@@ -52,16 +52,23 @@ const contractEvidenceID = "55555555-5555-4555-8555-555555555555"
 // *string at the Go boundary.
 func strptr(s string) *string { return &s }
 
-// stubEvidenceReader is the fixed-row implementation of the per-control
+// stubEvidenceReader is the fixed-row implementation of the
 // evidenceWindowReader seam. It returns deterministic rows + a fixed
-// tenant-wide total with no Postgres.
+// tenant-wide total with no Postgres. The `rows` field feeds the per-control
+// branch (slice 692); the `listRows` field feeds the tenant-wide branch
+// (slice 704). A given test populates whichever branch it records.
 type stubEvidenceReader struct {
-	rows  []dbx.ListEvidenceForControlPagedRow
-	total int64
+	rows     []dbx.ListEvidenceForControlPagedRow
+	listRows []dbx.ListEvidencePagedRow
+	total    int64
 }
 
 func (s stubEvidenceReader) EvidenceForControl(_ context.Context, _ uuid.UUID, _ evidencePage) ([]dbx.ListEvidenceForControlPagedRow, error) {
 	return s.rows, nil
+}
+
+func (s stubEvidenceReader) EvidencePaged(_ context.Context, _ evidenceListPage) ([]dbx.ListEvidencePagedRow, error) {
+	return s.listRows, nil
 }
 
 func (s stubEvidenceReader) CountEvidenceForTenant(_ context.Context) (int64, error) {
@@ -152,6 +159,105 @@ func TestContract_ControlEvidence(t *testing.T) {
 		filepath.Clean("../../../web/lib/contracts/control-evidence.golden.json"),
 		"Slice 692 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence per-control branch, real handler over an injected fixed-row evidenceWindowReader stub — Option A two-method seam, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_ControlEvidence -update`. CONSUMER: web/lib/contracts/control-evidence.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent); evidence is ALWAYS an array; total is the tenant-wide ledger count (NOT the page length). JUDGMENT (decisions log D3): seam covers ONLY the per-control branch; the slice-106 tenant-wide branch is deferred + spilled.",
 		"GET /v1/evidence?control_id={id}",
+		recorded,
+	)
+}
+
+// ===== GET /v1/evidence (tenant-wide ledger window, no control_id) =====
+
+// listRow builds a tenant-wide ledger row (dbx.ListEvidencePagedRow). The row
+// type is structurally identical to the per-control row but is a distinct sqlc
+// type (a separate named query), so it gets its own fixture builder.
+func listRow(id string, observed time.Time, kind *string, prov []byte, hash string, scope pgtype.UUID, result string) dbx.ListEvidencePagedRow {
+	return dbx.ListEvidencePagedRow{
+		ID:           pgID(id),
+		TenantID:     pgID(contractTenantID),
+		ControlID:    pgID(contractControlID),
+		ControlRef:   contractControlID,
+		ScopeID:      scope,
+		ObservedAt:   pgTS(observed),
+		EvidenceKind: kind,
+		Provenance:   prov,
+		Hash:         hash,
+		Result:       dbx.EvidenceResult(result),
+	}
+}
+
+// TestContract_TenantWideEvidence records the PROVIDER half of the tenant-wide
+// branch of the Evidence handler (GET /v1/evidence with no control_id — the
+// slice-106 + slice-234 filter-matrix ledger window). It mirrors the
+// per-control recorder above but drives the no-control_id path: the envelope's
+// control_id is the empty string and the rows come from the slice-704
+// EvidencePaged seam method. Three variants pin the wire:
+//
+//   - populated: an unfiltered window with a fully-populated row + a
+//     fully-nulled row (every nullable field's present + absent branch).
+//   - filtered: the SAME wire shape requested through a non-empty filter
+//     predicate (kind + result + scope_cell_id + the since/until window) so
+//     the filter-matrix request surface is exercised end-to-end. The stub
+//     returns one row; the point is that the handler parses every filter param
+//     and still produces the canonical envelope.
+//   - empty: a window with zero rows but a non-zero tenant-wide total — pins
+//     the "filters narrowed to zero, ledger not empty" disambiguation
+//     (slice 236). evidence is [] (never null).
+func TestContract_TenantWideEvidence(t *testing.T) {
+	observed := mustTime("2026-05-14T08:00:00Z")
+
+	populated := stubEvidenceReader{
+		total: 11,
+		listRows: []dbx.ListEvidencePagedRow{
+			listRow(
+				contractEvidenceID, observed,
+				strptr("sast.scan_result.v1"),
+				[]byte(`{"connector":"github","runner":"ci-runner"}`),
+				"sha256:0000000000000000000000000000000000000000000000000000000000000000",
+				pgID(contractScopeID), "pass",
+			),
+			listRow(
+				contractPolicyID, observed.Add(-12*time.Hour),
+				nil, nil,
+				"sha256:1111111111111111111111111111111111111111111111111111111111111111",
+				pgtype.UUID{Valid: false}, "fail",
+			),
+		},
+	}
+	// filtered — a single row returned through a non-empty filter predicate.
+	// The envelope shape is identical (filters narrow rows, not the wire);
+	// recording it pins that a filtered request still produces the canonical
+	// tenant-wide envelope.
+	filtered := stubEvidenceReader{
+		total: 11,
+		listRows: []dbx.ListEvidencePagedRow{
+			listRow(
+				contractRiskID, observed,
+				strptr("access_review.completion.v1"),
+				[]byte(`{"connector":"okta","runner":"scheduled-poll"}`),
+				"sha256:2222222222222222222222222222222222222222222222222222222222222222",
+				pgID(contractScopeID), "pass",
+			),
+		},
+	}
+	// empty — no rows in the window, ledger non-empty tenant-wide (total 4).
+	empty := stubEvidenceReader{total: 4, listRows: nil}
+
+	// The filtered variant carries a non-empty filter matrix on the request
+	// line: kind + result + scope_cell_id + a since/until window. The handler
+	// parses each before the (stubbed) read, so this exercises the
+	// filter-matrix request surface the slice names.
+	filteredTarget := "/v1/evidence?kind=access_review.completion.v1&result=pass" +
+		"&scope_cell_id=" + contractScopeID +
+		"&source_actor_type=service&source_actor_id=okta-sync" +
+		"&since=2026-05-01T00:00:00Z&until=2026-05-31T23:59:59Z"
+
+	recorded := map[string]json.RawMessage{
+		"populated": recordEvidenceVariant(t, newHandlerWithEvidenceReader(populated).Evidence, "/v1/evidence"),
+		"filtered":  recordEvidenceVariant(t, newHandlerWithEvidenceReader(filtered).Evidence, filteredTarget),
+		"empty":     recordEvidenceVariant(t, newHandlerWithEvidenceReader(empty).Evidence, "/v1/evidence"),
+	}
+	assertContractGolden(t,
+		filepath.Clean("../../../web/lib/contracts/evidence-tenant-window.golden.json"),
+		"Slice 704 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence TENANT-WIDE branch — GET /v1/evidence with no control_id, the slice-106 + slice-234 filter-matrix window — real handler over an injected fixed-row evidenceWindowReader stub via EvidencePaged; Option A seam extended to the tenant-wide method, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_TenantWideEvidence -update`. CONSUMER: web/lib/contracts/evidence-tenant-window.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; on this branch control_id is the EMPTY STRING. Each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent); evidence is ALWAYS an array; total is the tenant-wide ledger count (NOT the page length). The `filtered` variant is recorded through a non-empty filter predicate (kind/result/scope_cell_id/window) to pin the filter-matrix request surface; the `empty` variant pins count 0 / total > 0 (slice 236). Closes slice 692 D3.",
+		"GET /v1/evidence",
 		recorded,
 	)
 }

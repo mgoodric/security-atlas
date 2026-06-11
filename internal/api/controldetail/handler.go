@@ -36,25 +36,32 @@ type controlDetailReader interface {
 	HistoryForControl(ctx context.Context, controlID uuid.UUID, p historyPage) ([]dbx.ListControlEvaluationHistoryPagedRow, error)
 }
 
-// evidenceWindowReader is the slice-692 per-route read seam for the
-// PER-CONTROL evidence ledger window (GET /v1/evidence?control_id=…). It is
-// the two-method seam the per-control branch of the Evidence handler reads
-// through: the keyset-paginated per-control window (EvidenceForControl) plus
-// the tenant-wide ledger total (CountEvidenceForTenant) the wire envelope's
-// `total` carries. The contract recorder (handler_contract_test.go) injects a
-// fixed-row stub satisfying this seam so the per-control evidence wire shape
-// records on the plain `go test ./...` unit surface with no Postgres pool
-// (ADR-0007 / P0-409-1). The production *Store satisfies it verbatim; the
-// seam is unexported and New(*Store) is unchanged (P0-409-2).
+// evidenceWindowReader is the per-route read seam for BOTH branches of the
+// Evidence handler's ledger window. It carries:
 //
-// JUDGMENT (slice 692 D3): the seam covers ONLY the per-control branch. The
-// tenant-wide branch (slice 106 — EvidencePaged + the six optional filters)
-// is NOT covered: the /e2e/ suite does not traverse the tenant-wide window
-// from the control-detail surface, and that branch is its own filter-heavy
-// recorder story. It is deferred to a follow-on slice (see decisions log).
-// The tenant-wide branch keeps using h.store directly.
+//   - EvidenceForControl — the slice-692 per-control window
+//     (GET /v1/evidence?control_id=…), keyset-paginated.
+//   - EvidencePaged — the slice-704 TENANT-WIDE ledger window
+//     (GET /v1/evidence with no control_id, the slice-106 + slice-234
+//     filter-matrix branch), keyset-paginated over the six optional filters.
+//   - CountEvidenceForTenant — the slice-236 tenant-wide ledger total the
+//     wire envelope's `total` carries on both branches.
+//
+// The contract recorders (evidence_contract_test.go) inject a fixed-row stub
+// satisfying this seam so both evidence wire shapes record on the plain
+// `go test ./...` unit surface with no Postgres pool (ADR-0007 / P0-409-1).
+// The production *Store satisfies it verbatim; the seam is unexported and
+// New(*Store) is unchanged (P0-409-2).
+//
+// JUDGMENT (slice 704 D1): the tenant-wide branch joins the SAME seam rather
+// than a sibling seam. The handler is one Evidence handler reading one ledger
+// table through two shaped queries; one seam keeps the constructor wiring +
+// the recorder's mental model minimal, and the production *Store satisfies the
+// added method verbatim. Slice 692 D3 (which deferred this branch) is now
+// closed.
 type evidenceWindowReader interface {
 	EvidenceForControl(ctx context.Context, controlID uuid.UUID, p evidencePage) ([]dbx.ListEvidenceForControlPagedRow, error)
+	EvidencePaged(ctx context.Context, p evidenceListPage) ([]dbx.ListEvidencePagedRow, error)
 	CountEvidenceForTenant(ctx context.Context) (int64, error)
 }
 
@@ -67,16 +74,16 @@ type evidenceWindowReader interface {
 type Handler struct {
 	store  *Store
 	reader controlDetailReader
-	// evidence is the slice-692 per-route read seam the PER-CONTROL evidence
-	// branch reads through; New points it at store, so production behavior is
-	// identical. The tenant-wide evidence branch keeps using store directly.
+	// evidence is the per-route read seam BOTH evidence branches read through
+	// (slice 692 per-control + slice 704 tenant-wide); New points it at store,
+	// so production behavior is identical.
 	evidence evidenceWindowReader
 }
 
 // New constructs a Handler over the application pgx pool. The slice-411
-// per-route read seam (reader) and the slice-692 per-control evidence seam
-// (evidence) are both wired to the same store — the public signature is
-// unchanged (P0-409-2).
+// per-route read seam (reader) and the evidence read seam (evidence — both
+// the per-control and tenant-wide branches) are wired to the same store — the
+// public signature is unchanged (P0-409-2).
 func New(store *Store) *Handler {
 	return &Handler{store: store, reader: store, evidence: store}
 }
@@ -245,16 +252,18 @@ func (h *Handler) Evidence(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if !hasControlID {
-		// Slice 106 tenant-wide path. Keeps using h.store directly — the
-		// slice-692 per-control seam deliberately does NOT cover this branch
-		// (decisions log D3). The tenant-wide ledger total (slice 236) is
-		// read here for this branch's envelope.
-		total, err := h.store.CountEvidenceForTenant(ctx)
+		// Slice 106 tenant-wide path. Slice 704 routes BOTH reads through the
+		// evidenceWindowReader seam (EvidencePaged + CountEvidenceForTenant) so
+		// the tenant-wide wire shape records with no Postgres pool, mirroring
+		// the per-control branch below. Production *Store satisfies the seam
+		// verbatim. The tenant-wide ledger total (slice 236) is read here for
+		// this branch's envelope.
+		total, err := h.evidence.CountEvidenceForTenant(ctx)
 		if err != nil {
 			httperr.WriteInternal(w, r, "controldetail", err)
 			return
 		}
-		rows, err := h.store.EvidencePaged(ctx, evidenceListPage{
+		rows, err := h.evidence.EvidencePaged(ctx, evidenceListPage{
 			since:           since,
 			until:           until,
 			kind:            q.Get("kind"),
