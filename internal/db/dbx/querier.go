@@ -2058,6 +2058,21 @@ type Querier interface {
 	// contract; the only wire-shape change is one additional column on every
 	// returned row.
 	//
+	// Slice 669 (2026-06-10): one new optional parameter
+	// (`exclude_read_telemetry BOOLEAN`) gates a view-only deny predicate that
+	// drops `decision`-kind rows whose `action = 'read'` — the high-volume
+	// internal authz read-telemetry the app emits auditing its own GET reads
+	// (`internal/authz/input.go` maps GET/HEAD/OPTIONS to action='read'). When
+	// `true` (the slice 270 `/v1/activity/unified` default), the Activity feed
+	// defaults to mutating/business events and the read-telemetry is hidden;
+	// when `false` (the slice 124 admin endpoint default + the activity
+	// endpoint's `?include_reads=true` opt-in) every row is returned and the
+	// result set is identical to the pre-slice-669 shape. This is a VIEW
+	// concern only — the underlying decision_audit_log ledger is unchanged
+	// (canvas invariant #2: the append-only ledger stays complete; filtering
+	// never deletes or stops recording). The predicate is conjunctive with all
+	// other filters; it never widens visibility.
+	//
 	// Slice 270 (2026-05-23): two new optional parameters
 	// (`caller_is_privileged BOOLEAN` + `caller_user_id TEXT`) gate one extra
 	// WHERE predicate that restricts non-privileged callers (viewer /

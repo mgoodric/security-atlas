@@ -121,6 +121,12 @@ type metaAuditParams struct {
 	Kinds   []string `json:"kinds,omitempty"`
 	Cursor  string   `json:"cursor,omitempty"`
 	Surface string   `json:"surface,omitempty"`
+	// IncludeReads (slice 669) records whether the caller opted in to the
+	// high-volume read-telemetry on the Activity surface. Recorded in the
+	// meta-audit so forensic review can tell a "show-all" query from the
+	// default business-events-only view. Omitted (false) for the admin
+	// endpoint, which always returns every row.
+	IncludeReads bool `json:"include_reads,omitempty"`
 }
 
 // metaAuditResult is the shape persisted to me_audit_log.after.
@@ -316,6 +322,12 @@ type parsedUnifiedParams struct {
 	fromRaw     string
 	toRaw       string
 	cursorRaw   string
+	// includeReads (slice 669) is the parsed `?include_reads=true` opt-in.
+	// Only the activity endpoint consults it (to flip ExcludeReadTelemetry);
+	// the admin endpoint ignores it and always shows every row. Parsing it
+	// here (rather than per-handler) keeps the query-string contract in one
+	// place.
+	includeReads bool
 }
 
 func (p parsedUnifiedParams) toAuditShape() metaAuditParams {
@@ -324,11 +336,12 @@ func (p parsedUnifiedParams) toAuditShape() metaAuditParams {
 		kinds = append(kinds, string(k))
 	}
 	return metaAuditParams{
-		From:   p.fromRaw,
-		To:     p.toRaw,
-		Actor:  p.queryParams.ActorFilter,
-		Kinds:  kinds,
-		Cursor: p.cursorRaw,
+		From:         p.fromRaw,
+		To:           p.toRaw,
+		Actor:        p.queryParams.ActorFilter,
+		Kinds:        kinds,
+		Cursor:       p.cursorRaw,
+		IncludeReads: p.includeReads,
 	}
 }
 
@@ -388,16 +401,24 @@ func parseUnifiedParams(r *http.Request) (parsedUnifiedParams, error) {
 		params.Cursor = cursor
 	}
 
+	// Slice 669: `?include_reads=true` is the opt-in to surface the
+	// high-volume `decision`/`read` telemetry on the Activity feed.
+	// Default (absent / any non-"true" value) keeps the business-events
+	// view. Only the activity handler flips ExcludeReadTelemetry from
+	// this; the admin handler ignores it (always shows every row).
+	includeReads := q.Get("include_reads") == "true"
+
 	// The aggregator returns up to Limit rows; the handler asks for one
 	// more than the page size so it can detect "more available" without
 	// an extra round-trip.
 	params.Limit = unifiedPageSize + 1
 
 	return parsedUnifiedParams{
-		queryParams: params,
-		fromRaw:     fromRaw,
-		toRaw:       toRaw,
-		cursorRaw:   cursorRaw,
+		queryParams:  params,
+		fromRaw:      fromRaw,
+		toRaw:        toRaw,
+		cursorRaw:    cursorRaw,
+		includeReads: includeReads,
 	}, nil
 }
 
