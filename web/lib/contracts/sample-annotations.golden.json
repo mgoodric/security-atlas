@@ -1,0 +1,33 @@
+{
+  "_comment": "Slice 690 contract-tier golden. PROVIDER: internal/api/audit/contractrecord_test.go (ListAnnotations, real handler over an injected fixed-row sampleReader stub — Option A seam, no Postgres; routed through chi for the {id} path param). Regenerate: `go test ./internal/api/audit/ -run TestContract_SampleAnnotationsList -update`. CONSUMER: web/lib/contracts/sample-annotations.contract.test.ts is a FIELD-CONTRACT pin (slice 687 D3) — there is NO verbatim-passthrough GET BFF for this list today (read by the sample-detail component, not a thin passthrough). The envelope is {annotations:[], count:N}; each row carries result (passed|failed|not-applicable), annotated_by, annotated_at (ISO-8601), and notes (NOT omitempty — \"\" when absent); annotations is ALWAYS an array (empty sample records []).",
+  "endpoint": "GET /v1/samples/{id}/annotations",
+  "variants": {
+    "empty": {
+      "annotations": [],
+      "count": 0
+    },
+    "populated": {
+      "annotations": [
+        {
+          "annotated_at": "2026-02-04T11:00:00Z",
+          "annotated_by": "key_contract_690",
+          "evidence_record_id": "55555555-5555-4555-8555-555555555555",
+          "id": "44444444-4444-4444-8444-444444444444",
+          "notes": "Control owner confirmed the recert ran on schedule.",
+          "result": "passed",
+          "sample_id": "33333333-3333-4333-8333-333333333333"
+        },
+        {
+          "annotated_at": "2026-02-04T11:05:30Z",
+          "annotated_by": "key_contract_690",
+          "evidence_record_id": "77777777-7777-4777-8777-777777777777",
+          "id": "66666666-6666-4666-8666-666666666666",
+          "notes": "",
+          "result": "failed",
+          "sample_id": "33333333-3333-4333-8333-333333333333"
+        }
+      ],
+      "count": 2
+    }
+  }
+}

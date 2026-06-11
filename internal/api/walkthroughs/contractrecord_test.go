@@ -1,7 +1,14 @@
-// Slice 689 — contract-test-tier rollout to the audit-workspace
-// single-walkthrough READ route served by this package:
+// Slice 689 + 690 — contract-test-tier rollout to the audit-workspace
+// walkthrough READ routes served by this package:
 //
-//	GET /v1/walkthroughs/{id} -> walkthrough-get.golden.json
+//	GET /v1/walkthroughs/{id} -> walkthrough-get.golden.json   (689, toEqual)
+//	GET /v1/walkthroughs      -> walkthroughs-list.golden.json (690, field-contract)
+//
+// The single-walkthrough read (689) has a verbatim-passthrough BFF (toEqual
+// consumer). The list read (690) has NO GET BFF today — the list BFF
+// (web/app/api/audit/walkthroughs/route.ts) is POST-only — so its consumer
+// half is a FIELD-CONTRACT pin on the recorded provider golden (slice 687 D3).
+// See decisions log 690 D1/D2.
 //
 // This is the slice-392 / slice-409 / slice-410 / slice-411 / slice-412 /
 // slice-687 shared-recorder helper copied into this package because Go test
@@ -145,14 +152,19 @@ func assertContractGolden(t *testing.T, path, comment, endpoint string, recorded
 	}
 }
 
-// stubWalkthroughReader is the fixed-row implementation of the single-method
-// walkthroughReader seam. It returns a deterministic row with no Postgres.
+// stubWalkthroughReader is the fixed-row implementation of the
+// walkthroughReader seam. It returns deterministic rows with no Postgres.
 type stubWalkthroughReader struct {
-	wt walkthrough.Walkthrough
+	wt   walkthrough.Walkthrough
+	list []walkthrough.Walkthrough
 }
 
 func (s stubWalkthroughReader) Get(_ context.Context, _ uuid.UUID) (walkthrough.Walkthrough, error) {
 	return s.wt, nil
+}
+
+func (s stubWalkthroughReader) List(_ context.Context) ([]walkthrough.Walkthrough, error) {
+	return s.list, nil
 }
 
 // recordRoutedVariant routes a GET through a chi router so chi.URLParam(r,
@@ -265,6 +277,71 @@ func TestContract_WalkthroughGet(t *testing.T) {
 		filepath.Clean("../../../web/lib/contracts/walkthrough-get.golden.json"),
 		"Slice 689 contract-tier golden. PROVIDER: internal/api/walkthroughs/contractrecord_test.go (Get, real handler over an injected fixed-row single-method walkthroughReader stub — Option A seam, no Postgres; routed through chi for the {id} path param). Regenerate: `go test ./internal/api/walkthroughs/ -run TestContract_WalkthroughGet -update`. CONSUMER: web/lib/contracts/walkthrough-get.contract.test.ts asserts the BFF at web/app/api/audit/walkthroughs/[id]/route.ts — VERBATIM passthrough (toEqual). canonical_hash is hex-encoded (64 lowercase hex chars); tamper_detected is always present (AC-6); attachments + audit_period_id + transcript are omitempty.",
 		"GET /v1/walkthroughs/{id}",
+		recorded,
+	)
+}
+
+// ===== GET /v1/walkthroughs =====
+
+func TestContract_WalkthroughsList(t *testing.T) {
+	created := mustTime("2026-02-10T08:00:00Z")
+	updated := mustTime("2026-02-11T10:30:00Z")
+	periodID := uuid.MustParse(contractPeriodID)
+
+	// Obviously-fake 32-byte digest (not a real hash) — synthetic bytes that
+	// hex-encode to 64 lowercase hex chars (canonical_hash wire shape).
+	canonicalHash := []byte{
+		0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11,
+		0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+		0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11,
+		0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88, 0x99,
+	}
+
+	// Variant "populated" — a two-row list: one finalized walkthrough with an
+	// audit_period_id pin, one draft without. The list shape omits attachments
+	// (the List query is the row-summary read; attachments hydrate only on the
+	// single-walkthrough Get) — pins the {walkthroughs:[], count:N} envelope +
+	// the per-row summary shape the list surface reads.
+	finalized := walkthrough.Walkthrough{
+		ID:             uuid.MustParse(contractWalkthroughID),
+		TenantID:       uuid.MustParse(contractTenantID),
+		AuditPeriodID:  &periodID,
+		ControlID:      uuid.MustParse(contractControlID),
+		Narrative:      "Reviewed the quarterly access-recertification run with the control owner.",
+		CanonicalHash:  canonicalHash,
+		Status:         walkthrough.StatusFinalized,
+		CreatedBy:      "key_contract_690",
+		CreatedAt:      created,
+		UpdatedAt:      updated,
+		TamperDetected: false,
+	}
+	draft := walkthrough.Walkthrough{
+		ID:             uuid.MustParse("55555555-5555-4555-8555-555555555555"),
+		TenantID:       uuid.MustParse(contractTenantID),
+		ControlID:      uuid.MustParse(contractControlID),
+		Narrative:      "Initial draft pending the control owner interview.",
+		CanonicalHash:  canonicalHash,
+		Status:         walkthrough.StatusDraft,
+		CreatedBy:      "key_contract_690",
+		CreatedAt:      created,
+		UpdatedAt:      created,
+		TamperDetected: false,
+	}
+	// Variant "empty" — no walkthroughs yet. walkthroughs is [] (the handler
+	// builds make([]walkthroughWire, 0)), count is 0.
+	empty := []walkthrough.Walkthrough{}
+
+	target := "/v1/walkthroughs"
+	recorded := map[string]json.RawMessage{
+		"populated": recordRoutedVariant(t, newHandlerWithReader(stubWalkthroughReader{list: []walkthrough.Walkthrough{finalized, draft}}).List,
+			"/v1/walkthroughs", target),
+		"empty": recordRoutedVariant(t, newHandlerWithReader(stubWalkthroughReader{list: empty}).List,
+			"/v1/walkthroughs", target),
+	}
+	assertContractGolden(t,
+		filepath.Clean("../../../web/lib/contracts/walkthroughs-list.golden.json"),
+		"Slice 690 contract-tier golden. PROVIDER: internal/api/walkthroughs/contractrecord_test.go (List, real handler over an injected fixed-row walkthroughReader stub — Option A seam, no Postgres). Regenerate: `go test ./internal/api/walkthroughs/ -run TestContract_WalkthroughsList -update`. CONSUMER: web/lib/contracts/walkthroughs-list.contract.test.ts is a FIELD-CONTRACT pin (slice 687 D3) — the list BFF (web/app/api/audit/walkthroughs/route.ts) is POST-only, no GET consumer today. Envelope is {walkthroughs:[], count:N}; each row carries id/control_id/narrative/status/canonical_hash (64 hex)/created_by/created_at/updated_at + tamper_detected (always present); audit_period_id is omitempty; walkthroughs is ALWAYS an array (empty list records []).",
+		"GET /v1/walkthroughs",
 		recorded,
 	)
 }

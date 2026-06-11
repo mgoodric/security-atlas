@@ -61,22 +61,24 @@ type ArtifactUploader interface {
 	Put(ctx context.Context, in artifact.PutInput) (artifact.Artifact, error)
 }
 
-// walkthroughReader is the per-route read seam the GET /v1/walkthroughs/{id}
-// path reads through (slice 689, contract-tier rollout). It carries JUST the
-// single-walkthrough Get method that route needs — deliberately narrow (slice
-// 409 D1 / slice 411 D2 / slice 412 D2 sizing rule: a one-method seam over the
-// wider walkthrough.Store, NOT a mirror of its create/list/attach/finalize
-// surface). The contract-tier recorder (handler_contract_test.go) injects a
-// fixed-row stub satisfying this seam so the single-walkthrough wire shape (with
-// attachments + canonical_hash + tamper flag) records on the plain
-// `go test ./...` unit surface with no Postgres pool (ADR-0007 / P0-409-1). The
-// production *walkthrough.Store satisfies it verbatim; the seam is unexported
-// and New(*walkthrough.Store, ArtifactUploader) is unchanged (P0-409-2). The
-// write/list/export handlers keep using the concrete h.store directly (Export
-// also calls Get, but it streams a download envelope, not the JSON wire shape
-// the BFF consumes — it is left on the concrete store).
+// walkthroughReader is the per-route read seam the two GET read paths —
+// GET /v1/walkthroughs/{id} (Get) and GET /v1/walkthroughs (List) — read
+// through (slice 689 added Get; slice 690's contract-tier rollout adds the
+// List read). It carries JUST the read methods those routes need —
+// deliberately narrow (slice 409 D1 / slice 411 D2 / slice 412 D2 sizing rule:
+// a two-method seam over the wider walkthrough.Store, NOT a mirror of its
+// create/attach/finalize surface). The contract-tier recorder
+// (contractrecord_test.go) injects a fixed-row stub satisfying this seam so the
+// wire shapes (with attachments + canonical_hash + tamper flag) record on the
+// plain `go test ./...` unit surface with no Postgres pool (ADR-0007 /
+// P0-409-1). The production *walkthrough.Store satisfies it verbatim; the seam
+// is unexported and New(*walkthrough.Store, ArtifactUploader) is unchanged
+// (P0-409-2). The write/export handlers keep using the concrete h.store
+// directly (Export also calls Get, but it streams a download envelope, not the
+// JSON wire shape the BFF consumes — it is left on the concrete store).
 type walkthroughReader interface {
 	Get(ctx context.Context, id uuid.UUID) (walkthrough.Walkthrough, error)
+	List(ctx context.Context) ([]walkthrough.Walkthrough, error)
 }
 
 // Handler bundles slice-027 routes over a walkthrough.Store + an optional
@@ -218,7 +220,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	ws, err := h.store.List(ctx)
+	ws, err := h.reader.List(ctx)
 	if err != nil {
 		h.writeStoreErr(w, r, "list walkthroughs", err)
 		return

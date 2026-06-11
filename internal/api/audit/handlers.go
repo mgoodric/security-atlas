@@ -31,22 +31,24 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// sampleReader is the per-route read seam the two single-resource GET paths
-// — GET /v1/populations/{id} (GetPopulation) and GET /v1/samples/{id}
-// (GetSample) — read through (slice 689, contract-tier rollout). It carries
-// JUST the two read methods those routes need — deliberately narrow (slice
-// 409 D1 / slice 411 D2 / slice 412 D2 sizing rule: a two-method seam over
-// the wider audit.Store, NOT a full mirror of its create/draw/annotate
-// surface). The contract-tier recorder (handler_contract_test.go) injects a
-// fixed-row stub satisfying this seam so the single-resource wire shapes
-// record on the plain `go test ./...` unit surface with no Postgres pool
-// (ADR-0007 / P0-409-1). The production *audit.Store satisfies it verbatim;
-// the seam is unexported and New(*audit.Store) is unchanged (P0-409-2). The
-// write/create handlers (CreatePopulation/DrawSample/Annotate) keep using the
-// concrete h.store directly.
+// sampleReader is the per-route read seam the three single-resource GET paths
+// — GET /v1/populations/{id} (GetPopulation), GET /v1/samples/{id}
+// (GetSample), and GET /v1/samples/{id}/annotations (ListAnnotations) — read
+// through (slice 689 added the first two; slice 690's contract-tier rollout
+// adds the annotation-list read). It carries JUST the read methods those
+// routes need — deliberately narrow (slice 409 D1 / slice 411 D2 / slice 412
+// D2 sizing rule: a three-method seam over the wider audit.Store, NOT a full
+// mirror of its create/draw/annotate surface). The contract-tier recorder
+// (contractrecord_test.go) injects a fixed-row stub satisfying this seam so
+// the wire shapes record on the plain `go test ./...` unit surface with no
+// Postgres pool (ADR-0007 / P0-409-1). The production *audit.Store satisfies
+// it verbatim; the seam is unexported and New(*audit.Store) is unchanged
+// (P0-409-2). The write/create handlers (CreatePopulation/DrawSample/Annotate)
+// keep using the concrete h.store directly.
 type sampleReader interface {
 	GetPopulation(ctx context.Context, id uuid.UUID) (audit.Population, error)
 	GetSample(ctx context.Context, id uuid.UUID) (audit.Sample, error)
+	ListAnnotations(ctx context.Context, sampleID uuid.UUID) ([]audit.Annotation, error)
 }
 
 // Handler bundles the slice-026 routes over a single audit.Store.
@@ -334,7 +336,7 @@ func (h *Handler) ListAnnotations(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "sample id must be a UUID")
 		return
 	}
-	anns, err := h.store.ListAnnotations(ctx, sampleID)
+	anns, err := h.reader.ListAnnotations(ctx, sampleID)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list annotations", err)
 		return

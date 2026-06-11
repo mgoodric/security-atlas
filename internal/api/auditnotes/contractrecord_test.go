@@ -1,7 +1,14 @@
-// Slice 689 — contract-test-tier rollout to the audit-workspace
-// thread READ route served by this package:
+// Slice 689 + 690 — contract-test-tier rollout to the audit-workspace
+// audit-notes READ routes served by this package:
 //
-//	GET /v1/audit-notes/thread -> audit-notes-thread.golden.json
+//	GET /v1/audit-notes/thread -> audit-notes-thread.golden.json  (689, toEqual)
+//	GET /v1/audit-notes        -> audit-notes-list.golden.json    (690, field-contract)
+//
+// The thread read (689) has a verbatim-passthrough BFF (toEqual consumer).
+// The legacy author-scoped list read (690) has NO GET BFF today — the
+// workspace reads /thread, not the legacy list — so its consumer half is a
+// FIELD-CONTRACT pin on the recorded provider golden (slice 687 D3). See
+// decisions log 690 D1/D2.
 //
 // This is the slice-392 / slice-409 / slice-410 / slice-411 / slice-412 /
 // slice-687 shared-recorder helper copied into this package because Go test
@@ -150,14 +157,19 @@ func assertContractGolden(t *testing.T, path, comment, endpoint string, recorded
 	}
 }
 
-// stubThreadReader is the fixed-row implementation of the single-method
-// threadReader seam. It returns deterministic rows with no Postgres.
+// stubThreadReader is the fixed-row implementation of the threadReader seam.
+// It returns deterministic rows with no Postgres.
 type stubThreadReader struct {
-	rows []notes.Note
+	rows       []notes.Note
+	authorRows []notes.Note
 }
 
 func (s stubThreadReader) ListThreadForScope(_ context.Context, _ uuid.UUID, _, _, _ string) ([]notes.Note, error) {
 	return s.rows, nil
+}
+
+func (s stubThreadReader) ListForAuthorAndPeriod(_ context.Context, _ uuid.UUID, _ string) ([]notes.Note, error) {
+	return s.authorRows, nil
 }
 
 // recordThreadVariant drives the Thread handler directly (the route params are
@@ -249,6 +261,65 @@ func TestContract_AuditNotesThread(t *testing.T) {
 		filepath.Clean("../../../web/lib/contracts/audit-notes-thread.golden.json"),
 		"Slice 689 contract-tier golden. PROVIDER: internal/api/auditnotes/contractrecord_test.go (Thread, real handler over an injected fixed-row single-method threadReader stub — Option A seam, no Postgres; route params are query params so no chi mux). Regenerate: `go test ./internal/api/auditnotes/ -run TestContract_AuditNotesThread -update`. CONSUMER: web/lib/contracts/audit-notes-thread.contract.test.ts asserts the BFF at web/app/api/audit/audit-notes/thread/route.ts — VERBATIM passthrough (toEqual). audit_notes is ALWAYS an array (never null); empty thread records [] + count 0. P0-2: auditor_only notes are filtered to their author at the query layer; the UI never client-side-filters visibility.",
 		"GET /v1/audit-notes/thread",
+		recorded,
+	)
+}
+
+// ===== GET /v1/audit-notes (legacy author-scoped list) =====
+
+func TestContract_AuditNotesList(t *testing.T) {
+	noteAt := mustTime("2026-02-15T09:00:00Z")
+	updatedAt := mustTime("2026-02-15T09:30:00Z")
+	rootID := uuid.MustParse(contractRootID)
+
+	// Variant "populated" — two of the caller's own notes in a period: a
+	// shared root and an auditor_only private note (the legacy List is
+	// author-scoped, so both belong to the caller). Pins the note row shape
+	// the slice-025 legacy author list reads (depth omitempty is 0 → absent;
+	// scope_id present on one, period-level on the other).
+	populated := stubThreadReader{authorRows: []notes.Note{
+		{
+			ID:            rootID,
+			TenantID:      uuid.MustParse(contractTenantID),
+			AuditPeriodID: uuid.MustParse(contractPeriodID),
+			AuthorUserID:  contractAuthorID,
+			ScopeType:     "control",
+			ScopeID:       contractScopeID,
+			Body:          "Drafted the access-review note for my own follow-up.",
+			Visibility:    "shared",
+			ParentNoteID:  nil,
+			CreatedAt:     noteAt,
+			UpdatedAt:     updatedAt,
+			Depth:         0,
+		},
+		{
+			ID:            uuid.MustParse(contractReplyID),
+			TenantID:      uuid.MustParse(contractTenantID),
+			AuditPeriodID: uuid.MustParse(contractPeriodID),
+			AuthorUserID:  contractAuthorID,
+			ScopeType:     "period",
+			ScopeID:       "",
+			Body:          "Private reminder to revisit the vendor SOC 2 bridge letter.",
+			Visibility:    "auditor_only",
+			ParentNoteID:  nil,
+			CreatedAt:     noteAt,
+			UpdatedAt:     noteAt,
+			Depth:         0,
+		},
+	}}
+	// Variant "empty" — the caller has no notes in this period. audit_notes is
+	// [] (never null) and count 0.
+	empty := stubThreadReader{authorRows: []notes.Note{}}
+
+	target := "/v1/audit-notes?audit_period_id=" + contractPeriodID
+	recorded := map[string]json.RawMessage{
+		"populated": recordThreadVariant(t, newHandlerWithReader(populated).List, target),
+		"empty":     recordThreadVariant(t, newHandlerWithReader(empty).List, target),
+	}
+	assertContractGolden(t,
+		filepath.Clean("../../../web/lib/contracts/audit-notes-list.golden.json"),
+		"Slice 690 contract-tier golden. PROVIDER: internal/api/auditnotes/contractrecord_test.go (List, real handler over an injected fixed-row threadReader stub — Option A seam, no Postgres; route param is a query param so no chi mux). Regenerate: `go test ./internal/api/auditnotes/ -run TestContract_AuditNotesList -update`. CONSUMER: web/lib/contracts/audit-notes-list.contract.test.ts is a FIELD-CONTRACT pin (slice 687 D3) — there is NO GET BFF for the legacy list today (the workspace reads /thread). Envelope is {audit_notes:[], count:N}; each row carries id/audit_period_id/author_user_id/scope_type/body/visibility/created_at/updated_at; scope_id is omitempty (period-level notes omit it); parent_note_id + depth are omitempty; created_at/updated_at use the millisecond 2006-01-02T15:04:05.000Z format; audit_notes is ALWAYS an array (empty records []).",
+		"GET /v1/audit-notes",
 		recorded,
 	)
 }

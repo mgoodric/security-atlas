@@ -1,0 +1,38 @@
+{
+  "_comment": "Slice 690 contract-tier golden. PROVIDER: internal/api/walkthroughs/contractrecord_test.go (List, real handler over an injected fixed-row walkthroughReader stub — Option A seam, no Postgres). Regenerate: `go test ./internal/api/walkthroughs/ -run TestContract_WalkthroughsList -update`. CONSUMER: web/lib/contracts/walkthroughs-list.contract.test.ts is a FIELD-CONTRACT pin (slice 687 D3) — the list BFF (web/app/api/audit/walkthroughs/route.ts) is POST-only, no GET consumer today. Envelope is {walkthroughs:[], count:N}; each row carries id/control_id/narrative/status/canonical_hash (64 hex)/created_by/created_at/updated_at + tamper_detected (always present); audit_period_id is omitempty; walkthroughs is ALWAYS an array (empty list records []).",
+  "endpoint": "GET /v1/walkthroughs",
+  "variants": {
+    "empty": {
+      "count": 0,
+      "walkthroughs": []
+    },
+    "populated": {
+      "count": 2,
+      "walkthroughs": [
+        {
+          "audit_period_id": "33333333-3333-4333-8333-333333333333",
+          "canonical_hash": "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+          "control_id": "11111111-1111-4111-8111-111111111111",
+          "created_at": "2026-02-10T08:00:00Z",
+          "created_by": "key_contract_690",
+          "id": "22222222-2222-4222-8222-222222222222",
+          "narrative": "Reviewed the quarterly access-recertification run with the control owner.",
+          "status": "finalized",
+          "tamper_detected": false,
+          "updated_at": "2026-02-11T10:30:00Z"
+        },
+        {
+          "canonical_hash": "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
+          "control_id": "11111111-1111-4111-8111-111111111111",
+          "created_at": "2026-02-10T08:00:00Z",
+          "created_by": "key_contract_690",
+          "id": "55555555-5555-4555-8555-555555555555",
+          "narrative": "Initial draft pending the control owner interview.",
+          "status": "draft",
+          "tamper_detected": false,
+          "updated_at": "2026-02-10T08:00:00Z"
+        }
+      ]
+    }
+  }
+}
