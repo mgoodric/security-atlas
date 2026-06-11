@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -84,11 +85,18 @@ func DefaultEnabledFunc() bool {
 //   - authPool (BYPASSRLS atlas_migrate pool) — passed to
 //     internal/demoseed which requires the BYPASSRLS pool (slice 205
 //     LOAD-BEARING design).
+//   - appPool (RLS-enforced atlas_app pool) — used by slice 671 to drive
+//     the post-seed evaluator (eval.EvaluateAll + freshness.Refresh) under
+//     RLS so the seeded tenant shows real control state. Distinct from
+//     authPool BY DESIGN: evaluation must run as the app role so RLS scopes
+//     it to the seeded tenant (invariant #6). May be nil in the unit-server
+//     harness — evaluation is then skipped (logged), not fatal.
 //   - isEnabled — test-injectable env-var gate.
 //   - limiter  — per-IP token bucket (1 token, 60s replenish).
 //   - clock    — test-injectable clock.
 type Handler struct {
 	authPool  *pgxpool.Pool
+	appPool   *pgxpool.Pool
 	isEnabled isEnabledFunc
 	limiter   *ipBucketLimiter
 	clock     func() time.Time
@@ -108,6 +116,16 @@ func New(authPool *pgxpool.Pool, enabled isEnabledFunc) *Handler {
 		limiter:   newIPBucketLimiter(rateLimitWindow),
 		clock:     time.Now,
 	}
+}
+
+// SetAppPool attaches the RLS-enforced app-role pool used by slice 671 to
+// drive the post-seed evaluator. Mirrors the SetAuthPool fluent-setter
+// pattern used elsewhere in the API layer so existing two-arg New(...) call
+// sites stay unchanged. When the app pool is absent (unit-server harness),
+// Seed skips evaluation rather than failing the seed.
+func (h *Handler) SetAppPool(appPool *pgxpool.Pool) *Handler {
+	h.appPool = appPool
+	return h
 }
 
 // WithClock overrides the clock. Test-only.
@@ -252,6 +270,16 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Slice 671: drive the REAL evaluator for the seeded tenant so its
+	// controls show computed STATE / FRESHNESS / LAST OBSERVED instead of "—".
+	// The seed write committed above; this is a SEPARATE stage that reads the
+	// ledger and writes only the evaluation read models (invariant #2), scoped
+	// to the seeded tenant via the app-role pool's RLS (invariant #6). Runs on
+	// the idempotent re-seed path too so a re-click ensures evaluation has run.
+	// Non-fatal: the seed itself succeeded, so an evaluation hiccup must not
+	// 500 the request — it is logged and the operator can re-trigger.
+	h.evaluateSeededTenant(ctx, res.TenantID)
+
 	httpresp.WriteJSON(w, http.StatusOK, seedResponse{
 		TenantID:     res.TenantID.String(),
 		TenantSlug:   res.TenantSlug,
@@ -263,6 +291,30 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		Idempotent:   res.Idempotent,
 	})
 
+}
+
+// evaluateSeededTenant drives the slice-671 post-seed evaluator for the
+// seeded tenant. It is non-fatal: a missing app pool (unit-server harness) or
+// an evaluation error is logged and swallowed — the seed already committed, so
+// the request still succeeds. The slog values are %q-formatted (tenant id is a
+// UUID, but the discipline holds uniformly — CodeQL go/log-injection).
+func (h *Handler) evaluateSeededTenant(ctx context.Context, tenantID uuid.UUID) {
+	if h.appPool == nil {
+		slog.Warn("admindemo: skipping post-seed evaluation (no app pool configured)",
+			"tenant", fmt.Sprintf("%q", tenantID.String()))
+		return
+	}
+	summary, err := demoseed.EvaluateSeededTenant(ctx, h.appPool, tenantID)
+	if err != nil {
+		slog.Error("admindemo: post-seed evaluation failed",
+			"tenant", fmt.Sprintf("%q", tenantID.String()),
+			"err", fmt.Sprintf("%q", err.Error()))
+		return
+	}
+	slog.Info("admindemo: post-seed evaluation complete",
+		"tenant", fmt.Sprintf("%q", tenantID.String()),
+		"control_evaluations", summary.ControlEvaluations,
+		"freshness_rows", summary.FreshnessRows)
 }
 
 // Teardown handles POST /v1/admin/demo/teardown.
