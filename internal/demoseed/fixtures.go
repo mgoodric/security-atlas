@@ -650,16 +650,14 @@ func (s *Seeder) buildFixtures(slug string) *fixtureSet {
 		fs.boardPacks = append(fs.boardPacks, boardPackFixture{
 			ID:        uuid.New(),
 			PeriodEnd: periodEnd,
-			Content: map[string]any{
-				"sections": []map[string]any{
-					{"title": "Posture summary", "approved": true, "templated_text": "Templated stub.", "override_text": ""},
-					{"title": "Top risks aging", "approved": true, "templated_text": "Templated stub.", "override_text": ""},
-					{"title": "Open findings", "approved": true, "templated_text": "Templated stub.", "override_text": ""},
-					{"title": "Investment vs coverage", "approved": true, "templated_text": "Templated stub.", "override_text": ""},
-					{"title": "Asks of the board", "approved": true, "templated_text": "Templated stub.", "override_text": ""},
-				},
-				"demo_seed_v": DemoSeedVersion,
-			},
+			Content:   demoBoardPackContent(periodEnd),
+			// Slice 662: a published demo pack is rendered read-only; the
+			// list endpoint deserializes `content` into board.Pack, which
+			// requires `sections` to be a key→section MAP (not an array)
+			// carrying all eight SectionKeys. The prior fixture wrote a
+			// 5-element array missing the key field, which failed to
+			// unmarshal and 500'd the list endpoint (slice 673) and the
+			// detail page. demoBoardPackContent now mirrors board.Pack.
 			NarrativeMD: "Quarterly board pack — demo content. See sections above for details.",
 			PublishedBy: fs.user.Email,
 			PublishedAt: periodEnd.AddDate(0, 0, 7),
@@ -668,6 +666,67 @@ func (s *Seeder) buildFixtures(slug string) *fixtureSet {
 
 	fs.auditTrailCount = s.applyScale(auditTrailFloor)
 	return fs
+}
+
+// demoBoardPackSection is one entry of the demo pack's section map. It
+// mirrors the JSON shape of board.Section (key/title/templated_text/
+// override_text/approved/data) so the row deserializes cleanly into
+// board.Pack on read. Slice 662.
+type demoBoardPackSection struct {
+	key, title, text string
+	data             map[string]any
+}
+
+// demoBoardPackSections is the canonical, ordered set of the eight fixed
+// board-pack sections (mirrors board.SectionKeys + board.sectionTitles).
+// Kept in-package so the demoseed fixture stays a self-contained
+// dependency-free literal; the board package's keys are the source of
+// truth and the slice-662 integration test asserts the two stay in sync.
+// Slot §05 (vendor_burndown) carries the generated burndown scalars so the
+// demo pack renders the §05 visual end-to-end.
+func demoBoardPackSections() []demoBoardPackSection {
+	return []demoBoardPackSection{
+		{key: "posture", title: "Posture summary", text: "Posture remains stable across SOC 2, ISO 27001, and NIST CSF.", data: map[string]any{}},
+		{key: "top_risks", title: "Top risks aging", text: "The top residual risks and their aging are summarized below.", data: map[string]any{}},
+		{key: "coverage_trend", title: "Coverage trend", text: "Control coverage held flat versus the prior quarter baseline.", data: map[string]any{"coverage_pct": 78, "baseline_coverage_pct": 78, "coverage_delta": 0}},
+		{key: "open_findings", title: "Open findings", text: "Open findings are tracked from failing control evaluations.", data: map[string]any{"findings_count": 0}},
+		{key: "vendor_burndown", title: "Vendor risk burndown", text: "High-criticality vendor reviews and their on-time burndown.", data: map[string]any{
+			"vendor_burndown_total":            8,
+			"vendor_burndown_on_time":          6,
+			"vendor_burndown_past_due":         2,
+			"vendor_burndown_on_time_pct":      75,
+			"vendor_burndown_on_time_fraction": 0.75,
+		}},
+		{key: "operational_metrics", title: "Operational metrics", text: "Operator-entered operational metrics for the quarter.", data: map[string]any{}},
+		{key: "investment", title: "Investment vs coverage", text: "Security spend this quarter against coverage delta.", data: map[string]any{"spend_usd": 0, "cost_per_coverage_point": 0}},
+		{key: "asks", title: "Asks of the board", text: "Asks of the board this quarter.", data: map[string]any{}},
+	}
+}
+
+// demoBoardPackContent builds the published demo pack's `content` JSONB in
+// the exact shape board.Pack marshals to: a self-describing envelope whose
+// `sections` is a key→section MAP carrying all eight SectionKeys, every
+// section approved (the pack ships published). Slice 662 — the prior
+// array-shaped literal failed board.Pack deserialization.
+func demoBoardPackContent(periodEnd time.Time) map[string]any {
+	sections := map[string]any{}
+	for _, s := range demoBoardPackSections() {
+		sections[s.key] = map[string]any{
+			"key":            s.key,
+			"title":          s.title,
+			"templated_text": s.text,
+			"override_text":  "",
+			"approved":       true,
+			"data":           s.data,
+		}
+	}
+	return map[string]any{
+		"period_end":   periodEnd.Format("2006-01-02"),
+		"generated_at": periodEnd.Format(time.RFC3339),
+		"status":       "published",
+		"sections":     sections,
+		"demo_seed_v":  DemoSeedVersion,
+	}
 }
 
 // ownerRoles is the cycle of fictional role labels stamped on control
