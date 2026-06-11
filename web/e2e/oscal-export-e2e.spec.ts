@@ -407,20 +407,12 @@ test.describe("OSCAL signed-export browser DOWNLOAD (slice 457)", () => {
     // is the page-render guard for that regression.
     await expect(dl).toHaveAttribute("download", DL_FILENAME);
 
-    // Arm the download listener AND the BFF-response listener BEFORE the
-    // click (a Playwright invariant). The download event is the AC-3
-    // signal; the BFF response is the reliable seam to read the bundle
-    // body from (see the AC-4 note below). Listen for the download on the
-    // browser CONTEXT so a download surfaced on any page/popup is caught.
+    // Arm the download listener BEFORE the click (a Playwright invariant).
+    // The download event is the AC-3 signal. Listen on the browser CONTEXT
+    // so a download surfaced on any page/popup is caught.
     const downloadPromise = context.waitForEvent("download", {
       timeout: 30_000,
     });
-    const responsePromise = page.waitForResponse(
-      (r) =>
-        r.url().includes(`/api/audits/${DL_PERIOD_ID}/oscal-export`) &&
-        r.request().method() === "GET",
-      { timeout: 30_000 },
-    );
     await dl.click();
     const download = await downloadPromise;
 
@@ -438,34 +430,18 @@ test.describe("OSCAL signed-export browser DOWNLOAD (slice 457)", () => {
     expect(download.suggestedFilename()).toBe(DL_FILENAME);
     expect(download.suggestedFilename()).toMatch(/^oscal-bundle-.+\.json$/);
 
-    // AC-4 (e2e-tier corroboration): read the SIGNED bundle from the BFF
-    // RESPONSE object — the reliable seam (Playwright returns the
-    // fulfilled body verbatim from `response.json()`, unlike the
-    // download stream). Assert the response is the signed envelope with
-    // the slice-413 manifest + the four canonical OSCAL members, served
-    // as an attachment. The authoritative manifest-in-bundle proof lives
-    // at the BFF vitest (`route.test.ts`) + the Go `download_test.go` +
-    // the slice-423 envelope e2e; this is the in-flow corroboration.
-    const bffResp = await responsePromise;
-    expect(bffResp.status()).toBe(200);
-    expect(bffResp.headers()["content-disposition"]).toContain(
-      `filename="${DL_FILENAME}"`,
-    );
-    const body = (await bffResp.json()) as {
-      audit_period_id?: string;
-      signature?: { mode?: string; algorithm?: string };
-      members?: { model_type?: string }[];
-    };
-    expect(body.audit_period_id).toBe(DL_PERIOD_ID);
-    expect(body.signature?.mode).toBe("embedded-ed25519");
-    expect(body.signature?.algorithm).toBe("ed25519");
-    expect((body.members ?? []).map((m) => m.model_type)).toEqual(
-      expect.arrayContaining([
-        "system-security-plan",
-        "assessment-plan",
-        "assessment-results",
-        "plan-of-action-and-milestones",
-      ]),
-    );
+    // AC-4 (the signing manifest rides in the downloaded bundle) is NOT
+    // asserted here. An anchor-`download` navigation does not surface a
+    // browser-readable body in Playwright: `download.createReadStream()`
+    // is canceled (the browser consumed the mocked body) and
+    // `page.waitForResponse()` never fires (a download bypasses normal
+    // response observation) — both are flaky test-harness seams, not
+    // product signals. The authoritative manifest-in-bundle proof lives at
+    // the BFF vitest (`web/app/api/audits/[id]/oscal-export/route.test.ts`,
+    // which asserts the full slice-413 manifest shape on the forwarded
+    // body) + the Go `internal/api/oscalexport/download_test.go` + the
+    // slice-423 envelope e2e (above). See decisions log D6. The e2e here
+    // asserts the deterministic AC-3 chain: the link renders, the download
+    // fires, and the filename is the pinned `oscal-bundle-<period>-<date>`.
   });
 });
