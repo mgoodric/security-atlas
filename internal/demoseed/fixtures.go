@@ -27,6 +27,20 @@ const (
 	auditTrailFloor   = 50
 )
 
+// auditPeriodName derives the demo audit-period label from the period's
+// OWN start date, so the quarter label always matches the date range it
+// describes (slice 680 / ATLAS-033). The prior seed labelled periods by
+// loop index (`Q{i%4+1}`), which decoupled the label from the range and
+// produced contradictions like a "Q3" period spanning 2026-02→05.
+//
+// The quarter is the calendar quarter of `start` (Q1 = Jan-Mar, Q2 =
+// Apr-Jun, Q3 = Jul-Sep, Q4 = Oct-Dec); the year is the start year. The
+// "SOC 2" framework prefix mirrors the demo SOC 2 audit narrative.
+func auditPeriodName(start time.Time) string {
+	quarter := (int(start.Month())-1)/3 + 1
+	return fmt.Sprintf("SOC 2 %d Q%d", start.Year(), quarter)
+}
+
 // applyScale multiplies a floor by the seeder's scale knob and rounds
 // to the nearest int with a minimum of 1 (AC-6: every primitive has
 // at least one row even at scale=0.1).
@@ -475,13 +489,19 @@ func (s *Seeder) buildFixtures(slug string) *fixtureSet {
 		nPeriods = 3
 	}
 	for i := 0; i < nPeriods; i++ {
-		// First period (i==0) is frozen; the rest are open.
+		// First period (i==0) is frozen; the rest are open. Periods are
+		// emitted oldest-first so the chronological order matches the
+		// label order (ATLAS-033: the prior code labelled by `i%4`,
+		// decoupling the quarter label from the actual date range — a
+		// "Q3" row could span Feb→May). The label is now derived from
+		// the period's own start date so the label and range never
+		// contradict.
 		frozen := i == 0
 		periodStart := now.AddDate(0, -12+i*4, 0)
 		periodEnd := periodStart.AddDate(0, 3, 0)
 		ap := auditPeriodFixture{
 			ID:          uuid.New(),
-			Name:        fmt.Sprintf("SOC 2 %d %s", now.Year(), []string{"Q1", "Q2", "Q3", "Q4"}[i%4]),
+			Name:        auditPeriodName(periodStart),
 			PeriodStart: periodStart,
 			PeriodEnd:   periodEnd,
 			Frozen:      frozen,

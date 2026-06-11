@@ -265,6 +265,82 @@ func (q *Queries) ListAuditPeriodsByTenant(ctx context.Context, tenantID pgtype.
 	return items, nil
 }
 
+const listAuditPeriodsWithFrameworkByTenant = `-- name: ListAuditPeriodsWithFrameworkByTenant :many
+SELECT
+    ap.id, ap.tenant_id, ap.name, ap.framework_version_id, ap.period_start, ap.period_end, ap.status, ap.frozen_at, ap.frozen_hash, ap.frozen_by, ap.created_by, ap.created_at, ap.updated_at,
+    f.name        AS framework_name,
+    fv.version    AS framework_version
+FROM audit_periods ap
+LEFT JOIN framework_versions fv ON fv.id = ap.framework_version_id
+LEFT JOIN frameworks f          ON f.id = fv.framework_id
+WHERE ap.tenant_id = $1
+ORDER BY ap.created_at DESC, ap.id ASC
+`
+
+type ListAuditPeriodsWithFrameworkByTenantRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	Name               string             `json:"name"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	PeriodStart        pgtype.Date        `json:"period_start"`
+	PeriodEnd          pgtype.Date        `json:"period_end"`
+	Status             string             `json:"status"`
+	FrozenAt           pgtype.Timestamptz `json:"frozen_at"`
+	FrozenHash         []byte             `json:"frozen_hash"`
+	FrozenBy           *string            `json:"frozen_by"`
+	CreatedBy          string             `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	FrameworkName      *string            `json:"framework_name"`
+	FrameworkVersion   *string            `json:"framework_version"`
+}
+
+// Slice 680 / ATLAS-033: the /audits list view rendered a truncated
+// framework_version_id UUID (which read as an opaque content hash) in the
+// "Framework version" column because the period row carries only the FK.
+// This LIST-path query LEFT JOINs frameworks + framework_versions so the
+// handler can surface a readable label ("SCF 2025.2") instead. LEFT JOIN
+// (not INNER) so a period whose framework_version_id no longer resolves
+// still appears in the list — the handler falls back to the UUID when the
+// label is NULL. Catalog tables (frameworks, framework_versions) are
+// tenant-NULL global rows; the audit_periods tenant filter + RLS still
+// scope the result to the caller's tenant.
+func (q *Queries) ListAuditPeriodsWithFrameworkByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListAuditPeriodsWithFrameworkByTenantRow, error) {
+	rows, err := q.db.Query(ctx, listAuditPeriodsWithFrameworkByTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditPeriodsWithFrameworkByTenantRow
+	for rows.Next() {
+		var i ListAuditPeriodsWithFrameworkByTenantRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.FrameworkVersionID,
+			&i.PeriodStart,
+			&i.PeriodEnd,
+			&i.Status,
+			&i.FrozenAt,
+			&i.FrozenHash,
+			&i.FrozenBy,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.FrameworkName,
+			&i.FrameworkVersion,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listControlIDsForPeriodHash = `-- name: ListControlIDsForPeriodHash :many
 SELECT id
 FROM controls

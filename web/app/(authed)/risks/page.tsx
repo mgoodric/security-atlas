@@ -89,6 +89,8 @@ import {
   DEFAULT_FILTERS,
   formatResidualScore,
   residualClass,
+  residualState,
+  reviewDuePending,
   setFilter,
   severityBand,
   severityClasses,
@@ -126,6 +128,42 @@ const RISKS_PAGE_SIZE = 50;
 // page index resets to 1 when a filter changes, preserving the user's
 // mental model).
 const PAGE_PARAM = "page";
+
+// Slice 680 / ATLAS-038 — column-header clarity copy.
+//
+// The "Severity" and "Residual" columns are INDEPENDENT axes, and the
+// audit flagged that they read as inconsistent (the same residual maps
+// to different severities across seeded risks). They are NOT a scoring
+// bug — per canvas §6.2 they measure different things:
+//
+//   - INHERENT SEVERITY = likelihood × impact on the 5×5 grid, BEFORE
+//     any control mitigation (the risk's raw exposure).
+//   - RESIDUAL = inherent × (1 − control_effectiveness) — the exposure
+//     AFTER the linked controls' measured effectiveness, normalized to
+//     0..1.
+//
+// Two risks with the same inherent severity legitimately carry
+// different residuals (different controls); two risks with the same
+// residual legitimately carry different inherent severities. The
+// headers now name the axis explicitly and a native `title` tooltip
+// spells out the relationship so the columns no longer read as a
+// scoring inconsistency. Copy/label only — the scoring model is
+// unchanged (anti-criterion).
+const SEVERITY_HEADER_TOOLTIP =
+  "Inherent severity: likelihood × impact on the 5×5 grid, before any control mitigation. Independent of the residual column.";
+const RESIDUAL_HEADER_TOOLTIP =
+  "Residual: inherent severity reduced by the linked controls' measured effectiveness (0..1). Two risks with the same inherent severity can have different residuals, and vice versa.";
+
+// Slice 680 / ATLAS-029 — pending-evaluation affordance copy.
+//
+// A newly-created risk has no residual_score or review_due_at until the
+// evaluator backfills them. The old cell rendered a bare "—", which
+// reads as broken. We render an explicit "Pending evaluation" label
+// (with a tooltip) instead so the empty state reads as "awaiting the
+// evaluator", not "missing data".
+const PENDING_EVAL_LABEL = "Pending evaluation";
+const PENDING_EVAL_TOOLTIP =
+  "Awaiting the risk evaluator. Inherent severity computes immediately; the residual and review-due date are backfilled once controls are evaluated.";
 
 const TREATMENT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All treatments" },
@@ -441,8 +479,29 @@ function RisksPageInner() {
     },
     {
       id: "residual_score",
-      header: "Residual",
+      // Slice 680 / ATLAS-038: name the axis ("after controls") + tooltip
+      // so it doesn't read as inconsistent with the inherent-severity
+      // column. Independent axes (canvas §6.2).
+      header: (
+        <span title={RESIDUAL_HEADER_TOOLTIP} className="cursor-help">
+          Residual (after controls)
+        </span>
+      ),
       cell: (row) => {
+        // Slice 680 / ATLAS-029: a brand-new risk has no residual yet —
+        // render an explicit "Pending evaluation" affordance rather than
+        // a bare "—" that reads as broken.
+        if (residualState(row.residual_score) === "pending") {
+          return (
+            <span
+              className="text-xs italic text-muted-foreground"
+              title={PENDING_EVAL_TOOLTIP}
+              data-testid="risks-row-residual-pending"
+            >
+              {PENDING_EVAL_LABEL}
+            </span>
+          );
+        }
         const formatted = formatResidualScore(row.residual_score);
         return (
           <span
@@ -456,7 +515,14 @@ function RisksPageInner() {
     },
     {
       id: "severity",
-      header: "Severity",
+      // Slice 680 / ATLAS-038: "Inherent severity" names the axis (before
+      // controls) so it doesn't read as inconsistent with the residual
+      // (after controls) column. Independent axes (canvas §6.2).
+      header: (
+        <span title={SEVERITY_HEADER_TOOLTIP} className="cursor-help">
+          Inherent severity
+        </span>
+      ),
       cell: (row) => {
         const band = severityBand(row.severity);
         return (
@@ -465,6 +531,7 @@ function RisksPageInner() {
               band,
             )}`}
             data-testid="risks-row-severity"
+            title="Inherent severity (likelihood × impact, before controls)"
           >
             {row.severity}
           </span>
@@ -475,12 +542,20 @@ function RisksPageInner() {
       id: "review_due_at",
       header: "Review due",
       cell: (row) =>
-        row.review_due_at ? (
-          <span className="text-xs text-muted-foreground">
-            {row.review_due_at.slice(0, 10)}
+        // Slice 680 / ATLAS-029: an unset review-due date on a new risk is
+        // "Pending evaluation", not a bare "—". A real date renders as-is.
+        reviewDuePending(row.review_due_at) ? (
+          <span
+            className="text-xs italic text-muted-foreground"
+            title={PENDING_EVAL_TOOLTIP}
+            data-testid="risks-row-review-due-pending"
+          >
+            {PENDING_EVAL_LABEL}
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span className="text-xs text-muted-foreground">
+            {row.review_due_at!.slice(0, 10)}
+          </span>
         ),
     },
     // Slice 185 (AC-2): explicit per-row "View in hierarchy" link

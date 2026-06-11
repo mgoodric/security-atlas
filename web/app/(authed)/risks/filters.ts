@@ -202,6 +202,58 @@ export function formatResidualScore(score: unknown): string {
 }
 
 /**
+ * Slice 680 / ATLAS-029 — residual evaluation state.
+ *
+ * A freshly-created risk has no residual_score yet: the create path
+ * stores an empty `{}` JSONB (internal/risk/store.go `defaultResidual`)
+ * and the evaluator backfills `{likelihood, impact}` asynchronously
+ * (slice 020 residual derivation). The old cell rendered a bare "—" for
+ * that case, which reads as broken rather than "awaiting evaluation".
+ *
+ * This classifier distinguishes the three states the cell must render
+ * differently:
+ *
+ *   - "pending": no residual yet — null / undefined / empty object /
+ *     an object with no numeric likelihood+impact. The common case for
+ *     a brand-new risk. The cell renders a "Pending evaluation"
+ *     affordance, NOT a bare dash.
+ *   - "scored": a valid {likelihood, impact} — the cell renders the
+ *     normalized 0..1 magnitude via formatResidualScore.
+ *
+ * Note: there is no separate "malformed" state. A partially-shaped
+ * score (e.g. only likelihood) is indistinguishable from "not yet
+ * evaluated" at the UI tier and the honest read is the same — the
+ * evaluator has not produced a usable residual — so it is bucketed as
+ * "pending". This keeps the affordance truthful without inventing a
+ * scary error state for what is, on `main` today, only ever the
+ * not-yet-evaluated case.
+ */
+export type ResidualState = "pending" | "scored";
+
+export function residualState(score: unknown): ResidualState {
+  if (score == null || typeof score !== "object") return "pending";
+  const s = score as { likelihood?: unknown; impact?: unknown };
+  const l = typeof s.likelihood === "number" ? s.likelihood : null;
+  const i = typeof s.impact === "number" ? s.impact : null;
+  if (l == null || i == null) return "pending";
+  if (!Number.isFinite((l * i) / 25)) return "pending";
+  return "scored";
+}
+
+/**
+ * Slice 680 / ATLAS-029 — review-due evaluation state.
+ *
+ * The evaluator backfills `review_due_at` alongside the residual; until
+ * then the wire omits it (`review_due_at?: string`). An absent /
+ * empty-string value is the "pending evaluation" signal — the same
+ * not-yet-evaluated state as the residual. A present ISO string is a
+ * real due date.
+ */
+export function reviewDuePending(reviewDueAt: string | undefined): boolean {
+  return reviewDueAt == null || reviewDueAt.trim() === "";
+}
+
+/**
  * Map a severity band to a Tailwind color class set for the pill in
  * the severity column. Centralised so the rose/amber/emerald palette
  * matches the mockup exactly.
