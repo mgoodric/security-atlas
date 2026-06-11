@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 601
+**Generated:** 2026-06-11 · **Total slices:** 602
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 507 |
+| merged | 510 |
 | in-progress | 1 |
-| ready | 92 |
+| ready | 90 |
 | not-ready | 1 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 663 666 667 668 670 674 675 676 677 678 679 680 681 682
+095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 667 668 670 674 676 677 678 679 680 681 682 684
 
 ## In-flight
 
@@ -612,10 +612,10 @@
 | 660 | Feature-flag state does not gate exposed nav/routes (OSCAL, B... | merged | #1264 | 2026-06-10 | cdb65621 |
 | 661 | Global search returns no results for controls / SCF anchors | merged | #1252 | 2026-06-10 | 078746fb |
 | 662 | Board pack §05 (Vendor burndown) not rendered; raw key leaks... | merged | #1258 | 2026-06-10 | 07b24d13 |
-| 663 | Risk creation is a dead end on a fresh tenant (mitigate requi... | ready |  |  |  |
+| 663 | Risk creation is a dead end on a fresh tenant (mitigate requi... | merged |  | 2026-06-11 | 7a5384cb |
 | 664 | Vendor "Review burndown" shows 100% on-time with 0 vendors (d... | merged |  | 2026-06-10 | ea8c06b4 |
 | 665 | Board pack "Generate draft" gives no feedback when quarter-en... | merged |  | 2026-06-10 | a263b530 |
-| 666 | Controls page count is inconsistent (header "53 of 53" vs foo... | ready |  |  |  |
+| 666 | Controls page count is inconsistent (header "53 of 53" vs foo... | merged |  | 2026-06-11 | 0a3e82fa |
 | 667 | Dashboard "Recent activity" filter chips are inert; placehold... | ready |  |  |  |
 | 668 | Calendar month view does not highlight "today" | ready |  |  |  |
 | 669 | Activity ledger is dominated by internal read-telemetry (low ... | merged |  | 2026-06-11 | 4e26fd21 |
@@ -624,7 +624,7 @@
 | 672 | Policy detail link 404s — `/policies/{id}` route does not e... | merged | #1255 | 2026-06-10 | d8a8763c |
 | 673 | Board Packs list fails to load in seeded tenant — `/api/boa... | merged | #1258 | 2026-06-10 | 07b24d13 |
 | 674 | Dashboard/breadcrumb shows "Default Tenant" while the active ... | ready |  |  |  |
-| 675 | Calendar agenda missing audit-period / vendor-review / policy... | ready |  |  |  |
+| 675 | Calendar agenda missing audit-period / vendor-review / policy... | merged |  | 2026-06-11 | 6be54edf |
 | 676 | Pervasive 503s on Next.js RSC prefetch/navigation requests | ready |  |  |  |
 | 677 | Metrics correctness pass (freshness contradiction, count labe... | ready |  |  |  |
 | 678 | Demo seed completeness: org_units, questionnaires, ack-role u... | ready |  |  |  |
@@ -633,3 +633,4 @@
 | 681 | Risk register UX: column sorting + per-risk detail; sidebar "... | ready |  |  |  |
 | 682 | Demo seed: anchor controls to SCF + give the demo framework r... | ready |  |  |  |
 | 683 | OSCAL component-definitions edge migration-lag (deploy-note /... | not-ready | #1261 |  | OSCAL edge migration-lag deploy-note; blocked on maintainer edge access |
+| 684 | Risks page count is inconsistent (header "N of M risks" vs fo... | ready |  |  |  |
