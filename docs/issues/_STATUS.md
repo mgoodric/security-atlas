@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 540 |
+| merged | 541 |
 | in-progress | 1 |
-| ready | 79 |
+| ready | 78 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 446 449 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 691 694 695 696 697 698 699 700 701 702 703
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 446 449 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 691 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -637,7 +637,7 @@
 | 685 | Wire dashboard "Recent activity" filter chips to a real kind ... | not-ready |  |  | wire dashboard activity chips — blocked on backend endpoint filter support (spillover from 667) |
 | 686 | Read-only vendor detail page with review history | merged |  | 2026-06-11 | 84e6386c |
 | 687 | Contract-tier rollout: controls-detail + audit-workspace REMA... | merged |  | 2026-06-11 | fb9b03b4 |
-| 688 | vendor_reviews ledger (per-review history surface) | ready |  |  |  |
+| 688 | vendor_reviews ledger (per-review history surface) | merged |  | 2026-06-11 | 7514a084 |
 | 689 | Contract-tier rollout: audit-workspace read tail (populations... | merged |  | 2026-06-11 | 4020b1a4 |
 | 690 | Contract-tier rollout: audit-workspace read-tail remainder (s... | merged |  | 2026-06-11 | 035a8f60 |
 | 691 | Vendor detail does not refresh after recording a review | ready |  |  |  |
