@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 609
+**Generated:** 2026-06-11 · **Total slices:** 610
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 529 |
+| merged | 532 |
 | in-progress | 1 |
-| ready | 77 |
+| ready | 75 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 690 691
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 428 434 435 436 440 441 442 443 444 446 449 450 452 453 455 457 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 691 692
 
 ## In-flight
 
@@ -464,7 +464,7 @@
 | 436 | Split the three oversized hand-written god-files | ready |  |  |  |
 | 437 | Archive `Plans/mockups/` iteration-1 HTML out of the active tree | merged | #980 | 2026-06-04 | 7ce4cc6f |
 | 438 | ISO 27001:2022 crosswalk loader (2nd framework — proves the... | merged | #1011 | 2026-06-04 | af5aec7f |
-| 439 | Evidence-staleness digest + alerting (honest, named-interval) | ready |  |  |  |
+| 439 | Evidence-staleness digest + alerting (honest, named-interval) | merged |  | 2026-06-11 | a9ec52b7 |
 | 440 | Board-narrative AI v0 — one numbered section, end-to-end | ready |  |  |  |
 | 441 | Questionnaire AI-answer suggestion v0 (cited drafts, one-clic... | ready |  |  |  |
 | 442 | GCP connector (highest-demand missing cloud) | ready |  |  |  |
@@ -492,7 +492,7 @@
 | 464 | `atlas evidence verify` CLI: ledger-wide integrity walk (+ SE... | merged | #1027 | 2026-06-06 | c3d08cbc |
 | 465 | `TRUST_FORWARDED_HEADERS` is server-read but not plumbed thro... | merged | #1004 | 2026-06-04 | 7b54bec7 |
 | 466 | `TRUSTED_PROXY_CIDRS` allowlist as the structural fix for X-F... | merged | #1016 | 2026-06-04 | 4d54e0e8 |
-| 467 | ISO 27001:2022 full Annex A coverage completion | ready |  |  |  |
+| 467 | ISO 27001:2022 full Annex A coverage completion | merged |  | 2026-06-11 | 594c4696 |
 | 468 | Server-backed bulk-assign-owner + saved filter-views (controls) | ready |  |  |  |
 | 469 | Sweep `web/app/**` stale `Plans/mockups/` citations to the ar... | merged | #1015 | 2026-06-04 | cbd26d51 |
 | 470 | header-overwriting reverse-proxy container in the e2e seed ha... | merged | #1021 | 2026-06-06 | 4c5496df |
@@ -639,5 +639,6 @@
 | 687 | Contract-tier rollout: controls-detail + audit-workspace REMA... | merged |  | 2026-06-11 | fb9b03b4 |
 | 688 | vendor_reviews ledger (per-review history surface) | ready |  |  |  |
 | 689 | Contract-tier rollout: audit-workspace read tail (populations... | merged |  | 2026-06-11 | 4020b1a4 |
-| 690 | Contract-tier rollout: audit-workspace read-tail remainder (s... | ready |  |  |  |
+| 690 | Contract-tier rollout: audit-workspace read-tail remainder (s... | merged |  | 2026-06-11 | 035a8f60 |
 | 691 | Vendor detail does not refresh after recording a review | ready |  |  |  |
+| 692 | Contract-tier rollout: controldetail attest-form + per-contro... | ready |  |  |  |
