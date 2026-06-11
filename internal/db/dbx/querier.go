@@ -1218,12 +1218,15 @@ type Querier interface {
 	ListBoardPacks(ctx context.Context, tenantID pgtype.UUID) ([]BoardPack, error)
 	// Slice 094 — compliance calendar backend read query.
 	//
-	// ONE UNION ALL across four event sources:
+	// ONE UNION ALL across five event sources:
 	//
 	//   1. audit_periods           — period_end is the audit's "report due" date
 	//   2. exceptions              — expires_at is the waiver-lapse date
 	//   3. policies                — next_review_at is the next review date
-	//   4. controls + control_evaluations — periodic-review controls whose
+	//   4. vendors                 — last_review_date + review_cadence interval is
+	//      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
+	//      vendor branch so the two surfaces cannot drift (slice 675).
+	//   5. controls + control_evaluations — periodic-review controls whose
 	//      cadence (derived from freshness_class) places their next review
 	//      between $from and $to. last_evaluated_at = MAX(evaluated_at) over
 	//      the append-only control_evaluations ledger.
@@ -1236,7 +1239,7 @@ type Querier interface {
 	// timestamptz bounds.
 	//
 	// Type filter (`type_filter`) is a CSV string. Empty string ('') means
-	// "all four sources." A non-empty filter narrows to the subset by checking
+	// "all five sources." A non-empty filter narrows to the subset by checking
 	// membership on the per-branch literal type discriminator.
 	//
 	// Cadence math for the controls branch:
@@ -2132,6 +2135,15 @@ type Querier interface {
 	// reviews (024), audit-period milestones (028) — projected to the AC-4 row
 	// shape {due_date, category, title, resource_type, resource_id}. NOT four
 	// round-trips (anti-criterion P0: no N+1).
+	//
+	// SHARED UPCOMING-EVENT VOCABULARY (slice 675, ADR-0015): this query and
+	// the compliance calendar's `ListCalendarEvents`
+	// (internal/db/queries/calendar.sql) both answer "what's coming up?" and
+	// MUST source the same entity types. The vendor branch below is mirrored
+	// by the calendar's vendor branch (same last_review_date + cadence math).
+	// If you add or remove an event source here, make the matching change in
+	// calendar.sql (or note why the two intentionally differ) so the dashboard
+	// and the calendar cannot silently drift again.
 	//
 	// due_date semantics per source:
 	//   exception        — expires_at (the waiver lapses)

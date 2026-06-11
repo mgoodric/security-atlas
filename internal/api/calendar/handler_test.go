@@ -101,10 +101,25 @@ func TestNormalizeTypeFilter_DedupesAndOrdersStably(t *testing.T) {
 }
 
 // TestNormalizeTypeFilter_RejectsUnknownType asserts the AC-1 closed
-// vocabulary — unknown types get a 400-shaped error.
+// vocabulary — unknown types get a 400-shaped error. `risk` is not a
+// calendar event source.
 func TestNormalizeTypeFilter_RejectsUnknownType(t *testing.T) {
-	if _, err := normalizeTypeFilter("audit,vendor"); err == nil {
-		t.Error("expected err for unknown type 'vendor', got nil")
+	if _, err := normalizeTypeFilter("audit,risk"); err == nil {
+		t.Error("expected err for unknown type 'risk', got nil")
+	}
+}
+
+// TestNormalizeTypeFilter_AcceptsVendor is the slice-675 guard: `vendor`
+// is now a first-class calendar event type (aligning the agenda with the
+// dashboard "Upcoming" widget). It must pass the closed-vocabulary check.
+func TestNormalizeTypeFilter_AcceptsVendor(t *testing.T) {
+	got, err := normalizeTypeFilter("audit,vendor,exception")
+	if err != nil {
+		t.Fatalf("vendor should be a valid event type: %v", err)
+	}
+	want := "audit,vendor,exception"
+	if got != want {
+		t.Errorf("normalized=%q want=%q", got, want)
 	}
 }
 
