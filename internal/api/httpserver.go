@@ -451,6 +451,9 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/vendors/{id}", vendorsH.GetVendor)
 	root.Patch("/v1/vendors/{id}", vendorsH.UpdateVendor)
 	root.Delete("/v1/vendors/{id}", vendorsH.DeleteVendor)
+	// Slice 688: per-review history ledger — list + record a completed review.
+	root.Get("/v1/vendors/{id}/reviews", vendorsH.ListReviews)
+	root.Post("/v1/vendors/{id}/reviews", vendorsH.RecordReview)
 	// Slice 018: FrameworkScope predicate + four-state workflow + intersection
 	// compute. Routes appended per the parallel-batch convention (chi rejects
 	// two Mounts at "/"). The /effective-scope route lives under
