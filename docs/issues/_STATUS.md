@@ -13,27 +13,19 @@
 
 | State | Count |
 | --- | --- |
-| merged | 384 |
-| in-progress | 9 |
-| ready | 207 |
+| merged | 504 |
+| in-progress | 1 |
+| ready | 95 |
 | not-ready | 1 |
 
 ## Ready set
 
-059 060 061 062 063 064 065 066 067 068 069 070 071 072 073 074 075 076 077 078 079 080 081 082 083 085 086 087 088 089 090 091 092 093 094 095 096 097 098 099 100 101 102 103 104 105 106 107 108 109 110 112 113 114 115 117 118 119 120 121 122 123 124 125 126 127 128 129 130 132 134 135 140 141 148 150 154 155 158 159 160 161 162 163 164 187 188 189 191 195 199 226 228 230 232 271 272 304 323 324 326 330 335 336 338 339 340 341 347 350 354 355 356 357 358 364 368 382 383 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 445 446 449 450 452 453 455 457 467 468 471 478 479 480 481 482 483 484 486 487 488 489 492 493 494 498 499 500 501 502 504 505 506 507 508 509 510 513 517 518 527 528 536 537 541 544 545 546 567 651 658 663 664 665 666 667 668 669 670 674 675 676 677 678 679 680 681 682
+095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 663 664 665 666 667 668 669 670 674 675 676 677 678 679 680 681 682
 
 ## In-flight
 
 | Slice | State | PR / Branch |
 | --- | --- | --- |
-| 146 | in-progress | fix/146-bff-cookie-production-build |
-| 147 | in-progress | fix/147-dashboard-placeholder-panels |
-| 149 | in-progress | fix/149-audits-create-button |
-| 151 | in-progress | fix/151-risks-form-control-link |
-| 152 | in-progress | fix/152-control-detail-404 |
-| 153 | in-progress | fix/153-logo-standalone |
-| 156 | in-progress | fix/156-dashboard-opa-admit |
-| 157 | in-progress | fix/157-dashboard-upcoming-and-top-risks |
 | 448 | in-progress | feat/448-bulk-ops-saved-views |
 
 ## All slices
@@ -98,112 +90,112 @@
 | 056 | Hierarchical risk dashboard view | merged |  |  | v1 backlog — slice-071 audit |
 | 057 | README screenshots + animated GIFs of core flows | merged |  |  | v1 backlog — slice-071 audit |
 | 058 | User docs scaffold + 5 core pages | merged |  |  | v1 backlog — slice-071 audit |
-| 059 | Per-tenant feature flags + capability toggles | ready |  |  |  |
-| 060 | Admin settings UI (SSO · users · API keys · feature flags ... | ready |  |  |  |
-| 061 | CI path-based filtering (skip expensive jobs for docs-only ch... | ready |  |  |  |
-| 062 | Admin BFF backend endpoints (SSO + Users + Unified audit log) | ready |  |  |  |
-| 063 | Enable `/admin/sso` form save (post-slice-062 wire-up) | ready |  |  |  |
-| 064 | Control-detail backend read endpoints | ready |  |  |  |
-| 065 | self-host bundle P0 fixes (slice 037 follow-up) | ready |  |  |  |
-| 066 | Dashboard backend read endpoints | ready |  |  |  |
-| 067 | Risk-hierarchy backend read endpoints | ready |  |  |  |
-| 068 | Schema-registry evidence_kind identifier fix | ready |  |  |  |
-| 069 | verification suite: Playwright runner wiring + frontend unit ... | ready |  |  |  |
-| 070 | Onboarding walkthroughs (showboat-generated) | ready |  |  |  |
-| 071 | Repo cleanup audit + in-place updates | ready |  |  |  |
-| 072 | Version string surfaced in the UI | ready |  |  |  |
-| 073 | First-time login UX + bootstrap-token discoverability | ready |  |  |  |
-| 074 | Logo design candidates (Media:Art, human approval pending) | ready |  |  |  |
-| 075 | Logo integration (post-approval of slice 074) | ready |  |  |  |
-| 076 | Metrics catalog + cascade + observation store | ready |  |  |  |
-| 077 | Dependabot `deps` commit prefix + dedicated release-please se... | ready |  |  |  |
-| 078 | Unblock `npm run lint` after ESLint 10 + eslint-plugin-react ... | ready |  |  |  |
-| 079 | Quarantine `Frontend · Playwright e2e` until the seed-data h... | ready |  |  |  |
-| 080 | Fix release-tag infrastructure (GoReleaser + mkdocs publish) | ready |  |  |  |
-| 081 | Pre-push hook + post-status-flip pre-commit re-run guidance | ready |  |  |  |
-| 082 | Playwright e2e seed-data harness | ready |  |  |  |
-| 083 | Pre-push hook: add `npm run lint -w web` once slice 078 lands | ready |  |  |  |
+| 059 | Per-tenant feature flags + capability toggles | merged | #54 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 060 | Admin settings UI (SSO · users · API keys · feature flags ... | merged | #66 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 061 | CI path-based filtering (skip expensive jobs for docs-only ch... | merged | #52 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 062 | Admin BFF backend endpoints (SSO + Users + Unified audit log) | merged | #70 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 063 | Enable `/admin/sso` form save (post-slice-062 wire-up) | merged | #76 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 064 | Control-detail backend read endpoints | merged | #102 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 065 | self-host bundle P0 fixes (slice 037 follow-up) | merged | #115 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 066 | Dashboard backend read endpoints | merged | #109 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 067 | Risk-hierarchy backend read endpoints | merged | #113 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 068 | Schema-registry evidence_kind identifier fix | merged | #125 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 069 | verification suite: Playwright runner wiring + frontend unit ... | merged | #132 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 070 | Onboarding walkthroughs (showboat-generated) | merged | #200 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 071 | Repo cleanup audit + in-place updates | merged | #197 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 072 | Version string surfaced in the UI | merged | #148 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 073 | First-time login UX + bootstrap-token discoverability | merged | #149 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 074 | Logo design candidates (Media:Art, human approval pending) | merged | #180 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 075 | Logo integration (post-approval of slice 074) | merged | #189 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 076 | Metrics catalog + cascade + observation store | merged | #203 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 077 | Dependabot `deps` commit prefix + dedicated release-please se... | merged | #147 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 078 | Unblock `npm run lint` after ESLint 10 + eslint-plugin-react ... | merged | #194 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 079 | Quarantine `Frontend · Playwright e2e` until the seed-data h... | merged | #164 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 080 | Fix release-tag infrastructure (GoReleaser + mkdocs publish) | merged | #166 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 081 | Pre-push hook + post-status-flip pre-commit re-run guidance | merged | #165 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 082 | Playwright e2e seed-data harness | merged | #253 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 083 | Pre-push hook: add `npm run lint -w web` once slice 078 lands | merged | #209 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 084 | cosign v3 + goreleaser-action@v7 migration | merged | #425 | 2026-05-20 | f15839a3 |
-| 085 | Security audit Q2 2026 | ready |  |  |  |
-| 086 | Fix open redirect on signIn `from` parameter | ready |  |  |  |
-| 087 | Security HTTP headers middleware | ready |  |  |  |
-| 088 | CLI `http.Client` explicit timeout | ready |  |  |  |
-| 089 | Dependency vulnerability scanning (govulncheck + npm audit + ... | ready |  |  |  |
-| 090 | Bump `govulncheck` pin for Go 1.26 toolchain compatibility | ready |  |  |  |
-| 091 | Root-route redirect (replace stock create-next-app template) | ready |  |  |  |
-| 092 | Version display end-to-end fix (publish-arg + middleware exem... | ready |  |  |  |
-| 093 | Mockups for missing top-level pages (controls / evidence / ri... | ready |  |  |  |
-| 094 | Compliance calendar (cross-business view of upcoming audits +... | ready |  |  |  |
+| 085 | Security audit Q2 2026 | merged | #168 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 086 | Fix open redirect on signIn `from` parameter | merged | #172 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 087 | Security HTTP headers middleware | merged | #171 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 088 | CLI `http.Client` explicit timeout | merged | #173 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 089 | Dependency vulnerability scanning (govulncheck + npm audit + ... | merged | #177 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 090 | Bump `govulncheck` pin for Go 1.26 toolchain compatibility | merged | #192 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 091 | Root-route redirect (replace stock create-next-app template) | merged | #210 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 092 | Version display end-to-end fix (publish-arg + middleware exem... | merged | #208 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 093 | Mockups for missing top-level pages (controls / evidence / ri... | merged | #215 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 094 | Compliance calendar (cross-business view of upcoming audits +... | merged | #218 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 095 | Re-upgrade ESLint to 10.x once `eslint-plugin-react` ships co... | ready |  |  |  |
-| 096 | Repo cleanup deletion candidates (follow-on to slice 071) | ready |  |  |  |
-| 097 | Metrics dashboard + cascade-tree visualization (follow-on to ... | ready |  |  |  |
-| 098 | /controls list view (per slice 093 mockup) | ready |  |  |  |
-| 099 | /evidence list view (per slice 093 mockup) | ready |  |  |  |
-| 100 | /risks list view (per slice 093 mockup) | ready |  |  |  |
-| 101 | /policies list view (per slice 093 mockup) | ready |  |  |  |
-| 102 | /audits list view (per slice 093 mockup) | ready |  |  |  |
-| 103 | /settings page (per slice 093 mockup) | ready |  |  |  |
-| 104 | `GET /v1/anchors?include=state` extension for `/controls` lis... | ready |  |  |  |
-| 105 | Risk-create UI for the /risks empty-state CTA | ready |  |  |  |
-| 106 | `GET /v1/evidence` backend extension (spillover from 099) | ready |  |  |  |
-| 107 | `GET /v1/policies?include=ack_rate` extension for `/policies`... | ready |  |  |  |
-| 108 | `/v1/me/*` profile, preferences, and sessions endpoints | ready |  |  |  |
-| 109 | Pin the sqlc toolchain version so `sqlc generate` is reproduc... | ready |  |  |  |
-| 110 | BFF forwards atlas_session cookie alongside bearer for /v1/me... | ready |  |  |  |
+| 096 | Repo cleanup deletion candidates (follow-on to slice 071) | merged | #205 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 097 | Metrics dashboard + cascade-tree visualization (follow-on to ... | merged | #214 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 098 | /controls list view (per slice 093 mockup) | merged | #223 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 099 | /evidence list view (per slice 093 mockup) | merged | #232 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 100 | /risks list view (per slice 093 mockup) | merged | #226 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 101 | /policies list view (per slice 093 mockup) | merged | #233 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 102 | /audits list view (per slice 093 mockup) | merged | #227 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 103 | /settings page (per slice 093 mockup) | merged | #238 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 104 | `GET /v1/anchors?include=state` extension for `/controls` lis... | merged | #228 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 105 | Risk-create UI for the /risks empty-state CTA | merged | #231 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 106 | `GET /v1/evidence` backend extension (spillover from 099) | merged | #240 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 107 | `GET /v1/policies?include=ack_rate` extension for `/policies`... | merged | #239 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 108 | `/v1/me/*` profile, preferences, and sessions endpoints | merged | #246 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 109 | Pin the sqlc toolchain version so `sqlc generate` is reproduc... | merged | #243 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 110 | BFF forwards atlas_session cookie alongside bearer for /v1/me... | merged | #249 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 111 | Enable full assertions in `dashboard.spec.ts` (post-082 stabi... | merged | #111 | 2026-05-21 | 8c3b3551 |
 | 112 | Extend `control-detail.sql` to FULL coverage + enable asserti... | ready |  |  |  |
 | 113 | Extend `audit-workspace.sql` to FULL coverage + enable assert... | ready |  |  |  |
 | 114 | Extend `risk-hierarchy.sql` to FULL coverage + enable asserti... | ready |  |  |  |
 | 115 | Extend `admin-bootstrap.sql` to FULL coverage + enable assert... | ready |  |  |  |
 | 116 | Promote `Frontend · Playwright e2e` to required-checks in br... | merged | #494 | 2026-05-22 | 963e60e8 |
-| 117 | Adopt StepSecurity Harden-Runner (audit mode → block mode) | ready |  |  |  |
+| 117 | Adopt StepSecurity Harden-Runner (audit mode → block mode) | merged | #262 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 118 | Promote StepSecurity Harden-Runner to block mode | ready |  |  |  |
-| 119 | Fix recurring `port 3000 already in use` flake in `Frontend ... | ready |  |  |  |
-| 120 | Audit and remove phantom (unused) dependencies across all man... | ready |  |  |  |
-| 121 | Add OTel SDK to atlas (traces + metrics + Go runtime telemetry) | ready |  |  |  |
-| 122 | Make slice 082's `seedFromFixture()` harness idempotent on `a... | ready |  |  |  |
-| 123 | Investigate + fix 4 e2e specs unmasked by slice 119's port-30... | ready |  |  |  |
-| 124 | Unified audit-log aggregation API (read-only across 9 per-dom... | ready |  |  |  |
-| 125 | Frontend `/audit-log` page (consumes slice 124's unified aggr... | ready |  |  |  |
-| 126 | External audit-log sink (tamper-evident retention outside the... | ready |  |  |  |
-| 127 | Branch-protection drift fix + recurring drift-detect CI job | ready |  |  |  |
-| 128 | SHA-pin every GitHub Action across all workflows (+ CI guard ... | ready |  |  |  |
-| 129 | Extend slice-124 `/v1/admin/audit-log/unified` with `actor_name` | ready |  |  |  |
-| 130 | Extend `/api/admin/me` BFF + `/v1/admin/credentials` backend ... | ready |  |  |  |
+| 119 | Fix recurring `port 3000 already in use` flake in `Frontend ... | merged | #259 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 120 | Audit and remove phantom (unused) dependencies across all man... | merged | #264 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 121 | Add OTel SDK to atlas (traces + metrics + Go runtime telemetry) | merged | #269 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 122 | Make slice 082's `seedFromFixture()` harness idempotent on `a... | merged | #265 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 123 | Investigate + fix 4 e2e specs unmasked by slice 119's port-30... | merged | #286 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 124 | Unified audit-log aggregation API (read-only across 9 per-dom... | merged | #267 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 125 | Frontend `/audit-log` page (consumes slice 124's unified aggr... | merged | #276 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 126 | External audit-log sink (tamper-evident retention outside the... | merged | #277 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 127 | Branch-protection drift fix + recurring drift-detect CI job | merged | #285 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 128 | SHA-pin every GitHub Action across all workflows (+ CI guard ... | merged | #288 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 129 | Extend slice-124 `/v1/admin/audit-log/unified` with `actor_name` | merged | #282 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 130 | Extend `/api/admin/me` BFF + `/v1/admin/credentials` backend ... | merged | #281 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 131 | Fix slice 029 integration tests' `SET LOCAL $1` syntax error | merged | #484 | 2026-05-22 | 29ab44d4 |
-| 132 | README refresh with fresh screenshots (v1.10.0+ baseline) | ready |  |  |  |
+| 132 | README refresh with fresh screenshots (v1.10.0+ baseline) | merged | #296 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 133 | mkdocs user docs content refresh (slice 058 follow-on) | merged | #389 | 2026-05-20 | b64cb069 |
 | 134 | Refresh slice-070 onboarding walkthroughs against current mai... | ready |  |  |  |
-| 135 | Data-export library + audit-log export (reference implementat... | ready |  |  |  |
+| 135 | Data-export library + audit-log export (reference implementat... | merged | #297 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 136 | Risk register data export (CSV / JSON / XLSX) | merged | #378 | 2026-05-19 | c80bec31 |
 | 137 | Controls UCF graph data export (CSV / JSON / XLSX) | merged | #384 | 2026-05-19 | 4300cde2 |
 | 138 | Ledger entities export (evidence + policies + exceptions + sa... | merged | #387 | 2026-05-19 | a171a0aa |
 | 139 | Audit periods + vendors data export (CSV / JSON / XLSX) | merged | #379 | 2026-05-19 | 3522c644 |
-| 140 | OpenAPI 3.1 spec + Redoc UI + drift-detect CI guard | ready |  |  |  |
-| 141 | Multi-tenant login + tenant picker + persistent header switcher | ready |  |  |  |
+| 140 | OpenAPI 3.1 spec + Redoc UI + drift-detect CI guard | merged | #300 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 141 | Multi-tenant login + tenant picker + persistent header switcher | merged | #458 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 142 | super_admin role: full schema + management surface (slice 141... | merged | #480 | 2026-05-21 | ea674f67 |
 | 143 | Create-tenant flow (super_admin-gated) | merged | #485 | 2026-05-22 | 73326954 |
 | 144 | Rename-tenant flow (per-tenant admin or super_admin) | merged | #462 | 2026-05-21 | dd2e8762 |
 | 145 | Data-export hardening: payload_json redaction + per-tenant co... | merged | #375 | 2026-05-19 | 637b8dce |
-| 146 | Fix BFF cookie regression in production-build standalone | in-progress |  |  | fix/146-bff-cookie-production-build |
-| 147 | Dashboard panels still render "endpoint does not exist" place... | in-progress |  |  | fix/147-dashboard-placeholder-panels |
-| 148 | Calendar page fails to load events despite slice 094 merge | ready |  |  |  |
-| 149 | Audits page "Create audit period" button redirects to /admin ... | in-progress |  |  | fix/149-audits-create-button |
-| 150 | Empty-set robustness audit: list endpoints return 500 on fres... | ready |  |  |  |
-| 151 | Risk creation form missing control-link UI (slice 105 incompl... | in-progress |  |  | fix/151-risks-form-control-link |
-| 152 | Control detail 404 on fresh install (seed SOC 2 kit OR friend... | in-progress |  |  | fix/152-control-detail-404 |
-| 153 | Logo not rendering in header + login screen on production-bui... | in-progress |  |  | fix/153-logo-standalone |
-| 154 | Settings page audit + parity check against mockup | ready |  |  |  |
-| 155 | Questionnaire feature: design + build (CAIQ / SIG / HECVAT re... | ready |  |  |  |
-| 156 | Dashboard read endpoints likely have the same OPA admit omiss... | in-progress |  |  | fix/156-dashboard-opa-admit |
-| 157 | Dashboard: re-point upcoming-panel to /v1/upcoming + top-risk... | in-progress |  |  | fix/157-dashboard-upcoming-and-top-risks |
-| 158 | branch-protection drift: real permission fix (PR #311 follow-on) | ready |  |  |  |
-| 159 | Resolve sqlc-toolchain CI binary drift (slice 109 follow-on) | ready |  |  |  |
-| 160 | Add missing fixtures/e2e/control-detail-empty.sql (slice 152 ... | ready |  |  |  |
-| 161 | Diagnose + fix auth-open-redirect.spec.ts drift (slice 086 fo... | ready |  |  |  |
-| 162 | Active sessions wire shape — augment with user_agent, ip_ad... | ready |  |  |  |
-| 163 | Settings API tokens — Rotate action | ready |  |  |  |
-| 164 | Settings Playwright e2e — seed fixture + un-comment AC bodies | ready |  |  |  |
+| 146 | Fix BFF cookie regression in production-build standalone | merged | #327 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 147 | Dashboard panels still render "endpoint does not exist" place... | merged | #309 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 148 | Calendar page fails to load events despite slice 094 merge | merged | #310 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 149 | Audits page "Create audit period" button redirects to /admin ... | merged | #315 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 150 | Empty-set robustness audit: list endpoints return 500 on fres... | merged | #316 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 151 | Risk creation form missing control-link UI (slice 105 incompl... | merged | #324 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 152 | Control detail 404 on fresh install (seed SOC 2 kit OR friend... | merged | #323 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 153 | Logo not rendering in header + login screen on production-bui... | merged | #330 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 154 | Settings page audit + parity check against mockup | merged | #338 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 155 | Questionnaire feature: design + build (CAIQ / SIG / HECVAT re... | merged | #433 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 156 | Dashboard read endpoints likely have the same OPA admit omiss... | merged | #319 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 157 | Dashboard: re-point upcoming-panel to /v1/upcoming + top-risk... | merged | #320 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 158 | branch-protection drift: real permission fix (PR #311 follow-on) | merged | #336 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 159 | Resolve sqlc-toolchain CI binary drift (slice 109 follow-on) | merged | #347 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 160 | Add missing fixtures/e2e/control-detail-empty.sql (slice 152 ... | merged | #342 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 161 | Diagnose + fix auth-open-redirect.spec.ts drift (slice 086 fo... | merged | #343 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 162 | Active sessions wire shape — augment with user_agent, ip_ad... | merged | #346 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 163 | Settings API tokens — Rotate action | merged | #351 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 164 | Settings Playwright e2e — seed fixture + un-comment AC bodies | merged | #354 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 165 | Diagnose + fix 11 settings.spec.ts AC failures (slice 164 fol... | merged | #360 | 2026-05-19 | e725893c |
 | 166 | Production bug: /settings crashes when an api_keys row has em... | merged | #362 | 2026-05-19 | e76e5cf9 |
 | 167 | Logo redesign + replace existing assets across all usages | merged | #367 | 2026-05-19 | 516e0436 |
@@ -226,19 +218,19 @@
 | 184 | UI honesty: audits row-click 404 (per-period detail placeholder) | merged | #417 | 2026-05-20 | e058f251 |
 | 185 | UI honesty: risks row-click routes to hierarchy, not detail | merged | #418 | 2026-05-20 | c509ca8c |
 | 186 | UI honesty: sidebar "Admin" entry shown to non-admin users | merged | #421 | 2026-05-20 | 471f7796 |
-| 187 | OAuth Authorization Server scaffolding (JWT signing + JWKS + ... | ready |  |  |  |
-| 188 | OAuth `/oauth/token` endpoint + RFC 8693 token exchange | ready |  |  |  |
-| 189 | OAuth `/oauth/authorize` + PKCE + frontend OAuth client integ... | ready |  |  |  |
+| 187 | OAuth Authorization Server scaffolding (JWT signing + JWKS + ... | merged | #432 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 188 | OAuth `/oauth/token` endpoint + RFC 8693 token exchange | merged | #442 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 189 | OAuth `/oauth/authorize` + PKCE + frontend OAuth client integ... | merged | #447 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 190 | JWT validation middleware on `/v1/*` + R2 eviction + `/oauth/... | merged | #190 | 2026-05-21 | 3df5df16 |
-| 191 | SDK migration to `client_credentials` × 4 languages + CLI de... | ready |  |  |  |
+| 191 | SDK migration to `client_credentials` × 4 languages + CLI de... | merged | #454 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 192 | Multi-tenant switch via OAuth token-exchange + frontend heade... | merged | #192 | 2026-05-21 | b0b5280a |
 | 193 | Diagnose + fix dashboard.spec.ts AC-5 upcoming-row Playwright... | merged | #193 | 2026-05-21 | de1b20ab |
 | 194 | CI path filter should include `fixtures/**` so fixture-only P... | merged | #194 | 2026-05-21 | 4159fb8a |
-| 195 | Java SDK OAuth client_credentials helper | ready |  |  |  |
+| 195 | Java SDK OAuth client_credentials helper | merged | #457 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 196 | Bootstrap container OAuth migration (atlas-bootstrap → clie... | merged | #465 | 2026-05-21 | 3b8f0f18 |
 | 197 | Complete slice 034 bearer-middleware retirement (test-fixture... | merged | #471 | 2026-05-21 | 00a682c8 |
 | 198 | OIDC first-install bootstrap (closes slice 192 AC-11/AC-12) | merged | #477 | 2026-05-21 | 12a6219f |
-| 199 | Cross-tab BroadcastChannel sync for tenant-switcher | ready |  |  |  |
+| 199 | Cross-tab BroadcastChannel sync for tenant-switcher | merged | #461 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 200 | Fix self-host bundle external-mode postgres init regression | merged | #468 | 2026-05-21 | 293a661d |
 | 201 | Migrate Playwright e2e fixtures from slice 034 bearer to JWT-... | merged | #474 | 2026-05-21 | d4bb38fc |
 | 202 | Self-host bundled mode: atlas service starts before migration... | merged | #490 | 2026-05-22 | bd8c7974 |
@@ -265,7 +257,7 @@
 | 223 | UI honesty: controls top bar omits breadcrumb, search, audit ... | merged | #603 | 2026-05-24 | cf7c0be0 |
 | 224 | Add Scope filter pill to /controls list | merged | #224 | 2026-05-23 | e2df15d0 |
 | 225 | UI honesty: "New control" button on /controls is silently dis... | merged | #561 | 2026-05-23 | ef3c4a28 |
-| 226 | Add Frameworks-per-row column to /controls list | ready |  |  |  |
+| 226 | Add Frameworks-per-row column to /controls list | merged | #553 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 227 | Add pagination to /controls list | merged | #576 | 2026-05-23 | 58422721 |
 | 228 | UI honesty: dashboard global command-K search bar missing fro... | ready |  |  |  |
 | 229 | UI honesty: dashboard header lacks tenant + snapshot-freshnes... | merged | #592 | 2026-05-23 | 6c8fa4eb |
@@ -357,9 +349,9 @@
 | 321 | Coverage lift — `pkg/sdk-go` to 70%+ | merged | #321 | 2026-05-27 | 291e49b1 |
 | 322 | /admin/demo "Reseed demo dataset" button click produces no vi... | merged | #719 | 2026-05-27 | 7e4732a3 |
 | 323 | README refresh: current release + accurate slice count + fres... | ready |  |  |  |
-| 324 | Evidence SDK docs alignment: push-only wire reality + connect... | ready |  |  |  |
+| 324 | Evidence SDK docs alignment: push-only wire reality + connect... | merged | #752 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 325 | OAuth grants landing map: per-grant reference docs for `inter... | merged | #746 | 2026-05-27 | a9f705bf |
-| 326 | Legacy bearer 410-Gone deprecation responder retirement | ready |  |  |  |
+| 326 | Legacy bearer 410-Gone deprecation responder retirement | merged | #754 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 327 | Security audit via voltagent-qa-sec:security-auditor | merged | #811 | 2026-05-28 | 17b73591 |
 | 328 | Comprehensive code review via voltagent-qa-sec:code-reviewer | merged | #821 | 2026-05-28 | 3b81923c |
 | 329 | Compliance meta-audit via voltagent-qa-sec:compliance-auditor | merged | #827 | 2026-05-28 | bc3f3f27 |
@@ -368,22 +360,22 @@
 | 332 | Performance audit (evidence pipeline + UCF + frontend) via vo... | merged | #845 | 2026-05-28 | e13b58e8 |
 | 333 | QA strategy gap analysis via voltagent-qa-sec:qa-expert | merged | #776 | 2026-05-28 | b68f589c |
 | 334 | Test framework review via voltagent-qa-sec:test-automator | merged | #770 | 2026-05-27 | 37052f08 |
-| 335 | Chaos experiment design via voltagent-qa-sec:chaos-engineer | ready |  |  |  |
+| 335 | Chaos experiment design via voltagent-qa-sec:chaos-engineer | merged | #782 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 336 | UX flow validation via voltagent-qa-sec:ui-ux-tester | ready |  |  |  |
 | 337 | AI-writing tone audit via voltagent-qa-sec:ai-writing-auditor | merged | #764 | 2026-05-27 | c27db8a4 |
 | 338 | Penetration test against atlas-edge.home.gmoney.sh via voltag... | ready |  |  |  |
 | 339 | OpenAPI spec drift: 12 OAuth endpoints not enumerated in `doc... | ready |  |  |  |
-| 340 | Investigate + re-enable chromedp `TestRender_ProducesRealPDF`... | ready |  |  |  |
-| 341 | Apply chromedp WSURLReadTimeout fix to remaining four PDF ren... | ready |  |  |  |
+| 340 | Investigate + re-enable chromedp `TestRender_ProducesRealPDF`... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 341 | Apply chromedp WSURLReadTimeout fix to remaining four PDF ren... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 342 | Vision canvas tone rewrite (banned phrase + em-dash saturation) | merged | #861 | 2026-05-29 | a85499bd |
 | 343 | Tone polish round 1 (low-density bundle from slice 337 audit) | merged | #767 | 2026-05-27 | 87d72889 |
 | 344 | CLAUDE.md tone discipline expansion (additions from slice 337... | merged | #868 | 2026-05-29 | 7e014299 |
 | 345 | CI integration-job enrolment-discovery primitive | merged | #873 | 2026-05-29 | 10230d18 |
 | 346 | CI yaml: extract inline slice-history commentary | merged | #788 | 2026-05-28 | a4e0d923 |
-| 347 | vitest coverage ratchet | ready |  |  |  |
+| 347 | vitest coverage ratchet | merged | #773 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 348 | Test framework polish round 1 | merged | #794 | 2026-05-28 | 58fa94eb |
 | 349 | Evaluate adding a contract-test tier for BFF↔atlas wire shape | merged | #879 | 2026-05-29 | 30c501ad |
-| 350 | Branch-coverage floor for security-critical packages | ready |  |  |  |
+| 350 | Branch-coverage floor for security-critical packages | merged | #779 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 351 | e2e critical multi-tenant flow gap audit + spec fill | merged | #875 | 2026-05-29 | b95383ed |
 | 352 | Flake budget formalization + dashboard | merged | #791 | 2026-05-28 | 621ddef3 |
 | 353 | QA strategy tactical round 1 | merged | #885 | 2026-05-29 | 31a0ed58 |
@@ -397,7 +389,7 @@
 | 361 | A11y global-search combobox ARIA wiring | merged | #804 | 2026-05-28 | be9ef102 |
 | 362 | A11y in-progress audit pill dark-mode contrast | merged | #801 | 2026-05-28 | 44e9a014 |
 | 363 | A11y admin forms: raw input + error association | merged | #807 | 2026-05-28 | 4da5ed9e |
-| 364 | Strip `atlas` Prometheus namespace from OTel Collector; enabl... | ready |  |  |  |
+| 364 | Strip `atlas` Prometheus namespace from OTel Collector; enabl... | merged | #795 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 365 | OIDC ID-token nonce generation + validation | merged | #814 | 2026-05-28 | ed24c6ec |
 | 366 | JWT signing key rotation end-to-end | merged | #863 | 2026-05-29 | 405a375f |
 | 367 | Error detail leakage audit + cleanup across `internal/api/` | merged | #817 | 2026-05-28 | 87777f19 |
@@ -415,8 +407,8 @@
 | 379 | Eliminate double `protojson.Marshal` on ingest redaction path... | merged | #859 | 2026-05-29 | f2bfc5d0 |
 | 380 | Dashboard Server Component fan-out + parallel data fetch (clo... | merged | #862 | 2026-05-29 | 8e353f14 |
 | 381 | Perf cleanup round 1 (bundle of slice 332 Low findings) | merged | #870 | 2026-05-29 | 9145cd5a |
-| 382 | Enforce STATUS row convention: orchestrator-only edits + CI l... | ready |  |  |  |
-| 383 | Pre-push `go mod tidy` drift check (catch direct-import-not-p... | ready |  |  |  |
+| 382 | Enforce STATUS row convention: orchestrator-only edits + CI l... | merged | #853 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 383 | Pre-push `go mod tidy` drift check (catch direct-import-not-p... | merged | #854 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 384 | ActionPlan primitive: schema + CRUD + risk/control linkage | ready |  |  |  |
 | 385 | metrics seeder: empty `source_slices` becomes SQL NULL, viola... | merged | #864 | 2026-05-29 | 549f0a80 |
 | 386 | metrics_catalog seed aborts on empty source_slices (NULL viol... | merged | #865 | 2026-05-29 | cac076a3 |
@@ -478,7 +470,7 @@
 | 442 | GCP connector (highest-demand missing cloud) | ready |  |  |  |
 | 443 | Slack connector | ready |  |  |  |
 | 444 | AI gap-explanation v0 (plain-language, cited, non-binding) | ready |  |  |  |
-| 445 | Email/SMTP notification channel (delivery substrate) | ready |  |  |  |
+| 445 | Email/SMTP notification channel (delivery substrate) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 446 | Disclosure / breach-notification workflow decision spike + AD... | ready |  |  |  |
 | 447 | PCI DSS v4.0 crosswalk loader (3rd framework; scope-reduction... | merged | #1017 | 2026-06-05 | 69078c86 |
 | 448 | Bulk operations + saved filter-views (operator ergonomics, co... | in-progress |  |  | feat/448-bulk-ops-saved-views |
@@ -511,25 +503,25 @@
 | 475 | Board/questionnaire PDF render must degrade to 503 (not 500/h... | merged | #1030 | 2026-06-06 | 37155f96 |
 | 476 | Make seeded demo data reachable by the operator who loads it | merged | #1098 | 2026-06-07 | 967d9afc |
 | 477 | Slice 477 — Walkthrough PDF render must degrade to 503 (not... | merged | #1041 | 2026-06-06 | efcd4a74 |
-| 478 | Super-admin user↔tenant↔role assignment API (incl. self-a... | ready |  |  |  |
-| 479 | Admin user-management UI: assign users to tenants + roles (in... | ready |  |  |  |
-| 480 | NIST CSF 2.0 crosswalk loader (4th framework via the generic ... | ready |  |  |  |
-| 481 | HIPAA Security Rule crosswalk loader (catalog-only; not the c... | ready |  |  |  |
-| 482 | Coverage-strength rollup + mapping-confidence visualization | ready |  |  |  |
+| 478 | Super-admin user↔tenant↔role assignment API (incl. self-a... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 479 | Admin user-management UI: assign users to tenants + roles (in... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 480 | NIST CSF 2.0 crosswalk loader (4th framework via the generic ... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 481 | HIPAA Security Rule crosswalk loader (catalog-only; not the c... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 482 | Coverage-strength rollup + mapping-confidence visualization | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 483 | Crosswalk-mapping verified-tier governance (community_draft ... | ready |  |  |  |
 | 484 | Framework-versioning capability (multiple live versions + mig... | ready |  |  |  |
-| 486 | Azure connector (Entra ID + Storage) — cloud parity with AW... | ready |  |  |  |
-| 487 | Kubernetes connector (RBAC + workload security config) | ready |  |  |  |
-| 488 | Monitoring connectors (Datadog + Grafana) — logging/alertin... | ready |  |  |  |
-| 489 | PagerDuty connector (incident-response evidence) | ready |  |  |  |
+| 486 | Azure connector (Entra ID + Storage) — cloud parity with AW... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 487 | Kubernetes connector (RBAC + workload security config) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 488 | Monitoring connectors (Datadog + Grafana) — logging/alertin... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 489 | PagerDuty connector (incident-response evidence) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 490 | MDM connectors (Jamf + Intune) — endpoint posture evidence | merged | #1095 | 2026-06-07 | 190b038e |
 | 491 | HRIS connectors (Rippling + BambooHR) — joiner/mover/leaver... | merged | #1105 | 2026-06-07 | f3abca7e |
-| 492 | OSCAL import: catalog / profile / component-definition ingestion | ready |  |  |  |
-| 493 | SSP export: real control-implementation narratives (not the s... | ready |  |  |  |
-| 494 | Assessment-Results export: wire the drawn sample evidence + w... | ready |  |  |  |
+| 492 | OSCAL import: catalog / profile / component-definition ingestion | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 493 | SSP export: real control-implementation narratives (not the s... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
+| 494 | Assessment-Results export: wire the drawn sample evidence + w... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 495 | Control-as-code: evaluate SQL + JSON-path evidence queries (n... | merged | #1043 | 2026-06-06 | f3f74bf4 |
 | 496 | Control-bundle test runner: fixture evidence + expected pass/... | merged | #1108 | 2026-06-07 | 6da529b6 |
-| 498 | Shared local-inference (`internal/llm`) client foundation + `... | ready |  |  |  |
+| 498 | Shared local-inference (`internal/llm`) client foundation + `... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 499 | Cloud-LLM opt-in per-tenant routing + visible "routes to {pro... | ready |  |  |  |
 | 500 | pgvector semantic-retrieval grounding for AI-assist drafts (c... | ready |  |  |  |
 | 501 | Board-narrative full multi-section + numeric-claim verificati... | ready |  |  |  |
@@ -540,10 +532,10 @@
 | 507 | Breach-notification workflow implementation (security → pri... | ready |  |  |  |
 | 508 | SCIM 2.0 user-lifecycle provisioning (deprovisioning on IdP o... | ready |  |  |  |
 | 509 | IdP group-to-role mapping (claims/SCIM-group -> atlas role as... | ready |  |  |  |
-| 510 | Automated backup + scheduled restore-verification (operationa... | ready |  |  |  |
+| 510 | Automated backup + scheduled restore-verification (operationa... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 511 | OSCAL profile import (resolve import / merge / modify directi... | merged | #1109 | 2026-06-07 | 57f085cf |
 | 512 | OSCAL component-definition import (vendor control-implementat... | merged | #1115 | 2026-06-07 | 3c3c62e3 |
-| 513 | Correct the AI-assist-boundary canonical-adopter reference (Q... | ready |  |  |  |
+| 513 | Correct the AI-assist-boundary canonical-adopter reference (Q... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 514 | NIST CSF 2.0 full Subcategory coverage | merged | #1100 | 2026-06-07 | e19faf7a |
 | 515 | NIST CSF 2.0 Profile / Tier assessment workflow | merged | #1168 | 2026-06-08 | 25f7a8b9 |
 | 516 | HIPAA Security Rule full coverage (incl. §164.314 + §164.316) | merged | #1104 | 2026-06-07 | 06000d08 |
@@ -557,7 +549,7 @@
 | 524 | Kubernetes connector: Pod-Security-Standards admission-config... | merged | #1186 | 2026-06-09 | 03c6ccb8 |
 | 525 | Kubernetes connector: Secret-inventory (metadata-only) evidence | merged | #1210 | 2026-06-09 | 1006afa9 |
 | 526 | Kubernetes connector: watch-based event-driven profile (audit... | merged | #1240 | 2026-06-10 | 9bfbcf66 |
-| 527 | Admin user-assign dialog: user + tenant dropdowns (replace ra... | ready |  |  |  |
+| 527 | Admin user-assign dialog: user + tenant dropdowns (replace ra... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 528 | Admin user-assign dialog: searchable combobox for large user/... | ready |  |  |  |
 | 533 | Datadog connector: Cloud-SIEM / Security-Monitoring rule evid... | merged | #1171 | 2026-06-08 | d50594a3 |
 | 534 | Grafana connector: SAML / RBAC config evidence | merged | #1183 | 2026-06-08 | 8cb2f9fa |
