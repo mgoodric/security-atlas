@@ -131,13 +131,24 @@ handler reuses the Exporter, which reads under RLS via
 `tenancy.ApplyTenant`. The authoritative place to prove a Tenant-B
 request cannot download Tenant-A's bundle is the integration tier with a
 real Postgres + RLS — `TestExport_CrossTenantPeriodIsNotExportable` seeds
-a frozen period for tenant A, attempts the export under tenant B's
-context, and asserts `ErrPeriodNotFound` (the 404 the download serves).
-It also asserts tenant A _can_ see its own period (reaches the bridge
-stage, surfacing `ErrBridgeUnavailable` with a nil bridge) so the denial
-is genuine isolation, not a not-found that fires for everyone. The
-handler-level + BFF-level unit/vitest tiers assert the attachment headers,
-the filename, and the error-path "no attachment on error" property.
+a frozen period for tenant A, then resolves it under tenant B's context
+and asserts `ErrPeriodNotFound` (the 404 the download serves).
+
+**Test exercises `Exporter.Aggregate`, not the full `Export`.** RLS
+denial happens in the Aggregate stage (`aggregate.go:109`,
+`tenancy.ApplyTenant` + `GetAuditPeriodByID`), BEFORE any
+Python-oscal-bridge call. Asserting at `Aggregate` therefore (a) tests
+the exact RLS boundary the isolation property lives in, and (b) keeps the
+test **bridge-free** — no nil-bridge dereference. (An earlier draft called
+the full `Export` with a `nil` bridge; the tenant-A sanity pre-check
+resolved the period and then reached the serialize stage, dereferencing
+the nil bridge → a deterministic CI panic. `Aggregate` never touches the
+bridge, so a nil bridge is safe and the test is panic-proof.) The
+sanity pre-check (tenant A aggregates its OWN period without error) proves
+the period genuinely exists for its owner, so the tenant-B denial is real
+isolation, not a not-found that fires for everyone. The handler-level +
+BFF-level unit/vitest tiers assert the attachment headers, the filename,
+and the error-path "no attachment on error" property.
 
 ### D6 — AC-3 vs AC-4 e2e verification tier split
 

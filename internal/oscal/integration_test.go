@@ -250,12 +250,23 @@ func TestExport_RejectsUnknownPeriod(t *testing.T) {
 // bundle as a downloadable artifact. Its headline threat is
 // information-disclosure across tenants: a Tenant-B operator must NOT be
 // able to download Tenant-A's bundle. The download handler adds no
-// cross-tenant reach — it reuses this exact Exporter, which reads under
-// the request's tenant context. This test pins the property at the
+// cross-tenant reach — it reuses this exact Exporter, whose RLS-gated
+// Aggregate stage reads under the request's tenant context. This test
+// pins the property at the
 // authoritative RLS boundary: a frozen period seeded for tenant A,
-// exported under tenant B's context, must resolve to ErrPeriodNotFound
-// (the same denial the download serves as a 404). No bridge is needed —
-// RLS denies the read in the Aggregate stage, before any bridge call.
+// resolved under tenant B's context, must return ErrPeriodNotFound (the
+// same denial the download serves as a 404).
+//
+// The test exercises the RLS-gated Aggregate stage directly, NOT the full
+// Export. This is deliberate: RLS denial happens in Aggregate, BEFORE any
+// bridge call, so the isolation property lives entirely in the
+// tenant-scoped read — and asserting at Aggregate keeps the test
+// bridge-free (no Python oscal-bridge, no nil-bridge deref). Aggregate
+// returns ErrPeriodNotFound for a missing/cross-tenant period
+// (aggregate.go:109) and succeeds when the period resolves, so both the
+// sanity pre-check (tenant A resolves its own period) and the isolation
+// assertion (tenant B is denied) are clean error/nil comparisons with no
+// bridge dependency.
 func TestExport_CrossTenantPeriodIsNotExportable(t *testing.T) {
 	admin := openPool(t, adminDSN(t))
 	app := openPool(t, appDSN(t))
@@ -268,31 +279,27 @@ func TestExport_CrossTenantPeriodIsNotExportable(t *testing.T) {
 	periodID, _ := seedPeriod(t, admin, tenantA, fwVersion, true /* frozen */)
 
 	signer, _ := oscal.NewEphemeralSigner()
+	// A nil bridge is fine: Aggregate never touches the bridge (the bridge
+	// is only used in the later serialize stage of Export, which this test
+	// does not reach).
 	e := oscal.NewExporter(app, nil, signer)
 
-	// Sanity: tenant A CAN see its own frozen period reaches the bridge
-	// stage (a nil bridge surfaces as ErrBridgeUnavailable — NOT
-	// ErrPeriodNotFound). This proves the period resolves for its owner,
-	// so the cross-tenant denial below is genuine isolation, not a
-	// not-found that would fire for anyone.
-	_, ownErr := e.Export(ctxFor(t, tenantA), oscal.ExportInput{
-		AuditPeriodID: periodID,
-		SystemName:    "Tenant A System",
-	})
-	if errors.Is(ownErr, oscal.ErrPeriodNotFound) {
-		t.Fatalf("tenant A could not see its OWN frozen period; isolation test is invalid: %v", ownErr)
+	in := oscal.ExportInput{AuditPeriodID: periodID, SystemName: "isolation-probe"}
+
+	// Sanity: tenant A CAN resolve its OWN frozen period through the
+	// RLS-gated Aggregate stage. This proves the period genuinely exists
+	// for its owner, so the cross-tenant denial below is real isolation,
+	// not a not-found that would fire for anyone.
+	if _, ownErr := e.Aggregate(ctxFor(t, tenantA), in); ownErr != nil {
+		t.Fatalf("tenant A could not aggregate its OWN frozen period; isolation test is invalid: %v", ownErr)
 	}
 
-	// The isolation assertion: tenant B asks to export tenant A's period.
-	// RLS scopes the read to tenant B, which has no such period -> the
-	// Aggregate stage returns ErrPeriodNotFound. Tenant B never sees a
-	// byte of tenant A's bundle.
-	_, err := e.Export(ctxFor(t, tenantB), oscal.ExportInput{
-		AuditPeriodID: periodID,
-		SystemName:    "Tenant B System",
-	})
-	if !errors.Is(err, oscal.ErrPeriodNotFound) {
-		t.Fatalf("cross-tenant export of tenant A's period under tenant B should be ErrPeriodNotFound, got %v", err)
+	// The isolation assertion: tenant B asks to resolve tenant A's period.
+	// RLS scopes the read to tenant B, which has no such period -> Aggregate
+	// returns ErrPeriodNotFound. Tenant B never sees a byte of tenant A's
+	// bundle (the read is denied before any data is assembled).
+	if _, err := e.Aggregate(ctxFor(t, tenantB), in); !errors.Is(err, oscal.ErrPeriodNotFound) {
+		t.Fatalf("cross-tenant aggregate of tenant A's period under tenant B should be ErrPeriodNotFound, got %v", err)
 	}
 }
 
