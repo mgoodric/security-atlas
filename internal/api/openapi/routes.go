@@ -162,6 +162,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/vendors", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors"},
 	{Method: "GET", Path: "/v1/vendors/burndown", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors/burndown"},
 	{Method: "GET", Path: "/v1/vendors/{id}", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors/{id}"},
+	{Method: "GET", Path: "/v1/vendors/{id}/reviews", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors/{id}/reviews"},
 	{Method: "GET", Path: "/v1/version", Tag: "system", Tier: "none", Internal: true, Summary: "GET /v1/version"},
 	{Method: "GET", Path: "/v1/walkthroughs", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "GET /v1/walkthroughs"},
 	{Method: "GET", Path: "/v1/walkthroughs/{id}", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "GET /v1/walkthroughs/{id}"},
@@ -253,6 +254,7 @@ var RouteSpecs = []RouteSpec{
 	// Internal:true so it does NOT appear in the public Redoc surface.
 	{Method: "POST", Path: "/v1/test/issue-jwt", Tag: "system", Tier: "none", Internal: true, Summary: "Mint a test JWT (env-gated by ATLAS_TEST_MODE; absent in production)"},
 	{Method: "POST", Path: "/v1/vendors", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "POST /v1/vendors"},
+	{Method: "POST", Path: "/v1/vendors/{id}/reviews", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "POST /v1/vendors/{id}/reviews"},
 	{Method: "POST", Path: "/v1/walkthroughs", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs"},
 	{Method: "POST", Path: "/v1/walkthroughs/{id}/attachments", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}/attachments"},
 	{Method: "POST", Path: "/v1/walkthroughs/{id}:finalize", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs/{id}:finalize"},

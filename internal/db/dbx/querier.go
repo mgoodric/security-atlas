@@ -311,6 +311,12 @@ type Querier interface {
 	// INSERT WITH CHECK policy. dpa_signed_at is required by CHECK constraint
 	// whenever dpa_signed=true.
 	CreateVendor(ctx context.Context, arg CreateVendorParams) (Vendor, error)
+	// Append a completed review to the ledger. tenant_id is captured directly so
+	// RLS evaluates the INSERT WITH CHECK policy. The composite FK
+	// (tenant_id, vendor_id) -> vendors enforces the vendor exists for this tenant
+	// (a cross-tenant or fabricated vendor_id trips a foreign_key_violation, which
+	// the store maps to ErrVendorNotFound). Append-only: there is no UpdateVendorReview.
+	CreateVendorReview(ctx context.Context, arg CreateVendorReviewParams) (VendorReview, error)
 	// Slice 027 — walkthrough recording primitive.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -968,6 +974,10 @@ type Querier interface {
 	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
 	// The most recent successful backup run — what restore-verification restores.
 	LatestSucceededBackup(ctx context.Context) (BackupRun, error)
+	// The most-recent reviewed_at for a vendor, used to keep vendors.last_review_date
+	// consistent with the ledger (AC-2, decisions log D2). Returns no row when the
+	// vendor has no reviews; the store treats pgx.ErrNoRows as "leave the scalar".
+	LatestVendorReviewDate(ctx context.Context, arg LatestVendorReviewDateParams) (pgtype.Date, error)
 	// ===== decision_controls =====
 	LinkDecisionControl(ctx context.Context, arg LinkDecisionControlParams) error
 	// ===== decision_exceptions =====
@@ -2222,6 +2232,10 @@ type Querier interface {
 	// the tenant scope; the explicit tenant_id filter in WHERE is defense-in-depth and lets
 	// a future RLS misconfiguration still filter by tenant.
 	ListUserNotificationPreferences(ctx context.Context, arg ListUserNotificationPreferencesParams) ([]UserNotificationPreference, error)
+	// AC-3 per-vendor review history, newest-first. reviewed_at DESC is the
+	// primary order; created_at DESC tie-breaks two reviews recorded for the same
+	// date so the order is stable. RLS scopes the read to the active tenant.
+	ListVendorReviews(ctx context.Context, arg ListVendorReviewsParams) ([]VendorReview, error)
 	// Cells attached to one vendor.
 	ListVendorScopeCells(ctx context.Context, arg ListVendorScopeCellsParams) ([]pgtype.UUID, error)
 	// AC-2 filter by criticality. NULL criticality_filter means "all" — the
@@ -2406,6 +2420,11 @@ type Querier interface {
 	// query path then enforces `observed_at <= populations.frozen_at` on
 	// subsequent draws.
 	SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFrozenAtParams) error
+	// Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
+	// ledger (AC-2, decisions log D2). Called after recording a review when the
+	// new review's reviewed_at is the most-recent on file. updated_at is bumped so
+	// the detail page's "last updated" reflects the change. RLS scopes the write.
+	SetVendorLastReviewDate(ctx context.Context, arg SetVendorLastReviewDateParams) error
 	// backup_runs — slice 510 automated-backup status/audit ledger.
 	//
 	// DEPLOYMENT-scope (no tenant_id): a backup is a full cross-tenant operation.

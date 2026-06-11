@@ -1,8 +1,11 @@
 package vendor
 
 import (
+	"errors"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // TestIsOverdueAsOf — AC-4. The derived overdue flag must hold three contract
@@ -121,5 +124,63 @@ func TestReviewCadence_Valid(t *testing.T) {
 		if bad.Valid() {
 			t.Fatalf("%q should be invalid", bad)
 		}
+	}
+}
+
+// TestReviewOutcome_Valid — slice 688. Reject unknown outcome strings at the
+// API boundary; the four enum values are the only accepted dispositions.
+func TestReviewOutcome_Valid(t *testing.T) {
+	t.Parallel()
+	for _, o := range AllReviewOutcomes {
+		if !o.Valid() {
+			t.Fatalf("%q should be valid", o)
+		}
+	}
+	for _, bad := range []ReviewOutcome{"", "PASS", "passed", "ok", "remediated"} {
+		if bad.Valid() {
+			t.Fatalf("%q should be invalid", bad)
+		}
+	}
+}
+
+// TestValidateReview — slice 688 pure-Go guard. RecordReview rejects a
+// missing vendor_id, a zero reviewed_at, and a bad outcome before any DB
+// round-trip; a fully-populated input passes.
+func TestValidateReview(t *testing.T) {
+	t.Parallel()
+	good := RecordReviewInput{
+		VendorID:   uuid.New(),
+		ReviewedAt: time.Date(2026, 3, 15, 0, 0, 0, 0, time.UTC),
+		Outcome:    OutcomePass,
+	}
+	tests := []struct {
+		name    string
+		mutate  func(in *RecordReviewInput)
+		wantErr bool
+	}{
+		{"valid", func(*RecordReviewInput) {}, false},
+		{"valid_with_findings", func(in *RecordReviewInput) { in.Outcome = OutcomePassWithFindings }, false},
+		{"missing_vendor_id", func(in *RecordReviewInput) { in.VendorID = uuid.Nil }, true},
+		{"zero_reviewed_at", func(in *RecordReviewInput) { in.ReviewedAt = time.Time{} }, true},
+		{"empty_outcome", func(in *RecordReviewInput) { in.Outcome = "" }, true},
+		{"bad_outcome", func(in *RecordReviewInput) { in.Outcome = "remediated" }, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			in := good
+			tc.mutate(&in)
+			err := validateReview(in)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("want error; got nil")
+				}
+				if !errors.Is(err, ErrInvalidInput) {
+					t.Fatalf("want ErrInvalidInput; got %v", err)
+				}
+			} else if err != nil {
+				t.Fatalf("want nil; got %v", err)
+			}
+		})
 	}
 }

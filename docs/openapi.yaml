@@ -3979,6 +3979,45 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/vendors/{id}/reviews:
+    get:
+      summary: GET /v1/vendors/{id}/reviews
+      tags: [vendors]
+      operationId: get-v1-vendors-id-reviews
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/vendors/{id}/reviews
+      tags: [vendors]
+      operationId: post-v1-vendors-id-reviews
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/version:
     get:
       summary: GET /v1/version

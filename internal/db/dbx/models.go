@@ -850,6 +850,50 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
+type VendorReviewOutcome string
+
+const (
+	VendorReviewOutcomePass             VendorReviewOutcome = "pass"
+	VendorReviewOutcomePassWithFindings VendorReviewOutcome = "pass_with_findings"
+	VendorReviewOutcomeFail             VendorReviewOutcome = "fail"
+	VendorReviewOutcomeWaived           VendorReviewOutcome = "waived"
+)
+
+func (e *VendorReviewOutcome) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VendorReviewOutcome(s)
+	case string:
+		*e = VendorReviewOutcome(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VendorReviewOutcome: %T", src)
+	}
+	return nil
+}
+
+type NullVendorReviewOutcome struct {
+	VendorReviewOutcome VendorReviewOutcome `json:"vendor_review_outcome"`
+	Valid               bool                `json:"valid"` // Valid is true if VendorReviewOutcome is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVendorReviewOutcome) Scan(value interface{}) error {
+	if value == nil {
+		ns.VendorReviewOutcome, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VendorReviewOutcome.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVendorReviewOutcome) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VendorReviewOutcome), nil
+}
+
 type AdminAuditLogV struct {
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	Ts           pgtype.Timestamptz `json:"ts"`
@@ -1999,6 +2043,17 @@ type Vendor struct {
 	Notes          string              `json:"notes"`
 	CreatedAt      pgtype.Timestamptz  `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz  `json:"updated_at"`
+}
+
+type VendorReview struct {
+	ID         pgtype.UUID         `json:"id"`
+	TenantID   pgtype.UUID         `json:"tenant_id"`
+	VendorID   pgtype.UUID         `json:"vendor_id"`
+	ReviewedAt pgtype.Date         `json:"reviewed_at"`
+	Reviewer   string              `json:"reviewer"`
+	Outcome    VendorReviewOutcome `json:"outcome"`
+	Notes      string              `json:"notes"`
+	CreatedAt  pgtype.Timestamptz  `json:"created_at"`
 }
 
 type VendorScopeCell struct {
