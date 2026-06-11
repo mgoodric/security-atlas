@@ -757,6 +757,12 @@
       "functions": 98,
       "lines": 98
     },
+    "lib/api/freshness-consistency.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/api/metrics.ts": {
       "statements": 21,
       "branches": 93,
