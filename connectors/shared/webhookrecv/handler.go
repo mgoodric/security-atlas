@@ -38,34 +38,20 @@ type BuildAndPush func(req *http.Request, body []byte) (status int)
 // This is the single place the P0 verify-first-before-record invariant lives for
 // every connector that adopts it: there is no code path that reaches BuildAndPush
 // without a passing verification.
+//
+// Handle is HandleWithValidation with a nil hook — a connector with no validation
+// handshake (github, hris, pagerduty, mdm-delivery) keeps this exact entrypoint and
+// behaviour; a connector with a handshake (Intune, Event Grid) passes a
+// ValidationHook to HandleWithValidation instead (slice 657).
 func Handle(w http.ResponseWriter, req *http.Request, maxBodyBytes int64, v Verifier, build BuildAndPush) {
-	if req.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
+	HandleWithValidation(w, req, maxBodyBytes, nil, v, build)
+}
 
-	// Size-bound the body BEFORE reading it (a hostile POST cannot exhaust
-	// memory). MaxBytesReader caps the read and errors past the limit.
-	req.Body = http.MaxBytesReader(w, req.Body, maxBodyBytes)
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
-		return
-	}
-
-	// Verify BEFORE any work. Reject unsigned / forged / wrong-signature with a
-	// bare 401 (no detail leak).
-	if err := v.Verify(body, req.Header); err != nil {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
-	}
-
-	status := build(req, body)
-	if status >= 400 {
-		http.Error(w, statusMessage(status), status)
-		return
-	}
-	w.WriteHeader(status)
+// readAll reads the (already MaxBytesReader-bounded) body fully. Factored so the
+// skeleton has one read site shared by the verify-first and validation-handshake
+// paths.
+func readAll(body io.ReadCloser) ([]byte, error) {
+	return io.ReadAll(body)
 }
 
 // statusMessage maps the non-2xx statuses the skeleton emits to the exact
