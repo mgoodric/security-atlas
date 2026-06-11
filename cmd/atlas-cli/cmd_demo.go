@@ -23,14 +23,23 @@ const demoEnableEnvVar = "ATLAS_ENABLE_DEMO_SEED"
 // atlas-bootstrap container.
 const demoDatabaseURLEnvVar = "DATABASE_URL"
 
+// demoAppDatabaseURLEnvVar is the RLS-enforced app-role pool URL
+// (atlas_app). Slice 671 uses it to drive the post-seed evaluator under
+// RLS so the seeded tenant shows real control state instead of "—".
+// Matches the platform binary's DATABASE_URL_APP convention
+// (cmd/atlas/main.go:95). When unset, the CLI prints a clear hint and
+// skips evaluation rather than failing the seed.
+const demoAppDatabaseURLEnvVar = "DATABASE_URL_APP"
+
 // demoSeedFlags + demoTeardownFlags hold the per-invocation knobs.
 // Held at package scope only because cobra reuses the same Command
 // instance across invocations; the underlying tests close over a
 // fresh cobra command per test case.
 var (
-	demoSeedTenantSlug  string
-	demoSeedScale       float64
-	demoSeedDatabaseURL string
+	demoSeedTenantSlug     string
+	demoSeedScale          float64
+	demoSeedDatabaseURL    string
+	demoSeedAppDatabaseURL string
 
 	demoTeardownTenantSlug  string
 	demoTeardownDatabaseURL string
@@ -88,6 +97,7 @@ Refuses to run if:
 	cmd.Flags().StringVar(&demoSeedTenantSlug, "tenant-slug", "", "slug for the demo tenant (lower-case alnum + hyphen; suggest demo-*)")
 	cmd.Flags().Float64Var(&demoSeedScale, "scale", demoseed.DefaultScale, "row-count multiplier (0.1 to 5.0)")
 	cmd.Flags().StringVar(&demoSeedDatabaseURL, "database-url", "", "BYPASSRLS DSN (env: DATABASE_URL)")
+	cmd.Flags().StringVar(&demoSeedAppDatabaseURL, "app-database-url", "", "RLS-enforced app-role DSN for post-seed evaluation (env: DATABASE_URL_APP)")
 	_ = cmd.MarkFlagRequired("tenant-slug")
 	return cmd
 }
@@ -168,6 +178,15 @@ func runDemoSeed(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("demo seed: %w", err)
 	}
 
+	// Slice 671: drive the REAL evaluator for the seeded tenant so its
+	// controls show computed STATE / FRESHNESS / LAST OBSERVED instead of "—".
+	// This is a SEPARATE stage AFTER the seed write committed: it reads the
+	// ledger and writes only the evaluation read models (invariant #2), scoped
+	// to the seeded tenant via the app-role pool's RLS (invariant #6). Runs on
+	// the idempotent re-seed path too so a re-run ensures evaluation has run.
+	// Non-fatal on a missing app DSN: the seed itself succeeded.
+	runDemoEvaluation(cmd, ctx, res.TenantID)
+
 	if res.Idempotent {
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(),
 			"demo seed: tenant %q already seeded (id=%s); no changes made. Rotate the password via /v1/admin/users if needed.\n",
@@ -222,6 +241,52 @@ func runDemoSeed(cmd *cobra.Command, _ []string) error {
 		res.TenantID,
 	)
 	return nil
+}
+
+// runDemoEvaluation drives the slice-671 post-seed evaluator for the seeded
+// tenant. It resolves the RLS-enforced app-role DSN from --app-database-url or
+// DATABASE_URL_APP, opens a short-lived pool, and runs
+// demoseed.EvaluateSeededTenant. It is NON-FATAL: a missing app DSN or an
+// evaluation error prints a hint to stderr and returns — the seed already
+// committed, so the demo tenant exists regardless; the operator can re-trigger
+// evaluation (re-running `demo seed` on the same slug re-evaluates).
+func runDemoEvaluation(cmd *cobra.Command, ctx context.Context, tenantID uuid.UUID) {
+	appDSN := demoSeedAppDatabaseURL
+	if appDSN == "" {
+		appDSN = os.Getenv(demoAppDatabaseURLEnvVar)
+	}
+	if appDSN == "" {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"demo seed: %s (or --app-database-url) not set; skipping post-seed evaluation.\n"+
+				"  The demo tenant's controls will show \"—\" until the evaluator runs.\n"+
+				"  Set the app-role DSN and re-run `demo seed` on the same slug to evaluate.\n",
+			demoAppDatabaseURLEnvVar,
+		)
+		return
+	}
+
+	appPool, err := pgxpool.New(ctx, appDSN)
+	if err != nil {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"demo seed: post-seed evaluation: open app pool: %v (seed committed; re-run to evaluate)\n", err,
+		)
+		return
+	}
+	defer appPool.Close()
+
+	summary, err := demoseed.EvaluateSeededTenant(ctx, appPool, tenantID)
+	if err != nil {
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(),
+			"demo seed: post-seed evaluation failed: %v (seed committed; re-run to evaluate)\n", err,
+		)
+		return
+	}
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(),
+		"\nPost-seed evaluation complete (controls now show real state):\n"+
+			"  control_evaluations : %d\n"+
+			"  evidence_freshness  : %d\n",
+		summary.ControlEvaluations, summary.FreshnessRows,
+	)
 }
 
 // runDemoTeardown executes `atlas-cli demo teardown`.
