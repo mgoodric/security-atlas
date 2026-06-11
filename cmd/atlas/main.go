@@ -58,6 +58,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
+	stalenesssched "github.com/mgoodric/security-atlas/internal/staleness"
 )
 
 const (
@@ -1026,6 +1027,46 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: metrics scheduler ticking every %s\n", interval.String())
 				if err := ms.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("metrics scheduler: %w", err)
+				}
+			}()
+		}
+	}
+
+	// Slice 439: evidence-staleness rollup scheduler. The PRODUCER of
+	// `evidence.staleness` notifications. An in-process tick-loop (mirroring
+	// the metrics scheduler — no external cron, single-VM self-host target)
+	// that, on a HONEST named cadence (every 6h — NOT "continuous
+	// monitoring", canvas anti-pattern), enumerates tenants from the migrator
+	// (BYPASSRLS) pool and runs each tenant's staleness rollup under the app
+	// pool with tenancy.WithTenant. Per-control alerts fire every tick; the
+	// weekly digest fires only on the Monday-09:00-UTC tick. Both writes are
+	// idempotent, so the tenant boundary (RLS) + the dedup ledger keep
+	// re-runs safe. ATLAS_STALENESS_INTERVAL overrides the 6h cadence for dev
+	// loops. The already-merged delivery channels (slice 445/543/582) consume
+	// the rows this producer writes.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		sctx, scancel := context.WithTimeout(context.Background(), 10*time.Second)
+		sPool, err := atlasotel.NewTracedPool(sctx, migratorURL)
+		scancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: staleness scheduler pool: %v\n", err)
+		} else {
+			interval := stalenesssched.DefaultRecomputeInterval
+			if raw := os.Getenv("ATLAS_STALENESS_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_STALENESS_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			ss := stalenesssched.New(sPool, pool, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer sPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: staleness scheduler ticking every %s (weekly digest Mondays 09:00 UTC)\n", interval.String())
+				if err := ss.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("staleness scheduler: %w", err)
 				}
 			}()
 		}
