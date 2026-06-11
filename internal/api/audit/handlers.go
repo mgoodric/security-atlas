@@ -31,13 +31,46 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// Handler bundles the slice-026 routes over a single audit.Store.
-type Handler struct {
-	store *audit.Store
+// sampleReader is the per-route read seam the two single-resource GET paths
+// — GET /v1/populations/{id} (GetPopulation) and GET /v1/samples/{id}
+// (GetSample) — read through (slice 689, contract-tier rollout). It carries
+// JUST the two read methods those routes need — deliberately narrow (slice
+// 409 D1 / slice 411 D2 / slice 412 D2 sizing rule: a two-method seam over
+// the wider audit.Store, NOT a full mirror of its create/draw/annotate
+// surface). The contract-tier recorder (handler_contract_test.go) injects a
+// fixed-row stub satisfying this seam so the single-resource wire shapes
+// record on the plain `go test ./...` unit surface with no Postgres pool
+// (ADR-0007 / P0-409-1). The production *audit.Store satisfies it verbatim;
+// the seam is unexported and New(*audit.Store) is unchanged (P0-409-2). The
+// write/create handlers (CreatePopulation/DrawSample/Annotate) keep using the
+// concrete h.store directly.
+type sampleReader interface {
+	GetPopulation(ctx context.Context, id uuid.UUID) (audit.Population, error)
+	GetSample(ctx context.Context, id uuid.UUID) (audit.Sample, error)
 }
 
-// New constructs a Handler.
-func New(store *audit.Store) *Handler { return &Handler{store: store} }
+// Handler bundles the slice-026 routes over a single audit.Store.
+//
+// reader is the slice-689 per-route read seam the GetPopulation/GetSample
+// paths read through; New points it at store, so production behavior is
+// identical. The write handlers keep using store directly.
+type Handler struct {
+	store  *audit.Store
+	reader sampleReader
+}
+
+// New constructs a Handler. The slice-689 per-route read seam (reader) is
+// wired to the same store — the public signature is unchanged (P0-409-2).
+func New(store *audit.Store) *Handler { return &Handler{store: store, reader: store} }
+
+// newHandlerWithReader constructs a Handler whose GetPopulation/GetSample
+// paths read through an arbitrary read seam. It exists ONLY for the slice-689
+// contract recorder, which injects a fixed-row stub so the single-resource
+// wire shapes record with no Postgres pool. Unexported — not part of the
+// public surface.
+func newHandlerWithReader(reader sampleReader) *Handler {
+	return &Handler{reader: reader}
+}
 
 // ----- wire shapes -----
 
@@ -152,7 +185,7 @@ func (h *Handler) GetPopulation(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	pop, err := h.store.GetPopulation(ctx, id)
+	pop, err := h.reader.GetPopulation(ctx, id)
 	if err != nil {
 		if errors.Is(err, audit.ErrNotFound) {
 			httpresp.WriteError(w, http.StatusNotFound, "population not found")
@@ -227,7 +260,7 @@ func (h *Handler) GetSample(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	sample, err := h.store.GetSample(ctx, id)
+	sample, err := h.reader.GetSample(ctx, id)
 	if err != nil {
 		if errors.Is(err, audit.ErrNotFound) {
 			httpresp.WriteError(w, http.StatusNotFound, "sample not found")

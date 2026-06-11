@@ -1,0 +1,39 @@
+{
+  "_comment": "Slice 689 contract-tier golden. PROVIDER: internal/api/auditnotes/contractrecord_test.go (Thread, real handler over an injected fixed-row single-method threadReader stub — Option A seam, no Postgres; route params are query params so no chi mux). Regenerate: `go test ./internal/api/auditnotes/ -run TestContract_AuditNotesThread -update`. CONSUMER: web/lib/contracts/audit-notes-thread.contract.test.ts asserts the BFF at web/app/api/audit/audit-notes/thread/route.ts — VERBATIM passthrough (toEqual). audit_notes is ALWAYS an array (never null); empty thread records [] + count 0. P0-2: auditor_only notes are filtered to their author at the query layer; the UI never client-side-filters visibility.",
+  "endpoint": "GET /v1/audit-notes/thread",
+  "variants": {
+    "empty": {
+      "audit_notes": [],
+      "count": 0
+    },
+    "populated": {
+      "audit_notes": [
+        {
+          "audit_period_id": "11111111-1111-4111-8111-111111111111",
+          "author_user_id": "user_contract_689",
+          "body": "Requesting the Q1 access-review completion evidence for this control.",
+          "created_at": "2026-02-14T13:00:00.000Z",
+          "id": "33333333-3333-4333-8333-333333333333",
+          "scope_id": "22222222-2222-4222-8222-222222222222",
+          "scope_type": "control",
+          "updated_at": "2026-02-14T13:00:00.000Z",
+          "visibility": "shared"
+        },
+        {
+          "audit_period_id": "11111111-1111-4111-8111-111111111111",
+          "author_user_id": "user_owner_689",
+          "body": "Attached the completion export to the walkthrough record.",
+          "created_at": "2026-02-14T14:30:00.000Z",
+          "depth": 1,
+          "id": "44444444-4444-4444-8444-444444444444",
+          "parent_note_id": "33333333-3333-4333-8333-333333333333",
+          "scope_id": "22222222-2222-4222-8222-222222222222",
+          "scope_type": "control",
+          "updated_at": "2026-02-14T14:30:00.000Z",
+          "visibility": "shared"
+        }
+      ],
+      "count": 2
+    }
+  }
+}
