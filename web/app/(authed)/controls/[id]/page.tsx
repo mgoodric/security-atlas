@@ -66,6 +66,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { CoverageTable } from "@/components/control/coverage-table";
 import { FreshnessClock } from "@/components/control/freshness-clock";
+import { GapExplanationCard } from "@/components/control/gap-explanation";
 import { ControlHeaderActions } from "@/components/control/header-actions";
 import { UcfMiniViz } from "@/components/control/ucf-mini-viz";
 import { cn } from "@/lib/utils";
@@ -829,6 +830,12 @@ function OverviewPanel({
             )}
           </CardContent>
         </Card>
+
+        {/* AI GAP-EXPLANATION — slice 444: non-binding, cited, local-Ollama
+            plain-language explanation of the deterministic freshness rollup.
+            Self-contained card (own query); renders the rollup always and the
+            explanation when available + non-suppressed (AC-6/AC-7). */}
+        <GapExplanationCard id={id} />
 
         {/* EFFECTIVE SCOPE */}
         <Card data-testid="effective-scope-section">

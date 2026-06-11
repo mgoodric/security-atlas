@@ -619,6 +619,12 @@
       "functions": 98,
       "lines": 98
     },
+    "components/control/gap-explanation-view.ts": {
+      "statements": 98,
+      "branches": 90,
+      "functions": 98,
+      "lines": 98
+    },
     "components/control/strm.ts": {
       "statements": 0,
       "branches": 98,
