@@ -237,6 +237,179 @@ func TestApply_Happy(t *testing.T) {
 	}
 }
 
+// TestApply_DemoBreadth verifies slice 678: the seed populates the
+// surfaces that previously dead-ended in empty/zero states.
+//
+//	AC-1 (ATLAS-028) — org_units seeded (org tree non-empty); every
+//	      seeded risk carries org_unit_id + a non-empty themes array (the
+//	      heatmap excludes NULL-org / empty-theme risks); the theme ×
+//	      org_unit grid query returns rows; decisions seeded (timeline
+//	      non-empty); a decision links to a real risk.
+//	AC-2 (ATLAS-037) — exactly one questionnaire seeded with questions +
+//	      at least one answer.
+//	AC-3 (ATLAS-037) — every published policy's ack roster has a non-zero
+//	      denominator (CountRequiredRoleUsersForVersion equivalent) and a
+//	      non-zero numerator for at least one policy.
+func TestApply_DemoBreadth(t *testing.T) {
+	const slug = "demo-it-breadth"
+	cleanupTenant(t, slug)
+
+	seeder, err := demoseed.NewSeeder(adminPool, demoseed.DefaultScale)
+	if err != nil {
+		t.Fatalf("NewSeeder: %v", err)
+	}
+	ctx := context.Background()
+	res, err := seeder.Apply(ctx, demoseed.ApplyInput{Slug: slug})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	tid := res.TenantID
+
+	// ---- AC-1: org tree ----
+	if res.OrgUnits == 0 {
+		t.Error("Result.OrgUnits = 0; org tree would be empty (AC-1)")
+	}
+	if n := rowCount(t, "org_units", tid); n == 0 {
+		t.Error("org_units row count 0; /risks/hierarchy org tree empty (AC-1)")
+	}
+	// Every seeded risk must bind to an org_unit AND carry themes (both
+	// are required for the theme × org_unit heatmap cell).
+	var nullOrg, emptyThemes int
+	if err := adminPool.QueryRow(ctx,
+		`SELECT
+		   count(*) FILTER (WHERE org_unit_id IS NULL),
+		   count(*) FILTER (WHERE cardinality(themes) = 0)
+		 FROM risks WHERE tenant_id = $1`, tid).Scan(&nullOrg, &emptyThemes); err != nil {
+		t.Fatalf("risk org/theme probe: %v", err)
+	}
+	if nullOrg != 0 {
+		t.Errorf("%d risks have NULL org_unit_id; the org tree + heatmap exclude them (AC-1)", nullOrg)
+	}
+	if emptyThemes != 0 {
+		t.Errorf("%d risks have an empty themes array; the heatmap excludes them (AC-1)", emptyThemes)
+	}
+
+	// The theme × org_unit grid query (RiskThemeOrgUnitGrid shape) must
+	// return rows — this is the heatmap's data source. Joins risks.themes
+	// to org_themes (built-in slugs, tenant_id IS NULL).
+	var gridCells int
+	if err := adminPool.QueryRow(ctx, `
+		SELECT count(*) FROM (
+			SELECT t.theme_name, r.org_unit_id
+			FROM risks r
+			CROSS JOIN LATERAL unnest(r.themes) AS theme_slug
+			JOIN org_themes t
+			  ON t.theme_name = theme_slug
+			 AND (t.tenant_id IS NULL OR t.tenant_id = $1)
+			WHERE r.tenant_id = $1 AND r.org_unit_id IS NOT NULL
+			GROUP BY t.theme_name, r.org_unit_id
+		) cells`, tid).Scan(&gridCells); err != nil {
+		t.Fatalf("heatmap grid probe: %v", err)
+	}
+	if gridCells == 0 {
+		t.Error("theme × org_unit heatmap grid returned 0 cells; themes don't resolve to org_themes (AC-1)")
+	}
+
+	// ---- AC-1: decision timeline ----
+	if res.Decisions == 0 {
+		t.Error("Result.Decisions = 0; the decision timeline would be empty (AC-1)")
+	}
+	if n := rowCount(t, "decisions", tid); n == 0 {
+		t.Error("decisions row count 0; timeline empty (AC-1)")
+	}
+	if n := rowCount(t, "decision_risks", tid); n == 0 {
+		t.Error("decision_risks row count 0; no decision resolves to a risk (AC-1)")
+	}
+
+	// ---- AC-2: questionnaire ----
+	if n := rowCount(t, "questionnaires", tid); n == 0 {
+		t.Error("questionnaires row count 0; /questionnaires empty (AC-2)")
+	}
+	if n := rowCount(t, "questionnaire_questions", tid); n == 0 {
+		t.Error("questionnaire_questions row count 0 (AC-2)")
+	}
+	if n := rowCount(t, "questionnaire_answers", tid); n == 0 {
+		t.Error("questionnaire_answers row count 0; questionnaire reads as a blank form (AC-2)")
+	}
+
+	// ---- AC-3: policy-ack roster ----
+	if res.RoleUsers == 0 {
+		t.Error("Result.RoleUsers = 0; the ack roster denominator would be empty (AC-3)")
+	}
+	// For every published policy, the roster denominator (distinct
+	// api_keys.issued_by whose owner_roles intersect the policy's
+	// acknowledgment_required_roles, or is_admin) must be > 0.
+	polRows, err := adminPool.Query(ctx,
+		`SELECT id, title, acknowledgment_required_roles
+		 FROM policies WHERE tenant_id = $1 AND status = 'published'`, tid)
+	if err != nil {
+		t.Fatalf("query policies: %v", err)
+	}
+	type pol struct {
+		id    uuid.UUID
+		title string
+		roles []string
+	}
+	var policies []pol
+	for polRows.Next() {
+		var p pol
+		if err := polRows.Scan(&p.id, &p.title, &p.roles); err != nil {
+			polRows.Close()
+			t.Fatalf("scan policy: %v", err)
+		}
+		policies = append(policies, p)
+	}
+	polRows.Close()
+	if err := polRows.Err(); err != nil {
+		t.Fatalf("iterate policies: %v", err)
+	}
+	if len(policies) == 0 {
+		t.Fatal("no published policies seeded (AC-3 cannot be evaluated)")
+	}
+	numeratorSeen := false
+	for _, p := range policies {
+		if len(p.roles) == 0 {
+			t.Errorf("policy %q has empty acknowledgment_required_roles; roster shows 'no required-role users' (AC-3)", p.title)
+			continue
+		}
+		var denom int
+		if err := adminPool.QueryRow(ctx, `
+			SELECT COUNT(DISTINCT k.issued_by)::int
+			FROM api_keys k
+			WHERE k.tenant_id = $1
+			  AND k.revoked_at IS NULL
+			  AND k.issued_by IS NOT NULL
+			  AND (k.is_admin = true OR k.owner_roles && $2::text[])`,
+			tid, p.roles).Scan(&denom); err != nil {
+			t.Fatalf("roster denominator for %q: %v", p.title, err)
+		}
+		if denom == 0 {
+			t.Errorf("policy %q roster denominator = 0 (AC-3 'no required-role users' regression)", p.title)
+		}
+		var numer int
+		if err := adminPool.QueryRow(ctx, `
+			SELECT COUNT(DISTINCT pa.user_id)::int
+			FROM policy_acknowledgments pa
+			WHERE pa.tenant_id = $1
+			  AND pa.policy_version_id = $2
+			  AND EXISTS (
+			      SELECT 1 FROM api_keys k
+			      WHERE k.tenant_id = pa.tenant_id
+			        AND k.issued_by = pa.user_id
+			        AND k.revoked_at IS NULL
+			        AND (k.is_admin = true OR k.owner_roles && $3::text[]))`,
+			tid, p.id, p.roles).Scan(&numer); err != nil {
+			t.Fatalf("roster numerator for %q: %v", p.title, err)
+		}
+		if numer > 0 {
+			numeratorSeen = true
+		}
+	}
+	if !numeratorSeen {
+		t.Error("no policy has a non-zero ack numerator; the roster would show 0% everywhere (AC-3)")
+	}
+}
+
 // TestApply_BoardPackSectionShape verifies slice 662 AC-4: the seeded
 // board pack's `content` deserializes cleanly into board.Pack (the exact
 // operation the GET / LIST endpoints perform via storedPackFromRow) and
@@ -461,6 +634,10 @@ var allSeededTables = []string{
 	"frameworks", "framework_versions",
 	"scope_cells", "scope_dimensions",
 	"users", "local_credentials", "user_roles", "me_audit_log",
+	// Slice 678 demo-breadth tables — Teardown must sweep these too.
+	"org_units", "decisions", "decision_risks",
+	"questionnaires", "questionnaire_questions", "questionnaire_answers",
+	"policy_acknowledgments", "api_keys",
 	"tenants", // probed by id, not tenant_id — handled specially below
 }
 
