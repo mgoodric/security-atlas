@@ -888,6 +888,12 @@
       "branches": 98,
       "functions": 98,
       "lines": 98
+    },
+    "lib/api/staleness-notification.ts": {
+      "statements": 98,
+      "branches": 92,
+      "functions": 98,
+      "lines": 98
     }
   }
 }
