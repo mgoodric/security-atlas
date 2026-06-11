@@ -151,6 +151,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/(authed)/risks/sort.ts": {
+      "statements": 98,
+      "branches": 87,
+      "functions": 98,
+      "lines": 98
+    },
     "app/(authed)/board-packs/validate.ts": {
       "statements": 98,
       "branches": 98,
@@ -528,6 +534,12 @@
       "branches": 73,
       "functions": 98,
       "lines": 98
+    },
+    "app/api/risks/[id]/route.ts": {
+      "statements": 90,
+      "branches": 78,
+      "functions": 98,
+      "lines": 90
     },
     "app/api/risks/export/route.ts": {
       "statements": 98,
