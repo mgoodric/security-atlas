@@ -457,6 +457,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/api/policies/[id]/route.ts": {
+      "statements": 92,
+      "branches": 79,
+      "functions": 98,
+      "lines": 92
+    },
     "app/api/questionnaires/[id]/answers/[qid]/route.ts": {
       "statements": 92,
       "branches": 81,
@@ -650,10 +656,10 @@
       "lines": 42
     },
     "lib/api/policies.ts": {
-      "statements": 29,
+      "statements": 45,
       "branches": 98,
-      "functions": 48,
-      "lines": 29
+      "functions": 58,
+      "lines": 45
     },
     "lib/api/risks.ts": {
       "statements": 11,
@@ -750,6 +756,12 @@
       "branches": 91,
       "functions": 98,
       "lines": 98
+    },
+    "lib/markdown.ts": {
+      "statements": 93,
+      "branches": 86,
+      "functions": 98,
+      "lines": 93
     },
     "lib/page-names.ts": {
       "statements": 98,
