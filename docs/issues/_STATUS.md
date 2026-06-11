@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 610
+**Generated:** 2026-06-11 · **Total slices:** 622
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 532 |
+| merged | 535 |
 | in-progress | 1 |
-| ready | 75 |
+| ready | 84 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 428 434 435 436 440 441 442 443 444 446 449 450 452 453 455 457 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 691 692
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 428 434 435 436 440 441 442 443 446 449 450 452 453 455 457 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 691 694 695 696 697 698 699 700 701 702 703 704
 
 ## In-flight
 
@@ -469,7 +469,7 @@
 | 441 | Questionnaire AI-answer suggestion v0 (cited drafts, one-clic... | ready |  |  |  |
 | 442 | GCP connector (highest-demand missing cloud) | ready |  |  |  |
 | 443 | Slack connector | ready |  |  |  |
-| 444 | AI gap-explanation v0 (plain-language, cited, non-binding) | ready |  |  |  |
+| 444 | AI gap-explanation v0 (plain-language, cited, non-binding) | merged |  | 2026-06-11 | 6bcc6942 |
 | 445 | Email/SMTP notification channel (delivery substrate) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 446 | Disclosure / breach-notification workflow decision spike + AD... | ready |  |  |  |
 | 447 | PCI DSS v4.0 crosswalk loader (3rd framework; scope-reduction... | merged | #1017 | 2026-06-05 | 69078c86 |
@@ -641,4 +641,16 @@
 | 689 | Contract-tier rollout: audit-workspace read tail (populations... | merged |  | 2026-06-11 | 4020b1a4 |
 | 690 | Contract-tier rollout: audit-workspace read-tail remainder (s... | merged |  | 2026-06-11 | 035a8f60 |
 | 691 | Vendor detail does not refresh after recording a review | ready |  |  |  |
-| 692 | Contract-tier rollout: controldetail attest-form + per-contro... | ready |  |  |  |
+| 692 | Contract-tier rollout: controldetail attest-form + per-contro... | merged |  | 2026-06-11 | 1a4d3fa1 |
+| 693 | CI pipeline efficiency + safety hardening (Tier 1) | merged | #1301 | 2026-06-11 | 3d11343c |
+| 694 | Docker layer caching on the trivy-image job | ready |  |  |  |
+| 695 | Share the prebuilt atlas binary across jobs (build once) | ready |  |  |  |
+| 696 | Share the `.next` frontend build + standardize on `npm ci` | ready |  |  |  |
+| 697 | Cache uv/pip in the Python CI jobs | ready |  |  |  |
+| 698 | De-duplicate the precommit CI job's language hooks | ready |  |  |  |
+| 699 | PR-scope (or demote) the three advisory bot comments | ready |  |  |  |
+| 700 | Move the Trivy image scan off the PR hot-path to a nightly ma... | ready |  |  |  |
+| 701 | Collapse the ~21 stub jobs behind a promoted merge-gate | ready |  |  |  |
+| 702 | container-publish edge-build efficiency | ready |  |  |  |
+| 703 | Main-canary: run a single representative leg on docs-only pushes | ready |  |  |  |
+| 704 | Contract-tier rollout: tenant-wide `/v1/evidence` ledger wind... | ready |  |  |  |
