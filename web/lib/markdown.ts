@@ -64,12 +64,15 @@ function renderInline(escaped: string): string {
   out = out.replace(
     /\[([^\]]+)\]\(([^)\s]+)\)/g,
     (_m, text: string, rawHref: string) => {
+      // Unescape in the REVERSE order of escapeHtml — named entities
+      // first, `&amp;` -> `&` LAST — so a literal like `&amp;lt;` is not
+      // double-unescaped into `<` (CodeQL js/double-escaping).
       const unescaped = rawHref
-        .replace(/&amp;/g, "&")
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
         .replace(/&quot;/g, '"')
         .replace(/&#39;/g, "'")
-        .replace(/&lt;/g, "<")
-        .replace(/&gt;/g, ">");
+        .replace(/&amp;/g, "&");
       const href = safeHref(unescaped);
       if (!href) return `[${text}](${rawHref})`;
       const safeAttr = escapeHtml(href);
