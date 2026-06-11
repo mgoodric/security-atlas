@@ -3,7 +3,7 @@
 **Cluster:** vendor
 **Estimate:** M (1-2d)
 **Type:** JUDGMENT (ledger shape + history-section UX)
-**Status:** `not-ready` — depends on slice 686 (read-only vendor detail
+**Status:** `ready` — its only dependency, slice 686 (read-only vendor detail / edit split), is now merged.
 page), which is the surface that would render the history. Slice 686 is
 in review; this slice is the AC-4 follow-on it explicitly defers.
 

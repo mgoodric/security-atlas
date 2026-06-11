@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 604
+**Generated:** 2026-06-11 · **Total slices:** 606
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 521 |
+| merged | 524 |
 | in-progress | 1 |
-| ready | 80 |
+| ready | 79 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 678 682 686
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 682 687 688
 
 ## In-flight
 
@@ -437,7 +437,7 @@
 | 409 | Contract-tier rollout: dashboard + high-traffic e2e routes (u... | merged | #936 | 2026-05-30 | 85be428c |
 | 410 | Contract-tier rollout: dashboard top-risks panel (GET /v1/risks) | merged | #942 | 2026-05-30 | ec3718fd |
 | 411 | Contract-tier rollout: controls-detail + audit-workspace routes | merged | #958 | 2026-06-03 | cfaa30a9 |
-| 412 | Contract-tier rollout: controls-detail + audit-workspace LONG... | ready |  |  |  |
+| 412 | Contract-tier rollout: controls-detail + audit-workspace LONG... | merged |  | 2026-06-11 | 74013361 |
 | 413 | OSCAL bundle signing Phase 1: cosign-kms + retained embedded-... | merged | #961 | 2026-06-03 | f777ff07 |
 | 414 | OSCAL bundle signing Phase 2: cosign-keyless + Fulcio + Rekor... | ready |  |  |  |
 | 415 | Adopt GitHub merge queue to kill the update-branch re-CI cascade | ready |  |  |  |
@@ -627,7 +627,7 @@
 | 675 | Calendar agenda missing audit-period / vendor-review / policy... | merged |  | 2026-06-11 | 6be54edf |
 | 676 | Pervasive 503s on Next.js RSC prefetch/navigation requests | ready |  |  |  |
 | 677 | Metrics correctness pass (freshness contradiction, count labe... | merged |  | 2026-06-11 | 5ac10361 |
-| 678 | Demo seed completeness: org_units, questionnaires, ack-role u... | ready |  |  |  |
+| 678 | Demo seed completeness: org_units, questionnaires, ack-role u... | merged |  | 2026-06-11 | 01f4038d |
 | 679 | Vendor UX/data: name/domain spacing, missing Delete control, ... | merged |  | 2026-06-11 | a490e17a |
 | 680 | Data-quality + scoring clarity: audit-period labels, residual... | merged |  | 2026-06-11 | d9ca9533 |
 | 681 | Risk register UX: column sorting + per-risk detail; sidebar "... | merged |  | 2026-06-11 | 35dca30d |
@@ -635,4 +635,6 @@
 | 683 | OSCAL component-definitions edge migration-lag (deploy-note /... | not-ready | #1261 |  | OSCAL edge migration-lag deploy-note; blocked on maintainer edge access |
 | 684 | Risks page count is inconsistent (header "N of M risks" vs fo... | merged |  | 2026-06-11 | 6f5289ca |
 | 685 | Wire dashboard "Recent activity" filter chips to a real kind ... | not-ready |  |  | wire dashboard activity chips — blocked on backend endpoint filter support (spillover from 667) |
-| 686 | Read-only vendor detail page with review history | ready |  |  |  |
+| 686 | Read-only vendor detail page with review history | merged |  | 2026-06-11 | 84e6386c |
+| 687 | Contract-tier rollout: controls-detail + audit-workspace REMA... | ready |  |  |  |
+| 688 | vendor_reviews ledger (per-review history surface) | ready |  |  |  |
