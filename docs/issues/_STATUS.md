@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 602
+**Generated:** 2026-06-11 · **Total slices:** 603
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 510 |
+| merged | 513 |
 | in-progress | 1 |
-| ready | 90 |
-| not-ready | 1 |
+| ready | 87 |
+| not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 667 668 670 674 676 677 678 679 680 681 682 684
+095 112 113 114 115 118 134 228 230 232 271 272 304 323 330 336 338 339 354 355 356 357 358 368 384 390 412 414 415 418 419 420 424 425 428 434 435 436 439 440 441 442 443 444 446 449 450 452 453 455 457 467 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 674 676 677 678 679 680 681 682
 
 ## In-flight
 
@@ -616,8 +616,8 @@
 | 664 | Vendor "Review burndown" shows 100% on-time with 0 vendors (d... | merged |  | 2026-06-10 | ea8c06b4 |
 | 665 | Board pack "Generate draft" gives no feedback when quarter-en... | merged |  | 2026-06-10 | a263b530 |
 | 666 | Controls page count is inconsistent (header "53 of 53" vs foo... | merged |  | 2026-06-11 | 0a3e82fa |
-| 667 | Dashboard "Recent activity" filter chips are inert; placehold... | ready |  |  |  |
-| 668 | Calendar month view does not highlight "today" | ready |  |  |  |
+| 667 | Dashboard "Recent activity" filter chips are inert; placehold... | merged |  | 2026-06-11 | 878c9129 |
+| 668 | Calendar month view does not highlight "today" | merged |  | 2026-06-11 | 10b655a9 |
 | 669 | Activity ledger is dominated by internal read-telemetry (low ... | merged |  | 2026-06-11 | 4e26fd21 |
 | 670 | Pre-GA copy & metadata pass (titles, breadcrumbs, raw IDs, ty... | ready |  |  |  |
 | 671 | Seeded demo tenant shows no evaluated control state / zero me... | merged | #1249 | 2026-06-10 | 2894827a |
@@ -633,4 +633,5 @@
 | 681 | Risk register UX: column sorting + per-risk detail; sidebar "... | ready |  |  |  |
 | 682 | Demo seed: anchor controls to SCF + give the demo framework r... | ready |  |  |  |
 | 683 | OSCAL component-definitions edge migration-lag (deploy-note /... | not-ready | #1261 |  | OSCAL edge migration-lag deploy-note; blocked on maintainer edge access |
-| 684 | Risks page count is inconsistent (header "N of M risks" vs fo... | ready |  |  |  |
+| 684 | Risks page count is inconsistent (header "N of M risks" vs fo... | merged |  | 2026-06-11 | 6f5289ca |
+| 685 | Wire dashboard "Recent activity" filter chips to a real kind ... | not-ready |  |  | wire dashboard activity chips — blocked on backend endpoint filter support (spillover from 667) |
