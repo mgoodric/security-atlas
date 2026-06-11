@@ -246,12 +246,31 @@ test.describe("vendor-review workflow (slice 424)", () => {
     expect(body.name).toBe("Tidewater Logistics");
 
     // AC-3: the resulting UI state. The save navigates back to the
-    // read-only detail, and the re-fetch now serves the reviewed vendor —
-    // the derived status has transitioned from "overdue" to "on time".
+    // read-only detail, which re-mounts and re-fetches GET /api/vendors/{id}
+    // (the detail page sets no staleTime -> default staleTime:0 ->
+    // refetchOnMount). The detail + edit pages SHARE the ["vendor", id]
+    // query key, so the cached OVERDUE body renders first and the on-time
+    // body arrives only on that background refetch. Gate the status
+    // assertion on the post-save GET landing so the assertion never races
+    // the stale cached render (slice 275 waitForResponse pattern). The
+    // waitForResponse is registered BEFORE the navigation it observes.
+    const reviewedGet = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/vendors/" + VENDOR_ID) &&
+        r.request().method() === "GET" &&
+        r.status() === 200,
+      { timeout: 30_000 },
+    );
     await page.waitForURL("**/vendors/" + VENDOR_ID);
-    await expect(page.getByTestId("vendor-detail")).toBeVisible();
+    await reviewedGet;
+    await expect(page.getByTestId("vendor-detail")).toBeVisible({
+      timeout: 30_000,
+    });
+    // The stateful GET now serves REVIEWED_VENDOR (reviewed===true after the
+    // PATCH), so the derived status has transitioned overdue -> on time.
     await expect(page.getByTestId("vendor-detail-status")).toHaveText(
       "on time",
+      { timeout: 30_000 },
     );
     await expect(page.getByTestId("vendor-detail-last-review")).toHaveText(
       REVIEW_DATE,
