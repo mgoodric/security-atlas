@@ -29,6 +29,12 @@ import { APIError } from "@/lib/api/base";
 import { BoardPack, generateBoardPack, listBoardPacks } from "@/lib/api/board";
 import { isFeatureDisabledError } from "@/lib/feature-nav";
 
+import {
+  GenerateFieldErrors,
+  hasErrors,
+  validateGenerateForm,
+} from "./validate";
+
 // Slice 032 — quarterly board pack list + generate.
 //
 // The list shows every pack for the tenant, newest report-date first. The
@@ -54,6 +60,12 @@ function StatusBadge({ status }: { status: string }) {
 export default function BoardPacksPage() {
   const queryClient = useQueryClient();
   const [periodEnd, setPeriodEnd] = useState("");
+  // Slice 665: client-side field errors for the generate-draft form. Empty
+  // until the operator attempts a submit (so we don't pre-shame an empty
+  // form). After a failed attempt, validation re-runs on every change so the
+  // error clears as the date is filled in — the risks/new form precedent.
+  const [fieldErrors, setFieldErrors] = useState<GenerateFieldErrors>({});
+  const [submitAttempted, setSubmitAttempted] = useState(false);
 
   const packsQuery = useQuery({
     queryKey: ["board-packs"],
@@ -64,9 +76,33 @@ export default function BoardPacksPage() {
     mutationFn: (date: string) => generateBoardPack(date),
     onSuccess: () => {
       setPeriodEnd("");
+      setFieldErrors({});
+      setSubmitAttempted(false);
       queryClient.invalidateQueries({ queryKey: ["board-packs"] });
     },
   });
+
+  function onPeriodEndChange(value: string) {
+    setPeriodEnd(value);
+    // Re-validate live after the first submit attempt so the error clears
+    // immediately as the operator fills in a valid date.
+    if (submitAttempted) {
+      setFieldErrors(validateGenerateForm({ periodEnd: value }));
+    }
+  }
+
+  function onGenerateSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitAttempted(true);
+    const errs = validateGenerateForm({ periodEnd });
+    setFieldErrors(errs);
+    if (hasErrors(errs)) {
+      // Surface the inline field error and stop — no silent no-op, and the
+      // server is never contacted with an empty date (AC-1 + AC-2).
+      return;
+    }
+    generate.mutate(periodEnd);
+  }
 
   // Slice 660: the `board.reporting` flag gates this module. A flag-off
   // tenant reaches here only by direct navigation (the nav entry is
@@ -103,11 +139,9 @@ export default function BoardPacksPage() {
         </CardHeader>
         <CardContent>
           <form
-            className="flex items-end gap-3"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (periodEnd) generate.mutate(periodEnd);
-            }}
+            className="flex items-start gap-3"
+            onSubmit={onGenerateSubmit}
+            data-testid="board-pack-generate-form"
           >
             <div className="space-y-1">
               <label
@@ -120,11 +154,31 @@ export default function BoardPacksPage() {
                 id="period-end"
                 type="date"
                 value={periodEnd}
-                onChange={(e) => setPeriodEnd(e.target.value)}
+                onChange={(e) => onPeriodEndChange(e.target.value)}
                 className="w-48"
+                aria-invalid={fieldErrors.periodEnd ? true : undefined}
+                aria-describedby={
+                  fieldErrors.periodEnd ? "period-end-error" : undefined
+                }
+                data-testid="board-pack-period-end"
               />
+              {fieldErrors.periodEnd && (
+                <p
+                  id="period-end-error"
+                  role="alert"
+                  className="text-sm text-destructive"
+                  data-testid="board-pack-period-end-error"
+                >
+                  {fieldErrors.periodEnd}
+                </p>
+              )}
             </div>
-            <Button type="submit" disabled={!periodEnd || generate.isPending}>
+            <Button
+              type="submit"
+              disabled={generate.isPending}
+              className="mt-6"
+              data-testid="board-pack-generate-submit"
+            >
               {generate.isPending ? "Generating…" : "Generate draft"}
             </Button>
           </form>
