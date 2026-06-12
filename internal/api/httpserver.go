@@ -33,6 +33,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	boardapi "github.com/mgoodric/security-atlas/internal/api/board"
 	calendarapi "github.com/mgoodric/security-atlas/internal/api/calendar"
+	checklistapi "github.com/mgoodric/security-atlas/internal/api/checklist"
 	controldetailapi "github.com/mgoodric/security-atlas/internal/api/controldetail"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
@@ -83,6 +84,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/board"
+	"github.com/mgoodric/security-atlas/internal/checklist"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/csfassessment"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -1069,6 +1071,27 @@ func (s *Server) httpHandler() http.Handler {
 	)
 	questionnairesH := questionnairesapi.NewWithSuggest(questionnaireStore, qaiSvc)
 	questionnairesH.RegisterRoutes(root)
+	// Slice 471: role-scoped control-implementation checklist generator v0
+	// (cited, non-binding). The which-control -> which-role split is
+	// DETERMINISTIC (owner_role + applicability_expr normalization, never
+	// LLM-guessed); the local-Ollama task-breakdown turns each in-scope
+	// control's text into 1..N cited task statements. Every item is cited to a
+	// real tenant-owned control/scf-anchor/policy id (validated before the
+	// operator sees it); the checklist is a DRAFT approved one section (role) at
+	// a time. Constitutional invariants (no fabricated coverage, no cross-tenant
+	// bleed, one-click approval, local-only) enforced by the service + the DB
+	// CHECK on checklist_sections (the slice-498 shared ai_assist guard). Routes
+	// append per the parallel-batch convention.
+	checklistStore := checklist.NewStore(s.dbPool)
+	checklistSvc := checklist.NewService(
+		checklistStore,
+		llm.NewOllamaClient(llm.ConfigFromEnv()),
+		checklistStore,
+		checklistStore,
+		llm.NewAuditWriter(s.dbPool),
+	)
+	checklistH := checklistapi.New(checklistSvc, checklistStore)
+	checklistH.RegisterRoutes(root)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The

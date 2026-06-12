@@ -1372,6 +1372,80 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/checklist/sections/{id}:approve:
+    post:
+      summary: POST /v1/controls/checklist/sections/{id}:approve
+      tags: [controls]
+      operationId: post-v1-controls-checklist-sections-id_approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/checklist/{generationID}:
+    get:
+      summary: GET /v1/controls/checklist/{generationID}
+      tags: [controls]
+      operationId: get-v1-controls-checklist-generationID
+      security:
+        - bearer: []
+      parameters:
+        - name: generationID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/checklist/{generationID}/export.md:
+    get:
+      summary: GET /v1/controls/checklist/{generationID}/export.md
+      tags: [controls]
+      operationId: get-v1-controls-checklist-generationID-export_md
+      security:
+        - bearer: []
+      parameters:
+        - name: generationID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/checklist:generate:
+    post:
+      summary: POST /v1/controls/checklist:generate
+      tags: [controls]
+      operationId: post-v1-controls-checklist_generate
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/drift:
     get:
       summary: GET /v1/controls/drift
