@@ -103,7 +103,7 @@ export const POLICIES_ACK_REPORT_FUTURE_TESTID = "policies-ack-report-future";
  *     AC-4's Playwright spec asserts on it.
  */
 export const POLICIES_ACK_REPORT_FUTURE_REASON =
-  "The in-app acknowledgment report ships with a future slice — until then, per-policy ack rates surface in the Acknowledgment column on this page.";
+  "The in-app acknowledgment report is not available yet — until then, per-policy ack rates surface in the Acknowledgment column on this page.";
 
 /**
  * Test-id token surfaced on the `<span>` that replaces the
@@ -139,4 +139,4 @@ export const POLICIES_NEW_POLICY_FUTURE_TESTID = "policies-new-policy-future";
  *     is named so the disclosure is a signpost, not a dead end.
  */
 export const POLICIES_NEW_POLICY_FUTURE_REASON =
-  "The in-app policy-create form ships with a future slice — until then, policies can be drafted via the platform API (POST /v1/policies).";
+  "The in-app policy-create form is not available yet — until then, policies can be drafted via the platform API (POST /v1/policies).";

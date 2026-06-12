@@ -1591,7 +1591,7 @@ function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
                 /admin/api-keys
               </a>{" "}
               if you have admin access in another session. User-scoped token
-              issuance is a follow-up slice.
+              issuance is not available yet.
             </AlertDescription>
           </Alert>
         </CardContent>
