@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 547 |
+| merged | 548 |
 | in-progress | 1 |
-| ready | 73 |
+| ready | 72 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -496,7 +496,7 @@
 | 468 | Server-backed bulk-assign-owner + saved filter-views (controls) | ready |  |  |  |
 | 469 | Sweep `web/app/**` stale `Plans/mockups/` citations to the ar... | merged | #1015 | 2026-06-04 | cbd26d51 |
 | 470 | header-overwriting reverse-proxy container in the e2e seed ha... | merged | #1021 | 2026-06-06 | 4c5496df |
-| 471 | Role-scoped control-implementation checklist generator v0 (ci... | ready |  |  |  |
+| 471 | Role-scoped control-implementation checklist generator v0 (ci... | merged |  | 2026-06-12 | 9c500311 |
 | 472 | `internal/api/oauth` coverage: device-approval flow + DBUserR... | merged | #1026 | 2026-06-06 | f6cd0eec |
 | 473 | Idempotent migrate-on-upgrade for the self-host deploy stack ... | merged | #1042 | 2026-06-06 | 8d5da2c0 |
 | 474 | align the ingest evidence hash so the ledger-wide verify walk... | merged | #1160 | 2026-06-08 | 90b1416a |
