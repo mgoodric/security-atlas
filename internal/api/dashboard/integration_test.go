@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -649,6 +650,44 @@ func TestUpcoming_CategoryFilter(t *testing.T) {
 	}
 	if cat := rows[0].(map[string]any)["category"].(string); cat != "exception" {
 		t.Fatalf("ISC-21 filter: category = %q, want exception", cat)
+	}
+}
+
+// TestUpcoming_ExceptionTitleUsesSCFCodeNotUUID is the slice 732 regression
+// guard for the dashboard "Upcoming" panel: the expiring-exception row's
+// title must resolve the control to its SCF code (here via the control's
+// scf_anchor_id -> scf_anchors.scf_id linkage) + the control name, and must
+// NOT contain the raw control UUID. Mirrors the calendar exception-label fix
+// so the two upcoming-event surfaces read identically (slice 675 vocabulary).
+func TestUpcoming_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	now := time.Now().UTC()
+	_, anchors := seedFramework(t, admin, "fwscf", "2024", 1)
+	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
+	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
+
+	resp, body := get(t, env, "/v1/upcoming?category=exception")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET upcoming?category=exception: status %d", resp.StatusCode)
+	}
+	rows, _ := body["upcoming"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 exception row, got %d", len(rows))
+	}
+	title := rows[0].(map[string]any)["title"].(string)
+
+	if !strings.HasPrefix(title, "Exception on SCF-") {
+		t.Errorf("exception title = %q; want it to start with the resolved SCF code", title)
+	}
+	if !strings.Contains(title, "slice 066 test control") {
+		t.Errorf("exception title = %q; want it to contain the control name", title)
+	}
+	if strings.Contains(title, ctrl.String()) {
+		t.Errorf("exception title leaked the raw control UUID: %q", title)
 	}
 }
 
