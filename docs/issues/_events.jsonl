@@ -182,3 +182,13 @@
 {"slice":304,"to":"merged","ts":"2026-06-11","ref":"","note":"pre-convention merge; reconciled 2026-06-03 (batch 184); #1266 backfill miss (not in history Status table)"}
 {"slice":390,"to":"merged","ts":"2026-06-11","ref":"","note":"merged via #933 (closes slice 390, integration-enrolment drain batch 8); #1266 backfill miss"}
 {"slice":428,"to":"merged","ts":"2026-06-11","ref":"","note":"ADRs 0011-0014 merged via #989 (2026-06-04); #1266 backfill miss (file says merged)"}
+{"slice":112,"to":"not-ready","ts":"2026-06-12","ref":"","note":"maintainer-gated staged e2e-seed rollout (112 narrative: maintainer flips to ready after >=5 clean Playwright runs + 111 merged; 116 then promotes e2e to required once 111-115 land)"}
+{"slice":113,"to":"not-ready","ts":"2026-06-12","ref":"","note":"maintainer-gated staged e2e-seed rollout (sibling of 112; extends audit-workspace.sql; maintainer flips to ready)"}
+{"slice":114,"to":"not-ready","ts":"2026-06-12","ref":"","note":"maintainer-gated staged e2e-seed rollout (sibling of 112; extends risk-hierarchy.sql; maintainer flips to ready)"}
+{"slice":115,"to":"not-ready","ts":"2026-06-12","ref":"","note":"maintainer-gated staged e2e-seed rollout (sibling of 112; extends admin-bootstrap.sql; maintainer flips to ready)"}
+{"slice":118,"to":"not-ready","ts":"2026-06-12","ref":"","note":"blocked on maintainer StepSecurity Harden-Runner audit-mode review before block-mode promotion (external action, not a code dep)"}
+{"slice":134,"to":"not-ready","ts":"2026-06-12","ref":"","note":"maintainer-gated: refreshing slice-070 onboarding walkthroughs needs a maintainer-scheduled interactive recording session"}
+{"slice":228,"to":"not-ready","ts":"2026-06-12","ref":"","note":"no backing endpoint: needs a unified /v1/search OR a UI fan-out design (neither exists today)"}
+{"slice":230,"to":"not-ready","ts":"2026-06-12","ref":"","note":"no dashboard-snapshot export endpoint exists (one of the two dashboard actions is unbacked)"}
+{"slice":232,"to":"not-ready","ts":"2026-06-12","ref":"","note":"no public non-admin /activity ledger route exists (the View-full-activity link has no backing surface)"}
+{"slice":434,"to":"merged","ts":"2026-06-12","ref":"","note":"status-event hygiene: emitted not-ready events for the 9 false-ready rows (112-115/118/134/228/230/232); generated _STATUS now matches the files. Done inline per the rescope."}

@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 553 |
+| merged | 554 |
 | in-progress | 1 |
-| ready | 68 |
-| not-ready | 2 |
+| ready | 58 |
+| not-ready | 11 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
+095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 436 440 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -143,13 +143,13 @@
 | 109 | Pin the sqlc toolchain version so `sqlc generate` is reproduc... | merged | #243 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 110 | BFF forwards atlas_session cookie alongside bearer for /v1/me... | merged | #249 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 111 | Enable full assertions in `dashboard.spec.ts` (post-082 stabi... | merged | #111 | 2026-05-21 | 8c3b3551 |
-| 112 | Extend `control-detail.sql` to FULL coverage + enable asserti... | ready |  |  |  |
-| 113 | Extend `audit-workspace.sql` to FULL coverage + enable assert... | ready |  |  |  |
-| 114 | Extend `risk-hierarchy.sql` to FULL coverage + enable asserti... | ready |  |  |  |
-| 115 | Extend `admin-bootstrap.sql` to FULL coverage + enable assert... | ready |  |  |  |
+| 112 | Extend `control-detail.sql` to FULL coverage + enable asserti... | not-ready |  |  | maintainer-gated staged e2e-seed rollout (112 narrative: maintainer flips to ready after >=5 clean Playwright runs + 111 merged; 116 then promotes e2e to required once 111-115 land) |
+| 113 | Extend `audit-workspace.sql` to FULL coverage + enable assert... | not-ready |  |  | maintainer-gated staged e2e-seed rollout (sibling of 112; extends audit-workspace.sql; maintainer flips to ready) |
+| 114 | Extend `risk-hierarchy.sql` to FULL coverage + enable asserti... | not-ready |  |  | maintainer-gated staged e2e-seed rollout (sibling of 112; extends risk-hierarchy.sql; maintainer flips to ready) |
+| 115 | Extend `admin-bootstrap.sql` to FULL coverage + enable assert... | not-ready |  |  | maintainer-gated staged e2e-seed rollout (sibling of 112; extends admin-bootstrap.sql; maintainer flips to ready) |
 | 116 | Promote `Frontend · Playwright e2e` to required-checks in br... | merged | #494 | 2026-05-22 | 963e60e8 |
 | 117 | Adopt StepSecurity Harden-Runner (audit mode → block mode) | merged | #262 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
-| 118 | Promote StepSecurity Harden-Runner to block mode | ready |  |  |  |
+| 118 | Promote StepSecurity Harden-Runner to block mode | not-ready |  |  | blocked on maintainer StepSecurity Harden-Runner audit-mode review before block-mode promotion (external action, not a code dep) |
 | 119 | Fix recurring `port 3000 already in use` flake in `Frontend ... | merged | #259 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 120 | Audit and remove phantom (unused) dependencies across all man... | merged | #264 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 121 | Add OTel SDK to atlas (traces + metrics + Go runtime telemetry) | merged | #269 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
@@ -165,7 +165,7 @@
 | 131 | Fix slice 029 integration tests' `SET LOCAL $1` syntax error | merged | #484 | 2026-05-22 | 29ab44d4 |
 | 132 | README refresh with fresh screenshots (v1.10.0+ baseline) | merged | #296 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 133 | mkdocs user docs content refresh (slice 058 follow-on) | merged | #389 | 2026-05-20 | b64cb069 |
-| 134 | Refresh slice-070 onboarding walkthroughs against current mai... | ready |  |  |  |
+| 134 | Refresh slice-070 onboarding walkthroughs against current mai... | not-ready |  |  | maintainer-gated: refreshing slice-070 onboarding walkthroughs needs a maintainer-scheduled interactive recording session |
 | 135 | Data-export library + audit-log export (reference implementat... | merged | #297 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 136 | Risk register data export (CSV / JSON / XLSX) | merged | #378 | 2026-05-19 | c80bec31 |
 | 137 | Controls UCF graph data export (CSV / JSON / XLSX) | merged | #384 | 2026-05-19 | 4300cde2 |
@@ -259,11 +259,11 @@
 | 225 | UI honesty: "New control" button on /controls is silently dis... | merged | #561 | 2026-05-23 | ef3c4a28 |
 | 226 | Add Frameworks-per-row column to /controls list | merged | #553 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 227 | Add pagination to /controls list | merged | #576 | 2026-05-23 | 58422721 |
-| 228 | UI honesty: dashboard global command-K search bar missing fro... | ready |  |  |  |
+| 228 | UI honesty: dashboard global command-K search bar missing fro... | not-ready |  |  | no backing endpoint: needs a unified /v1/search OR a UI fan-out design (neither exists today) |
 | 229 | UI honesty: dashboard header lacks tenant + snapshot-freshnes... | merged | #592 | 2026-05-23 | 6c8fa4eb |
-| 230 | UI honesty: dashboard "Export" and "New board report" header ... | ready |  |  |  |
+| 230 | UI honesty: dashboard "Export" and "New board report" header ... | not-ready |  |  | no dashboard-snapshot export endpoint exists (one of the two dashboard actions is unbacked) |
 | 231 | UI parity: dashboard mockup-stale "SOC 2 Type II · Q2 2026 i... | merged | #537 | 2026-05-23 | a5bbf03a |
-| 232 | UI honesty: dashboard activity-feed "View full activity ledge... | ready |  |  |  |
+| 232 | UI honesty: dashboard activity-feed "View full activity ledge... | not-ready |  |  | no public non-admin /activity ledger route exists (the View-full-activity link has no backing surface) |
 | 233 | UI honesty: /evidence "Push evidence" CTA is disabled with no... | merged | #558 | 2026-05-23 | ebf7502a |
 | 234 | UI honesty: /evidence filter row missing three pills (Source,... | merged | #568 | 2026-05-23 | 1bea0cd4 |
 | 235 | UI honesty: /evidence header missing audit-period banner + gl... | merged | #606 | 2026-05-24 | 0351f05c |
@@ -459,7 +459,7 @@
 | 431 | External-IdP / OIDC operator setup guide | merged | #994 | 2026-06-04 | bdca8df7 |
 | 432 | Operator backup/restore + upgrade runbooks, surfaced in the d... | merged | #1001 | 2026-06-04 | 9537f74c |
 | 433 | gitignore the `.understand-anything/` local-analysis cache | merged | #978 | 2026-06-03 | 1508501c |
-| 434 | One-time audit + reconcile of the stale `not-ready` `_STATUS.... | ready |  |  |  |
+| 434 | One-time audit + reconcile of the stale `not-ready` `_STATUS.... | merged |  |  | status-event hygiene: emitted not-ready events for the 9 false-ready rows (112-115/118/134/228/230/232); generated _STATUS now matches the files. Done inline per the rescope. |
 | 435 | Shared integration-test DB/tenant harness package (`internal/... | ready |  |  |  |
 | 436 | Split the three oversized hand-written god-files | ready |  |  |  |
 | 437 | Archive `Plans/mockups/` iteration-1 HTML out of the active tree | merged | #980 | 2026-06-04 | 7ce4cc6f |
