@@ -159,6 +159,11 @@ type Querier interface {
 	CountSinkFailures(ctx context.Context) (int64, error)
 	// Count claims for a recipient (tests assert no duplicate rows after a re-run).
 	CountStalenessRollupClaims(ctx context.Context, arg CountStalenessRollupClaimsParams) (int64, error)
+	// Counts the DISTINCT users holding the 'admin' role in the tenant (regardless
+	// of origin). The resolver's last-admin guard (AC-5 / P0-509-3) reads this
+	// before revoking an admin role: it refuses to drop the final admin so a group
+	// re-derivation can never lock the tenant out.
+	CountTenantAdmins(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
@@ -379,6 +384,13 @@ type Querier interface {
 	// a scope (supersession is the lifecycle exit); the row is preserved as
 	// audit trail.
 	DeleteFrameworkScope(ctx context.Context, arg DeleteFrameworkScopeParams) error
+	// Revokes a SPECIFIC group-derived role from the user. The origin='group-derived'
+	// predicate is the safety belt (AC-4): a manual row with the same (tenant, user,
+	// role) is never deleted by this query. Returns the affected-row count.
+	DeleteGroupDerivedRole(ctx context.Context, arg DeleteGroupDerivedRoleParams) (int64, error)
+	// Removes a mapping by id within the tenant. Returns affected-row count so the
+	// handler can 404 a missing id.
+	DeleteGroupRoleMapping(ctx context.Context, arg DeleteGroupRoleMappingParams) (int64, error)
 	// ON DELETE SET NULL on risks.org_unit_id keeps risks alive after their
 	// binding org_unit is removed (canvas §6.4: child risk lifecycle is
 	// independent of parent).
@@ -641,6 +653,8 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// Single mapping by id within the tenant. 404 (ErrNoRows) when absent.
+	GetGroupRoleMapping(ctx context.Context, arg GetGroupRoleMappingParams) (OidcIdpGroupMapping, error)
 	// Fetch one imported catalog by id. RLS scopes to the caller's tenant; a
 	// cross-tenant id returns ErrNoRows.
 	GetImportedCatalogByID(ctx context.Context, arg GetImportedCatalogByIDParams) (ImportedCatalog, error)
@@ -788,6 +802,10 @@ type Querier interface {
 	GetWalkthroughByID(ctx context.Context, arg GetWalkthroughByIDParams) (Walkthrough, error)
 	// Read a user's webhook-channel master opt-in. Missing row = OPTED-OUT.
 	GetWebhookOptIn(ctx context.Context, arg GetWebhookOptInParams) (bool, error)
+	// Reports whether the user holds a SPECIFIC role via a manual assignment. Used
+	// by the resolver so a group-derived grant does not duplicate a manual row, and
+	// so a revoke never deletes a role the user also holds manually.
+	HasManualRole(ctx context.Context, arg HasManualRoleParams) (bool, error)
 	// Slice 124 — defense-in-depth role probe for the unified audit-log endpoint.
 	//
 	// Returns TRUE when the caller holds 'auditor' OR 'grc_engineer' in user_roles
@@ -920,6 +938,30 @@ type Querier interface {
 	// exact nanosecond timestamp the hash covered.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Grants a role to the user with origin='group-derived'. Idempotent on the
+	// composite PK. granted_by records the derivation source label.
+	InsertGroupDerivedRole(ctx context.Context, arg InsertGroupDerivedRoleParams) error
+	// ===== group-derived role audit (AC-7) =====
+	// Appends one row to the append-only group_role_audit_log for every
+	// group-derived grant/revoke, capturing the triggering group + source.
+	InsertGroupRoleAudit(ctx context.Context, arg InsertGroupRoleAuditParams) error
+	// Slice 509 — IdP group-to-role mapping queries.
+	//
+	// Two clusters:
+	//   (1) Mapping CRUD (oidc_idp_group_mappings) — the admin control plane.
+	//   (2) Derivation/reconciliation (user_roles origin-aware + the
+	//       group_role_audit_log append) — the resolver's read/write surface.
+	//
+	// Every query is tenant-scoped in WHERE and runs under app.current_tenant RLS
+	// (invariant #6). idp_config_id is matched with IS NOT DISTINCT FROM so a NULL
+	// source (SCIM) matches NULL and a non-NULL source (a specific OIDC config)
+	// matches that exact config (AC-6 multi-IdP independence).
+	// ===== mapping CRUD =====
+	// Adds a (group_ref -> role) mapping for a tenant + source. Idempotent on the
+	// unique index (tenant, COALESCE(idp_config_id,nil), group_ref, role): a
+	// duplicate returns the existing row. The role CHECK enforces P0-509-4 at the
+	// DB layer; the application validates authz.IsCanonical first for a clean 400.
+	InsertGroupRoleMapping(ctx context.Context, arg InsertGroupRoleMappingParams) (OidcIdpGroupMapping, error)
 	// Slice 492: OSCAL catalog-import queries.
 	//
 	// CRUD against the three new tables (imported_catalogs,
@@ -1719,6 +1761,16 @@ type Querier interface {
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
+	// ===== user_roles origin-aware reconciliation =====
+	// The user's CURRENT group-derived roles (origin='group-derived') in the
+	// tenant. The resolver diffs this against the freshly-resolved target set to
+	// compute grants + revokes. Manual roles (origin='manual') are intentionally
+	// excluded — they are never touched by re-derivation (AC-4).
+	ListGroupDerivedRoles(ctx context.Context, arg ListGroupDerivedRolesParams) ([]string, error)
+	// The group-derived role-change history for a user in the tenant (admin read).
+	ListGroupRoleAuditForUser(ctx context.Context, arg ListGroupRoleAuditForUserParams) ([]GroupRoleAuditLog, error)
+	// All mappings for a tenant, ordered for stable display. Admin CRUD list (AC-8).
+	ListGroupRoleMappings(ctx context.Context, tenantID pgtype.UUID) ([]OidcIdpGroupMapping, error)
 	// Every control for one imported catalog, ordered for stable rendering.
 	ListImportedCatalogControls(ctx context.Context, arg ListImportedCatalogControlsParams) ([]ImportedCatalogControl, error)
 	// Enumerate every imported catalog for the tenant, most recent first.
@@ -2455,6 +2507,14 @@ type Querier interface {
 	// Citation-resolution gate: does this id name a tenant-owned policy? Used when
 	// a generated item cites a linked policy id. Cross-tenant ids are RLS-invisible.
 	ResolveChecklistPolicy(ctx context.Context, arg ResolveChecklistPolicyParams) (pgtype.UUID, error)
+	// The resolver's core lookup: the DISTINCT set of roles a tenant's mappings
+	// grant for a given source (idp_config_id) and group-set. idp_config_id is
+	// matched with IS NOT DISTINCT FROM so NULL (SCIM) only matches NULL mappings
+	// and a specific config only matches that config's mappings (AC-6). An unmapped
+	// group contributes no row, so a user in only-unmapped groups gets an empty set
+	// (P0-509-1 fail-closed). Returns the triggering group alongside the role so
+	// the audit row can record WHICH group granted it (AC-7).
+	ResolveRolesForGroups(ctx context.Context, arg ResolveRolesForGroupsParams) ([]ResolveRolesForGroupsRow, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	// Deprovision (AC-4): revoke EVERY valid session for the user so the
 	// deprovisioned account loses all access immediately. No keep-id — unlike the

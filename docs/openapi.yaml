@@ -55,6 +55,7 @@ tags:
   - name: admin-evidence
   - name: admin-exceptions
   - name: admin-feature-flags
+  - name: admin-group-role-mappings
   - name: admin-install
   - name: admin-policies
   - name: admin-samples
@@ -429,6 +430,53 @@ paths:
         - adminBearer: []
       parameters:
         - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/group-role-mappings:
+    get:
+      summary: GET /v1/admin/group-role-mappings
+      tags: [admin-group-role-mappings]
+      operationId: get-v1-admin-group-role-mappings
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/admin/group-role-mappings
+      tags: [admin-group-role-mappings]
+      operationId: post-v1-admin-group-role-mappings
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/group-role-mappings/{id}:
+    delete:
+      summary: DELETE /v1/admin/group-role-mappings/{id}
+      tags: [admin-group-role-mappings]
+      operationId: delete-v1-admin-group-role-mappings-id
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
           in: path
           required: true
           schema:

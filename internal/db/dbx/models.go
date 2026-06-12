@@ -1545,6 +1545,19 @@ type FwToScfEdge struct {
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 }
 
+type GroupRoleAuditLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	OccurredAt      pgtype.Timestamptz `json:"occurred_at"`
+	UserID          string             `json:"user_id"`
+	Role            string             `json:"role"`
+	Change          string             `json:"change"`
+	Source          string             `json:"source"`
+	IdpConfigID     pgtype.UUID        `json:"idp_config_id"`
+	TriggeringGroup string             `json:"triggering_group"`
+	Detail          []byte             `json:"detail"`
+}
+
 type ImportedCatalog struct {
 	ID           pgtype.UUID        `json:"id"`
 	TenantID     pgtype.UUID        `json:"tenant_id"`
@@ -1730,6 +1743,16 @@ type OidcIdpConfig struct {
 	AllowedEmailDomains []string           `json:"allowed_email_domains"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type OidcIdpGroupMapping struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	IdpConfigID pgtype.UUID        `json:"idp_config_id"`
+	GroupRef    string             `json:"group_ref"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
 }
 
 type OrgTheme struct {
@@ -2084,6 +2107,7 @@ type UserRole struct {
 	Role      string             `json:"role"`
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 	GrantedBy string             `json:"granted_by"`
+	Origin    string             `json:"origin"`
 }
 
 type Vendor struct {

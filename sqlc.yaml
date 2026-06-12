@@ -76,6 +76,7 @@ sql:
       - "migrations/sql/20260612000000_questionnaire_answer_ai_columns.sql"
       - "migrations/sql/20260612010000_role_scoped_checklist.sql"
       - "migrations/sql/20260612020000_scim_provisioning.sql"
+      - "migrations/sql/20260612030000_idp_group_role_mappings.sql"
     queries: "internal/db/queries"
     gen:
       go:
