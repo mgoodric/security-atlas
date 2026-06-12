@@ -21,10 +21,12 @@ Phase 2 of the ADR-0010 ADOPT-DEFERRED plan. Adds the **`cosign-keyless`** mode 
 
 ## Acceptance criteria
 
-- [ ] **AC-1.** `cosign-keyless` mode signs (Fulcio cert) + logs to Rekor.
-- [ ] **AC-2.** Keyless verification dispatch (identity + transparency-log inclusion).
-- [ ] **AC-3.** Drift/round-trip integration tests for the keyless path.
-- [ ] **AC-4.** **REVISED by ADR-0016:** `cosign-keyless` is made selectable (opt-in) for the private-Sigstore deployment shape. The SaaS (Helm) GA default is NOT flipped — it stays `cosign-kms` (ADR-0010 default table preserved). Keyless is opt-in, not a default.
+- [x] **AC-1.** `cosign-keyless` mode signs (Fulcio cert) + logs to Rekor. (`internal/oscal/cosign/signblob_keyless.go` `SignBlobKeyless`; `internal/oscal/sign_keyless.go` `KeylessSigner.SignBundle` records cert + Rekor log index in the manifest.)
+- [x] **AC-2.** Keyless verification dispatch (identity + transparency-log inclusion). (`verifyCosignKeyless` + `VerifyBundleWithCosign` keyless case; `VerifyBlobKeyless` runs `cosign verify-blob --certificate-identity --certificate-oidc-issuer --rekor-url`.)
+- [x] **AC-3.** Drift/round-trip integration tests for the keyless path. (`internal/oscal/sign_keyless_integration_test.go` — sign → WriteBundle → ReadBundle → verify + tamper-rejects, faking Fulcio/Rekor at the client boundary; unit round-trips in `sign_keyless_test.go`.)
+- [x] **AC-4.** **REVISED by ADR-0016:** `cosign-keyless` is made selectable (opt-in) for the private-Sigstore deployment shape. (`ResolveSigningConfig` selects keyless only on explicit mode + private Fulcio/Rekor; never inferred — `TestResolveSigningConfig_KeylessIsNeverInferred`.) The SaaS (Helm) GA default is NOT flipped — it stays `cosign-kms` (ADR-0010 default table preserved). Keyless is opt-in, not a default.
+
+**Delivered.** See `docs/audit-log/414-cosign-keyless-signing-decisions.md` for the JUDGMENT calls (library choice, OIDC plumbing, manifest shape, opt-in config).
 
 ## Dependencies
 
