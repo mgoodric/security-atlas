@@ -6,6 +6,15 @@
 
 **Status:** `ready`
 
+> **MAINTAINER DECISION (2026-06-12): target Node 22 (Active LTS).** This resolves the
+> P0-452-6 JUDGMENT (the LTS-line choice). Align all four surfaces to **Node 22**:
+> `web/package.json` `@types/node` `^25` → `^22`; `engines.node` `>=20` → `>=22`; the
+> CI `node-version` pin (×8 in `.github/workflows/ci.yml`) `"20"` → `"22"`; and any
+> container base image → a pinned `node:22-alpine` tag. Verify the standalone Next.js
+> build + the self-host bundle still run on 22. **Build-then-hold:** because P0-452-6
+> exists, the loop BUILDS this targeting 22 but leaves the PR OPEN for a one-click
+> maintainer confirm (the LTS judgment is pre-made here, so the review is a formality).
+
 ## Narrative
 
 The project's Node version is specified in four places that have **drifted
