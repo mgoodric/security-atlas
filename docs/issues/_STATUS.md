@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 550 |
+| merged | 551 |
 | in-progress | 1 |
-| ready | 71 |
+| ready | 70 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703 733
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -655,4 +655,4 @@
 | 703 | Main-canary: run a single representative leg on docs-only pushes | ready |  |  |  |
 | 704 | Contract-tier rollout: tenant-wide `/v1/evidence` ledger wind... | merged |  | 2026-06-11 | f882950d |
 | 732 | Calendar/dashboard exception event labels show the raw contro... | merged |  | 2026-06-11 | 9159b6a5 |
-| 733 | Live group-role derivation wiring + SCIM /Groups REST resource | ready |  |  |  |
+| 733 | Live group-role derivation wiring + SCIM /Groups REST resource | merged |  | 2026-06-12 | 5591029b |
