@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 552 |
+| merged | 553 |
 | in-progress | 1 |
-| ready | 69 |
+| ready | 68 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -625,7 +625,7 @@
 | 673 | Board Packs list fails to load in seeded tenant — `/api/boa... | merged | #1258 | 2026-06-10 | 07b24d13 |
 | 674 | Dashboard/breadcrumb shows "Default Tenant" while the active ... | merged |  | 2026-06-11 | f850f1dd |
 | 675 | Calendar agenda missing audit-period / vendor-review / policy... | merged |  | 2026-06-11 | 6be54edf |
-| 676 | Pervasive 503s on Next.js RSC prefetch/navigation requests | ready |  |  |  |
+| 676 | Pervasive 503s on Next.js RSC prefetch/navigation requests | merged |  | 2026-06-12 | 841ce5d7 |
 | 677 | Metrics correctness pass (freshness contradiction, count labe... | merged |  | 2026-06-11 | 5ac10361 |
 | 678 | Demo seed completeness: org_units, questionnaires, ack-role u... | merged |  | 2026-06-11 | 01f4038d |
 | 679 | Vendor UX/data: name/domain spacing, missing Delete control, ... | merged |  | 2026-06-11 | a490e17a |
