@@ -13,13 +13,13 @@
 
 | State | Count |
 | --- | --- |
-| merged | 559 |
-| ready | 55 |
+| merged | 561 |
+| ready | 53 |
 | not-ready | 11 |
 
 ## Ready set
 
-095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 436 446 452 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
+095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 436 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -469,13 +469,13 @@
 | 443 | Slack connector | merged |  | 2026-06-11 | 8e866181 |
 | 444 | AI gap-explanation v0 (plain-language, cited, non-binding) | merged |  | 2026-06-11 | 6bcc6942 |
 | 445 | Email/SMTP notification channel (delivery substrate) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
-| 446 | Disclosure / breach-notification workflow decision spike + AD... | ready |  |  |  |
+| 446 | Disclosure / breach-notification workflow decision spike + AD... | merged |  | 2026-06-12 | baf49acd |
 | 447 | PCI DSS v4.0 crosswalk loader (3rd framework; scope-reduction... | merged | #1017 | 2026-06-05 | 69078c86 |
 | 448 | Bulk operations + saved filter-views (operator ergonomics, co... | merged |  |  | frontend shell (controls multi-select + saved filter-views) merged via PR #1012 (2026-06-04); generator missed the (#448) paren-convention merge + a stale feat/448 branch showed in-progress. 468 (server-backed completion) is the remaining spillover. |
 | 449 | OPA 1.4 → 1.17 embedded-engine upgrade (13 minors on the au... | merged | #1319 | 2026-06-11 | 05bb92a3 |
 | 450 | vitest 4 + @vitest/coverage-v8 4 paired migration | merged |  | 2026-06-12 | 8589f281 |
 | 451 | SLSA provenance + SBOM for binary / CLI / SDK releases | merged | #990 | 2026-06-04 | 750d0eca |
-| 452 | Node version alignment: @types/node + CI + runtime + engines ... | ready |  |  |  |
+| 452 | Node version alignment: @types/node + CI + runtime + engines ... | merged |  | 2026-06-12 | c6625930 |
 | 453 | TypeScript 6 migration | merged |  | 2026-06-12 | 0ab184bd |
 | 454 | go-otel observability group bump (13 modules) | merged | #986 | 2026-06-04 | b839f98a |
 | 455 | OIDC-identity-strategy decision spike (unblocks cosign keyles... | merged |  | 2026-06-11 | a5bc0ea9 |
