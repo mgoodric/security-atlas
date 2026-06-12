@@ -58,6 +58,15 @@ describe("derivePageName", () => {
     expect(derivePageName("/board-packs")).toBe("Board Packs");
   });
 
+  // ATLAS-011 — the Vendor Claims module lives under /oscal/*; without an
+  // explicit map entry the breadcrumb humanized the raw segment to the
+  // jargon "Oscal". Map it to the user-facing module name.
+  test("returns 'Vendor Claims' for /oscal/component-definitions", () => {
+    expect(derivePageName("/oscal/component-definitions")).toBe(
+      "Vendor Claims",
+    );
+  });
+
   test("returns 'Catalog' for /catalog/scf", () => {
     expect(derivePageName("/catalog/scf")).toBe("Catalog");
   });

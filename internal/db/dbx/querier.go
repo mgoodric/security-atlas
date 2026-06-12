@@ -30,9 +30,20 @@ type Querier interface {
 	// statements run inside one tx so the partial unique index never sees
 	// two `activated` rows at once.
 	ActivateFrameworkScope(ctx context.Context, arg ActivateFrameworkScopeParams) (FrameworkScope, error)
+	// ===== scim_group_members edge CRUD =====
+	// Adds a (group, user) membership edge. Idempotent on the unique index: a
+	// duplicate add is a no-op (the SCIM `add members` op is idempotent).
+	AddSCIMGroupMember(ctx context.Context, arg AddSCIMGroupMemberParams) error
 	// Idempotent: ON CONFLICT DO NOTHING because the PK already enforces no
 	// duplicates, so re-adding is a no-op.
 	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
+	// One-click per-section approval (AC-10): flip human_approved=TRUE + record the
+	// approver on an AI-assisted, currently-unapproved section. The
+	// ai_assisted=TRUE AND human_approver IS NOT NULL guard in the WHERE means an
+	// attempt to "approve" the unassigned bucket (ai_assisted=FALSE) or supply a
+	// blank approver matches no row (ErrNoRows) — there is NO auto-approve path.
+	// The DB CHECK is the authoritative backstop. updated_at is refreshed.
+	ApproveChecklistSection(ctx context.Context, arg ApproveChecklistSectionParams) (ChecklistSection, error)
 	// AC-3 transition: requested -> approved. The application MUST verify the
 	// caller has IsApprover before invoking this query AND that approved_by
 	// differs from requested_by (segregation of duties). The WHERE
@@ -48,6 +59,14 @@ type Querier interface {
 	// Transition: under_review -> approved. Requires IsApprover at handler
 	// (AC-4). The DB only guards the prior-state.
 	ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (Policy, error)
+	// Slice 441 — one-click human approval of an AI-suggested draft (AC-6/AC-7).
+	// Sets human_approved=TRUE and records the human_approver; optionally accepts
+	// the operator's edited final text. The DB CHECK
+	// questionnaire_answers_ai_assist_invariant makes human_approved=TRUE with a
+	// blank human_approver impossible (P0-441-8); this query NEVER passes an empty
+	// approver (the service rejects that before the round-trip via
+	// llm.EnforceApproval). Tenant-scoped by RLS + the explicit tenant_id guard.
+	ApproveQuestionnaireAnswer(ctx context.Context, arg ApproveQuestionnaireAnswerParams) (QuestionnaireAnswer, error)
 	// Slice 025 — auditor assignments + audit notes.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -89,6 +108,10 @@ type Querier interface {
 	// Count of all generations for the current tenant. Used by the cross-tenant
 	// isolation integration test to prove tenant B sees zero of tenant A's rows.
 	CountAIGenerationsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// Count of all checklist sections visible to the caller's tenant. Used by the
+	// cross-tenant isolation integration test to prove tenant B sees zero of
+	// tenant A's rows (AC-8).
+	CountChecklistSectionsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Slice 055 overdue-job dedup probe: has this decision already had an
 	// `overdue_notified` audit row written? A non-zero count means the daily
 	// job already notified the decision_maker -- skip re-emission (P0
@@ -132,6 +155,9 @@ type Querier interface {
 	CountRequiredRoleUsersForVersion(ctx context.Context, arg CountRequiredRoleUsersForVersionParams) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
+	// Total group count in the tenant (List envelope totalResults).
+	CountSCIMGroups(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	CountSCIMUsers(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Return the row count for the caller's tenant. Used by the slice 126
 	// integration test to assert exactly-1 fallback row after the 10001-record
@@ -139,6 +165,11 @@ type Querier interface {
 	CountSinkFailures(ctx context.Context) (int64, error)
 	// Count claims for a recipient (tests assert no duplicate rows after a re-run).
 	CountStalenessRollupClaims(ctx context.Context, arg CountStalenessRollupClaimsParams) (int64, error)
+	// Counts the DISTINCT users holding the 'admin' role in the tenant (regardless
+	// of origin). The resolver's last-admin guard (AC-5 / P0-509-3) reads this
+	// before revoking an admin role: it refuses to drop the final admin so a group
+	// re-derivation can never lock the tenant out.
+	CountTenantAdmins(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
@@ -286,6 +317,27 @@ type Querier interface {
 	// DB-side CHECK constraints (slice 019) are defense-in-depth, not the
 	// primary validation path.
 	CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, error)
+	// Slice 733 — SCIM /Groups resource queries.
+	//
+	// Two clusters:
+	//   (1) scim_groups CRUD — the SCIM Group resource (Create/Get/List/Patch/
+	//       Delete per RFC 7644).
+	//   (2) scim_group_members edge CRUD + the resolver-feeding read
+	//       (ListGroupRefsForUser): a membership change feeds the user's FULL
+	//       current validated group set to the slice-509 grouprole.Resolver.Derive
+	//       (AC-3). This file holds NO mapping/derivation logic — that lives in
+	//       slice 509 and is reused, not re-authored (P0-733-1).
+	//
+	// Every query is tenant-scoped in WHERE and runs under app.current_tenant RLS
+	// (invariant #6 / P0-733-4).
+	// ===== scim_groups CRUD =====
+	// Creates a SCIM Group. scim_external_id is NULLABLE (some IdPs omit it).
+	CreateSCIMGroup(ctx context.Context, arg CreateSCIMGroupParams) (ScimGroup, error)
+	// Slice 508: provision a user via SCIM. Sets scim_managed=true and the IdP's
+	// externalId. status + active are kept in lockstep ('active'/true). idp_issuer
+	// / idp_subject are left empty here (SCIM is push-from-IdP, not OIDC login);
+	// email is the join key with a later OIDC sign-in.
+	CreateSCIMUser(ctx context.Context, arg CreateSCIMUserParams) (User, error)
 	CreateSample(ctx context.Context, arg CreateSampleParams) (Sample, error)
 	// Insert a scope cell. dimensions_hash is the application-computed canonical
 	// hash; the UNIQUE (tenant_id, dimensions_hash) constraint rejects duplicates.
@@ -311,6 +363,12 @@ type Querier interface {
 	// INSERT WITH CHECK policy. dpa_signed_at is required by CHECK constraint
 	// whenever dpa_signed=true.
 	CreateVendor(ctx context.Context, arg CreateVendorParams) (Vendor, error)
+	// Append a completed review to the ledger. tenant_id is captured directly so
+	// RLS evaluates the INSERT WITH CHECK policy. The composite FK
+	// (tenant_id, vendor_id) -> vendors enforces the vendor exists for this tenant
+	// (a cross-tenant or fabricated vendor_id trips a foreign_key_violation, which
+	// the store maps to ErrVendorNotFound). Append-only: there is no UpdateVendorReview.
+	CreateVendorReview(ctx context.Context, arg CreateVendorReviewParams) (VendorReview, error)
 	// Slice 027 — walkthrough recording primitive.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -348,6 +406,13 @@ type Querier interface {
 	// a scope (supersession is the lifecycle exit); the row is preserved as
 	// audit trail.
 	DeleteFrameworkScope(ctx context.Context, arg DeleteFrameworkScopeParams) error
+	// Revokes a SPECIFIC group-derived role from the user. The origin='group-derived'
+	// predicate is the safety belt (AC-4): a manual row with the same (tenant, user,
+	// role) is never deleted by this query. Returns the affected-row count.
+	DeleteGroupDerivedRole(ctx context.Context, arg DeleteGroupDerivedRoleParams) (int64, error)
+	// Removes a mapping by id within the tenant. Returns affected-row count so the
+	// handler can 404 a missing id.
+	DeleteGroupRoleMapping(ctx context.Context, arg DeleteGroupRoleMappingParams) (int64, error)
 	// ON DELETE SET NULL on risks.org_unit_id keeps risks alive after their
 	// binding org_unit is removed (canvas §6.4: child risk lifecycle is
 	// independent of parent).
@@ -526,6 +591,9 @@ type Querier interface {
 	GetBoardPackByID(ctx context.Context, arg GetBoardPackByIDParams) (BoardPack, error)
 	// Read a delivery-log row by id (tests + outcome inspection).
 	GetChannelDeliveryLog(ctx context.Context, arg GetChannelDeliveryLogParams) (ChannelDeliveryLog, error)
+	// Fetch one section by id within the caller's tenant. Used by the approval flow
+	// + tests. A cross-tenant id returns ErrNoRows.
+	GetChecklistSectionByID(ctx context.Context, arg GetChecklistSectionByIDParams) (ChecklistSection, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
@@ -607,6 +675,8 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// Single mapping by id within the tenant. 404 (ErrNoRows) when absent.
+	GetGroupRoleMapping(ctx context.Context, arg GetGroupRoleMappingParams) (OidcIdpGroupMapping, error)
 	// Fetch one imported catalog by id. RLS scopes to the caller's tenant; a
 	// cross-tenant id returns ErrNoRows.
 	GetImportedCatalogByID(ctx context.Context, arg GetImportedCatalogByIDParams) (ImportedCatalog, error)
@@ -660,6 +730,10 @@ type Querier interface {
 	// predicate is defense-in-depth behind RLS. A cross-tenant or non-profile id,
 	// or a baseline with no success-audit row, returns ErrNoRows.
 	GetProfileImportProvenance(ctx context.Context, arg GetProfileImportProvenanceParams) (GetProfileImportProvenanceRow, error)
+	// Slice 441 — fetch one answer by id under the caller's tenant. Used by the
+	// approval path to confirm the draft exists + is AI-assisted before approving,
+	// and by tests. A cross-tenant id returns ErrNoRows (RLS).
+	GetQuestionnaireAnswerByID(ctx context.Context, arg GetQuestionnaireAnswerByIDParams) (QuestionnaireAnswer, error)
 	// Fetch one questionnaire by id. RLS scopes the lookup to the caller's
 	// tenant; a cross-tenant id returns ErrNoRows.
 	GetQuestionnaireByID(ctx context.Context, arg GetQuestionnaireByIDParams) (Questionnaire, error)
@@ -691,6 +765,22 @@ type Querier interface {
 	// Updated / Unchanged (xmax-based detection inside ON CONFLICT can't
 	// distinguish "updated to the same content" from "actually updated").
 	GetSCFAnchorByVersionAndSCFID(ctx context.Context, arg GetSCFAnchorByVersionAndSCFIDParams) (ScfAnchor, error)
+	// Lookup by HMAC hash for the SCIM auth middleware. Runs under the BYPASSRLS
+	// atlas_migrate role (no tenant context yet — the row's tenant_id is what
+	// authentication RETURNS). Returns the row whether revoked or not — the caller
+	// enforces the revoked-state check.
+	GetSCIMCredentialByHash(ctx context.Context, tokenHash []byte) (ScimCredential, error)
+	GetSCIMCredentialByID(ctx context.Context, arg GetSCIMCredentialByIDParams) (ScimCredential, error)
+	// Single group by externalId within the tenant (Create reconciliation).
+	GetSCIMGroupByExternalID(ctx context.Context, arg GetSCIMGroupByExternalIDParams) (ScimGroup, error)
+	// Single group by id within the tenant. ErrNoRows when absent (a group in
+	// another tenant reads identically to "not found" — RLS-confined, no oracle).
+	GetSCIMGroupByID(ctx context.Context, arg GetSCIMGroupByIDParams) (ScimGroup, error)
+	// Case-insensitive email lookup within a tenant. SCIM userName maps to email
+	// (decisions D1); used to reconcile a SCIM Create against an existing row.
+	GetSCIMUserByEmail(ctx context.Context, arg GetSCIMUserByEmailParams) (User, error)
+	// Lookup a SCIM-provisioned user by the IdP's externalId within the tenant.
+	GetSCIMUserByExternalID(ctx context.Context, arg GetSCIMUserByExternalIDParams) (User, error)
 	GetSampleByID(ctx context.Context, arg GetSampleByIDParams) (Sample, error)
 	// Look up a cell by its dimensions hash. Used by the "create or get" path so
 	// a re-seed call does not 409 on the existing default cell.
@@ -739,6 +829,10 @@ type Querier interface {
 	GetWalkthroughByID(ctx context.Context, arg GetWalkthroughByIDParams) (Walkthrough, error)
 	// Read a user's webhook-channel master opt-in. Missing row = OPTED-OUT.
 	GetWebhookOptIn(ctx context.Context, arg GetWebhookOptInParams) (bool, error)
+	// Reports whether the user holds a SPECIFIC role via a manual assignment. Used
+	// by the resolver so a group-derived grant does not duplicate a manual row, and
+	// so a revoke never deletes a role the user also holds manually.
+	HasManualRole(ctx context.Context, arg HasManualRoleParams) (bool, error)
 	// Slice 124 — defense-in-depth role probe for the unified audit-log endpoint.
 	//
 	// Returns TRUE when the caller holds 'auditor' OR 'grc_engineer' in user_roles
@@ -799,6 +893,18 @@ type Querier interface {
 	// that). A re-generation for the same period_end is a NEW row with a NEW id
 	// — never an edit of an existing pack.
 	InsertBoardPack(ctx context.Context, arg InsertBoardPackParams) (BoardPack, error)
+	// Persist one cited task statement in a section. citations is the validated,
+	// tenant-resolved JSONB array (the service guarantees every cited id resolves
+	// BEFORE this write — P0-471-2); the CHECK guarantees the array is non-empty.
+	// no_evidence marks a control with no evidence backing as an explicit gap
+	// (AC-6). task_text is bound as a parameter (model output never interpolated).
+	InsertChecklistItem(ctx context.Context, arg InsertChecklistItemParams) (ChecklistItem, error)
+	// Persist one approvable role-section of a generation (ai_assisted, UNAPPROVED).
+	// A real role-section is ai_assisted=TRUE with full model provenance; the
+	// unassigned bucket is ai_assisted=FALSE with empty provenance. The shared
+	// ai_assist_human_approver_guard CHECK forbids the approved-without-approver
+	// shape at INSERT time too.
+	InsertChecklistSection(ctx context.Context, arg InsertChecklistSectionParams) (ChecklistSection, error)
 	// Slice 012 — control state evaluation engine queries.
 	//
 	// `control_evaluations` is the append-only output table of the evaluation
@@ -859,6 +965,30 @@ type Querier interface {
 	// exact nanosecond timestamp the hash covered.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Grants a role to the user with origin='group-derived'. Idempotent on the
+	// composite PK. granted_by records the derivation source label.
+	InsertGroupDerivedRole(ctx context.Context, arg InsertGroupDerivedRoleParams) error
+	// ===== group-derived role audit (AC-7) =====
+	// Appends one row to the append-only group_role_audit_log for every
+	// group-derived grant/revoke, capturing the triggering group + source.
+	InsertGroupRoleAudit(ctx context.Context, arg InsertGroupRoleAuditParams) error
+	// Slice 509 — IdP group-to-role mapping queries.
+	//
+	// Two clusters:
+	//   (1) Mapping CRUD (oidc_idp_group_mappings) — the admin control plane.
+	//   (2) Derivation/reconciliation (user_roles origin-aware + the
+	//       group_role_audit_log append) — the resolver's read/write surface.
+	//
+	// Every query is tenant-scoped in WHERE and runs under app.current_tenant RLS
+	// (invariant #6). idp_config_id is matched with IS NOT DISTINCT FROM so a NULL
+	// source (SCIM) matches NULL and a non-NULL source (a specific OIDC config)
+	// matches that exact config (AC-6 multi-IdP independence).
+	// ===== mapping CRUD =====
+	// Adds a (group_ref -> role) mapping for a tenant + source. Idempotent on the
+	// unique index (tenant, COALESCE(idp_config_id,nil), group_ref, role): a
+	// duplicate returns the existing row. The role CHECK enforces P0-509-4 at the
+	// DB layer; the application validates authz.IsCanonical first for a clean 400.
+	InsertGroupRoleMapping(ctx context.Context, arg InsertGroupRoleMappingParams) (OidcIdpGroupMapping, error)
 	// Slice 492: OSCAL catalog-import queries.
 	//
 	// CRUD against the three new tables (imported_catalogs,
@@ -961,6 +1091,13 @@ type Querier interface {
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
+	// Append-only audit row for a SCIM provision/deprovision mutation (AC-5).
+	InsertSCIMAuditLog(ctx context.Context, arg InsertSCIMAuditLogParams) error
+	// Slice 508: persist a new SCIM provisioning credential. token_hash is
+	// HMAC-SHA256(plaintext, BEARER_HASH_KEY) per ADR 0002 — computed by the
+	// application layer before this call. last4 is the last four chars of the
+	// plaintext bearer (safe to surface).
+	InsertSCIMCredential(ctx context.Context, arg InsertSCIMCredentialParams) (ScimCredential, error)
 	InsertSampleEvidence(ctx context.Context, arg InsertSampleEvidenceParams) error
 	// Adds a single (tenant, user, role) assignment. Idempotent under the
 	// composite PK; conflicts are silently no-op so concurrent admins
@@ -968,6 +1105,10 @@ type Querier interface {
 	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
 	// The most recent successful backup run — what restore-verification restores.
 	LatestSucceededBackup(ctx context.Context) (BackupRun, error)
+	// The most-recent reviewed_at for a vendor, used to keep vendors.last_review_date
+	// consistent with the ledger (AC-2, decisions log D2). Returns no row when the
+	// vendor has no reviews; the store treats pgx.ErrNoRows as "leave the scalar".
+	LatestVendorReviewDate(ctx context.Context, arg LatestVendorReviewDateParams) (pgtype.Date, error)
 	// ===== decision_controls =====
 	LinkDecisionControl(ctx context.Context, arg LinkDecisionControlParams) error
 	// ===== decision_exceptions =====
@@ -1322,6 +1463,11 @@ type Querier interface {
 	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
 	// inside an ARRAY[] constructor.
 	ListCandidateRisksForRule(ctx context.Context, arg ListCandidateRisksForRuleParams) ([]Risk, error)
+	// The cited task items in one section, render order. Tenant-scoped.
+	ListChecklistItemsBySection(ctx context.Context, arg ListChecklistItemsBySectionParams) ([]ChecklistItem, error)
+	// Load all sections of one generation for the caller's tenant, role order
+	// stable. Powers the role-grouped review view (AC-9).
+	ListChecklistSectionsByGeneration(ctx context.Context, arg ListChecklistSectionsByGenerationParams) ([]ChecklistSection, error)
 	// Every catalog metric whose compute_strategy is 'computed'. The 15-min
 	// cron iterates this list per tenant.
 	ListComputedCatalog(ctx context.Context) ([]MetricsCatalog, error)
@@ -1642,6 +1788,21 @@ type Querier interface {
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
+	// ===== user_roles origin-aware reconciliation =====
+	// The user's CURRENT group-derived roles (origin='group-derived') in the
+	// tenant. The resolver diffs this against the freshly-resolved target set to
+	// compute grants + revokes. Manual roles (origin='manual') are intentionally
+	// excluded — they are never touched by re-derivation (AC-4).
+	ListGroupDerivedRoles(ctx context.Context, arg ListGroupDerivedRolesParams) ([]string, error)
+	// The DISTINCT group_refs the user is currently a member of across ALL active
+	// groups in the tenant. This is the resolver input on a membership change: the
+	// user's FULL current validated group set (AC-3). Inactive (soft-disabled)
+	// groups contribute nothing — a deleted group is no longer a membership source.
+	ListGroupRefsForUser(ctx context.Context, arg ListGroupRefsForUserParams) ([]string, error)
+	// The group-derived role-change history for a user in the tenant (admin read).
+	ListGroupRoleAuditForUser(ctx context.Context, arg ListGroupRoleAuditForUserParams) ([]GroupRoleAuditLog, error)
+	// All mappings for a tenant, ordered for stable display. Admin CRUD list (AC-8).
+	ListGroupRoleMappings(ctx context.Context, tenantID pgtype.UUID) ([]OidcIdpGroupMapping, error)
 	// Every control for one imported catalog, ordered for stable rendering.
 	ListImportedCatalogControls(ctx context.Context, arg ListImportedCatalogControlsParams) ([]ImportedCatalogControl, error)
 	// Enumerate every imported catalog for the tenant, most recent first.
@@ -1666,6 +1827,21 @@ type Querier interface {
 	// Enumerate every resolved profile baseline for the tenant, most recent
 	// first (index-served by idx_imported_catalogs_tenant_profiles).
 	ListImportedProfiles(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)
+	// Slice 471 — role-scoped control-implementation checklist generator v0.
+	//
+	// Queries for the deterministic role-split + the cited, non-binding checklist
+	// draft. Every query is tenant-bound via the leading $1 parameter
+	// (defense-in-depth behind the four-policy FORCE RLS on checklist_sections /
+	// checklist_items, invariant #6). Model output (task_text, citations) is bound
+	// as PARAMETERIZED values only — never interpolated (P0-498-7).
+	// AC-1/AC-2: the in-scope control set for a generation. Every ACTIVE
+	// (non-superseded) control for the caller's tenant, with the deterministic
+	// role-split inputs (owner_role + applicability_expr), its scf linkage (scf_id
+	// for the SCF-anchor citation), and a `has_evidence` flag (AC-6: a control with
+	// zero evidence rows is rendered as a "no evidence yet" gap, never as
+	// satisfied). RLS scopes the read to the tenant; the WHERE tenant_id clause is
+	// belt-and-suspenders. Ordered for stable rendering.
+	ListInScopeControlsForChecklist(ctx context.Context, tenantID pgtype.UUID) ([]ListInScopeControlsForChecklistRow, error)
 	// Every (control, scope_cell)'s latest state for one control. DISTINCT ON
 	// collapses the append-only history to the current row per cell. Used by
 	// GET /v1/controls/:id/state when no scope filter is supplied.
@@ -1812,6 +1988,11 @@ type Querier interface {
 	// bigint value. See
 	// `docs/audit-log/159-sqlc-toolchain-ci-drift-fix-decisions.md`.
 	ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesWithAckRateParams) ([]ListPoliciesWithAckRateRow, error)
+	// The policy ids linked to one control via slice-022's
+	// policies.linked_control_ids UUID[] array (same predicate as slice-064's
+	// ListPoliciesLinkedToControl). Lets the generator offer a linked-policy id as
+	// a citable reference for a control's tasks. Tenant-scoped.
+	ListPolicyIDsLinkedToControl(ctx context.Context, arg ListPolicyIDsLinkedToControlParams) ([]pgtype.UUID, error)
 	// Returns the version chain for a policy id by walking predecessor_id.
 	// Recursive CTE keeps the query inside Postgres rather than client-side
 	// traversal. Returns oldest-first so the chain reads naturally
@@ -1991,6 +2172,22 @@ type Querier interface {
 	// (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
 	// regen-on-rebase note in MEMORY.md). Keep the two in sync.
 	ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error)
+	// Read-only: SCIM audit rows for a tenant, newest first. Backs integration
+	// assertions (AC-5) and any future admin surface.
+	ListSCIMAuditLogByTenant(ctx context.Context, arg ListSCIMAuditLogByTenantParams) ([]ScimAuditLog, error)
+	// Active SCIM credentials for a tenant (excludes revoked).
+	ListSCIMCredentialsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ScimCredential, error)
+	// The member user ids of a group (the SCIM Group resource's `members` array).
+	ListSCIMGroupMembers(ctx context.Context, arg ListSCIMGroupMembersParams) ([]string, error)
+	// A page of tenant groups (List, no filter). RLS confines to the tenant.
+	ListSCIMGroups(ctx context.Context, arg ListSCIMGroupsParams) ([]ScimGroup, error)
+	// Groups matching `filter=displayName eq "x"` (the List filter minimum).
+	ListSCIMGroupsByDisplayName(ctx context.Context, arg ListSCIMGroupsByDisplayNameParams) ([]ScimGroup, error)
+	// Tenant-scoped user list for SCIM List (no filter). RLS confines to the
+	// credential's tenant (P0-508-4). Ordered for stable pagination.
+	ListSCIMUsers(ctx context.Context, arg ListSCIMUsersParams) ([]User, error)
+	// SCIM List with `filter=userName eq "x"` (AC-1). userName maps to email.
+	ListSCIMUsersByUserName(ctx context.Context, arg ListSCIMUsersByUserNameParams) ([]User, error)
 	ListSampleAnnotations(ctx context.Context, arg ListSampleAnnotationsParams) ([]SampleAnnotation, error)
 	ListSampleAuditLog(ctx context.Context, arg ListSampleAuditLogParams) ([]SampleAuditLog, error)
 	ListSampleEvidence(ctx context.Context, arg ListSampleEvidenceParams) ([]ListSampleEvidenceRow, error)
@@ -2222,6 +2419,10 @@ type Querier interface {
 	// the tenant scope; the explicit tenant_id filter in WHERE is defense-in-depth and lets
 	// a future RLS misconfiguration still filter by tenant.
 	ListUserNotificationPreferences(ctx context.Context, arg ListUserNotificationPreferencesParams) ([]UserNotificationPreference, error)
+	// AC-3 per-vendor review history, newest-first. reviewed_at DESC is the
+	// primary order; created_at DESC tie-breaks two reviews recorded for the same
+	// date so the order is stable. RLS scopes the read to the active tenant.
+	ListVendorReviews(ctx context.Context, arg ListVendorReviewsParams) ([]VendorReview, error)
 	// Cells attached to one vendor.
 	ListVendorScopeCells(ctx context.Context, arg ListVendorScopeCellsParams) ([]pgtype.UUID, error)
 	// AC-2 filter by criticality. NULL criticality_filter means "all" — the
@@ -2320,6 +2521,8 @@ type Querier interface {
 	// The CTE is bounded by the tenant_id predicate on every row, so it can
 	// never walk into another tenant's chain even with RLS off.
 	ParentChainIDs(ctx context.Context, arg ParentChainIDsParams) ([]pgtype.UUID, error)
+	// SCIM Patch of a core attribute (display_name). Roles are out of scope.
+	PatchSCIMUserDisplayName(ctx context.Context, arg PatchSCIMUserDisplayNameParams) (User, error)
 	// One-shot publish of an approved row that has NO predecessor (the very
 	// first version). Sets status -> published, populates effective_date,
 	// published_at, published_by. Predecessor_id stays NULL.
@@ -2331,12 +2534,44 @@ type Querier interface {
 	// explicitly so the publish writes the final, operator-reviewed snapshot in
 	// the same UPDATE that flips the status — one atomic transition.
 	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
+	// Clears every member of a group (Replace `members`, or Delete soft-disable).
+	// Returns affected-row count.
+	RemoveAllSCIMGroupMembers(ctx context.Context, arg RemoveAllSCIMGroupMembersParams) (int64, error)
+	// Removes a single (group, user) membership edge. Returns affected-row count.
+	RemoveSCIMGroupMember(ctx context.Context, arg RemoveSCIMGroupMemberParams) (int64, error)
+	// Overwrites the group's display name (Patch/Replace of displayName). Bumps
+	// updated_at.
+	ReplaceSCIMGroupDisplayName(ctx context.Context, arg ReplaceSCIMGroupDisplayNameParams) (ScimGroup, error)
+	// SCIM Replace (PUT) — overwrites the mutable SCIM-mapped attributes:
+	// display_name, active (and the mirrored status), email. external_id and
+	// roles are NOT touched here (P0-508-3: SCIM never assigns roles).
+	ReplaceSCIMUser(ctx context.Context, arg ReplaceSCIMUserParams) (User, error)
+	// Citation-resolution gate (AC-5, P0-471-2): does this id name a tenant-owned
+	// ACTIVE control? A cross-tenant id is RLS-invisible, so this returns no row
+	// (the AC-8 mechanism). Returns the control id when it resolves.
+	ResolveChecklistControl(ctx context.Context, arg ResolveChecklistControlParams) (pgtype.UUID, error)
+	// Citation-resolution gate: does this id name a tenant-owned policy? Used when
+	// a generated item cites a linked policy id. Cross-tenant ids are RLS-invisible.
+	ResolveChecklistPolicy(ctx context.Context, arg ResolveChecklistPolicyParams) (pgtype.UUID, error)
+	// The resolver's core lookup: the DISTINCT set of roles a tenant's mappings
+	// grant for a given source (idp_config_id) and group-set. idp_config_id is
+	// matched with IS NOT DISTINCT FROM so NULL (SCIM) only matches NULL mappings
+	// and a specific config only matches that config's mappings (AC-6). An unmapped
+	// group contributes no row, so a user in only-unmapped groups gets an empty set
+	// (P0-509-1 fail-closed). Returns the triggering group alongside the role so
+	// the audit row can record WHICH group granted it (AC-7).
+	ResolveRolesForGroups(ctx context.Context, arg ResolveRolesForGroupsParams) ([]ResolveRolesForGroupsRow, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
+	// Deprovision (AC-4): revoke EVERY valid session for the user so the
+	// deprovisioned account loses all access immediately. No keep-id — unlike the
+	// /v1/me "sign out other devices" path, deprovision kills the whole set.
+	RevokeAllSCIMUserSessions(ctx context.Context, arg RevokeAllSCIMUserSessionsParams) (int64, error)
 	// Slice 108: DELETE /v1/me/sessions (no {id}). Revokes every valid session for the
 	// caller EXCEPT the one identified by $3 (the "current" session id). When the caller
 	// has no current-session cookie, pass an empty string to revoke ALL sessions for the
 	// user — there is no way to keep the request alive past this point anyway.
 	RevokeOtherSessionsForUser(ctx context.Context, arg RevokeOtherSessionsForUserParams) (int64, error)
+	RevokeSCIMCredential(ctx context.Context, arg RevokeSCIMCredentialParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	// Slice 108: DELETE /v1/me/sessions/{id}. Atomic ownership-guard via the WHERE clause:
 	// the row is only updated when (tenant_id, id, user_id) all match. RowsAffected = 0
@@ -2406,6 +2641,16 @@ type Querier interface {
 	// query path then enforces `observed_at <= populations.frozen_at` on
 	// subsequent draws.
 	SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFrozenAtParams) error
+	// Soft-disables / re-enables a group (Delete = active=false). Bumps updated_at.
+	SetSCIMGroupActive(ctx context.Context, arg SetSCIMGroupActiveParams) (ScimGroup, error)
+	// SCIM Patch `active` flip (AC-4) — the deprovision/reprovision signal. Keeps
+	// status in lockstep with the boolean. Never touches roles.
+	SetSCIMUserActive(ctx context.Context, arg SetSCIMUserActiveParams) (User, error)
+	// Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
+	// ledger (AC-2, decisions log D2). Called after recording a review when the
+	// new review's reviewed_at is the most-recent on file. updated_at is bumped so
+	// the detail page's "last updated" reflects the change. RLS scopes the write.
+	SetVendorLastReviewDate(ctx context.Context, arg SetVendorLastReviewDateParams) error
 	// backup_runs — slice 510 automated-backup status/audit ledger.
 	//
 	// DEPLOYMENT-scope (no tenant_id): a backup is a full cross-tenant operation.
@@ -2441,6 +2686,8 @@ type Querier interface {
 	// Best-effort timestamp bump. Failure here is logged but never blocks the
 	// authenticated request.
 	TouchAPIKeyLastUsed(ctx context.Context, tokenHash []byte) error
+	// Best-effort timestamp bump; failure logged, never blocks the request.
+	TouchSCIMCredentialLastUsed(ctx context.Context, tokenHash []byte) error
 	// Update last_seen_at and (when given) bump expires_at. Caller computes the
 	// new expires_at — sliding-window logic lives in the sessions package.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
@@ -2529,6 +2776,15 @@ type Querier interface {
 	// guard makes a post-finalize mutation a zero-row UPDATE which the
 	// handler surfaces as 409 Conflict.
 	UpdateWalkthroughHash(ctx context.Context, arg UpdateWalkthroughHashParams) (Walkthrough, error)
+	// Slice 441 — persist an AI-suggested DRAFT answer for one question. The draft
+	// is ai_assisted=TRUE, human_approved=FALSE, human_approver=NULL: a suggestion
+	// the operator has not yet approved (P0-441-1, AC-6). The model-provenance
+	// columns are populated from the generation that produced the draft
+	// (snapshot-at-generation). On conflict (the question already has an answer)
+	// the draft REPLACES the prior answer text BUT resets approval to FALSE/NULL —
+	// a fresh suggestion is unapproved by construction, so an operator can never
+	// inherit a prior approval onto new AI text (P0-441-1).
+	UpsertAISuggestedAnswer(ctx context.Context, arg UpsertAISuggestedAnswerParams) (QuestionnaireAnswer, error)
 	// Insert-or-update the tenant's primary IdP config. The application
 	// supplies the encrypted client_secret_enc; an empty bytea is rejected
 	// at the application layer for INSERT but permitted for UPDATE-only

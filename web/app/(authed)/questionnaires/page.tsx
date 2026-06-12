@@ -149,7 +149,7 @@ export default function QuestionnairesPage() {
           </h1>
           <p className="text-sm text-muted-foreground">
             Vendor security diligence questionnaires. Upload an Excel workbook
-            to import questions; author answers with prior- answer suggestions
+            to import questions; author answers with prior-answer suggestions
             and policy / evidence citations.
           </p>
         </div>

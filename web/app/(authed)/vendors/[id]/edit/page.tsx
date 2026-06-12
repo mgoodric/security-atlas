@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect } from "react";
@@ -30,6 +30,7 @@ export default function VendorEditPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const qc = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["vendor", id],
     queryFn: () => fetchVendor(id),
@@ -72,6 +73,29 @@ export default function VendorEditPage({
             initial={data}
             onSubmit={async (body) => {
               await updateVendorFromCookieSession(id, body);
+              // Slice 691 — refresh the detail surface the operator is
+              // redirected to. The detail and edit pages share the
+              // ["vendor", id] key, so without this invalidation the
+              // read-only detail serves the cached pre-review vendor and
+              // the derived review-status badge (overdue -> on time) and
+              // the Last-review field stay stale until a hard reload.
+              //
+              // Await the detail + history invalidations so their refetch
+              // is in flight BEFORE we navigate (avoids the shared-key
+              // read-back race noted in slice 424): the detail page mounts
+              // against an already-invalidated cache and refetches rather
+              // than painting the stale cached body.
+              await Promise.all([
+                qc.invalidateQueries({ queryKey: ["vendor", id] }),
+                qc.invalidateQueries({ queryKey: ["vendor-reviews", id] }),
+              ]);
+              // The list + burndown are prefix-matched (their keys carry
+              // filter params, e.g. ["vendors", criticality, overdueOnly]);
+              // a partial-key invalidate marks every variant stale so the
+              // list has no overdue row on return to /vendors. These need
+              // not block the navigation.
+              void qc.invalidateQueries({ queryKey: ["vendors"] });
+              void qc.invalidateQueries({ queryKey: ["vendors-burndown"] });
               router.push(`/vendors/${id}`);
             }}
             submitLabel="Save changes"

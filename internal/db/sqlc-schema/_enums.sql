@@ -197,3 +197,12 @@ CREATE TYPE csf_profile_kind AS ENUM (
     'current',
     'target'
 );
+
+-- ===== From migrations/sql/20260611000000_vendor_reviews_ledger.sql (slice 688) =====
+
+CREATE TYPE vendor_review_outcome AS ENUM (
+    'pass',
+    'pass_with_findings',
+    'fail',
+    'waived'
+);

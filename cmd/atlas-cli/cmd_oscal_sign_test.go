@@ -110,10 +110,34 @@ func TestOscalCLI_ConfigCheckKMSNoBinaryOverrideMissing(t *testing.T) {
 	}
 }
 
-func TestOscalCLI_ConfigCheckRejectsKeyless(t *testing.T) {
+func TestOscalCLI_ConfigCheckRejectsKeylessWithoutEndpoints(t *testing.T) {
+	// Keyless selected but no private Fulcio/Rekor configured → rejected
+	// (opt-in is not satisfied; P0-414-3). Clear any inherited endpoints.
 	t.Setenv("ATLAS_OSCAL_SIGNING_MODE", "cosign-keyless")
+	t.Setenv("ATLAS_COSIGN_FULCIO_URL", "")
+	t.Setenv("ATLAS_COSIGN_REKOR_URL", "")
 	if _, err := runOscalSignCmd(t, "config-check"); err == nil {
-		t.Fatal("config-check must reject cosign-keyless in Phase 1 (P0-413-1)")
+		t.Fatal("config-check must reject cosign-keyless without private Sigstore endpoints")
+	}
+}
+
+func TestOscalCLI_ConfigCheckKeylessOptIn(t *testing.T) {
+	// Keyless opt-in with private endpoints configured. The cosign binary is
+	// pointed at a nonexistent path so the check fails on "binary not found"
+	// rather than attempting a real keyless sign — which is the correct
+	// behavior to assert here (the mode resolves; the prerequisite check
+	// runs).
+	t.Setenv("ATLAS_OSCAL_SIGNING_MODE", "cosign-keyless")
+	t.Setenv("ATLAS_COSIGN_FULCIO_URL", "https://fulcio.atlas.internal")
+	t.Setenv("ATLAS_COSIGN_REKOR_URL", "https://rekor.atlas.internal")
+	t.Setenv("ATLAS_COSIGN_BINARY", "/nonexistent/cosign-xyz")
+	out, err := runOscalSignCmd(t, "config-check")
+	if err == nil {
+		t.Fatal("config-check must fail when the cosign binary is missing")
+	}
+	// The resolved-mode line should still have printed before the failure.
+	if !strings.Contains(out, "cosign-keyless") {
+		t.Errorf("output should report the resolved keyless mode, got %q", out)
 	}
 }
 

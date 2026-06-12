@@ -19,7 +19,7 @@
       "functions": 98,
       "lines": 97
     },
-    "app/(authed)/audits/oscal-export-future.ts": {
+    "app/(authed)/audits/oscal-export.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -312,6 +312,12 @@
       "branches": 64,
       "functions": 98,
       "lines": 88
+    },
+    "app/api/audits/[id]/oscal-export/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
     },
     "app/api/audits/route.ts": {
       "statements": 93,
@@ -619,6 +625,12 @@
       "functions": 98,
       "lines": 98
     },
+    "components/control/gap-explanation-view.ts": {
+      "statements": 98,
+      "branches": 90,
+      "functions": 98,
+      "lines": 98
+    },
     "components/control/strm.ts": {
       "statements": 0,
       "branches": 98,
@@ -817,6 +829,12 @@
       "functions": 81,
       "lines": 92
     },
+    "lib/checklist/checklist-view.ts": {
+      "statements": 98,
+      "branches": 92,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/display-name.ts": {
       "statements": 98,
       "branches": 91,
@@ -844,6 +862,12 @@
     "lib/page-names.ts": {
       "statements": 98,
       "branches": 86,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/questionnaire/ai-suggest.ts": {
+      "statements": 98,
+      "branches": 88,
       "functions": 98,
       "lines": 98
     },

@@ -197,7 +197,7 @@ export function CoverageTable({
                   <span
                     data-testid="coverage-row-chevron"
                     aria-disabled="true"
-                    title="Per-requirement inspector lands in a follow-up slice"
+                    title="Per-requirement inspector is not available yet"
                     className="inline-flex items-center justify-end text-muted-foreground/40"
                   >
                     <svg

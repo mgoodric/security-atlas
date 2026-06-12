@@ -81,3 +81,60 @@ INSERT INTO answer_library
     (id, tenant_id, scf_anchor_id, canonical_text, source_label, source_answer_id)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
+
+-- name: UpsertAISuggestedAnswer :one
+-- Slice 441 — persist an AI-suggested DRAFT answer for one question. The draft
+-- is ai_assisted=TRUE, human_approved=FALSE, human_approver=NULL: a suggestion
+-- the operator has not yet approved (P0-441-1, AC-6). The model-provenance
+-- columns are populated from the generation that produced the draft
+-- (snapshot-at-generation). On conflict (the question already has an answer)
+-- the draft REPLACES the prior answer text BUT resets approval to FALSE/NULL —
+-- a fresh suggestion is unapproved by construction, so an operator can never
+-- inherit a prior approval onto new AI text (P0-441-1).
+INSERT INTO questionnaire_answers
+    (id, tenant_id, question_id, answer_value, narrative, citations, authored_by,
+     ai_assisted, human_approved, human_approver,
+     prompt_version, model_name, model_version, model_provider)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+        TRUE, FALSE, NULL,
+        $8, $9, $10, $11)
+ON CONFLICT (question_id) DO UPDATE
+SET answer_value    = EXCLUDED.answer_value,
+    narrative       = EXCLUDED.narrative,
+    citations       = EXCLUDED.citations,
+    authored_by     = EXCLUDED.authored_by,
+    ai_assisted     = TRUE,
+    human_approved  = FALSE,
+    human_approver  = NULL,
+    prompt_version  = EXCLUDED.prompt_version,
+    model_name      = EXCLUDED.model_name,
+    model_version   = EXCLUDED.model_version,
+    model_provider  = EXCLUDED.model_provider,
+    updated_at      = now()
+RETURNING *;
+
+-- name: ApproveQuestionnaireAnswer :one
+-- Slice 441 — one-click human approval of an AI-suggested draft (AC-6/AC-7).
+-- Sets human_approved=TRUE and records the human_approver; optionally accepts
+-- the operator's edited final text. The DB CHECK
+-- questionnaire_answers_ai_assist_invariant makes human_approved=TRUE with a
+-- blank human_approver impossible (P0-441-8); this query NEVER passes an empty
+-- approver (the service rejects that before the round-trip via
+-- llm.EnforceApproval). Tenant-scoped by RLS + the explicit tenant_id guard.
+UPDATE questionnaire_answers
+SET narrative       = $3,
+    answer_value    = $4,
+    human_approved  = TRUE,
+    human_approver  = $5,
+    updated_at      = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND ai_assisted = TRUE
+RETURNING *;
+
+-- name: GetQuestionnaireAnswerByID :one
+-- Slice 441 — fetch one answer by id under the caller's tenant. Used by the
+-- approval path to confirm the draft exists + is AI-assisted before approving,
+-- and by tests. A cross-tenant id returns ErrNoRows (RLS).
+SELECT * FROM questionnaire_answers
+WHERE tenant_id = $1 AND id = $2;

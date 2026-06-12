@@ -46,10 +46,28 @@ FROM (
     UNION ALL
 
     -- exception expirations: active waivers ordered by when they lapse.
+    -- Slice 732: the title resolves the control UUID to its human SCF code
+    -- + control name (controls.title) so the agenda / month-grid / ICS read
+    -- "Exception on AAA-01 — <name>" instead of the raw
+    -- "Exception on control <uuid>". The SCF code is resolved two ways and
+    -- COALESCEd: (1) controls.scf_id, the code stamped directly on the
+    -- control row; (2) the global scf_anchors.scf_id reached through the
+    -- structured controls.scf_anchor_id FK (slice 009 linkage). The control
+    -- JOIN is on the composite (tenant_id, control_id) FK target — the row
+    -- is guaranteed to exist and is tenant-scoped (controls(tenant_id, id)),
+    -- so it crosses no tenant boundary (canvas invariant #6). scf_anchors is
+    -- the global platform catalog (no tenant_id, no RLS — slice 006), so the
+    -- LEFT JOIN to it leaks nothing tenant-specific. When NEITHER code
+    -- resolves (a data edge case), the title falls back to the control name
+    -- alone; it NEVER prints a bare UUID (AC-2).
     SELECT
         e.id::text                                                    AS event_id,
         'exception'::text                                             AS event_type,
-        ('Exception on control ' || e.control_id::text)::text         AS title,
+        ('Exception on ' || CASE
+            WHEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) IS NOT NULL
+                THEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) || ' — ' || c.title
+            ELSE c.title
+        END)::text                                                    AS title,
         e.expires_at::timestamptz                                     AS starts_at,
         NULL::timestamptz                                             AS ends_at,
         e.id::text                                                    AS related_entity_id,
@@ -58,6 +76,11 @@ FROM (
         e.status                                                      AS status,
         NULL::text                                                    AS cadence
     FROM exceptions e
+    JOIN controls c
+      ON c.tenant_id = e.tenant_id
+     AND c.id = e.control_id
+    LEFT JOIN scf_anchors a
+      ON a.id = c.scf_anchor_id
     WHERE e.tenant_id = $1
       AND e.status = 'active'
       AND e.expires_at IS NOT NULL
