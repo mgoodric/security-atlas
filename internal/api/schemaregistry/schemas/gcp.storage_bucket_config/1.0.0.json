@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/gcp.storage_bucket_config/1.0.0.json",
+  "x-evidence-kind": "gcp.storage_bucket_config.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CRY-04", "NET-04"],
+  "title": "GCP Cloud Storage bucket configuration",
+  "description": "Per-bucket hardening posture captured read-only from the Cloud Storage JSON API buckets.list (roles/storage.bucketViewer, projection=noAcl): encryption (default CMEK key), public-access-prevention, uniform bucket-level access, object versioning, and retention-policy duration. Bucket CONFIGURATION only — never the contents of any stored object, never an ACL entry, never a signed-URL secret. The connector never touches the object data plane.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["bucket_name", "public_access", "uniform_access"],
+  "properties": {
+    "bucket_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Globally-unique Cloud Storage bucket name."
+    },
+    "location": {
+      "type": "string",
+      "description": "Bucket location (e.g. US, EUROPE-WEST1)."
+    },
+    "default_kms_key_name": {
+      "type": "string",
+      "description": "Customer-managed encryption key (CMEK) resource name. Empty == Google-managed encryption key (still encrypted at rest)."
+    },
+    "uniform_access": {
+      "type": "boolean",
+      "description": "Uniform bucket-level access is enabled (IAM-only, no legacy per-object ACLs)."
+    },
+    "public_access": {
+      "type": "string",
+      "enum": ["enforced", "inherited", "unspecified"],
+      "description": "public-access-prevention state: enforced (no public access possible), inherited (inherits org/project policy), or unspecified."
+    },
+    "versioning_enabled": {
+      "type": "boolean",
+      "description": "Object versioning is enabled on the bucket."
+    },
+    "retention_seconds": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Retention-policy duration in seconds. 0 == no retention policy configured."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable reason when the hardening verdict is fail/inconclusive."
+    }
+  }
+}
