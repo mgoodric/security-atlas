@@ -1129,9 +1129,19 @@ func (s *Server) httpHandler() http.Handler {
 		root.Delete("/v1/admin/scim-credentials/{id}", adminScimH.Revoke)
 
 		scimUserH := scimapi.NewHandler(scim.NewStore(s.dbPool))
+		// Slice 733: the SCIM /Groups resource. Membership changes drive a
+		// re-derivation through the slice-509 grouprole resolver — the SOLE path
+		// to a role (P0-733-1 / P0-733-3). The resolver is REUSED via the
+		// scimGroupDeriver adapter, never re-implemented. Same router, same
+		// per-tenant SCIM credential, same RLS as /Users (P0-733-4).
+		scimGroupH := scimapi.NewGroupHandler(
+			scim.NewGroupStore(s.dbPool),
+			scimGroupDeriver{resolver: grouprole.NewResolver(s.dbPool)},
+		)
 		root.Group(func(scimR chi.Router) {
 			scimR.Use(scimapi.Middleware(s.scimCredStore))
 			scimUserH.Mount(scimR)
+			scimGroupH.MountGroups(scimR)
 		})
 	}
 	// Slice 073: admin-only bootstrap-token reset endpoint. Used by
@@ -1688,4 +1698,30 @@ func (a vendorBurndownAdapter) ReadHighCriticalityBurndown(ctx context.Context, 
 		OnTime:  bd.Total.Total - bd.Total.Overdue,
 		PastDue: bd.Total.Overdue,
 	}, nil
+}
+
+// scimGroupDeriver adapts the slice-509 grouprole.Resolver to the
+// scimapi.RoleDeriver surface the SCIM /Groups handler calls on a membership
+// change (slice 733 AC-3). It is a thin mapping shim: it translates the
+// handler's package-local DeriveRequest into a grouprole.DeriveInput with
+// Source=SCIM and a NIL idp_config_id (the SCIM push channel matches the
+// NULL-source mappings, per slice 509). It carries NO mapping/derivation logic
+// — that lives entirely in the resolver (P0-733-1). The resolver's last-admin
+// guard, fail-closed (unmapped group → no role), no-auto-create, and
+// manual-role preservation all hold unchanged on this path (P0-733-3 / AC-4).
+type scimGroupDeriver struct {
+	resolver *grouprole.Resolver
+}
+
+// Derive maps the SCIM membership change to roles via the slice-509 resolver.
+// ctx carries the tenant RLS context set by the SCIM auth middleware, so the
+// resolver reads the tenant's mappings + reconciles under RLS (P0-733-4).
+func (d scimGroupDeriver) Derive(ctx context.Context, in scimapi.DeriveRequest) error {
+	_, err := d.resolver.Derive(ctx, grouprole.DeriveInput{
+		UserID:      in.UserID,
+		IDPConfigID: uuid.Nil, // SCIM source → NULL-source mappings (slice 509)
+		Groups:      in.Groups,
+		Source:      grouprole.SourceSCIM,
+	})
+	return err
 }

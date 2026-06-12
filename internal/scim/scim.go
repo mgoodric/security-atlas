@@ -204,8 +204,8 @@ func ServiceProviderConfig() map[string]any {
 	}
 }
 
-// ResourceTypes is the SCIM /ResourceTypes document (RFC 7643 §6). Only the
-// User resource type is exposed (Group is slice 509).
+// ResourceTypes is the SCIM /ResourceTypes document (RFC 7643 §6). Slice 733
+// adds the Group resource type alongside User (slice 508).
 func ResourceTypes(baseURL string) []map[string]any {
 	return []map[string]any{
 		{
@@ -215,6 +215,15 @@ func ResourceTypes(baseURL string) []map[string]any {
 			"endpoint":         "/Users",
 			"schema":           SchemaUser,
 			"meta":             map[string]any{"resourceType": "ResourceType", "location": baseURL + "/ResourceTypes/User"},
+			"schemaExtensions": []any{},
+		},
+		{
+			"schemas":          []string{SchemaResourceType},
+			"id":               ResourceTypeGroup,
+			"name":             ResourceTypeGroup,
+			"endpoint":         "/Groups",
+			"schema":           SchemaGroup,
+			"meta":             map[string]any{"resourceType": "ResourceType", "location": baseURL + "/ResourceTypes/Group"},
 			"schemaExtensions": []any{},
 		},
 	}
@@ -238,6 +247,17 @@ func Schemas() []map[string]any {
 				attrComplex("emails"),
 			},
 		},
+		{
+			"id":          SchemaGroup,
+			"name":        "Group",
+			"description": "Group",
+			"meta":        map[string]any{"resourceType": "Schema", "location": "/scim/v2/Schemas/" + SchemaGroup},
+			"attributes": []map[string]any{
+				attr("displayName", "string", true, "none", "default"),
+				attr("externalId", "string", false, "none", "default"),
+				attrMembers(),
+			},
+		},
 	}
 }
 
@@ -251,6 +271,25 @@ func attr(name, typ string, required bool, uniqueness, returned string) map[stri
 		"mutability":  "readWrite",
 		"returned":    returned,
 		"uniqueness":  uniqueness,
+	}
+}
+
+// attrMembers describes the SCIM Group `members` multi-valued complex
+// attribute (RFC 7643 §4.2). `value` is the member's resource id.
+func attrMembers() map[string]any {
+	return map[string]any{
+		"name":        "members",
+		"type":        "complex",
+		"multiValued": true,
+		"required":    false,
+		"mutability":  "readWrite",
+		"returned":    "default",
+		"subAttributes": []map[string]any{
+			{"name": "value", "type": "string", "multiValued": false, "required": false},
+			{"name": "$ref", "type": "reference", "multiValued": false, "required": false},
+			{"name": "display", "type": "string", "multiValued": false, "required": false},
+			{"name": "type", "type": "string", "multiValued": false, "required": false},
+		},
 	}
 }
 
