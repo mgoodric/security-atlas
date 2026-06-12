@@ -378,6 +378,28 @@ func (q *Queries) ListVendors(ctx context.Context, arg ListVendorsParams) ([]Ven
 	return items, nil
 }
 
+const setVendorLastReviewDate = `-- name: SetVendorLastReviewDate :exec
+UPDATE vendors SET
+    last_review_date = $3,
+    updated_at       = now()
+WHERE tenant_id = $1 AND id = $2
+`
+
+type SetVendorLastReviewDateParams struct {
+	TenantID       pgtype.UUID `json:"tenant_id"`
+	ID             pgtype.UUID `json:"id"`
+	LastReviewDate pgtype.Date `json:"last_review_date"`
+}
+
+// Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
+// ledger (AC-2, decisions log D2). Called after recording a review when the
+// new review's reviewed_at is the most-recent on file. updated_at is bumped so
+// the detail page's "last updated" reflects the change. RLS scopes the write.
+func (q *Queries) SetVendorLastReviewDate(ctx context.Context, arg SetVendorLastReviewDateParams) error {
+	_, err := q.db.Exec(ctx, setVendorLastReviewDate, arg.TenantID, arg.ID, arg.LastReviewDate)
+	return err
+}
+
 const updateVendor = `-- name: UpdateVendor :one
 UPDATE vendors SET
     name             = $3,

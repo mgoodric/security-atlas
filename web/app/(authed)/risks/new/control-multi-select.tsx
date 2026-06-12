@@ -153,9 +153,9 @@ export function ControlMultiSelect({
           className="rounded-md border border-input bg-muted/40 p-3 text-sm text-muted-foreground"
           data-testid="risks-create-control-multi-select-empty"
         >
-          No active controls in this tenant yet. Upload a control bundle via{" "}
-          <span className="font-mono">/v1/controls:upload-bundle</span> or
-          switch treatment to <span className="font-mono">accept</span> /{" "}
+          No active controls in this tenant yet. Import your controls from the
+          SCF catalog, or switch treatment to{" "}
+          <span className="font-mono">accept</span> /{" "}
           <span className="font-mono">transfer</span> /{" "}
           <span className="font-mono">avoid</span>.
         </div>

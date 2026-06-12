@@ -1,11 +1,14 @@
 -- Slice 094 — compliance calendar backend read query.
 --
--- ONE UNION ALL across four event sources:
+-- ONE UNION ALL across five event sources:
 --
 --   1. audit_periods           — period_end is the audit's "report due" date
 --   2. exceptions              — expires_at is the waiver-lapse date
 --   3. policies                — next_review_at is the next review date
---   4. controls + control_evaluations — periodic-review controls whose
+--   4. vendors                 — last_review_date + review_cadence interval is
+--      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
+--      vendor branch so the two surfaces cannot drift (slice 675).
+--   5. controls + control_evaluations — periodic-review controls whose
 --      cadence (derived from freshness_class) places their next review
 --      between $from and $to. last_evaluated_at = MAX(evaluated_at) over
 --      the append-only control_evaluations ledger.
@@ -18,7 +21,7 @@
 -- timestamptz bounds.
 --
 -- Type filter (`type_filter`) is a CSV string. Empty string ('') means
--- "all four sources." A non-empty filter narrows to the subset by checking
+-- "all five sources." A non-empty filter narrows to the subset by checking
 -- membership on the per-branch literal type discriminator.
 --
 -- Cadence math for the controls branch:
@@ -76,10 +79,28 @@ FROM (
     UNION ALL
 
     -- exception expirations: active waivers ordered by when they lapse.
+    -- Slice 732: the title resolves the control UUID to its human SCF code
+    -- + control name (controls.title) so the agenda / month-grid / ICS read
+    -- "Exception on AAA-01 — <name>" instead of the raw
+    -- "Exception on control <uuid>". The SCF code is resolved two ways and
+    -- COALESCEd: (1) controls.scf_id, the code stamped directly on the
+    -- control row; (2) the global scf_anchors.scf_id reached through the
+    -- structured controls.scf_anchor_id FK (slice 009 linkage). The control
+    -- JOIN is on the composite (tenant_id, control_id) FK target — the row
+    -- is guaranteed to exist and is tenant-scoped (controls(tenant_id, id)),
+    -- so it crosses no tenant boundary (canvas invariant #6). scf_anchors is
+    -- the global platform catalog (no tenant_id, no RLS — slice 006), so the
+    -- LEFT JOIN to it leaks nothing tenant-specific. When NEITHER code
+    -- resolves (a data edge case), the title falls back to the control name
+    -- alone; it NEVER prints a bare UUID (AC-2).
     SELECT
         e.id::text                                                    AS event_id,
         'exception'::text                                             AS event_type,
-        ('Exception on control ' || e.control_id::text)::text         AS title,
+        ('Exception on ' || CASE
+            WHEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) IS NOT NULL
+                THEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) || ' — ' || c.title
+            ELSE c.title
+        END)::text                                                    AS title,
         e.expires_at::timestamptz                                     AS starts_at,
         NULL::timestamptz                                             AS ends_at,
         e.id::text                                                    AS related_entity_id,
@@ -88,6 +109,11 @@ FROM (
         e.status                                                      AS status,
         NULL::text                                                    AS cadence
     FROM exceptions e
+    JOIN controls c
+      ON c.tenant_id = e.tenant_id
+     AND c.id = e.control_id
+    LEFT JOIN scf_anchors a
+      ON a.id = c.scf_anchor_id
     WHERE e.tenant_id = $1
       AND e.status = 'active'
       AND e.expires_at IS NOT NULL
@@ -115,6 +141,49 @@ FROM (
       AND p.next_review_at::timestamptz >= sqlc.arg(from_ts)::timestamptz
       AND p.next_review_at::timestamptz <  sqlc.arg(to_ts)::timestamptz
       AND (sqlc.arg(type_filter)::text = '' OR position('policy' IN sqlc.arg(type_filter)::text) > 0)
+
+    UNION ALL
+
+    -- vendor reviews: last_review_date + cadence interval is the next-review
+    -- date. Mirrors the dashboard "Upcoming" rollup's vendor branch
+    -- (internal/db/queries/dashboard.sql ListUpcomingItems) so the two
+    -- surfaces source the SAME vendor-review events (slice 675 AC-1/AC-3).
+    -- Vendors with no last_review_date are excluded — there is no anchor to
+    -- project a next-review date from. The cadence -> interval mapping is the
+    -- vendor_review_cadence enum (monthly/quarterly/biannual/annual); the
+    -- ELSE-less CASE is total over the enum so next_due_at is never NULL.
+    SELECT
+        v.id::text                                                    AS event_id,
+        'vendor'::text                                                AS event_type,
+        ('Vendor review: ' || v.name)::text                           AS title,
+        (v.last_review_date + CASE v.review_cadence
+            WHEN 'monthly'   THEN INTERVAL '1 month'
+            WHEN 'quarterly' THEN INTERVAL '3 months'
+            WHEN 'biannual'  THEN INTERVAL '6 months'
+            WHEN 'annual'    THEN INTERVAL '12 months'
+         END)::timestamptz                                            AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        v.id::text                                                    AS related_entity_id,
+        'vendor'::text                                                AS related_entity_kind,
+        v.criticality::text                                           AS summary,
+        v.review_cadence::text                                        AS status,
+        v.review_cadence::text                                        AS cadence
+    FROM vendors v
+    WHERE v.tenant_id = $1
+      AND v.last_review_date IS NOT NULL
+      AND (v.last_review_date + CASE v.review_cadence
+            WHEN 'monthly'   THEN INTERVAL '1 month'
+            WHEN 'quarterly' THEN INTERVAL '3 months'
+            WHEN 'biannual'  THEN INTERVAL '6 months'
+            WHEN 'annual'    THEN INTERVAL '12 months'
+           END)::timestamptz >= sqlc.arg(from_ts)::timestamptz
+      AND (v.last_review_date + CASE v.review_cadence
+            WHEN 'monthly'   THEN INTERVAL '1 month'
+            WHEN 'quarterly' THEN INTERVAL '3 months'
+            WHEN 'biannual'  THEN INTERVAL '6 months'
+            WHEN 'annual'    THEN INTERVAL '12 months'
+           END)::timestamptz <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR position('vendor' IN sqlc.arg(type_filter)::text) > 0)
 
     UNION ALL
 

@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 )
 
@@ -478,5 +479,109 @@ func TestSlice268_PartialTypesAlwaysArray(t *testing.T) {
 	}
 	if _, ok := raw.([]any); !ok {
 		t.Fatalf("partial_types not an array, got %T", raw)
+	}
+}
+
+// ===== IST-8: slice 661 — SCF anchor catalog search (AC-1, AC-4) =====
+//
+// This is the reproduction-and-fix test. It seeds the bundled SCF
+// catalog via scfseed.EnsureFullCatalog (which loads CRY-04 "Encryption
+// At Rest" + CRY-08 "Encryption In Transit" among ~53 anchors) and a
+// brand-new tenant with ZERO instantiated controls. Before the slice
+// 661 change there is no `anchors` search branch, so both `q=CRY-04`
+// (anchor-code match) and `q=encryption` (anchor-title match) return
+// zero hits even though the anchors are present in /catalog/scf. With
+// the change, both return anchor hits.
+//
+// The same test also asserts the invariant-#6 boundary: an anchor hit
+// (tenant-agnostic catalog) does NOT leak another tenant's
+// tenant-scoped rows. We seed a SECOND tenant's control carrying the
+// "encryption" token and confirm tenant A's `q=encryption` search never
+// returns it — controls stay RLS-scoped exactly as before.
+func TestSlice661_AnchorSearch_EmptyTenant(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	// Seed the bundled SCF catalog (CRY-04, CRY-08, ... — tenant-agnostic).
+	if err := scfseed.EnsureFullCatalog(context.Background(), admin); err != nil {
+		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
+	}
+
+	// Tenant A: the empty tenant — ZERO instantiated controls.
+	tenantA := freshTenant(t, admin)
+	// Tenant B: an unrelated tenant whose control carries the
+	// "encryption" token. The RLS boundary must keep tenant A's search
+	// from ever returning this row.
+	tenantB := freshTenant(t, admin)
+	seedControl(t, admin, tenantB,
+		"Tenant B encryption control "+uuid.NewString()[:8],
+		"encryption at rest for tenant B")
+
+	envA := testServer(t, app, tenantA)
+
+	// --- AC-4(a): exact anchor code `CRY-04` returns an anchor hit. ---
+	resp, body := doGet(t, envA, "/v1/search?q=CRY-04&limit=50")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("IST-8 CRY-04: status %d body=%v", resp.StatusCode, body)
+	}
+	hits := hitsAsSlice(body)
+	var sawCRY04 bool
+	for _, h := range hits {
+		if h["type"] != "anchors" {
+			continue
+		}
+		// The anchor link id must be the anchor UUID (the FE links to
+		// /catalog/scf/<id>). Title is "<scf_id> — <title>".
+		title, _ := h["title"].(string)
+		id, _ := h["id"].(string)
+		if strings.Contains(title, "CRY-04") {
+			sawCRY04 = true
+			if _, err := uuid.Parse(id); err != nil {
+				t.Errorf("IST-8: anchor hit id %q is not a UUID (FE links to /catalog/scf/<id>)", id)
+			}
+		}
+	}
+	if !sawCRY04 {
+		t.Fatalf("IST-8 CRY-04: expected an anchor hit for CRY-04 on an empty tenant, got hits=%v", hits)
+	}
+
+	// --- AC-4(b): name query `encryption` returns anchor hits ---
+	// (CRY-04 "Encryption At Rest" + CRY-08 "Encryption In Transit"),
+	// AND does NOT leak tenant B's matching control (RLS isolation).
+	resp, body = doGet(t, envA, "/v1/search?q=encryption&limit=50")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("IST-8 encryption: status %d body=%v", resp.StatusCode, body)
+	}
+	hits = hitsAsSlice(body)
+	anchorTitles := map[string]bool{}
+	for _, h := range hits {
+		title, _ := h["title"].(string)
+		switch h["type"] {
+		case "anchors":
+			anchorTitles[title] = true
+		case "controls":
+			// Invariant #6: tenant A has zero controls; any control hit
+			// would be a cross-tenant RLS leak of tenant B's row.
+			t.Errorf("IST-8: invariant-#6 leak — empty tenant A's anchor search returned a control hit %q", title)
+		}
+	}
+	if len(anchorTitles) == 0 {
+		t.Fatalf("IST-8 encryption: expected anchor hits, got none (hits=%v)", hits)
+	}
+	// Both encryption anchors should surface by title.
+	var sawAtRest, sawInTransit bool
+	for title := range anchorTitles {
+		if strings.Contains(title, "CRY-04") {
+			sawAtRest = true
+		}
+		if strings.Contains(title, "CRY-08") {
+			sawInTransit = true
+		}
+	}
+	if !sawAtRest {
+		t.Errorf("IST-8 encryption: expected CRY-04 (Encryption At Rest) anchor hit, titles=%v", anchorTitles)
+	}
+	if !sawInTransit {
+		t.Errorf("IST-8 encryption: expected CRY-08 (Encryption In Transit) anchor hit, titles=%v", anchorTitles)
 	}
 }

@@ -161,14 +161,20 @@ func writeControls(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) 
 // writeRisks bulk-inserts the risks fixture set + their risk_control_links.
 func writeRisks(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
 	for _, r := range fs.risks {
+		// org_unit_id + themes are slice-052 columns the slice-678 seed
+		// populates so /risks/hierarchy renders (org tree needs the
+		// org_unit binding; the theme × org_unit heatmap needs BOTH a
+		// non-NULL org_unit_id AND a non-empty themes array). org_unit_id
+		// is nil-safe: nullableUUID passes NULL when the org tree is empty.
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO risks
 			 (id, tenant_id, title, description, category, treatment, treatment_owner,
-			  inherent_score, residual_score, review_due_at)
-			 VALUES ($1, $2, $3, $4, $5::risk_category, $6::risk_treatment, $7, $8::jsonb, $9::jsonb, $10)`,
+			  inherent_score, residual_score, review_due_at, org_unit_id, themes)
+			 VALUES ($1, $2, $3, $4, $5::risk_category, $6::risk_treatment, $7, $8::jsonb, $9::jsonb, $10, $11, $12)`,
 			r.ID, fs.tenant.ID, r.Title, r.Description,
 			r.Category, r.Treatment, r.TreatmentOwner,
 			r.InherentScoreJ, r.ResidualScoreJ, r.ReviewDueAt,
+			nullableUUID(r.OrgUnitID), r.Themes,
 		); err != nil {
 			return 0, fmt.Errorf("demoseed: insert risk %s: %w", r.Title, err)
 		}
@@ -190,17 +196,23 @@ func writeRisks(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
 // The demo ships all policies as 'published'.
 func writePolicies(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
 	for _, p := range fs.policies {
+		// acknowledgment_required_roles is the ack-roster denominator key
+		// (slice 678 / ATLAS-037). An empty array reproduces the "no
+		// required-role users" empty state; we set a non-empty set so the
+		// roster has a real denominator. text[] arg passed as a Go slice —
+		// pgx encodes []string to text[] directly.
 		if _, err := tx.Exec(ctx,
 			`INSERT INTO policies
 			 (id, tenant_id, title, version, effective_date, body_md,
 			  owner_role, approver_role, status, source_attribution, created_by,
-			  published_at, published_by)
+			  published_at, published_by, acknowledgment_required_roles)
 			 VALUES ($1, $2, $3, '1.0.0', $4, $5,
 			         $6, $7, $8, 'tenant_authored', $9,
-			         $10, $9)`,
+			         $10, $9, $11)`,
 			p.ID, fs.tenant.ID, p.Title, p.EffectiveDate, p.BodyMD,
 			p.Owner, p.Approver, p.Status, fs.user.Email,
 			p.EffectiveDate.UTC(), // published_at — wall-clock; reuse the effective_date day
+			p.RequiredRoles,
 		); err != nil {
 			return 0, fmt.Errorf("demoseed: insert policy %s: %w", p.Title, err)
 		}
@@ -573,6 +585,204 @@ func sha256Of(s string) []byte {
 	return h[:]
 }
 
+// demoSCFAnchor is one synthesized SCF anchor for the self-contained spine
+// branch. scf_id values are REAL SCF control codes (the same family/code
+// shape the slice-006 catalog importer produces), so the demo never invents
+// a parallel control taxonomy (invariant #7) — it just bundles a thin slice
+// of the SCF catalog when the full global catalog is not loaded.
+type demoSCFAnchor struct {
+	SCFID  string
+	Family string
+	Title  string
+}
+
+// demoSCFAnchors is the fixed thin-slice SCF anchor set the self-contained
+// spine branch synthesizes. The codes/families are drawn verbatim from the
+// SCF catalog (securecontrolsframework.com) so anchoring to them is anchoring
+// to real SCF controls, not fabricated ones.
+var demoSCFAnchors = []demoSCFAnchor{
+	{"IAC-06", "Identification & Authentication", "Multi-Factor Authentication"},
+	{"CRY-05", "Cryptographic Protections", "Encryption of Data at Rest"},
+	{"BCD-11", "Business Continuity & Disaster Recovery", "Data Backups"},
+	{"TDA-09", "Technology Development & Acquisition", "Secure Coding"},
+	{"TPM-03", "Third-Party Management", "Supply Chain Risk Management"},
+	{"MON-01", "Continuous Monitoring", "Continuous Monitoring"},
+	{"VPM-02", "Vulnerability & Patch Management", "Vulnerability Remediation"},
+	{"IRO-04", "Incident Response", "Incident Handling"},
+}
+
+// writeFrameworkPostureSpine builds the SCF-anchor coverage spine
+// (constitutional invariant #1) for the demo tenant so the dashboard
+// "Framework posture" tiles render REAL coverage instead of "No active
+// framework versions yet" (slice 682 / ATLAS-037).
+//
+// The spine is:
+//
+//	framework_versions (status='current', tenant-scoped demo)
+//	  -> framework_requirements
+//	    -> fw_to_scf_edges (STRM, non-no_relationship)
+//	      -> scf_anchors
+//	        <- controls.scf_anchor_id (this tenant's active controls)
+//
+// AC-4 JUDGMENT (global-catalog dependency vs demo self-containment): the
+// demo seed must work in the common deploy where the full global SCF catalog
+// (tenant_id IS NULL framework_versions + scf_anchors) is NOT loaded — that
+// is the state of the CI integration DB and of a fresh self-host before any
+// catalog import. So the seed is SELF-CONTAINED: it builds the whole spine on
+// a tenant-scoped demo framework_version. When the global SCF catalog IS
+// present, the seed ADOPTS its real anchors (same scf_id codes resolve to the
+// global rows) rather than duplicating them; the demo requirements + edges
+// still hang off the tenant-scoped demo framework_version, so the global
+// catalog is never mutated (AC-4 / invariant #6). See
+// docs/audit-log/682-demo-posture-decisions.md.
+//
+// Idempotency (AC-5): every spine row hangs (directly or via FK CASCADE) off
+// the tenant-scoped demo framework_version, which Teardown deletes with
+// `DELETE FROM framework_versions WHERE tenant_id = $1`. A re-seed rebuilds
+// the spine from scratch with identical cardinality — no duplicate edges.
+//
+// Returns (requirements, edges, controlsAnchored).
+func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, int, int, error) {
+	// 1. Find-or-create a tenant-scoped demo framework_version with
+	//    status='current'. writeAuditPeriodsAndSamples may already have
+	//    created one (when the global catalog is absent) OR adopted a global
+	//    version (when present). We never hang demo requirements off a global
+	//    framework_version (that would pollute the global catalog — AC-4), so
+	//    we explicitly resolve the TENANT-SCOPED one and create it if needed.
+	var fwVersionID uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT id FROM framework_versions
+		WHERE tenant_id = $1 AND status = 'current'
+		ORDER BY created_at ASC
+		LIMIT 1
+	`, fs.tenant.ID).Scan(&fwVersionID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		fwID := uuid.New()
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO frameworks (id, tenant_id, name, slug, issuer)
+			 VALUES ($1, $2, 'Demo Framework', 'demo-framework', 'demo-seed')
+			 ON CONFLICT (tenant_id, slug) DO NOTHING`,
+			fwID, fs.tenant.ID,
+		); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine insert demo framework: %w", err)
+		}
+		// ON CONFLICT may have skipped the insert (a demo framework already
+		// exists from writeAuditPeriodsAndSamples); resolve the real id.
+		if err := tx.QueryRow(ctx,
+			`SELECT id FROM frameworks WHERE tenant_id = $1 AND slug = 'demo-framework'`,
+			fs.tenant.ID,
+		).Scan(&fwID); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine resolve demo framework: %w", err)
+		}
+		fwVersionID = uuid.New()
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+			 VALUES ($1, $2, $3, '1.0', 'current')`,
+			fwVersionID, fs.tenant.ID, fwID,
+		); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine insert demo framework_version: %w", err)
+		}
+		fs.frameworkVersionIDs = append(fs.frameworkVersionIDs, fwVersionID)
+	} else if err != nil {
+		return 0, 0, 0, fmt.Errorf("demoseed: spine lookup framework_version: %w", err)
+	}
+
+	// 2. For each anchor in the thin SCF slice: resolve the real global
+	//    scf_anchors row by scf_id when the catalog is loaded (ADOPT), else
+	//    synthesize a tenant-scoped demo anchor on the demo framework_version
+	//    (SELF-CONTAINED). Build a requirement + a STRM edge per anchor.
+	reqCount := 0
+	edgeCount := 0
+	anchorIDs := make([]uuid.UUID, 0, len(demoSCFAnchors))
+	for i, a := range demoSCFAnchors {
+		// ADOPT: a global anchor (tenant_id IS NULL framework_version) with
+		// this scf_id already exists in the catalog.
+		var anchorID uuid.UUID
+		adoptErr := tx.QueryRow(ctx, `
+			SELECT sa.id
+			FROM scf_anchors sa
+			JOIN framework_versions fv ON fv.id = sa.framework_version_id
+			WHERE sa.scf_id = $1 AND fv.tenant_id IS NULL
+			ORDER BY sa.created_at ASC
+			LIMIT 1
+		`, a.SCFID).Scan(&anchorID)
+		if errors.Is(adoptErr, pgx.ErrNoRows) {
+			// SELF-CONTAINED: synthesize a demo anchor on the demo version.
+			anchorID = uuid.New()
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO scf_anchors
+				 (id, framework_version_id, scf_id, family, title, description)
+				 VALUES ($1, $2, $3, $4, $5, $6)`,
+				anchorID, fwVersionID, a.SCFID, a.Family, a.Title,
+				"Demo SCF anchor for the seeded posture spine.",
+			); err != nil {
+				return 0, 0, 0, fmt.Errorf("demoseed: spine insert scf_anchor %s: %w", a.SCFID, err)
+			}
+		} else if adoptErr != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine adopt scf_anchor %s: %w", a.SCFID, adoptErr)
+		}
+		anchorIDs = append(anchorIDs, anchorID)
+
+		// Requirement on the demo framework_version, one per anchor. The code
+		// is a stable demo-namespaced clause id; the title mirrors the anchor.
+		reqID := uuid.New()
+		reqCode := fmt.Sprintf("DEMO-%02d", i+1)
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO framework_requirements
+			 (id, framework_version_id, code, title, body)
+			 VALUES ($1, $2, $3, $4, $5)`,
+			reqID, fwVersionID, reqCode, a.Title,
+			"Demo framework requirement satisfied via the SCF anchor crosswalk.",
+		); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine insert framework_requirement %s: %w", reqCode, err)
+		}
+		reqCount++
+
+		// STRM edge requirement -> anchor. 'equal' is the strongest STRM
+		// relationship (NIST IR 8477); a non-'no_relationship' edge is what
+		// the posture query's req_anchor CTE requires. source_attribution
+		// 'org_internal' marks this as a demo-synthesized crosswalk, never
+		// claimed as official SCF mapping.
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO fw_to_scf_edges
+			 (id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale)
+			 VALUES ($1, $2, $3, 'equal', 1.0, 'org_internal', $4)`,
+			uuid.New(), reqID, anchorID,
+			"Demo seed crosswalk: requirement is satisfied by the SCF anchor.",
+		); err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine insert fw_to_scf_edge %s: %w", reqCode, err)
+		}
+		edgeCount++
+	}
+
+	// 3. Anchor the demo controls. Round-robin the tenant's active controls
+	//    across the chosen anchors so MOST (but not necessarily all)
+	//    requirements are covered — a realistic, non-flat coverage_pct.
+	//    Leaving a couple of requirements uncovered keeps the tile honest
+	//    (coverage < 100% is the realistic demo state). We anchor every
+	//    control to keep the UCF graph dense, but skip the LAST two anchors
+	//    in the round-robin so their requirements render as gaps.
+	coverableAnchors := anchorIDs
+	if len(coverableAnchors) > 2 {
+		coverableAnchors = coverableAnchors[:len(coverableAnchors)-2]
+	}
+	controlsAnchored := 0
+	for i, c := range fs.controls {
+		anchorID := coverableAnchors[i%len(coverableAnchors)]
+		ct, err := tx.Exec(ctx,
+			`UPDATE controls SET scf_anchor_id = $1
+			 WHERE id = $2 AND tenant_id = $3`,
+			anchorID, c.ID, fs.tenant.ID,
+		)
+		if err != nil {
+			return 0, 0, 0, fmt.Errorf("demoseed: spine anchor control %s: %w", c.ID, err)
+		}
+		controlsAnchored += int(ct.RowsAffected())
+	}
+
+	return reqCount, edgeCount, controlsAnchored, nil
+}
+
 // writeDemoAuditTrail writes ~50 tenant-scoped me_audit_log rows with
 // realistic actions ('profile.update', 'preferences.update', etc.).
 // Every row carries `payload_json -> demo_seed_v = "205"` for AC-9.
@@ -610,6 +820,197 @@ func writeDemoAuditTrail(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, e
 		count++
 	}
 	return count, nil
+}
+
+// writeOrgUnits inserts the org-unit hierarchy. Parents are inserted
+// before children (the fixture builder emits company → org → team order,
+// which is already topologically sorted for the self-ref FK). Slice 678 /
+// ATLAS-028. MUST run before writeRisks (risks.org_unit_id FKs here).
+func writeOrgUnits(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
+	for _, u := range fs.orgUnits {
+		authoritiesBytes, err := json.Marshal(u.AcceptanceAuthorities)
+		if err != nil {
+			return 0, fmt.Errorf("demoseed: marshal acceptance_authorities: %w", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO org_units
+			 (id, tenant_id, name, parent_id, level, acceptance_authorities)
+			 VALUES ($1, $2, $3, $4, $5::risk_level, $6::jsonb)`,
+			u.ID, fs.tenant.ID, u.Name, nullableUUIDPtr(u.ParentID), u.Level,
+			authoritiesBytes,
+		); err != nil {
+			return 0, fmt.Errorf("demoseed: insert org_unit %s: %w", u.Name, err)
+		}
+	}
+	return len(fs.orgUnits), nil
+}
+
+// writeRoleUsers inserts the role-holder users (+ their local_credentials,
+// user_roles, and api_keys rows) so the policy-ack roster has a real
+// denominator (slice 678 / ATLAS-037, AC-3). The roster query counts
+// distinct api_keys.issued_by whose owner_roles intersect a policy's
+// acknowledgment_required_roles, so each user carries an api_keys row with
+// OwnerRoles stamped. Users are demo_only=TRUE (the slice-205 forensic
+// mark + slice-142 super_admin-promotion guard). A subset also write
+// policy_acknowledgments so the roster numerator is non-zero.
+//
+// passwordHash is reused from the admin user — these demo users never log
+// in interactively (the operator logs in as admin@demo.example); the
+// credential row exists so the user is a complete, RLS-consistent record.
+func writeRoleUsers(ctx context.Context, tx pgx.Tx, fs *fixtureSet, passwordHash string) (int, error) {
+	for _, u := range fs.roleUsers {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO users (id, tenant_id, email, display_name, status, demo_only)
+			 VALUES ($1, $2, $3, $4, 'active', TRUE)`,
+			u.ID, fs.tenant.ID, u.Email, u.Name,
+		); err != nil {
+			return 0, fmt.Errorf("demoseed: insert role user %s: %w", u.Email, err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO local_credentials (user_id, tenant_id, password_hash, algo, params)
+			 VALUES ($1, $2, $3, 'argon2id', '{}'::jsonb)`,
+			u.ID, fs.tenant.ID, passwordHash,
+		); err != nil {
+			return 0, fmt.Errorf("demoseed: insert role user creds %s: %w", u.Email, err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
+			 VALUES ($1, $2, 'viewer', 'system:demoseed')`,
+			fs.tenant.ID, u.ID.String(),
+		); err != nil {
+			return 0, fmt.Errorf("demoseed: insert role user_roles %s: %w", u.Email, err)
+		}
+		// api_keys row carrying owner_roles — the roster's role source.
+		// token_hash is a deterministic-but-unique 32-byte digest derived
+		// from the user id (the key is never used to authenticate; it
+		// exists so the user appears in the roster denominator).
+		tokenHash := sha256.Sum256([]byte("demo-api-key:" + u.ID.String()))
+		last4 := u.ID.String()[len(u.ID.String())-4:]
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO api_keys
+			 (id, tenant_id, token_hash, issued_by, owner_roles, last4)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			uuid.New(), fs.tenant.ID, tokenHash[:], u.ID, u.OwnerRoles, last4,
+		); err != nil {
+			return 0, fmt.Errorf("demoseed: insert role user api_key %s: %w", u.Email, err)
+		}
+	}
+
+	// Acks: a subset of role users acknowledge every published policy so
+	// the roster numerator is non-zero (a partial roster, not 0% or 100%).
+	if err := writePolicyAcks(ctx, tx, fs); err != nil {
+		return 0, err
+	}
+	return len(fs.roleUsers), nil
+}
+
+// writePolicyAcks writes policy_acknowledgments for the role users flagged
+// Acks=true, one per published policy. ack_token is the deterministic
+// (user, policy_version, day-bucket) key the real handler derives; we
+// reproduce a stable shape so a re-seed is idempotent at the unique index.
+func writePolicyAcks(ctx context.Context, tx pgx.Tx, fs *fixtureSet) error {
+	for _, u := range fs.roleUsers {
+		if !u.Acks {
+			continue
+		}
+		for _, p := range fs.policies {
+			ackToken := fmt.Sprintf("demo-ack:%s:%s", u.ID.String(), p.ID.String())
+			ackedAt := fs.now.AddDate(0, 0, -7) // acknowledged a week ago (fresh)
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO policy_acknowledgments
+				 (tenant_id, policy_id, policy_version_id, user_id, acknowledged_at, ack_token)
+				 VALUES ($1, $2, $3, $4, $5, $6)`,
+				fs.tenant.ID, p.ID, p.ID, u.ID, ackedAt, ackToken,
+			); err != nil {
+				return fmt.Errorf("demoseed: insert policy_ack %s/%s: %w", u.Email, p.Title, err)
+			}
+		}
+	}
+	return nil
+}
+
+// writeDecisions inserts the Decision Log entries + their decision_risks
+// links so the /risks/hierarchy decision timeline is non-empty (slice 678
+// / ATLAS-028, AC-1). MUST run after writeRisks (decision_risks FKs into
+// risks). The decisions.tenant_write RLS WITH CHECK gates on
+// app.current_role being set/non-empty — the seeder runs BYPASSRLS so the
+// policy is not enforced, but the row carries the correct tenant_id.
+func writeDecisions(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
+	for _, d := range fs.decisions {
+		var revisitBy any
+		if d.RevisitBy != nil {
+			revisitBy = *d.RevisitBy
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO decisions
+			 (id, tenant_id, decision_id, title, narrative, constraints,
+			  tradeoffs, decision_maker, decided_at, revisit_by, status)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::decision_status)`,
+			d.ID, fs.tenant.ID, d.DecisionID, d.Title, d.Narrative, d.Constraints,
+			d.Tradeoffs, d.DecisionMaker, d.DecidedAt, revisitBy, d.Status,
+		); err != nil {
+			return 0, fmt.Errorf("demoseed: insert decision %s: %w", d.DecisionID, err)
+		}
+		if d.LinkedRiskID != nil {
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO decision_risks (decision_id, target_id, tenant_id)
+				 VALUES ($1, $2, $3)`,
+				d.ID, *d.LinkedRiskID, fs.tenant.ID,
+			); err != nil {
+				return 0, fmt.Errorf("demoseed: insert decision_risk link %s: %w", d.DecisionID, err)
+			}
+		}
+	}
+	return len(fs.decisions), nil
+}
+
+// writeQuestionnaire inserts the single questionnaire response instance +
+// its questions + answers so /questionnaires is demonstrable (slice 678 /
+// ATLAS-037, AC-2). Returns the question count written.
+func writeQuestionnaire(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
+	q := fs.questionnaire
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO questionnaires (id, tenant_id, name, source_label, status, notes)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		q.ID, fs.tenant.ID, q.Name, q.SourceLabel, q.Status, q.Notes,
+	); err != nil {
+		return 0, fmt.Errorf("demoseed: insert questionnaire: %w", err)
+	}
+	for _, qq := range q.Questions {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO questionnaire_questions
+			 (id, tenant_id, questionnaire_id, code, text, domain, answer_type, scf_anchor_id, sort_order)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+			qq.ID, fs.tenant.ID, q.ID, qq.Code, qq.Text, qq.Domain,
+			qq.AnswerType, qq.SCFAnchorID, qq.SortOrder,
+		); err != nil {
+			return 0, fmt.Errorf("demoseed: insert questionnaire_question %s: %w", qq.Code, err)
+		}
+		// Only answered questions get an answer row (one question is left
+		// unanswered + needs-mapping on purpose — the realistic state).
+		if qq.AnswerValue == "" && qq.Narrative == "" {
+			continue
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO questionnaire_answers
+			 (id, tenant_id, question_id, answer_value, narrative, authored_by)
+			 VALUES ($1, $2, $3, $4, $5, $6)`,
+			uuid.New(), fs.tenant.ID, qq.ID, qq.AnswerValue, qq.Narrative, qq.AuthoredBy,
+		); err != nil {
+			return 0, fmt.Errorf("demoseed: insert questionnaire_answer %s: %w", qq.Code, err)
+		}
+	}
+	return len(q.Questions), nil
+}
+
+// nullableUUIDPtr returns nil if p is nil or points at uuid.Nil, otherwise
+// the dereferenced uuid. Used for nullable self-ref FK columns (org_units
+// parent_id) where the fixture carries a *uuid.UUID.
+func nullableUUIDPtr(p *uuid.UUID) any {
+	if p == nil || *p == uuid.Nil {
+		return nil
+	}
+	return *p
 }
 
 // ----- helper helpers -----

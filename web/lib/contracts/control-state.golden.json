@@ -1,0 +1,37 @@
+{
+  "_comment": "Slice 412 contract-tier golden. PROVIDER: internal/api/controlstate/handler_contract_test.go (State, real handler over an injected fixed-row two-method controlEvaluator stub — per-route Option-A seam, no eval.Engine/Postgres). Regenerate: `go test ./internal/api/controlstate/ -run TestContract_ControlState -update`. CONSUMER: web/lib/contracts/control-state.contract.test.ts asserts the BFF at web/app/api/controls/[id]/state/route.ts — VERBATIM passthrough (toEqual). scope_cell_id + last_observed_at are nullable (null on the whole-tenant/no-observation row).",
+  "endpoint": "GET /v1/controls/{id}/state",
+  "variants": {
+    "empty": {
+      "control_id": "11111111-1111-4111-8111-111111111111",
+      "count": 0,
+      "states": []
+    },
+    "populated": {
+      "control_id": "11111111-1111-4111-8111-111111111111",
+      "count": 2,
+      "states": [
+        {
+          "evaluated_at": "2026-04-02T09:00:00Z",
+          "evidence_count_in_window": 3,
+          "freshness_class": "30d",
+          "freshness_status": "fresh",
+          "last_observed_at": "2026-04-01T12:00:00Z",
+          "result": "pass",
+          "scope_cell_id": "33333333-3333-4333-8333-333333333333",
+          "trigger": "evidence"
+        },
+        {
+          "evaluated_at": "2026-04-02T09:00:00Z",
+          "evidence_count_in_window": 0,
+          "freshness_class": "30d",
+          "freshness_status": "stale",
+          "last_observed_at": null,
+          "result": "na",
+          "scope_cell_id": null,
+          "trigger": "schedule"
+        }
+      ]
+    }
+  }
+}

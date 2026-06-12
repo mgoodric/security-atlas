@@ -65,6 +65,13 @@ export type UnifiedListParams = {
   actor?: string;
   kinds?: AuditLogKind[];
   cursor?: string;
+  // includeReads (slice 669) opts the Activity feed back into the
+  // high-volume `decision`/`read` telemetry that is excluded by default.
+  // Only the activity page sets it (true === show the full ledger); the
+  // admin audit-log page never sets it (the admin endpoint always returns
+  // every row and ignores the parameter). Emitted as `include_reads=true`
+  // only when true — omitted otherwise so the default URL stays clean.
+  includeReads?: boolean;
 };
 
 /**
@@ -84,6 +91,9 @@ export function buildUnifiedQuery(params: UnifiedListParams): string {
   }
   if (params.cursor && params.cursor.trim()) {
     u.set("cursor", params.cursor.trim());
+  }
+  if (params.includeReads) {
+    u.set("include_reads", "true");
   }
   return `?${u.toString()}`;
 }

@@ -1,0 +1,122 @@
+{
+  "_comment": "Slice 687 contract-tier golden. PROVIDER: internal/api/ucfcoverage/handler_contract_test.go (ControlCoverage, real handler over an injected fixed-view single-method coverageAssembler stub — thin read-model seam over the tx-orchestrating assembler, no Postgres/eval/scope stores; slice 412 D5 rationale). Regenerate: `go test ./internal/api/ucfcoverage/ -run TestContract_ControlCoverage -update`. CONSUMER: web/lib/contracts/control-coverage.contract.test.ts asserts the BFF at web/app/api/controls/[id]/coverage/route.ts — VERBATIM passthrough (toEqual). anchor is null on the unanchored variant; requirements[].coverage is number|null (null = out-of-scope/no-data, never degraded to 0).",
+  "endpoint": "GET /v1/controls/{id}/coverage",
+  "variants": {
+    "anchored_pinned": {
+      "anchor": {
+        "description": "Govern logical access to systems and data.",
+        "family": "IAC",
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "Identity \u0026 Access Management",
+        "scf_id": "IAC-06"
+      },
+      "control": {
+        "bundle_id": "ctl.access-review",
+        "control_family": "IAC",
+        "freshness_class": "30d",
+        "id": "11111111-1111-4111-8111-111111111111",
+        "implementation_type": "manual",
+        "lifecycle_state": "active",
+        "owner_role": "grc_engineer",
+        "scf_anchor_id": "22222222-2222-4222-8222-222222222222",
+        "scf_id": "IAC-06",
+        "title": "Periodic access review",
+        "version": 3
+      },
+      "requirements": [
+        {
+          "body": "The entity implements logical access security measures.",
+          "code": "CC6.1",
+          "coverage": 0.64,
+          "edge_id": "44444444-4444-4444-8444-444444444444",
+          "framework_name": "SOC 2",
+          "framework_slug": "soc2",
+          "framework_version": "2017",
+          "framework_version_id": "66666666-6666-4666-8666-666666666666",
+          "framework_version_status": "current",
+          "rationale": "SCF anchor satisfies the SOC 2 logical-access requirement.",
+          "relationship_type": "subset",
+          "requirement_id": "55555555-5555-4555-8555-555555555555",
+          "source_attribution": "scf-strm",
+          "strength": 0.8,
+          "title": "Logical access controls"
+        }
+      ]
+    },
+    "anchored_unpinned": {
+      "anchor": {
+        "description": "Govern logical access to systems and data.",
+        "family": "IAC",
+        "id": "22222222-2222-4222-8222-222222222222",
+        "name": "Identity \u0026 Access Management",
+        "scf_id": "IAC-06"
+      },
+      "control": {
+        "bundle_id": "ctl.access-review",
+        "control_family": "IAC",
+        "freshness_class": "30d",
+        "id": "11111111-1111-4111-8111-111111111111",
+        "implementation_type": "manual",
+        "lifecycle_state": "active",
+        "owner_role": "grc_engineer",
+        "scf_anchor_id": "22222222-2222-4222-8222-222222222222",
+        "scf_id": "IAC-06",
+        "title": "Periodic access review",
+        "version": 3
+      },
+      "requirements": [
+        {
+          "body": "The entity implements logical access security measures.",
+          "code": "CC6.1",
+          "coverage": 0.64,
+          "edge_id": "44444444-4444-4444-8444-444444444444",
+          "framework_name": "SOC 2",
+          "framework_slug": "soc2",
+          "framework_version": "2017",
+          "framework_version_id": "66666666-6666-4666-8666-666666666666",
+          "framework_version_status": "current",
+          "rationale": "SCF anchor satisfies the SOC 2 logical-access requirement.",
+          "relationship_type": "subset",
+          "requirement_id": "55555555-5555-4555-8555-555555555555",
+          "source_attribution": "scf-strm",
+          "strength": 0.8,
+          "title": "Logical access controls"
+        },
+        {
+          "body": "The entity implements logical access security measures.",
+          "code": "CC6.1",
+          "coverage": null,
+          "edge_id": "44444444-4444-4444-8444-444444444444",
+          "framework_name": "SOC 2",
+          "framework_slug": "soc2",
+          "framework_version": "2017",
+          "framework_version_id": "66666666-6666-4666-8666-666666666666",
+          "framework_version_status": "current",
+          "rationale": "SCF anchor satisfies the SOC 2 logical-access requirement.",
+          "relationship_type": "subset",
+          "requirement_id": "55555555-5555-4555-8555-555555555555",
+          "source_attribution": "scf-strm",
+          "strength": 0.8,
+          "title": "Logical access controls"
+        }
+      ]
+    },
+    "unanchored": {
+      "anchor": null,
+      "control": {
+        "bundle_id": "ctl.access-review",
+        "control_family": "IAC",
+        "freshness_class": "30d",
+        "id": "11111111-1111-4111-8111-111111111111",
+        "implementation_type": "manual",
+        "lifecycle_state": "active",
+        "owner_role": "grc_engineer",
+        "scf_anchor_id": "22222222-2222-4222-8222-222222222222",
+        "scf_id": "IAC-06",
+        "title": "Periodic access review",
+        "version": 3
+      },
+      "requirements": []
+    }
+  }
+}

@@ -15,6 +15,29 @@
 
 export type RiskTreatment = "mitigate" | "transfer" | "accept" | "avoid";
 
+// DEFAULT_TREATMENT — slice 663.
+//
+// The risk-create form (risk-form.tsx) opens on this treatment. It is
+// deliberately "avoid", NOT "mitigate".
+//
+// Why: "mitigate" requires >=1 linked control (canvas §6.1). On a fresh
+// tenant with zero instantiated controls there is nothing to link, so a
+// mitigate-default form CANNOT be submitted — the primary create flow
+// dead-ends for a brand-new operator (slice 663 / ATLAS-006).
+//
+// "avoid" is the only treatment with zero required satellite fields
+// (canvas §6.1: accept needs accepter + accepted_until; transfer needs
+// instrument_reference; mitigate needs a linked control; avoid is
+// status-only). It also matches the SERVER's own omitted-treatment
+// safe-default (`internal/api/risks/handlers.go` falls back to
+// RiskTreatmentAvoid when the wire treatment is empty), so the default
+// is consistent client-to-server.
+//
+// The mitigate-requires-control rule is UNCHANGED: an operator who
+// picks "mitigate" in a populated tenant still must link a control
+// (slice 663 AC-3). Only the *opening default* moved.
+export const DEFAULT_TREATMENT: RiskTreatment = "avoid";
+
 export type RiskFormForValidation = {
   title: string;
   treatment_owner: string;

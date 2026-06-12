@@ -143,7 +143,9 @@ export default function DashboardPage() {
             }}
           />
         </div>
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1" id="evidence-freshness">
+          {/* Anchor target for the slice-439 staleness digest/alert deep-link
+              (staleness.FreshnessViewPath = /dashboard#evidence-freshness). */}
           <EvidenceFreshnessPanel
             report={freshnessQ.data}
             state={{

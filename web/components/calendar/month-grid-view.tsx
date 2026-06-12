@@ -20,6 +20,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { CalendarEvent } from "@/lib/api/calendar";
 
+import { isToday } from "./is-today";
 import { linkFor } from "./link-for";
 
 type Props = {
@@ -33,6 +34,7 @@ const TYPE_COLOR: Record<string, string> = {
   audit: "bg-blue-500",
   exception: "bg-amber-500",
   policy: "bg-purple-500",
+  vendor: "bg-rose-500",
   control: "bg-emerald-500",
 };
 
@@ -77,6 +79,11 @@ export function MonthGridView({ events, anchor, onPrev, onNext }: Props) {
   const [openDay, setOpenDay] = useState<string | null>(null);
   const byDay = eventsByDay(events);
 
+  // Slice 668 — the single clock read for the "today" highlight. Captured
+  // once per render and passed to the pure `isToday` helper so the
+  // detection logic stays unit-testable with an injected reference (AC-3).
+  const today = new Date();
+
   const monthLabel = anchor.toLocaleDateString(undefined, {
     year: "numeric",
     month: "long",
@@ -113,6 +120,11 @@ export function MonthGridView({ events, anchor, onPrev, onNext }: Props) {
         {days.map((d) => {
           const key = isoDay(d);
           const isCurMonth = d.getMonth() === anchor.getMonth();
+          const isSelected = openDay === key;
+          // Slice 668 — distinct "today" treatment (AC-1): a subtle primary
+          // tint behind the cell plus an emphasized day number. Kept visually
+          // distinct from hover (muted bg) and selection (a stronger ring).
+          const isTodayCell = isToday(d, today);
           const dayEvents = byDay.get(key) ?? [];
           const overdueDot = dayEvents.some(
             (e) => e.type === "control" && e.status === "overdue",
@@ -121,13 +133,30 @@ export function MonthGridView({ events, anchor, onPrev, onNext }: Props) {
             <button
               key={key}
               type="button"
-              onClick={() => setOpenDay(openDay === key ? null : key)}
+              // AC-2 — mark the current day for assistive tech.
+              aria-current={isTodayCell ? "date" : undefined}
+              data-today={isTodayCell ? "true" : undefined}
+              onClick={() => setOpenDay(isSelected ? null : key)}
               className={`relative min-h-[5rem] border-b border-r p-2 text-left text-sm transition-colors hover:bg-muted/40 ${
                 isCurMonth ? "" : "text-muted-foreground/60 bg-muted/20"
-              } ${openDay === key ? "ring-2 ring-foreground/20" : ""}`}
+              } ${isTodayCell ? "bg-primary/10" : ""} ${
+                isSelected
+                  ? "ring-2 ring-foreground/20"
+                  : isTodayCell
+                    ? "ring-1 ring-primary/40"
+                    : ""
+              }`}
             >
               <div className="flex items-center justify-between">
-                <span className={isCurMonth ? "font-medium" : ""}>
+                <span
+                  className={
+                    isTodayCell
+                      ? "font-semibold text-primary"
+                      : isCurMonth
+                        ? "font-medium"
+                        : ""
+                  }
+                >
                   {d.getDate()}
                 </span>
                 {overdueDot && (

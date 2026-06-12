@@ -30,6 +30,7 @@ import (
 	auditsink "github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
@@ -58,6 +59,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
+	"github.com/mgoodric/security-atlas/internal/scim"
+	stalenesssched "github.com/mgoodric/security-atlas/internal/staleness"
 )
 
 const (
@@ -612,6 +615,14 @@ func main() {
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
 
+		// Slice 508: SCIM provisioning credential store. Same hasher +
+		// BYPASSRLS authPool as api_keys (the lookup-by-hash auth path runs
+		// before tenant resolution). When wired, the /scim/v2/* endpoints +
+		// the admin /v1/admin/scim-credentials routes mount.
+		scimCredSvc := scim.NewCredentialStore(pool, authPool, hasher)
+		srv.AttachSCIM(scimCredSvc)
+		fmt.Fprintf(os.Stderr, "atlas: scim_credentials store wired (SCIM provisioning ready)\n")
+
 		// Slice 192: wire the BYPASSRLS authPool into the Server so
 		// GET /v1/me/tenants can run its bounded `SELECT id, name
 		// FROM tenants WHERE id = ANY($1)` query against the
@@ -666,8 +677,15 @@ func main() {
 				Issuer:   localAuthIssuer,
 			}
 		}
-		srv.AttachAuthHandler(authapi.New(oidcAuth, userStore, sessionStore, secureCookies, localAS))
-		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t)\n",
+		authHandler := authapi.New(oidcAuth, userStore, sessionStore, secureCookies, localAS)
+		// Slice 733 AC-1: wire the slice-509 group-to-role resolver so an OIDC
+		// login reconciles the user's group-derived roles from the validated
+		// groups claim. The resolver is REUSED via oidcGroupDeriver (P0-733-1);
+		// it reads/writes under the request's tenant RLS context (pool is the
+		// RLS app pool).
+		authHandler.AttachGroupDeriver(oidcGroupDeriver{resolver: grouprole.NewResolver(pool)})
+		srv.AttachAuthHandler(authHandler)
+		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t, group_role_derivation=on)\n",
 			secureCookies, localAS != nil)
 
 		// Slice 035: construct the OPA engine + decision audit writer
@@ -1031,6 +1049,46 @@ func main() {
 		}
 	}
 
+	// Slice 439: evidence-staleness rollup scheduler. The PRODUCER of
+	// `evidence.staleness` notifications. An in-process tick-loop (mirroring
+	// the metrics scheduler — no external cron, single-VM self-host target)
+	// that, on a HONEST named cadence (every 6h — NOT "continuous
+	// monitoring", canvas anti-pattern), enumerates tenants from the migrator
+	// (BYPASSRLS) pool and runs each tenant's staleness rollup under the app
+	// pool with tenancy.WithTenant. Per-control alerts fire every tick; the
+	// weekly digest fires only on the Monday-09:00-UTC tick. Both writes are
+	// idempotent, so the tenant boundary (RLS) + the dedup ledger keep
+	// re-runs safe. ATLAS_STALENESS_INTERVAL overrides the 6h cadence for dev
+	// loops. The already-merged delivery channels (slice 445/543/582) consume
+	// the rows this producer writes.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		sctx, scancel := context.WithTimeout(context.Background(), 10*time.Second)
+		sPool, err := atlasotel.NewTracedPool(sctx, migratorURL)
+		scancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: staleness scheduler pool: %v\n", err)
+		} else {
+			interval := stalenesssched.DefaultRecomputeInterval
+			if raw := os.Getenv("ATLAS_STALENESS_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_STALENESS_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			ss := stalenesssched.New(sPool, pool, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer sPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: staleness scheduler ticking every %s (weekly digest Mondays 09:00 UTC)\n", interval.String())
+				if err := ss.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("staleness scheduler: %w", err)
+				}
+			}()
+		}
+	}
+
 	// Slice 582: notification-channel digest scheduler. An in-process
 	// tick-loop (mirroring the metrics + backup schedulers — no external
 	// cron, single-VM self-host target, D1) that, once per UTC day,
@@ -1251,6 +1309,33 @@ type localModeIdpResolver struct{}
 
 func (localModeIdpResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (oidc.IdpConfig, error) {
 	return oidc.IdpConfig{}, oidc.ErrUnknownIdp
+}
+
+// oidcGroupDeriver adapts the slice-509 grouprole.Resolver to the
+// authapi.OIDCGroupDeriver surface the OIDC callback calls on login (slice 733
+// AC-1). It is a thin mapping shim: it translates the callback's validated
+// (idpConfigID, userID, groups) into a grouprole.DeriveInput with Source=OIDC.
+// It carries NO mapping/derivation logic — that lives entirely in the resolver
+// (P0-733-1). The resolver fails closed on an unmapped group, holds the
+// last-admin guard, never auto-creates a role, and never touches
+// origin='manual' roles (P0-733-3 / AC-4). Only validated claims reach here
+// because the callback invokes it strictly after ID-token verification
+// (P0-733-2).
+type oidcGroupDeriver struct {
+	resolver *grouprole.Resolver
+}
+
+// DeriveOnLogin reconciles the user's group-derived roles via the slice-509
+// resolver. ctx carries the tenant RLS context the OIDC handler established, so
+// the resolver reads the tenant's mappings + reconciles under RLS (P0-733-4).
+func (d oidcGroupDeriver) DeriveOnLogin(ctx context.Context, idpConfigID uuid.UUID, userID string, groups []string) error {
+	_, err := d.resolver.Derive(ctx, grouprole.DeriveInput{
+		UserID:      userID,
+		IDPConfigID: idpConfigID,
+		Groups:      groups,
+		Source:      grouprole.SourceOIDC,
+	})
+	return err
 }
 
 // runAuthCodeSweeper is the slice-189 sweeper goroutine. Every 5
