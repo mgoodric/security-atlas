@@ -95,6 +95,24 @@ func (g *Generator) Generate(ctx context.Context, periodEnd string) (StoredBrief
 	return g.store.Insert(ctx, brief, narrativeMd, generatedAt)
 }
 
+// Assemble builds the structured Brief for `periodEnd` from live program
+// metrics WITHOUT persisting it — a pure read of the same read models Generate
+// uses (freshness + drift + frameworks + risks), under the caller's RLS
+// context. It exists so the slice-440 board-narrative surface can reuse the
+// EXACT deterministic brief data path as the ground-truth rollup for its
+// numeric-verification gate, without writing a board_briefs row (the narrative
+// surface computes a rollup, not a frozen brief). `periodEnd` is the report
+// date (YYYY-MM-DD); the posture numbers are computed live at call time (same
+// discipline as Generate — the "pin" is the immutability of a STORED brief, not
+// a time-travel query, so an unpersisted Assemble is a live snapshot).
+func (g *Generator) Assemble(ctx context.Context, periodEnd string) (Brief, error) {
+	periodEndDate, err := time.Parse("2006-01-02", periodEnd)
+	if err != nil {
+		return Brief{}, fmt.Errorf("%w: period_end %q", ErrBadPeriodEnd, periodEnd)
+	}
+	return g.assemble(ctx, periodEndDate, g.now())
+}
+
 // assemble builds the structured Brief from the read models — pure read, no
 // write. Split out from Generate so the assembly is testable in isolation
 // from the append.

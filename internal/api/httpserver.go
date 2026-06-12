@@ -34,6 +34,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	boardapi "github.com/mgoodric/security-atlas/internal/api/board"
+	boardnarrativeapi "github.com/mgoodric/security-atlas/internal/api/boardnarrative"
 	calendarapi "github.com/mgoodric/security-atlas/internal/api/calendar"
 	checklistapi "github.com/mgoodric/security-atlas/internal/api/checklist"
 	controldetailapi "github.com/mgoodric/security-atlas/internal/api/controldetail"
@@ -88,6 +89,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/board"
+	"github.com/mgoodric/security-atlas/internal/boardnarrative"
 	"github.com/mgoodric/security-atlas/internal/checklist"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/csfassessment"
@@ -1049,6 +1051,30 @@ func (s *Server) httpHandler() http.Handler {
 		)
 		boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
 		boardPackH.RegisterRoutes(r)
+		// Slice 440: board-narrative AI v0 (cited, numeric-verified,
+		// per-section approval). The HIGHEST-RISK AI-assist surface: an
+		// AI-drafted board-report SECTION (the control-coverage-summary
+		// section) an operator approves before it ships into the board pack.
+		// The deterministic rollup REUSES the slice-031 brief data path
+		// (boardGen.Assemble — a pure read, no board_briefs write); the seven
+		// guardrails (hybrid input, mandatory citations, numeric verification,
+		// section-shape, per-section approval, full audit, tone) are enforced
+		// server-side BEFORE the operator sees a draft. Constitutional
+		// invariants (no fabricated coverage/numbers, no cross-tenant bleed,
+		// one-click approval, local-Ollama-only) enforced by the service + the
+		// DB CHECK on board_narrative_sections (the slice-498 shared ai_assist
+		// guard). Gated with the board module under board.reporting; routes
+		// append per the parallel-batch convention.
+		boardNarrativeStore := boardnarrative.NewStore(s.dbPool, boardGen)
+		boardNarrativeSvc := boardnarrative.NewService(
+			boardNarrativeStore,
+			llm.NewOllamaClient(llm.ConfigFromEnv()),
+			boardNarrativeStore,
+			boardnarrative.NewAuditSink(llm.NewAuditWriter(s.dbPool)),
+			boardNarrativeStore,
+		)
+		boardNarrativeH := boardnarrativeapi.New(boardNarrativeSvc)
+		boardNarrativeH.RegisterRoutes(r)
 	})
 	// Slice 155: questionnaire tracer-bullet — Excel import + manual
 	// authoring + AnswerLibrary skeleton (SCF-anchor keyed) + PDF export.
