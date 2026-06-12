@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 548 |
+| merged | 549 |
 | in-progress | 1 |
-| ready | 72 |
+| ready | 71 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 509 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -530,7 +530,7 @@
 | 505 | Privacy v0: data-subject-access-request (DSAR) export workflow | ready |  |  |  |
 | 506 | Privacy v0: Records of Processing Activities (RoPA, GDPR Art.... | ready |  |  |  |
 | 507 | Breach-notification workflow implementation (security → pri... | ready |  |  |  |
-| 508 | SCIM 2.0 user-lifecycle provisioning (deprovisioning on IdP o... | ready |  |  |  |
+| 508 | SCIM 2.0 user-lifecycle provisioning (deprovisioning on IdP o... | merged |  | 2026-06-12 | f9969f4e |
 | 509 | IdP group-to-role mapping (claims/SCIM-group -> atlas role as... | ready |  |  |  |
 | 510 | Automated backup + scheduled restore-verification (operationa... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 511 | OSCAL profile import (resolve import / merge / modify directi... | merged | #1109 | 2026-06-07 | 57f085cf |
