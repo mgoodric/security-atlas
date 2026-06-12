@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 557 |
+| merged | 558 |
 | in-progress | 1 |
-| ready | 56 |
+| ready | 55 |
 | not-ready | 11 |
 
 ## Ready set
 
-095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 436 446 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
+095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 436 446 452 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -478,7 +478,7 @@
 | 450 | vitest 4 + @vitest/coverage-v8 4 paired migration | merged |  | 2026-06-12 | 8589f281 |
 | 451 | SLSA provenance + SBOM for binary / CLI / SDK releases | merged | #990 | 2026-06-04 | 750d0eca |
 | 452 | Node version alignment: @types/node + CI + runtime + engines ... | ready |  |  |  |
-| 453 | TypeScript 6 migration | ready |  |  |  |
+| 453 | TypeScript 6 migration | merged |  | 2026-06-12 | 0ab184bd |
 | 454 | go-otel observability group bump (13 modules) | merged | #986 | 2026-06-04 | b839f98a |
 | 455 | OIDC-identity-strategy decision spike (unblocks cosign keyles... | merged |  | 2026-06-11 | a5bc0ea9 |
 | 456 | `internal/api/oauth` residual coverage: audit-write + signer-... | merged | #1022 | 2026-06-05 | 02c926f9 |
