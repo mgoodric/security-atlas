@@ -90,6 +90,27 @@ type writeReq struct {
 	ScopeCellIDs   []string `json:"scope_cell_ids"`
 }
 
+// reviewWire is the JSON shape for one row in the vendor_reviews ledger
+// (slice 688). reviewed_at is date-granular (YYYY-MM-DD); created_at is the
+// immutable insert timestamp.
+type reviewWire struct {
+	ID         string    `json:"id"`
+	VendorID   string    `json:"vendor_id"`
+	ReviewedAt string    `json:"reviewed_at"`
+	Reviewer   string    `json:"reviewer"`
+	Outcome    string    `json:"outcome"`
+	Notes      string    `json:"notes"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+// recordReviewReq is the POST body for recording a completed review.
+type recordReviewReq struct {
+	ReviewedAt string `json:"reviewed_at"`
+	Reviewer   string `json:"reviewer"`
+	Outcome    string `json:"outcome"`
+	Notes      string `json:"notes"`
+}
+
 type burndownBandWire struct {
 	Criticality    string  `json:"criticality"`
 	Total          int64   `json:"total"`
@@ -235,6 +256,75 @@ func (h *Handler) DeleteVendor(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ListReviews handles GET /v1/vendors/{id}/reviews — the vendor's review
+// history, newest-first (slice 688 AC-3). RLS scopes the read to the active
+// tenant; a cross-tenant or fabricated id yields an empty series.
+func (h *Handler) ListReviews(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	rows, err := h.store.ListReviews(ctx, id)
+	if err != nil {
+		h.writeStoreErr(w, r, "list vendor reviews", err)
+		return
+	}
+	out := make([]reviewWire, 0, len(rows))
+	for _, rv := range rows {
+		out = append(out, toReviewWire(rv))
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"reviews": out})
+}
+
+// RecordReview handles POST /v1/vendors/{id}/reviews — append a completed
+// review to the ledger (slice 688 AC-5). The store also keeps the vendor's
+// last_review_date scalar consistent with the most-recent ledger row.
+func (h *Handler) RecordReview(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	var req recordReviewReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	reviewedAt, derr := parseOptDate(&req.ReviewedAt)
+	if derr != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "reviewed_at: "+derr.Error())
+		return
+	}
+	if reviewedAt == nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "reviewed_at is required (YYYY-MM-DD)")
+		return
+	}
+	in := vendor.RecordReviewInput{
+		VendorID:   id,
+		ReviewedAt: *reviewedAt,
+		Reviewer:   req.Reviewer,
+		Outcome:    vendor.ReviewOutcome(strings.TrimSpace(req.Outcome)),
+		Notes:      req.Notes,
+	}
+	rv, err := h.store.RecordReview(ctx, in)
+	if err != nil {
+		h.writeStoreErr(w, r, "record vendor review", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"review": toReviewWire(rv)})
+}
+
 // Burndown handles GET /v1/vendors/burndown?criticality=high&as_of=YYYY-MM-DD.
 func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
@@ -371,6 +461,18 @@ func (h *Handler) toWire(v vendor.Vendor) vendorWire {
 	w.DPASignedAt = dateString(v.DPASignedAt)
 	w.LastReviewDate = dateString(v.LastReviewDate)
 	return w
+}
+
+func toReviewWire(rv vendor.Review) reviewWire {
+	return reviewWire{
+		ID:         rv.ID.String(),
+		VendorID:   rv.VendorID.String(),
+		ReviewedAt: rv.ReviewedAt.Format("2006-01-02"),
+		Reviewer:   rv.Reviewer,
+		Outcome:    string(rv.Outcome),
+		Notes:      rv.Notes,
+		CreatedAt:  rv.CreatedAt,
+	}
 }
 
 func dateString(t *time.Time) *string {

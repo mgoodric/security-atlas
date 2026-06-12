@@ -61,4 +61,4 @@ export const NEW_CONTROL_FUTURE_TESTID = "controls-new-control-disabled-reason";
  *     Playwright spec asserts on it.
  */
 export const NEW_CONTROL_FUTURE_REASON =
-  "Create-control flow lands in a future slice. For now, controls are instantiated by the SCF importer or by the atlas CLI.";
+  "The in-app create-control flow is not available yet. For now, controls are instantiated by the SCF importer or by the atlas CLI.";

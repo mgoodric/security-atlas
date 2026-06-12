@@ -40,7 +40,7 @@
 import { expect, test } from "./fixtures";
 import type { Page, Request } from "@playwright/test";
 
-import type { Vendor, VendorBurndown } from "../lib/api/vendors";
+import type { Vendor, VendorBurndown, VendorReview } from "../lib/api/vendors";
 
 // One seeded tenant's single vendor. `overdue: true` is the pre-review
 // state the workflow transitions away from. Neutral strings + a
@@ -150,6 +150,72 @@ function mockVendorReviewTransition(page: Page): {
   return { patch: () => patchRequest };
 }
 
+// The review the record-review form (slice 688 `reviews/new`) appends to
+// the ledger. `reviewed_at` matches the date the form submits; the derived
+// vendor `last_review_date` recompute (internal/vendor/reviews.go) is what
+// flips the badge.
+const RECORDED_REVIEW: VendorReview = {
+  id: "00000000-0000-0000-0000-0000000000d1",
+  vendor_id: VENDOR_ID,
+  reviewed_at: REVIEW_DATE,
+  reviewer: "owner@demo.example",
+  outcome: "pass",
+  notes: "Annual review complete; no findings.",
+  created_at: "2026-06-11T00:00:00Z",
+};
+
+// A stateful mock for the slice 688 record-review flow (`reviews/new`):
+//   * GET /api/vendors/{id}          -> overdue until the POST, then on-time
+//                                       (mirrors the server-side
+//                                       last_review_date recompute).
+//   * GET /api/vendors/{id}/reviews  -> empty until the POST, then the
+//                                       one recorded review (the timeline
+//                                       row that must appear without a
+//                                       hard reload).
+//   * POST /api/vendors/{id}/reviews -> 201, flips the stateful flag.
+// The two route patterns do not overlap: the bare-id glob does NOT match
+// the `/reviews` suffix, so each path is served by exactly one handler.
+function mockRecordReviewTransition(page: Page): {
+  post: () => Request | null;
+} {
+  let recorded = false;
+  let postRequest: Request | null = null;
+
+  void page.route("**/api/vendors/" + VENDOR_ID, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        vendor: recorded ? REVIEWED_VENDOR : OVERDUE_VENDOR,
+      }),
+    });
+  });
+
+  void page.route("**/api/vendors/" + VENDOR_ID + "/reviews", async (route) => {
+    const req = route.request();
+    if (req.method() === "POST") {
+      postRequest = req;
+      recorded = true;
+      await route.fulfill({
+        status: 201,
+        contentType: "application/json",
+        body: JSON.stringify({ review: RECORDED_REVIEW }),
+      });
+      return;
+    }
+    // GET (the detail history timeline): empty pre-record, one row after.
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        reviews: recorded ? [RECORDED_REVIEW] : [],
+      }),
+    });
+  });
+
+  return { post: () => postRequest };
+}
+
 test.describe("vendor-review workflow (slice 424)", () => {
   // AC-1: the vendor list renders the seeded tenant's vendor.
   test("AC-1: vendor list renders the seeded tenant's vendor", async ({
@@ -245,28 +311,101 @@ test.describe("vendor-review workflow (slice 424)", () => {
     expect(body.linked_sow_uri).toBeNull();
     expect(body.name).toBe("Tidewater Logistics");
 
-    // AC-3: assert the DETERMINISTIC consequence of recording the review,
-    // NOT a cache-invalidation-dependent re-render. On save success the
-    // edit page's onSubmit does exactly two things: it awaits the PATCH
-    // (asserted above) and then `router.push(`/vendors/{id}`)` — a
-    // navigation back to the read-only review surface. That navigation
-    // ALWAYS fires; it does not depend on TanStack invalidating the
-    // ["vendor", id] query.
+    // AC-3 / slice 691 AC-2 + AC-4: assert the post-record refresh. On save
+    // success the edit page's onSubmit awaits the PATCH (asserted above),
+    // then invalidates ["vendor", id] + ["vendor-reviews", id] (and the
+    // list/burndown keys) BEFORE `router.push(`/vendors/{id}`)`. The detail
+    // and edit pages share the ["vendor", id] key, so the invalidation is
+    // what forces the read-only detail to refetch the now-reviewed body
+    // instead of serving the cached OVERDUE one (the global 60s staleTime
+    // would otherwise suppress the refetch on nav-back within the window).
     //
-    // v1 does NOT call `invalidateQueries` after the mutation, so the
-    // derived status badge ("overdue" -> "on time") only flips on a refetch
-    // the app does not guarantee (the detail + edit pages share the
-    // ["vendor", id] key; the cached OVERDUE body is served on nav-back).
-    // Asserting that flip is asserting non-contractual behavior, so we do
-    // NOT assert it. The missing post-record auto-refresh is filed as
-    // spillover slice 691. The interaction's deterministic resulting UI
-    // state is the navigation + the review surface re-rendering.
+    // Slice 424 deferred this flip assertion to slice 691 because v1 did
+    // NOT invalidate after the mutation. Slice 691 added the invalidation,
+    // so the flip is now a guaranteed contract — assert it deterministically
+    // (no fixed timeout / no hard reload).
     await page.waitForURL("**/vendors/" + VENDOR_ID, { timeout: 30_000 });
     await expect(page.getByTestId("vendor-detail")).toBeVisible({
       timeout: 30_000,
     });
     await expect(page.getByTestId("vendor-detail-name")).toHaveText(
       "Tidewater Logistics",
+    );
+
+    // slice 691 AC-2: the derived review-status badge flips overdue -> on
+    // time off the refetched row (no stored status column; the badge is
+    // computed at render from last_review_date + review_cadence).
+    await expect(page.getByTestId("vendor-detail-status")).toHaveText(
+      "on time",
+    );
+    // slice 691 AC-1: the Last-review field reflects the just-saved date.
+    await expect(page.getByTestId("vendor-detail-last-review")).toHaveText(
+      REVIEW_DATE,
+    );
+  });
+
+  // slice 691 — the dedicated record-review surface (slice 688
+  // `reviews/new`). This is the surface the slice title names ("after
+  // recording a review"): a separate form that appends to the ledger, then
+  // routes back to the detail. Before slice 691 it did not invalidate, so
+  // the new timeline row + flipped badge needed a hard reload.
+  test("slice 691: recording a review on reviews/new refreshes the detail", async ({
+    authedPage: page,
+  }) => {
+    await mockBurndown(page);
+    await mockList(page, [OVERDUE_VENDOR]);
+    const captured = mockRecordReviewTransition(page);
+
+    // Open the read-only detail; the history is empty and the badge reads
+    // overdue.
+    await page.goto("/vendors/" + VENDOR_ID);
+    await expect(page.getByTestId("vendor-detail-status")).toHaveText(
+      "overdue",
+    );
+    await expect(
+      page.getByTestId("vendor-detail-review-history-scalar"),
+    ).toBeVisible();
+
+    // Navigate to the record-review form and record a review.
+    await page.getByTestId("vendor-detail-record-review").click();
+    await page.waitForURL("**/vendors/" + VENDOR_ID + "/reviews/new");
+    await page.getByTestId("vendor-record-review-date").fill(REVIEW_DATE);
+    await page
+      .getByTestId("vendor-record-review-reviewer")
+      .fill("owner@demo.example");
+
+    const postResp = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/vendors/" + VENDOR_ID + "/reviews") &&
+        r.request().method() === "POST",
+    );
+    await page.getByTestId("vendor-record-review-submit").click();
+    await postResp;
+
+    // The POST carried the recorded review (wire-shape guard).
+    const post = captured.post();
+    expect(post).not.toBeNull();
+    const body = post!.postDataJSON() as Record<string, unknown>;
+    expect(body.reviewed_at).toBe(REVIEW_DATE);
+    expect(body.outcome).toBe("pass");
+
+    // slice 691 AC-1/AC-2/AC-4: back on the detail, the invalidation forces
+    // a refetch — the new timeline row appears, the badge flips to on time,
+    // and the Last-review field updates. No hard reload, no fixed timeout.
+    await page.waitForURL("**/vendors/" + VENDOR_ID, { timeout: 30_000 });
+    await expect(page.getByTestId("vendor-detail")).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("vendor-detail-status")).toHaveText(
+      "on time",
+    );
+    await expect(page.getByTestId("vendor-detail-last-review")).toHaveText(
+      REVIEW_DATE,
+    );
+    // The recorded review is now a row in the history timeline.
+    await expect(page.getByTestId("vendor-detail-review-row")).toHaveCount(1);
+    await expect(page.getByTestId("vendor-detail-review-date")).toHaveText(
+      REVIEW_DATE,
     );
   });
 });

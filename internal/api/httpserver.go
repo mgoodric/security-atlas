@@ -18,6 +18,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
+	"github.com/mgoodric/security-atlas/internal/api/admingroupmappings"
+	"github.com/mgoodric/security-atlas/internal/api/adminscim"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminsuperadmins"
 	"github.com/mgoodric/security-atlas/internal/api/admintenants"
@@ -33,6 +35,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	boardapi "github.com/mgoodric/security-atlas/internal/api/board"
 	calendarapi "github.com/mgoodric/security-atlas/internal/api/calendar"
+	checklistapi "github.com/mgoodric/security-atlas/internal/api/checklist"
 	controldetailapi "github.com/mgoodric/security-atlas/internal/api/controldetail"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	controlstateapi "github.com/mgoodric/security-atlas/internal/api/controlstate"
@@ -46,6 +49,7 @@ import (
 	featuresapi "github.com/mgoodric/security-atlas/internal/api/features"
 	fwscopesapi "github.com/mgoodric/security-atlas/internal/api/frameworkscopes"
 	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
+	gapexplainapi "github.com/mgoodric/security-atlas/internal/api/gapexplain"
 	mcpwriteproposalsapi "github.com/mgoodric/security-atlas/internal/api/mcpwriteproposals"
 	meapi "github.com/mgoodric/security-atlas/internal/api/me"
 	metricsapi "github.com/mgoodric/security-atlas/internal/api/metrics"
@@ -59,6 +63,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/requestidmw"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	searchapi "github.com/mgoodric/security-atlas/internal/api/search"
 	"github.com/mgoodric/security-atlas/internal/api/securityheaders"
@@ -76,12 +81,14 @@ import (
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/userprefs"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/board"
+	"github.com/mgoodric/security-atlas/internal/checklist"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/csfassessment"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -92,14 +99,18 @@ import (
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/freshness"
+	"github.com/mgoodric/security-atlas/internal/gapexplain"
+	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/notify/email"
 	"github.com/mgoodric/security-atlas/internal/notify/slack"
 	"github.com/mgoodric/security-atlas/internal/notify/webhook"
 	"github.com/mgoodric/security-atlas/internal/policy"
+	"github.com/mgoodric/security-atlas/internal/qaisuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
+	"github.com/mgoodric/security-atlas/internal/scim"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
@@ -177,7 +188,7 @@ func (s *Server) httpHandler() http.Handler {
 		}), "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
-			"/oauth/device_authorization", "/v1/test/issue-jwt"))
+			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/"))
 		// Slice 197: fail-closed credential requirement. The slice 190
 		// JWT middleware passes through requests with NO JWT shape
 		// (e.g. malformed bearers or no Authorization header); without
@@ -202,7 +213,7 @@ func (s *Server) httpHandler() http.Handler {
 		root.Use(requireCredential("/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
-			"/oauth/device_authorization", "/v1/test/issue-jwt"))
+			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/"))
 	}
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
@@ -226,7 +237,7 @@ func (s *Server) httpHandler() http.Handler {
 		// (mounted only when ATLAS_TEST_MODE=1) — same rationale as the
 		// bearer-exempt above: the endpoint mints the first JWT, so it
 		// cannot be gated by OPA on a credential it has not yet produced.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt"))
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -448,6 +459,9 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/vendors/{id}", vendorsH.GetVendor)
 	root.Patch("/v1/vendors/{id}", vendorsH.UpdateVendor)
 	root.Delete("/v1/vendors/{id}", vendorsH.DeleteVendor)
+	// Slice 688: per-review history ledger — list + record a completed review.
+	root.Get("/v1/vendors/{id}/reviews", vendorsH.ListReviews)
+	root.Post("/v1/vendors/{id}/reviews", vendorsH.RecordReview)
 	// Slice 018: FrameworkScope predicate + four-state workflow + intersection
 	// compute. Routes appended per the parallel-batch convention (chi rejects
 	// two Mounts at "/"). The /effective-scope route lives under
@@ -568,6 +582,13 @@ func (s *Server) httpHandler() http.Handler {
 	if s.oscalExporter != nil {
 		oscalExportH := oscalexportapi.New(s.oscalExporter)
 		root.Post("/v1/audit-periods/{id}/oscal-export", oscalExportH.Export)
+		// Slice 457: browser download surface. Same tenant-scoped export,
+		// served with a Content-Disposition: attachment header so the UI
+		// can drop the signed bundle as a downloadable .json artifact. The
+		// literal :download verb is declared alongside the bare
+		// /oscal-export so chi's declaration-order match keeps both ahead
+		// of periodsH.Get below.
+		root.Post("/v1/audit-periods/{id}/oscal-export:download", oscalExportH.Download)
 	}
 	root.Get("/v1/audit-periods/{id}", periodsH.Get)
 	// Slice 027: walkthrough recording primitive. Routes appended per the
@@ -824,6 +845,30 @@ func (s *Server) httpHandler() http.Handler {
 	root.Get("/v1/controls/{id}/policies", controlDetailH.Policies)
 	root.Get("/v1/controls/{id}/risks", controlDetailH.Risks)
 	root.Get("/v1/controls/{id}/history", controlDetailH.History)
+	// Slice 444: AI gap-explanation v0 — the first AI-assist surface, the
+	// lowest-risk one. GET /v1/controls/{id}/gap-explanation returns the
+	// DETERMINISTIC freshness/evidence rollup ALWAYS, plus a plain-language,
+	// cited, NON-BINDING local-Ollama explanation of that rollup when
+	// available AND every citation resolves to a tenant-owned row (AC-4). The
+	// explanation is a comprehension aid in the control-detail view — never an
+	// audit artifact, never persisted (P0-444-4), no approve/publish/export
+	// path (P0-444-3). Route appended per the parallel-batch convention (chi
+	// rejects two Mounts at "/"); the /v1/controls/{id}/ sub-resource sits
+	// alongside slice 064's /policies,/risks,/history — chi resolves
+	// declaration order within the same method, so no shadowing. The inference
+	// client is local Ollama (slice 498), built from the all-defaults local
+	// config; when Ollama is unreachable the surface degrades gracefully to
+	// the deterministic rollup (AC-7). The gapexplain.Store is a pure read
+	// surface over evidence_freshness + controls + evidence_records (invariant
+	// #2) and runs under app.current_tenant RLS (invariant #6).
+	gapExplainStore := gapexplain.NewStore(s.dbPool)
+	gapExplainSvc := gapexplain.NewService(
+		gapExplainStore,
+		llm.NewOllamaClient(llm.ConfigFromEnv()),
+		gapExplainStore,
+	)
+	gapExplainH := gapexplainapi.New(gapExplainSvc)
+	root.Get("/v1/controls/{id}/gap-explanation", gapExplainH.GapExplanation)
 	// Slice 599: OSCAL resolved-chain provenance read. A single pure read
 	// over the slice-578 provenance persisted into the append-only
 	// imported_catalog_audit_log.detail JSON of the `profile_imported`
@@ -1014,8 +1059,44 @@ func (s *Server) httpHandler() http.Handler {
 	// go.mod dependency for PDF). NO AI-assist at v1 — the AnswerLibrary
 	// suggestion path is a deterministic SCF-anchor lookup, not inference.
 	questionnaireStore := questionnaire.NewStore(s.dbPool)
-	questionnairesH := questionnairesapi.New(questionnaireStore)
+	// Slice 441: AI-answer suggestion v0 (cited drafts, one-click approve) —
+	// the FIRST AI-write surface. The qaisuggest.Store does keyword-first-pass
+	// retrieval + citation resolution + draft persistence under RLS (invariant
+	// #6); the inference rides local Ollama (slice 498, P0-441-6 local-only).
+	// Constitutional invariants (no fabricated coverage, no cross-tenant bleed,
+	// one-click human approval) are enforced by the service + the DB CHECK on
+	// questionnaire_answers (the slice-498 shared ai_assist guard, adopted by
+	// this slice's migration).
+	qaiStore := qaisuggest.NewStore(s.dbPool)
+	qaiSvc := qaisuggest.NewService(
+		qaiStore,
+		llm.NewOllamaClient(llm.ConfigFromEnv()),
+		qaiStore,
+		qaiStore,
+	)
+	questionnairesH := questionnairesapi.NewWithSuggest(questionnaireStore, qaiSvc)
 	questionnairesH.RegisterRoutes(root)
+	// Slice 471: role-scoped control-implementation checklist generator v0
+	// (cited, non-binding). The which-control -> which-role split is
+	// DETERMINISTIC (owner_role + applicability_expr normalization, never
+	// LLM-guessed); the local-Ollama task-breakdown turns each in-scope
+	// control's text into 1..N cited task statements. Every item is cited to a
+	// real tenant-owned control/scf-anchor/policy id (validated before the
+	// operator sees it); the checklist is a DRAFT approved one section (role) at
+	// a time. Constitutional invariants (no fabricated coverage, no cross-tenant
+	// bleed, one-click approval, local-only) enforced by the service + the DB
+	// CHECK on checklist_sections (the slice-498 shared ai_assist guard). Routes
+	// append per the parallel-batch convention.
+	checklistStore := checklist.NewStore(s.dbPool)
+	checklistSvc := checklist.NewService(
+		checklistStore,
+		llm.NewOllamaClient(llm.ConfigFromEnv()),
+		checklistStore,
+		checklistStore,
+		llm.NewAuditWriter(s.dbPool),
+	)
+	checklistH := checklistapi.New(checklistSvc, checklistStore)
+	checklistH.RegisterRoutes(root)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require
 	// the bearer auth middleware (admin gate inside the handler). The
@@ -1027,6 +1108,41 @@ func (s *Server) httpHandler() http.Handler {
 		root.Get("/v1/admin/credentials", admincredsH.List)
 		root.Post("/v1/admin/credentials/{id}/rotate", admincredsH.Rotate)
 		root.Post("/v1/admin/credentials/{id}/revoke", admincredsH.Revoke)
+	}
+	// Slice 508: SCIM 2.0 user-lifecycle provisioning. Two surfaces:
+	//
+	//   (1) Admin control plane on /v1 (admin-gated): issue / list / revoke
+	//       the per-tenant SCIM bearer credential (AC-3).
+	//   (2) The inbound SCIM endpoints on /scim/v2/* — mounted in a chi
+	//       SUBROUTER wrapped by the SCIM auth middleware (the distinct
+	//       credential scope, P0-508-2). The /scim/ prefix is bypassed by the
+	//       /v1 JWT + requireCredential + authz chain above, so a SCIM token
+	//       can NEVER reach a /v1 handler and an atlas JWT is irrelevant here.
+	//
+	// Both mount only when the SCIM credential store is wired (cmd/atlas wires
+	// it with a BEARER_HASH_KEY hasher + BYPASSRLS authPool). The provisioning
+	// store runs every query under the credential's tenant RLS (P0-508-4).
+	if s.scimCredStore != nil {
+		adminScimH := adminscim.New(s.scimCredStore)
+		root.Post("/v1/admin/scim-credentials", adminScimH.Issue)
+		root.Get("/v1/admin/scim-credentials", adminScimH.List)
+		root.Delete("/v1/admin/scim-credentials/{id}", adminScimH.Revoke)
+
+		scimUserH := scimapi.NewHandler(scim.NewStore(s.dbPool))
+		// Slice 733: the SCIM /Groups resource. Membership changes drive a
+		// re-derivation through the slice-509 grouprole resolver — the SOLE path
+		// to a role (P0-733-1 / P0-733-3). The resolver is REUSED via the
+		// scimGroupDeriver adapter, never re-implemented. Same router, same
+		// per-tenant SCIM credential, same RLS as /Users (P0-733-4).
+		scimGroupH := scimapi.NewGroupHandler(
+			scim.NewGroupStore(s.dbPool),
+			scimGroupDeriver{resolver: grouprole.NewResolver(s.dbPool)},
+		)
+		root.Group(func(scimR chi.Router) {
+			scimR.Use(scimapi.Middleware(s.scimCredStore))
+			scimUserH.Mount(scimR)
+			scimGroupH.MountGroups(scimR)
+		})
 	}
 	// Slice 073: admin-only bootstrap-token reset endpoint. Used by
 	// `atlas-cli credentials issue --reset-bootstrap`. Mounts only when
@@ -1084,6 +1200,17 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
 	root.Post("/v1/admin/users/assign", usersH.Assign)
 	root.Post("/v1/admin/users/revoke", usersH.Revoke)
+
+	// Slice 509: IdP group-to-role mapping CRUD (AC-8). Admin-gated (the
+	// handler enforces cred.IsAdmin defense-in-depth alongside the slice 035
+	// OPA middleware); editing a mapping is a privilege-granting action so a
+	// non-admin caller gets 403. The store runs every op under the caller's
+	// tenant RLS context (invariant #6). The derivation surface (the resolver
+	// the OIDC + SCIM sources call) is wired separately at those call sites.
+	groupMapH := admingroupmappings.New(grouprole.NewStore(s.dbPool))
+	root.Post("/v1/admin/group-role-mappings", groupMapH.Create)
+	root.Get("/v1/admin/group-role-mappings", groupMapH.List)
+	root.Delete("/v1/admin/group-role-mappings/{id}", groupMapH.Delete)
 
 	// Slice 142: super_admin management surface. super_admin-gated
 	// (the handler reads jwtmw.FromContext().SuperAdmin); the OPA
@@ -1571,4 +1698,30 @@ func (a vendorBurndownAdapter) ReadHighCriticalityBurndown(ctx context.Context, 
 		OnTime:  bd.Total.Total - bd.Total.Overdue,
 		PastDue: bd.Total.Overdue,
 	}, nil
+}
+
+// scimGroupDeriver adapts the slice-509 grouprole.Resolver to the
+// scimapi.RoleDeriver surface the SCIM /Groups handler calls on a membership
+// change (slice 733 AC-3). It is a thin mapping shim: it translates the
+// handler's package-local DeriveRequest into a grouprole.DeriveInput with
+// Source=SCIM and a NIL idp_config_id (the SCIM push channel matches the
+// NULL-source mappings, per slice 509). It carries NO mapping/derivation logic
+// — that lives entirely in the resolver (P0-733-1). The resolver's last-admin
+// guard, fail-closed (unmapped group → no role), no-auto-create, and
+// manual-role preservation all hold unchanged on this path (P0-733-3 / AC-4).
+type scimGroupDeriver struct {
+	resolver *grouprole.Resolver
+}
+
+// Derive maps the SCIM membership change to roles via the slice-509 resolver.
+// ctx carries the tenant RLS context set by the SCIM auth middleware, so the
+// resolver reads the tenant's mappings + reconciles under RLS (P0-733-4).
+func (d scimGroupDeriver) Derive(ctx context.Context, in scimapi.DeriveRequest) error {
+	_, err := d.resolver.Derive(ctx, grouprole.DeriveInput{
+		UserID:      in.UserID,
+		IDPConfigID: uuid.Nil, // SCIM source → NULL-source mappings (slice 509)
+		Groups:      in.Groups,
+		Source:      grouprole.SourceSCIM,
+	})
+	return err
 }

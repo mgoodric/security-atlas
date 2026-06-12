@@ -11,6 +11,7 @@
 package auth
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -41,6 +42,23 @@ type LocalASConfig struct {
 	Issuer string
 }
 
+// OIDCGroupDeriver is the slice-509 group-to-role resolver surface the OIDC
+// callback REUSES to reconcile a user's group-derived roles on login (slice 733
+// AC-1). Satisfied by an adapter over *grouprole.Resolver. Injected as an
+// interface so this package carries no grouprole import (no cycle) and never
+// re-implements derivation logic (P0-733-1). nil = derivation disabled
+// (pre-733 behavior); the login still succeeds.
+type OIDCGroupDeriver interface {
+	// DeriveOnLogin reconciles the user's origin='group-derived' roles from the
+	// VALIDATED OIDC groups claim. ctx MUST carry the tenant RLS context. Only
+	// validated claims reach here (P0-733-2): the OIDC callback calls this
+	// strictly AFTER ID-token signature + issuer + audience + nonce
+	// verification. idpConfigID scopes the mapping lookup (509 AC-6). The
+	// resolver's last-admin guard + manual-role preservation + fail-closed hold
+	// unchanged (AC-4).
+	DeriveOnLogin(ctx context.Context, idpConfigID uuid.UUID, userID string, groups []string) error
+}
+
 // Handler bundles the auth routes' dependencies.
 type Handler struct {
 	oidc          *oidc.Authenticator
@@ -49,6 +67,10 @@ type Handler struct {
 	secureCookies bool
 
 	localAS *LocalASConfig
+
+	// groupDeriver, when set, reconciles group-derived roles on OIDC login
+	// (slice 733 AC-1). nil leaves the pre-733 behavior (no derivation).
+	groupDeriver OIDCGroupDeriver
 }
 
 // New constructs a Handler. secureCookies=false is for local-dev HTTP
@@ -73,6 +95,12 @@ func New(
 		localAS:       localAS,
 	}
 }
+
+// AttachGroupDeriver wires the slice-509 group-to-role resolver so an OIDC
+// login reconciles the user's group-derived roles from the validated groups
+// claim (slice 733 AC-1). Optional: when nil (never attached), OIDC login keeps
+// its pre-733 behavior. Set once at startup from cmd/atlas.
+func (h *Handler) AttachGroupDeriver(d OIDCGroupDeriver) { h.groupDeriver = d }
 
 // LocalLoginRequest is the JSON body for POST /auth/local/login.
 type LocalLoginRequest struct {
@@ -288,6 +316,24 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Slice 733 AC-1: reconcile the user's group-derived roles from the
+	// VALIDATED OIDC groups claim BEFORE minting the session, so the session
+	// reflects current group membership. This runs strictly after the ID token
+	// was signature/issuer/audience/nonce-verified in HandleCallback above
+	// (P0-733-2: only validated claims feed derivation). The resolver REUSES the
+	// slice-509 engine (P0-733-1); it fails closed on an unmapped group, holds
+	// the last-admin guard, and never touches origin='manual' roles (AC-4). ctx
+	// already carries the (possibly bootstrap-synthesized) tenant RLS context.
+	// A nil deriver leaves pre-733 behavior. result.Groups is empty when the IdP
+	// emits no groups claim — Derive then revokes any stale group-derived roles
+	// (subject to the guard), which is the correct reconciliation.
+	if h.groupDeriver != nil {
+		if derr := h.groupDeriver.DeriveOnLogin(ctx, result.IDPConfigID, usr.ID.String(), result.Groups); derr != nil {
+			writeAuthError(w, http.StatusInternalServerError, "group-role derivation: "+derr.Error())
+			return
+		}
+	}
+
 	sess, err := h.sessions.Create(ctx, sessions.CreateInput{
 		TenantID:   usr.TenantID,
 		UserID:     usr.ID,

@@ -271,6 +271,64 @@ export async function getControlRisks(
   return (await res.json()) as ControlLinkedRisksResponse;
 }
 
+// ===== Slice 444 — AI gap-explanation v0 =====
+//
+// GET /v1/controls/{id}/gap-explanation returns the DETERMINISTIC freshness
+// rollup ALWAYS, plus a NON-BINDING, cited, local-Ollama explanation when one
+// is available AND every citation resolves to a tenant-owned row. The
+// explanation is null when suppressed (graceful degradation); the rollup is
+// always present. The explanation is a comprehension aid — never an audit
+// artifact, with no approve/publish/export affordance.
+
+export type GapEvidenceFact = {
+  evidence_id: string;
+  evidence_kind: string;
+  result: string;
+  observed_at: string;
+};
+
+export type GapRollup = {
+  control_id: string;
+  control_title: string;
+  freshness_class: string;
+  is_stale: boolean;
+  evidence_count: number;
+  latest_observed_at: string | null;
+  valid_until: string | null;
+  evidence: GapEvidenceFact[];
+};
+
+export type GapCitation = {
+  kind: "control" | "evidence";
+  id: string;
+};
+
+export type GapExplanationBody = {
+  text: string;
+  citations: GapCitation[];
+  // Human-friendly composed model string + the structured provenance fields
+  // (slice-182 contract shape) so a future cloud-routing banner can read the
+  // provider without re-parsing prose.
+  model: string;
+  model_name: string;
+  model_version: string;
+  model_provider: string;
+  // ALWAYS false — the explanation is non-binding (no approve/publish/export).
+  binding: boolean;
+  // Human-readable "AI-generated explanation (model X) — not an audit
+  // artifact" disclosure.
+  disclosure: string;
+};
+
+export type ControlGapExplanationResponse = {
+  control_id: string;
+  rollup: GapRollup;
+  // null when the explanation was suppressed (generation unavailable or a
+  // citation failed to resolve) — the rollup still renders.
+  explanation: GapExplanationBody | null;
+  suppressed_reason: string;
+};
+
 export async function getControlHistory(
   bearer: string,
   controlID: string,
@@ -284,6 +342,17 @@ export async function getControlHistory(
     bearer,
   );
   return (await res.json()) as ControlHistoryResponse;
+}
+
+export async function getControlGapExplanation(
+  bearer: string,
+  controlID: string,
+): Promise<ControlGapExplanationResponse> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/gap-explanation`,
+    bearer,
+  );
+  return (await res.json()) as ControlGapExplanationResponse;
 }
 
 // ----- browser-side fns (hit the BFF under /api/controls/**) -----
@@ -350,5 +419,17 @@ export function fetchControlHistory(
 ): Promise<ControlHistoryResponse> {
   return bffControlFetch<ControlHistoryResponse>(
     `/api/controls/${encodeURIComponent(controlID)}/history`,
+  );
+}
+
+// Slice 444 — browser-side fetcher for the gap-explanation read. Rides the
+// existing bffControlFetch helper so APIError surfaces with the upstream
+// status; the control-detail page's classifyControlDetailError routes 401 /
+// 404 / other for free.
+export function fetchControlGapExplanation(
+  controlID: string,
+): Promise<ControlGapExplanationResponse> {
+  return bffControlFetch<ControlGapExplanationResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/gap-explanation`,
   );
 }

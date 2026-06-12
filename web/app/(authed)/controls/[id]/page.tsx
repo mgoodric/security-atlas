@@ -66,6 +66,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { CoverageTable } from "@/components/control/coverage-table";
 import { FreshnessClock } from "@/components/control/freshness-clock";
+import { GapExplanationCard } from "@/components/control/gap-explanation";
 import { ControlHeaderActions } from "@/components/control/header-actions";
 import { UcfMiniViz } from "@/components/control/ucf-mini-viz";
 import { cn } from "@/lib/utils";
@@ -88,6 +89,8 @@ import {
   fetchEvidenceList,
   type EvidenceListResponse,
 } from "@/lib/api/evidence";
+import { type AnchorDetail } from "@/lib/api/anchors";
+import { APIError } from "@/lib/api/base";
 import { formatResidualScore } from "@/app/(authed)/risks/filters";
 
 import { classifyControlDetailError } from "../error-classifier";
@@ -219,6 +222,22 @@ function ControlDetailPageInner() {
   const firstError =
     coverageQ.error ?? stateQ.error ?? effectivenessQ.error ?? null;
   const errorClass = classifyControlDetailError(firstError);
+
+  // ATLAS-012 — when the coverage call 404s, the id in the URL is an SCF
+  // anchor with no instantiated control. The empty-state copy should name
+  // the human-readable SCF code (e.g. "AAA-01"), not the raw UUID. The
+  // anchor still resolves in the global catalog, so we look up its
+  // requirements (same BFF the catalog detail page uses) purely to read
+  // `anchor.scf_id`. Enabled only on the notfound branch so the happy
+  // path makes no extra call; if the lookup is pending or also fails we
+  // fall back to the id so the empty-state always renders.
+  const anchorCodeQ = useQuery<AnchorDetail>({
+    queryKey: ["control", id, "anchor-code"],
+    queryFn: () => fetchAnchorDetail(id),
+    enabled: Boolean(id) && errorClass === "notfound",
+  });
+  const anchorCode = anchorCodeQ.data?.anchor.scf_id ?? null;
+
   useEffect(() => {
     if (errorClass === "unauthorized") {
       router.push(`/login?from=/controls/${id}`);
@@ -269,10 +288,10 @@ function ControlDetailPageInner() {
           This SCF anchor has no control instantiated in your tenant yet
         </div>
         <div className="text-xs text-muted-foreground mb-4">
-          The id <span className="font-mono">{id}</span> resolves in the global
-          SCF catalog but no tenant control is bound to it. This is the expected
-          state on a fresh install — controls are tenant-scoped and authored
-          separately from the catalog.
+          SCF anchor <span className="font-mono">{anchorCode ?? id}</span>{" "}
+          resolves in the global SCF catalog but no tenant control is bound to
+          it. This is the expected state on a fresh install — controls are
+          tenant-scoped and authored separately from the catalog.
         </div>
         <Link
           href="/controls"
@@ -357,15 +376,26 @@ function ControlDetailPageInner() {
 
   return (
     <div className="space-y-6" data-testid="control-detail">
-      {/* breadcrumb */}
-      <div className="text-sm">
-        <Link
-          href="/controls"
-          className="text-muted-foreground hover:underline"
-        >
-          ← All controls
+      {/* breadcrumb — ATLAS-011: include the leaf crumb (the SCF anchor
+          code, e.g. "Controls › AAA-01") so the trail ends at the page the
+          operator is on, not at the section. Falls back to the control's
+          bundle id when the row is unanchored. */}
+      <nav
+        aria-label="Breadcrumb"
+        data-testid="control-detail-breadcrumb"
+        className="flex items-center gap-1.5 text-sm text-muted-foreground"
+      >
+        <Link href="/controls" className="hover:underline">
+          Controls
         </Link>
-      </div>
+        <span aria-hidden>›</span>
+        <span
+          className="font-medium text-foreground"
+          data-testid="control-detail-breadcrumb-leaf"
+        >
+          {anchor ? anchor.scf_id : control.bundle_id}
+        </span>
+      </nav>
 
       {/* ============ CONTROL HEADER ============ */}
       {/* Slice 255 — header now splits into a left "title + meta" well
@@ -830,6 +860,12 @@ function OverviewPanel({
           </CardContent>
         </Card>
 
+        {/* AI GAP-EXPLANATION — slice 444: non-binding, cited, local-Ollama
+            plain-language explanation of the deterministic freshness rollup.
+            Self-contained card (own query); renders the rollup always and the
+            explanation when available + non-suppressed (AC-6/AC-7). */}
+        <GapExplanationCard id={id} />
+
         {/* EFFECTIVE SCOPE */}
         <Card data-testid="effective-scope-section">
           <CardHeader>
@@ -1017,10 +1053,7 @@ function PoliciesPanel({
     <Card data-testid="policies-tab-panel">
       <CardHeader className="border-b">
         <CardTitle>Linked policies</CardTitle>
-        <CardDescription>
-          Policies linked to this control via the policy_control_links table
-          (slice 020).
-        </CardDescription>
+        <CardDescription>Policies linked to this control.</CardDescription>
       </CardHeader>
       <CardContent>
         <PoliciesBody policiesQ={policiesQ} />
@@ -1423,4 +1456,17 @@ function formatHistoryDate(iso: string): string {
   if (!iso) return "—";
   const t = iso.indexOf("T");
   return t > 0 ? iso.slice(0, t) : iso;
+}
+
+// ATLAS-012 — resolve an SCF anchor's human-readable code via the same
+// BFF the catalog detail page uses. Used only on the control-detail
+// 404 empty-state to print "AAA-01" instead of the raw anchor UUID.
+async function fetchAnchorDetail(id: string): Promise<AnchorDetail> {
+  const res = await fetch(
+    `/api/anchors/${encodeURIComponent(id)}/requirements`,
+  );
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as AnchorDetail;
 }

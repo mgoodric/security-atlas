@@ -42,9 +42,9 @@ export type LinkForResult =
   | { kind: "static"; reason: string };
 
 const EXCEPTION_REASON =
-  "Per-exception detail page is a future slice — view the exception register at /exceptions.";
+  "A per-exception detail page is not available yet — view the exception register at /exceptions.";
 const POLICY_REASON =
-  "Per-policy detail page is a future slice — view the policy register at /policies.";
+  "A per-policy detail page is not available yet — view the policy register at /policies.";
 
 function assertNever(x: never): never {
   throw new Error(

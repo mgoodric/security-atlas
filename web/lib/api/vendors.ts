@@ -47,6 +47,31 @@ export type VendorWrite = {
   scope_cell_ids: string[];
 };
 
+// Slice 688 — vendor_reviews ledger. One row per completed review,
+// append-only, newest-first from the read path.
+export type VendorReviewOutcome =
+  | "pass"
+  | "pass_with_findings"
+  | "fail"
+  | "waived";
+
+export type VendorReview = {
+  id: string;
+  vendor_id: string;
+  reviewed_at: string;
+  reviewer: string;
+  outcome: VendorReviewOutcome;
+  notes: string;
+  created_at: string;
+};
+
+export type VendorReviewWrite = {
+  reviewed_at: string;
+  reviewer: string;
+  outcome: VendorReviewOutcome;
+  notes: string;
+};
+
 export type VendorBurndownBand = {
   criticality: string;
   total: number;
@@ -147,6 +172,47 @@ export async function deleteVendor(bearer: string, id: string): Promise<void> {
   if (!res.ok) {
     throw new APIError(res.status, `${res.status} ${res.statusText}`);
   }
+}
+
+// listVendorReviews fetches a vendor's review history, newest-first
+// (slice 688 AC-3). RLS scopes the read upstream; a cross-tenant id yields
+// an empty series.
+export async function listVendorReviews(
+  bearer: string,
+  vendorId: string,
+): Promise<VendorReview[]> {
+  const res = await apiFetch(
+    `/v1/vendors/${encodeURIComponent(vendorId)}/reviews`,
+    bearer,
+  );
+  const body = (await res.json()) as { reviews: VendorReview[] };
+  return body.reviews;
+}
+
+// recordVendorReview appends a completed review to the ledger (slice 688
+// AC-5). The platform also keeps the vendor's last_review_date scalar
+// consistent with the most-recent ledger row.
+export async function recordVendorReview(
+  bearer: string,
+  vendorId: string,
+  body: VendorReviewWrite,
+): Promise<VendorReview> {
+  const res = await fetch(
+    `${apiBaseURL()}/v1/vendors/${encodeURIComponent(vendorId)}/reviews`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${bearer}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+    },
+  );
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  const decoded = (await res.json()) as { review: VendorReview };
+  return decoded.review;
 }
 
 export async function getVendorBurndown(

@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 610
+**Generated:** 2026-06-12 · **Total slices:** 624
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 532 |
+| merged | 551 |
 | in-progress | 1 |
-| ready | 75 |
+| ready | 70 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 428 434 435 436 440 441 442 443 444 446 449 450 452 453 455 457 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 688 691 692
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -439,7 +439,7 @@
 | 411 | Contract-tier rollout: controls-detail + audit-workspace routes | merged | #958 | 2026-06-03 | cfaa30a9 |
 | 412 | Contract-tier rollout: controls-detail + audit-workspace LONG... | merged |  | 2026-06-11 | 74013361 |
 | 413 | OSCAL bundle signing Phase 1: cosign-kms + retained embedded-... | merged | #961 | 2026-06-03 | f777ff07 |
-| 414 | OSCAL bundle signing Phase 2: cosign-keyless + Fulcio + Rekor... | ready |  |  |  |
+| 414 | OSCAL bundle signing Phase 2: cosign-keyless + Fulcio + Rekor... | merged |  | 2026-06-12 | 89cca3e1 |
 | 415 | Adopt GitHub merge queue to kill the update-branch re-CI cascade | ready |  |  |  |
 | 416 | Pin golangci-lint version (drop `version: latest`) | merged | #973 | 2026-06-03 | baf06f64 |
 | 417 | Shard the `-p 1` integration job (Phase A serial / Phase B ma... | merged | #417 | 2026-06-04 | e662bed4 |
@@ -453,7 +453,7 @@
 | 425 | Real cloud-KMS round-trip integration test for `internal/osca... | merged |  | 2026-06-11 | 2ada94e9 |
 | 426 | Targeted coverage-lift round: decisions / policies / me / fre... | merged | #1006 | 2026-06-04 | 9dfb08b8 |
 | 427 | Publish the auditor-facing "verify a signed OSCAL export" pag... | merged | #974 | 2026-06-03 | 2dcb70be |
-| 428 | ADRs for the four load-bearing canvas invariants without a de... | ready |  |  |  |
+| 428 | ADRs for the four load-bearing canvas invariants without a de... | merged |  |  | ADRs 0011-0014 merged via #989 (2026-06-04); #1266 backfill miss (file says merged) |
 | 429 | README parity for the AWS connector and the Go/TypeScript SDKs | merged | #979 | 2026-06-04 | 74ca43be |
 | 430 | Consolidated environment-variable / configuration reference page | merged | #984 | 2026-06-04 | 07c2c25c |
 | 431 | External-IdP / OIDC operator setup guide | merged | #994 | 2026-06-04 | bdca8df7 |
@@ -466,23 +466,23 @@
 | 438 | ISO 27001:2022 crosswalk loader (2nd framework — proves the... | merged | #1011 | 2026-06-04 | af5aec7f |
 | 439 | Evidence-staleness digest + alerting (honest, named-interval) | merged |  | 2026-06-11 | a9ec52b7 |
 | 440 | Board-narrative AI v0 — one numbered section, end-to-end | ready |  |  |  |
-| 441 | Questionnaire AI-answer suggestion v0 (cited drafts, one-clic... | ready |  |  |  |
+| 441 | Questionnaire AI-answer suggestion v0 (cited drafts, one-clic... | merged |  | 2026-06-12 | bf191829 |
 | 442 | GCP connector (highest-demand missing cloud) | ready |  |  |  |
-| 443 | Slack connector | ready |  |  |  |
-| 444 | AI gap-explanation v0 (plain-language, cited, non-binding) | ready |  |  |  |
+| 443 | Slack connector | merged |  | 2026-06-11 | 8e866181 |
+| 444 | AI gap-explanation v0 (plain-language, cited, non-binding) | merged |  | 2026-06-11 | 6bcc6942 |
 | 445 | Email/SMTP notification channel (delivery substrate) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 446 | Disclosure / breach-notification workflow decision spike + AD... | ready |  |  |  |
 | 447 | PCI DSS v4.0 crosswalk loader (3rd framework; scope-reduction... | merged | #1017 | 2026-06-05 | 69078c86 |
 | 448 | Bulk operations + saved filter-views (operator ergonomics, co... | in-progress |  |  | feat/448-bulk-ops-saved-views |
-| 449 | OPA 1.4 → 1.17 embedded-engine upgrade (13 minors on the au... | ready |  |  |  |
+| 449 | OPA 1.4 → 1.17 embedded-engine upgrade (13 minors on the au... | merged | #1319 | 2026-06-11 | 05bb92a3 |
 | 450 | vitest 4 + @vitest/coverage-v8 4 paired migration | ready |  |  |  |
 | 451 | SLSA provenance + SBOM for binary / CLI / SDK releases | merged | #990 | 2026-06-04 | 750d0eca |
 | 452 | Node version alignment: @types/node + CI + runtime + engines ... | ready |  |  |  |
 | 453 | TypeScript 6 migration | ready |  |  |  |
 | 454 | go-otel observability group bump (13 modules) | merged | #986 | 2026-06-04 | b839f98a |
-| 455 | OIDC-identity-strategy decision spike (unblocks cosign keyles... | ready |  |  |  |
+| 455 | OIDC-identity-strategy decision spike (unblocks cosign keyles... | merged |  | 2026-06-11 | a5bc0ea9 |
 | 456 | `internal/api/oauth` residual coverage: audit-write + signer-... | merged | #1022 | 2026-06-05 | 02c926f9 |
-| 457 | Browser download surface for the OSCAL signed-export bundle | ready |  |  |  |
+| 457 | Browser download surface for the OSCAL signed-export bundle | merged |  | 2026-06-11 | a04fd240 |
 | 458 | pre-commit guard against committing machine-local analysis ca... | merged | #1005 | 2026-06-04 | e3877b29 |
 | 459 | Sweep code-comment `Plans/mockups/` provenance citations to t... | merged | #1010 | 2026-06-04 | 4833a7bd |
 | 460 | `NATS_URL` is read by the server but absent from `.env.example` | merged | #460 | 2026-06-04 | a528e279 |
@@ -496,7 +496,7 @@
 | 468 | Server-backed bulk-assign-owner + saved filter-views (controls) | ready |  |  |  |
 | 469 | Sweep `web/app/**` stale `Plans/mockups/` citations to the ar... | merged | #1015 | 2026-06-04 | cbd26d51 |
 | 470 | header-overwriting reverse-proxy container in the e2e seed ha... | merged | #1021 | 2026-06-06 | 4c5496df |
-| 471 | Role-scoped control-implementation checklist generator v0 (ci... | ready |  |  |  |
+| 471 | Role-scoped control-implementation checklist generator v0 (ci... | merged |  | 2026-06-12 | 9c500311 |
 | 472 | `internal/api/oauth` coverage: device-approval flow + DBUserR... | merged | #1026 | 2026-06-06 | f6cd0eec |
 | 473 | Idempotent migrate-on-upgrade for the self-host deploy stack ... | merged | #1042 | 2026-06-06 | 8d5da2c0 |
 | 474 | align the ingest evidence hash so the ledger-wide verify walk... | merged | #1160 | 2026-06-08 | 90b1416a |
@@ -530,8 +530,8 @@
 | 505 | Privacy v0: data-subject-access-request (DSAR) export workflow | ready |  |  |  |
 | 506 | Privacy v0: Records of Processing Activities (RoPA, GDPR Art.... | ready |  |  |  |
 | 507 | Breach-notification workflow implementation (security → pri... | ready |  |  |  |
-| 508 | SCIM 2.0 user-lifecycle provisioning (deprovisioning on IdP o... | ready |  |  |  |
-| 509 | IdP group-to-role mapping (claims/SCIM-group -> atlas role as... | ready |  |  |  |
+| 508 | SCIM 2.0 user-lifecycle provisioning (deprovisioning on IdP o... | merged |  | 2026-06-12 | f9969f4e |
+| 509 | IdP group-to-role mapping (claims/SCIM-group -> atlas role as... | merged |  | 2026-06-12 | 2a6297a7 |
 | 510 | Automated backup + scheduled restore-verification (operationa... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 511 | OSCAL profile import (resolve import / merge / modify directi... | merged | #1109 | 2026-06-07 | 57f085cf |
 | 512 | OSCAL component-definition import (vendor control-implementat... | merged | #1115 | 2026-06-07 | 3c3c62e3 |
@@ -619,7 +619,7 @@
 | 667 | Dashboard "Recent activity" filter chips are inert; placehold... | merged |  | 2026-06-11 | 878c9129 |
 | 668 | Calendar month view does not highlight "today" | merged |  | 2026-06-11 | 10b655a9 |
 | 669 | Activity ledger is dominated by internal read-telemetry (low ... | merged |  | 2026-06-11 | 4e26fd21 |
-| 670 | Pre-GA copy & metadata pass (titles, breadcrumbs, raw IDs, ty... | ready |  |  |  |
+| 670 | Pre-GA copy & metadata pass (titles, breadcrumbs, raw IDs, ty... | merged |  | 2026-06-11 | b0a6ba5a |
 | 671 | Seeded demo tenant shows no evaluated control state / zero me... | merged | #1249 | 2026-06-10 | 2894827a |
 | 672 | Policy detail link 404s — `/policies/{id}` route does not e... | merged | #1255 | 2026-06-10 | d8a8763c |
 | 673 | Board Packs list fails to load in seeded tenant — `/api/boa... | merged | #1258 | 2026-06-10 | 07b24d13 |
@@ -637,8 +637,22 @@
 | 685 | Wire dashboard "Recent activity" filter chips to a real kind ... | not-ready |  |  | wire dashboard activity chips — blocked on backend endpoint filter support (spillover from 667) |
 | 686 | Read-only vendor detail page with review history | merged |  | 2026-06-11 | 84e6386c |
 | 687 | Contract-tier rollout: controls-detail + audit-workspace REMA... | merged |  | 2026-06-11 | fb9b03b4 |
-| 688 | vendor_reviews ledger (per-review history surface) | ready |  |  |  |
+| 688 | vendor_reviews ledger (per-review history surface) | merged |  | 2026-06-11 | 7514a084 |
 | 689 | Contract-tier rollout: audit-workspace read tail (populations... | merged |  | 2026-06-11 | 4020b1a4 |
 | 690 | Contract-tier rollout: audit-workspace read-tail remainder (s... | merged |  | 2026-06-11 | 035a8f60 |
-| 691 | Vendor detail does not refresh after recording a review | ready |  |  |  |
-| 692 | Contract-tier rollout: controldetail attest-form + per-contro... | ready |  |  |  |
+| 691 | Vendor detail does not refresh after recording a review | merged |  | 2026-06-11 | b600c061 |
+| 692 | Contract-tier rollout: controldetail attest-form + per-contro... | merged |  | 2026-06-11 | 1a4d3fa1 |
+| 693 | CI pipeline efficiency + safety hardening (Tier 1) | merged | #1301 | 2026-06-11 | 3d11343c |
+| 694 | Docker layer caching on the trivy-image job | ready |  |  |  |
+| 695 | Share the prebuilt atlas binary across jobs (build once) | ready |  |  |  |
+| 696 | Share the `.next` frontend build + standardize on `npm ci` | ready |  |  |  |
+| 697 | Cache uv/pip in the Python CI jobs | ready |  |  |  |
+| 698 | De-duplicate the precommit CI job's language hooks | ready |  |  |  |
+| 699 | PR-scope (or demote) the three advisory bot comments | ready |  |  |  |
+| 700 | Move the Trivy image scan off the PR hot-path to a nightly ma... | ready |  |  |  |
+| 701 | Collapse the ~21 stub jobs behind a promoted merge-gate | ready |  |  |  |
+| 702 | container-publish edge-build efficiency | ready |  |  |  |
+| 703 | Main-canary: run a single representative leg on docs-only pushes | ready |  |  |  |
+| 704 | Contract-tier rollout: tenant-wide `/v1/evidence` ledger wind... | merged |  | 2026-06-11 | f882950d |
+| 732 | Calendar/dashboard exception event labels show the raw contro... | merged |  | 2026-06-11 | 9159b6a5 |
+| 733 | Live group-role derivation wiring + SCIM /Groups REST resource | merged |  | 2026-06-12 | 5591029b |

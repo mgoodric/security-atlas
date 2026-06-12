@@ -16,6 +16,7 @@
 package questionnaires
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -23,21 +24,36 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/qaisuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// Handler bundles the slice-155 questionnaire routes against the Store.
+// Handler bundles the slice-155 questionnaire routes against the Store, plus
+// the slice-441 AI-suggestion routes against the qaisuggest.Service. The
+// suggestion service is OPTIONAL — when nil (e.g. a deployment that has not
+// wired local inference) the suggest/approve routes return 503 rather than
+// panicking, so the rest of the questionnaire surface is unaffected.
 type Handler struct {
-	store *questionnaire.Store
+	store   *questionnaire.Store
+	suggest *qaisuggest.Service
 }
 
-// New constructs a Handler.
+// New constructs a Handler without the AI-suggestion surface (slice 155 only).
 func New(store *questionnaire.Store) *Handler {
 	return &Handler{store: store}
+}
+
+// NewWithSuggest constructs a Handler wired with the slice-441 AI-suggestion
+// service. When suggest is non-nil the suggest + approve routes are live.
+func NewWithSuggest(store *questionnaire.Store, suggest *qaisuggest.Service) *Handler {
+	return &Handler{store: store, suggest: suggest}
 }
 
 // RegisterRoutes attaches the slice-155 routes directly onto the
@@ -52,6 +68,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/v1/questionnaires/{id}/import-excel", h.ImportExcel)
 	r.Get("/v1/questionnaires/{id}/suggestions", h.Suggestions)
 	r.Post("/v1/questionnaires/{id}/export-pdf", h.ExportPDF)
+	// Slice 441 — AI-answer suggestion v0. The longest-literal-suffix routes
+	// (answers/{qid}/ai-suggest, answers/{qid}/ai-approve) are declared before
+	// the bare answers/{qid} PATCH so chi's declaration-order match resolves
+	// them first.
+	r.Post("/v1/questionnaires/{id}/answers/{qid}/ai-suggest", h.AISuggest)
+	r.Post("/v1/questionnaires/{id}/answers/{qid}/ai-approve", h.AIApprove)
 	r.Patch("/v1/questionnaires/{id}/answers/{qid}", h.UpsertAnswer)
 	r.Get("/v1/questionnaires/{id}", h.Get)
 }
@@ -333,4 +355,124 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/pdf")
 	_, _ = w.Write(buf)
+}
+
+// ===== POST /v1/questionnaires/{id}/answers/{qid}/ai-suggest =====
+//
+// Slice 441 — generate a cited AI DRAFT answer for one question. The draft is
+// persisted as ai_assisted=TRUE, human_approved=FALSE (NOT returned to a
+// customer; not approved). Constitutional invariants (no fabricated coverage,
+// no cross-tenant bleed, local-only) are enforced by the qaisuggest.Service.
+//
+// Role-gated: questionnaire-response is a grc_engineer (IsApprover) / admin
+// capability (AC-9, threat-model S). A bare read role cannot generate a draft
+// that will become a customer-facing answer.
+func (h *Handler) AISuggest(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to generate an AI answer suggestion")
+		return
+	}
+	if h.suggest == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI suggestion is not enabled on this deployment")
+		return
+	}
+	qid, err := uuid.Parse(chi.URLParam(r, "qid"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "qid must be a uuid")
+		return
+	}
+	out, err := h.suggest.Suggest(ctx, qaisuggest.SuggestParams{
+		QuestionID: qid,
+		AuthoredBy: cred.ID,
+	})
+	if err != nil {
+		if errors.Is(err, qaisuggest.ErrQuestionNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "question not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "questionnaires", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+// ===== POST /v1/questionnaires/{id}/answers/{qid}/ai-approve =====
+//
+// Slice 441 — one-click human approval of an AI-suggested draft (AC-6/AC-12).
+// Records the approver + flips human_approved=TRUE; the operator's edited
+// final text is what the questionnaire stores. There is NO auto-approve path —
+// this endpoint is the ONLY way an AI draft becomes approved. The DB CHECK
+// makes human_approved=TRUE without a human_approver impossible (P0-441-8).
+//
+// Role-gated identically to AISuggest.
+func (h *Handler) AIApprove(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to approve an AI answer")
+		return
+	}
+	if h.suggest == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI suggestion is not enabled on this deployment")
+		return
+	}
+	var req aiApproveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON")
+		return
+	}
+	answerID, err := uuid.Parse(req.AnswerID)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "answer_id must be a uuid")
+		return
+	}
+	approved, err := h.suggest.Approve(ctx, qaisuggest.ApproveParams{
+		AnswerID:    answerID,
+		Narrative:   req.Narrative,
+		AnswerValue: req.AnswerValue,
+		// The approver is the authenticated credential — NEVER client-supplied
+		// (a caller cannot approve "as" someone else).
+		Approver: cred.ID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, qaisuggest.ErrApproverRequired):
+			// Should be unreachable (cred.ID is always set) but maps cleanly.
+			httpresp.WriteError(w, http.StatusBadRequest, "approver is required")
+		case errors.Is(err, qaisuggest.ErrAnswerNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "ai-suggested answer not found")
+		default:
+			httperr.WriteInternal(w, r, "questionnaires", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, approved)
+}
+
+type aiApproveRequest struct {
+	AnswerID    string `json:"answer_id"`
+	Narrative   string `json:"narrative"`
+	AnswerValue string `json:"answer_value"`
+}
+
+// tenantCred resolves the tenant context + the authenticated credential. Both
+// must be present for the role-gated AI routes. Mirrors
+// oscalcomponents.tenantCredContext.
+func (h *Handler) tenantCred(r *http.Request) (context.Context, credstore.Credential, bool) {
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
+		return nil, credstore.Credential{}, false
+	}
+	c, found := authctx.CredentialFromContext(r.Context())
+	if !found || c.TenantID == "" {
+		return nil, credstore.Credential{}, false
+	}
+	return r.Context(), c, true
 }
