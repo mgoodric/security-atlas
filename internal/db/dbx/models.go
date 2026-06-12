@@ -1100,6 +1100,27 @@ type BoardBrief struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type BoardNarrativeSection struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	SectionKey    string             `json:"section_key"`
+	PeriodEnd     string             `json:"period_end"`
+	RawDraft      string             `json:"raw_draft"`
+	OperatorEdit  string             `json:"operator_edit"`
+	FinalText     string             `json:"final_text"`
+	Citations     []byte             `json:"citations"`
+	AuthoredBy    string             `json:"authored_by"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+	PromptVersion string             `json:"prompt_version"`
+	ModelName     string             `json:"model_name"`
+	ModelVersion  string             `json:"model_version"`
+	ModelProvider string             `json:"model_provider"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BoardPack struct {
 	ID          pgtype.UUID        `json:"id"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`
