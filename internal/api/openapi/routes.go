@@ -239,6 +239,8 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/policies/{id}/publish", Tag: "policies", Tier: "bearer", Internal: false, Summary: "POST /v1/policies/{id}/publish"},
 	{Method: "POST", Path: "/v1/populations", Tag: "audit-samples", Tier: "bearer", Internal: false, Summary: "POST /v1/populations"},
 	{Method: "POST", Path: "/v1/questionnaires", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires"},
+	{Method: "POST", Path: "/v1/questionnaires/{id}/answers/{qid}/ai-approve", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/answers/{qid}/ai-approve"},
+	{Method: "POST", Path: "/v1/questionnaires/{id}/answers/{qid}/ai-suggest", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/answers/{qid}/ai-suggest"},
 	{Method: "POST", Path: "/v1/questionnaires/{id}/export-pdf", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/export-pdf"},
 	{Method: "POST", Path: "/v1/questionnaires/{id}/import-excel", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/import-excel"},
 	{Method: "POST", Path: "/v1/risks", Tag: "risks", Tier: "bearer", Internal: false, Summary: "POST /v1/risks"},

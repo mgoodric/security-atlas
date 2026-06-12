@@ -48,6 +48,14 @@ type Querier interface {
 	// Transition: under_review -> approved. Requires IsApprover at handler
 	// (AC-4). The DB only guards the prior-state.
 	ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (Policy, error)
+	// Slice 441 — one-click human approval of an AI-suggested draft (AC-6/AC-7).
+	// Sets human_approved=TRUE and records the human_approver; optionally accepts
+	// the operator's edited final text. The DB CHECK
+	// questionnaire_answers_ai_assist_invariant makes human_approved=TRUE with a
+	// blank human_approver impossible (P0-441-8); this query NEVER passes an empty
+	// approver (the service rejects that before the round-trip via
+	// llm.EnforceApproval). Tenant-scoped by RLS + the explicit tenant_id guard.
+	ApproveQuestionnaireAnswer(ctx context.Context, arg ApproveQuestionnaireAnswerParams) (QuestionnaireAnswer, error)
 	// Slice 025 — auditor assignments + audit notes.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -666,6 +674,10 @@ type Querier interface {
 	// predicate is defense-in-depth behind RLS. A cross-tenant or non-profile id,
 	// or a baseline with no success-audit row, returns ErrNoRows.
 	GetProfileImportProvenance(ctx context.Context, arg GetProfileImportProvenanceParams) (GetProfileImportProvenanceRow, error)
+	// Slice 441 — fetch one answer by id under the caller's tenant. Used by the
+	// approval path to confirm the draft exists + is AI-assisted before approving,
+	// and by tests. A cross-tenant id returns ErrNoRows (RLS).
+	GetQuestionnaireAnswerByID(ctx context.Context, arg GetQuestionnaireAnswerByIDParams) (QuestionnaireAnswer, error)
 	// Fetch one questionnaire by id. RLS scopes the lookup to the caller's
 	// tenant; a cross-tenant id returns ErrNoRows.
 	GetQuestionnaireByID(ctx context.Context, arg GetQuestionnaireByIDParams) (Questionnaire, error)
@@ -2548,6 +2560,15 @@ type Querier interface {
 	// guard makes a post-finalize mutation a zero-row UPDATE which the
 	// handler surfaces as 409 Conflict.
 	UpdateWalkthroughHash(ctx context.Context, arg UpdateWalkthroughHashParams) (Walkthrough, error)
+	// Slice 441 — persist an AI-suggested DRAFT answer for one question. The draft
+	// is ai_assisted=TRUE, human_approved=FALSE, human_approver=NULL: a suggestion
+	// the operator has not yet approved (P0-441-1, AC-6). The model-provenance
+	// columns are populated from the generation that produced the draft
+	// (snapshot-at-generation). On conflict (the question already has an answer)
+	// the draft REPLACES the prior answer text BUT resets approval to FALSE/NULL —
+	// a fresh suggestion is unapproved by construction, so an operator can never
+	// inherit a prior approval onto new AI text (P0-441-1).
+	UpsertAISuggestedAnswer(ctx context.Context, arg UpsertAISuggestedAnswerParams) (QuestionnaireAnswer, error)
 	// Insert-or-update the tenant's primary IdP config. The application
 	// supplies the encrypted client_secret_enc; an empty bytea is rejected
 	// at the application layer for INSERT but permitted for UPDATE-only

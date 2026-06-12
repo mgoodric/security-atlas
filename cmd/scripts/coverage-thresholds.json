@@ -280,6 +280,7 @@
     "internal/policy": 70,
     "internal/policy/pdf": 68,
     "internal/policy/seed": 87,
+    "internal/qaisuggest": 79,
     "internal/questionnaire": 77,
     "internal/risk": 77,
     "internal/risk/aggrule": 72,
