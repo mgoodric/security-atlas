@@ -167,6 +167,32 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid
 	}
 }
 
+// seedControlWithSCF inserts a control with an explicit scf_id (the SCF
+// anchor code) and a known title so slice 732's exception-label JOIN can
+// be asserted. A blank scfID exercises the AC-2 no-SCF-code fallback path.
+func seedControlWithSCF(t *testing.T, admin *pgxpool.Pool, tenant, scfID, title string) uuid.UUID {
+	t.Helper()
+	ctrlID := uuid.New()
+	var scfArg any
+	if scfID == "" {
+		scfArg = nil
+	} else {
+		scfArg = scfID
+	}
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO controls (
+			id, tenant_id, scf_id, title, control_family, implementation_type,
+			bundle_id, evidence_queries, applicability_expr, freshness_class,
+			lifecycle_state
+		)
+		VALUES ($1, $2, $3, $4, 'AAA', 'manual_periodic',
+		        $5, '[]'::jsonb, 'true', 'quarterly', 'active')
+	`, ctrlID, tenant, scfArg, title, "test-bundle-732-"+ctrlID.String()); err != nil {
+		t.Fatalf("seed control with scf: %v", err)
+	}
+	return ctrlID
+}
+
 // seedVendor inserts a vendor with a last_review_date and review_cadence so
 // the calendar's vendor-review branch (slice 675) projects a next-review
 // event at last_review_date + cadence. Returns the vendor id.
@@ -305,6 +331,76 @@ func TestCalendar_RLSIsolatesExceptionsAcrossTenants(t *testing.T) {
 	eventsA := gotA["events"].([]any)
 	if len(eventsA) != 1 {
 		t.Errorf("tenant A sees %d exceptions; expected 1", len(eventsA))
+	}
+}
+
+// TestCalendar_ExceptionTitleUsesSCFCodeNotUUID is the slice 732 AC-5
+// acceptance test: an exception on a control with a known SCF code renders
+// "Exception on <scf_code> — <control name>" and NEVER the raw control
+// UUID. The label is built in the calendar SQL JOIN (single source of
+// truth); the handler passes it through verbatim.
+func TestCalendar_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	tenant := freshTenant(t, admin)
+	now := time.Now().UTC()
+
+	ctrl := seedControlWithSCF(t, admin, tenant, "AAA-01", "Access Control Policy")
+	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
+
+	env := testServer(t, app, tenant)
+	resp, body := get(t, env, "/v1/calendar?types=exception")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("calendar GET: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	got := decodeJSON(t, body)
+	events := got["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 exception event, got %d: %s", len(events), string(body))
+	}
+	title := events[0].(map[string]any)["title"].(string)
+
+	const wantTitle = "Exception on AAA-01 — Access Control Policy"
+	if title != wantTitle {
+		t.Errorf("exception title = %q; want %q", title, wantTitle)
+	}
+	if strings.Contains(title, ctrl.String()) {
+		t.Errorf("exception title leaked the raw control UUID: %q", title)
+	}
+}
+
+// TestCalendar_ExceptionTitleFallsBackWhenNoSCFCode is the slice 732 AC-2
+// edge case: a control with NO SCF code falls back to "Exception on
+// <control name>" — it must still never print a bare UUID.
+func TestCalendar_ExceptionTitleFallsBackWhenNoSCFCode(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+
+	tenant := freshTenant(t, admin)
+	now := time.Now().UTC()
+
+	ctrl := seedControlWithSCF(t, admin, tenant, "", "Custom unmapped control")
+	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
+
+	env := testServer(t, app, tenant)
+	resp, body := get(t, env, "/v1/calendar?types=exception")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("calendar GET: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	got := decodeJSON(t, body)
+	events := got["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 exception event, got %d: %s", len(events), string(body))
+	}
+	title := events[0].(map[string]any)["title"].(string)
+
+	const wantTitle = "Exception on Custom unmapped control"
+	if title != wantTitle {
+		t.Errorf("fallback exception title = %q; want %q", title, wantTitle)
+	}
+	if strings.Contains(title, ctrl.String()) {
+		t.Errorf("fallback exception title leaked the raw control UUID: %q", title)
 	}
 }
 
