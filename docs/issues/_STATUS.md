@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 551 |
+| merged | 552 |
 | in-progress | 1 |
-| ready | 70 |
+| ready | 69 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -467,7 +467,7 @@
 | 439 | Evidence-staleness digest + alerting (honest, named-interval) | merged |  | 2026-06-11 | a9ec52b7 |
 | 440 | Board-narrative AI v0 — one numbered section, end-to-end | ready |  |  |  |
 | 441 | Questionnaire AI-answer suggestion v0 (cited drafts, one-clic... | merged |  | 2026-06-12 | bf191829 |
-| 442 | GCP connector (highest-demand missing cloud) | ready |  |  |  |
+| 442 | GCP connector (highest-demand missing cloud) | merged |  | 2026-06-12 | e7befdbf |
 | 443 | Slack connector | merged |  | 2026-06-11 | 8e866181 |
 | 444 | AI gap-explanation v0 (plain-language, cited, non-binding) | merged |  | 2026-06-11 | 6bcc6942 |
 | 445 | Email/SMTP notification channel (delivery substrate) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
