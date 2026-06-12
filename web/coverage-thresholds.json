@@ -829,6 +829,12 @@
       "functions": 81,
       "lines": 92
     },
+    "lib/checklist/checklist-view.ts": {
+      "statements": 98,
+      "branches": 92,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/display-name.ts": {
       "statements": 98,
       "branches": 91,

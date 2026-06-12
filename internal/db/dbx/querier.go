@@ -33,6 +33,13 @@ type Querier interface {
 	// Idempotent: ON CONFLICT DO NOTHING because the PK already enforces no
 	// duplicates, so re-adding is a no-op.
 	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
+	// One-click per-section approval (AC-10): flip human_approved=TRUE + record the
+	// approver on an AI-assisted, currently-unapproved section. The
+	// ai_assisted=TRUE AND human_approver IS NOT NULL guard in the WHERE means an
+	// attempt to "approve" the unassigned bucket (ai_assisted=FALSE) or supply a
+	// blank approver matches no row (ErrNoRows) — there is NO auto-approve path.
+	// The DB CHECK is the authoritative backstop. updated_at is refreshed.
+	ApproveChecklistSection(ctx context.Context, arg ApproveChecklistSectionParams) (ChecklistSection, error)
 	// AC-3 transition: requested -> approved. The application MUST verify the
 	// caller has IsApprover before invoking this query AND that approved_by
 	// differs from requested_by (segregation of duties). The WHERE
@@ -97,6 +104,10 @@ type Querier interface {
 	// Count of all generations for the current tenant. Used by the cross-tenant
 	// isolation integration test to prove tenant B sees zero of tenant A's rows.
 	CountAIGenerationsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// Count of all checklist sections visible to the caller's tenant. Used by the
+	// cross-tenant isolation integration test to prove tenant B sees zero of
+	// tenant A's rows (AC-8).
+	CountChecklistSectionsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Slice 055 overdue-job dedup probe: has this decision already had an
 	// `overdue_notified` audit row written? A non-zero count means the daily
 	// job already notified the decision_maker -- skip re-emission (P0
@@ -540,6 +551,9 @@ type Querier interface {
 	GetBoardPackByID(ctx context.Context, arg GetBoardPackByIDParams) (BoardPack, error)
 	// Read a delivery-log row by id (tests + outcome inspection).
 	GetChannelDeliveryLog(ctx context.Context, arg GetChannelDeliveryLogParams) (ChannelDeliveryLog, error)
+	// Fetch one section by id within the caller's tenant. Used by the approval flow
+	// + tests. A cross-tenant id returns ErrNoRows.
+	GetChecklistSectionByID(ctx context.Context, arg GetChecklistSectionByIDParams) (ChecklistSection, error)
 	// Returns the JSON-encoded applicability_expr for a single control. The column
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
@@ -817,6 +831,18 @@ type Querier interface {
 	// that). A re-generation for the same period_end is a NEW row with a NEW id
 	// — never an edit of an existing pack.
 	InsertBoardPack(ctx context.Context, arg InsertBoardPackParams) (BoardPack, error)
+	// Persist one cited task statement in a section. citations is the validated,
+	// tenant-resolved JSONB array (the service guarantees every cited id resolves
+	// BEFORE this write — P0-471-2); the CHECK guarantees the array is non-empty.
+	// no_evidence marks a control with no evidence backing as an explicit gap
+	// (AC-6). task_text is bound as a parameter (model output never interpolated).
+	InsertChecklistItem(ctx context.Context, arg InsertChecklistItemParams) (ChecklistItem, error)
+	// Persist one approvable role-section of a generation (ai_assisted, UNAPPROVED).
+	// A real role-section is ai_assisted=TRUE with full model provenance; the
+	// unassigned bucket is ai_assisted=FALSE with empty provenance. The shared
+	// ai_assist_human_approver_guard CHECK forbids the approved-without-approver
+	// shape at INSERT time too.
+	InsertChecklistSection(ctx context.Context, arg InsertChecklistSectionParams) (ChecklistSection, error)
 	// Slice 012 — control state evaluation engine queries.
 	//
 	// `control_evaluations` is the append-only output table of the evaluation
@@ -1344,6 +1370,11 @@ type Querier interface {
 	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
 	// inside an ARRAY[] constructor.
 	ListCandidateRisksForRule(ctx context.Context, arg ListCandidateRisksForRuleParams) ([]Risk, error)
+	// The cited task items in one section, render order. Tenant-scoped.
+	ListChecklistItemsBySection(ctx context.Context, arg ListChecklistItemsBySectionParams) ([]ChecklistItem, error)
+	// Load all sections of one generation for the caller's tenant, role order
+	// stable. Powers the role-grouped review view (AC-9).
+	ListChecklistSectionsByGeneration(ctx context.Context, arg ListChecklistSectionsByGenerationParams) ([]ChecklistSection, error)
 	// Every catalog metric whose compute_strategy is 'computed'. The 15-min
 	// cron iterates this list per tenant.
 	ListComputedCatalog(ctx context.Context) ([]MetricsCatalog, error)
@@ -1688,6 +1719,21 @@ type Querier interface {
 	// Enumerate every resolved profile baseline for the tenant, most recent
 	// first (index-served by idx_imported_catalogs_tenant_profiles).
 	ListImportedProfiles(ctx context.Context, tenantID pgtype.UUID) ([]ImportedCatalog, error)
+	// Slice 471 — role-scoped control-implementation checklist generator v0.
+	//
+	// Queries for the deterministic role-split + the cited, non-binding checklist
+	// draft. Every query is tenant-bound via the leading $1 parameter
+	// (defense-in-depth behind the four-policy FORCE RLS on checklist_sections /
+	// checklist_items, invariant #6). Model output (task_text, citations) is bound
+	// as PARAMETERIZED values only — never interpolated (P0-498-7).
+	// AC-1/AC-2: the in-scope control set for a generation. Every ACTIVE
+	// (non-superseded) control for the caller's tenant, with the deterministic
+	// role-split inputs (owner_role + applicability_expr), its scf linkage (scf_id
+	// for the SCF-anchor citation), and a `has_evidence` flag (AC-6: a control with
+	// zero evidence rows is rendered as a "no evidence yet" gap, never as
+	// satisfied). RLS scopes the read to the tenant; the WHERE tenant_id clause is
+	// belt-and-suspenders. Ordered for stable rendering.
+	ListInScopeControlsForChecklist(ctx context.Context, tenantID pgtype.UUID) ([]ListInScopeControlsForChecklistRow, error)
 	// Every (control, scope_cell)'s latest state for one control. DISTINCT ON
 	// collapses the append-only history to the current row per cell. Used by
 	// GET /v1/controls/:id/state when no scope filter is supplied.
@@ -1834,6 +1880,11 @@ type Querier interface {
 	// bigint value. See
 	// `docs/audit-log/159-sqlc-toolchain-ci-drift-fix-decisions.md`.
 	ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesWithAckRateParams) ([]ListPoliciesWithAckRateRow, error)
+	// The policy ids linked to one control via slice-022's
+	// policies.linked_control_ids UUID[] array (same predicate as slice-064's
+	// ListPoliciesLinkedToControl). Lets the generator offer a linked-policy id as
+	// a citable reference for a control's tasks. Tenant-scoped.
+	ListPolicyIDsLinkedToControl(ctx context.Context, arg ListPolicyIDsLinkedToControlParams) ([]pgtype.UUID, error)
 	// Returns the version chain for a policy id by walking predecessor_id.
 	// Recursive CTE keeps the query inside Postgres rather than client-side
 	// traversal. Returns oldest-first so the chain reads naturally
@@ -2357,6 +2408,13 @@ type Querier interface {
 	// explicitly so the publish writes the final, operator-reviewed snapshot in
 	// the same UPDATE that flips the status — one atomic transition.
 	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
+	// Citation-resolution gate (AC-5, P0-471-2): does this id name a tenant-owned
+	// ACTIVE control? A cross-tenant id is RLS-invisible, so this returns no row
+	// (the AC-8 mechanism). Returns the control id when it resolves.
+	ResolveChecklistControl(ctx context.Context, arg ResolveChecklistControlParams) (pgtype.UUID, error)
+	// Citation-resolution gate: does this id name a tenant-owned policy? Used when
+	// a generated item cites a linked policy id. Cross-tenant ids are RLS-invisible.
+	ResolveChecklistPolicy(ctx context.Context, arg ResolveChecklistPolicyParams) (pgtype.UUID, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	// Slice 108: DELETE /v1/me/sessions (no {id}). Revokes every valid session for the
 	// caller EXCEPT the one identified by $3 (the "current" session id). When the caller
