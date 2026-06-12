@@ -4,7 +4,7 @@
   "private": true,
   "description": "security-atlas frontend — Next.js App Router + shadcn/ui + Tailwind 4 + TanStack Query",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "next dev",
@@ -32,7 +32,7 @@
   "devDependencies": {
     "@playwright/test": "^1.49.0",
     "@tailwindcss/postcss": "^4",
-    "@types/node": "^25",
+    "@types/node": "^22",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^4.1.8",

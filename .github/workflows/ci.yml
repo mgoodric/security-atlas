@@ -880,7 +880,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces
         run: npm install --no-audit --no-fund
@@ -964,7 +964,7 @@ jobs:
           python-version: "3.11"
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       # Slice 693 — cache the pre-commit hook environments (the dominant
       # cost of this job: pre-commit creates a venv/node_env per hook repo
@@ -1271,7 +1271,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces
         working-directory: .
@@ -1328,7 +1328,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces
         working-directory: .
@@ -1450,7 +1450,7 @@ jobs:
           cache: true
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Start MinIO
         run: |
@@ -1684,7 +1684,7 @@ jobs:
           cache: true
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Start MinIO
         run: |
@@ -1890,7 +1890,7 @@ jobs:
           cache: true
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces
         run: npm install --no-audit --no-fund
@@ -2508,7 +2508,7 @@ jobs:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces (production dependency tree only)
         # Use the lockfile-faithful install so audit sees the same
