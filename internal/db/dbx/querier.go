@@ -151,6 +151,7 @@ type Querier interface {
 	CountRequiredRoleUsersForVersion(ctx context.Context, arg CountRequiredRoleUsersForVersionParams) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
+	CountSCIMUsers(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Return the row count for the caller's tenant. Used by the slice 126
 	// integration test to assert exactly-1 fallback row after the 10001-record
@@ -305,6 +306,11 @@ type Querier interface {
 	// DB-side CHECK constraints (slice 019) are defense-in-depth, not the
 	// primary validation path.
 	CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, error)
+	// Slice 508: provision a user via SCIM. Sets scim_managed=true and the IdP's
+	// externalId. status + active are kept in lockstep ('active'/true). idp_issuer
+	// / idp_subject are left empty here (SCIM is push-from-IdP, not OIDC login);
+	// email is the join key with a later OIDC sign-in.
+	CreateSCIMUser(ctx context.Context, arg CreateSCIMUserParams) (User, error)
 	CreateSample(ctx context.Context, arg CreateSampleParams) (Sample, error)
 	// Insert a scope cell. dimensions_hash is the application-computed canonical
 	// hash; the UNIQUE (tenant_id, dimensions_hash) constraint rejects duplicates.
@@ -723,6 +729,17 @@ type Querier interface {
 	// Updated / Unchanged (xmax-based detection inside ON CONFLICT can't
 	// distinguish "updated to the same content" from "actually updated").
 	GetSCFAnchorByVersionAndSCFID(ctx context.Context, arg GetSCFAnchorByVersionAndSCFIDParams) (ScfAnchor, error)
+	// Lookup by HMAC hash for the SCIM auth middleware. Runs under the BYPASSRLS
+	// atlas_migrate role (no tenant context yet — the row's tenant_id is what
+	// authentication RETURNS). Returns the row whether revoked or not — the caller
+	// enforces the revoked-state check.
+	GetSCIMCredentialByHash(ctx context.Context, tokenHash []byte) (ScimCredential, error)
+	GetSCIMCredentialByID(ctx context.Context, arg GetSCIMCredentialByIDParams) (ScimCredential, error)
+	// Case-insensitive email lookup within a tenant. SCIM userName maps to email
+	// (decisions D1); used to reconcile a SCIM Create against an existing row.
+	GetSCIMUserByEmail(ctx context.Context, arg GetSCIMUserByEmailParams) (User, error)
+	// Lookup a SCIM-provisioned user by the IdP's externalId within the tenant.
+	GetSCIMUserByExternalID(ctx context.Context, arg GetSCIMUserByExternalIDParams) (User, error)
 	GetSampleByID(ctx context.Context, arg GetSampleByIDParams) (Sample, error)
 	// Look up a cell by its dimensions hash. Used by the "create or get" path so
 	// a re-seed call does not 409 on the existing default cell.
@@ -1005,6 +1022,13 @@ type Querier interface {
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
+	// Append-only audit row for a SCIM provision/deprovision mutation (AC-5).
+	InsertSCIMAuditLog(ctx context.Context, arg InsertSCIMAuditLogParams) error
+	// Slice 508: persist a new SCIM provisioning credential. token_hash is
+	// HMAC-SHA256(plaintext, BEARER_HASH_KEY) per ADR 0002 — computed by the
+	// application layer before this call. last4 is the last four chars of the
+	// plaintext bearer (safe to surface).
+	InsertSCIMCredential(ctx context.Context, arg InsertSCIMCredentialParams) (ScimCredential, error)
 	InsertSampleEvidence(ctx context.Context, arg InsertSampleEvidenceParams) error
 	// Adds a single (tenant, user, role) assignment. Idempotent under the
 	// composite PK; conflicts are silently no-op so concurrent admins
@@ -2064,6 +2088,16 @@ type Querier interface {
 	// (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
 	// regen-on-rebase note in MEMORY.md). Keep the two in sync.
 	ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error)
+	// Read-only: SCIM audit rows for a tenant, newest first. Backs integration
+	// assertions (AC-5) and any future admin surface.
+	ListSCIMAuditLogByTenant(ctx context.Context, arg ListSCIMAuditLogByTenantParams) ([]ScimAuditLog, error)
+	// Active SCIM credentials for a tenant (excludes revoked).
+	ListSCIMCredentialsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ScimCredential, error)
+	// Tenant-scoped user list for SCIM List (no filter). RLS confines to the
+	// credential's tenant (P0-508-4). Ordered for stable pagination.
+	ListSCIMUsers(ctx context.Context, arg ListSCIMUsersParams) ([]User, error)
+	// SCIM List with `filter=userName eq "x"` (AC-1). userName maps to email.
+	ListSCIMUsersByUserName(ctx context.Context, arg ListSCIMUsersByUserNameParams) ([]User, error)
 	ListSampleAnnotations(ctx context.Context, arg ListSampleAnnotationsParams) ([]SampleAnnotation, error)
 	ListSampleAuditLog(ctx context.Context, arg ListSampleAuditLogParams) ([]SampleAuditLog, error)
 	ListSampleEvidence(ctx context.Context, arg ListSampleEvidenceParams) ([]ListSampleEvidenceRow, error)
@@ -2397,6 +2431,8 @@ type Querier interface {
 	// The CTE is bounded by the tenant_id predicate on every row, so it can
 	// never walk into another tenant's chain even with RLS off.
 	ParentChainIDs(ctx context.Context, arg ParentChainIDsParams) ([]pgtype.UUID, error)
+	// SCIM Patch of a core attribute (display_name). Roles are out of scope.
+	PatchSCIMUserDisplayName(ctx context.Context, arg PatchSCIMUserDisplayNameParams) (User, error)
 	// One-shot publish of an approved row that has NO predecessor (the very
 	// first version). Sets status -> published, populates effective_date,
 	// published_at, published_by. Predecessor_id stays NULL.
@@ -2408,6 +2444,10 @@ type Querier interface {
 	// explicitly so the publish writes the final, operator-reviewed snapshot in
 	// the same UPDATE that flips the status — one atomic transition.
 	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
+	// SCIM Replace (PUT) — overwrites the mutable SCIM-mapped attributes:
+	// display_name, active (and the mirrored status), email. external_id and
+	// roles are NOT touched here (P0-508-3: SCIM never assigns roles).
+	ReplaceSCIMUser(ctx context.Context, arg ReplaceSCIMUserParams) (User, error)
 	// Citation-resolution gate (AC-5, P0-471-2): does this id name a tenant-owned
 	// ACTIVE control? A cross-tenant id is RLS-invisible, so this returns no row
 	// (the AC-8 mechanism). Returns the control id when it resolves.
@@ -2416,11 +2456,16 @@ type Querier interface {
 	// a generated item cites a linked policy id. Cross-tenant ids are RLS-invisible.
 	ResolveChecklistPolicy(ctx context.Context, arg ResolveChecklistPolicyParams) (pgtype.UUID, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
+	// Deprovision (AC-4): revoke EVERY valid session for the user so the
+	// deprovisioned account loses all access immediately. No keep-id — unlike the
+	// /v1/me "sign out other devices" path, deprovision kills the whole set.
+	RevokeAllSCIMUserSessions(ctx context.Context, arg RevokeAllSCIMUserSessionsParams) (int64, error)
 	// Slice 108: DELETE /v1/me/sessions (no {id}). Revokes every valid session for the
 	// caller EXCEPT the one identified by $3 (the "current" session id). When the caller
 	// has no current-session cookie, pass an empty string to revoke ALL sessions for the
 	// user — there is no way to keep the request alive past this point anyway.
 	RevokeOtherSessionsForUser(ctx context.Context, arg RevokeOtherSessionsForUserParams) (int64, error)
+	RevokeSCIMCredential(ctx context.Context, arg RevokeSCIMCredentialParams) error
 	RevokeSession(ctx context.Context, arg RevokeSessionParams) error
 	// Slice 108: DELETE /v1/me/sessions/{id}. Atomic ownership-guard via the WHERE clause:
 	// the row is only updated when (tenant_id, id, user_id) all match. RowsAffected = 0
@@ -2490,6 +2535,9 @@ type Querier interface {
 	// query path then enforces `observed_at <= populations.frozen_at` on
 	// subsequent draws.
 	SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFrozenAtParams) error
+	// SCIM Patch `active` flip (AC-4) — the deprovision/reprovision signal. Keeps
+	// status in lockstep with the boolean. Never touches roles.
+	SetSCIMUserActive(ctx context.Context, arg SetSCIMUserActiveParams) (User, error)
 	// Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
 	// ledger (AC-2, decisions log D2). Called after recording a review when the
 	// new review's reviewed_at is the most-recent on file. updated_at is bumped so
@@ -2530,6 +2578,8 @@ type Querier interface {
 	// Best-effort timestamp bump. Failure here is logged but never blocks the
 	// authenticated request.
 	TouchAPIKeyLastUsed(ctx context.Context, tokenHash []byte) error
+	// Best-effort timestamp bump; failure logged, never blocks the request.
+	TouchSCIMCredentialLastUsed(ctx context.Context, tokenHash []byte) error
 	// Update last_seen_at and (when given) bump expires_at. Caller computes the
 	// new expires_at — sliding-window logic lives in the sessions package.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error

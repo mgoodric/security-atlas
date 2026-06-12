@@ -58,6 +58,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
+	"github.com/mgoodric/security-atlas/internal/scim"
 	stalenesssched "github.com/mgoodric/security-atlas/internal/staleness"
 )
 
@@ -612,6 +613,14 @@ func main() {
 		apikeySvc := apikeystore.NewStore(pool, authPool, hasher, 0)
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
+
+		// Slice 508: SCIM provisioning credential store. Same hasher +
+		// BYPASSRLS authPool as api_keys (the lookup-by-hash auth path runs
+		// before tenant resolution). When wired, the /scim/v2/* endpoints +
+		// the admin /v1/admin/scim-credentials routes mount.
+		scimCredSvc := scim.NewCredentialStore(pool, authPool, hasher)
+		srv.AttachSCIM(scimCredSvc)
+		fmt.Fprintf(os.Stderr, "atlas: scim_credentials store wired (SCIM provisioning ready)\n")
 
 		// Slice 192: wire the BYPASSRLS authPool into the Server so
 		// GET /v1/me/tenants can run its bounded `SELECT id, name

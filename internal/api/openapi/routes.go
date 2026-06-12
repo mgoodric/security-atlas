@@ -22,6 +22,7 @@ type RouteSpec struct {
 
 // RouteSpecs is the canonical route list. See package doc.
 var RouteSpecs = []RouteSpec{
+	{Method: "DELETE", Path: "/v1/admin/scim-credentials/{id}", Tag: "admin-scim-credentials", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/scim-credentials/{id}"},
 	{Method: "DELETE", Path: "/v1/admin/super-admins/{user_id}", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "DELETE /v1/admin/super-admins/{user_id}"},
 	{Method: "DELETE", Path: "/v1/csf/profiles/{kind}/selections/{requirement_id}", Tag: "csf", Tier: "bearer", Internal: false, Summary: "DELETE /v1/csf/profiles/{kind}/selections/{requirement_id}"},
 	{Method: "DELETE", Path: "/v1/decisions/{id}/links/{kind}/{targetID}", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "DELETE /v1/decisions/{id}/links/{kind}/{targetID}"},
@@ -48,6 +49,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/admin/features", Tag: "admin-feature-flags", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/features"},
 	{Method: "GET", Path: "/v1/admin/policies/export", Tag: "admin-policies", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/policies/export"},
 	{Method: "GET", Path: "/v1/admin/samples/export", Tag: "admin-samples", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/samples/export"},
+	{Method: "GET", Path: "/v1/admin/scim-credentials", Tag: "admin-scim-credentials", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/scim-credentials"},
 	{Method: "GET", Path: "/v1/admin/sso", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/sso"},
 	{Method: "GET", Path: "/v1/admin/super-admins", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/super-admins"},
 	{Method: "GET", Path: "/v1/admin/tenants", Tag: "admin-tenants", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/tenants"},
@@ -201,6 +203,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/admin/demo/seed", Tag: "admin-demo", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/demo/seed"},
 	{Method: "POST", Path: "/v1/admin/demo/teardown", Tag: "admin-demo", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/demo/teardown"},
 	{Method: "POST", Path: "/v1/admin/install/reset-bootstrap", Tag: "admin-install", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/install/reset-bootstrap"},
+	{Method: "POST", Path: "/v1/admin/scim-credentials", Tag: "admin-scim-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/scim-credentials"},
 	{Method: "POST", Path: "/v1/admin/sso/preflight", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/sso/preflight"},
 	{Method: "POST", Path: "/v1/admin/super-admins", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/super-admins"},
 	{Method: "POST", Path: "/v1/admin/tenants", Tag: "admin-tenants", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/tenants"},

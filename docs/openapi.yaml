@@ -58,6 +58,7 @@ tags:
   - name: admin-install
   - name: admin-policies
   - name: admin-samples
+  - name: admin-scim-credentials
   - name: admin-sso
   - name: admin-super-admins
   - name: admin-tenants
@@ -474,6 +475,53 @@ paths:
       operationId: get-v1-admin-samples-export
       security:
         - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/scim-credentials:
+    get:
+      summary: GET /v1/admin/scim-credentials
+      tags: [admin-scim-credentials]
+      operationId: get-v1-admin-scim-credentials
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/admin/scim-credentials
+      tags: [admin-scim-credentials]
+      operationId: post-v1-admin-scim-credentials
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/scim-credentials/{id}:
+    delete:
+      summary: DELETE /v1/admin/scim-credentials/{id}
+      tags: [admin-scim-credentials]
+      operationId: delete-v1-admin-scim-credentials-id
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
