@@ -37,6 +37,31 @@ name: container-publish
 # docker/metadata-action tag rules below conditionalize on event type
 # so a release event produces `vX.Y.Z` tags only and a main push
 # produces `:edge` + `:main-<sha7>` only — the two are not interleaved.
+#
+# ── Native-arch build split (CI email-noise fix) ──────────────────────
+# Previously this workflow built `linux/amd64,linux/arm64` in a single
+# job on `ubuntu-latest` with QEMU emulation. The arm64 leg ran the
+# whole image build (including `next build`, whose SWC native binary is
+# Rust) under QEMU user-mode emulation, which intermittently crashed
+# with `qemu: uncaught target signal 4 (Illegal instruction)` / SIGILL.
+# At ~45 merges/day that structural fragility produced multiple failed-
+# build emails per day.
+#
+# We now build each architecture on its OWN native runner:
+#   - linux/amd64 on `ubuntu-latest`
+#   - linux/arm64 on `ubuntu-24.04-arm` (GitHub-hosted arm64; free for
+#     public repos)
+# Each build pushes the per-arch image BY DIGEST (no tag), then a
+# `merge` job assembles the multi-arch manifest list with the channel
+# tags via `docker buildx imagetools create`. No QEMU anywhere — the
+# SIGILL failure class is eliminated and builds are materially faster.
+# This is the canonical buildx "distribute across runners" pattern
+# (https://docs.docker.com/build/ci/github-actions/multi-platform/).
+# Provenance + SBOM + the AC-13 dual-arch manifest assertion are all
+# preserved; the attestation now binds the final index digest in the
+# merge job rather than a single emulated build's digest.
+#
+# See docs/audit-log/container-publish-native-arm64-decisions.md.
 
 on:
   release:
@@ -44,6 +69,17 @@ on:
   push:
     branches:
       - main
+    # Volume control: docs-only merges (status reconciliations, slice
+    # docs, Plans/ canvas edits, READMEs) do not change any image and
+    # must not trigger a rebuild. A merge touching docs AND code still
+    # builds (paths-ignore only skips when ALL changed paths match).
+    # This removes the large `chore(status)` / `docs(slices)` fraction
+    # of main-push builds — each was a dice-roll against the build-leg
+    # flake rate for zero image delta.
+    paths-ignore:
+      - "Plans/**"
+      - "docs/**"
+      - "**/*.md"
   workflow_dispatch:
     inputs:
       tag:
@@ -64,12 +100,22 @@ concurrency:
   # which fires `release: published` — both produce images, both are
   # safe to run in parallel because they tag different namespaces).
   group: container-publish-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Debounce edge builds: a burst of rapid merges to main collapses to
+  # the latest commit (`:edge` always points at HEAD anyway). Release
+  # builds are NEVER cancelled — `cancel-in-progress` only evaluates
+  # true for `push` events, and release events live in their own group.
+  # NOTE: this relaxes slice 207's "every merge builds :main-<sha7>" —
+  # a superseded intermediate merge may be cancelled before its
+  # `:main-<sha7>` image is published. The trust anchor for edge images
+  # is the provenance attestation on the surviving build, not the
+  # existence of an image per SHA (slice 451 AC-5). Reversible by
+  # removing this expression. See the decisions log.
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 jobs:
-  build-publish:
-    name: Build + publish multi-arch image (${{ matrix.image.name }})
-    runs-on: ubuntu-latest
+  build:
+    name: Build ${{ matrix.image.name }} (${{ matrix.platform.arch }})
+    runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
       matrix:
@@ -86,6 +132,13 @@ jobs:
           - name: bootstrap
             dockerfile: deploy/docker/bootstrap.Dockerfile
             target: ghcr.io/mgoodric/security-atlas-bootstrap
+        platform:
+          - arch: amd64
+            os: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            os: linux/arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -96,8 +149,108 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Set up QEMU (multi-arch emulation)
-        uses: docker/setup-qemu-action@06116385d9baf250c9f4dcb4858b16962ea869c3 # v4
+      # No QEMU: each arch builds on its own native runner.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute BUILD_TIME (RFC3339 UTC)
+        id: buildtime
+        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve VERSION (release tag, dispatch input, or 'edge')
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            v="${{ github.event.release.tag_name }}"
+          elif [ -n "${{ github.event.inputs.tag }}" ]; then
+            v="${{ github.event.inputs.tag }}"
+          else
+            v="edge"
+          fi
+          echo "value=${v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build + push by digest
+        id: build
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        with:
+          context: .
+          file: ${{ matrix.image.dockerfile }}
+          platforms: ${{ matrix.platform.os }}
+          # push-by-digest: publish the per-arch image with NO tag; the
+          # `merge` job assembles the tagged multi-arch manifest list.
+          outputs: type=image,name=${{ matrix.image.target }},push-by-digest=true,name-canonical=true,push=true
+          # Slice 092: bake release metadata into the binary AND the OCI
+          # image labels. atlas.Dockerfile + atlas-cli.Dockerfile accept
+          # ARG VERSION / ARG COMMIT / ARG BUILD_TIME and wire them into
+          # ldflags. Images whose Dockerfile doesn't declare these ARGs
+          # (web, bootstrap) ignore them with a Docker warning only.
+          build-args: |
+            VERSION=${{ steps.version.outputs.value }}
+            COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.buildtime.outputs.value }}
+          labels: |
+            org.opencontainers.image.title=${{ matrix.image.name }}
+            org.opencontainers.image.source=https://github.com/mgoodric/security-atlas
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.description=security-atlas ${{ matrix.image.name }} — open-source GRC platform
+            org.opencontainers.image.revision=${{ github.sha }}
+          # Cache scoped per image AND arch — the two native runners must
+          # not collide on a shared cache key.
+          cache-from: type=gha,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          provenance: true
+          sbom: true
+
+      - name: Export digest
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: digests-${{ matrix.image.name }}-${{ matrix.platform.arch }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    name: Merge + publish multi-arch manifest (${{ matrix.image.name }})
+    runs-on: ubuntu-latest
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: atlas
+            target: ghcr.io/mgoodric/security-atlas
+          - name: atlas-cli
+            target: ghcr.io/mgoodric/security-atlas-cli
+          - name: web
+            target: ghcr.io/mgoodric/security-atlas-web
+          - name: bootstrap
+            target: ghcr.io/mgoodric/security-atlas-bootstrap
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Download digests
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-${{ matrix.image.name }}-*
+          merge-multiple: true
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
@@ -116,16 +269,10 @@ jobs:
           images: ${{ matrix.image.target }}
           # Slice 207 — tag selection is event-type-conditionalized so
           # release events produce ONLY versioned tags and main pushes
-          # produce ONLY edge tags. The `enable=` predicates use the
-          # docker/metadata-action expression engine's event-context
-          # variables: `is_default_branch` is true when github.ref
-          # matches the repo's default branch (main) AND the event is
-          # a push; the semver/`ref,event=tag` types fire only on
-          # release/tag events.
+          # produce ONLY edge tags.
           #
           # On release: `vX.Y.Z` + `X.Y` + `X` + `latest`.
           # On push-to-main: `edge` + `main-<sha7>`.
-          # On workflow_dispatch: respects the input override.
           tags: |
             type=ref,event=tag
             type=semver,pattern={{version}}
@@ -134,61 +281,40 @@ jobs:
             type=raw,value=latest,enable=${{ github.event_name == 'release' }}
             type=raw,value=edge,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
             type=sha,prefix=main-,format=short,enable=${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          labels: |
-            org.opencontainers.image.title=${{ matrix.image.name }}
-            org.opencontainers.image.source=https://github.com/mgoodric/security-atlas
-            org.opencontainers.image.licenses=Apache-2.0
-            org.opencontainers.image.description=security-atlas ${{ matrix.image.name }} — open-source GRC platform
-            org.opencontainers.image.revision=${{ github.sha }}
 
-      - name: Compute BUILD_TIME (RFC3339 UTC)
-        id: buildtime
-        run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
-      - name: Build + push
-        id: build
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
-        with:
-          context: .
-          file: ${{ matrix.image.dockerfile }}
-          platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          # Slice 092: bake release metadata into the binary AND the OCI
-          # image labels. atlas.Dockerfile + atlas-cli.Dockerfile both
-          # accept ARG VERSION / ARG COMMIT / ARG BUILD_TIME and wire
-          # them into `-ldflags "-X main.version=... -X main.commit=...
-          # -X main.date=..."` (see deploy/docker/atlas.Dockerfile lines
-          # 39-46). Without these build-args the binary's ldflag
-          # defaults win (`dev`, `none`, `unknown`), and every released
-          # image reports `version=dev` on `/v1/version`. Images whose
-          # Dockerfile doesn't declare these ARGs (web, bootstrap)
-          # safely ignore the build-args with a Docker warning only — no
-          # change to those images.
-          build-args: |
-            VERSION=${{ steps.meta.outputs.version }}
-            COMMIT=${{ github.sha }}
-            BUILD_TIME=${{ steps.buildtime.outputs.value }}
-          cache-from: type=gha,scope=${{ matrix.image.name }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image.name }}
-          provenance: true
-          sbom: true
+      - name: Create multi-arch manifest list
+        working-directory: ${{ runner.temp }}/digests
+        run: |
+          # Assemble one tagged manifest list from the per-arch digests
+          # pushed by the `build` job. `imagetools create` takes the
+          # `-t <tag>` flags from metadata-action and the source
+          # `<target>@sha256:<digest>` references from the digest files.
+          # shellcheck disable=SC2046 # intentional word-splitting: -t flags + digest args must expand to argv
+          docker buildx imagetools create \
+            $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '${{ matrix.image.target }}@sha256:%s ' *)
 
       - name: Verify multi-arch manifest
         run: |
           PRIMARY_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
           echo "Inspecting ${PRIMARY_TAG}"
-          docker manifest inspect "${PRIMARY_TAG}" | tee /tmp/manifest.json
+          docker buildx imagetools inspect "${PRIMARY_TAG}" --raw | tee /tmp/manifest.json
           # AC-13: confirm both linux/amd64 and linux/arm64 are present.
           jq -e '
             [.manifests[].platform | "\(.os)/\(.architecture)"]
             | (contains(["linux/amd64"]) and contains(["linux/arm64"]))
           ' /tmp/manifest.json
 
+      - name: Resolve index digest
+        id: digest
+        run: |
+          PRIMARY_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
+          d=$(docker buildx imagetools inspect "${PRIMARY_TAG}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "value=${d}" >> "$GITHUB_OUTPUT"
+
       - name: Attest provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4
         with:
           subject-name: ${{ matrix.image.target }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.digest.outputs.value }}
           push-to-registry: true
