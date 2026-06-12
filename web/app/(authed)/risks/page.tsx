@@ -81,6 +81,7 @@ import {
   buildRiskExportURL,
 } from "@/lib/api/risks-export";
 
+import { risksCountLabel } from "./count-label";
 import {
   ALL,
   applyFilters,
@@ -88,12 +89,24 @@ import {
   DEFAULT_FILTERS,
   formatResidualScore,
   residualClass,
+  residualState,
+  reviewDuePending,
   setFilter,
   severityBand,
   severityClasses,
   uniqueOwners,
   type RiskFilters,
 } from "./filters";
+import {
+  DEFAULT_SORT,
+  nextSortState,
+  parseSortState,
+  serializeSortState,
+  sortRisks,
+  type SortKey,
+  type SortState,
+} from "./sort";
+import { SortableHeader } from "./sortable-header";
 
 // Slice 244 — six filter keys. Order mirrors the mockup
 // (Plans/_archive/mockups/risks.html lines 126-173) with one local deviation:
@@ -125,6 +138,50 @@ const RISKS_PAGE_SIZE = 50;
 // page index resets to 1 when a filter changes, preserving the user's
 // mental model).
 const PAGE_PARAM = "page";
+
+// Slice 681 / ATLAS-039 — URL query-string key for the active column
+// sort (shape `"<key>:<dir>"`, e.g. `severity:asc`). Sibling to the
+// filter keys + the `page` key. A filter or sort change resets the page
+// index to 1 (the user's mental model: re-ordering the set starts at the
+// top). The default sort (severity desc) is treated as "no param" so the
+// canonical register URL stays clean until a non-default sort is chosen.
+const SORT_PARAM = "sort";
+
+// Slice 680 / ATLAS-038 — column-header clarity copy.
+//
+// The "Severity" and "Residual" columns are INDEPENDENT axes, and the
+// audit flagged that they read as inconsistent (the same residual maps
+// to different severities across seeded risks). They are NOT a scoring
+// bug — per canvas §6.2 they measure different things:
+//
+//   - INHERENT SEVERITY = likelihood × impact on the 5×5 grid, BEFORE
+//     any control mitigation (the risk's raw exposure).
+//   - RESIDUAL = inherent × (1 − control_effectiveness) — the exposure
+//     AFTER the linked controls' measured effectiveness, normalized to
+//     0..1.
+//
+// Two risks with the same inherent severity legitimately carry
+// different residuals (different controls); two risks with the same
+// residual legitimately carry different inherent severities. The
+// headers now name the axis explicitly and a native `title` tooltip
+// spells out the relationship so the columns no longer read as a
+// scoring inconsistency. Copy/label only — the scoring model is
+// unchanged (anti-criterion).
+const SEVERITY_HEADER_TOOLTIP =
+  "Inherent severity: likelihood × impact on the 5×5 grid, before any control mitigation. Independent of the residual column.";
+const RESIDUAL_HEADER_TOOLTIP =
+  "Residual: inherent severity reduced by the linked controls' measured effectiveness (0..1). Two risks with the same inherent severity can have different residuals, and vice versa.";
+
+// Slice 680 / ATLAS-029 — pending-evaluation affordance copy.
+//
+// A newly-created risk has no residual_score or review_due_at until the
+// evaluator backfills them. The old cell rendered a bare "—", which
+// reads as broken. We render an explicit "Pending evaluation" label
+// (with a tooltip) instead so the empty state reads as "awaiting the
+// evaluator", not "missing data".
+const PENDING_EVAL_LABEL = "Pending evaluation";
+const PENDING_EVAL_TOOLTIP =
+  "Awaiting the risk evaluator. Inherent severity computes immediately; the residual and review-due date are backfilled once controls are evaluated.";
 
 const TREATMENT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All treatments" },
@@ -205,6 +262,31 @@ function RisksPageInner() {
     return parsed;
   }, [search]);
 
+  // Slice 681 — active column sort, URL-driven so it is bookmarkable and
+  // survives refresh (same posture as the filter + page state). A
+  // missing / malformed param resolves to DEFAULT_SORT (severity desc).
+  const sortState: SortState = useMemo(
+    () => parseSortState(search.get(SORT_PARAM)),
+    [search],
+  );
+
+  // Slice 681 — header-click handler. Toggles the clicked column's
+  // direction (or switches to it, descending-first) and writes the
+  // result to the URL. The default sort is dropped from the URL so the
+  // canonical register URL has no `sort` key; any other sort serialises
+  // to `?sort=<key>:<dir>`. Re-sorting resets the page index to 1.
+  const updateSort = (clicked: SortKey) => {
+    const next = nextSortState(sortState, clicked);
+    const sp = new URLSearchParams(search.toString());
+    if (next.key === DEFAULT_SORT.key && next.dir === DEFAULT_SORT.dir) {
+      sp.delete(SORT_PARAM);
+    } else {
+      sp.set(SORT_PARAM, serializeSortState(next));
+    }
+    sp.delete(PAGE_PARAM);
+    router.replace(`/risks?${sp.toString()}`);
+  };
+
   const updateFilter = (key: keyof RiskFilters, value: string) => {
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
@@ -263,7 +345,16 @@ function RisksPageInner() {
 
   const rows: Risk[] = useMemo(() => risksQ.data?.risks ?? [], [risksQ.data]);
 
-  const visible = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+  const filtered = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+
+  // Slice 681 / ATLAS-039 — apply the active column sort AFTER filtering
+  // and BEFORE pagination, so the page slice the table renders is the
+  // correctly-ordered window. `sortRisks` is pure (returns a new array)
+  // so the memoized `filtered` array is never mutated.
+  const visible = useMemo(
+    () => sortRisks(filtered, sortState),
+    [filtered, sortState],
+  );
 
   // Slice 246 — client-side page slice over the filtered set. Per
   // P0-246-1 the v1 wire `GET /v1/risks` ships the full list; the
@@ -349,11 +440,36 @@ function RisksPageInner() {
     },
   ];
 
+  // Slice 684 — header count semantics fix (mirrors slice 666 on
+  // /controls). Previously the header read "Showing {visible} of {rows}
+  // risks" while the shared `<ListPagination>` footer reads "Showing M–N
+  // of TOTAL" — both used the verb "Showing" but meant different things,
+  // so read together the header implied all rows were on screen while
+  // the footer paginated only the first page. The header now drops the
+  // verb and renders a plain COUNT of the filtered register; the footer
+  // keeps sole ownership of the page-range phrasing. The filtered count
+  // drives the header (AC-3) and is the same number the footer
+  // paginates over, so the two now read consistently. Copy/semantics
+  // only — page size + counts are unchanged (anti-criterion). See
+  // `docs/audit-log/684-risks-count-semantics-decisions.md`.
+  const countLabel = risksCountLabel(visible.length, rows.length);
   const meta = (
-    <span>
-      Showing{" "}
-      <span className="text-foreground font-medium">{visible.length}</span> of{" "}
-      <span className="font-mono">{rows.length}</span> risks
+    <span data-testid="risks-count-label">
+      {countLabel.isFiltered ? (
+        <>
+          <span className="text-foreground font-medium">
+            {countLabel.filtered}
+          </span>{" "}
+          of <span className="font-mono">{countLabel.total}</span> risks
+        </>
+      ) : (
+        <>
+          <span className="text-foreground font-medium">
+            {countLabel.total}
+          </span>{" "}
+          risks
+        </>
+      )}
     </span>
   );
 
@@ -373,10 +489,19 @@ function RisksPageInner() {
     {
       id: "title",
       header: "Title",
+      // Slice 681 / ATLAS-039 (AC-2): the title is now a link to the
+      // read-only per-risk detail at `/risks/{id}`. Slice 185 removed the
+      // old implicit row-click (it dishonestly routed to the hierarchy);
+      // this restores a drill-in that truthfully advertises its
+      // destination, now that the detail route exists (decisions log D2).
       cell: (row) => (
-        <span className="text-foreground" data-testid="risks-row-title">
+        <Link
+          href={`/risks/${encodeURIComponent(row.id)}`}
+          className="text-primary hover:underline"
+          data-testid="risks-row-title"
+        >
           {row.title}
-        </span>
+        </Link>
       ),
     },
     {
@@ -415,8 +540,36 @@ function RisksPageInner() {
     },
     {
       id: "residual_score",
-      header: "Residual",
+      // Slice 680 / ATLAS-038: name the axis ("after controls") + tooltip
+      // so it doesn't read as inconsistent with the inherent-severity
+      // column. Independent axes (canvas §6.2).
+      // Slice 681 / ATLAS-039: the header is now a sortable button. The
+      // slice-680 axis-disambiguation tooltip moves to the button's
+      // native `title`; pending (un-scored) rows sort to the end.
+      header: (
+        <SortableHeader
+          sortKey="residual"
+          label="Residual (after controls)"
+          title={RESIDUAL_HEADER_TOOLTIP}
+          state={sortState}
+          onSort={updateSort}
+        />
+      ),
       cell: (row) => {
+        // Slice 680 / ATLAS-029: a brand-new risk has no residual yet —
+        // render an explicit "Pending evaluation" affordance rather than
+        // a bare "—" that reads as broken.
+        if (residualState(row.residual_score) === "pending") {
+          return (
+            <span
+              className="text-xs italic text-muted-foreground"
+              title={PENDING_EVAL_TOOLTIP}
+              data-testid="risks-row-residual-pending"
+            >
+              {PENDING_EVAL_LABEL}
+            </span>
+          );
+        }
         const formatted = formatResidualScore(row.residual_score);
         return (
           <span
@@ -430,7 +583,20 @@ function RisksPageInner() {
     },
     {
       id: "severity",
-      header: "Severity",
+      // Slice 680 / ATLAS-038: "Inherent severity" names the axis (before
+      // controls) so it doesn't read as inconsistent with the residual
+      // (after controls) column. Independent axes (canvas §6.2).
+      // Slice 681 / ATLAS-039: sortable; this is the DEFAULT sort
+      // (descending — worst exposure first).
+      header: (
+        <SortableHeader
+          sortKey="severity"
+          label="Inherent severity"
+          title={SEVERITY_HEADER_TOOLTIP}
+          state={sortState}
+          onSort={updateSort}
+        />
+      ),
       cell: (row) => {
         const band = severityBand(row.severity);
         return (
@@ -439,6 +605,7 @@ function RisksPageInner() {
               band,
             )}`}
             data-testid="risks-row-severity"
+            title="Inherent severity (likelihood × impact, before controls)"
           >
             {row.severity}
           </span>
@@ -447,14 +614,33 @@ function RisksPageInner() {
     },
     {
       id: "review_due_at",
-      header: "Review due",
+      // Slice 681 / ATLAS-039: sortable by review-due date. Pending
+      // (un-dated, newly-created) rows sort to the end in both
+      // directions so "next review soonest" never surfaces an
+      // un-evaluated risk first.
+      header: (
+        <SortableHeader
+          sortKey="review_due"
+          label="Review due"
+          state={sortState}
+          onSort={updateSort}
+        />
+      ),
       cell: (row) =>
-        row.review_due_at ? (
-          <span className="text-xs text-muted-foreground">
-            {row.review_due_at.slice(0, 10)}
+        // Slice 680 / ATLAS-029: an unset review-due date on a new risk is
+        // "Pending evaluation", not a bare "—". A real date renders as-is.
+        reviewDuePending(row.review_due_at) ? (
+          <span
+            className="text-xs italic text-muted-foreground"
+            title={PENDING_EVAL_TOOLTIP}
+            data-testid="risks-row-review-due-pending"
+          >
+            {PENDING_EVAL_LABEL}
           </span>
         ) : (
-          <span className="text-xs text-muted-foreground">—</span>
+          <span className="text-xs text-muted-foreground">
+            {row.review_due_at!.slice(0, 10)}
+          </span>
         ),
     },
     // Slice 185 (AC-2): explicit per-row "View in hierarchy" link
@@ -632,16 +818,12 @@ function RisksPageInner() {
         />
       }
     >
-      {/* Slice 185 (AC-3): honest banner above the table — the
-          per-risk detail page is a future slice. Without this users
-          would reasonably expect the row itself to be the link. */}
-      <Alert data-testid="risks-detail-future-slice-banner" className="mb-4">
-        <AlertTitle>Per-risk detail page is a future slice</AlertTitle>
-        <AlertDescription>
-          Use the per-row <span className="font-medium">View in hierarchy</span>{" "}
-          link to scope the org-tree view to a specific risk.
-        </AlertDescription>
-      </Alert>
+      {/* Slice 681 (AC-2): the slice-185 "Per-risk detail page is a
+          future slice" banner is REMOVED — the read-only detail route
+          now exists (`/risks/{id}`) and the title links to it. The
+          per-row "View in hierarchy" link is retained for the org-tree
+          scoping workflow (it sits alongside, not instead of, the
+          title drill-in). See decisions log D2. */}
       <ListTable<Risk>
         columns={columns}
         rows={pagedRows}

@@ -117,12 +117,18 @@ func TestContract_AuditPeriods(t *testing.T) {
 		TenantID:           uuid.MustParse(contractTenantID),
 		Name:               "SOC 2 Type II — H1 2026",
 		FrameworkVersionID: uuid.MustParse(contractFWID),
-		PeriodStart:        start,
-		PeriodEnd:          end,
-		Status:             period.StatusOpen,
-		CreatedBy:          "key_contract_411",
-		CreatedAt:          created,
-		UpdatedAt:          updated,
+		// Slice 680 / ATLAS-033: the LIST path resolves a readable
+		// framework_label from the catalog. The open row carries one,
+		// pinning the present-shape; the frozen row below leaves it
+		// empty, pinning the omitempty absence (e.g. an unresolved
+		// framework version).
+		FrameworkLabel: "SCF 2025.2",
+		PeriodStart:    start,
+		PeriodEnd:      end,
+		Status:         period.StatusOpen,
+		CreatedBy:      "key_contract_411",
+		CreatedAt:      created,
+		UpdatedAt:      updated,
 	}
 	frozen := period.Period{
 		ID:                 uuid.MustParse(contractFWID),

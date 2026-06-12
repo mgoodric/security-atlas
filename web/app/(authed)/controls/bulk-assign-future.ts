@@ -48,4 +48,4 @@ export const BULK_ASSIGN_FUTURE_TESTID = "controls-bulk-assign-future";
  *     contract asserts on it.
  */
 export const BULK_ASSIGN_FUTURE_REASON =
-  "Bulk assign-owner lands in a future slice once the per-control owner-assign action ships; the selection below is ready to act on.";
+  "Bulk assign-owner is not available yet; the selection below is ready to act on.";

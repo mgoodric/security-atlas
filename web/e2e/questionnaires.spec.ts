@@ -315,6 +315,138 @@ test.describe("questionnaires (slice 263)", () => {
     expect(download.suggestedFilename()).toMatch(/\.pdf$/);
   });
 
+  // Slice 441 — AI-answer suggestion v0. Asserts the constitutional FE
+  // behavior: a suppressed draft offers NO approvable text (AC-11/P0-441-4),
+  // and a valid cited draft IS approvable, approving it writes the approved
+  // text into the manual editor (AC-12). Hermetic: every BFF call is
+  // route-mocked (no shared-DB seed).
+  test("AI suggest: suppressed → no approve; cited draft → approve writes narrative", async ({
+    authedPage: page,
+  }) => {
+    let answeredBody: ReturnType<typeof detailBody> = detailBody();
+    await page.route(`**/api/questionnaires/${Q_ID}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(answeredBody),
+      });
+    });
+    // Empty deterministic suggestions so only the AI panel is under test.
+    await page.route(
+      `**/api/questionnaires/${Q_ID}/suggestions**`,
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ suggestions: [] }),
+        });
+      },
+    );
+
+    // First ai-suggest call returns a SUPPRESSED outcome (a fabricated/
+    // cross-tenant citation was withheld server-side); second returns a valid
+    // cited draft. A state-carrying closure flips between them.
+    let suggestCall = 0;
+    await page.route(
+      `**/api/questionnaires/${Q_ID}/answers/${QUESTION_ID}/ai-suggest`,
+      async (route) => {
+        suggestCall += 1;
+        const body =
+          suggestCall === 1
+            ? { suppressed: true, reason: "unresolved_citation" }
+            : {
+                answer_id: "ai-draft-1",
+                question_id: QUESTION_ID,
+                draft:
+                  "Yes. MFA is enforced for administrative access (policy 33333333-3333-3333-3333-333333333333).",
+                citations: [
+                  {
+                    kind: "policy",
+                    id: "33333333-3333-3333-3333-333333333333",
+                  },
+                ],
+                model_name: "llama3.1:8b-instruct-q5",
+                model_version: "1",
+                model_provider: "ollama-local",
+                cloud_routed: false,
+              };
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(body),
+        });
+      },
+    );
+
+    await page.route(
+      `**/api/questionnaires/${Q_ID}/answers/${QUESTION_ID}/ai-approve`,
+      async (route, req) => {
+        const b = JSON.parse(req.postData() ?? "{}") as { narrative?: string };
+        answeredBody = detailBody({ narrative: b.narrative });
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            answer_id: "ai-draft-1",
+            question_id: QUESTION_ID,
+            narrative: b.narrative ?? "",
+            answer_value: "",
+            human_approved: true,
+            human_approver: "key_grc",
+          }),
+        });
+      },
+    );
+
+    await page.goto(`/questionnaires/${Q_ID}`);
+    await expect(page.getByTestId("ai-suggest-panel")).toBeVisible({
+      timeout: 30_000,
+    });
+
+    // === Suppressed outcome — manual message, NO approvable draft ===
+    const firstSuggest = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/answers/${QUESTION_ID}/ai-suggest`) &&
+        r.status() === 200,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("ai-suggest-button").click();
+    await firstSuggest;
+    await expect(page.getByTestId("ai-suggest-manual")).toBeVisible({
+      timeout: 30_000,
+    });
+    // P0-441-4: there is no approve button to click on a suppressed outcome.
+    await expect(page.getByTestId("ai-suggest-approve")).toHaveCount(0);
+
+    // === Valid cited draft — approvable ===
+    const secondSuggest = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/answers/${QUESTION_ID}/ai-suggest`) &&
+        r.status() === 200,
+      { timeout: 30_000 },
+    );
+    await page.getByTestId("ai-suggest-button").click();
+    await secondSuggest;
+    await expect(page.getByTestId("ai-suggest-draft")).toBeVisible({
+      timeout: 30_000,
+    });
+    const approveBtn = page.getByTestId("ai-suggest-approve");
+    await expect(approveBtn).toBeEnabled();
+
+    // === Approve — writes the approved text into the manual narrative ===
+    const approveResp = page.waitForResponse(
+      (r) =>
+        r.url().includes(`/answers/${QUESTION_ID}/ai-approve`) &&
+        r.status() === 200,
+      { timeout: 30_000 },
+    );
+    await approveBtn.click();
+    await approveResp;
+    await expect(page.getByTestId("answer-editor-narrative")).toContainText(
+      "MFA is enforced for administrative access",
+    );
+  });
+
   test("sidebar exposes Questionnaires entry under Operations cluster", async ({
     authedPage: page,
   }) => {

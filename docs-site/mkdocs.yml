@@ -91,6 +91,7 @@ nav:
   - Framework setup: framework-setup.md
   - First audit: first-audit.md
   - Board reporting: board-reporting.md
+  - Implementation checklist (AI-assisted): checklist.md
   - Measuring your program:
       - Overview: metrics.md
       - Reference: metrics-reference.md
@@ -125,6 +126,8 @@ nav:
   - Design decisions:
       - Architecture decision records: design/architecture-decision-records.md
       - Logo selection: design/logo-decision.md
+  # Generated at build time by hooks/slice_status.py — the live slice tracker.
+  - Project status: slice-status.md
 
 # Slice 140 — copy the canonical docs/openapi.yaml into the docs site
 # at build time and filter out operations marked `x-internal: true`
@@ -133,6 +136,10 @@ nav:
 # (P0-A8); this hook produces a derived filtered view.
 hooks:
   - hooks/openapi_pipeline.py
+  # Renders the generated slice tracker (scripts/gen-status.sh) into
+  # docs-site/docs/slice-status.md at build time — published, never
+  # committed. Derived view; source of truth is git + _events.jsonl.
+  - hooks/slice_status.py
 
 extra:
   social:

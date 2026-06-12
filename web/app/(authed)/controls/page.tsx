@@ -88,6 +88,7 @@ import {
   type AnchorRow,
   type ControlFilters,
 } from "./filters";
+import { controlsCountLabel } from "./count-label";
 import {
   NEW_CONTROL_FUTURE_REASON,
   NEW_CONTROL_FUTURE_TESTID,
@@ -498,11 +499,34 @@ function ControlsPageInner() {
     },
   ];
 
+  // Slice 666 — header count label. The header is a COUNT of the
+  // filtered catalog ("42 of 53 SCF anchors" / "53 SCF anchors"), NOT a
+  // "Showing M–N" range. The verb "Showing" belongs exclusively to the
+  // pagination footer (`<ListPagination>`); sharing it produced the
+  // ATLAS-007 contradiction (header "Showing 53 of 53" vs footer
+  // "Showing 1–50 of 53"). The filtered total drives the header (AC-3)
+  // and is the same number the footer paginates over, so the two now
+  // read consistently. Copy/semantics only — page size + counts are
+  // unchanged (anti-criterion). See
+  // `docs/audit-log/666-controls-count-semantics-decisions.md`.
+  const countLabel = controlsCountLabel(visible.length, rows.length);
   const meta = (
-    <span>
-      Showing{" "}
-      <span className="text-foreground font-medium">{visible.length}</span> of{" "}
-      <span className="font-mono">{rows.length}</span> SCF anchors
+    <span data-testid="controls-count-label">
+      {countLabel.isFiltered ? (
+        <>
+          <span className="text-foreground font-medium">
+            {countLabel.filtered}
+          </span>{" "}
+          of <span className="font-mono">{countLabel.total}</span> SCF anchors
+        </>
+      ) : (
+        <>
+          <span className="text-foreground font-medium">
+            {countLabel.total}
+          </span>{" "}
+          SCF anchors
+        </>
+      )}
     </span>
   );
 

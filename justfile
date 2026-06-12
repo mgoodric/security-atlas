@@ -295,6 +295,10 @@ import-soc2 path:
 connector-build:
     go build -o ./bin/aws-connector ./connectors/aws/cmd/aws-connector
 
+# Build the Slack connector binary (slice 443).
+connector-build-slack:
+    go build -o ./bin/slack-connector ./connectors/slack/cmd/slack-connector
+
 # Trigger a connector run. Args: <vendor> <kind>. Required env vars:
 #   SECURITY_ATLAS_ENDPOINT  platform gRPC endpoint
 #   SECURITY_ATLAS_TOKEN     bearer token (issued via `atlas-cli credentials issue`)
@@ -590,3 +594,29 @@ walkthroughs-refresh:
         rm -f "$f.bak"; \
     done
     @echo "Refresh complete. Verify via 'just docs-build'."
+
+# ----- Slice status (GENERATED — see docs/issues/_GENERATOR.md) -----
+# Status is DERIVED from git history + open PRs + branches + _events.jsonl,
+# not hand-authored. Replaces the manual reconcile flow (06-status-reconcile).
+
+# Regenerate docs/issues/_STATUS.generated.md from current ground truth
+status:
+    @bash scripts/gen-status.sh
+
+# Print generated status to stdout without writing the file
+status-preview:
+    @bash scripts/gen-status.sh --stdout
+
+# CI gate: non-zero exit if a slice merged on `main` isn't reflected in _STATUS.md.
+# Deterministic (git+events merged-set only); logic in scripts/check-status-drift.sh.
+status-check:
+    @bash scripts/check-status-drift.sh
+
+# List the ready set (filed, not merged, not in-flight, no blocking event)
+ready:
+    @awk '/^## Ready set/{f=1;next} f&&/^## /{exit} f&&NF{print}' docs/issues/_STATUS.md
+
+# Append a slice state event: just event <slice> <state> [note] [ref]
+#   states: ready in-progress in-review merged not-ready blocked deferred abandoned not-a-code-bug
+event slice state note="" ref="":
+    @bash scripts/slice-event.sh {{slice}} {{state}} "{{note}}" "{{ref}}"

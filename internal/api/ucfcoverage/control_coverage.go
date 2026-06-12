@@ -19,6 +19,44 @@ import (
 
 // ===== /v1/controls/{id}/coverage =====
 
+// coverageView is the assembled read-model the ControlCoverage handler
+// serializes. It is the OUTPUT of the slice-687 coverageAssembler read
+// seam: all the tenant-tx + catalog + slice-256 coverage DB work is done
+// by the seam, and the handler turns this struct into the
+// `{ control, anchor, requirements[] }` wire shape. The handler retains
+// the three serialization forks — they live HERE in the response
+// assembly, not in any single store method (slice 687 D1, mirroring the
+// slice 412 D5 rationale for why a thin response-shaping seam beats a
+// 6-method dbx mirror):
+//
+//   - Anchored=false → anchor serializes as JSON null, requirements [].
+//   - Anchored=true  → anchor present; Requirements carries the (already
+//     coverage-applied) rows, which may be empty when a ?framework_version=
+//     pin resolves to nothing.
+type coverageView struct {
+	Control      controlWire
+	Anchored     bool
+	Anchor       anchorWire
+	Requirements []requirementForAnchorWire
+}
+
+// coverageAssembler is the single-method read seam the ControlCoverage
+// (GET /v1/controls/{id}/coverage) path reads through (slice 687,
+// contract-tier tail rollout). It carries JUST the assembly method that
+// route needs — deliberately narrow (slice 409 D1 / slice 411 D2 / slice
+// 412 D5: a thin read-model seam returning the assembled triple, NOT a
+// 6+-method dbx.Queries mirror plus an inTenantTx fake plus the three
+// slice-256 coverage stores). The contract-tier recorder
+// (handler_contract_test.go) injects a fixed-view stub satisfying this
+// seam so the three wire-shape forks (unanchored / anchored-unpinned /
+// anchored-pinned) record on the plain `go test ./...` unit surface with
+// no Postgres pool (ADR-0007 / P0-409-1). The production *Handler
+// satisfies it verbatim via assembleCoverage; the seam is unexported and
+// New(*pgxpool.Pool) is unchanged (P0-409-2).
+type coverageAssembler interface {
+	assembleCoverage(ctx context.Context, controlID uuid.UUID, fvParam string) (coverageView, bool, error)
+}
+
 // ControlCoverage handles GET /v1/controls/{id}/coverage (AC-3).
 //
 // Path: UUID-only — controls are tenant-scoped so the natural-key
@@ -48,6 +86,44 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	view, found, err := h.assembler.assembleCoverage(ctx, cid, r.URL.Query().Get("framework_version"))
+	if err != nil {
+		httperr.WriteInternal(w, r, "assemble control coverage", err)
+		return
+	}
+	if !found {
+		httpresp.WriteError(w, http.StatusNotFound, "control not found")
+		return
+	}
+
+	out := map[string]any{
+		"control": view.Control,
+	}
+	if !view.Anchored {
+		// Control exists but isn't anchored. Return 200 with null
+		// anchor + empty requirements. The dashboard surfaces this as
+		// "not yet mapped to the canonical graph."
+		out["anchor"] = nil
+		out["requirements"] = []requirementForAnchorWire{}
+		httpresp.WriteJSON(w, http.StatusOK, out)
+		return
+	}
+
+	out["anchor"] = view.Anchor
+	out["requirements"] = view.Requirements
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+// assembleCoverage is the production implementation of the coverageAssembler
+// seam. It does ALL the DB work for GET /v1/controls/{id}/coverage — the
+// tenant-tx control lookup, the catalog anchor read, the pinned/unpinned
+// requirements list, and the slice-256 per-row coverage computation — and
+// returns the assembled view the handler serializes. Splitting the read
+// (here) from the serialization (ControlCoverage) is what lets the
+// contract recorder capture the three wire-shape forks without a Postgres
+// pool (slice 687). found=false means the control id did not resolve in
+// the caller's tenant (RLS-invisible) → 404.
+func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam string) (coverageView, bool, error) {
 	var (
 		controlOK bool
 		ctrl      dbx.GetControlByIDRow
@@ -67,58 +143,46 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 		controlOK = true
 		return nil
 	}); err != nil {
-		httperr.WriteInternal(w, r, "lookup control", err)
-		return
+		return coverageView{}, false, fmt.Errorf("lookup control: %w", err)
 	}
 	if !controlOK {
-		httpresp.WriteError(w, http.StatusNotFound, "control not found")
-		return
+		return coverageView{}, false, nil
 	}
 
-	out := map[string]any{
-		"control": controlWireFromControlRow(ctrl),
-	}
+	view := coverageView{Control: controlWireFromControlRow(ctrl)}
 	if !ctrl.ScfAnchorID.Valid {
-		// Control exists but isn't anchored. Return 200 with null
-		// anchor + empty requirements. The dashboard surfaces this as
-		// "not yet mapped to the canonical graph."
-		out["anchor"] = nil
-		out["requirements"] = []requirementForAnchorWire{}
-		httpresp.WriteJSON(w, http.StatusOK, out)
-		return
+		// Control exists but isn't anchored.
+		view.Requirements = []requirementForAnchorWire{}
+		return view, true, nil
 	}
+	view.Anchored = true
 
 	// Anchor metadata: pull from scf_anchors directly (catalog read).
 	anchor, err := h.q.GetSCFAnchorByID(ctx, ctrl.ScfAnchorID)
 	if err != nil {
-		httperr.WriteInternal(w, r, "lookup control anchor", err)
-		return
+		return coverageView{}, false, fmt.Errorf("lookup control anchor: %w", err)
 	}
-	out["anchor"] = anchorWireFromRow(anchor)
+	view.Anchor = anchorWireFromRow(anchor)
 
 	var reqs []requirementForAnchorWire
-	fvParam := r.URL.Query().Get("framework_version")
 	if fvParam != "" {
 		fv, ok := h.resolveFrameworkVersion(ctx, fvParam)
 		if !ok {
-			out["requirements"] = []requirementForAnchorWire{}
-			httpresp.WriteJSON(w, http.StatusOK, out)
-			return
+			view.Requirements = []requirementForAnchorWire{}
+			return view, true, nil
 		}
 		got, err := h.q.ListRequirementsForAnchorByFrameworkVersion(ctx, dbx.ListRequirementsForAnchorByFrameworkVersionParams{
 			ScfAnchorID:        ctrl.ScfAnchorID,
 			FrameworkVersionID: fv.ID,
 		})
 		if err != nil {
-			httperr.WriteInternal(w, r, "list requirements for control (pinned)", err)
-			return
+			return coverageView{}, false, fmt.Errorf("list requirements for control (pinned): %w", err)
 		}
 		reqs = mapPinnedRequirements(got)
 	} else {
 		got, err := h.q.ListRequirementsForAnchor(ctx, ctrl.ScfAnchorID)
 		if err != nil {
-			httperr.WriteInternal(w, r, "list requirements for control", err)
-			return
+			return coverageView{}, false, fmt.Errorf("list requirements for control: %w", err)
 		}
 		reqs = mapRequirements(got)
 	}
@@ -143,13 +207,12 @@ func (h *Handler) ControlCoverage(w http.ResponseWriter, r *http.Request) {
 	// omitted entirely, preserving the slice-008 shape.
 	if h.engine != nil && h.scopeStore != nil && h.fwScopeStore != nil && len(reqs) > 0 {
 		if err := h.applyCoverage(ctx, cid, reqs); err != nil {
-			httperr.WriteInternal(w, r, "compute coverage", err)
-			return
+			return coverageView{}, false, fmt.Errorf("compute coverage: %w", err)
 		}
 	}
 
-	out["requirements"] = reqs
-	httpresp.WriteJSON(w, http.StatusOK, out)
+	view.Requirements = reqs
+	return view, true, nil
 }
 
 // applyCoverage fills the `coverage` field on each requirement in `reqs`.

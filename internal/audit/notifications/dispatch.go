@@ -36,6 +36,12 @@ import (
 // register here so the wire layer can render type-specific UI.
 const (
 	TypeAuditNoteReply = "audit_note.reply"
+	// TypeEvidenceStaleness is written by the slice-439 staleness rollup
+	// producer. The string is load-bearing: the already-merged delivery
+	// channels (slice 445/543/582/583) map it via internal/notify
+	// kindToEvent ("evidence.staleness" -> "evidence_staleness") and
+	// typeLabels. Do NOT rename without moving those maps in the same change.
+	TypeEvidenceStaleness = "evidence.staleness"
 )
 
 // ErrNotFound is returned for cross-recipient, cross-tenant, or absent

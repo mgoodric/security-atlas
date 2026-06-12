@@ -1,0 +1,62 @@
+{
+  "_comment": "Slice 704 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence TENANT-WIDE branch — GET /v1/evidence with no control_id, the slice-106 + slice-234 filter-matrix window — real handler over an injected fixed-row evidenceWindowReader stub via EvidencePaged; Option A seam extended to the tenant-wide method, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_TenantWideEvidence -update`. CONSUMER: web/lib/contracts/evidence-tenant-window.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; on this branch control_id is the EMPTY STRING. Each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent); evidence is ALWAYS an array; total is the tenant-wide ledger count (NOT the page length). The `filtered` variant is recorded through a non-empty filter predicate (kind/result/scope_cell_id/window) to pin the filter-matrix request surface; the `empty` variant pins count 0 / total \u003e 0 (slice 236). Closes slice 692 D3.",
+  "endpoint": "GET /v1/evidence",
+  "variants": {
+    "empty": {
+      "control_id": "",
+      "count": 0,
+      "evidence": [],
+      "next_cursor": "",
+      "total": 4
+    },
+    "filtered": {
+      "control_id": "",
+      "count": 1,
+      "evidence": [
+        {
+          "content_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+          "evidence_id": "33333333-3333-4333-8333-333333333333",
+          "evidence_kind": "access_review.completion.v1",
+          "observed_at": "2026-05-14T08:00:00Z",
+          "result": "pass",
+          "scope_cell": "44444444-4444-4444-8444-444444444444",
+          "source": {
+            "connector": "okta",
+            "runner": "scheduled-poll"
+          }
+        }
+      ],
+      "next_cursor": "",
+      "total": 11
+    },
+    "populated": {
+      "control_id": "",
+      "count": 2,
+      "evidence": [
+        {
+          "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "evidence_id": "55555555-5555-4555-8555-555555555555",
+          "evidence_kind": "sast.scan_result.v1",
+          "observed_at": "2026-05-14T08:00:00Z",
+          "result": "pass",
+          "scope_cell": "44444444-4444-4444-8444-444444444444",
+          "source": {
+            "connector": "github",
+            "runner": "ci-runner"
+          }
+        },
+        {
+          "content_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "evidence_id": "22222222-2222-4222-8222-222222222222",
+          "evidence_kind": null,
+          "observed_at": "2026-05-13T20:00:00Z",
+          "result": "fail",
+          "scope_cell": null,
+          "source": null
+        }
+      ],
+      "next_cursor": "",
+      "total": 11
+    }
+  }
+}

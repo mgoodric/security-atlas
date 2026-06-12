@@ -162,32 +162,48 @@ test.describe("/audits list view", () => {
     //    ).toBeVisible();
   });
 
-  test("slice 217 / AC-A4: OSCAL export disclosure replaces the disabled button", async () => {
+  test("slice 457 / AC-5: the slice-217 disclosure becomes the working OSCAL download affordance", async () => {
     // Slice 217 closed the F-178-217 HONESTY-GAP by replacing a
-    // permanently-disabled `<Button>Export OSCAL bundle</Button>` in
-    // the toolbar with a non-button `<span>` that discloses the
-    // future-state (the capability ships with the per-period detail
-    // view). AC-A4 has two halves:
+    // permanently-disabled "Export OSCAL bundle" button with a non-button
+    // `<span>` disclosing the FUTURE state ("ships with the per-period
+    // detail view"). Slice 457 ships the capability: the honesty property
+    // MIGRATES — the disclosure is replaced by the working action it
+    // signposted (AC-5: the assertion is updated, NOT silently deleted).
     //
-    //   1. The disclosure is present, visible, and its text contains
-    //      "per-period" (load-bearing substring pinned by the vitest
-    //      sibling spec).
-    //   2. No disabled `<button>` with the literal text "Export OSCAL
-    //      bundle" exists anywhere on the page.
+    // The migrated contract has three halves:
     //
-    // Quarantined behind the slice 082 seed harness like the rest of
-    // this file. Bodies left commented so the contract is reviewable;
-    // when the harness lands the assertions turn on.
+    //   1. The old future-state disclosure testid
+    //      (`audits-oscal-export-future`) is GONE — the coming-soon span
+    //      no longer exists.
+    //   2. A toolbar note (`audits-oscal-export-toolbar`) describes the
+    //      now-live capability and names the frozen-period home.
+    //   3. Every FROZEN period row carries a working "Export OSCAL bundle"
+    //      download link (`audits-oscal-export-download`) whose href is
+    //      the BFF download route.
+    //
+    // Quarantined behind the slice 082 seed harness like the rest of this
+    // file. Bodies left commented so the contract is reviewable; when the
+    // harness lands the assertions turn on. The live `download` event +
+    // filename + content-type are asserted in
+    // `web/e2e/oscal-export-e2e.spec.ts` (AC-3).
     //    await page.goto("/audits");
-    //    const disclosure = page.getByTestId("audits-oscal-export-future");
-    //    await expect(disclosure).toBeVisible();
-    //    const text = (await disclosure.textContent())?.toLowerCase() ?? "";
-    //    expect(text).toContain("per-period");
-    //    // `title` attribute carries the same copy as the visible text
-    //    // so screen readers and pointer-hover both surface the same
-    //    // disclosure. (aria-label likewise — both are set.)
-    //    const titleAttr = await disclosure.getAttribute("title");
-    //    expect(titleAttr).toMatch(/per-period/i);
+    //    // 1. The old future-state disclosure span is gone.
+    //    await expect(
+    //      page.getByTestId("audits-oscal-export-future"),
+    //    ).toHaveCount(0);
+    //    // 2. The toolbar note describes the now-working capability.
+    //    const note = page.getByTestId("audits-oscal-export-toolbar");
+    //    await expect(note).toBeVisible();
+    //    expect((await note.textContent())?.toLowerCase() ?? "").toContain(
+    //      "frozen period",
+    //    );
+    //    // 3. At least one frozen row carries the working download link,
+    //    //    pointing at the BFF download route.
+    //    const dl = page.getByTestId("audits-oscal-export-download").first();
+    //    await expect(dl).toBeVisible();
+    //    const href = await dl.getAttribute("href");
+    //    expect(href).toMatch(/^\/api\/audits\/.+\/oscal-export$/);
+    //    expect(await dl.getAttribute("download")).not.toBeNull();
     //    // No disabled <button> with the original label survives.
     //    await expect(
     //      page.locator("button[disabled]", { hasText: "Export OSCAL bundle" }),

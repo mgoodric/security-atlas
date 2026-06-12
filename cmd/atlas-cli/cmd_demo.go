@@ -217,13 +217,17 @@ func runDemoSeed(cmd *cobra.Command, _ []string) error {
 			"  board_briefs     : %d\n"+
 			"  board_packs      : %d\n"+
 			"  framework_scopes : %d\n"+
+			"  framework_reqs   : %d (posture spine)\n"+
+			"  strm_edges       : %d (posture spine)\n"+
+			"  controls_anchored: %d (scf_anchor_id set)\n"+
 			"  audit_log rows   : %d\n"+
 			"  evidence_kinds   : %d distinct kinds\n",
 		res.TenantSlug, res.TenantID, res.UserEmail, res.PlaintextPasswd,
 		res.Controls, res.Risks, res.Evidence, res.Policies, res.Vendors,
 		res.AuditPeriods, res.Populations, res.Samples,
 		res.Walkthroughs, res.Exceptions, res.BoardBriefs, res.BoardPacks,
-		res.FrameworkScopes, res.AuditLogRows, len(res.EvidenceKindsUsed),
+		res.FrameworkScopes, res.FrameworkReqs, res.STRMEdges, res.ControlsAnchored,
+		res.AuditLogRows, len(res.EvidenceKindsUsed),
 	)
 
 	// Slice 476 — reach-it hint. The demo data lives in a SEPARATE tenant,

@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { hasErrors, validateRiskForm } from "./validate";
+import { DEFAULT_TREATMENT, hasErrors, validateRiskForm } from "./validate";
 
 const baseValid = {
   title: "Vendor data breach exposure",
@@ -98,6 +98,46 @@ describe("validateRiskForm — carry-over required fields", () => {
     expect(e.title).toBeDefined();
     expect(e.treatment_owner).toBeDefined();
     expect(e.linked_control_ids).toBeDefined();
+    expect(hasErrors(e)).toBe(true);
+  });
+});
+
+describe("DEFAULT_TREATMENT — slice 663 fresh-tenant dead-end", () => {
+  test("the form's opening default treatment is not mitigate", () => {
+    // mitigate requires a linked control, which a fresh tenant cannot
+    // satisfy. The opening default must be a treatment with no
+    // unsatisfiable required field.
+    expect(DEFAULT_TREATMENT).not.toBe("mitigate");
+  });
+
+  test("the default treatment is avoid (status-only, zero required fields)", () => {
+    expect(DEFAULT_TREATMENT).toBe("avoid");
+  });
+
+  test("AC-1: an empty-tenant default-flow submit is valid with zero linked controls", () => {
+    // Simulate a brand-new operator: fills title + owner, leaves the
+    // default treatment, has zero controls to link. validateRiskForm
+    // must return no errors so the create flow does not dead-end.
+    const e = validateRiskForm({
+      title: "First program risk",
+      treatment_owner: "security-lead",
+      treatment: DEFAULT_TREATMENT,
+      linked_control_ids: [],
+    });
+    expect(e).toEqual({});
+    expect(hasErrors(e)).toBe(false);
+  });
+
+  test("AC-3: switching to mitigate in any tenant still requires a linked control", () => {
+    // The relaxation is the opening default only — mitigate keeps its
+    // canvas §6.1 invariant.
+    const e = validateRiskForm({
+      title: "First program risk",
+      treatment_owner: "security-lead",
+      treatment: "mitigate",
+      linked_control_ids: [],
+    });
+    expect(e.linked_control_ids).toMatch(/at least one control/i);
     expect(hasErrors(e)).toBe(true);
   });
 });

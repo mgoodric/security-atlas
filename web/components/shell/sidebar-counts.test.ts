@@ -24,7 +24,11 @@ import { describe, expect, test } from "vitest";
 
 import type { Risk } from "@/lib/api/risks";
 
-import { countHighSeverityRisks } from "./sidebar-counts";
+import {
+  countHighSeverityRisks,
+  highSeverityBadgeLabel,
+  HIGH_SEVERITY_BADGE_MARKER,
+} from "./sidebar-counts";
 
 function makeRisk(overrides: Partial<Risk> = {}): Risk {
   return {
@@ -91,5 +95,32 @@ describe("countHighSeverityRisks", () => {
       makeRisk({ severity: 22 }), // high
     ];
     expect(countHighSeverityRisks(risks)).toBe(2);
+  });
+});
+
+// Slice 681 / ATLAS-036 — the badge label must read as "high-severity",
+// not a total count, in BOTH the screen-reader (aria-label) and the
+// sighted-hover (title) surfaces.
+describe("highSeverityBadgeLabel", () => {
+  test("always names the count as high-severity (not a total)", () => {
+    expect(highSeverityBadgeLabel(10)).toBe("10 high-severity risks");
+    expect(highSeverityBadgeLabel(10)).toContain("high-severity");
+    expect(highSeverityBadgeLabel(10)).not.toMatch(/total/i);
+  });
+
+  test("uses the singular noun for exactly one risk", () => {
+    expect(highSeverityBadgeLabel(1)).toBe("1 high-severity risk");
+  });
+
+  test("uses the plural noun for zero and for many", () => {
+    expect(highSeverityBadgeLabel(0)).toBe("0 high-severity risks");
+    expect(highSeverityBadgeLabel(21)).toBe("21 high-severity risks");
+  });
+
+  test("exposes a non-empty visual marker glyph distinct from a digit", () => {
+    // The marker disambiguates the rose count visually; it must not be a
+    // numeral (which would read as part of the count).
+    expect(HIGH_SEVERITY_BADGE_MARKER.length).toBeGreaterThan(0);
+    expect(HIGH_SEVERITY_BADGE_MARKER).not.toMatch(/[0-9]/);
   });
 });

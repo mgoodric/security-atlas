@@ -46,21 +46,23 @@ per-framework controls — invariant #1, #7).
 
 ## Acceptance criteria
 
-- [ ] **AC-1.** A seeded demo tenant's controls carry `scf_anchor_id` values
+- [x] **AC-1.** A seeded demo tenant's controls carry `scf_anchor_id` values
       that resolve against the catalog (real SCF anchors when the global SCF
       catalog is loaded; a tenant-scoped anchor set when it is not).
-- [ ] **AC-2.** The demo framework version carries `framework_requirements` +
+- [x] **AC-2.** The demo framework version carries `framework_requirements` +
       `fw_to_scf_edges` (STRM) so `FrameworkPosture`'s `version_reqs` and
       `req_anchor` CTEs are non-empty — OR the seed adopts the global SCF
       catalog's requirements/edges when present.
-- [ ] **AC-3.** The dashboard "Framework posture" tiles render with a non-zero
+- [x] **AC-3.** The dashboard "Framework posture" tiles render with a non-zero
       coverage_pct for the seeded tenant (resolves the posture half of
       ATLAS-037). Coverage need not be 100% — it must be REAL.
-- [ ] **AC-4.** JUDGMENT (decisions log): whether to (a) require the global SCF
+- [x] **AC-4.** JUDGMENT (decisions log): whether to (a) require the global SCF
       catalog be loaded and anchor demo controls to it, or (b) synthesize a
       self-contained tenant-scoped anchor + requirement + edge set. Record the
       trade-off (global-catalog dependency vs. demo self-containment).
-- [ ] **AC-5.** Integration test: a seeded tenant produces ≥1 `FrameworkPosture`
+      Resolved (b)+adopt-when-present; see
+      `docs/audit-log/682-demo-posture-decisions.md` D1.
+- [x] **AC-5.** Integration test: a seeded tenant produces ≥1 `FrameworkPosture`
       row with coverage_pct > 0; idempotent re-seed does not duplicate edges.
 
 ## Anti-criteria

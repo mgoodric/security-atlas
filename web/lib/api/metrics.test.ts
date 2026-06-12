@@ -22,6 +22,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   type CascadeNode,
+  neutralBadgeLabel,
   reassembleCascade,
   thresholdBadgeColor,
 } from "./metrics";
@@ -128,11 +129,19 @@ describe("thresholdBadgeColor — neutral / no-target paths", () => {
     expect(thresholdBadgeColor(undefined, null)).toBe("neutral");
   });
 
-  test("no target row → green (nothing to fail against)", () => {
-    expect(thresholdBadgeColor(95, null)).toBe("green");
+  // Slice 677 / ATLAS-023: a metric with NO target configured must NOT
+  // render green "on target". Green is reserved for value-meets-target.
+  // A 0.0% board KPI shown green is actively misleading to executives.
+  // The badge is neutral until a target exists to measure against.
+  test("no target row → neutral (no target to measure against)", () => {
+    expect(thresholdBadgeColor(95, null)).toBe("neutral");
   });
 
-  test("target row with empty target_value → green", () => {
+  test("zero value, no target → neutral (NOT green for a 0% KPI)", () => {
+    expect(thresholdBadgeColor(0, null)).toBe("neutral");
+  });
+
+  test("target row with empty target_value → neutral", () => {
     expect(
       thresholdBadgeColor(95, {
         target_value: undefined,
@@ -140,7 +149,32 @@ describe("thresholdBadgeColor — neutral / no-target paths", () => {
         critical_threshold: undefined,
         direction: "higher_is_better",
       }),
-    ).toBe("green");
+    ).toBe("neutral");
+  });
+});
+
+describe("neutralBadgeLabel — disambiguate the neutral cases (ATLAS-023)", () => {
+  test("no observation (value undefined) → 'no data'", () => {
+    expect(neutralBadgeLabel(undefined, null)).toBe("no data");
+    expect(neutralBadgeLabel(undefined, { target_value: "95" })).toBe(
+      "no data",
+    );
+  });
+
+  test("value present, no target row → 'no target'", () => {
+    expect(neutralBadgeLabel(0, null)).toBe("no target");
+    expect(neutralBadgeLabel(94, null)).toBe("no target");
+  });
+
+  test("value present, target row but empty target_value → 'no target'", () => {
+    expect(neutralBadgeLabel(0, { target_value: "" })).toBe("no target");
+    expect(neutralBadgeLabel(0, { target_value: undefined })).toBe("no target");
+  });
+
+  test("value present with configured target_value → 'no data' default", () => {
+    // Reaching neutral with a configured target_value implies the value
+    // path didn't resolve a color — fall back to the data label.
+    expect(neutralBadgeLabel(50, { target_value: "95" })).toBe("no data");
   });
 });
 

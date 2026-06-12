@@ -36,7 +36,12 @@ import { Input } from "@/components/ui/input";
 import { RiskCreateInput } from "@/lib/api/risks";
 
 import { ControlMultiSelect } from "./control-multi-select";
-import { FieldErrors, hasErrors, validateRiskForm } from "./validate";
+import {
+  DEFAULT_TREATMENT,
+  FieldErrors,
+  hasErrors,
+  validateRiskForm,
+} from "./validate";
 
 const CATEGORIES = [
   "confidentiality",
@@ -82,7 +87,12 @@ function initialState(): FormState {
     description: "",
     category: "operational",
     methodology: "nist_800_30",
-    treatment: "mitigate",
+    // Slice 663: open on "avoid" (zero required satellite fields) instead
+    // of "mitigate" so a fresh tenant with zero instantiated controls can
+    // create its first risk through the default flow without hitting the
+    // unsatisfiable mitigate-requires-control rule. See validate.ts
+    // DEFAULT_TREATMENT and docs/audit-log/663-*-decisions.md.
+    treatment: DEFAULT_TREATMENT,
     treatment_owner: "",
     likelihood: 3,
     impact: 3,

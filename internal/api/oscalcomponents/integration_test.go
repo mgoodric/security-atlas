@@ -80,9 +80,37 @@ func openPool(t *testing.T, dsn string) *pgxpool.Pool {
 
 // freshTenant returns a new tenant id and registers a cleanup that deletes
 // every row this slice's tests can create under it.
+// enableFeatureFlag turns a gating feature flag ON for the test tenant.
+// Slice 660 wrapped the OSCAL component-definition routes in
+// featureflag.Gate("oscal.export"), which DEFAULTS OFF — so without an
+// explicit override every OSCAL route returns 404 for a fresh test tenant.
+// We upsert the override via the admin (BYPASSRLS) pool, the same effect as
+// an operator toggling the flag ON. Cleanup removes the row.
+func enableFeatureFlag(t *testing.T, admin *pgxpool.Pool, tenant, key, category string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO feature_flags (tenant_id, flag_key, enabled, description, category, last_changed_by, last_changed_at)
+		VALUES ($1, $2, TRUE, '', $3, 'integration-test', now())
+		ON CONFLICT (tenant_id, flag_key) DO UPDATE SET enabled = TRUE`,
+		tenant, key, category); err != nil {
+		t.Fatalf("enable feature flag %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(),
+			`DELETE FROM feature_flags WHERE tenant_id = $1`, tenant)
+		_, _ = admin.Exec(context.Background(),
+			`DELETE FROM feature_flag_audit_log WHERE tenant_id = $1`, tenant)
+	})
+}
+
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
+	// Slice 660: the OSCAL routes are gate-wrapped on oscal.export (default
+	// OFF). Enable it for the test tenant so the pre-slice-660 route tests
+	// reach the real handler instead of the gate's 404.
+	enableFeatureFlag(t, admin, tenant, "oscal.export", "integrations")
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, stmt := range []string{
@@ -289,6 +317,52 @@ func TestList_ReturnsDefinitions(t *testing.T) {
 	first, _ := defs[0].(map[string]any)
 	if first["source_label"] != "Acme SaaS" {
 		t.Fatalf("source_label = %v", first["source_label"])
+	}
+}
+
+// ===== slice 659: empty-tenant regression guard =====
+//
+// TestList_EmptyTenantReturns200EmptyList is the slice-659 regression guard. The
+// Vendor Claims page's GET /v1/oscal/component-definitions 500'd in the
+// EMPTY/default tenant on an edge deploy. The reproduce (slice 659 decisions-log
+// D1) showed the LIST QUERY itself is correct on a fully-migrated DB: an empty
+// tenant returns 200 + {"component_definitions":[],"count":0}, never a 500. The
+// edge 500 was migration-lag — the edge `imported_catalogs` table was missing
+// the `kind` / `profile_title` columns added by migration 20260608000000, so the
+// generated query (which sqlc expands to reference `kind` in both the SELECT
+// list and the `WHERE kind = 'component_definition'` predicate) failed at parse
+// time with "column \"kind\" does not exist" REGARDLESS of row count, which the
+// handler maps to a generic 500.
+//
+// This test runs against the fully-migrated harness DB (the integration tier
+// applies every migrations/sql/*.sql), so it locks in: a future query/migration
+// mismatch that reintroduces the parse-time failure is caught in CI rather than
+// in a deploy. It asserts the exact symptom-page wire shape: 200, an empty
+// list, and count=0.
+func TestList_EmptyTenantReturns200EmptyList(t *testing.T) {
+	admin := openPool(t, adminDSN(t))
+	app := openPool(t, appDSN(t))
+	// A brand-new tenant with NO imported_catalogs rows — the EMPTY/default
+	// tenant shape that 500'd on edge. freshTenant registers the cleanup;
+	// nothing is seeded.
+	tenant := freshTenant(t, admin)
+	env := ownerServer(t, app, tenant)
+
+	resp, body := do(t, env, http.MethodGet, "/v1/oscal/component-definitions", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("empty-tenant list status = %d, want 200 (a 500 here is the slice-659 regression)", resp.StatusCode)
+	}
+	defs, ok := body["component_definitions"].([]any)
+	if !ok {
+		t.Fatalf("component_definitions missing or not an array: body=%v", body)
+	}
+	if len(defs) != 0 {
+		t.Fatalf("empty-tenant definitions = %d, want 0", len(defs))
+	}
+	// count must be the JSON number 0 (the list length), not absent/null.
+	count, ok := body["count"].(float64)
+	if !ok || count != 0 {
+		t.Fatalf("count = %v (%T), want 0", body["count"], body["count"])
 	}
 }
 

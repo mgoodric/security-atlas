@@ -145,6 +145,51 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// EnabledResponse is the GET /v1/features/enabled shape — a flat map of
+// the slice 660 GATING flag keys to their effective per-tenant boolean.
+// Slice 660: this is the NON-admin, tenant-scoped read the web shell
+// consults to gate nav for ALL users. It deliberately exposes ONLY the
+// gating keys (featureflag.GatingKeys), never the full inventory + audit
+// metadata that the admin GET /v1/admin/features surface returns — a
+// non-admin caller learns nothing beyond "is this module navigable for
+// me", which is exactly what the shell renders anyway.
+type EnabledResponse struct {
+	Modules map[string]bool `json:"modules"`
+}
+
+// Enabled handles GET /v1/features/enabled. Authed but NOT admin-only:
+// every signed-in caller may read the gating-flag booleans for their own
+// tenant so the shell can hide flag-off nav entries. Tenant scope comes
+// from the credential + RLS via the Store (constitutional invariant #6);
+// the caller cannot read another tenant's flag state.
+//
+// The response is the slice 660 GatingKeys set only. We do NOT widen the
+// admin toggle surface to non-admins (anti-criterion): there is no write
+// path here and no per-flag audit metadata, just the booleans the shell
+// needs.
+func (h *Handler) Enabled(w http.ResponseWriter, r *http.Request) {
+	if _, ok := authctx.CredentialFromContext(r.Context()); !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
+		return
+	}
+	modules := make(map[string]bool, len(featureflag.GatingKeys))
+	for _, key := range featureflag.GatingKeys {
+		// Enabled() falls open to the Seed default on a DB error and never
+		// fails closed (anti-criterion P0 in internal/featureflag). The
+		// store read is tenant-scoped under RLS.
+		on, err := featureflag.Enabled(r.Context(), h.store, key)
+		if err != nil {
+			// Only an unknown-key (code-bug) lookup surfaces an error here;
+			// a GatingKey not in Seed is a programming error worth a 500.
+			httperr.WriteInternal(w, r, "feature flag read failed", err)
+			return
+		}
+		modules[key] = on
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(EnabledResponse{Modules: modules})
+}
+
 // --- helpers ---
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {

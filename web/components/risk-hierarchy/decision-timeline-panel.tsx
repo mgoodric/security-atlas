@@ -26,6 +26,7 @@
 // is read-only — it surfaces data, it does not interpret or comment on it
 // (anti-criterion: no LLM-generated commentary).
 
+import Link from "next/link";
 import { useMemo } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -295,7 +296,7 @@ export function DecisionTimelinePanel({
           <Button
             variant="outline"
             size="sm"
-            render={<a href="/risks" />}
+            render={<Link href="/risks" />}
             data-testid="decision-timeline-empty-action"
           >
             Record your first decision
