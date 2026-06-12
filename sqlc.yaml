@@ -72,6 +72,12 @@ sql:
       - "migrations/sql/20260608070000_evidence_observed_at_nanos.sql"
       - "migrations/sql/20260608080000_csf_tier_profile.sql"
       - "migrations/sql/20260609000000_staleness_rollup_log.sql"
+      - "migrations/sql/20260611000000_vendor_reviews_ledger.sql"
+      - "migrations/sql/20260612000000_questionnaire_answer_ai_columns.sql"
+      - "migrations/sql/20260612010000_role_scoped_checklist.sql"
+      - "migrations/sql/20260612020000_scim_provisioning.sql"
+      - "migrations/sql/20260612030000_idp_group_role_mappings.sql"
+      - "migrations/sql/20260612040000_scim_groups.sql"
     queries: "internal/db/queries"
     gen:
       go:

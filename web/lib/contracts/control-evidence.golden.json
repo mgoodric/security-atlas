@@ -1,0 +1,42 @@
+{
+  "_comment": "Slice 692 contract-tier golden. PROVIDER: internal/api/controldetail/evidence_contract_test.go (Evidence per-control branch, real handler over an injected fixed-row evidenceWindowReader stub — Option A two-method seam, no Postgres). Regenerate: `go test ./internal/api/controldetail/ -run TestContract_ControlEvidence -update`. CONSUMER: web/lib/contracts/control-evidence.contract.test.ts asserts the BFF at web/app/api/evidence/route.ts — VERBATIM passthrough (toEqual). Envelope is {control_id, evidence:[], count, total, next_cursor}; each row carries evidence_id/observed_at/content_hash/result (strings), evidence_kind (string-or-null), scope_cell (string-or-null), source (opaque JSON, null when absent); evidence is ALWAYS an array; total is the tenant-wide ledger count (NOT the page length). JUDGMENT (decisions log D3): seam covers ONLY the per-control branch; the slice-106 tenant-wide branch is deferred + spilled.",
+  "endpoint": "GET /v1/evidence?control_id={id}",
+  "variants": {
+    "empty": {
+      "control_id": "11111111-1111-4111-8111-111111111111",
+      "count": 0,
+      "evidence": [],
+      "next_cursor": "",
+      "total": 3
+    },
+    "populated": {
+      "control_id": "11111111-1111-4111-8111-111111111111",
+      "count": 2,
+      "evidence": [
+        {
+          "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+          "evidence_id": "55555555-5555-4555-8555-555555555555",
+          "evidence_kind": "manual.attestation.v1",
+          "observed_at": "2026-05-14T08:00:00Z",
+          "result": "pass",
+          "scope_cell": "44444444-4444-4444-8444-444444444444",
+          "source": {
+            "connector": "manual",
+            "runner": "operator-console"
+          }
+        },
+        {
+          "content_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+          "evidence_id": "22222222-2222-4222-8222-222222222222",
+          "evidence_kind": null,
+          "observed_at": "2026-05-13T20:00:00Z",
+          "result": "fail",
+          "scope_cell": null,
+          "source": null
+        }
+      ],
+      "next_cursor": "",
+      "total": 7
+    }
+  }
+}

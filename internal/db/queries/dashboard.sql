@@ -231,13 +231,34 @@ LIMIT sqlc.arg(row_limit);
 SELECT due_date, category, title, resource_type, resource_id
 FROM (
     -- expiring exceptions: active waivers, ordered by when they lapse.
+    -- Slice 732: resolve the control UUID to its SCF code + control name so
+    -- the dashboard "Upcoming" panel reads "Exception on AAA-01 — <name>"
+    -- instead of "Exception on control <uuid>". Same fix + same resolution
+    -- as the calendar's exception branch (internal/db/queries/calendar.sql);
+    -- the two surfaces share the upcoming-event vocabulary (slice 675), so
+    -- the exception label must read identically on both. The SCF code is
+    -- COALESCEd from controls.scf_id then the global scf_anchors.scf_id via
+    -- the structured controls.scf_anchor_id FK (slice 009). The control JOIN
+    -- is on the tenant-scoped (tenant_id, control_id) FK target — no tenant
+    -- boundary crossed; scf_anchors is the global catalog (no RLS). When
+    -- neither code resolves, the title falls back to the control name; never
+    -- a bare UUID (AC-2).
     SELECT
         e.expires_at::timestamptz                 AS due_date,
         'exception'::text                          AS category,
-        ('Exception on control ' || e.control_id::text) AS title,
+        ('Exception on ' || CASE
+            WHEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) IS NOT NULL
+                THEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) || ' — ' || c.title
+            ELSE c.title
+        END)                                       AS title,
         'exception'::text                          AS resource_type,
         e.id::text                                 AS resource_id
     FROM exceptions e
+    JOIN controls c
+      ON c.tenant_id = e.tenant_id
+     AND c.id = e.control_id
+    LEFT JOIN scf_anchors a
+      ON a.id = c.scf_anchor_id
     WHERE e.tenant_id = $1
       AND e.status = 'active'
       AND (sqlc.arg(category_filter)::text = '' OR sqlc.arg(category_filter)::text = 'exception')

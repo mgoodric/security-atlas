@@ -850,6 +850,50 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
+type VendorReviewOutcome string
+
+const (
+	VendorReviewOutcomePass             VendorReviewOutcome = "pass"
+	VendorReviewOutcomePassWithFindings VendorReviewOutcome = "pass_with_findings"
+	VendorReviewOutcomeFail             VendorReviewOutcome = "fail"
+	VendorReviewOutcomeWaived           VendorReviewOutcome = "waived"
+)
+
+func (e *VendorReviewOutcome) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VendorReviewOutcome(s)
+	case string:
+		*e = VendorReviewOutcome(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VendorReviewOutcome: %T", src)
+	}
+	return nil
+}
+
+type NullVendorReviewOutcome struct {
+	VendorReviewOutcome VendorReviewOutcome `json:"vendor_review_outcome"`
+	Valid               bool                `json:"valid"` // Valid is true if VendorReviewOutcome is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVendorReviewOutcome) Scan(value interface{}) error {
+	if value == nil {
+		ns.VendorReviewOutcome, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VendorReviewOutcome.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVendorReviewOutcome) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VendorReviewOutcome), nil
+}
+
 type AdminAuditLogV struct {
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	Ts           pgtype.Timestamptz `json:"ts"`
@@ -1080,6 +1124,34 @@ type ChannelDeliveryLog struct {
 	LastError       string             `json:"last_error"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	SentAt          pgtype.Timestamptz `json:"sent_at"`
+}
+
+type ChecklistItem struct {
+	ID         pgtype.UUID        `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	SectionID  pgtype.UUID        `json:"section_id"`
+	ControlID  pgtype.UUID        `json:"control_id"`
+	TaskText   string             `json:"task_text"`
+	Citations  []byte             `json:"citations"`
+	NoEvidence bool               `json:"no_evidence"`
+	SortOrder  int32              `json:"sort_order"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChecklistSection struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	GenerationID  pgtype.UUID        `json:"generation_id"`
+	Role          string             `json:"role"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+	PromptVersion string             `json:"prompt_version"`
+	ModelName     string             `json:"model_name"`
+	ModelVersion  string             `json:"model_version"`
+	ModelProvider string             `json:"model_provider"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Control struct {
@@ -1473,6 +1545,19 @@ type FwToScfEdge struct {
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 }
 
+type GroupRoleAuditLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	OccurredAt      pgtype.Timestamptz `json:"occurred_at"`
+	UserID          string             `json:"user_id"`
+	Role            string             `json:"role"`
+	Change          string             `json:"change"`
+	Source          string             `json:"source"`
+	IdpConfigID     pgtype.UUID        `json:"idp_config_id"`
+	TriggeringGroup string             `json:"triggering_group"`
+	Detail          []byte             `json:"detail"`
+}
+
 type ImportedCatalog struct {
 	ID           pgtype.UUID        `json:"id"`
 	TenantID     pgtype.UUID        `json:"tenant_id"`
@@ -1660,6 +1745,16 @@ type OidcIdpConfig struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OidcIdpGroupMapping struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	IdpConfigID pgtype.UUID        `json:"idp_config_id"`
+	GroupRef    string             `json:"group_ref"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+}
+
 type OrgTheme struct {
 	ID          pgtype.UUID        `json:"id"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`
@@ -1746,15 +1841,22 @@ type Questionnaire struct {
 }
 
 type QuestionnaireAnswer struct {
-	ID          pgtype.UUID        `json:"id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	QuestionID  pgtype.UUID        `json:"question_id"`
-	AnswerValue string             `json:"answer_value"`
-	Narrative   string             `json:"narrative"`
-	Citations   []byte             `json:"citations"`
-	AuthoredBy  string             `json:"authored_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	QuestionID    pgtype.UUID        `json:"question_id"`
+	AnswerValue   string             `json:"answer_value"`
+	Narrative     string             `json:"narrative"`
+	Citations     []byte             `json:"citations"`
+	AuthoredBy    string             `json:"authored_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+	PromptVersion string             `json:"prompt_version"`
+	ModelName     string             `json:"model_name"`
+	ModelVersion  string             `json:"model_version"`
+	ModelProvider string             `json:"model_provider"`
 }
 
 type QuestionnaireQuestion struct {
@@ -1867,6 +1969,47 @@ type ScfAnchor struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ScimAuditLog struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	OccurredAt        pgtype.Timestamptz `json:"occurred_at"`
+	ActorCredentialID pgtype.UUID        `json:"actor_credential_id"`
+	TargetUserID      pgtype.UUID        `json:"target_user_id"`
+	Action            string             `json:"action"`
+	Detail            []byte             `json:"detail"`
+}
+
+type ScimCredential struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	TokenHash   []byte             `json:"token_hash"`
+	Description string             `json:"description"`
+	IssuedBy    pgtype.UUID        `json:"issued_by"`
+	IssuedAt    pgtype.Timestamptz `json:"issued_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	Last4       string             `json:"last4"`
+}
+
+type ScimGroup struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	DisplayName    string             `json:"display_name"`
+	ScimExternalID *string            `json:"scim_external_id"`
+	Active         bool               `json:"active"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ScimGroupMember struct {
+	ID        pgtype.UUID        `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	GroupID   pgtype.UUID        `json:"group_id"`
+	UserID    string             `json:"user_id"`
+	GroupRef  string             `json:"group_ref"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Scope struct {
 	ID                 pgtype.UUID              `json:"id"`
 	TenantID           pgtype.UUID              `json:"tenant_id"`
@@ -1953,16 +2096,19 @@ type Tenant struct {
 }
 
 type User struct {
-	ID          pgtype.UUID        `json:"id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	Email       string             `json:"email"`
-	DisplayName string             `json:"display_name"`
-	Status      string             `json:"status"`
-	IdpIssuer   string             `json:"idp_issuer"`
-	IdpSubject  string             `json:"idp_subject"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	TimeZone    string             `json:"time_zone"`
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Email          string             `json:"email"`
+	DisplayName    string             `json:"display_name"`
+	Status         string             `json:"status"`
+	IdpIssuer      string             `json:"idp_issuer"`
+	IdpSubject     string             `json:"idp_subject"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	TimeZone       string             `json:"time_zone"`
+	Active         bool               `json:"active"`
+	ScimExternalID *string            `json:"scim_external_id"`
+	ScimManaged    bool               `json:"scim_managed"`
 }
 
 type UserNotificationPreference struct {
@@ -1980,6 +2126,7 @@ type UserRole struct {
 	Role      string             `json:"role"`
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 	GrantedBy string             `json:"granted_by"`
+	Origin    string             `json:"origin"`
 }
 
 type Vendor struct {
@@ -1999,6 +2146,17 @@ type Vendor struct {
 	Notes          string              `json:"notes"`
 	CreatedAt      pgtype.Timestamptz  `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz  `json:"updated_at"`
+}
+
+type VendorReview struct {
+	ID         pgtype.UUID         `json:"id"`
+	TenantID   pgtype.UUID         `json:"tenant_id"`
+	VendorID   pgtype.UUID         `json:"vendor_id"`
+	ReviewedAt pgtype.Date         `json:"reviewed_at"`
+	Reviewer   string              `json:"reviewer"`
+	Outcome    VendorReviewOutcome `json:"outcome"`
+	Notes      string              `json:"notes"`
+	CreatedAt  pgtype.Timestamptz  `json:"created_at"`
 }
 
 type VendorScopeCell struct {

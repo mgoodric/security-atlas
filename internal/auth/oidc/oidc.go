@@ -174,6 +174,22 @@ type CallbackResult struct {
 	Subject     string
 	Email       string
 	DisplayName string
+	// IDPConfigID is the id of the oidc_idp_configs row this login flowed
+	// through (slice 733). It scopes the slice-509 group-to-role derivation so a
+	// tenant with multiple IdP configs maps each IdP's groups independently
+	// (509 AC-6): the resolver matches mappings with idp_config_id IS NOT
+	// DISTINCT FROM this value. uuid.Nil when the resolver supplied no id (e.g.
+	// the local-mode resolver), in which case derivation matches the
+	// NULL-source (IdP-agnostic) mappings.
+	IDPConfigID uuid.UUID
+	// Groups is the validated `groups` claim from the verified ID token (slice
+	// 509). It is populated ONLY from a token that passed signature + issuer +
+	// audience + nonce verification above, so it is a trusted group set the
+	// group-to-role resolver may safely consume (P0-509-2: never derive roles
+	// from an unvalidated token). Empty when the IdP emits no groups claim. The
+	// caller passes it (with the login's idp_config_id) to grouprole.Resolver
+	// to derive the user's group-mapped roles after the user is upserted.
+	Groups []string
 }
 
 // HandleCallback verifies state, exchanges code, validates ID token, and
@@ -259,9 +275,10 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 		return CallbackResult{}, ErrNonceMismatch
 	}
 	var claims struct {
-		Email             string `json:"email"`
-		Name              string `json:"name"`
-		PreferredUsername string `json:"preferred_username"`
+		Email             string   `json:"email"`
+		Name              string   `json:"name"`
+		PreferredUsername string   `json:"preferred_username"`
+		Groups            []string `json:"groups"`
 	}
 	if err := idTok.Claims(&claims); err != nil {
 		return CallbackResult{}, fmt.Errorf("oidc: id_token claims: %w", err)
@@ -294,6 +311,8 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 		Subject:     idTok.Subject,
 		Email:       claims.Email,
 		DisplayName: name,
+		IDPConfigID: cfg.ID,
+		Groups:      claims.Groups,
 	}, nil
 }
 

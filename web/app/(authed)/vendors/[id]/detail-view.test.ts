@@ -7,7 +7,13 @@
 
 import { describe, expect, it } from "vitest";
 
-import { dpaStatusLabel, formatDetailDate, ownerMailto } from "./detail-view";
+import {
+  dpaStatusLabel,
+  formatDetailDate,
+  ownerMailto,
+  reviewOutcomeBadgeVariant,
+  reviewOutcomeLabel,
+} from "./detail-view";
 
 describe("formatDetailDate", () => {
   it("renders an em-dash for null / undefined / empty", () => {
@@ -60,5 +66,35 @@ describe("dpaStatusLabel", () => {
   it("reports an unsigned DPA and ignores any stray date", () => {
     expect(dpaStatusLabel(false, null)).toBe("Not signed");
     expect(dpaStatusLabel(false, "2026-02-01")).toBe("Not signed");
+  });
+});
+
+describe("reviewOutcomeLabel", () => {
+  it("renders each known outcome as a human-readable label", () => {
+    expect(reviewOutcomeLabel("pass")).toBe("Pass");
+    expect(reviewOutcomeLabel("pass_with_findings")).toBe("Pass with findings");
+    expect(reviewOutcomeLabel("fail")).toBe("Fail");
+    expect(reviewOutcomeLabel("waived")).toBe("Waived");
+  });
+
+  it("falls back to the raw string for an unknown outcome", () => {
+    expect(reviewOutcomeLabel("remediated")).toBe("remediated");
+    expect(reviewOutcomeLabel("")).toBe("");
+  });
+});
+
+describe("reviewOutcomeBadgeVariant", () => {
+  it("maps a fail to the destructive variant", () => {
+    expect(reviewOutcomeBadgeVariant("fail")).toBe("destructive");
+  });
+
+  it("maps findings / waiver to the outline variant", () => {
+    expect(reviewOutcomeBadgeVariant("pass_with_findings")).toBe("outline");
+    expect(reviewOutcomeBadgeVariant("waived")).toBe("outline");
+  });
+
+  it("maps a clean pass (and unknowns) to the secondary variant", () => {
+    expect(reviewOutcomeBadgeVariant("pass")).toBe("secondary");
+    expect(reviewOutcomeBadgeVariant("something-new")).toBe("secondary");
   });
 });

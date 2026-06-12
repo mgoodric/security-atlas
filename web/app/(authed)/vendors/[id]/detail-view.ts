@@ -41,3 +41,40 @@ export function dpaStatusLabel(
   const date = signedAt ? signedAt.slice(0, 10) : "";
   return date ? `Signed (${date})` : "Signed";
 }
+
+// reviewOutcomeLabel renders a vendor_reviews ledger outcome (slice 688)
+// as a human-readable label for the history timeline. An unknown value
+// falls back to the raw string so a future enum addition still renders
+// honestly rather than blanking out.
+export function reviewOutcomeLabel(outcome: string): string {
+  switch (outcome) {
+    case "pass":
+      return "Pass";
+    case "pass_with_findings":
+      return "Pass with findings";
+    case "fail":
+      return "Fail";
+    case "waived":
+      return "Waived";
+    default:
+      return outcome;
+  }
+}
+
+// reviewOutcomeBadgeVariant maps a review outcome to a shadcn Badge
+// variant so the timeline reads at a glance: a clean pass is muted, a
+// pass-with-findings or waiver is a neutral outline, and a fail is
+// destructive (the one outcome an operator must not miss).
+export function reviewOutcomeBadgeVariant(
+  outcome: string,
+): "secondary" | "outline" | "destructive" {
+  switch (outcome) {
+    case "fail":
+      return "destructive";
+    case "pass_with_findings":
+    case "waived":
+      return "outline";
+    default:
+      return "secondary";
+  }
+}

@@ -19,11 +19,12 @@
 // passes a tenant_id, and it reuses the existing getVendor GET — NO second
 // wire surface (slice 686 anti-criterion).
 //
-// AC-4 (review history): v1 has only the `last_review_date` scalar on the
-// vendor row — there is no per-review ledger to render a history from. The
-// detail surfaces the scalar honestly ("Last review"); a true history
-// needs a `vendor_reviews` ledger, filed as a follow-on slice (decisions
-// log D3). No migration here (anti-criterion).
+// AC-4 (review history): slice 688 lands the `vendor_reviews` append-only
+// ledger, so the history card now renders a real per-review timeline
+// (reviewer + date + outcome + notes, newest-first) drawn from
+// `/api/vendors/{id}/reviews`. When the ledger has no rows the card falls
+// back to the honest scalar message (decisions log D3). The detail page
+// does NOT touch the post-recording refresh logic — that is slice 691.
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -36,9 +37,15 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
-import { Vendor } from "@/lib/api/vendors";
+import { Vendor, VendorReview } from "@/lib/api/vendors";
 
-import { dpaStatusLabel, formatDetailDate, ownerMailto } from "./detail-view";
+import {
+  dpaStatusLabel,
+  formatDetailDate,
+  ownerMailto,
+  reviewOutcomeBadgeVariant,
+  reviewOutcomeLabel,
+} from "./detail-view";
 
 async function fetchVendor(id: string): Promise<Vendor> {
   const res = await fetch(`/api/vendors/${encodeURIComponent(id)}`);
@@ -47,6 +54,15 @@ async function fetchVendor(id: string): Promise<Vendor> {
   }
   const body = (await res.json()) as { vendor: Vendor };
   return body.vendor;
+}
+
+async function fetchVendorReviews(id: string): Promise<VendorReview[]> {
+  const res = await fetch(`/api/vendors/${encodeURIComponent(id)}/reviews`);
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as { reviews: VendorReview[] };
+  return body.reviews;
 }
 
 export default function VendorDetailPage({
@@ -62,6 +78,19 @@ export default function VendorDetailPage({
     queryFn: () => fetchVendor(id),
     // A 404 (genuinely-missing / cross-tenant id) and a 401 are terminal
     // states — do not retry them.
+    retry: (count, err) =>
+      !(
+        err instanceof APIError &&
+        (err.status === 404 || err.status === 401)
+      ) && count < 2,
+  });
+
+  // The review-history ledger is a secondary, non-blocking fetch: the
+  // summary renders even if the history is still loading or errors. An
+  // empty series (or an error) falls back to the honest scalar message.
+  const { data: reviews } = useQuery({
+    queryKey: ["vendor-reviews", id],
+    queryFn: () => fetchVendorReviews(id),
     retry: (count, err) =>
       !(
         err instanceof APIError &&
@@ -148,13 +177,22 @@ export default function VendorDetailPage({
             </p>
           ) : null}
         </div>
-        <Link
-          href={`/vendors/${id}/edit`}
-          className={buttonVariants()}
-          data-testid="vendor-detail-edit"
-        >
-          Edit
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href={`/vendors/${id}/reviews/new`}
+            className={buttonVariants({ variant: "secondary" })}
+            data-testid="vendor-detail-record-review"
+          >
+            Record review
+          </Link>
+          <Link
+            href={`/vendors/${id}/edit`}
+            className={buttonVariants()}
+            data-testid="vendor-detail-edit"
+          >
+            Edit
+          </Link>
+        </div>
       </header>
 
       {/* ============ SUMMARY ============ */}
@@ -241,38 +279,89 @@ export default function VendorDetailPage({
       </Card>
 
       {/* ============ REVIEW HISTORY (AC-4) ============ */}
-      {/* v1 carries only the `last_review_date` scalar — there is no
-          per-review ledger to render a history from. The summary above
-          surfaces the scalar; a true history needs a `vendor_reviews`
-          ledger, filed as a follow-on slice (decisions log D3). This
-          honest placeholder names the gap rather than faking a timeline. */}
+      {/* Slice 688: the `vendor_reviews` ledger now backs a real per-review
+          timeline (reviewer + date + outcome + notes, newest-first). When
+          the ledger has no rows the card falls back to the honest scalar
+          message (decisions log D3). */}
       <Card data-testid="vendor-detail-review-history-card">
         <CardHeader className="border-b">
           <CardTitle>Review history</CardTitle>
         </CardHeader>
         <CardContent>
-          <p
-            className="text-sm text-muted-foreground"
-            data-testid="vendor-detail-review-history-scalar"
-          >
-            v1 records a single last-review date
-            {vendor.last_review_date ? (
-              <>
-                {" "}
-                (
-                <span className="font-mono">
-                  {formatDetailDate(vendor.last_review_date)}
-                </span>
-                ).
-              </>
-            ) : (
-              <> — no review recorded yet.</>
-            )}{" "}
-            A per-review timeline arrives with the vendor-review ledger.
-          </p>
+          {reviews && reviews.length > 0 ? (
+            <ol
+              className="space-y-4"
+              data-testid="vendor-detail-review-history-timeline"
+            >
+              {reviews.map((review) => (
+                <ReviewRow key={review.id} review={review} />
+              ))}
+            </ol>
+          ) : (
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="vendor-detail-review-history-scalar"
+            >
+              No per-review history recorded yet
+              {vendor.last_review_date ? (
+                <>
+                  {" "}
+                  (last review on file:{" "}
+                  <span className="font-mono">
+                    {formatDetailDate(vendor.last_review_date)}
+                  </span>
+                  ).
+                </>
+              ) : (
+                <>.</>
+              )}{" "}
+              Recorded reviews appear here as a timeline.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+function ReviewRow({ review }: { review: VendorReview }) {
+  const reviewer = review.reviewer.trim();
+  return (
+    <li
+      className="border-l-2 border-muted pl-4"
+      data-testid="vendor-detail-review-row"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <span
+          className="font-mono text-sm text-foreground"
+          data-testid="vendor-detail-review-date"
+        >
+          {formatDetailDate(review.reviewed_at)}
+        </span>
+        <Badge
+          variant={reviewOutcomeBadgeVariant(review.outcome)}
+          data-testid="vendor-detail-review-outcome"
+        >
+          {reviewOutcomeLabel(review.outcome)}
+        </Badge>
+        {reviewer ? (
+          <span
+            className="text-sm text-muted-foreground"
+            data-testid="vendor-detail-review-reviewer"
+          >
+            {reviewer}
+          </span>
+        ) : null}
+      </div>
+      {review.notes.trim() ? (
+        <p
+          className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground"
+          data-testid="vendor-detail-review-notes"
+        >
+          {review.notes}
+        </p>
+      ) : null}
+    </li>
   );
 }
 
