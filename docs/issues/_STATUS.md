@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 543 |
+| merged | 545 |
 | in-progress | 1 |
-| ready | 77 |
+| ready | 75 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 446 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 676 691 694 695 696 697 698 699 700 701 702 703 732
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 446 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -640,7 +640,7 @@
 | 688 | vendor_reviews ledger (per-review history surface) | merged |  | 2026-06-11 | 7514a084 |
 | 689 | Contract-tier rollout: audit-workspace read tail (populations... | merged |  | 2026-06-11 | 4020b1a4 |
 | 690 | Contract-tier rollout: audit-workspace read-tail remainder (s... | merged |  | 2026-06-11 | 035a8f60 |
-| 691 | Vendor detail does not refresh after recording a review | ready |  |  |  |
+| 691 | Vendor detail does not refresh after recording a review | merged |  | 2026-06-11 | b600c061 |
 | 692 | Contract-tier rollout: controldetail attest-form + per-contro... | merged |  | 2026-06-11 | 1a4d3fa1 |
 | 693 | CI pipeline efficiency + safety hardening (Tier 1) | merged | #1301 | 2026-06-11 | 3d11343c |
 | 694 | Docker layer caching on the trivy-image job | ready |  |  |  |
@@ -654,4 +654,4 @@
 | 702 | container-publish edge-build efficiency | ready |  |  |  |
 | 703 | Main-canary: run a single representative leg on docs-only pushes | ready |  |  |  |
 | 704 | Contract-tier rollout: tenant-wide `/v1/evidence` ledger wind... | merged |  | 2026-06-11 | f882950d |
-| 732 | Calendar/dashboard exception event labels show the raw contro... | ready |  |  |  |
+| 732 | Calendar/dashboard exception event labels show the raw contro... | merged |  | 2026-06-11 | 9159b6a5 |
