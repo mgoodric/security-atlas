@@ -55,9 +55,11 @@ tags:
   - name: admin-evidence
   - name: admin-exceptions
   - name: admin-feature-flags
+  - name: admin-group-role-mappings
   - name: admin-install
   - name: admin-policies
   - name: admin-samples
+  - name: admin-scim-credentials
   - name: admin-sso
   - name: admin-super-admins
   - name: admin-tenants
@@ -76,6 +78,7 @@ tags:
   - name: decisions
   - name: evidence
   - name: exceptions
+  - name: feature-flags
   - name: framework-scopes
   - name: frameworks
   - name: install
@@ -438,6 +441,53 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/group-role-mappings:
+    get:
+      summary: GET /v1/admin/group-role-mappings
+      tags: [admin-group-role-mappings]
+      operationId: get-v1-admin-group-role-mappings
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/admin/group-role-mappings
+      tags: [admin-group-role-mappings]
+      operationId: post-v1-admin-group-role-mappings
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/group-role-mappings/{id}:
+    delete:
+      summary: DELETE /v1/admin/group-role-mappings/{id}
+      tags: [admin-group-role-mappings]
+      operationId: delete-v1-admin-group-role-mappings-id
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/install/reset-bootstrap:
     post:
       summary: POST /v1/admin/install/reset-bootstrap
@@ -473,6 +523,53 @@ paths:
       operationId: get-v1-admin-samples-export
       security:
         - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/scim-credentials:
+    get:
+      summary: GET /v1/admin/scim-credentials
+      tags: [admin-scim-credentials]
+      operationId: get-v1-admin-scim-credentials
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/admin/scim-credentials
+      tags: [admin-scim-credentials]
+      operationId: post-v1-admin-scim-credentials
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/scim-credentials/{id}:
+    delete:
+      summary: DELETE /v1/admin/scim-credentials/{id}
+      tags: [admin-scim-credentials]
+      operationId: delete-v1-admin-scim-credentials-id
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
@@ -1028,6 +1125,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/audit-periods/{id}/oscal-export:download:
+    post:
+      summary: POST /v1/audit-periods/{id}/oscal-export:download
+      tags: [audit-periods]
+      operationId: post-v1-audit-periods-id-oscal-export_download
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}/populations/{popID}:
     post:
       summary: POST /v1/audit-periods/{id}/populations/{popID}
@@ -1351,6 +1468,80 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/checklist/sections/{id}:approve:
+    post:
+      summary: POST /v1/controls/checklist/sections/{id}:approve
+      tags: [controls]
+      operationId: post-v1-controls-checklist-sections-id_approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/checklist/{generationID}:
+    get:
+      summary: GET /v1/controls/checklist/{generationID}
+      tags: [controls]
+      operationId: get-v1-controls-checklist-generationID
+      security:
+        - bearer: []
+      parameters:
+        - name: generationID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/checklist/{generationID}/export.md:
+    get:
+      summary: GET /v1/controls/checklist/{generationID}/export.md
+      tags: [controls]
+      operationId: get-v1-controls-checklist-generationID-export_md
+      security:
+        - bearer: []
+      parameters:
+        - name: generationID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/checklist:generate:
+    post:
+      summary: POST /v1/controls/checklist:generate
+      tags: [controls]
+      operationId: post-v1-controls-checklist_generate
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/drift:
     get:
       summary: GET /v1/controls/drift
@@ -1498,6 +1689,26 @@ paths:
       summary: GET /v1/controls/{id}/effectiveness
       tags: [controls]
       operationId: get-v1-controls-id-effectiveness
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/gap-explanation:
+    get:
+      summary: GET /v1/controls/{id}/gap-explanation
+      tags: [controls]
+      operationId: get-v1-controls-id-gap-explanation
       security:
         - bearer: []
       parameters:
@@ -2097,6 +2308,20 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/features/enabled:
+    get:
+      summary: GET /v1/features/enabled — non-admin enabled-modules read (slice 660 gating flags)
+      tags: [feature-flags]
+      operationId: get-v1-features-enabled
+      security:
+        - bearer: []
       responses:
         default:
           description: Default response envelope.
@@ -3277,6 +3502,56 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answers/{qid}/ai-approve:
+    post:
+      summary: POST /v1/questionnaires/{id}/answers/{qid}/ai-approve
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answers-qid-ai-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answers/{qid}/ai-suggest:
+    post:
+      summary: POST /v1/questionnaires/{id}/answers/{qid}/ai-suggest
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answers-qid-ai-suggest
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/questionnaires/{id}/export-pdf:
     post:
       summary: POST /v1/questionnaires/{id}/export-pdf
@@ -3909,6 +4184,45 @@ paths:
       summary: PATCH /v1/vendors/{id}
       tags: [vendors]
       operationId: patch-v1-vendors-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/vendors/{id}/reviews:
+    get:
+      summary: GET /v1/vendors/{id}/reviews
+      tags: [vendors]
+      operationId: get-v1-vendors-id-reviews
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/vendors/{id}/reviews
+      tags: [vendors]
+      operationId: post-v1-vendors-id-reviews
       security:
         - bearer: []
       parameters:

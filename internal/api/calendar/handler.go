@@ -53,8 +53,11 @@ const (
 	truncateThreshold = 500
 
 	// validEventTypes is the AC-1 closed set. Filters outside this set
-	// are rejected with 400.
-	validEventTypes = "audit,exception,policy,control"
+	// are rejected with 400. Slice 675 added `vendor` so the calendar
+	// agenda sources the same event types as the dashboard "Upcoming"
+	// widget (audit-period boundaries, vendor reviews, policy reviews,
+	// exceptions) plus the calendar-only periodic control reviews.
+	validEventTypes = "audit,exception,policy,vendor,control"
 
 	// calendarScopeKind is the api_keys AllowedKinds entry used to
 	// scope a credential to "may only fetch the ICS feed." See decision
@@ -398,6 +401,7 @@ func normalizeTypeFilter(raw string) (string, error) {
 		"audit":     {},
 		"exception": {},
 		"policy":    {},
+		"vendor":    {},
 		"control":   {},
 	}
 	kept := make([]string, 0, len(parts))

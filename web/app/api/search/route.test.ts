@@ -124,6 +124,45 @@ describe("GET /api/search", () => {
     expect(headers.Authorization).toBe("Bearer test-bearer-223");
   });
 
+  test("forwards types=anchors through verbatim (slice 661)", async () => {
+    // Slice 661 added the `anchors` result type upstream. The BFF is a
+    // thin proxy with NO type whitelist of its own — it forwards the
+    // `types` param verbatim and lets the upstream own validation. This
+    // pins that `anchors` is NOT stripped at the BFF layer.
+    mockCookieGet.mockReturnValue({ value: "test-bearer-661" });
+    let capturedURL = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      capturedURL = typeof input === "string" ? input : input.toString();
+      return new Response(
+        JSON.stringify({
+          hits: [
+            {
+              id: "00000000-0000-0000-0000-0000000000a1",
+              type: "anchors",
+              title: "CRY-04 — Encryption At Rest",
+              snippet: "CRY-04 — Encryption At Rest",
+              relevance_score: 1.0,
+            },
+          ],
+          count: 1,
+          partial_types: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const req = makeReq(
+      "http://localhost:3000/api/search?q=CRY-04&types=anchors&limit=10",
+    ) as unknown as Parameters<typeof GET>[0];
+    const res = await GET(req);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      hits: { type: string }[];
+    };
+    expect(body.hits[0]?.type).toBe("anchors");
+    expect(capturedURL).toContain("types=anchors");
+  });
+
   test("propagates upstream 400 (q too short) verbatim", async () => {
     mockCookieGet.mockReturnValue({ value: "test-bearer-223" });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(

@@ -80,9 +80,37 @@ func openPool(t *testing.T, dsn string) *pgxpool.Pool {
 	return pool
 }
 
+// enableFeatureFlag turns a gating feature flag ON for the test tenant.
+// Slice 660 wrapped the board (briefs + packs) routes in
+// featureflag.Gate("board.reporting"), which DEFAULTS OFF — so without an
+// explicit override every board route returns 404 for a fresh test tenant.
+// We upsert the override via the admin (BYPASSRLS) pool, the same effect as
+// an operator toggling the flag ON. Cleanup removes the row.
+func enableFeatureFlag(t *testing.T, admin *pgxpool.Pool, tenant, key, category string) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO feature_flags (tenant_id, flag_key, enabled, description, category, last_changed_by, last_changed_at)
+		VALUES ($1, $2, TRUE, '', $3, 'integration-test', now())
+		ON CONFLICT (tenant_id, flag_key) DO UPDATE SET enabled = TRUE`,
+		tenant, key, category); err != nil {
+		t.Fatalf("enable feature flag %s: %v", key, err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(),
+			`DELETE FROM feature_flags WHERE tenant_id = $1`, tenant)
+		_, _ = admin.Exec(context.Background(),
+			`DELETE FROM feature_flag_audit_log WHERE tenant_id = $1`, tenant)
+	})
+}
+
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
+	// Slice 660: the board routes are gate-wrapped on board.reporting
+	// (default OFF). Enable it for the test tenant so the pre-slice-660
+	// route tests reach the real handler instead of the gate's 404.
+	enableFeatureFlag(t, admin, tenant, "board.reporting", "board")
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, stmt := range []string{

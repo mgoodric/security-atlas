@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -69,6 +70,15 @@ type Period struct {
 	CreatedBy          string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	// FrameworkLabel is a readable "<framework name> <version>" string
+	// (e.g. "SCF 2025.2") resolved from the catalog on the LIST path
+	// only (slice 680 / ATLAS-033). It is empty on the Create/Get/Freeze
+	// paths, which do not join the framework catalog. The /audits list
+	// view renders this label instead of a truncated framework_version_id
+	// UUID (which read as an opaque content hash). Empty when the
+	// framework version no longer resolves; the wire then omits it and
+	// the frontend falls back to the UUID.
+	FrameworkLabel string
 }
 
 // CreateInput is the API-shape for POST /v1/audit-periods.
@@ -156,21 +166,40 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Period, error) {
 	return out, err
 }
 
-// List returns periods for the current tenant, newest first.
+// List returns periods for the current tenant, newest first. The LIST
+// path joins the framework catalog so each period carries a readable
+// FrameworkLabel (slice 680 / ATLAS-033) the /audits view renders in
+// place of a truncated framework_version_id UUID.
 func (s *Store) List(ctx context.Context) ([]Period, error) {
 	var out []Period
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		rows, err := q.ListAuditPeriodsByTenant(ctx, pgUUID(tenantID))
+		rows, err := q.ListAuditPeriodsWithFrameworkByTenant(ctx, pgUUID(tenantID))
 		if err != nil {
 			return fmt.Errorf("list audit periods: %w", err)
 		}
 		out = make([]Period, len(rows))
 		for i, r := range rows {
-			out[i] = periodFromRow(r)
+			out[i] = periodFromListRow(r)
 		}
 		return nil
 	})
 	return out, err
+}
+
+// frameworkLabel composes the readable "<name> <version>" label from the
+// nullable catalog columns surfaced by the LIST join. Returns "" when
+// either part is missing (the framework version no longer resolves), so
+// the wire omits the field and the frontend falls back to the UUID.
+func frameworkLabel(name, version *string) string {
+	if name == nil || version == nil {
+		return ""
+	}
+	n := strings.TrimSpace(*name)
+	v := strings.TrimSpace(*version)
+	if n == "" || v == "" {
+		return ""
+	}
+	return n + " " + v
 }
 
 // Freeze flips status open->frozen at the wall-clock instant `at`, stamps
@@ -563,6 +592,45 @@ func periodFromRow(r dbx.AuditPeriod) Period {
 		FrameworkVersionID: uuid.UUID(r.FrameworkVersionID.Bytes),
 		Status:             Status(r.Status),
 		CreatedBy:          r.CreatedBy,
+	}
+	if r.PeriodStart.Valid {
+		p.PeriodStart = r.PeriodStart.Time
+	}
+	if r.PeriodEnd.Valid {
+		p.PeriodEnd = r.PeriodEnd.Time
+	}
+	if r.FrozenAt.Valid {
+		t := r.FrozenAt.Time
+		p.FrozenAt = &t
+	}
+	if len(r.FrozenHash) > 0 {
+		p.FrozenHash = append([]byte(nil), r.FrozenHash...)
+	}
+	if r.FrozenBy != nil {
+		p.FrozenBy = *r.FrozenBy
+	}
+	if r.CreatedAt.Valid {
+		p.CreatedAt = r.CreatedAt.Time
+	}
+	if r.UpdatedAt.Valid {
+		p.UpdatedAt = r.UpdatedAt.Time
+	}
+	return p
+}
+
+// periodFromListRow maps the LIST-path joined row (slice 680) to a
+// Period, additionally resolving the readable FrameworkLabel. The
+// audit_periods columns map identically to periodFromRow; the two
+// joined columns (framework_name, framework_version) compose the label.
+func periodFromListRow(r dbx.ListAuditPeriodsWithFrameworkByTenantRow) Period {
+	p := Period{
+		ID:                 uuid.UUID(r.ID.Bytes),
+		TenantID:           uuid.UUID(r.TenantID.Bytes),
+		Name:               r.Name,
+		FrameworkVersionID: uuid.UUID(r.FrameworkVersionID.Bytes),
+		Status:             Status(r.Status),
+		CreatedBy:          r.CreatedBy,
+		FrameworkLabel:     frameworkLabel(r.FrameworkName, r.FrameworkVersion),
 	}
 	if r.PeriodStart.Valid {
 		p.PeriodStart = r.PeriodStart.Time

@@ -97,6 +97,113 @@ func TestISOImport_CreatesRowsAndIsIdempotent(t *testing.T) {
 	}
 }
 
+// AC-3 (slice 467) — the FULL Annex A crosswalk (all 93 controls) imports
+// cleanly into a real Postgres: every requirement row and every STRM edge is
+// created, and the import is idempotent. This is the completion proof for the
+// slice — slice 438 shipped 36 controls; this asserts the graph now carries
+// all 93. The earlier TestISOImport_CreatesRowsAndIsIdempotent already ties
+// the created-row counts to len(cw.Requirements)/len(cw.Mappings); this test
+// pins the ABSOLUTE Annex A count so a silently-shrunk crosswalk is caught.
+func TestISOImport_FullAnnexA_ImportsAll93Controls(t *testing.T) {
+	pool := openPool(t)
+	resetISO(t, pool)
+	ensureSCFLoaded(t, pool)
+	cw := loadISOCrosswalk(t)
+
+	const fullAnnexACount = 93
+	if len(cw.Requirements) != fullAnnexACount {
+		t.Fatalf("crosswalk carries %d requirements; want full Annex A %d", len(cw.Requirements), fullAnnexACount)
+	}
+
+	if _, err := soc2import.Import(context.Background(), pool, cw); err != nil {
+		t.Fatalf("ISO Import: %v", err)
+	}
+
+	// Count the ISO requirement rows actually persisted under iso27001:2022.
+	var reqRows int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM framework_requirements fr
+		JOIN framework_versions fv ON fv.id = fr.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'iso27001' AND fv.version = '2022'`).Scan(&reqRows); err != nil {
+		t.Fatalf("count ISO requirement rows: %v", err)
+	}
+	if reqRows != fullAnnexACount {
+		t.Fatalf("persisted ISO requirement rows = %d; want %d", reqRows, fullAnnexACount)
+	}
+
+	// Every persisted requirement resolves to at least one SCF anchor edge —
+	// no orphan requirement (invariant #1: every framework requirement is
+	// satisfied THROUGH an SCF anchor, never directly).
+	var orphans int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM framework_requirements fr
+		JOIN framework_versions fv ON fv.id = fr.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'iso27001' AND fv.version = '2022'
+		  AND NOT EXISTS (
+			SELECT 1 FROM fw_to_scf_edges e WHERE e.framework_requirement_id = fr.id)`).Scan(&orphans); err != nil {
+		t.Fatalf("orphan-requirement query: %v", err)
+	}
+	if orphans != 0 {
+		t.Fatalf("%d ISO requirements have no SCF anchor edge — invariant #1 violated", orphans)
+	}
+
+	// Idempotent re-import of the full set.
+	report2, err := soc2import.Import(context.Background(), pool, cw)
+	if err != nil {
+		t.Fatalf("second full ISO Import: %v", err)
+	}
+	if report2.RequirementsCreated != 0 || report2.EdgesCreated != 0 {
+		t.Fatalf("idempotent re-import of full Annex A created rows: %+v", report2)
+	}
+}
+
+// AC-3 (slice 467) — the slice-438 curated subset is preserved verbatim: the
+// 36 original controls (and their anchor mappings) still resolve after the
+// full-coverage extension. This is the no-regression-of-the-subset guard.
+func TestISOImport_FullAnnexA_PreservesSlice438Subset(t *testing.T) {
+	pool := openPool(t)
+	resetISO(t, pool)
+	ensureSCFLoaded(t, pool)
+	if _, err := soc2import.Import(context.Background(), pool, loadISOCrosswalk(t)); err != nil {
+		t.Fatalf("ISO Import: %v", err)
+	}
+
+	// A representative sample of the slice-438 subset, each with the anchor it
+	// was originally mapped to. If the extension silently re-anchored or
+	// dropped any of these, this fails.
+	subset := map[string]string{
+		"A.5.1":  "GOV-01",
+		"A.5.15": "IAC-01", // the invariant-#1 shared anchor
+		"A.5.18": "IAC-07",
+		"A.5.24": "IRO-04",
+		"A.6.3":  "HRS-04",
+		"A.7.2":  "PES-04",
+		"A.8.2":  "IAC-21",
+		"A.8.8":  "VPM-01",
+		"A.8.13": "BCD-09",
+		"A.8.15": "AAA-01",
+		"A.8.25": "SEA-05",
+	}
+	for code, wantAnchor := range subset {
+		var found int
+		if err := pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM framework_requirements fr
+			JOIN framework_versions fv ON fv.id = fr.framework_version_id
+			JOIN frameworks f ON f.id = fv.framework_id
+			JOIN fw_to_scf_edges e ON e.framework_requirement_id = fr.id
+			JOIN scf_anchors a ON a.id = e.scf_anchor_id
+			WHERE f.slug = 'iso27001' AND fv.version = '2022'
+			  AND fr.code = $1 AND a.scf_id = $2`, code, wantAnchor).Scan(&found); err != nil {
+			t.Fatalf("subset-preservation query (%s -> %s): %v", code, wantAnchor, err)
+		}
+		if found == 0 {
+			t.Errorf("slice-438 subset control %s no longer maps to %s after full-coverage extension", code, wantAnchor)
+		}
+	}
+}
+
 // AC-5 — importing ISO does NOT disturb the SOC 2 rows; both frameworks
 // coexist in the same graph with distinct framework_version_ids.
 // AC-3 — an ISO `A.x` code and a SOC 2 `CCx` code coexist without collision.

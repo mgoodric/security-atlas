@@ -43,12 +43,20 @@ describe("linkFor", () => {
     expect(result).toEqual({ kind: "link", href: "/controls/ctl-9" });
   });
 
+  it("vendor event returns a link to the vendor detail route (slice 675)", () => {
+    const result = linkFor(
+      makeEvent({ type: "vendor", related_entity_id: "vnd-7" }),
+    );
+    expect(result).toEqual({ kind: "link", href: "/vendors/vnd-7" });
+  });
+
   it("exception event returns a static (no-link) result with an explanatory reason", () => {
     const result = linkFor(makeEvent({ type: "exception" }));
     expect(result.kind).toBe("static");
     if (result.kind === "static") {
       expect(result.reason).toMatch(/exception/i);
-      expect(result.reason).toMatch(/future slice/i);
+      expect(result.reason).toMatch(/not available yet/i);
+      expect(result.reason).toMatch(/\/exceptions/i);
     }
   });
 
@@ -57,15 +65,17 @@ describe("linkFor", () => {
     expect(result.kind).toBe("static");
     if (result.kind === "static") {
       expect(result.reason).toMatch(/policy/i);
-      expect(result.reason).toMatch(/future slice/i);
+      expect(result.reason).toMatch(/not available yet/i);
+      expect(result.reason).toMatch(/\/policies/i);
     }
   });
 
-  it("does NOT return a `#` href for any of the four event types (AC-1)", () => {
+  it("does NOT return a `#` href for any of the event types (AC-1)", () => {
     const types: CalendarEvent["type"][] = [
       "audit",
       "exception",
       "policy",
+      "vendor",
       "control",
     ];
     for (const t of types) {

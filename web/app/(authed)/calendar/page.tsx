@@ -9,8 +9,9 @@
 //   - Month grid — standard 7-col × 5/6-row calendar. Click on a date
 //     opens a popover listing that day's events.
 //
-// Filter sidebar: event-type checkboxes (audit/exception/policy/control).
-// Filter state persists in URL query string for shareable filtered views.
+// Filter sidebar: event-type checkboxes
+// (audit/exception/policy/vendor/control). Filter state persists in URL
+// query string for shareable filtered views.
 //
 // "Subscribe in your calendar" button mints a per-user ICS URL token and
 // copies it to clipboard. Calendar clients (Google / Apple / Outlook)
@@ -24,7 +25,9 @@
 // Anti-criteria honored (P0):
 // - P0-A6: NO calendar-library dependency (FullCalendar etc.). Both
 //   views are hand-rolled with Tailwind. See decision D6.
-// - P0-A1: ONLY 4 event types (audit/exception/policy/control).
+// - P0-A1: a closed event-type set (audit/exception/policy/vendor/control).
+//   Slice 675 added `vendor` to align the agenda with the dashboard
+//   "Upcoming" widget; the set is still closed (no free-form types).
 // - P0-A5: per-event links fall back to placeholders for pages that
 //   have not shipped yet.
 
@@ -44,7 +47,13 @@ import {
   fetchCalendarEvents,
 } from "@/lib/api/calendar";
 
-const ALL_TYPES = ["audit", "exception", "policy", "control"] as const;
+const ALL_TYPES = [
+  "audit",
+  "exception",
+  "policy",
+  "vendor",
+  "control",
+] as const;
 type AllowedType = (typeof ALL_TYPES)[number];
 
 function isAllowedType(t: string): t is AllowedType {
@@ -150,8 +159,9 @@ function CalendarPageInner() {
         <div>
           <h1 className="text-2xl font-semibold">Compliance calendar</h1>
           <p className="text-sm text-muted-foreground">
-            Upcoming audits, exception expirations, policy reviews, and periodic
-            control reviews — one place for the whole team.
+            Upcoming audits, exception expirations, policy reviews, vendor
+            reviews, and periodic control reviews — one place for the whole
+            team.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">

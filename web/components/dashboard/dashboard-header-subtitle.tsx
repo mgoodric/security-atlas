@@ -48,13 +48,14 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 
 import {
   fetchDashboardFreshness,
   type FreshnessReport,
 } from "@/lib/api/dashboard";
+import { freshnessPctFromReport } from "@/lib/api/freshness-consistency";
+import { useCurrentTenantName } from "@/lib/auth/use-current-tenant-name";
 
 // ---------------------------------------------------------------------
 // Pure helpers — unit-tested in `dashboard-header-subtitle.test.ts`.
@@ -74,10 +75,10 @@ export function computeFreshnessPct(
   total: number,
   totalStale: number,
 ): number | null {
-  if (total <= 0) return null;
-  const stale = Math.max(0, Math.min(totalStale, total));
-  const pct = 100 * (1 - stale / total);
-  return Math.round(pct);
+  // Slice 677 / ATLAS-020: delegate to the shared single-source-of-truth
+  // definition so the dashboard subtitle and the metrics-view board KPI
+  // can never disagree on the freshness figure (they call one function).
+  return freshnessPctFromReport({ total, total_stale: totalStale });
 }
 
 /**
@@ -104,78 +105,23 @@ export function formatTenantContext(name: string | undefined): string | null {
 }
 
 // ---------------------------------------------------------------------
-// Tenant fetch — mirrors the TenantSwitcher's inline fetch pattern.
-// We do NOT factor a shared `fetchMeTenants` helper because the
-// TenantSwitcher carries enough switcher-specific logic (periodic
-// re-fetch, cross-tab broadcast, eviction banner) that lifting the
-// fetch primitive would create a coupling the next refactor would
-// regret. The redundancy is one tiny `fetch()` call.
-// ---------------------------------------------------------------------
-
-interface Tenant {
-  id: string;
-  name: string;
-  current: boolean;
-}
-
-interface TenantsResponse {
-  tenants: Tenant[];
-}
-
-/**
- * useCurrentTenantName subscribes to /api/me/tenants and returns the
- * `name` of the entry flagged `current`. Returns:
- *
- *   - `undefined` while loading or on any failure (silent absence
- *     by collapsing to "no tenant context" in the caller).
- *   - the tenant name string on success.
- *
- * Honors the BFF's no-store cache header. Does NOT periodically
- * re-fetch — the `TenantSwitcher` already does so at 60s and the page
- * full-refreshes on tenant switch, which causes this component to
- * re-mount and re-fetch.
- */
-function useCurrentTenantName(): string | undefined {
-  const [name, setName] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const resp = await fetch("/api/me/tenants", {
-          cache: "no-store",
-          credentials: "include",
-        });
-        if (cancelled || !resp.ok) return;
-        const data = (await resp.json()) as TenantsResponse;
-        if (cancelled) return;
-        const current = Array.isArray(data?.tenants)
-          ? data.tenants.find((t) => t.current)
-          : undefined;
-        setName(current?.name);
-      } catch {
-        // Silent absence on any failure.
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return name;
-}
-
-// ---------------------------------------------------------------------
 // Components
 // ---------------------------------------------------------------------
 
 /**
  * TenantContext renders the tenant-name chip next to the dashboard H1.
- * Returns null on silent absence (no tenant context loaded yet, or
- * the fetch failed).
+ * Returns null on silent absence (no tenant context loaded yet, or the
+ * fetch failed).
+ *
+ * Slice 674 — the active-tenant-name resolution now lives in the shared
+ * `useCurrentTenantName` hook (`web/lib/auth/use-current-tenant-name.ts`),
+ * which re-fetches on the slice-199 `tenant-switched` broadcast. The
+ * prior local hook fetched only on mount, so an in-tab switch left this
+ * chip showing the origin tenant name until a hard reload.
  */
 export function TenantContext() {
   const tenantName = useCurrentTenantName();
-  const display = formatTenantContext(tenantName);
+  const display = formatTenantContext(tenantName ?? undefined);
   if (display === null) return null;
   return (
     <span

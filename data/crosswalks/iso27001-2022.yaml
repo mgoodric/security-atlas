@@ -2,9 +2,11 @@
 #
 # DRAFT — community_draft attribution. Authored by the agent for slice 438
 # (the FIRST second-framework slice — it proves UCF invariant #1: one SCF
-# anchor satisfies requirements from TWO frameworks at once). Every row is
-# an agent JUDGMENT call recorded in
-# docs/audit-log/438-iso27001-crosswalk-decisions.md.
+# anchor satisfies requirements from TWO frameworks at once) and COMPLETED to
+# full Annex A coverage by slice 467. Every row is an agent JUDGMENT call
+# recorded in docs/audit-log/438-iso27001-crosswalk-decisions.md (the original
+# 36-control subset) and docs/audit-log/467-iso27001-annex-a-decisions.md
+# (the remaining 57 controls + the A.8.24 cryptography split).
 #
 # LICENSING POSTURE (deliberate — see decisions log):
 #   ISO/IEC 27001:2022 is a copyrighted standard. This file references only
@@ -15,13 +17,16 @@
 #   imported separately by the operator (slice 006); this file ships only
 #   the ISO→SCF edge data (P0-438-7).
 #
-# SCOPE DISCIPLINE (binding — slice 438 narrative):
-#   This is a CURATED high-signal subset (~36 controls), NOT full 93-control
-#   Annex A coverage. The subset deliberately covers (a) the SOC 2 overlap
-#   zone — so a shared SCF anchor demonstrates invariant #1 — and (b) a
-#   handful of ISO-unique controls (threat intelligence, ICT readiness,
-#   data masking) that SOC 2 does not name. Full Annex A completion is a
-#   follow-on slice.
+# COVERAGE (slice 467 — full Annex A):
+#   This crosswalk now carries ALL 93 ISO/IEC 27001:2022 Annex A controls
+#   (A.5 organizational ×37, A.6 people ×8, A.7 physical ×14, A.8
+#   technological ×34). Slice 438 shipped a curated 36-control subset that
+#   deliberately covered the SOC 2 overlap zone (so a shared SCF anchor
+#   demonstrates invariant #1) plus a handful of ISO-unique controls; slice
+#   467 completed the remaining 57 controls and split A.8.24 cryptography into
+#   the in-transit + key-management edge pair. Each requirement maps to one or
+#   more SCF anchors (requirement → SCF anchor only — invariant #7); no
+#   requirement → requirement edge exists.
 #
 # Source basis (methodology, not copied text):
 #   - ISO/IEC 27001:2022 Annex A control IDs + short titles (factual refs)
@@ -54,6 +59,18 @@ requirements:
   - code: A.5.2
     title: "Information security roles and responsibilities"
     body: "Information security roles and responsibilities are defined and allocated according to organizational needs."
+  - code: A.5.3
+    title: "Segregation of duties"
+    body: "Conflicting duties and conflicting areas of responsibility are segregated to reduce the risk of unauthorized or unintended modification or misuse of assets."
+  - code: A.5.4
+    title: "Management responsibilities"
+    body: "Management requires all personnel to apply information security in accordance with the established policies and procedures of the organization."
+  - code: A.5.5
+    title: "Contact with authorities"
+    body: "The organization establishes and maintains contact with relevant authorities."
+  - code: A.5.6
+    title: "Contact with special interest groups"
+    body: "The organization establishes and maintains contact with special interest groups, specialist security forums, and professional associations."
   - code: A.5.7
     title: "Threat intelligence"
     body: "Information relating to information security threats is collected and analyzed to produce threat intelligence."
@@ -66,12 +83,24 @@ requirements:
   - code: A.5.10
     title: "Acceptable use of information and other associated assets"
     body: "Rules for the acceptable use and handling of information and associated assets are identified, documented, and implemented."
+  - code: A.5.11
+    title: "Return of assets"
+    body: "Personnel and other interested parties return all organizational assets in their possession upon change or termination of their employment, contract, or agreement."
   - code: A.5.12
     title: "Classification of information"
     body: "Information is classified according to the organization's information security needs based on confidentiality, integrity, availability, and relevant requirements."
+  - code: A.5.13
+    title: "Labelling of information"
+    body: "An appropriate set of procedures for information labelling is developed and implemented in accordance with the information classification scheme adopted by the organization."
+  - code: A.5.14
+    title: "Information transfer"
+    body: "Information transfer rules, procedures, and agreements are in place for all types of transfer facilities within the organization and between the organization and external parties."
   - code: A.5.15
     title: "Access control"
     body: "Rules to control physical and logical access to information and associated assets are established and implemented based on business and information security requirements."
+  - code: A.5.16
+    title: "Identity management"
+    body: "The full life cycle of identities is managed by the organization."
   - code: A.5.17
     title: "Authentication information"
     body: "Allocation and management of authentication information is controlled by a management process, including advising personnel on appropriate handling."
@@ -81,6 +110,12 @@ requirements:
   - code: A.5.19
     title: "Information security in supplier relationships"
     body: "Processes and procedures are defined and implemented to manage the information security risks associated with the use of suppliers' products or services."
+  - code: A.5.20
+    title: "Addressing information security within supplier agreements"
+    body: "Relevant information security requirements are established and agreed with each supplier based on the type of supplier relationship."
+  - code: A.5.21
+    title: "Managing information security in the ICT supply chain"
+    body: "Processes and procedures are defined and implemented to manage the information security risks associated with the ICT products and services supply chain."
   - code: A.5.22
     title: "Monitoring, review and change management of supplier services"
     body: "The organization regularly monitors, reviews, evaluates, and manages change in supplier information security practices and service delivery."
@@ -90,9 +125,18 @@ requirements:
   - code: A.5.24
     title: "Information security incident management planning and preparation"
     body: "The organization plans and prepares for managing information security incidents by defining, establishing, and communicating processes, roles, and responsibilities."
+  - code: A.5.25
+    title: "Assessment and decision on information security events"
+    body: "The organization assesses information security events and decides whether they are to be categorized as information security incidents."
   - code: A.5.26
     title: "Response to information security incidents"
     body: "Information security incidents are responded to in accordance with documented procedures."
+  - code: A.5.27
+    title: "Learning from information security incidents"
+    body: "Knowledge gained from information security incidents is used to strengthen and improve information security controls."
+  - code: A.5.28
+    title: "Collection of evidence"
+    body: "The organization establishes and implements procedures for the identification, collection, acquisition, and preservation of evidence related to information security events."
   - code: A.5.29
     title: "Information security during disruption"
     body: "The organization plans how to maintain information security at an appropriate level during disruption."
@@ -102,33 +146,111 @@ requirements:
   - code: A.5.31
     title: "Legal, statutory, regulatory and contractual requirements"
     body: "Legal, statutory, regulatory, and contractual requirements relevant to information security and the organization's approach to meeting them are identified, documented, and kept up to date."
+  - code: A.5.32
+    title: "Intellectual property rights"
+    body: "The organization implements appropriate procedures to protect intellectual property rights."
+  - code: A.5.33
+    title: "Protection of records"
+    body: "Records are protected from loss, destruction, falsification, unauthorized access, and unauthorized release."
+  - code: A.5.34
+    title: "Privacy and protection of personal identifiable information (PII)"
+    body: "The organization identifies and meets the requirements regarding the preservation of privacy and protection of personal identifiable information according to applicable laws and regulations."
   - code: A.5.35
     title: "Independent review of information security"
     body: "The organization's approach to managing information security and its implementation is reviewed independently at planned intervals or when significant changes occur."
-
+  - code: A.5.36
+    title: "Compliance with policies, rules and standards for information security"
+    body: "Compliance with the organization's information security policy, topic-specific policies, rules, and standards is regularly reviewed."
+  - code: A.5.37
+    title: "Documented operating procedures"
+    body: "Operating procedures for information processing facilities are documented and made available to personnel who need them."
   # ===== A.6 People controls =====
+  - code: A.6.1
+    title: "Screening"
+    body: "Background verification checks on all candidates for employment are carried out prior to joining the organization and on an ongoing basis, in accordance with applicable laws, regulations, and ethics, and proportional to the business requirements."
+  - code: A.6.2
+    title: "Terms and conditions of employment"
+    body: "Employment contractual agreements state the personnel's and the organization's responsibilities for information security."
   - code: A.6.3
     title: "Information security awareness, education and training"
     body: "Personnel and relevant interested parties receive appropriate information security awareness, education, and training and regular updates of policies relevant to their function."
+  - code: A.6.4
+    title: "Disciplinary process"
+    body: "A disciplinary process is formalized and communicated to take actions against personnel and other relevant interested parties who have committed an information security policy violation."
   - code: A.6.5
     title: "Responsibilities after termination or change of employment"
     body: "Information security responsibilities and duties that remain valid after termination or change of employment are defined, enforced, and communicated."
-
+  - code: A.6.6
+    title: "Confidentiality or non-disclosure agreements"
+    body: "Confidentiality or non-disclosure agreements reflecting the organization's needs for the protection of information are identified, documented, regularly reviewed, and signed by personnel and other relevant interested parties."
+  - code: A.6.7
+    title: "Remote working"
+    body: "Security measures are implemented when personnel are working remotely to protect information accessed, processed, or stored outside the organization's premises."
+  - code: A.6.8
+    title: "Information security event reporting"
+    body: "The organization provides a mechanism for personnel to report observed or suspected information security events through appropriate channels in a timely manner."
   # ===== A.7 Physical controls =====
+  - code: A.7.1
+    title: "Physical security perimeters"
+    body: "Security perimeters are defined and used to protect areas that contain information and other associated assets."
   - code: A.7.2
     title: "Physical entry"
     body: "Secure areas are protected by appropriate entry controls and access points."
+  - code: A.7.3
+    title: "Securing offices, rooms and facilities"
+    body: "Physical security for offices, rooms, and facilities is designed and implemented."
+  - code: A.7.4
+    title: "Physical security monitoring"
+    body: "Premises are continuously monitored for unauthorized physical access."
+  - code: A.7.5
+    title: "Protecting against physical and environmental threats"
+    body: "Protection against physical and environmental threats, such as natural disasters and other intentional or unintentional physical threats to infrastructure, is designed and implemented."
+  - code: A.7.6
+    title: "Working in secure areas"
+    body: "Security measures for working in secure areas are designed and implemented."
+  - code: A.7.7
+    title: "Clear desk and clear screen"
+    body: "Clear desk rules for papers and removable storage media and clear screen rules for information processing facilities are defined and appropriately enforced."
+  - code: A.7.8
+    title: "Equipment siting and protection"
+    body: "Equipment is sited securely and protected."
+  - code: A.7.9
+    title: "Security of assets off-premises"
+    body: "Off-site assets are protected."
   - code: A.7.10
     title: "Storage media"
     body: "Storage media are managed through their acquisition, use, transportation, and disposal in accordance with the classification scheme and handling requirements."
-
+  - code: A.7.11
+    title: "Supporting utilities"
+    body: "Information processing facilities are protected from power failures and other disruptions caused by failures in supporting utilities."
+  - code: A.7.12
+    title: "Cabling security"
+    body: "Cables carrying power, data, or supporting information services are protected from interception, interference, or damage."
+  - code: A.7.13
+    title: "Equipment maintenance"
+    body: "Equipment is maintained correctly to ensure the availability, integrity, and confidentiality of information."
+  - code: A.7.14
+    title: "Secure disposal or re-use of equipment"
+    body: "Items of equipment containing storage media are verified to ensure that any sensitive data and licensed software has been removed or securely overwritten prior to disposal or re-use."
   # ===== A.8 Technological controls =====
+  - code: A.8.1
+    title: "User endpoint devices"
+    body: "Information stored on, processed by, or accessible via user endpoint devices is protected."
   - code: A.8.2
     title: "Privileged access rights"
     body: "The allocation and use of privileged access rights are restricted and managed."
+  - code: A.8.3
+    title: "Information access restriction"
+    body: "Access to information and other associated assets is restricted in accordance with the established topic-specific policy on access control."
+  - code: A.8.4
+    title: "Access to source code"
+    body: "Read and write access to source code, development tools, and software libraries is appropriately managed."
   - code: A.8.5
     title: "Secure authentication"
     body: "Secure authentication technologies and procedures are implemented based on information access restrictions and the access control policy."
+  - code: A.8.6
+    title: "Capacity management"
+    body: "The use of resources is monitored and adjusted in line with current and anticipated capacity requirements."
   - code: A.8.7
     title: "Protection against malware"
     body: "Protection against malware is implemented and supported by appropriate user awareness."
@@ -138,30 +260,81 @@ requirements:
   - code: A.8.9
     title: "Configuration management"
     body: "Configurations, including security configurations, of hardware, software, services, and networks are established, documented, implemented, monitored, and reviewed."
+  - code: A.8.10
+    title: "Information deletion"
+    body: "Information stored in information systems, devices, or any other storage media is deleted when no longer required."
   - code: A.8.11
     title: "Data masking"
     body: "Data masking is used in accordance with the access control policy and other related policies and business requirements, considering applicable legislation."
+  - code: A.8.12
+    title: "Data leakage prevention"
+    body: "Data leakage prevention measures are applied to systems, networks, and any other devices that process, store, or transmit sensitive information."
   - code: A.8.13
     title: "Information backup"
     body: "Backup copies of information, software, and systems are maintained and regularly tested in accordance with the agreed backup policy."
+  - code: A.8.14
+    title: "Redundancy of information processing facilities"
+    body: "Information processing facilities are implemented with redundancy sufficient to meet availability requirements."
   - code: A.8.15
     title: "Logging"
     body: "Logs recording activities, exceptions, faults, and other relevant events are produced, stored, protected, and analyzed."
   - code: A.8.16
     title: "Monitoring activities"
     body: "Networks, systems, and applications are monitored for anomalous behavior, and appropriate actions are taken to evaluate potential information security incidents."
+  - code: A.8.17
+    title: "Clock synchronization"
+    body: "The clocks of information processing systems used by the organization are synchronized to approved time sources."
+  - code: A.8.18
+    title: "Use of privileged utility programs"
+    body: "The use of utility programs that can be capable of overriding system and application controls is restricted and tightly controlled."
+  - code: A.8.19
+    title: "Installation of software on operational systems"
+    body: "Procedures and measures are implemented to securely manage software installation on operational systems."
   - code: A.8.20
     title: "Networks security"
     body: "Networks and network devices are secured, managed, and controlled to protect information in systems and applications."
+  - code: A.8.21
+    title: "Security of network services"
+    body: "Security mechanisms, service levels, and service requirements of network services are identified, implemented, and monitored."
+  - code: A.8.22
+    title: "Segregation of networks"
+    body: "Groups of information services, users, and information systems are segregated in the organization's networks."
+  - code: A.8.23
+    title: "Web filtering"
+    body: "Access to external websites is managed to reduce exposure to malicious content."
   - code: A.8.24
     title: "Use of cryptography"
     body: "Rules for the effective use of cryptography, including cryptographic key management, are defined and implemented."
   - code: A.8.25
     title: "Secure development life cycle"
     body: "Rules for the secure development of software and systems are established and applied."
+  - code: A.8.26
+    title: "Application security requirements"
+    body: "Information security requirements are identified, specified, and approved when developing or acquiring applications."
   - code: A.8.27
     title: "Secure system architecture and engineering principles"
     body: "Principles for engineering secure systems are established, documented, maintained, and applied to information system development activities."
+  - code: A.8.28
+    title: "Secure coding"
+    body: "Secure coding principles are applied to software development."
+  - code: A.8.29
+    title: "Security testing in development and acceptance"
+    body: "Security testing processes are defined and implemented in the development life cycle."
+  - code: A.8.30
+    title: "Outsourced development"
+    body: "The organization directs, monitors, and reviews the activities related to outsourced system development."
+  - code: A.8.31
+    title: "Separation of development, test and production environments"
+    body: "Development, testing, and production environments are separated and secured."
+  - code: A.8.32
+    title: "Change management"
+    body: "Changes to information processing facilities and information systems are subject to change management procedures."
+  - code: A.8.33
+    title: "Test information"
+    body: "Test information is appropriately selected, protected, and managed."
+  - code: A.8.34
+    title: "Protection of information systems during audit testing"
+    body: "Audit tests and other assurance activities involving assessment of operational systems are planned and agreed between the tester and appropriate management."
 
 mappings:
   # --- A.5 Organizational ---
@@ -175,6 +348,26 @@ mappings:
     relationship_type: equal
     strength: 0.9
     rationale: "Roles & responsibilities allocation aligns with SCF GOV-04."
+  - requirement_code: A.5.3
+    scf_anchor: IAC-07
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Segregation of duties is enforced through user provisioning and access-lifecycle controls; IAC-07 (User Provisioning & Lifecycle) is the nearest sample anchor that carries the entitlement-separation concept."
+  - requirement_code: A.5.4
+    scf_anchor: GOV-04
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Management's duty to direct personnel toward security policy compliance is the Information Security Roles & Responsibilities concept."
+  - requirement_code: A.5.5
+    scf_anchor: IRO-04
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Maintaining authority contacts is primarily an incident-response readiness concern; IRO-04 (Incident Response Plan) carries the external-notification/escalation-contact element."
+  - requirement_code: A.5.6
+    scf_anchor: THR-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Engagement with security forums and special interest groups is a threat-information-sharing activity; THR-01 (Threat Intelligence Program) is the nearest anchor, though the control is broader than threat intel alone (LOW CONFIDENCE)."
   - requirement_code: A.5.7
     scf_anchor: THR-01
     relationship_type: equal
@@ -200,16 +393,46 @@ mappings:
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Acceptable use + handling of information maps to Data Classification & Handling."
+  - requirement_code: A.5.11
+    scf_anchor: HRS-09
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Asset return on departure is a step within the Personnel Termination Process (HRS-09)."
   - requirement_code: A.5.12
     scf_anchor: DCH-01
     relationship_type: equal
     strength: 0.9
     rationale: "Information classification is the core of SCF Data Classification & Handling."
+  - requirement_code: A.5.13
+    scf_anchor: DCH-01
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Information labelling implements the classification scheme; it is a subset of Data Classification & Handling (DCH-01)."
+  - requirement_code: A.5.14
+    scf_anchor: DCH-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Information-transfer rules are a handling concern under DCH-01; CRY-08 covers the in-transit protection facet."
+  - requirement_code: A.5.14
+    scf_anchor: CRY-08
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Secure transfer of information overlaps Encryption In Transit (CRY-08) where the transfer channel is protected cryptographically."
   - requirement_code: A.5.15
     scf_anchor: IAC-01
     relationship_type: equal
     strength: 0.9
     rationale: "ISO access-control rules map to SCF Identification & Authentication Policy — the shared access-control anchor with SOC 2 CC6.1 (invariant #1 proof)."
+  - requirement_code: A.5.16
+    scf_anchor: IAC-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Identity management across the identity life cycle is the core of the Identification & Authentication Policy anchor (IAC-01)."
+  - requirement_code: A.5.16
+    scf_anchor: IAC-07
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Provisioning, modification, and de-provisioning of identities is the User Provisioning & Lifecycle facet (IAC-07)."
   - requirement_code: A.5.17
     scf_anchor: IAC-01
     relationship_type: subset_of
@@ -225,6 +448,16 @@ mappings:
     relationship_type: equal
     strength: 0.9
     rationale: "Information security in supplier relationships maps to SCF Third-Party Management — shared with SOC 2 CC9.2."
+  - requirement_code: A.5.20
+    scf_anchor: TPM-01
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Embedding security requirements into supplier agreements is a core Third-Party Management (TPM-01) activity."
+  - requirement_code: A.5.21
+    scf_anchor: TPM-04
+    relationship_type: equal
+    strength: 0.8
+    rationale: "ICT supply-chain risk management maps to Third-Party Risk Assessments (TPM-04)."
   - requirement_code: A.5.22
     scf_anchor: TPM-04
     relationship_type: equal
@@ -240,11 +473,31 @@ mappings:
     relationship_type: equal
     strength: 0.9
     rationale: "Incident management planning & preparation maps to SCF Incident Response Plan — shared with SOC 2 CC7.3/CC7.4."
+  - requirement_code: A.5.25
+    scf_anchor: IRO-04
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Triage and categorization of events into incidents is a defined step of the Incident Response Plan (IRO-04)."
   - requirement_code: A.5.26
     scf_anchor: IRO-04
     relationship_type: subset_of
     strength: 0.7
     rationale: "Response to incidents is a subset of the broader Incident Response Plan anchor."
+  - requirement_code: A.5.27
+    scf_anchor: IRO-04
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Post-incident learning and control improvement is the lessons-learned phase of the Incident Response Plan (IRO-04)."
+  - requirement_code: A.5.28
+    scf_anchor: IRO-04
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Evidence collection and preservation is the forensic-readiness facet of incident response (IRO-04)."
+  - requirement_code: A.5.28
+    scf_anchor: AAA-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Preserved logs and audit records are a primary evidence source; Auditing & Accountability (AAA-01) underpins evidentiary integrity."
   - requirement_code: A.5.29
     scf_anchor: BCD-02
     relationship_type: intersects_with
@@ -260,47 +513,244 @@ mappings:
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Legal/regulatory/contractual requirements overlap with the Internal Audit/Compliance function anchor."
+  - requirement_code: A.5.32
+    scf_anchor: CPL-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "IP-rights protection is a legal/regulatory compliance obligation tracked under Compliance Management (CPL-01)."
+  - requirement_code: A.5.33
+    scf_anchor: DCH-03
+    relationship_type: equal
+    strength: 0.7
+    rationale: "Protection and integrity of records over their lifetime maps to Data Retention (DCH-03)."
+  - requirement_code: A.5.33
+    scf_anchor: AAA-10
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Retention and protection of log/audit records is the Event Log Retention (AAA-10) facet of record protection."
+  - requirement_code: A.5.34
+    scf_anchor: PRI-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Privacy and PII protection maps directly to Privacy Governance (PRI-01)."
+  - requirement_code: A.5.34
+    scf_anchor: PRI-04
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Honoring data-subject requests is the Data Subject Rights (PRI-04) facet of PII protection."
   - requirement_code: A.5.35
     scf_anchor: CPL-03
     relationship_type: equal
     strength: 0.8
     rationale: "Independent review of information security maps to SCF Internal Audit Function — shared with SOC 2 CC4.1."
-
+  - requirement_code: A.5.36
+    scf_anchor: CPL-01
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Regular review of policy compliance maps to Compliance Management (CPL-01)."
+  - requirement_code: A.5.36
+    scf_anchor: CPL-03
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Independent verification of compliance is performed by the Internal Audit Function (CPL-03)."
+  - requirement_code: A.5.37
+    scf_anchor: CFG-02
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Documented, repeatable operating procedures align with Secure Baseline Configurations (CFG-02) as the documented-standard-state anchor."
   # --- A.6 People ---
+  - requirement_code: A.6.1
+    scf_anchor: HRS-01
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Pre-employment screening and background verification is a core Human Resources Security (HRS-01) activity."
+  - requirement_code: A.6.2
+    scf_anchor: HRS-01
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Security responsibilities embedded in employment terms is part of Human Resources Security (HRS-01)."
   - requirement_code: A.6.3
     scf_anchor: HRS-04
     relationship_type: equal
     strength: 0.9
     rationale: "Security awareness, education & training maps to SCF Security Awareness Training — shared with SOC 2 CC1.4."
+  - requirement_code: A.6.4
+    scf_anchor: HRS-01
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "A formal disciplinary process for security-policy violations is a Human Resources Security (HRS-01) control."
   - requirement_code: A.6.5
     scf_anchor: HRS-09
     relationship_type: equal
     strength: 0.9
     rationale: "Responsibilities after termination maps to SCF Personnel Termination Process."
-
+  - requirement_code: A.6.6
+    scf_anchor: HRS-01
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "NDAs covering personnel are an HR-security obligation (HRS-01)."
+  - requirement_code: A.6.6
+    scf_anchor: DCH-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Confidentiality agreements operationalize the handling rules for classified information (DCH-01)."
+  - requirement_code: A.6.7
+    scf_anchor: END-04
+    relationship_type: equal
+    strength: 0.7
+    rationale: "Protecting information on remote/off-premises endpoints maps to Endpoint Security (END-04)."
+  - requirement_code: A.6.7
+    scf_anchor: NET-04
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Remote-access protection of the network boundary is the Boundary Protection (NET-04) facet."
+  - requirement_code: A.6.8
+    scf_anchor: IRO-09
+    relationship_type: equal
+    strength: 0.9
+    rationale: "A personnel event-reporting mechanism maps to Incident Reporting (IRO-09)."
   # --- A.7 Physical ---
+  - requirement_code: A.7.1
+    scf_anchor: PES-04
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Defining and protecting physical security perimeters is part of Physical Access Control (PES-04)."
   - requirement_code: A.7.2
     scf_anchor: PES-04
     relationship_type: equal
     strength: 0.9
     rationale: "Physical entry controls map to SCF Physical Access Control — shared with SOC 2 CC6.4."
+  - requirement_code: A.7.3
+    scf_anchor: PES-04
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Securing rooms and facilities is a Physical Access Control (PES-04) activity."
+  - requirement_code: A.7.4
+    scf_anchor: PES-04
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Continuous monitoring for unauthorized physical access extends Physical Access Control (PES-04)."
+  - requirement_code: A.7.4
+    scf_anchor: MON-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Physical-access monitoring shares the continuous-monitoring discipline (MON-01)."
+  - requirement_code: A.7.5
+    scf_anchor: PES-04
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Physical-threat protection is an extension of physical security controls (PES-04)."
+  - requirement_code: A.7.5
+    scf_anchor: BCD-02
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Resilience against environmental threats (disaster) ties to the Business Continuity Plan (BCD-02)."
+  - requirement_code: A.7.6
+    scf_anchor: PES-04
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Procedures for working within secure areas are a refinement of Physical Access Control (PES-04)."
+  - requirement_code: A.7.7
+    scf_anchor: DCH-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Clear-desk/clear-screen rules enforce the handling of classified information at the physical workspace (DCH-01)."
+  - requirement_code: A.7.8
+    scf_anchor: PES-04
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Secure siting and protection of equipment is a physical-protection control (PES-04)."
+  - requirement_code: A.7.8
+    scf_anchor: AST-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Equipment siting is governed by the Asset Management Policy (AST-01)."
+  - requirement_code: A.7.9
+    scf_anchor: AST-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Protection of off-premises assets is governed by the Asset Management Policy (AST-01)."
+  - requirement_code: A.7.9
+    scf_anchor: END-04
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Off-site devices fall under Endpoint Security (END-04)."
   - requirement_code: A.7.10
     scf_anchor: AST-09
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Storage media handling/disposal overlaps with SCF Asset Disposal — shared with SOC 2 CC6.5."
-
+  - requirement_code: A.7.11
+    scf_anchor: BCD-02
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Protection from utility failures is a continuity/availability concern under the Business Continuity Plan (BCD-02)."
+  - requirement_code: A.7.12
+    scf_anchor: PES-04
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Physical protection of cabling is a physical-security control (PES-04)."
+  - requirement_code: A.7.12
+    scf_anchor: NET-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Protecting data-carrying cabling supports overall Network Security (NET-01)."
+  - requirement_code: A.7.13
+    scf_anchor: AST-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Correct equipment maintenance over the asset lifecycle is governed by the Asset Management Policy (AST-01)."
+  - requirement_code: A.7.14
+    scf_anchor: AST-09
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Secure disposal/re-use of equipment with media sanitization maps to Asset Disposal (AST-09)."
   # --- A.8 Technological ---
+  - requirement_code: A.8.1
+    scf_anchor: END-04
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Protection of information on user endpoint devices maps to Endpoint Security (END-04)."
   - requirement_code: A.8.2
     scf_anchor: IAC-21
     relationship_type: equal
     strength: 0.9
     rationale: "Privileged access rights map to SCF Privileged Account Management."
+  - requirement_code: A.8.3
+    scf_anchor: IAC-01
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Restricting access per the access-control policy is the Identification & Authentication Policy (IAC-01) concept."
+  - requirement_code: A.8.3
+    scf_anchor: IAC-15
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Periodic verification that access remains appropriately restricted is the Account Review (IAC-15) facet."
+  - requirement_code: A.8.4
+    scf_anchor: IAC-07
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Managing read/write access to source code is an access-provisioning control (IAC-07)."
+  - requirement_code: A.8.4
+    scf_anchor: SEA-05
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Source-code access governance is part of Secure Software Development (SEA-05)."
   - requirement_code: A.8.5
     scf_anchor: IAC-06
     relationship_type: subset_of
     strength: 0.7
     rationale: "Secure authentication (incl. MFA) is a subset/instance of the SCF Multi-Factor Authentication anchor — shared with SOC 2 CC6.1 MFA mapping."
+  - requirement_code: A.8.6
+    scf_anchor: MON-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Monitoring and adjusting resource use ties to Continuous Monitoring (MON-01) of system health."
+  - requirement_code: A.8.6
+    scf_anchor: BCD-02
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Capacity planning to sustain availability supports the Business Continuity Plan (BCD-02)."
   - requirement_code: A.8.7
     scf_anchor: END-07
     relationship_type: equal
@@ -321,16 +771,51 @@ mappings:
     relationship_type: equal
     strength: 0.8
     rationale: "Configuration management maps to SCF Configuration Change Control — shared with SOC 2 CC8.1."
+  - requirement_code: A.8.10
+    scf_anchor: DCH-03
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Deletion of information when no longer required is the disposal end of Data Retention (DCH-03)."
+  - requirement_code: A.8.10
+    scf_anchor: AST-09
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Media sanitization on deletion is an Asset Disposal (AST-09) activity."
   - requirement_code: A.8.11
     scf_anchor: DCH-01
     relationship_type: intersects_with
     strength: 0.4
-    rationale: "Data masking is an ISO-distinct technique only loosely covered by Data Classification & Handling; SCF sample lacks a dedicated masking anchor (LOW CONFIDENCE)."
+    rationale: "Data masking is an ISO-distinct technique only loosely covered by Data Classification & Handling; the SCF sample catalog still lacks a dedicated masking anchor (LOW CONFIDENCE — slice 467 confirmed no masking anchor exists in the 62-anchor sample fixture, so DCH-01 remains the honest stopgap pending a masking-family import)."
+  - requirement_code: A.8.11
+    scf_anchor: IAC-01
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Data masking is applied in accordance with the access-control policy — masking enforces context-based access restriction, which the Identification & Authentication Policy (IAC-01) governs. Secondary edge added by slice 467 to capture the access-control facet the DCH-01 stopgap misses."
+  - requirement_code: A.8.12
+    scf_anchor: DCH-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Preventing leakage of sensitive information is a handling/protection control under Data Classification & Handling (DCH-01)."
+  - requirement_code: A.8.12
+    scf_anchor: NET-04
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Egress controls at the network boundary are part of Boundary Protection (NET-04)."
   - requirement_code: A.8.13
     scf_anchor: BCD-09
     relationship_type: equal
     strength: 0.9
     rationale: "Information backup maps to SCF Backups — shared with SOC 2 A1.2 backup mapping."
+  - requirement_code: A.8.14
+    scf_anchor: BCD-02
+    relationship_type: equal
+    strength: 0.7
+    rationale: "Redundancy of processing facilities to meet availability targets maps to the Business Continuity Plan (BCD-02)."
+  - requirement_code: A.8.14
+    scf_anchor: BCD-09
+    relationship_type: intersects_with
+    strength: 0.5
+    rationale: "Redundant data copies relate to Backups (BCD-09)."
   - requirement_code: A.8.15
     scf_anchor: AAA-01
     relationship_type: equal
@@ -351,23 +836,143 @@ mappings:
     relationship_type: intersects_with
     strength: 0.6
     rationale: "A.8.16 'networks, systems, and applications are monitored for anomalous behavior' overlaps Threat Hunting (slice 641 THR-04) — proactive hunting is one monitoring technique that surfaces anomalous behavior. Partial: A.8.16 also covers passive/automated monitoring beyond active hunting. Added by slice 646."
+  - requirement_code: A.8.17
+    scf_anchor: AAA-01
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Synchronized clocks underpin accurate, correlatable audit timestamps; clock sync is a prerequisite facet of Auditing & Accountability (AAA-01)."
+  - requirement_code: A.8.18
+    scf_anchor: IAC-21
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Restricting privileged utility programs maps to Privileged Account Management (IAC-21)."
+  - requirement_code: A.8.19
+    scf_anchor: CFG-04
+    relationship_type: equal
+    strength: 0.7
+    rationale: "Controlled software installation on operational systems is a Configuration Change Control (CFG-04) activity."
+  - requirement_code: A.8.19
+    scf_anchor: CFG-02
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Approved-software baselines are governed by Secure Baseline Configurations (CFG-02)."
   - requirement_code: A.8.20
     scf_anchor: NET-04
     relationship_type: equal
     strength: 0.8
     rationale: "Networks security maps to SCF Boundary Protection — shared with SOC 2 CC6.6."
+  - requirement_code: A.8.21
+    scf_anchor: NET-01
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Securing network services maps to Network Security (NET-01)."
+  - requirement_code: A.8.21
+    scf_anchor: NET-04
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Boundary-level service protection is the Boundary Protection (NET-04) facet."
+  - requirement_code: A.8.22
+    scf_anchor: NET-04
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Network segregation/segmentation maps to Boundary Protection (NET-04)."
+  - requirement_code: A.8.23
+    scf_anchor: NET-04
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Outbound web filtering at the boundary is part of Boundary Protection (NET-04)."
+  - requirement_code: A.8.23
+    scf_anchor: END-07
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Blocking access to malicious content reduces malware exposure, aligning with Malicious Code Protection (END-07)."
+  - requirement_code: A.8.24
+    scf_anchor: CRY-01
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Rules for the effective use of cryptography map directly to Use of Cryptographic Controls (CRY-01) — the policy-level cryptography anchor. Added by slice 467 as the primary edge of the A.8.24 split."
   - requirement_code: A.8.24
     scf_anchor: CRY-08
-    relationship_type: intersects_with
+    relationship_type: subset_of
     strength: 0.7
-    rationale: "Use of cryptography (incl. key management) overlaps with Encryption In Transit — shared with SOC 2 CC6.7; CRY-09 (key mgmt) is the broader companion."
+    rationale: "Encryption-in-transit is one concrete application of A.8.24's cryptography rules; CRY-08 (Encryption In Transit) is the in-transit facet — shared with SOC 2 CC6.7. Split out by slice 467."
+  - requirement_code: A.8.24
+    scf_anchor: CRY-09
+    relationship_type: subset_of
+    strength: 0.8
+    rationale: "A.8.24 explicitly spans cryptographic key management; Cryptographic Key Management (CRY-09) is the dedicated key-lifecycle anchor — the key-management half of the slice-467 A.8.24 split that the slice-438 decisions log flagged for completion."
   - requirement_code: A.8.25
     scf_anchor: SEA-05
     relationship_type: equal
     strength: 0.9
     rationale: "Secure development life cycle maps to SCF Secure Software Development — shared with SOC 2 CC8.1/PI mappings."
+  - requirement_code: A.8.26
+    scf_anchor: SEA-05
+    relationship_type: equal
+    strength: 0.8
+    rationale: "Defining application security requirements in development maps to Secure Software Development (SEA-05)."
+  - requirement_code: A.8.26
+    scf_anchor: TDA-01
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Security requirements during acquisition are part of Technology Development & Acquisition (TDA-01)."
   - requirement_code: A.8.27
     scf_anchor: SEA-01
     relationship_type: equal
     strength: 0.9
     rationale: "Secure system architecture & engineering principles map to SCF Secure Engineering Principles — shared with SOC 2 CC8.1."
+  - requirement_code: A.8.28
+    scf_anchor: SEA-05
+    relationship_type: equal
+    strength: 0.9
+    rationale: "Secure coding practices map to Secure Software Development (SEA-05)."
+  - requirement_code: A.8.29
+    scf_anchor: SEA-05
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Security testing within the SDLC is a Secure Software Development (SEA-05) activity."
+  - requirement_code: A.8.29
+    scf_anchor: VPM-04
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Pre-release security testing that drives remediation relates to the Vulnerability Remediation Process (VPM-04)."
+  - requirement_code: A.8.30
+    scf_anchor: TPM-01
+    relationship_type: equal
+    strength: 0.7
+    rationale: "Governing outsourced development providers maps to Third-Party Management (TPM-01)."
+  - requirement_code: A.8.30
+    scf_anchor: SEA-05
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Outsourced work must still meet Secure Software Development (SEA-05) standards."
+  - requirement_code: A.8.31
+    scf_anchor: CFG-02
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Environment separation is a baseline-configuration/segregation control (CFG-02)."
+  - requirement_code: A.8.31
+    scf_anchor: CHG-02
+    relationship_type: subset_of
+    strength: 0.6
+    rationale: "Controlled promotion between separated environments is part of the Change Control Process (CHG-02)."
+  - requirement_code: A.8.32
+    scf_anchor: CHG-02
+    relationship_type: equal
+    strength: 0.9
+    rationale: "System and facility changes under formal procedure map to the Change Control Process (CHG-02)."
+  - requirement_code: A.8.32
+    scf_anchor: CFG-04
+    relationship_type: subset_of
+    strength: 0.7
+    rationale: "Configuration-level change control is the Configuration Change Control (CFG-04) facet."
+  - requirement_code: A.8.33
+    scf_anchor: DCH-01
+    relationship_type: intersects_with
+    strength: 0.6
+    rationale: "Protection and handling of test information (especially when derived from production data) is a Data Classification & Handling (DCH-01) concern."
+  - requirement_code: A.8.34
+    scf_anchor: CPL-03
+    relationship_type: equal
+    strength: 0.7
+    rationale: "Planning and controlling audit testing against operational systems maps to the Internal Audit Function (CPL-03)."

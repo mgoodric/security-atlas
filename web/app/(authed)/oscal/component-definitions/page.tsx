@@ -16,11 +16,13 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
+import { FeatureDisabledState } from "@/components/feature-disabled-state";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
 import type { ComponentDefinitionList } from "@/lib/api/oscal-components";
+import { isFeatureDisabledError } from "@/lib/feature-nav";
 
 export default function ComponentDefinitionsPage() {
   const q = useQuery({
@@ -30,6 +32,14 @@ export default function ComponentDefinitionsPage() {
         "/api/oscal/component-definitions",
       ),
   });
+
+  // Slice 660: the `oscal.export` flag gates this module. A flag-off
+  // tenant reaches here only by direct navigation (the nav entry is
+  // hidden server-side); the gated API returns 404 "feature disabled".
+  // Render the clean disabled panel instead of the raw error Alert.
+  if (q.isError && isFeatureDisabledError(q.error)) {
+    return <FeatureDisabledState moduleName="Vendor Claims" />;
+  }
 
   return (
     <div className="space-y-6" data-testid="component-definitions-page">

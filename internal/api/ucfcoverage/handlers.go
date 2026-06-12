@@ -82,6 +82,13 @@ type Handler struct {
 	engine       *eval.Engine
 	scopeStore   *scope.Store
 	fwScopeStore *frameworkscope.Store
+
+	// assembler is the slice-687 single-method read seam the
+	// ControlCoverage path reads through; New points it at the Handler
+	// itself (h.assembleCoverage), so production behavior is identical.
+	// The contract recorder swaps in a fixed-view stub to record the
+	// /v1/controls/{id}/coverage wire shape with no Postgres pool.
+	assembler coverageAssembler
 }
 
 // New constructs a Handler from a pgx pool. pool must be non-nil.
@@ -90,7 +97,18 @@ type Handler struct {
 // slice-256 per-row `coverage` field. Call AttachCoverage to wire the
 // dependencies that promote that field to first-class.
 func New(pool *pgxpool.Pool) *Handler {
-	return &Handler{pool: pool, q: dbx.New(pool)}
+	h := &Handler{pool: pool, q: dbx.New(pool)}
+	h.assembler = h
+	return h
+}
+
+// newHandlerWithAssembler constructs a Handler whose ControlCoverage path
+// reads through an arbitrary coverage-assembly seam. It exists ONLY for
+// the slice-687 contract recorder, which injects a fixed-view stub so the
+// /v1/controls/{id}/coverage wire shape records with no Postgres pool.
+// Unexported — not part of the public surface.
+func newHandlerWithAssembler(assembler coverageAssembler) *Handler {
+	return &Handler{assembler: assembler}
 }
 
 // AttachCoverage wires the three stores the slice-256 per-row coverage

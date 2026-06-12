@@ -19,7 +19,7 @@
       "functions": 98,
       "lines": 97
     },
-    "app/(authed)/audits/oscal-export-future.ts": {
+    "app/(authed)/audits/oscal-export.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -32,6 +32,18 @@
       "lines": 98
     },
     "app/(authed)/controls/[id]/tabs.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/vendors/[id]/detail-view.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/controls/count-label.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -127,6 +139,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/(authed)/risks/count-label.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "app/(authed)/risks/filters.ts": {
       "statements": 98,
       "branches": 95,
@@ -134,6 +152,18 @@
       "lines": 98
     },
     "app/(authed)/risks/new/validate.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/risks/sort.ts": {
+      "statements": 98,
+      "branches": 87,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/board-packs/validate.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -283,6 +313,12 @@
       "functions": 98,
       "lines": 88
     },
+    "app/api/audits/[id]/oscal-export/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/audits/route.ts": {
       "statements": 93,
       "branches": 88,
@@ -391,6 +427,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/api/features/enabled/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/install-state/route.ts": {
       "statements": 98,
       "branches": 98,
@@ -457,6 +499,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/api/policies/[id]/route.ts": {
+      "statements": 92,
+      "branches": 79,
+      "functions": 98,
+      "lines": 92
+    },
     "app/api/questionnaires/[id]/answers/[qid]/route.ts": {
       "statements": 92,
       "branches": 81,
@@ -498,6 +546,12 @@
       "branches": 73,
       "functions": 98,
       "lines": 98
+    },
+    "app/api/risks/[id]/route.ts": {
+      "statements": 90,
+      "branches": 78,
+      "functions": 98,
+      "lines": 90
     },
     "app/api/risks/export/route.ts": {
       "statements": 98,
@@ -547,6 +601,12 @@
       "functions": 98,
       "lines": 98
     },
+    "components/calendar/is-today.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "components/calendar/link-for.ts": {
       "statements": 98,
       "branches": 98,
@@ -562,6 +622,12 @@
     "components/control/coverage.ts": {
       "statements": 98,
       "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/control/gap-explanation-view.ts": {
+      "statements": 98,
+      "branches": 90,
       "functions": 98,
       "lines": 98
     },
@@ -650,10 +716,10 @@
       "lines": 42
     },
     "lib/api/policies.ts": {
-      "statements": 29,
+      "statements": 45,
       "branches": 98,
-      "functions": 48,
-      "lines": 29
+      "functions": 58,
+      "lines": 45
     },
     "lib/api/risks.ts": {
       "statements": 11,
@@ -709,6 +775,12 @@
       "functions": 98,
       "lines": 98
     },
+    "lib/api/freshness-consistency.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/api/metrics.ts": {
       "statements": 21,
       "branches": 93,
@@ -721,7 +793,19 @@
       "functions": 98,
       "lines": 98
     },
+    "lib/api/vendor-burndown-format.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/auth.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/auth/current-tenant.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -745,15 +829,45 @@
       "functions": 81,
       "lines": 92
     },
+    "lib/checklist/checklist-view.ts": {
+      "statements": 98,
+      "branches": 92,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/display-name.ts": {
       "statements": 98,
       "branches": 91,
       "functions": 98,
       "lines": 98
     },
+    "lib/email.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/feature-nav.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/markdown.ts": {
+      "statements": 93,
+      "branches": 86,
+      "functions": 98,
+      "lines": 93
+    },
     "lib/page-names.ts": {
       "statements": 98,
       "branches": 86,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/questionnaire/ai-suggest.ts": {
+      "statements": 98,
+      "branches": 88,
       "functions": 98,
       "lines": 98
     },
@@ -796,6 +910,12 @@
     "proxy.ts": {
       "statements": 98,
       "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/staleness-notification.ts": {
+      "statements": 98,
+      "branches": 92,
       "functions": 98,
       "lines": 98
     }

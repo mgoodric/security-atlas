@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { APIError } from "@/lib/api/base";
+import { formatOnTimeRate } from "@/lib/api/vendor-burndown-format";
 import { Vendor, VendorBurndown } from "@/lib/api/vendors";
 
 // Slice 024 — vendor lite list view. The filters are query-param-driven so
@@ -188,17 +189,27 @@ function VendorTable({ vendors }: { vendors: Vendor[] }) {
         {vendors.map((v) => (
           <TableRow key={v.id} className="cursor-pointer">
             <TableCell>
-              <Link
-                href={`/vendors/${v.id}`}
-                className="text-sm font-medium hover:underline"
-              >
-                {v.name}
-              </Link>
-              {v.domain ? (
-                <span className="ml-2 text-xs text-muted-foreground">
-                  {v.domain}
-                </span>
-              ) : null}
+              {/* Slice 679 (ATLAS-030): name and domain render on
+                  separate lines as primary + secondary text so the two
+                  values never read as one concatenated string
+                  ("Pinecone Bankpineconebank.example"). */}
+              <div className="flex flex-col gap-0.5">
+                <Link
+                  href={`/vendors/${v.id}`}
+                  className="text-sm font-medium hover:underline"
+                  data-testid="vendor-name"
+                >
+                  {v.name}
+                </Link>
+                {v.domain ? (
+                  <span
+                    className="text-xs text-muted-foreground"
+                    data-testid="vendor-domain"
+                  >
+                    {v.domain}
+                  </span>
+                ) : null}
+              </div>
             </TableCell>
             <TableCell>
               <CriticalityBadge value={v.criticality} />
@@ -251,7 +262,10 @@ function BurndownCard({
 }) {
   if (loading) return <Skeleton className="h-24 w-full" />;
   if (error || !burndown) return null;
-  const pct = Math.round(burndown.total.on_time_fraction * 100);
+  // Slice 664 — an empty vendor population (total === 0) renders "—", not
+  // "100%". formatOnTimeRate guards on the population size; the on-time
+  // fraction the platform sends for an empty population is 1.0, which would
+  // otherwise surface as a misleading "100% ON-TIME / 0 vendors".
   return (
     <Card>
       <CardHeader>
@@ -263,7 +277,10 @@ function BurndownCard({
       <CardContent className="flex flex-wrap gap-6">
         <Stat
           label="On-time"
-          value={`${pct}%`}
+          value={formatOnTimeRate(
+            burndown.total.total,
+            burndown.total.on_time_fraction,
+          )}
           sub={`${burndown.total.total} vendors`}
         />
         <Stat label="Overdue" value={`${burndown.total.overdue}`} />
@@ -271,7 +288,7 @@ function BurndownCard({
           <Stat
             key={b.criticality}
             label={`${b.criticality} on-time`}
-            value={`${Math.round(b.on_time_fraction * 100)}%`}
+            value={formatOnTimeRate(b.total, b.on_time_fraction)}
             sub={`${b.overdue}/${b.total} overdue`}
           />
         ))}
@@ -289,12 +306,20 @@ function Stat({
   value: string;
   sub?: string;
 }) {
+  // Stable contract point for Playwright: the value div carries a testid
+  // derived from the label (e.g. "On-time" -> "vendor-stat-on-time") so
+  // specs can pin the rendered rate without scraping sibling text.
+  const testid = `vendor-stat-${label
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")}`;
   return (
     <div className="min-w-32">
       <div className="text-xs uppercase tracking-wide text-muted-foreground">
         {label}
       </div>
-      <div className="text-2xl font-semibold tabular-nums">{value}</div>
+      <div className="text-2xl font-semibold tabular-nums" data-testid={testid}>
+        {value}
+      </div>
       {sub ? <div className="text-xs text-muted-foreground">{sub}</div> : null}
     </div>
   );

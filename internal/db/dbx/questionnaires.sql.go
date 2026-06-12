@@ -11,6 +11,101 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const approveQuestionnaireAnswer = `-- name: ApproveQuestionnaireAnswer :one
+UPDATE questionnaire_answers
+SET narrative       = $3,
+    answer_value    = $4,
+    human_approved  = TRUE,
+    human_approver  = $5,
+    updated_at      = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND ai_assisted = TRUE
+RETURNING id, tenant_id, question_id, answer_value, narrative, citations, authored_by, created_at, updated_at, ai_assisted, human_approved, human_approver, prompt_version, model_name, model_version, model_provider
+`
+
+type ApproveQuestionnaireAnswerParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	ID            pgtype.UUID `json:"id"`
+	Narrative     string      `json:"narrative"`
+	AnswerValue   string      `json:"answer_value"`
+	HumanApprover *string     `json:"human_approver"`
+}
+
+// Slice 441 — one-click human approval of an AI-suggested draft (AC-6/AC-7).
+// Sets human_approved=TRUE and records the human_approver; optionally accepts
+// the operator's edited final text. The DB CHECK
+// questionnaire_answers_ai_assist_invariant makes human_approved=TRUE with a
+// blank human_approver impossible (P0-441-8); this query NEVER passes an empty
+// approver (the service rejects that before the round-trip via
+// llm.EnforceApproval). Tenant-scoped by RLS + the explicit tenant_id guard.
+func (q *Queries) ApproveQuestionnaireAnswer(ctx context.Context, arg ApproveQuestionnaireAnswerParams) (QuestionnaireAnswer, error) {
+	row := q.db.QueryRow(ctx, approveQuestionnaireAnswer,
+		arg.TenantID,
+		arg.ID,
+		arg.Narrative,
+		arg.AnswerValue,
+		arg.HumanApprover,
+	)
+	var i QuestionnaireAnswer
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.QuestionID,
+		&i.AnswerValue,
+		&i.Narrative,
+		&i.Citations,
+		&i.AuthoredBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AiAssisted,
+		&i.HumanApproved,
+		&i.HumanApprover,
+		&i.PromptVersion,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.ModelProvider,
+	)
+	return i, err
+}
+
+const getQuestionnaireAnswerByID = `-- name: GetQuestionnaireAnswerByID :one
+SELECT id, tenant_id, question_id, answer_value, narrative, citations, authored_by, created_at, updated_at, ai_assisted, human_approved, human_approver, prompt_version, model_name, model_version, model_provider FROM questionnaire_answers
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetQuestionnaireAnswerByIDParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// Slice 441 — fetch one answer by id under the caller's tenant. Used by the
+// approval path to confirm the draft exists + is AI-assisted before approving,
+// and by tests. A cross-tenant id returns ErrNoRows (RLS).
+func (q *Queries) GetQuestionnaireAnswerByID(ctx context.Context, arg GetQuestionnaireAnswerByIDParams) (QuestionnaireAnswer, error) {
+	row := q.db.QueryRow(ctx, getQuestionnaireAnswerByID, arg.TenantID, arg.ID)
+	var i QuestionnaireAnswer
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.QuestionID,
+		&i.AnswerValue,
+		&i.Narrative,
+		&i.Citations,
+		&i.AuthoredBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AiAssisted,
+		&i.HumanApproved,
+		&i.HumanApprover,
+		&i.PromptVersion,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.ModelProvider,
+	)
+	return i, err
+}
+
 const getQuestionnaireByID = `-- name: GetQuestionnaireByID :one
 SELECT id, tenant_id, name, source_label, source_filename, status, notes, created_at, updated_at FROM questionnaires
 WHERE tenant_id = $1 AND id = $2
@@ -181,7 +276,7 @@ func (q *Queries) InsertQuestionnaireQuestion(ctx context.Context, arg InsertQue
 }
 
 const listAnswersForQuestionnaire = `-- name: ListAnswersForQuestionnaire :many
-SELECT a.id, a.tenant_id, a.question_id, a.answer_value, a.narrative, a.citations, a.authored_by, a.created_at, a.updated_at
+SELECT a.id, a.tenant_id, a.question_id, a.answer_value, a.narrative, a.citations, a.authored_by, a.created_at, a.updated_at, a.ai_assisted, a.human_approved, a.human_approver, a.prompt_version, a.model_name, a.model_version, a.model_provider
 FROM questionnaire_answers a
 JOIN questionnaire_questions q ON q.id = a.question_id
 WHERE a.tenant_id = $1
@@ -214,6 +309,13 @@ func (q *Queries) ListAnswersForQuestionnaire(ctx context.Context, arg ListAnswe
 			&i.AuthoredBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AiAssisted,
+			&i.HumanApproved,
+			&i.HumanApprover,
+			&i.PromptVersion,
+			&i.ModelName,
+			&i.ModelVersion,
+			&i.ModelProvider,
 		); err != nil {
 			return nil, err
 		}
@@ -342,6 +444,88 @@ func (q *Queries) UpdateQuestionAnchor(ctx context.Context, arg UpdateQuestionAn
 	return i, err
 }
 
+const upsertAISuggestedAnswer = `-- name: UpsertAISuggestedAnswer :one
+INSERT INTO questionnaire_answers
+    (id, tenant_id, question_id, answer_value, narrative, citations, authored_by,
+     ai_assisted, human_approved, human_approver,
+     prompt_version, model_name, model_version, model_provider)
+VALUES ($1, $2, $3, $4, $5, $6, $7,
+        TRUE, FALSE, NULL,
+        $8, $9, $10, $11)
+ON CONFLICT (question_id) DO UPDATE
+SET answer_value    = EXCLUDED.answer_value,
+    narrative       = EXCLUDED.narrative,
+    citations       = EXCLUDED.citations,
+    authored_by     = EXCLUDED.authored_by,
+    ai_assisted     = TRUE,
+    human_approved  = FALSE,
+    human_approver  = NULL,
+    prompt_version  = EXCLUDED.prompt_version,
+    model_name      = EXCLUDED.model_name,
+    model_version   = EXCLUDED.model_version,
+    model_provider  = EXCLUDED.model_provider,
+    updated_at      = now()
+RETURNING id, tenant_id, question_id, answer_value, narrative, citations, authored_by, created_at, updated_at, ai_assisted, human_approved, human_approver, prompt_version, model_name, model_version, model_provider
+`
+
+type UpsertAISuggestedAnswerParams struct {
+	ID            pgtype.UUID `json:"id"`
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	QuestionID    pgtype.UUID `json:"question_id"`
+	AnswerValue   string      `json:"answer_value"`
+	Narrative     string      `json:"narrative"`
+	Citations     []byte      `json:"citations"`
+	AuthoredBy    string      `json:"authored_by"`
+	PromptVersion string      `json:"prompt_version"`
+	ModelName     string      `json:"model_name"`
+	ModelVersion  string      `json:"model_version"`
+	ModelProvider string      `json:"model_provider"`
+}
+
+// Slice 441 — persist an AI-suggested DRAFT answer for one question. The draft
+// is ai_assisted=TRUE, human_approved=FALSE, human_approver=NULL: a suggestion
+// the operator has not yet approved (P0-441-1, AC-6). The model-provenance
+// columns are populated from the generation that produced the draft
+// (snapshot-at-generation). On conflict (the question already has an answer)
+// the draft REPLACES the prior answer text BUT resets approval to FALSE/NULL —
+// a fresh suggestion is unapproved by construction, so an operator can never
+// inherit a prior approval onto new AI text (P0-441-1).
+func (q *Queries) UpsertAISuggestedAnswer(ctx context.Context, arg UpsertAISuggestedAnswerParams) (QuestionnaireAnswer, error) {
+	row := q.db.QueryRow(ctx, upsertAISuggestedAnswer,
+		arg.ID,
+		arg.TenantID,
+		arg.QuestionID,
+		arg.AnswerValue,
+		arg.Narrative,
+		arg.Citations,
+		arg.AuthoredBy,
+		arg.PromptVersion,
+		arg.ModelName,
+		arg.ModelVersion,
+		arg.ModelProvider,
+	)
+	var i QuestionnaireAnswer
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.QuestionID,
+		&i.AnswerValue,
+		&i.Narrative,
+		&i.Citations,
+		&i.AuthoredBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AiAssisted,
+		&i.HumanApproved,
+		&i.HumanApprover,
+		&i.PromptVersion,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.ModelProvider,
+	)
+	return i, err
+}
+
 const upsertQuestionnaireAnswer = `-- name: UpsertQuestionnaireAnswer :one
 INSERT INTO questionnaire_answers
     (id, tenant_id, question_id, answer_value, narrative, citations, authored_by)
@@ -352,7 +536,7 @@ SET answer_value = EXCLUDED.answer_value,
     citations    = EXCLUDED.citations,
     authored_by  = EXCLUDED.authored_by,
     updated_at   = now()
-RETURNING id, tenant_id, question_id, answer_value, narrative, citations, authored_by, created_at, updated_at
+RETURNING id, tenant_id, question_id, answer_value, narrative, citations, authored_by, created_at, updated_at, ai_assisted, human_approved, human_approver, prompt_version, model_name, model_version, model_provider
 `
 
 type UpsertQuestionnaireAnswerParams struct {
@@ -388,6 +572,13 @@ func (q *Queries) UpsertQuestionnaireAnswer(ctx context.Context, arg UpsertQuest
 		&i.AuthoredBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AiAssisted,
+		&i.HumanApproved,
+		&i.HumanApprover,
+		&i.PromptVersion,
+		&i.ModelName,
+		&i.ModelVersion,
+		&i.ModelProvider,
 	)
 	return i, err
 }

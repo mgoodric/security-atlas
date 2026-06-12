@@ -225,8 +225,26 @@ test.describe("dashboard view", () => {
     const rows = page.getByTestId("activity-feed-row");
     const emptyState = page.getByTestId("activity-feed-empty");
     await expect(rows.or(emptyState).first()).toBeVisible();
-    // The filter chips still render (visual continuity) but stay disabled:
-    await expect(page.getByTestId("activity-filter-chip")).toHaveCount(4);
+  });
+
+  test("AC-2/AC-3 slice 667: no inert filter chips or dev placeholder note", async ({
+    authedPage: page,
+  }) => {
+    // Slice 667: the All/Evidence/Controls/Approvals chips were inert
+    // (no handler) and carried a developer-facing placeholder note
+    // ("Filter chips activate once...") duplicated 4x in `title`. The
+    // dashboard /v1/activity endpoint surfaces only the evidence branch
+    // and takes no kind/source filter, so the chips had nothing to bind
+    // to. Per the JUDGMENT decision they are hidden, not wired.
+    await page.goto("/dashboard");
+    await expect(page.getByTestId("activity-feed-panel")).toBeVisible();
+    // No empty chip row renders:
+    await expect(page.getByTestId("activity-filter-chip")).toHaveCount(0);
+    await expect(page.getByTestId("activity-feed-filters")).toHaveCount(0);
+    // The internal "activate once" placeholder note is gone from the DOM:
+    await expect(page.getByTestId("activity-feed-panel")).not.toContainText(
+      "activate once",
+    );
   });
 
   test("AC-1 P0-DASH-1: no 'does not exist on main yet' copy anywhere on the dashboard", async ({

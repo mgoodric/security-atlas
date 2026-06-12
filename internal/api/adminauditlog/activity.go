@@ -137,6 +137,17 @@ func (h *Handler) ActivityList(w http.ResponseWriter, r *http.Request) {
 	// that flips the bool without updating this assignment.
 	params.queryParams.CallerUserID = userIdentifier
 
+	// Slice 669 AC-1/AC-2: the Activity feed defaults to mutating/business
+	// events by excluding the high-volume `decision`/`read` telemetry.
+	// `?include_reads=true` opts back into the full ledger view (AC-2).
+	// This is a view-only filter — the underlying ledger is unchanged
+	// (AC-4, canvas invariant #2). The toggle is orthogonal to the
+	// CallerIsPrivileged row-visibility gate above: a privileged caller
+	// still gets the read-telemetry de-prioritized by default on THIS
+	// surface (the admin /v1/admin/audit-log/unified endpoint remains the
+	// show-everything forensic surface).
+	params.queryParams.ExcludeReadTelemetry = !params.includeReads
+
 	// One transaction for both the aggregator read AND the meta-audit
 	// write. Same `tenancy.ApplyTenant` context guards both. RLS on the
 	// nine audit-log tables filters reads; the me_audit_log INSERT

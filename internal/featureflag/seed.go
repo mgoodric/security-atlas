@@ -193,3 +193,30 @@ func DefaultByKey(key string) (Default, bool) {
 	}
 	return Default{}, false
 }
+
+// GatingKeys is the slice 660 canonical set of capability flags that gate
+// a user-facing nav entry AND a route/handler when off. These are the
+// flags the non-admin enabled-modules read (GET /v1/features/enabled)
+// surfaces so the shell can hide nav for ALL users (not just admins), and
+// the route-guard middleware consults to make a flag-off module's API
+// unreachable.
+//
+// Both default OFF in Seed ("pending GA"); see seed.go. Keeping the set
+// here (not in the API package) lets the route-guard wiring + the
+// enabled-modules handler share one source of truth. Adding a module to
+// this set is a deliberate decision: it commits to BOTH a nav gate AND a
+// route gate for the key.
+var GatingKeys = []string{
+	"oscal.export",
+	"board.reporting",
+}
+
+// IsGatingKey reports whether key is in the slice 660 GatingKeys set.
+func IsGatingKey(key string) bool {
+	for _, k := range GatingKeys {
+		if k == key {
+			return true
+		}
+	}
+	return false
+}

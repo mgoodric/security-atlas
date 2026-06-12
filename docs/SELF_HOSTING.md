@@ -446,6 +446,47 @@ Configuration (all optional; sensible defaults for the single-VM bundle):
 
 ---
 
+## Evidence-staleness alerts (slice 439)
+
+The platform watches evidence freshness and tells the operator when a control's
+evidence crosses its freshness threshold — so you never have to keep a
+side-spreadsheet of "what's about to expire." Two surfaces, both written to the
+in-app notifications store and both delivered through any configured channel
+(email / Slack / webhook):
+
+| Surface           | What it is                                                         | Honest cadence (named, not "continuous")  |
+| ----------------- | ------------------------------------------------------------------ | ----------------------------------------- |
+| Per-control alert | One notification when a control's evidence becomes **stale**       | Staleness is **recomputed every 6 hours** |
+| Weekly digest     | A summary of stale + approaching-stale controls with a top-10 list | Generated **every Monday at 09:00 UTC**   |
+
+These are **scheduled, named-interval** signals — deliberately **not** framed
+as real-time/continuous monitoring. The recompute interval is stated in every
+alert; the digest names the week it covers and the Monday-09:00-UTC cadence.
+
+**Tuning the cadence.**
+
+| Variable                   | Default | Meaning                                                             |
+| -------------------------- | ------- | ------------------------------------------------------------------- |
+| `ATLAS_STALENESS_INTERVAL` | `6h`    | How often the rollup recomputes staleness (e.g. `1h` for dev loops) |
+
+The weekly digest fires on the Monday-09:00-UTC tick regardless of the recompute
+interval; both writes are idempotent, so an extra tick never double-delivers.
+The "approaching-stale" early-warning band is **14 days** before a control's
+`valid_until` horizon.
+
+**Opting out.** Each user is opted **in** by default. To stop receiving the
+in-app staleness surface, set the per-kind preference for the
+`evidence_staleness` event on the `in_app` channel to off
+(`PATCH /v1/me/preferences`, or the notification preferences UI). The opt-out is
+honored by the producer — an opted-out user receives no staleness alert or
+digest. Per-control custom thresholds and a dedicated preferences page are
+follow-on work; v1 reuses the per-control freshness class as the threshold.
+
+**Recipients.** All active users of a tenant receive the tenant's staleness
+notifications (for the v1 solo-operator deployment, that is the operator).
+
+---
+
 ## Monitoring
 
 The platform exports OTEL traces, metrics, and logs by default. Point `OTEL_EXPORTER_OTLP_ENDPOINT` at your collector of choice. The bundled docker-compose at [`deploy/docker/observability-compose.yml`](../deploy/docker/observability-compose.yml) brings up Prometheus + Grafana + Tempo + Loki for evaluation.

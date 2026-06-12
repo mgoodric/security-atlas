@@ -107,6 +107,13 @@ type Filters = {
   to: string;
   actor: string;
   kinds: ActivityKind[];
+  // includeReads (slice 669) — when false (the default), the Activity feed
+  // shows mutating/business events only and excludes the high-volume
+  // `decision`/`read` internal telemetry. When true, the full ledger is
+  // shown. URL-driven (`?include_reads=true`) so back/forward and shared
+  // links restore the same view. This is a view filter only; the
+  // underlying audit ledger is unchanged.
+  includeReads: boolean;
 };
 
 export function ActivityPageClient() {
@@ -137,6 +144,7 @@ export function ActivityPageClient() {
         actor: filters.actor,
         kinds: filters.kinds,
         cursor: pageParam,
+        includeReads: filters.includeReads,
       });
     },
     getNextPageParam: (last) => last.next_cursor || undefined,
@@ -177,6 +185,7 @@ export function ActivityPageClient() {
       params.set("to", next.to);
       if (next.actor) params.set("actor", next.actor);
       if (next.kinds.length > 0) params.set("kind", next.kinds.join(","));
+      if (next.includeReads) params.set("include_reads", "true");
       router.replace(`/activity?${params.toString()}`);
     },
     [router],
@@ -199,6 +208,9 @@ export function ActivityPageClient() {
       : { ...filters, kinds: [...filters.kinds, k] };
     replaceWith(next);
   };
+  const toggleIncludeReads = () => {
+    replaceWith({ ...filters, includeReads: !filters.includeReads });
+  };
   const applyActor = (draft: string) => {
     replaceWith({ ...filters, actor: draft.trim() });
   };
@@ -217,6 +229,7 @@ export function ActivityPageClient() {
         onFromChange={setFrom}
         onToChange={setTo}
         onKindToggle={toggleKind}
+        onIncludeReadsToggle={toggleIncludeReads}
         windowValid={queryEnabled}
       />
 
@@ -272,6 +285,9 @@ function parseFilters(searchParams: URLSearchParams): Filters {
   const toRaw = searchParams.get("to");
   const actor = searchParams.get("actor") ?? "";
   const kindRaw = searchParams.get("kind") ?? "";
+  // Slice 669: read-telemetry is excluded by default; only the explicit
+  // `include_reads=true` opts back into the full ledger.
+  const includeReads = searchParams.get("include_reads") === "true";
 
   const from =
     fromRaw && Number.isFinite(Date.parse(fromRaw)) ? fromRaw : defaultFrom();
@@ -286,7 +302,7 @@ function parseFilters(searchParams: URLSearchParams): Filters {
         )
     : [];
 
-  return { from, to, actor, kinds };
+  return { from, to, actor, kinds, includeReads };
 }
 
 type FilterBarProps = {
@@ -296,6 +312,7 @@ type FilterBarProps = {
   onFromChange: (v: string) => void;
   onToChange: (v: string) => void;
   onKindToggle: (k: ActivityKind) => void;
+  onIncludeReadsToggle: () => void;
   windowValid: boolean;
 };
 
@@ -306,6 +323,7 @@ function FilterBar({
   onFromChange,
   onToChange,
   onKindToggle,
+  onIncludeReadsToggle,
 }: FilterBarProps) {
   return (
     <div
@@ -383,6 +401,34 @@ function FilterBar({
             );
           })}
         </div>
+      </div>
+
+      <div className="flex items-center justify-between border-t pt-3">
+        <div>
+          <div className="text-xs font-medium text-muted-foreground">
+            Read-telemetry
+          </div>
+          <p className="text-xs text-muted-foreground">
+            High-volume internal read events are hidden by default so business
+            events stay visible. The full audit ledger is unchanged.
+          </p>
+        </div>
+        <button
+          type="button"
+          data-testid="activity-include-reads-toggle"
+          aria-pressed={filters.includeReads}
+          onClick={onIncludeReadsToggle}
+          className={
+            "rounded-full border px-3 py-1 text-xs transition-colors " +
+            (filters.includeReads
+              ? "border-primary bg-primary text-primary-foreground"
+              : "border-input bg-background hover:bg-muted")
+          }
+        >
+          {filters.includeReads
+            ? "Showing read-telemetry"
+            : "Show read-telemetry"}
+        </button>
       </div>
     </div>
   );

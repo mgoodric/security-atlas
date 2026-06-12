@@ -168,3 +168,63 @@ func TestRenderICS_NoMalformedVEvent(t *testing.T) {
 		t.Errorf("ICS output contains a blank line — clients reject these:\n%s", out)
 	}
 }
+
+// TestRenderICS_ExceptionSummaryUsesSCFCodeNotUUID is the AC-4 guard for
+// slice 732: the exception event's SUMMARY must carry the resolved SCF
+// code + control name (built in the calendar SQL JOIN), and must NOT
+// contain the raw control UUID. The renderer reads row.Title verbatim, so
+// this asserts the contract the query now satisfies: a row whose Title is
+// the human label renders that label into SUMMARY, never a bare UUID.
+func TestRenderICS_ExceptionSummaryUsesSCFCodeNotUUID(t *testing.T) {
+	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	starts := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	const ctrlUUID = "32e55da9-9f3a-4c21-8b7e-001122334455"
+	rows := []dbx.ListCalendarEventsRow{
+		{
+			EventID:           "exc-1",
+			EventType:         "exception",
+			Title:             "Exception on AAA-01 — Access Control Policy",
+			StartsAt:          pgtype.Timestamptz{Time: starts, Valid: true},
+			RelatedEntityID:   "exc-1",
+			RelatedEntityKind: "exception",
+			Summary:           "compensating manual review",
+			Status:            "active",
+		},
+	}
+	out := renderICS(rows, "test", now)
+
+	wantSummary := "SUMMARY:Exception on AAA-01 — Access Control Policy\r\n"
+	if !strings.Contains(out, wantSummary) {
+		t.Errorf("expected exception SUMMARY %q, got:\n%s", wantSummary, out)
+	}
+	if strings.Contains(out, ctrlUUID) {
+		t.Errorf("exception SUMMARY leaked the raw control UUID %q:\n%s", ctrlUUID, out)
+	}
+}
+
+// TestRenderICS_ExceptionSummaryFallbackNoSCFCode is the AC-2 fallback
+// guard at the render tier: when a control has no SCF code, the query
+// falls back to "Exception on <control name>" — never a bare UUID. The
+// renderer must surface that label faithfully.
+func TestRenderICS_ExceptionSummaryFallbackNoSCFCode(t *testing.T) {
+	now := time.Date(2026, 5, 16, 12, 0, 0, 0, time.UTC)
+	starts := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	const ctrlUUID = "32e55da9-9f3a-4c21-8b7e-001122334455"
+	rows := []dbx.ListCalendarEventsRow{
+		{
+			EventID:   "exc-2",
+			EventType: "exception",
+			Title:     "Exception on Custom unmapped control",
+			StartsAt:  pgtype.Timestamptz{Time: starts, Valid: true},
+			Status:    "active",
+		},
+	}
+	out := renderICS(rows, "test", now)
+
+	if !strings.Contains(out, "SUMMARY:Exception on Custom unmapped control\r\n") {
+		t.Errorf("expected fallback exception SUMMARY, got:\n%s", out)
+	}
+	if strings.Contains(out, ctrlUUID) {
+		t.Errorf("fallback exception SUMMARY leaked a raw UUID:\n%s", out)
+	}
+}

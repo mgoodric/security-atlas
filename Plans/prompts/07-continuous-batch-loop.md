@@ -8,7 +8,20 @@ Prompt `05-parallel-batch.md` is the unit of work — one orchestration cycle th
 
 This file wraps that loop. Four guards decide whether each iteration runs at all; two amendments adapt `05` for unattended operation; spillover-as-slice is reinforced so out-of-scope finds become future iterations' input automatically.
 
-The loop is **stateless across invocations** — state lives in `docs/issues/_STATUS.md` (source of truth for the queue) and one local audit trail (`~/.claude/MEMORY/LEARNING/REFLECTIONS/continuous-batch.jsonl`). Restart is just `/loop <prompt body>` again.
+The loop is **stateless across invocations** — state lives in git + open PRs + branches + `docs/issues/_events.jsonl`, projected into the generated `docs/issues/_STATUS.md` (the queue view) plus one local audit trail (`~/.claude/MEMORY/LEARNING/REFLECTIONS/continuous-batch.jsonl`). Restart is just `/loop <prompt body>` again.
+
+> **STATUS MODEL UPDATED — 2026-06-10.** The queue's source of truth is now git+events, not
+> a hand-maintained `_STATUS.md`. For this loop that means:
+>
+> - **Pick the ready set:** run `just ready` (filed, not merged, not in-flight, no blocking
+>   event). Dependency-gating note in [`_GENERATOR.md`](../../docs/issues/_GENERATOR.md):
+>   `just ready` is not yet dep-aware, so still confirm a picked slice's deps are `merged`.
+> - **Claim / merge:** push the `feat/NNN-…` branch to claim; merge the slice PR to complete.
+>   No `chore(status)` claim-stake or reconcile PRs — `in-progress`/`in-review`/`merged` are
+>   derived. Run `just status` once per iteration and commit the regenerated `_STATUS.md`.
+> - **Newly-filed spillover slices:** `just event <NNN> not-ready "<unmet dep>"` if blocked,
+>   else they default to `ready` once filed. Follow the deprecated-but-retained steps below
+>   only for the parts the bullets above don't cover.
 
 ## When to use
 
