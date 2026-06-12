@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/google/uuid"
@@ -170,7 +171,7 @@ func (s *Store) List(ctx context.Context, tenantID string, limit, offset int) ([
 	var total int
 	err = s.inTxReadOnly(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		rows, lErr := q.ListSCIMUsers(ctx, dbx.ListSCIMUsersParams{
-			TenantID: tIDU, Limit: int32(limit), Offset: int32(offset),
+			TenantID: tIDU, Limit: clampInt32(limit), Offset: clampInt32(offset),
 		})
 		if lErr != nil {
 			return lErr
@@ -524,6 +525,23 @@ func domainUserFromRow(row dbx.User) DomainUser {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation
+}
+
+// clampInt32 narrows a non-negative pagination int to int32 with an explicit
+// dominating upper-bound check (CodeQL go/incorrect-integer-conversion): a
+// negative value clamps to 0, a value above math.MaxInt32 clamps to
+// math.MaxInt32, so the int32() conversion can never overflow. The SCIM
+// handler already clamps count/startIndex to a small page cap (RFC 7644
+// §3.4.2.4); this is the defense-in-depth guard at the storage boundary so the
+// narrowing is provably safe regardless of the caller.
+func clampInt32(n int) int32 {
+	if n < 0 {
+		return 0
+	}
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(n)
 }
 
 func strPtr(s string) *string { return &s }

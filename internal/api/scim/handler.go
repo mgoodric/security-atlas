@@ -23,6 +23,10 @@ const maxBodyBytes = 64 * 1024
 const (
 	defaultCount = 100
 	maxCount     = 200
+	// maxStartIndex bounds the 1-based SCIM startIndex so the derived offset
+	// stays well within int32 (no IdP paginates past this many users; the cap
+	// is a DoS + overflow guard). RFC 7644 §3.4.2.4 lets the provider clamp.
+	maxStartIndex = 1_000_000
 )
 
 // provisioner is the surface the handlers need from the SCIM provisioning
@@ -158,16 +162,11 @@ func (h *Handler) ListUsers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Unfiltered list with SCIM 1-based startIndex + count pagination.
-	startIndex := parsePositiveInt(r.URL.Query().Get("startIndex"), 1)
-	count := parsePositiveInt(r.URL.Query().Get("count"), defaultCount)
-	if count > maxCount {
-		count = maxCount
-	}
-	offset := startIndex - 1
-	if offset < 0 {
-		offset = 0
-	}
+	// Unfiltered list with SCIM 1-based startIndex + count pagination
+	// (RFC 7644 §3.4.2.4). Both values are clamped at the source so the
+	// downstream int32 narrowing cannot overflow.
+	startIndex, count, offset := scimPagination(
+		r.URL.Query().Get("startIndex"), r.URL.Query().Get("count"))
 	users, total, err := h.store.List(r.Context(), cred.tenantID, count, offset)
 	if err != nil {
 		httperr.WriteInternal(w, r, "scim list users", err)
@@ -351,6 +350,28 @@ func parsePositiveInt(s string, def int) int {
 		return def
 	}
 	return n
+}
+
+// scimPagination parses + CLAMPS the SCIM 1-based startIndex and count query
+// params (RFC 7644 §3.4.2.4) and derives a non-negative offset. count is
+// bounded to [1, maxCount]; startIndex is bounded to [1, maxStartIndex]. The
+// returned (startIndex, count, offset) are all small non-negative ints, so the
+// downstream int32 narrowing in the store cannot overflow. Returning the
+// clamped startIndex lets the ListResponse echo the effective value.
+func scimPagination(startIndexRaw, countRaw string) (startIndex, count, offset int) {
+	startIndex = parsePositiveInt(startIndexRaw, 1)
+	if startIndex > maxStartIndex {
+		startIndex = maxStartIndex
+	}
+	count = parsePositiveInt(countRaw, defaultCount)
+	if count > maxCount {
+		count = maxCount
+	}
+	offset = startIndex - 1
+	if offset < 0 {
+		offset = 0
+	}
+	return startIndex, count, offset
 }
 
 func schemeHost(r *http.Request) string {

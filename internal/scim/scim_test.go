@@ -6,12 +6,37 @@ package scim
 
 import (
 	"encoding/json"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// TestClampInt32 pins the pagination-narrowing guard (CodeQL
+// go/incorrect-integer-conversion): a negative clamps to 0, a value above
+// math.MaxInt32 clamps to math.MaxInt32, so the int32() conversion in
+// Store.List can never overflow.
+func TestClampInt32(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in   int
+		want int32
+	}{
+		{-1, 0},
+		{-1000, 0},
+		{0, 0},
+		{100, 100},
+		{math.MaxInt32, math.MaxInt32},
+		{math.MaxInt32 + 1, math.MaxInt32},
+	}
+	for _, tc := range cases {
+		if got := clampInt32(tc.in); got != tc.want {
+			t.Errorf("clampInt32(%d) = %d; want %d", tc.in, got, tc.want)
+		}
+	}
+}
 
 func TestParseUserNameFilter(t *testing.T) {
 	t.Parallel()

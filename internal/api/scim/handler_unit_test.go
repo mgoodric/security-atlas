@@ -80,6 +80,45 @@ func TestInboundUser_ResolveDisplayName(t *testing.T) {
 	}
 }
 
+// TestSCIMPagination pins the RFC 7644 §3.4.2.4 clamp: count is bounded to
+// [1, maxCount], startIndex to [1, maxStartIndex], and the derived offset is
+// non-negative — so the downstream int32 narrowing in the store cannot
+// overflow (CodeQL go/incorrect-integer-conversion regression guard).
+func TestSCIMPagination(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name           string
+		startIndex     string
+		count          string
+		wantStartIndex int
+		wantCount      int
+		wantOffset     int
+	}{
+		{"defaults", "", "", 1, defaultCount, 0},
+		{"negative count → default", "1", "-5", 1, defaultCount, 0},
+		{"huge count → maxCount", "1", "100000", 1, maxCount, 0},
+		{"negative startIndex → 1", "-3", "10", 1, 10, 0},
+		{"zero startIndex → 1", "0", "10", 1, 10, 0},
+		{"normal page two", "11", "10", 11, 10, 10},
+		{"huge startIndex → maxStartIndex", "999999999", "10", maxStartIndex, 10, maxStartIndex - 1},
+		{"garbage → defaults", "abc", "xyz", 1, defaultCount, 0},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			si, c, off := scimPagination(tc.startIndex, tc.count)
+			if si != tc.wantStartIndex || c != tc.wantCount || off != tc.wantOffset {
+				t.Errorf("scimPagination(%q,%q) = (%d,%d,%d); want (%d,%d,%d)",
+					tc.startIndex, tc.count, si, c, off, tc.wantStartIndex, tc.wantCount, tc.wantOffset)
+			}
+			if off < 0 {
+				t.Errorf("offset must be non-negative, got %d", off)
+			}
+		})
+	}
+}
+
 func TestParsePositiveInt(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
