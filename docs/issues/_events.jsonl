@@ -192,3 +192,4 @@
 {"slice":230,"to":"not-ready","ts":"2026-06-12","ref":"","note":"no dashboard-snapshot export endpoint exists (one of the two dashboard actions is unbacked)"}
 {"slice":232,"to":"not-ready","ts":"2026-06-12","ref":"","note":"no public non-admin /activity ledger route exists (the View-full-activity link has no backing surface)"}
 {"slice":434,"to":"merged","ts":"2026-06-12","ref":"","note":"status-event hygiene: emitted not-ready events for the 9 false-ready rows (112-115/118/134/228/230/232); generated _STATUS now matches the files. Done inline per the rescope."}
+{"slice":740,"to":"merged","ts":"2026-06-12","ref":"","note":"floor re-baseline folded into slice 450 (8589f281) per maintainer approval 2026-06-12; the 68 re-baselined web floors are on main via 450; standalone slice superseded, dataset retained in the doc"}

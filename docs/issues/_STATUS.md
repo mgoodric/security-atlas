@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-12 · **Total slices:** 624
+**Generated:** 2026-06-12 · **Total slices:** 625
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 555 |
+| merged | 557 |
 | in-progress | 1 |
-| ready | 57 |
+| ready | 56 |
 | not-ready | 11 |
 
 ## Ready set
 
-095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 436 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
+095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 436 446 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -475,7 +475,7 @@
 | 447 | PCI DSS v4.0 crosswalk loader (3rd framework; scope-reduction... | merged | #1017 | 2026-06-05 | 69078c86 |
 | 448 | Bulk operations + saved filter-views (operator ergonomics, co... | in-progress |  |  | feat/448-bulk-ops-saved-views |
 | 449 | OPA 1.4 → 1.17 embedded-engine upgrade (13 minors on the au... | merged | #1319 | 2026-06-11 | 05bb92a3 |
-| 450 | vitest 4 + @vitest/coverage-v8 4 paired migration | ready |  |  |  |
+| 450 | vitest 4 + @vitest/coverage-v8 4 paired migration | merged |  | 2026-06-12 | 8589f281 |
 | 451 | SLSA provenance + SBOM for binary / CLI / SDK releases | merged | #990 | 2026-06-04 | 750d0eca |
 | 452 | Node version alignment: @types/node + CI + runtime + engines ... | ready |  |  |  |
 | 453 | TypeScript 6 migration | ready |  |  |  |
@@ -656,3 +656,4 @@
 | 704 | Contract-tier rollout: tenant-wide `/v1/evidence` ledger wind... | merged |  | 2026-06-11 | f882950d |
 | 732 | Calendar/dashboard exception event labels show the raw contro... | merged |  | 2026-06-11 | 9159b6a5 |
 | 733 | Live group-role derivation wiring + SCIM /Groups REST resource | merged |  | 2026-06-12 | 5591029b |
+| 740 | vitest 4 coverage-floor re-baseline (AST-aware v8 provider) | merged |  |  | floor re-baseline folded into slice 450 (8589f281) per maintainer approval 2026-06-12; the 68 re-baselined web floors are on main via 450; standalone slice superseded, dataset retained in the doc |
