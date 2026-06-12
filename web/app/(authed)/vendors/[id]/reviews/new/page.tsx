@@ -6,11 +6,18 @@
 // the timeline. Mirrors the slice-686 read/edit split: the write affordance
 // lives on its own route, not bolted onto the read-only detail.
 //
-// NOTE: this slice does NOT touch any post-recording auto-refresh of the
-// detail page beyond the explicit navigation back — the broader
-// "recording a review doesn't refresh" concern (slice 424) is slice 691's
-// job, not this slice's.
+// Slice 691 — on a successful record the form invalidates the detail
+// (["vendor", id]) and history (["vendor-reviews", id]) queries (plus the
+// list + burndown) before routing back, so the read-only detail the
+// operator lands on reflects the just-recorded review without a hard
+// reload: the new timeline row appears, the Last-review field updates, and
+// the derived review-status badge flips overdue -> on time. Recording a
+// review updates vendors.last_review_date server-side
+// (internal/vendor/reviews.go), so the badge re-derives off the refetched
+// row. The global 60s staleTime would otherwise suppress the on-mount
+// refetch on nav-back, so the explicit invalidation is load-bearing.
 
+import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { use, useState } from "react";
@@ -40,6 +47,7 @@ export default function RecordVendorReviewPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
+  const qc = useQueryClient();
 
   const [reviewedAt, setReviewedAt] = useState(todayISO());
   const [reviewer, setReviewer] = useState("");
@@ -81,6 +89,16 @@ export default function RecordVendorReviewPage({
         };
         throw new Error(detail.error ?? `${res.status} ${res.statusText}`);
       }
+      // Slice 691 — refresh the detail surface the operator returns to.
+      // Await the detail + history invalidations so their refetch is in
+      // flight before navigation (avoids the shared-key read-back race);
+      // the list + burndown are prefix-matched and need not block.
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["vendor", id] }),
+        qc.invalidateQueries({ queryKey: ["vendor-reviews", id] }),
+      ]);
+      void qc.invalidateQueries({ queryKey: ["vendors"] });
+      void qc.invalidateQueries({ queryKey: ["vendors-burndown"] });
       router.push(`/vendors/${id}`);
     } catch (err) {
       setError((err as Error).message);
