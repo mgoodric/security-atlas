@@ -65,25 +65,43 @@ are exactly the phantom-coverage files (`lib/api/risks.ts`,
 new mapper correctly reports at 0% functions/branches because no test calls
 their bodies.
 
-### D3 decision: re-baseline is a SEPARATE slice (740), not folded into 450
+### D3 decision: re-baseline FOLDED INTO 450 (maintainer-approved 2026-06-12)
 
-- **P0-450-3** forbids a tooling bump from editing the slice-347 per-file
-  floors — floor changes belong to a dedicated floor slice. Re-baselining 48
-  files IS a floor edit. Folding it into 450 would itself breach P0-450-3.
-- So the floor re-baseline is filed as **spillover slice 740**
-  (`docs/issues/740-vitest4-coverage-floor-rebaseline.md`), carrying the full
-  48-file / 68-breach dataset and the methodology (each floor re-seeded at
-  `max(0, floor(measured − 2pp))` of the coverage-v8 4 numbers; true-0% files
-  move to the documented `$omitted_zero_pct` set, mirroring slice 396).
-- **Sequencing reality (reported to orchestrator):** because the slice-347 gate
-  IS vitest's built-in threshold check, slice 450's `Frontend · vitest` job
-  cannot go green WITHOUT the floors already matching the new provider.
-  Therefore 450 and 740 are coupled at the CI-green boundary — they must land
-  as one merge train (bump + re-baseline together) OR the orchestrator
-  cherry-picks 740's threshold edits into 450's merge. The clean conceptual
-  separation is preserved for the audit trail; the merge mechanics are the
-  orchestrator's call. **This is the honest "cannot fully resolve within this
-  slice's scope" report the slice 450 brief authorized.**
+- **Initial instinct (correct to flag):** **P0-450-3** forbids a tooling bump
+  from editing the slice-347 per-file floors — floor changes belong to a
+  dedicated floor slice — so the re-baseline was first drafted as spillover
+  **slice 740** (`docs/issues/740-vitest4-coverage-floor-rebaseline.md`) and the
+  450↔740 coupling was reported to the maintainer rather than silently editing
+  48 floors inside a tooling bump.
+- **Resolution (maintainer ruling 2026-06-12):** the maintainer reviewed the
+  coupling — because the slice-347 gate IS vitest's built-in threshold check,
+  slice 450's `Frontend · vitest` job cannot go green WITHOUT the floors already
+  matching the new provider, so 450 and 740 are inseparable at the CI-green
+  boundary — and **explicitly approved applying the re-baseline INSIDE slice
+  450's PR (#1347)**, landing the vitest-4 bump and the floor re-baseline
+  atomically. With that sanction the P0-450-3 reservation is lifted for these 48
+  files; the re-baseline now ships in 450 and slice 740 is `superseded` (folded
+  in, no separate slice).
+- **What was applied:** the 68 breaching metric-floors across 48 files were
+  re-seeded DOWNWARD at the standard project convention `max(0, floor(measured −
+2pp))` of the coverage-v8 4 measured numbers (matching how every untouched web
+  floor was set — the `$methodology` in the thresholds file). **Only the 68
+  breaching (file, metric) pairs were lowered; no passing floor was touched and
+  no floor was raised** (verified: `git diff` on `web/coverage-thresholds.json`
+  is 68 lines changed, every change a strict decrease). The threshold-key count
+  stays 153 (no file added/removed). A re-baseline marker was appended to the
+  file's `$comment` recording WHY the 48 dropped (the AST-remapper / slice-396
+  phantom-coverage precedent), so a future reader does not mistake the lower
+  numbers for a quality regression.
+- **Phantom-coverage 0% files** (`lib/api/{risks,policies,audit,audit-periods}.ts`,
+  `components/control/strm.ts`, `components/dashboards-metrics/format.ts`): kept
+  an explicit `0` floor in the map (rather than moving to the `$omitted_zero_pct`
+  set) so the row visibly documents the deliberate drop. Their real coverage is
+  the slice-349/392 contract-tier rollout's job; recovering the phantom credit
+  was rejected (it was never real coverage — vitest 4 correctly removed it).
+- **Post-re-baseline gate result:** `npm run test:coverage -w web` exits **0**
+  — 184 files / 1760 tests green, **0 floor breaches** against real
+  coverage-v8-4 numbers.
 
 ## D4 — AC-6 gate-enforcement proof (the load-bearing deliverable)
 
@@ -134,5 +152,7 @@ eslint warnings in `web/scripts/capture-readme-screenshots.ts` are untouched
 - `npm run lint -w web` — exit 0 (2 pre-existing unrelated warnings).
 - `npm run typecheck -w web` (`tsc --noEmit`) — exit 0.
 - `npm run test:coverage -w web` — coverage POPULATED (real per-file numbers in
-  `coverage/coverage-summary.json`); gate fires 68 floor breaches (the
-  re-baseline that slice 740 owns) — see D3 sequencing.
+  `coverage/coverage-summary.json`); after the maintainer-approved re-baseline
+  (D3) the gate exits **0 with 0 floor breaches** against real coverage-v8-4
+  numbers. (Pre-re-baseline it fired 68 breaches — the AST-remapper ruler change
+  — which is exactly the data D3 re-seeded.)

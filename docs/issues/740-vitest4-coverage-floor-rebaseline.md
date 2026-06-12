@@ -4,9 +4,19 @@
 **Estimate:** S (0.5d)
 **Type:** AFK
 
-**Status:** `not-ready` (blocked-by: 450 must land the vitest 4 bump; this slice
-re-baselines the floors AGAINST the new provider — the two are sequenced, see
-"Dependencies")
+**Status:** `superseded` — **FOLDED INTO slice 450 per maintainer approval
+(2026-06-12).** The maintainer reviewed the 450↔740 coupling (the slice-347 gate
+is vitest's built-in threshold check, so 450's `Frontend · vitest` job cannot go
+green without the floors matching the new provider) and explicitly approved
+applying this re-baseline INSIDE slice 450's PR (#1347), landing the vitest-4
+bump and the floor re-baseline atomically. The 68-floor / 48-file re-baseline
+(each re-seeded at the standard `max(0, floor(measured-2pp))` of the
+coverage-v8-4 numbers) now lives in `web/coverage-thresholds.json` on the slice
+450 branch; this doc is retained for the dataset + audit record and will be
+marked merged/superseded in the reconcile. **No separate slice ships.**
+
+> Original status was `not-ready` (blocked-by 450); the dataset and AC below
+> describe the work as it was delivered inside 450.
 
 ## Parent
 
