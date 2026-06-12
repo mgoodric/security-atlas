@@ -18,6 +18,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
+	"github.com/mgoodric/security-atlas/internal/api/adminscim"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminsuperadmins"
 	"github.com/mgoodric/security-atlas/internal/api/admintenants"
@@ -61,6 +62,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/requestidmw"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/api/scopes"
 	searchapi "github.com/mgoodric/security-atlas/internal/api/search"
 	"github.com/mgoodric/security-atlas/internal/api/securityheaders"
@@ -106,6 +108,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
+	"github.com/mgoodric/security-atlas/internal/scim"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
@@ -183,7 +186,7 @@ func (s *Server) httpHandler() http.Handler {
 		}), "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
-			"/oauth/device_authorization", "/v1/test/issue-jwt"))
+			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/"))
 		// Slice 197: fail-closed credential requirement. The slice 190
 		// JWT middleware passes through requests with NO JWT shape
 		// (e.g. malformed bearers or no Authorization header); without
@@ -208,7 +211,7 @@ func (s *Server) httpHandler() http.Handler {
 		root.Use(requireCredential("/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
-			"/oauth/device_authorization", "/v1/test/issue-jwt"))
+			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/"))
 	}
 	// Slice 033: lift the authenticated credential's tenant id onto the
 	// request context so every downstream handler — and every database
@@ -232,7 +235,7 @@ func (s *Server) httpHandler() http.Handler {
 		// (mounted only when ATLAS_TEST_MODE=1) — same rationale as the
 		// bearer-exempt above: the endpoint mints the first JWT, so it
 		// cannot be gated by OPA on a credential it has not yet produced.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt"))
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -1103,6 +1106,31 @@ func (s *Server) httpHandler() http.Handler {
 		root.Get("/v1/admin/credentials", admincredsH.List)
 		root.Post("/v1/admin/credentials/{id}/rotate", admincredsH.Rotate)
 		root.Post("/v1/admin/credentials/{id}/revoke", admincredsH.Revoke)
+	}
+	// Slice 508: SCIM 2.0 user-lifecycle provisioning. Two surfaces:
+	//
+	//   (1) Admin control plane on /v1 (admin-gated): issue / list / revoke
+	//       the per-tenant SCIM bearer credential (AC-3).
+	//   (2) The inbound SCIM endpoints on /scim/v2/* — mounted in a chi
+	//       SUBROUTER wrapped by the SCIM auth middleware (the distinct
+	//       credential scope, P0-508-2). The /scim/ prefix is bypassed by the
+	//       /v1 JWT + requireCredential + authz chain above, so a SCIM token
+	//       can NEVER reach a /v1 handler and an atlas JWT is irrelevant here.
+	//
+	// Both mount only when the SCIM credential store is wired (cmd/atlas wires
+	// it with a BEARER_HASH_KEY hasher + BYPASSRLS authPool). The provisioning
+	// store runs every query under the credential's tenant RLS (P0-508-4).
+	if s.scimCredStore != nil {
+		adminScimH := adminscim.New(s.scimCredStore)
+		root.Post("/v1/admin/scim-credentials", adminScimH.Issue)
+		root.Get("/v1/admin/scim-credentials", adminScimH.List)
+		root.Delete("/v1/admin/scim-credentials/{id}", adminScimH.Revoke)
+
+		scimUserH := scimapi.NewHandler(scim.NewStore(s.dbPool))
+		root.Group(func(scimR chi.Router) {
+			scimR.Use(scimapi.Middleware(s.scimCredStore))
+			scimUserH.Mount(scimR)
+		})
 	}
 	// Slice 073: admin-only bootstrap-token reset endpoint. Used by
 	// `atlas-cli credentials issue --reset-bootstrap`. Mounts only when

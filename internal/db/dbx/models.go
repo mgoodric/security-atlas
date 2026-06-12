@@ -1946,6 +1946,28 @@ type ScfAnchor struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ScimAuditLog struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	OccurredAt        pgtype.Timestamptz `json:"occurred_at"`
+	ActorCredentialID pgtype.UUID        `json:"actor_credential_id"`
+	TargetUserID      pgtype.UUID        `json:"target_user_id"`
+	Action            string             `json:"action"`
+	Detail            []byte             `json:"detail"`
+}
+
+type ScimCredential struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	TokenHash   []byte             `json:"token_hash"`
+	Description string             `json:"description"`
+	IssuedBy    pgtype.UUID        `json:"issued_by"`
+	IssuedAt    pgtype.Timestamptz `json:"issued_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	Last4       string             `json:"last4"`
+}
+
 type Scope struct {
 	ID                 pgtype.UUID              `json:"id"`
 	TenantID           pgtype.UUID              `json:"tenant_id"`
@@ -2032,16 +2054,19 @@ type Tenant struct {
 }
 
 type User struct {
-	ID          pgtype.UUID        `json:"id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	Email       string             `json:"email"`
-	DisplayName string             `json:"display_name"`
-	Status      string             `json:"status"`
-	IdpIssuer   string             `json:"idp_issuer"`
-	IdpSubject  string             `json:"idp_subject"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	TimeZone    string             `json:"time_zone"`
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Email          string             `json:"email"`
+	DisplayName    string             `json:"display_name"`
+	Status         string             `json:"status"`
+	IdpIssuer      string             `json:"idp_issuer"`
+	IdpSubject     string             `json:"idp_subject"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	TimeZone       string             `json:"time_zone"`
+	Active         bool               `json:"active"`
+	ScimExternalID *string            `json:"scim_external_id"`
+	ScimManaged    bool               `json:"scim_managed"`
 }
 
 type UserNotificationPreference struct {
