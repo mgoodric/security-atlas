@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-12 · **Total slices:** 623
+**Generated:** 2026-06-12 · **Total slices:** 624
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 549 |
+| merged | 550 |
 | in-progress | 1 |
 | ready | 71 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 509 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703 733
 
 ## In-flight
 
@@ -531,7 +531,7 @@
 | 506 | Privacy v0: Records of Processing Activities (RoPA, GDPR Art.... | ready |  |  |  |
 | 507 | Breach-notification workflow implementation (security → pri... | ready |  |  |  |
 | 508 | SCIM 2.0 user-lifecycle provisioning (deprovisioning on IdP o... | merged |  | 2026-06-12 | f9969f4e |
-| 509 | IdP group-to-role mapping (claims/SCIM-group -> atlas role as... | ready |  |  |  |
+| 509 | IdP group-to-role mapping (claims/SCIM-group -> atlas role as... | merged |  | 2026-06-12 | 2a6297a7 |
 | 510 | Automated backup + scheduled restore-verification (operationa... | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 511 | OSCAL profile import (resolve import / merge / modify directi... | merged | #1109 | 2026-06-07 | 57f085cf |
 | 512 | OSCAL component-definition import (vendor control-implementat... | merged | #1115 | 2026-06-07 | 3c3c62e3 |
@@ -655,3 +655,4 @@
 | 703 | Main-canary: run a single representative leg on docs-only pushes | ready |  |  |  |
 | 704 | Contract-tier rollout: tenant-wide `/v1/evidence` ledger wind... | merged |  | 2026-06-11 | f882950d |
 | 732 | Calendar/dashboard exception event labels show the raw contro... | merged |  | 2026-06-11 | 9159b6a5 |
+| 733 | Live group-role derivation wiring + SCIM /Groups REST resource | ready |  |  |  |
