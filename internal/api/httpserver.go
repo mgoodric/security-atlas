@@ -100,6 +100,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/notify/slack"
 	"github.com/mgoodric/security-atlas/internal/notify/webhook"
 	"github.com/mgoodric/security-atlas/internal/policy"
+	"github.com/mgoodric/security-atlas/internal/qaisuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
@@ -1051,7 +1052,22 @@ func (s *Server) httpHandler() http.Handler {
 	// go.mod dependency for PDF). NO AI-assist at v1 — the AnswerLibrary
 	// suggestion path is a deterministic SCF-anchor lookup, not inference.
 	questionnaireStore := questionnaire.NewStore(s.dbPool)
-	questionnairesH := questionnairesapi.New(questionnaireStore)
+	// Slice 441: AI-answer suggestion v0 (cited drafts, one-click approve) —
+	// the FIRST AI-write surface. The qaisuggest.Store does keyword-first-pass
+	// retrieval + citation resolution + draft persistence under RLS (invariant
+	// #6); the inference rides local Ollama (slice 498, P0-441-6 local-only).
+	// Constitutional invariants (no fabricated coverage, no cross-tenant bleed,
+	// one-click human approval) are enforced by the service + the DB CHECK on
+	// questionnaire_answers (the slice-498 shared ai_assist guard, adopted by
+	// this slice's migration).
+	qaiStore := qaisuggest.NewStore(s.dbPool)
+	qaiSvc := qaisuggest.NewService(
+		qaiStore,
+		llm.NewOllamaClient(llm.ConfigFromEnv()),
+		qaiStore,
+		qaiStore,
+	)
+	questionnairesH := questionnairesapi.NewWithSuggest(questionnaireStore, qaiSvc)
 	questionnairesH.RegisterRoutes(root)
 	// Slice 034: admin credentials HTTP API + auth routes. Routes append
 	// per the parallel-batch convention. Admin-credential routes require

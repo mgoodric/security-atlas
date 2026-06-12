@@ -1790,15 +1790,22 @@ type Questionnaire struct {
 }
 
 type QuestionnaireAnswer struct {
-	ID          pgtype.UUID        `json:"id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	QuestionID  pgtype.UUID        `json:"question_id"`
-	AnswerValue string             `json:"answer_value"`
-	Narrative   string             `json:"narrative"`
-	Citations   []byte             `json:"citations"`
-	AuthoredBy  string             `json:"authored_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	QuestionID    pgtype.UUID        `json:"question_id"`
+	AnswerValue   string             `json:"answer_value"`
+	Narrative     string             `json:"narrative"`
+	Citations     []byte             `json:"citations"`
+	AuthoredBy    string             `json:"authored_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+	PromptVersion string             `json:"prompt_version"`
+	ModelName     string             `json:"model_name"`
+	ModelVersion  string             `json:"model_version"`
+	ModelProvider string             `json:"model_provider"`
 }
 
 type QuestionnaireQuestion struct {
