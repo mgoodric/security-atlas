@@ -55,7 +55,8 @@ describe("linkFor", () => {
     expect(result.kind).toBe("static");
     if (result.kind === "static") {
       expect(result.reason).toMatch(/exception/i);
-      expect(result.reason).toMatch(/future slice/i);
+      expect(result.reason).toMatch(/not available yet/i);
+      expect(result.reason).toMatch(/\/exceptions/i);
     }
   });
 
@@ -64,7 +65,8 @@ describe("linkFor", () => {
     expect(result.kind).toBe("static");
     if (result.kind === "static") {
       expect(result.reason).toMatch(/policy/i);
-      expect(result.reason).toMatch(/future slice/i);
+      expect(result.reason).toMatch(/not available yet/i);
+      expect(result.reason).toMatch(/\/policies/i);
     }
   });
 

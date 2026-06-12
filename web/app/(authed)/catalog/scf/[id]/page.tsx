@@ -141,8 +141,8 @@ function AnchorDetailView({ detail }: { detail: AnchorDetail }) {
         <Alert>
           <AlertTitle>No requirement mappings</AlertTitle>
           <AlertDescription>
-            This anchor has no framework requirements in the slice-005 seed.
-            Full mappings import with slice 006.
+            This anchor has no framework requirements in the starter catalog.
+            Full framework mappings load when you run the catalog import.
           </AlertDescription>
         </Alert>
       ) : null}

@@ -581,9 +581,7 @@ function AuditsPageInner() {
           When the detail page lands, this banner is deleted and the
           onRowClick is restored. */}
       <Alert data-testid="audits-detail-coming-soon-banner" className="mb-3">
-        <AlertTitle>
-          Per-period detail view is coming in a future slice
-        </AlertTitle>
+        <AlertTitle>Per-period detail view is not available yet</AlertTitle>
         <AlertDescription>
           Rows in this table are not clickable yet. The per-audit-period detail
           page (frozen-status meta, sample-population summary, OSCAL export
