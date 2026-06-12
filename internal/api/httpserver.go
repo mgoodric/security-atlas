@@ -18,6 +18,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
+	"github.com/mgoodric/security-atlas/internal/api/admingroupmappings"
 	"github.com/mgoodric/security-atlas/internal/api/adminscim"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
 	"github.com/mgoodric/security-atlas/internal/api/adminsuperadmins"
@@ -80,6 +81,7 @@ import (
 	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
+	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/userprefs"
@@ -1188,6 +1190,17 @@ func (s *Server) httpHandler() http.Handler {
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)
 	root.Post("/v1/admin/users/assign", usersH.Assign)
 	root.Post("/v1/admin/users/revoke", usersH.Revoke)
+
+	// Slice 509: IdP group-to-role mapping CRUD (AC-8). Admin-gated (the
+	// handler enforces cred.IsAdmin defense-in-depth alongside the slice 035
+	// OPA middleware); editing a mapping is a privilege-granting action so a
+	// non-admin caller gets 403. The store runs every op under the caller's
+	// tenant RLS context (invariant #6). The derivation surface (the resolver
+	// the OIDC + SCIM sources call) is wired separately at those call sites.
+	groupMapH := admingroupmappings.New(grouprole.NewStore(s.dbPool))
+	root.Post("/v1/admin/group-role-mappings", groupMapH.Create)
+	root.Get("/v1/admin/group-role-mappings", groupMapH.List)
+	root.Delete("/v1/admin/group-role-mappings/{id}", groupMapH.Delete)
 
 	// Slice 142: super_admin management surface. super_admin-gated
 	// (the handler reads jwtmw.FromContext().SuperAdmin); the OPA
