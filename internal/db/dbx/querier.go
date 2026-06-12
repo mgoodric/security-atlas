@@ -37,6 +37,12 @@ type Querier interface {
 	// Idempotent: ON CONFLICT DO NOTHING because the PK already enforces no
 	// duplicates, so re-adding is a no-op.
 	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
+	// ApproveBoardNarrativeSection records the operator's edited final text +
+	// approver and flips human_approved=TRUE (one-click per section). The DB CHECK
+	// makes human_approved=TRUE with a blank approver impossible (P0-440-2); the
+	// service rejects a blank approver before this call. Scoped to the tenant +
+	// the AI-assisted draft; an absent/cross-tenant id returns no row.
+	ApproveBoardNarrativeSection(ctx context.Context, arg ApproveBoardNarrativeSectionParams) (BoardNarrativeSection, error)
 	// One-click per-section approval (AC-10): flip human_approved=TRUE + record the
 	// approver on an AI-assisted, currently-unapproved section. The
 	// ai_assisted=TRUE AND human_approver IS NOT NULL guard in the WHERE means an
@@ -585,6 +591,9 @@ type Querier interface {
 	// 404). The returned `content` + `narrative_md` are the verbatim frozen
 	// snapshot — AC-5 (re-fetch returns the original content).
 	GetBoardBriefByID(ctx context.Context, arg GetBoardBriefByIDParams) (BoardBrief, error)
+	// GetBoardNarrativeSectionByID returns one section by id under the caller's
+	// tenant (used by the approval flow + tests).
+	GetBoardNarrativeSectionByID(ctx context.Context, arg GetBoardNarrativeSectionByIDParams) (BoardNarrativeSection, error)
 	// Fetch one pack by id. RLS scopes the lookup to the caller's tenant — a
 	// cross-tenant id returns ErrNoRows (the handler maps that to 404). Works
 	// for both draft and published packs.
@@ -2791,6 +2800,16 @@ type Querier interface {
 	// with secret-unchanged semantics. id is supplied by the caller (UUIDv4)
 	// so the insert path is deterministic in tests.
 	UpsertAdminSSO(ctx context.Context, arg UpsertAdminSSOParams) (UpsertAdminSSORow, error)
+	// Slice 440 — board-narrative AI v0 per-section record queries. Every query is
+	// tenant-scoped (tenant_id = $1) and runs under the caller's RLS transaction
+	// (app.current_tenant) so cross-tenant rows are invisible (invariant #6).
+	// UpsertBoardNarrativeDraft persists a validated, UNAPPROVED draft section
+	// (ai_assisted=TRUE, human_approved=FALSE, human_approver=NULL). Regeneration
+	// for the same (tenant, period_end, section_key) replaces the prior unapproved
+	// draft (the immutable history is the ai_generations ledger). The draft text +
+	// model provenance are bound as parameters (P0-498-7 — model output is never
+	// interpolated into SQL).
+	UpsertBoardNarrativeDraft(ctx context.Context, arg UpsertBoardNarrativeDraftParams) (BoardNarrativeSection, error)
 	// ===== csf_profiles =====
 	// Insert (or no-op update) the single profile per (tenant, framework_version,
 	// kind). Re-creating the same kind returns the existing row (its name/updated
