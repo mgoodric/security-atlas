@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 541 |
+| merged | 542 |
 | in-progress | 1 |
-| ready | 78 |
+| ready | 77 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 446 449 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 691 694 695 696 697 698 699 700 701 702 703
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 446 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 670 676 691 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -474,7 +474,7 @@
 | 446 | Disclosure / breach-notification workflow decision spike + AD... | ready |  |  |  |
 | 447 | PCI DSS v4.0 crosswalk loader (3rd framework; scope-reduction... | merged | #1017 | 2026-06-05 | 69078c86 |
 | 448 | Bulk operations + saved filter-views (operator ergonomics, co... | in-progress |  |  | feat/448-bulk-ops-saved-views |
-| 449 | OPA 1.4 → 1.17 embedded-engine upgrade (13 minors on the au... | ready |  |  |  |
+| 449 | OPA 1.4 → 1.17 embedded-engine upgrade (13 minors on the au... | merged | #1319 | 2026-06-11 | 05bb92a3 |
 | 450 | vitest 4 + @vitest/coverage-v8 4 paired migration | ready |  |  |  |
 | 451 | SLSA provenance + SBOM for binary / CLI / SDK releases | merged | #990 | 2026-06-04 | 750d0eca |
 | 452 | Node version alignment: @types/node + CI + runtime + engines ... | ready |  |  |  |
