@@ -13,14 +13,14 @@
 
 | State | Count |
 | --- | --- |
-| merged | 554 |
+| merged | 555 |
 | in-progress | 1 |
-| ready | 58 |
+| ready | 57 |
 | not-ready | 11 |
 
 ## Ready set
 
-095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 436 440 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
+095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 436 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -465,7 +465,7 @@
 | 437 | Archive `Plans/mockups/` iteration-1 HTML out of the active tree | merged | #980 | 2026-06-04 | 7ce4cc6f |
 | 438 | ISO 27001:2022 crosswalk loader (2nd framework — proves the... | merged | #1011 | 2026-06-04 | af5aec7f |
 | 439 | Evidence-staleness digest + alerting (honest, named-interval) | merged |  | 2026-06-11 | a9ec52b7 |
-| 440 | Board-narrative AI v0 — one numbered section, end-to-end | ready |  |  |  |
+| 440 | Board-narrative AI v0 — one numbered section, end-to-end | merged |  | 2026-06-12 | c9c79891 |
 | 441 | Questionnaire AI-answer suggestion v0 (cited drafts, one-clic... | merged |  | 2026-06-12 | bf191829 |
 | 442 | GCP connector (highest-demand missing cloud) | merged |  | 2026-06-12 | e7befdbf |
 | 443 | Slack connector | merged |  | 2026-06-11 | 8e866181 |
