@@ -273,12 +273,16 @@ func TestDiscoveryDocs(t *testing.T) {
 	if schemas, ok := spc["schemas"].([]string); !ok || len(schemas) != 1 || schemas[0] != SchemaServiceProviderConfig {
 		t.Errorf("SPC schemas wrong: %v", spc["schemas"])
 	}
+	// Slice 733: discovery now advertises BOTH User (508) and Group (733).
 	rts := ResourceTypes("https://host/scim/v2")
-	if len(rts) != 1 || rts[0]["id"] != ResourceTypeUser {
+	if len(rts) != 2 || rts[0]["id"] != ResourceTypeUser || rts[1]["id"] != ResourceTypeGroup {
 		t.Errorf("ResourceTypes wrong: %v", rts)
 	}
+	if rts[1]["endpoint"] != "/Groups" {
+		t.Errorf("Group ResourceType endpoint = %v; want /Groups", rts[1]["endpoint"])
+	}
 	sch := Schemas()
-	if len(sch) != 1 || sch[0]["id"] != SchemaUser {
+	if len(sch) != 2 || sch[0]["id"] != SchemaUser || sch[1]["id"] != SchemaGroup {
 		t.Errorf("Schemas wrong: %v", sch)
 	}
 }

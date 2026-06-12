@@ -449,6 +449,55 @@ func TestDerive_CrossTenantIsolation(t *testing.T) {
 	}
 }
 
+// --- slice 733 AC-1: the OIDC live-login derivation call shape ---
+
+// TestDerive_OIDCLoginLivePath mirrors EXACTLY the call the slice-733 OIDC
+// session-mint path makes: Derive with Source=OIDC + the login's idp_config_id
+// + the VALIDATED groups claim. It proves the live wiring's semantics: a login
+// reconciles origin='group-derived' roles to current group membership while
+// origin='manual' roles are untouched (509 AC-4 preserved at runtime, AC-4).
+func TestDerive_OIDCLoginLivePath(t *testing.T) {
+	requireAdminPool(t)
+	tenant := seedTenant(t, "gr-733-oidc-live")
+	cfg := seedIDPConfig(t, tenant, "okta")
+	seedMapping(t, tenant, cfg, "Engineering", "grc_engineer")
+	r := grouprole.NewResolver(appPool)
+	ctx := tenantCtx(t, tenant)
+	user := uuid.New().String()
+
+	// The user holds 'viewer' MANUALLY (e.g. an admin-assigned role).
+	grantManualRole(t, tenant, user, "viewer")
+
+	// FIRST LOGIN: validated groups claim = ["Engineering"] → derive grc_engineer.
+	if _, err := r.Derive(ctx, grouprole.DeriveInput{
+		UserID: user, IDPConfigID: cfg, Groups: []string{"Engineering"}, Source: grouprole.SourceOIDC,
+	}); err != nil {
+		t.Fatalf("login derive 1: %v", err)
+	}
+	got := rolesFor(t, tenant, user)
+	if got["grc_engineer"] != "group-derived" {
+		t.Fatalf("login did not derive grc_engineer: %v", got)
+	}
+	if got["viewer"] != "manual" {
+		t.Fatalf("manual viewer must be preserved at login: %v", got)
+	}
+
+	// NEXT LOGIN after the user is removed from Engineering (validated claim now
+	// empty): the group-derived grc_engineer revokes; manual viewer survives.
+	if _, err := r.Derive(ctx, grouprole.DeriveInput{
+		UserID: user, IDPConfigID: cfg, Groups: nil, Source: grouprole.SourceOIDC,
+	}); err != nil {
+		t.Fatalf("login derive 2: %v", err)
+	}
+	got = rolesFor(t, tenant, user)
+	if _, still := got["grc_engineer"]; still {
+		t.Fatalf("group-derived role should reconcile away on re-login: %v", got)
+	}
+	if got["viewer"] != "manual" {
+		t.Fatalf("manual viewer must still survive: %v", got)
+	}
+}
+
 // --- P0-509-4: mapping to a non-existent role is rejected ---
 
 func TestValidateMappingRole_RejectsUnknown(t *testing.T) {

@@ -30,6 +30,7 @@ import (
 	auditsink "github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
@@ -676,8 +677,15 @@ func main() {
 				Issuer:   localAuthIssuer,
 			}
 		}
-		srv.AttachAuthHandler(authapi.New(oidcAuth, userStore, sessionStore, secureCookies, localAS))
-		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t)\n",
+		authHandler := authapi.New(oidcAuth, userStore, sessionStore, secureCookies, localAS)
+		// Slice 733 AC-1: wire the slice-509 group-to-role resolver so an OIDC
+		// login reconciles the user's group-derived roles from the validated
+		// groups claim. The resolver is REUSED via oidcGroupDeriver (P0-733-1);
+		// it reads/writes under the request's tenant RLS context (pool is the
+		// RLS app pool).
+		authHandler.AttachGroupDeriver(oidcGroupDeriver{resolver: grouprole.NewResolver(pool)})
+		srv.AttachAuthHandler(authHandler)
+		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t, group_role_derivation=on)\n",
 			secureCookies, localAS != nil)
 
 		// Slice 035: construct the OPA engine + decision audit writer
@@ -1301,6 +1309,33 @@ type localModeIdpResolver struct{}
 
 func (localModeIdpResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (oidc.IdpConfig, error) {
 	return oidc.IdpConfig{}, oidc.ErrUnknownIdp
+}
+
+// oidcGroupDeriver adapts the slice-509 grouprole.Resolver to the
+// authapi.OIDCGroupDeriver surface the OIDC callback calls on login (slice 733
+// AC-1). It is a thin mapping shim: it translates the callback's validated
+// (idpConfigID, userID, groups) into a grouprole.DeriveInput with Source=OIDC.
+// It carries NO mapping/derivation logic — that lives entirely in the resolver
+// (P0-733-1). The resolver fails closed on an unmapped group, holds the
+// last-admin guard, never auto-creates a role, and never touches
+// origin='manual' roles (P0-733-3 / AC-4). Only validated claims reach here
+// because the callback invokes it strictly after ID-token verification
+// (P0-733-2).
+type oidcGroupDeriver struct {
+	resolver *grouprole.Resolver
+}
+
+// DeriveOnLogin reconciles the user's group-derived roles via the slice-509
+// resolver. ctx carries the tenant RLS context the OIDC handler established, so
+// the resolver reads the tenant's mappings + reconciles under RLS (P0-733-4).
+func (d oidcGroupDeriver) DeriveOnLogin(ctx context.Context, idpConfigID uuid.UUID, userID string, groups []string) error {
+	_, err := d.resolver.Derive(ctx, grouprole.DeriveInput{
+		UserID:      userID,
+		IDPConfigID: idpConfigID,
+		Groups:      groups,
+		Source:      grouprole.SourceOIDC,
+	})
+	return err
 }
 
 // runAuthCodeSweeper is the slice-189 sweeper goroutine. Every 5

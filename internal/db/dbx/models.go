@@ -1991,6 +1991,25 @@ type ScimCredential struct {
 	Last4       string             `json:"last4"`
 }
 
+type ScimGroup struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	DisplayName    string             `json:"display_name"`
+	ScimExternalID *string            `json:"scim_external_id"`
+	Active         bool               `json:"active"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ScimGroupMember struct {
+	ID        pgtype.UUID        `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	GroupID   pgtype.UUID        `json:"group_id"`
+	UserID    string             `json:"user_id"`
+	GroupRef  string             `json:"group_ref"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Scope struct {
 	ID                 pgtype.UUID              `json:"id"`
 	TenantID           pgtype.UUID              `json:"tenant_id"`

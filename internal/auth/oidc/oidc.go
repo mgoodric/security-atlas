@@ -174,6 +174,14 @@ type CallbackResult struct {
 	Subject     string
 	Email       string
 	DisplayName string
+	// IDPConfigID is the id of the oidc_idp_configs row this login flowed
+	// through (slice 733). It scopes the slice-509 group-to-role derivation so a
+	// tenant with multiple IdP configs maps each IdP's groups independently
+	// (509 AC-6): the resolver matches mappings with idp_config_id IS NOT
+	// DISTINCT FROM this value. uuid.Nil when the resolver supplied no id (e.g.
+	// the local-mode resolver), in which case derivation matches the
+	// NULL-source (IdP-agnostic) mappings.
+	IDPConfigID uuid.UUID
 	// Groups is the validated `groups` claim from the verified ID token (slice
 	// 509). It is populated ONLY from a token that passed signature + issuer +
 	// audience + nonce verification above, so it is a trusted group set the
@@ -303,6 +311,7 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 		Subject:     idTok.Subject,
 		Email:       claims.Email,
 		DisplayName: name,
+		IDPConfigID: cfg.ID,
 		Groups:      claims.Groups,
 	}, nil
 }

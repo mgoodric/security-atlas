@@ -77,6 +77,7 @@ sql:
       - "migrations/sql/20260612010000_role_scoped_checklist.sql"
       - "migrations/sql/20260612020000_scim_provisioning.sql"
       - "migrations/sql/20260612030000_idp_group_role_mappings.sql"
+      - "migrations/sql/20260612040000_scim_groups.sql"
     queries: "internal/db/queries"
     gen:
       go:

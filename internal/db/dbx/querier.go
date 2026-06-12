@@ -30,6 +30,10 @@ type Querier interface {
 	// statements run inside one tx so the partial unique index never sees
 	// two `activated` rows at once.
 	ActivateFrameworkScope(ctx context.Context, arg ActivateFrameworkScopeParams) (FrameworkScope, error)
+	// ===== scim_group_members edge CRUD =====
+	// Adds a (group, user) membership edge. Idempotent on the unique index: a
+	// duplicate add is a no-op (the SCIM `add members` op is idempotent).
+	AddSCIMGroupMember(ctx context.Context, arg AddSCIMGroupMemberParams) error
 	// Idempotent: ON CONFLICT DO NOTHING because the PK already enforces no
 	// duplicates, so re-adding is a no-op.
 	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
@@ -151,6 +155,8 @@ type Querier interface {
 	CountRequiredRoleUsersForVersion(ctx context.Context, arg CountRequiredRoleUsersForVersionParams) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
+	// Total group count in the tenant (List envelope totalResults).
+	CountSCIMGroups(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountSCIMUsers(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Return the row count for the caller's tenant. Used by the slice 126
@@ -311,6 +317,22 @@ type Querier interface {
 	// DB-side CHECK constraints (slice 019) are defense-in-depth, not the
 	// primary validation path.
 	CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, error)
+	// Slice 733 — SCIM /Groups resource queries.
+	//
+	// Two clusters:
+	//   (1) scim_groups CRUD — the SCIM Group resource (Create/Get/List/Patch/
+	//       Delete per RFC 7644).
+	//   (2) scim_group_members edge CRUD + the resolver-feeding read
+	//       (ListGroupRefsForUser): a membership change feeds the user's FULL
+	//       current validated group set to the slice-509 grouprole.Resolver.Derive
+	//       (AC-3). This file holds NO mapping/derivation logic — that lives in
+	//       slice 509 and is reused, not re-authored (P0-733-1).
+	//
+	// Every query is tenant-scoped in WHERE and runs under app.current_tenant RLS
+	// (invariant #6 / P0-733-4).
+	// ===== scim_groups CRUD =====
+	// Creates a SCIM Group. scim_external_id is NULLABLE (some IdPs omit it).
+	CreateSCIMGroup(ctx context.Context, arg CreateSCIMGroupParams) (ScimGroup, error)
 	// Slice 508: provision a user via SCIM. Sets scim_managed=true and the IdP's
 	// externalId. status + active are kept in lockstep ('active'/true). idp_issuer
 	// / idp_subject are left empty here (SCIM is push-from-IdP, not OIDC login);
@@ -749,6 +771,11 @@ type Querier interface {
 	// enforces the revoked-state check.
 	GetSCIMCredentialByHash(ctx context.Context, tokenHash []byte) (ScimCredential, error)
 	GetSCIMCredentialByID(ctx context.Context, arg GetSCIMCredentialByIDParams) (ScimCredential, error)
+	// Single group by externalId within the tenant (Create reconciliation).
+	GetSCIMGroupByExternalID(ctx context.Context, arg GetSCIMGroupByExternalIDParams) (ScimGroup, error)
+	// Single group by id within the tenant. ErrNoRows when absent (a group in
+	// another tenant reads identically to "not found" — RLS-confined, no oracle).
+	GetSCIMGroupByID(ctx context.Context, arg GetSCIMGroupByIDParams) (ScimGroup, error)
 	// Case-insensitive email lookup within a tenant. SCIM userName maps to email
 	// (decisions D1); used to reconcile a SCIM Create against an existing row.
 	GetSCIMUserByEmail(ctx context.Context, arg GetSCIMUserByEmailParams) (User, error)
@@ -1767,6 +1794,11 @@ type Querier interface {
 	// compute grants + revokes. Manual roles (origin='manual') are intentionally
 	// excluded — they are never touched by re-derivation (AC-4).
 	ListGroupDerivedRoles(ctx context.Context, arg ListGroupDerivedRolesParams) ([]string, error)
+	// The DISTINCT group_refs the user is currently a member of across ALL active
+	// groups in the tenant. This is the resolver input on a membership change: the
+	// user's FULL current validated group set (AC-3). Inactive (soft-disabled)
+	// groups contribute nothing — a deleted group is no longer a membership source.
+	ListGroupRefsForUser(ctx context.Context, arg ListGroupRefsForUserParams) ([]string, error)
 	// The group-derived role-change history for a user in the tenant (admin read).
 	ListGroupRoleAuditForUser(ctx context.Context, arg ListGroupRoleAuditForUserParams) ([]GroupRoleAuditLog, error)
 	// All mappings for a tenant, ordered for stable display. Admin CRUD list (AC-8).
@@ -2145,6 +2177,12 @@ type Querier interface {
 	ListSCIMAuditLogByTenant(ctx context.Context, arg ListSCIMAuditLogByTenantParams) ([]ScimAuditLog, error)
 	// Active SCIM credentials for a tenant (excludes revoked).
 	ListSCIMCredentialsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ScimCredential, error)
+	// The member user ids of a group (the SCIM Group resource's `members` array).
+	ListSCIMGroupMembers(ctx context.Context, arg ListSCIMGroupMembersParams) ([]string, error)
+	// A page of tenant groups (List, no filter). RLS confines to the tenant.
+	ListSCIMGroups(ctx context.Context, arg ListSCIMGroupsParams) ([]ScimGroup, error)
+	// Groups matching `filter=displayName eq "x"` (the List filter minimum).
+	ListSCIMGroupsByDisplayName(ctx context.Context, arg ListSCIMGroupsByDisplayNameParams) ([]ScimGroup, error)
 	// Tenant-scoped user list for SCIM List (no filter). RLS confines to the
 	// credential's tenant (P0-508-4). Ordered for stable pagination.
 	ListSCIMUsers(ctx context.Context, arg ListSCIMUsersParams) ([]User, error)
@@ -2496,6 +2534,14 @@ type Querier interface {
 	// explicitly so the publish writes the final, operator-reviewed snapshot in
 	// the same UPDATE that flips the status — one atomic transition.
 	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
+	// Clears every member of a group (Replace `members`, or Delete soft-disable).
+	// Returns affected-row count.
+	RemoveAllSCIMGroupMembers(ctx context.Context, arg RemoveAllSCIMGroupMembersParams) (int64, error)
+	// Removes a single (group, user) membership edge. Returns affected-row count.
+	RemoveSCIMGroupMember(ctx context.Context, arg RemoveSCIMGroupMemberParams) (int64, error)
+	// Overwrites the group's display name (Patch/Replace of displayName). Bumps
+	// updated_at.
+	ReplaceSCIMGroupDisplayName(ctx context.Context, arg ReplaceSCIMGroupDisplayNameParams) (ScimGroup, error)
 	// SCIM Replace (PUT) — overwrites the mutable SCIM-mapped attributes:
 	// display_name, active (and the mirrored status), email. external_id and
 	// roles are NOT touched here (P0-508-3: SCIM never assigns roles).
@@ -2595,6 +2641,8 @@ type Querier interface {
 	// query path then enforces `observed_at <= populations.frozen_at` on
 	// subsequent draws.
 	SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFrozenAtParams) error
+	// Soft-disables / re-enables a group (Delete = active=false). Bumps updated_at.
+	SetSCIMGroupActive(ctx context.Context, arg SetSCIMGroupActiveParams) (ScimGroup, error)
 	// SCIM Patch `active` flip (AC-4) — the deprovision/reprovision signal. Keeps
 	// status in lockstep with the boolean. Never touches roles.
 	SetSCIMUserActive(ctx context.Context, arg SetSCIMUserActiveParams) (User, error)
