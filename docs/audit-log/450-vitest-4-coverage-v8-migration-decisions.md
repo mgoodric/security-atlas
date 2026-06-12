@@ -156,3 +156,63 @@ eslint warnings in `web/scripts/capture-readme-screenshots.ts` are untouched
   (D3) the gate exits **0 with 0 floor breaches** against real coverage-v8-4
   numbers. (Pre-re-baseline it fired 68 breaches — the AST-remapper ruler change
   — which is exactly the data D3 re-seeded.)
+
+## D6 — second CI regression: self-host web image build (decouple test config from prod typecheck)
+
+After the floor re-baseline (D3) went green, CI surfaced a SECOND, distinct,
+non-flake failure (reproduced on rerun): the `Self-host bundle · end-to-end`
+job (all 4 matrix variants) failed because the self-host **web Docker image
+build** (`deploy/docker/web.Dockerfile`, which runs `npm run build` = `next
+build`) failed with:
+
+```
+./vitest.config.ts:58:30
+Type error: Cannot find module 'vitest/config' or its corresponding type declarations.
+Next.js build worker exited with code: 1
+```
+
+**Root cause.** `next build` runs the TypeScript checker over `tsconfig.json`'s
+`include` set (`**/*.ts`), which matched `vitest.config.ts` (and all 184
+`**/*.test.ts`). The bare `import { defineConfig } from "vitest/config"` (and
+the `import … from "vitest"` in every test) resolved in the production build
+context under **vitest 2** but does **not** under **vitest 4** — vitest 4
+changed the `vitest` / `vitest/config` package export + type-declaration
+structure. This is a real slice-450 regression (it passed on `main` at vitest
+2). It is NOT a Node-version issue: the container is already `node:22-alpine`
+(satisfies vitest 4's `>=22.12.0`), so there is **no coupling to slice 452**.
+
+**Fix (the correct separation — `next build` should not typecheck test infra).**
+
+1. `web/tsconfig.json` `exclude` gains `"vitest.config.ts"` and `"**/*.test.ts"`
+   (alongside the existing `"node_modules"`, `"e2e"`). The prod build typecheck
+   graph no longer contains any test-tooling file, so the `vitest`-type
+   resolution failure cannot occur in `next build`. (Excluding only
+   `vitest.config.ts` would have surfaced the identical error on the first
+   `*.test.ts` tsc reached, since all 184 tests `import … from "vitest"` — so
+   both the config and the test glob are excluded.)
+2. To NOT silently drop type-safety on the test files, a dedicated
+   **`web/tsconfig.test.json`** (`extends: ./tsconfig.json`, re-includes
+   `vitest.config.ts` + `**/*.test.ts`) is added, and the `typecheck` script
+   becomes `tsc --noEmit && tsc --noEmit -p tsconfig.test.json`. The test files
+   are STILL fully type-checked (the second invocation, where devDeps are
+   present so the vitest types resolve) — proven by injecting a deliberate
+   `TS2322` into a test and confirming the test-config tsc catches it.
+3. vitest itself never reads either tsconfig (it transpiles via esbuild), so the
+   split does not touch the runner — `Frontend · vitest` + the coverage gate are
+   unaffected.
+
+**Verification (reproduced-before / proven-after).**
+
+- BEFORE fix: `docker build -f deploy/docker/web.Dockerfile -t sa-web-test .`
+  FAILED at `next build` with the exact `Cannot find module 'vitest/config'`
+  error at `./vitest.config.ts:58:30`.
+- AFTER fix: the same build **succeeds** — `✓ Compiled successfully` and the
+  image is produced.
+- `npm run typecheck -w web` (both configs) — exit 0; the test files are
+  type-checked via the test config (injected-error proof).
+- `npm run test -w web` — 184 files / 1760 tests pass.
+- `npm run test:coverage -w web` — exit 0, 0 floor breaches (D3 re-baseline
+  intact).
+
+This is the second distinct sequential CI regression of the bump (D3 was the
+first); each fixed is expected, not a repeat.
