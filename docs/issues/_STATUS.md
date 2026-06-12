@@ -13,8 +13,7 @@
 
 | State | Count |
 | --- | --- |
-| merged | 558 |
-| in-progress | 1 |
+| merged | 559 |
 | ready | 55 |
 | not-ready | 11 |
 
@@ -26,7 +25,6 @@
 
 | Slice | State | PR / Branch |
 | --- | --- | --- |
-| 448 | in-progress | feat/448-bulk-ops-saved-views |
 
 ## All slices
 
@@ -473,7 +471,7 @@
 | 445 | Email/SMTP notification channel (delivery substrate) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 446 | Disclosure / breach-notification workflow decision spike + AD... | ready |  |  |  |
 | 447 | PCI DSS v4.0 crosswalk loader (3rd framework; scope-reduction... | merged | #1017 | 2026-06-05 | 69078c86 |
-| 448 | Bulk operations + saved filter-views (operator ergonomics, co... | in-progress |  |  | feat/448-bulk-ops-saved-views |
+| 448 | Bulk operations + saved filter-views (operator ergonomics, co... | merged |  |  | frontend shell (controls multi-select + saved filter-views) merged via PR #1012 (2026-06-04); generator missed the (#448) paren-convention merge + a stale feat/448 branch showed in-progress. 468 (server-backed completion) is the remaining spillover. |
 | 449 | OPA 1.4 → 1.17 embedded-engine upgrade (13 minors on the au... | merged | #1319 | 2026-06-11 | 05bb92a3 |
 | 450 | vitest 4 + @vitest/coverage-v8 4 paired migration | merged |  | 2026-06-12 | 8589f281 |
 | 451 | SLSA provenance + SBOM for binary / CLI / SDK releases | merged | #990 | 2026-06-04 | 750d0eca |
