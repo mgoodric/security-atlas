@@ -7,20 +7,20 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-11 · **Total slices:** 623
+**Generated:** 2026-06-12 · **Total slices:** 623
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 545 |
+| merged | 546 |
 | in-progress | 1 |
-| ready | 75 |
+| ready | 74 |
 | not-ready | 2 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 414 415 418 419 420 434 435 436 440 441 442 446 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
+095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 441 442 446 450 452 453 468 471 483 484 499 500 501 502 504 505 506 507 508 509 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
 
 ## In-flight
 
@@ -439,7 +439,7 @@
 | 411 | Contract-tier rollout: controls-detail + audit-workspace routes | merged | #958 | 2026-06-03 | cfaa30a9 |
 | 412 | Contract-tier rollout: controls-detail + audit-workspace LONG... | merged |  | 2026-06-11 | 74013361 |
 | 413 | OSCAL bundle signing Phase 1: cosign-kms + retained embedded-... | merged | #961 | 2026-06-03 | f777ff07 |
-| 414 | OSCAL bundle signing Phase 2: cosign-keyless + Fulcio + Rekor... | ready |  |  |  |
+| 414 | OSCAL bundle signing Phase 2: cosign-keyless + Fulcio + Rekor... | merged |  | 2026-06-12 | 89cca3e1 |
 | 415 | Adopt GitHub merge queue to kill the update-branch re-CI cascade | ready |  |  |  |
 | 416 | Pin golangci-lint version (drop `version: latest`) | merged | #973 | 2026-06-03 | baf06f64 |
 | 417 | Shard the `-p 1` integration job (Phase A serial / Phase B ma... | merged | #417 | 2026-06-04 | e662bed4 |
