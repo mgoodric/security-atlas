@@ -4,7 +4,7 @@
   "$deviations_from_slice_050_AC11": {
     "required_approving_review_count": "Slice 050 AC-11 originally required ≥1 approving review. Dropped to 0 (required_pull_request_reviews: null) post-batch-13 because the maintainer is solo — no second reviewer exists. The audit trail still rides on PR + CI + squash-merge for every change. Re-evaluate when the contributor base grows past ~3 active committers. Tracked in docs/RELEASE_READINESS.md §10.",
     "restrictions": "Slice 050 AC-11 specified push restrictions to mgoodric + release-please. GitHub only supports restrictions on organization repos; this is a personal user repo, so the field is null. If the project migrates to an org account later, re-add the block.",
-    "required_status_checks.contexts": "Slice 050 AC-11 enumerated 10 checks including some speculative names (Frontend · build + lint + test, Python · lint, Lint · pre-commit, codecov/project, DCO). Updated to actual workflow names. codecov/project and DCO removed pending the maintainer wiring those services — tracked in docs/RELEASE_READINESS.md §10. Analyze (python) removed because the repo currently has zero Python source (oscal-bridge hasn't shipped yet); re-add when the slice that lands oscal-bridge merges."
+    "required_status_checks.contexts": "Slice 050 AC-11 enumerated 10 checks including some speculative names (Frontend · build + lint + test, Python · lint, Lint · pre-commit, codecov/project, DCO). Updated to actual workflow names. codecov/project removed pending the maintainer wiring that service — tracked in docs/RELEASE_READINESS.md §10. DCO added to live required-checks 2026-06-13 (the DCO app is now wired; dependabot already signs off as dependabot[bot]; CLAUDE.md + CONTRIBUTING.md §DCO document the human sign-off requirement). NOTE (2026-06-13): live branch-protection had drifted to only 11 contexts — the file-declared 'Go · sqlc generate diff' (slice 159), 'Frontend · Playwright e2e' (slice 116), and 'openapi-drift-check' (slice 140) were never pushed to live (apply-branch-protection.sh not run post-merge), so those three were NOT actually enforcing; reconciling file<->live is a follow-up. Analyze (python) removed because the repo currently has zero Python source (oscal-bridge hasn't shipped yet); re-add when the slice that lands oscal-bridge merges."
   },
 
   "$additions_from_slice_128": {
@@ -45,7 +45,8 @@
       "Analyze (javascript-typescript)",
       "GitGuardian Security Checks",
       "actions-pin-check",
-      "openapi-drift-check"
+      "openapi-drift-check",
+      "DCO"
     ]
   },
 

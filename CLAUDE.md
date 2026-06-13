@@ -2,7 +2,7 @@
 
 > Read this first when starting any session in this repo.
 
-**Status:** v1 backlog fully merged on `main` (69/69 v1 slices; v2 follow-ons in progress). The system of record for design intent is still the canvas under `Plans/`; the system of record for implementation is `main` plus the merge trail in `docs/issues/_STATUS.md`. `_STATUS.md` is a **generated** file (`scripts/gen-status.sh` / `just status`), **auto-refreshed by CI** on every push to `main` (the `Slice status · auto-regenerate` job — slice 741), never reconciled by hand or via a per-merge `chore(status)` PR.
+**Status:** v1 backlog fully merged on `main` (69/69 v1 slices; v2 follow-ons in progress). The system of record for design intent is still the canvas under `Plans/`; the system of record for implementation is `main` plus the merge trail in `docs/issues/_STATUS.md`. `_STATUS.md` is a **generated** file (`scripts/gen-status.sh` / `just status`); it is no longer reconciled via a per-merge `chore(status)` PR (slice 741). The in-repo copy is **regenerated on demand** (`just status`) and **may lag** — it is non-gating. A CI auto-push of the regenerated file is NOT active: on this personal repo a `GITHUB_TOKEN` cannot push to the protected `main` (see slice 744). Treat git history + `_events.jsonl` as ground truth; run `just status` when you need a fresh browsable copy.
 
 ---
 
