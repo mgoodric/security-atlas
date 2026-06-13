@@ -7,19 +7,19 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-12 · **Total slices:** 625
+**Generated:** 2026-06-12 · **Total slices:** 627
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 562 |
-| ready | 52 |
+| merged | 563 |
+| ready | 53 |
 | not-ready | 11 |
 
 ## Ready set
 
-095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 435 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703
+095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703 741 742
 
 ## In-flight
 
@@ -458,7 +458,7 @@
 | 432 | Operator backup/restore + upgrade runbooks, surfaced in the d... | merged | #1001 | 2026-06-04 | 9537f74c |
 | 433 | gitignore the `.understand-anything/` local-analysis cache | merged | #978 | 2026-06-03 | 1508501c |
 | 434 | One-time audit + reconcile of the stale `not-ready` `_STATUS.... | merged |  |  | status-event hygiene: emitted not-ready events for the 9 false-ready rows (112-115/118/134/228/230/232); generated _STATUS now matches the files. Done inline per the rescope. |
-| 435 | Shared integration-test DB/tenant harness package (`internal/... | ready |  |  |  |
+| 435 | Shared integration-test DB/tenant harness package (`internal/... | merged |  | 2026-06-12 | 986c95fb |
 | 436 | Split the three oversized hand-written god-files | merged |  | 2026-06-12 | 94795ab2 |
 | 437 | Archive `Plans/mockups/` iteration-1 HTML out of the active tree | merged | #980 | 2026-06-04 | 7ce4cc6f |
 | 438 | ISO 27001:2022 crosswalk loader (2nd framework — proves the... | merged | #1011 | 2026-06-04 | af5aec7f |
@@ -655,3 +655,5 @@
 | 732 | Calendar/dashboard exception event labels show the raw contro... | merged |  | 2026-06-11 | 9159b6a5 |
 | 733 | Live group-role derivation wiring + SCIM /Groups REST resource | merged |  | 2026-06-12 | 5591029b |
 | 740 | vitest 4 coverage-floor re-baseline (AST-aware v8 provider) | merged |  |  | floor re-baseline folded into slice 450 (8589f281) per maintainer approval 2026-06-12; the 68 re-baselined web floors are on main via 450; standalone slice superseded, dataset retained in the doc |
+| 741 | Auto-regenerate `_STATUS.md` and eliminate the per-merge reco... | ready |  |  |  |
+| 742 | Migrate remaining integration suites to `internal/dbtest` (dr... | ready |  |  |  |
