@@ -73,4 +73,28 @@ func (s *Server) registerControls(root *chi.Mux) {
 		root.Get("/v1/controls/{id}/attest-form", attestH.AttestForm)
 		root.Post("/v1/controls/{id}/attestations", attestH.Submit)
 	}
+
+	// Slice 468: server-backed control owner-assignment (single-item +
+	// bulk) + per-user saved filter-views. The single-item path is the
+	// prerequisite the bulk path reuses as its per-item check (AC-467-1);
+	// the bulk path is the authz-amplifier (AC-11). Both go through the
+	// shared assignOwnerInTx so they cannot drift (P0-467-1). The
+	// owner-assign routes resolve to action="write", resource="controls"
+	// at the authz middleware — admitted for admin / grc_engineer /
+	// control_owner, denied for viewer / auditor — identically to every
+	// other control write. The ":bulk-assign-owner" colon-suffix is NOT a
+	// transition verb, so the bulk route gets the same write-on-controls
+	// decision the single route does (the role gate is byte-identical).
+	ownerAssignH := controlsapi.NewOwnerAssignHandler(s.dbPool)
+	root.Post("/v1/controls/{id}/owner", ownerAssignH.AssignOwner)
+	root.Post("/v1/controls:bulk-assign-owner", ownerAssignH.BulkAssignOwner)
+
+	// Saved filter-views — a per-user self-service surface (resource type
+	// "saved-views" at the authz layer, admitted for any authenticated
+	// role via defaults.rego; per-user isolation enforced at the query
+	// layer, tenant isolation via RLS — P0-448-5).
+	savedViewsH := controlsapi.NewSavedViewsHandler(s.dbPool)
+	root.Get("/v1/saved-views", savedViewsH.List)
+	root.Post("/v1/saved-views", savedViewsH.Create)
+	root.Delete("/v1/saved-views/{id}", savedViewsH.Delete)
 }

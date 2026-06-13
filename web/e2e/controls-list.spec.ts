@@ -303,21 +303,27 @@ test.describe("/controls list view", () => {
     //    await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
 
-  test("slice 448 AC-2: the bulk-assign action is disclosed as future-state (no vapor POST)", async () => {
+  // Slice 468 — the bulk-assign action is now a WORKING trigger (the
+  // slice-448 future-state disclosure was replaced once the server-backed
+  // endpoint landed). Assigning the selected set to the current user round-
+  // trips to `/v1/controls:bulk-assign-owner` (the upstream re-checks role +
+  // tenant PER ITEM — AC-11). The seeded demo user is the assign target.
+  test("slice 468 AC-2: bulk-assign-owner is a working trigger that assigns the selection to me", async () => {
     //    await page.goto("/controls");
     //    await page.getByTestId("controls-row-select").first().click();
-    //    const disclosure = page.getByTestId("controls-bulk-assign-future");
-    //    await expect(disclosure).toBeVisible();
-    //    // Load-bearing substring (pinned so a copy rewrite is one place).
-    //    const text = (await disclosure.textContent())?.toLowerCase() ?? "";
+    //    const trigger = page.getByTestId("controls-bulk-assign-owner");
+    //    await expect(trigger).toBeVisible();
+    //    // It IS a real <button> now (slice 468 replaced the disclosure span).
+    //    const text = (await trigger.textContent())?.toLowerCase() ?? "";
     //    expect(text).toContain("bulk assign-owner");
-    //    const title = await disclosure.getAttribute("title");
-    //    expect(title?.toLowerCase()).toContain("bulk assign-owner");
-    //    // It is NOT a <button> firing a mutation — the disclosure IS the
-    //    // affordance (slice 225 label-honesty pattern).
+    //    await trigger.click();
+    //    // The success message confirms the round-trip (seeded user is the
+    //    // owner target; the upstream re-checks per item).
     //    await expect(
-    //      page.locator("button", { hasText: /^Bulk assign-owner/ }),
-    //    ).toHaveCount(0);
+    //      page.getByTestId("controls-bulk-assign-message"),
+    //    ).toContainText(/assigned \d+ control/i);
+    //    // Selection clears on success.
+    //    await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
 
   test("slice 448 AC-3: the selection cap is communicated in the selection bar", async () => {

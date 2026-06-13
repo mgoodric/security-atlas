@@ -79,6 +79,7 @@ sql:
       - "migrations/sql/20260612030000_idp_group_role_mappings.sql"
       - "migrations/sql/20260612040000_scim_groups.sql"
       - "migrations/sql/20260612050000_board_narrative_ai.sql"
+      - "migrations/sql/20260612060000_control_owner_assign_saved_views.sql"
     queries: "internal/db/queries"
     gen:
       go:
