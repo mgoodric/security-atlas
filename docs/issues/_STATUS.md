@@ -7,19 +7,19 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-12 · **Total slices:** 627
+**Generated:** 2026-06-12 · **Total slices:** 628
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 563 |
+| merged | 564 |
 | ready | 53 |
 | not-ready | 11 |
 
 ## Ready set
 
-095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703 741 742
+095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703 741 742 743
 
 ## In-flight
 
@@ -491,7 +491,7 @@
 | 465 | `TRUST_FORWARDED_HEADERS` is server-read but not plumbed thro... | merged | #1004 | 2026-06-04 | 7b54bec7 |
 | 466 | `TRUSTED_PROXY_CIDRS` allowlist as the structural fix for X-F... | merged | #1016 | 2026-06-04 | 4d54e0e8 |
 | 467 | ISO 27001:2022 full Annex A coverage completion | merged |  | 2026-06-11 | 594c4696 |
-| 468 | Server-backed bulk-assign-owner + saved filter-views (controls) | ready |  |  |  |
+| 468 | Server-backed bulk-assign-owner + saved filter-views (controls) | merged |  | 2026-06-12 | 52665a3a |
 | 469 | Sweep `web/app/**` stale `Plans/mockups/` citations to the ar... | merged | #1015 | 2026-06-04 | cbd26d51 |
 | 470 | header-overwriting reverse-proxy container in the e2e seed ha... | merged | #1021 | 2026-06-06 | 4c5496df |
 | 471 | Role-scoped control-implementation checklist generator v0 (ci... | merged |  | 2026-06-12 | 9c500311 |
@@ -657,3 +657,4 @@
 | 740 | vitest 4 coverage-floor re-baseline (AST-aware v8 provider) | merged |  |  | floor re-baseline folded into slice 450 (8589f281) per maintainer approval 2026-06-12; the 68 re-baselined web floors are on main via 450; standalone slice superseded, dataset retained in the doc |
 | 741 | Auto-regenerate `_STATUS.md` and eliminate the per-merge reco... | ready |  |  |  |
 | 742 | Migrate remaining integration suites to `internal/dbtest` (dr... | ready |  |  |  |
+| 743 | Controls-list Playwright e2e — seed fixture + un-comment sl... | ready |  |  |  |
