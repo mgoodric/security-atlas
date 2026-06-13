@@ -88,6 +88,7 @@ tags:
   - name: policies
   - name: questionnaires
   - name: risks
+  - name: saved-views
   - name: schemas
   - name: scopes
   - name: search
@@ -1772,6 +1773,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/owner:
+    post:
+      summary: POST /v1/controls/{id}/owner
+      tags: [controls]
+      operationId: post-v1-controls-id-owner
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/policies:
     get:
       summary: GET /v1/controls/{id}/policies
@@ -1825,6 +1846,20 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls:bulk-assign-owner:
+    post:
+      summary: POST /v1/controls:bulk-assign-owner
+      tags: [controls]
+      operationId: post-v1-controls_bulk-assign-owner
+      security:
+        - bearer: []
       responses:
         default:
           description: Default response envelope.
@@ -3945,6 +3980,53 @@ paths:
       summary: POST /v1/samples/{id}/annotations
       tags: [audit-samples]
       operationId: post-v1-samples-id-annotations
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/saved-views:
+    get:
+      summary: GET /v1/saved-views
+      tags: [saved-views]
+      operationId: get-v1-saved-views
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/saved-views
+      tags: [saved-views]
+      operationId: post-v1-saved-views
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/saved-views/{id}:
+    delete:
+      summary: DELETE /v1/saved-views/{id}
+      tags: [saved-views]
+      operationId: delete-v1-saved-views-id
       security:
         - bearer: []
       parameters:

@@ -39,7 +39,7 @@
 //   - P0-A4: real placeholder data — no Lorem Ipsum.
 //   - P0-A5: neutral test tokens only in tests.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
@@ -65,6 +65,15 @@ import {
   type ControlsListResponse,
   type ScopeCellsListResponse,
 } from "@/lib/api/controls-list";
+import {
+  createSavedView,
+  deleteSavedView,
+  listSavedViews,
+  type ServerSavedView,
+} from "@/lib/api/saved-views";
+import { bulkAssignOwner } from "@/lib/api/controls-bulk";
+import { getMe } from "@/lib/api/me";
+import { APIError } from "@/lib/api/base";
 import {
   CONTROLS_EXPORT_FORMATS,
   CONTROLS_EXPORT_FORMAT_LABELS,
@@ -102,11 +111,9 @@ import {
   toggleSelection,
 } from "./selection";
 import {
-  addView,
   findView,
-  readViews,
-  removeView,
-  writeViews,
+  migrateLocalViewsToServer,
+  sanitizeFilters,
   type SavedView,
 } from "./saved-views";
 
@@ -171,6 +178,26 @@ const FRAMEWORK_OPTIONS: { value: string; label: string }[] = [
   { value: "hipaa", label: "HIPAA" },
   { value: "gdpr", label: "GDPR" },
 ];
+
+// Slice 468 — convert a server saved-view (flat string-map filters) to the
+// page's typed SavedView. sanitizeFilters narrows the map to the slice-224
+// ControlFilters shape (unknown keys dropped, missing keys -> ALL) so a row
+// hand-edited or written under a future key-set degrades gracefully.
+function toSavedView(v: ServerSavedView): SavedView {
+  return { id: v.id, name: v.name, filters: sanitizeFilters(v.filters) };
+}
+
+// serializeFilters projects the typed ControlFilters to the flat string map
+// the server persists, dropping ALL-valued (inactive) keys so the stored
+// payload is just the active criteria (matches the server's own
+// sanitizeControlFilters allow-list + empty-value drop).
+function serializeFilters(filters: ControlFilters): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of FILTER_KEYS) {
+    if (filters[k] !== ALL) out[k] = filters[k];
+  }
+  return out;
+}
 
 function ControlsPageInner() {
   const router = useRouter();
@@ -353,28 +380,90 @@ function ControlsPageInner() {
     setSelected(new Set<string>());
   }, []);
 
-  // Slice 448 — saved filter-views. Persisted client-side per user
-  // (decisions log D1). Hydrated from localStorage on mount; the page
-  // is the only place that touches `window` (the module is pure).
-  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
-  const [activeViewId, setActiveViewId] = useState<string>("");
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    // Post-mount hydration from localStorage. Reading in an effect (not
-    // a lazy initializer) keeps the server-render + first client-render
-    // deterministic (empty list) so there is no hydration mismatch; the
-    // browser-only store is read after mount. Same disciplined disable
-    // as the slice 170 theme hydration (settings/page.tsx line 838).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSavedViews(readViews(window.localStorage));
-  }, []);
+  // Slice 468 — WORKING bulk-assign-owner action. v1 assigns the selected
+  // set to the CURRENT USER ("assign to me" — the dominant triage case the
+  // slice-448 narrative names; a richer assign-to-any-user picker is a
+  // follow-on, decisions log 468 D4). The owner id is resolved from
+  // `/v1/me`; the upstream re-checks role + tenant PER ITEM (AC-11) and
+  // caps the set server-side. On success the selection clears; the message
+  // surfaces inline.
+  const [assignMessage, setAssignMessage] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
+  const bulkAssignMutation = useMutation({
+    mutationFn: async (controlIds: string[]) => {
+      const me = await getMe();
+      return bulkAssignOwner(controlIds, me.user_id);
+    },
+    onSuccess: (res) => {
+      setAssignMessage({
+        kind: "ok",
+        text: `Assigned ${res.assigned} control${
+          res.assigned === 1 ? "" : "s"
+        } to you.`,
+      });
+      setSelected(new Set<string>());
+    },
+    onError: (err) => {
+      const text =
+        err instanceof APIError
+          ? err.message
+          : "Could not assign the selected controls. Try again.";
+      setAssignMessage({ kind: "error", text });
+    },
+  });
+  const onAssignToMe = useCallback(() => {
+    setAssignMessage(null);
+    bulkAssignMutation.mutate(Array.from(selected));
+  }, [bulkAssignMutation, selected]);
 
-  const persistViews = useCallback((next: SavedView[]) => {
-    setSavedViews(next);
-    if (typeof window !== "undefined") {
-      writeViews(window.localStorage, next);
-    }
-  }, []);
+  // Slice 468 — saved filter-views are now SERVER-BACKED (was client-side
+  // localStorage in slice 448). Persistence moved to the (tenant, user)-
+  // scoped `/v1/saved-views` store via the BFF; the SavedViewStore seam
+  // slice 448 built made this a one-place swap. The server returns a flat
+  // filter map; `toSavedView` narrows it back to the typed ControlFilters
+  // via the slice-448 `sanitizeFilters` (defense-in-depth on read).
+  const queryClient = useQueryClient();
+  const [activeViewId, setActiveViewId] = useState<string>("");
+
+  const savedViewsQ = useQuery<SavedView[]>({
+    queryKey: ["saved-views", "controls"],
+    queryFn: async () => {
+      // AC-467-3 — one-time migration of any views a user saved CLIENT-SIDE
+      // during the slice-448 interim. On first server-backed load we upload
+      // each local view (best-effort; duplicate-name 409s are swallowed),
+      // then clear the localStorage key so the migration runs once. The
+      // server is the source of truth thereafter (decisions log 468 D5).
+      if (typeof window !== "undefined") {
+        await migrateLocalViewsToServer(window.localStorage, createSavedView);
+      }
+      const server = await listSavedViews();
+      return server.map(toSavedView);
+    },
+  });
+  const savedViews = useMemo(() => savedViewsQ.data ?? [], [savedViewsQ.data]);
+
+  const saveViewMutation = useMutation({
+    mutationFn: (name: string) =>
+      createSavedView(name, serializeFilters(filters)),
+    onSuccess: (created) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["saved-views", "controls"],
+      });
+      setActiveViewId(created.id);
+    },
+  });
+
+  const deleteViewMutation = useMutation({
+    mutationFn: (id: string) => deleteSavedView(id),
+    onSuccess: (_void, id) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["saved-views", "controls"],
+      });
+      if (activeViewId === id) setActiveViewId("");
+    },
+  });
 
   // Apply a saved view's filter state to the URL (the URL is the source
   // of truth for filters — slice 224/227). Drops the page param so the
@@ -401,34 +490,35 @@ function ControlsPageInner() {
   );
 
   const onSaveView = useCallback(
-    (name: string): { ok: true } | { ok: false; message: string } => {
-      const id =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `view-${Date.now()}`;
-      const result = addView(savedViews, id, name, filters);
-      if (!result.ok) {
+    async (
+      name: string,
+    ): Promise<{ ok: true } | { ok: false; message: string }> => {
+      const trimmed = name.trim();
+      if (trimmed.length === 0) {
+        return { ok: false, message: "Enter a name for this view." };
+      }
+      try {
+        await saveViewMutation.mutateAsync(trimmed);
+        return { ok: true };
+      } catch (err) {
+        // Map the upstream status to the slice-448 inline messages.
         const message =
-          result.reason === "empty-name"
-            ? "Enter a name for this view."
-            : result.reason === "duplicate-name"
-              ? "A view with that name already exists."
-              : "Saved-view limit reached — delete one before saving another.";
+          err instanceof APIError && err.status === 409
+            ? "A view with that name already exists."
+            : err instanceof APIError && err.status === 422
+              ? "Saved-view limit reached — delete one before saving another."
+              : "Could not save the view. Try again.";
         return { ok: false, message };
       }
-      persistViews(result.views);
-      setActiveViewId(id);
-      return { ok: true };
     },
-    [savedViews, filters, persistViews],
+    [saveViewMutation],
   );
 
   const onDeleteView = useCallback(
     (id: string) => {
-      persistViews(removeView(savedViews, id));
-      if (activeViewId === id) setActiveViewId("");
+      deleteViewMutation.mutate(id);
     },
-    [savedViews, activeViewId, persistViews],
+    [deleteViewMutation],
   );
 
   const familyOptions: { value: string; label: string }[] = useMemo(() => {
@@ -818,6 +908,9 @@ function ControlsPageInner() {
           selectedCount={selected.size}
           overCap={selectionOverCap}
           onClear={onClearSelection}
+          onAssignToMe={onAssignToMe}
+          assigning={bulkAssignMutation.isPending}
+          assignMessage={assignMessage}
         />
       ) : null}
       {cellsCapped ? (

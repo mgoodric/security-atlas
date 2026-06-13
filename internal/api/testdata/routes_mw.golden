@@ -10,6 +10,7 @@ DELETE /v1/me/sessions/{id} 8
 DELETE /v1/org_units/{id} 8
 DELETE /v1/risks/{id} 8
 DELETE /v1/risks/{id}/themes/{theme} 8
+DELETE /v1/saved-views/{id} 8
 DELETE /v1/vendors/{id} 8
 GET /.well-known/jwks.json 8
 GET /.well-known/openid-configuration 8
@@ -145,6 +146,7 @@ GET /v1/risks/{id} 8
 GET /v1/risks/{id}/aggregation 8
 GET /v1/samples/{id} 8
 GET /v1/samples/{id}/annotations 8
+GET /v1/saved-views 8
 GET /v1/scopes/cells 8
 GET /v1/scopes/dimensions 8
 GET /v1/search 8
@@ -224,6 +226,8 @@ POST /v1/calendar/subscription 8
 POST /v1/controls/checklist/sections/{id}:approve 8
 POST /v1/controls/checklist:generate 8
 POST /v1/controls/{id}/attestations 8
+POST /v1/controls/{id}/owner 8
+POST /v1/controls:bulk-assign-owner 8
 POST /v1/controls:upload-bundle 8
 POST /v1/decisions 8
 POST /v1/decisions/{id}/links/{kind} 8
@@ -255,6 +259,7 @@ POST /v1/risks/{id}/controls 8
 POST /v1/risks/{id}/themes 8
 POST /v1/samples 8
 POST /v1/samples/{id}/annotations 8
+POST /v1/saved-views 8
 POST /v1/scopes/cells 8
 POST /v1/test/issue-jwt 8
 POST /v1/vendors 8

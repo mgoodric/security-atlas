@@ -1229,6 +1229,25 @@ type ControlEvaluation struct {
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 }
 
+type ControlOwnerAssignment struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	ControlID   pgtype.UUID        `json:"control_id"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
+	AssignedBy  pgtype.UUID        `json:"assigned_by"`
+	AssignedAt  pgtype.Timestamptz `json:"assigned_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ControlOwnerAssignmentAuditLog struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
+	ActorUserID pgtype.UUID        `json:"actor_user_id"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
+	ControlIds  []pgtype.UUID      `json:"control_ids"`
+	IsBulk      bool               `json:"is_bulk"`
+}
+
 type CsfAssessmentAudit struct {
 	ID                 pgtype.UUID        `json:"id"`
 	TenantID           pgtype.UUID        `json:"tenant_id"`
@@ -1976,6 +1995,17 @@ type SampleEvidence struct {
 	TenantID         pgtype.UUID `json:"tenant_id"`
 	EvidenceRecordID pgtype.UUID `json:"evidence_record_id"`
 	Ordinal          int32       `json:"ordinal"`
+}
+
+type SavedView struct {
+	ID        pgtype.UUID        `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Surface   string             `json:"surface"`
+	Name      string             `json:"name"`
+	Filters   []byte             `json:"filters"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ScfAnchor struct {

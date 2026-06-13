@@ -111,6 +111,11 @@ type Querier interface {
 	ClaimStalenessRollup(ctx context.Context, arg ClaimStalenessRollupParams) (pgtype.UUID, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
+	// Per-item existence + tenant check (AC-6 / AC-7): does this control id
+	// exist and is it visible to the calling tenant? Run inside the tenant-GUC
+	// tx so RLS hides cross-tenant rows — a control in another tenant returns
+	// false. The bulk path calls this per submitted id before any mutation.
+	ControlExistsInTenant(ctx context.Context, arg ControlExistsInTenantParams) (bool, error)
 	// Count of all generations for the current tenant. Used by the cross-tenant
 	// isolation integration test to prove tenant B sees zero of tenant A's rows.
 	CountAIGenerationsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -164,6 +169,9 @@ type Querier interface {
 	// Total group count in the tenant (List envelope totalResults).
 	CountSCIMGroups(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountSCIMUsers(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// The user's saved-view count for a surface — used to enforce the per-user
+	// cap before INSERT.
+	CountSavedViews(ctx context.Context, arg CountSavedViewsParams) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Return the row count for the caller's tenant. Used by the slice 126
 	// integration test to assert exactly-1 fallback row after the 10001-record
@@ -424,6 +432,10 @@ type Querier interface {
 	// independent of parent).
 	DeleteOrgUnit(ctx context.Context, arg DeleteOrgUnitParams) error
 	DeleteRisk(ctx context.Context, arg DeleteRiskParams) error
+	// Delete one of the caller's own views. The user_id predicate means a
+	// caller can never delete another user's view even within the same tenant.
+	// RETURNING lets the handler 404 when the id was not the caller's.
+	DeleteSavedView(ctx context.Context, arg DeleteSavedViewParams) (pgtype.UUID, error)
 	// Tenant-private themes only — the policy forbids deleting defaults
 	// regardless of what this query asks for.
 	DeleteTenantTheme(ctx context.Context, arg DeleteTenantThemeParams) error
@@ -607,6 +619,16 @@ type Querier interface {
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
 	GetControlByID(ctx context.Context, arg GetControlByIDParams) (GetControlByIDRow, error)
+	// Slice 468: server-backed control owner-assignment + saved filter-views.
+	//
+	// Every query here is tenant-scoped on tenant_id ($1 or sqlc.arg) AND runs
+	// inside a tenant-GUC tx — RLS is the real boundary; the explicit tenant_id
+	// predicate keeps the query plan tight and is belt-and-braces. The single-
+	// item assign path and the bulk path BOTH go through UpsertControlOwner so
+	// the per-item write is byte-identical (no drift — P0-467-1 / AC-11).
+	// The current owner-user assignment for a control (if any). Returns
+	// pgx.ErrNoRows when the control has no assigned owner-user yet.
+	GetControlOwnerAssignment(ctx context.Context, arg GetControlOwnerAssignmentParams) (ControlOwnerAssignment, error)
 	GetCsfProfile(ctx context.Context, arg GetCsfProfileParams) (CsfProfile, error)
 	GetCsfProfileByID(ctx context.Context, arg GetCsfProfileByIDParams) (CsfProfile, error)
 	GetCsfTierRating(ctx context.Context, arg GetCsfTierRatingParams) (CsfTierRating, error)
@@ -1065,6 +1087,10 @@ type Querier interface {
 	// (atlas_app pool + tenancy GUC). The source string distinguishes
 	// 'evaluator:<name>' from 'manual:<user-uuid>' provenance.
 	InsertMetricObservation(ctx context.Context, arg InsertMetricObservationParams) (MetricObservation, error)
+	// Append one repudiation-ledger row (threat-model R / P0-448-4). is_bulk
+	// distinguishes a bulk event (control_ids carries the whole applied set)
+	// from a single-item event (one id). Append-only by RLS construction.
+	InsertOwnerAssignmentAudit(ctx context.Context, arg InsertOwnerAssignmentAuditParams) (InsertOwnerAssignmentAuditRow, error)
 	// Slice 023 — policy acknowledgment queries.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -1108,6 +1134,11 @@ type Querier interface {
 	// plaintext bearer (safe to surface).
 	InsertSCIMCredential(ctx context.Context, arg InsertSCIMCredentialParams) (ScimCredential, error)
 	InsertSampleEvidence(ctx context.Context, arg InsertSampleEvidenceParams) error
+	// Persist a new saved view. The case-insensitive unique index
+	// (tenant_id, user_id, surface, lower(name)) rejects a duplicate name with
+	// a unique-violation the handler maps to 409. filters is the handler-
+	// validated criteria payload (threat-model T).
+	InsertSavedView(ctx context.Context, arg InsertSavedViewParams) (SavedView, error)
 	// Adds a single (tenant, user, role) assignment. Idempotent under the
 	// composite PK; conflicts are silently no-op so concurrent admins
 	// granting the same role don't fail.
@@ -1908,6 +1939,9 @@ type Querier interface {
 	// (testability) and timezone semantics (vendor reviews are date-granular,
 	// not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
+	// Read the assignment audit ledger for the tenant, newest first. Used by
+	// the integration tests (and a future "who reassigned these?" surface).
+	ListOwnerAssignmentAudit(ctx context.Context, arg ListOwnerAssignmentAuditParams) ([]ControlOwnerAssignmentAuditLog, error)
 	// ===== control_drift_snapshots =====
 	// The drift snapshot input: for one tenant, the set of controls "passing" as
 	// of `as_of` under the worst-cell rollup. A control passes iff EVERY
@@ -2219,6 +2253,18 @@ type Querier interface {
 	// position) so the AR's sampled_evidence_ids preserve the auditor's sample
 	// order (AC-9 reproducibility).
 	ListSampledEvidenceForPeriod(ctx context.Context, arg ListSampledEvidenceForPeriodParams) ([]ListSampledEvidenceForPeriodRow, error)
+	// Slice 468: per-(tenant, user) saved filter-views for the /controls list.
+	//
+	// The TENANT half of isolation is RLS (current_tenant_matches on every
+	// policy); the USER half is the mandatory user_id predicate on every query
+	// here, sourced from the verified credential in the handler — NEVER the
+	// request body (threat-model I / P0-448-5). There is no app.current_user
+	// GUC at v1, so the user cut lives in the WHERE clause, exactly as
+	// user_notification_preferences (slice 016) does it.
+	// A user's saved views for a surface, oldest-first (stable display order).
+	// user_id is ALWAYS the calling credential's id — a caller can never pass
+	// another user's id to read their views.
+	ListSavedViews(ctx context.Context, arg ListSavedViewsParams) ([]SavedView, error)
 	// Enumerate the active tenant's scope cells. Newest first.
 	ListScopeCells(ctx context.Context, tenantID pgtype.UUID) ([]ScopeCell, error)
 	// Enumerate the active tenant's declared dimensions. Ordering: builtins first
@@ -2810,6 +2856,10 @@ type Querier interface {
 	// model provenance are bound as parameters (P0-498-7 — model output is never
 	// interpolated into SQL).
 	UpsertBoardNarrativeDraft(ctx context.Context, arg UpsertBoardNarrativeDraftParams) (BoardNarrativeSection, error)
+	// Assign (or re-assign) a control's owner-user. The SINGLE per-item write
+	// the single-item path AND the bulk path both call — one row per control.
+	// Re-assigning UPSERTs onto the (tenant_id, control_id) PK.
+	UpsertControlOwner(ctx context.Context, arg UpsertControlOwnerParams) (ControlOwnerAssignment, error)
 	// ===== csf_profiles =====
 	// Insert (or no-op update) the single profile per (tenant, framework_version,
 	// kind). Re-creating the same kind returns the existing row (its name/updated
@@ -2899,6 +2949,10 @@ type Querier interface {
 	UpsertUserNotificationPreference(ctx context.Context, arg UpsertUserNotificationPreferenceParams) error
 	// Set a user's webhook-channel master opt-in.
 	UpsertWebhookOptIn(ctx context.Context, arg UpsertWebhookOptInParams) (bool, error)
+	// Target-owner validation (AC-6, threat-model T): is owner_user_id a real,
+	// active user in the calling tenant? RLS hides cross-tenant users; the
+	// status gate rejects a disabled user as an assignment target.
+	UserExistsInTenant(ctx context.Context, arg UserExistsInTenantParams) (bool, error)
 	// Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
 	// Read-only integrity walk — recomputes each record's canonical hash and
 	// compares to the stored `hash`. Ordered by id ASC so the caller can page
