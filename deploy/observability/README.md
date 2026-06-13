@@ -101,7 +101,7 @@ for i in $(seq 1 20); do
 done
 
 # 2. Verify metrics in Prometheus
-curl -s 'http://192.168.1.246:9090/api/v1/query?query=atlas_http_server_duration_count' | jq
+curl -s 'http://192.168.1.246:9090/api/v1/query?query=http_server_duration_count%7Bservice_name%3D%22security-atlas%22%7D' | jq
 
 # 3. Verify traces in Tempo
 curl -s 'http://192.168.1.246:3200/api/search?tags=service.name%3Dsecurity-atlas&limit=5' | jq
@@ -173,7 +173,7 @@ done
 curl -s 'http://192.168.1.246:3200/api/search?tags=service.name%3Dsecurity-atlas&limit=5' | jq
 
 # 4. Verify metrics in Prometheus (via the OTel Collector → prometheus exporter).
-curl -s 'http://192.168.1.246:9090/api/v1/query?query=atlas_http_server_request_duration_seconds_count' | jq
+curl -s 'http://192.168.1.246:9090/api/v1/query?query=http_server_request_duration_seconds_count%7Bservice_name%3D%22security-atlas%22%7D' | jq
 
 # 5. Verify trace-to-logs correlation in Grafana UI:
 #    Explore → Tempo → search for service.name=security-atlas →
