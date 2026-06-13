@@ -291,6 +291,12 @@ The v1 spine was built in this order — preserved here so future contributors u
 - **Cite sources** when making factual claims (versions, license terms, vendor behavior). Sources live in `Plans/canvas/sources.md`.
 - **Conventional Commits** when code commits begin (`feat:`, `fix:`, `docs:`, `chore:`, etc.).
 - **Co-authored-by** trailer on AI-assisted commits.
+- **DCO sign-off (required).** Every commit MUST carry a `Signed-off-by:` trailer matching the commit author (`git commit -s`); the project enforces the [Developer Certificate of Origin](https://developercertificate.org/) via the DCO check (see `CONTRIBUTING.md` §DCO). The sign-off email MUST match the author email, so the repo's git identity must be the human contributor (`Matt Goodrich <matt@mattgoodrich.com>`), never a bot — do NOT set a local `user.name`/`user.email` override. AI-assisted commits carry BOTH trailers, e.g.:
+
+  ```
+  Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+  Signed-off-by: Matt Goodrich <matt@mattgoodrich.com>
+  ```
 
 ### Branching
 
