@@ -17,14 +17,15 @@ Promotion history:
 
 ## Files
 
-| File                      | What it covers                                                                                              |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `fixtures.ts`             | Shared `test.extend<{ authedPage }>` — signs in once per worker via `TEST_BEARER` or email/password env     |
-| `dashboard.spec.ts`       | `/dashboard` — six bound panels, framework-posture placeholder, freshness binding, drift, top risks         |
-| `control-detail.spec.ts`  | `/controls/:id` — coverage table, UCF mini-viz, evidence stream, freshness clock, effective-scope, OOS rows |
-| `audit-workspace.spec.ts` | `/audit` — auditor flow: period bar, control nav, sampling, walkthrough, comments (shared/private)          |
-| `risk-hierarchy.spec.ts`  | `/risks/hierarchy` — org tree, theme heatmap, decision timeline, overdue pills, deep-linked filters         |
-| `admin-bootstrap.spec.ts` | `/admin/**` — admin tiles, SSO discovery, feature toggle, API key issuance, role matrix                     |
+| File                      | What it covers                                                                                                                                                                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fixtures.ts`             | Shared `test.extend<{ authedPage }>` — signs in once per worker via `TEST_BEARER` or email/password env                                                                                                                                                       |
+| `dashboard.spec.ts`       | `/dashboard` — six bound panels, framework-posture placeholder, freshness binding, drift, top risks                                                                                                                                                           |
+| `control-detail.spec.ts`  | `/controls/:id` — coverage table, UCF mini-viz, evidence stream, freshness clock, effective-scope, OOS rows                                                                                                                                                   |
+| `audit-workspace.spec.ts` | `/audit` — auditor flow: period bar, control nav, sampling, walkthrough, comments (shared/private)                                                                                                                                                            |
+| `risk-hierarchy.spec.ts`  | `/risks/hierarchy` — org tree, theme heatmap, decision timeline, overdue pills, deep-linked filters                                                                                                                                                           |
+| `admin-bootstrap.spec.ts` | `/admin/**` — admin tiles, SSO discovery, feature toggle, API key issuance, role matrix                                                                                                                                                                       |
+| `controls-list.spec.ts`   | `/controls` — anchor table renders, Family pill narrows, empty state, row→detail nav, multi-select + select-all, bulk assign-owner round-trip, saved filter-views (save/re-apply/duplicate-name 409). Seeded by `fixtures/e2e/controls-list.sql` (slice 743). |
 
 ## How to run locally
 
