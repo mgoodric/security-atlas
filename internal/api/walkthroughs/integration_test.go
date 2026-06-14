@@ -26,7 +26,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -37,68 +36,20 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM walkthrough_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM walkthrough_attachments WHERE tenant_id = $1`,
-			`DELETE FROM walkthroughs WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
-}
-
-func ctxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
+	return dbtest.SeedTenant(t, admin,
+		"walkthrough_audit_log",
+		"walkthrough_attachments",
+		"walkthroughs",
+		"controls",
+	)
 }
 
 func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
@@ -118,7 +69,7 @@ func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 func seedWalkthrough(t *testing.T, app *pgxpool.Pool, tenant string, ctrlID uuid.UUID) string {
 	t.Helper()
 	store := walkthrough.NewStore(walkthrough.Config{Pool: app})
-	w, err := store.Create(ctxFor(t, tenant), walkthrough.CreateInput{
+	w, err := store.Create(dbtest.WithTenantCtx(t, tenant), walkthrough.CreateInput{
 		ControlID: ctrlID,
 		Narrative: "Slice 477 walkthrough PDF degradation test. The team rotates keys every 90 days.",
 		CreatedBy: "key_test_477",
@@ -208,8 +159,8 @@ func exportPDFPath(id string) string {
 // real (default) limiter, the walkthrough PDF export is 200 (chrome present) or
 // 503 (chrome absent) — never a 500.
 func TestPDF_ReturnsPDFOrServiceUnavailable(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	wtID := seedWalkthrough(t, app, tenant, ctrlID)
@@ -229,8 +180,8 @@ func TestPDF_RenderDeadlineDegradesTo503(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(2, time.Nanosecond, time.Second))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	wtID := seedWalkthrough(t, app, tenant, ctrlID)
@@ -251,8 +202,8 @@ func TestPDF_QueueSaturationDegradesTo503(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 5*time.Second, 0))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	wtID := seedWalkthrough(t, app, tenant, ctrlID)
@@ -294,8 +245,8 @@ func TestPDF_StressNoNonGraceful(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 50*time.Millisecond, 80*time.Millisecond))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	wtID := seedWalkthrough(t, app, tenant, ctrlID)
