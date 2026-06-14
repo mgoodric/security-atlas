@@ -471,38 +471,29 @@ test.describe("/controls list view", () => {
     );
   });
 
-  // QUARANTINED (slice 743 finding — NOT a seed gap; P0-743-3).
-  //
-  // The seed precondition for this assertion is fully met (a saved view is
-  // created + visible). The assertion fails on a REAL live-impl behavior
-  // surfaced by this new e2e coverage: after `deleteSavedView` succeeds
-  // (the upstream DELETE returns 204 and a fresh `GET /v1/saved-views`
-  // returns `{views:[]}`), the deleted view does NOT drop out of the
-  // saved-views `<select>` in place — it only disappears after a full page
-  // reload. The create / save / re-apply / duplicate-name paths all work;
-  // only the in-place post-delete refresh is stale.
-  //
-  // Root cause (diagnosed during slice 743): the controls page's
-  // `deleteViewMutation.onSuccess` invalidates the
-  // `["saved-views","controls"]` query, but the BFF GET handler
-  // (`web/lib/api/bff.ts` forwardJSON) returns the browser-facing Response
-  // WITHOUT a `Cache-Control: no-store` header, so the React-Query refetch
-  // can be served the browser-HTTP-cached (pre-delete) body. Fixing this is
-  // a frontend code change outside slice 743's seed-and-un-quarantine
-  // scope; filed as a follow-on. Per P0-743-3 the assertion is NOT relaxed
-  // — it stays quarantined with this cited reason and turns on when the
-  // follow-on lands the cache-header fix.
-  test("slice 448 AC-5: a saved view can be deleted", async () => {
-    //    await page.goto("/controls?family=IAC");
-    //    await page.getByTestId("controls-save-view-open").click();
-    //    await page.getByTestId("controls-save-view-name").fill("Disposable");
-    //    await page.getByTestId("controls-save-view-confirm").click();
-    //    await expect(
-    //      page.getByTestId("controls-saved-views-select"),
-    //    ).toContainText("Disposable");
-    //    await page.getByTestId("controls-saved-views-delete").click();
-    //    await expect(
-    //      page.getByTestId("controls-saved-views-select"),
-    //    ).not.toContainText("Disposable");
+  // Un-quarantined by slice 746. The slice-743 finding (stale post-delete
+  // `<select>`) was a real live-impl bug: the saved-views BFF GET handler
+  // returned the browser-facing Response without `Cache-Control: no-store`,
+  // so the React-Query refetch after a DELETE could be served the
+  // browser-HTTP-cached (pre-delete) body and the deleted view lingered
+  // until a hard reload. Slice 746 attaches `Cache-Control: no-store` to the
+  // saved-views BFF GET (per-route, via the opt-in `noStore` wrapper — the
+  // shared `forwardJSON` default is unchanged), so the in-place refetch now
+  // returns the fresh (shorter) list and the deleted view drops out without
+  // a page reload. This assertion is the oracle for that fix.
+  test("slice 448 AC-5: a saved view can be deleted", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls?family=IAC");
+    await page.getByTestId("controls-save-view-open").click();
+    await page.getByTestId("controls-save-view-name").fill("Disposable");
+    await page.getByTestId("controls-save-view-confirm").click();
+    await expect(page.getByTestId("controls-saved-views-select")).toContainText(
+      "Disposable",
+    );
+    await page.getByTestId("controls-saved-views-delete").click();
+    await expect(
+      page.getByTestId("controls-saved-views-select"),
+    ).not.toContainText("Disposable");
   });
 });
