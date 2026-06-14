@@ -38,6 +38,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // setupHTTPServerWithSrv mirrors setupHTTPServer but ALSO returns the
@@ -50,8 +51,7 @@ import (
 func setupHTTPServerWithSrv(t *testing.T) (*httptest.Server, *api.Server, string) {
 	t.Helper()
 
-	adminPool := openPoolDSN(t, adminDSN(t))
-	defer adminPool.Close()
+	adminPool := dbtest.NewMigratePool(t)
 	// Seed the SCF catalog + SOC 2 crosswalk via the shared slice 461
 	// helper. This replaces the prior `if anchorCount == 0 { t.Skip }`
 	// cold-start hack: EnsureFullCatalog is order-independent, so the
@@ -62,7 +62,10 @@ func setupHTTPServerWithSrv(t *testing.T) (*httptest.Server, *api.Server, string
 		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
 	}
 
-	appPool := openPoolDSN(t, appDSN(t))
+	// The app pool self-closes via dbtest.NewAppPool's t.Cleanup, registered
+	// before the httptest server's — LIFO closes the server first, then the
+	// pool.
+	appPool := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(appPool)
 	// Slice 197: mint JWT via slice 190 path. ViewerFor matches the
@@ -74,10 +77,7 @@ func setupHTTPServerWithSrv(t *testing.T) (*httptest.Server, *api.Server, string
 		t.Fatal("HTTPHandlerForTests returned nil")
 	}
 	ts := httptest.NewServer(handler)
-	t.Cleanup(func() {
-		ts.Close()
-		appPool.Close()
-	})
+	t.Cleanup(ts.Close)
 	return ts, srv, bearer
 }
 
@@ -191,8 +191,7 @@ func TestListAnchors_OmittedIncludeReturnsV1Shape(t *testing.T) {
 // relies on "no controls" must take responsibility for ensuring it.
 func TestListAnchors_IncludeStateReturnsNullStateForEmptyTenant(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
-	admin := openPoolDSN(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	cleanupTenantState(t, admin, tenantA)
 	resp, body := get(t, ts, "/v1/anchors?include=state", bearer)
 	if resp.StatusCode != http.StatusOK {
@@ -226,8 +225,7 @@ func TestListAnchors_IncludeStateReturnsNullStateForEmptyTenant(t *testing.T) {
 // up worst state (fail). Tenant B's bearer never sees Tenant A's state.
 func TestListAnchors_IncludeStateRollsUpWorstStatePerAnchor_TenantIsolated(t *testing.T) {
 	ts, srv, bearer := setupHTTPServerWithSrv(t)
-	admin := openPoolDSN(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 
 	anchorUUID := anchorIDBySCFID(t, admin, "IAC-06")
 
@@ -312,8 +310,7 @@ func TestListAnchors_IncludeStateRollsUpWorstStatePerAnchor_TenantIsolated(t *te
 // page.tsx depend on.
 func TestListAnchors_IncludeStateColumnSetMatchesDesignDoc(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
-	admin := openPoolDSN(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	anchorUUID := anchorIDBySCFID(t, admin, "IAC-06")
 	t.Cleanup(func() { cleanupTenantState(t, admin, tenantA) })
 	obs := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
@@ -340,8 +337,7 @@ func TestListAnchors_IncludeStateColumnSetMatchesDesignDoc(t *testing.T) {
 // public HTTP API. The CTE shape in the SQL is the structural guard.
 func TestListAnchors_IncludeStateCarriesFrameworksColumn(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
-	admin := openPoolDSN(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	cleanupTenantState(t, admin, tenantA)
 
 	resp, body := get(t, ts, "/v1/anchors?include=state", bearer)
@@ -401,8 +397,7 @@ func TestListAnchors_IncludeStateCarriesFrameworksColumn(t *testing.T) {
 // authority lives backend-side.
 func TestListAnchors_IncludeStateFrameworksAreDisplayAbbreviations(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
-	admin := openPoolDSN(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	cleanupTenantState(t, admin, tenantA)
 
 	_, body := get(t, ts, "/v1/anchors?include=state", bearer)

@@ -585,3 +585,61 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 21 — internal/api anchors + board + freshnessdrift (whole-package, sibling-shared)
+
+Three WHOLE-PACKAGE (sibling-shared) drains: each package DEFINES its pool
+helpers in `integration_test.go` and CALLS them from a sibling `_test.go`, so
+all caller files were migrated before the shared DEFs were deleted.
+
+- `internal/api/anchors` — WHOLE-PACKAGE drain (2 files); completes the batch-10
+  partial. Batch 10 already migrated this package's `setupHTTPServer` onto
+  `dbtest` but KEPT `appDSN`/`adminDSN`/`openPoolDSN` because the sibling
+  `state_integration_test.go` still called them. Batch 21 migrates that sibling
+  (`openPoolDSN(t, adminDSN(t))` → `dbtest.NewMigratePool(t)`;
+  `openPoolDSN(t, appDSN(t))` → `dbtest.NewAppPool(t)`; `setupHTTPServerWithSrv`
+  app pool hoisted out, redundant `adminPool.Close()`/`appPool.Close()` dropped,
+  `ts.Close()` KEPT) and then DELETES the three now-unused DEFs from
+  `integration_test.go`. NO `freshTenant` in this package. `os`+`pgxpool`
+  dropped from `integration_test.go`; `pgxpool` STAYS in the sibling
+  (seed/cleanup helper signatures take `*pgxpool.Pool`).
+
+- `internal/api/board` — WHOLE-PACKAGE drain (2 files) with a `freshTenant`
+  CARVE-OUT. DEFs in `integration_test.go`, called from sibling
+  `pack_integration_test.go`. `appDSN`/`adminDSN`/`openPool` deleted;
+  `openPool(t, adminDSN(t))` → `dbtest.NewMigratePool(t)` and
+  `openPool(t, appDSN(t))` → `dbtest.NewAppPool(t)` at every caller (the old
+  `openPool` registered its own `t.Cleanup(pool.Close)`, so callers had no
+  manual `.Close()` to drop; `testServer`'s `ts.Close()` KEPT). `freshTenant`
+  STAYS INLINE as a CARVE-OUT: it interleaves an `enableFeatureFlag` upsert
+  (turning `board.reporting` ON) among the tenant-scoped DELETEs, which
+  `dbtest.SeedTenant` (DELETE-only) cannot express; it takes `admin` as a param
+  and opens no pool, so nothing inside it needed re-routing. `os` dropped;
+  `pgxpool` STAYS (carve-out + seed helper signatures).
+
+- `internal/api/freshnessdrift` — WHOLE-PACKAGE drain (2 files); clean
+  conversion. DEFs in `integration_test.go`, called from sibling
+  `empty_set_integration_test.go`. `appDSN`/`adminDSN`/`openPool` deleted;
+  `freshTenant` is a PURE FK-ordered tenant-scoped DELETE returning a string, so
+  it now delegates to `dbtest.SeedTenant(t, admin, …)` with the same five tables
+  in the same order. Callers migrated to `dbtest.NewMigratePool`/`NewAppPool`.
+  The sibling gained only the `dbtest` import (it had no pgxpool/os/context/time
+  imports). `os` dropped from `integration_test.go`; `pgxpool`/`context`/`time`
+  STAY (seed helper signatures + timestamp math). `ctxFor`/`tenancy.WithTenant`
+  left inline — not in batch 21's transform scope.
+
+Role model preserved throughout: RLS-bound assertions run through
+`dbtest.NewAppPool`; the BYPASSRLS `dbtest.NewMigratePool` is used only for
+cross-tenant seed + append-only cleanup. No assertion defaults to the
+privileged pool.
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all 3 packages; all 3 return `ok` under
+  `go test -tags=integration -p 1` with no DB env (clean SKIP + untouched unit
+  tests pass). Live integration run deferred to CI (no local Postgres this
+  session — batch-9..20 precedent). No production (`!_test.go`) code touched;
+  shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none

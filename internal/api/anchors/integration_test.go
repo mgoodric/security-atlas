@@ -8,12 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
@@ -22,24 +20,6 @@ import (
 )
 
 const tenantA = "11111111-1111-1111-1111-111111111111"
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
 
 func setupHTTPServer(t *testing.T) (*httptest.Server, string) {
 	t.Helper()
@@ -72,17 +52,6 @@ func setupHTTPServer(t *testing.T) (*httptest.Server, string) {
 	ts := httptest.NewServer(handler)
 	t.Cleanup(ts.Close)
 	return ts, bearer
-}
-
-func openPoolDSN(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
 }
 
 func get(t *testing.T, ts *httptest.Server, path, bearer string) (*http.Response, []byte) {
