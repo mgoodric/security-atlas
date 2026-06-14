@@ -54,15 +54,6 @@ func (f *fakeProvider) recipients() []string {
 	return out
 }
 
-// openPools returns the RLS-enforcing atlas_app pool and the privileged
-// BYPASSRLS migrate pool from the shared internal/dbtest harness (slice 435 /
-// 742). The app pool backs the per-user delivery (real slice-445 channel); the
-// migrate pool runs the BYPASSRLS enumeration query and cross-tenant seeding.
-func openPools(t *testing.T) (app, admin *pgxpool.Pool) {
-	t.Helper()
-	return dbtest.NewAppPool(t), dbtest.NewMigratePool(t)
-}
-
 // seedUser inserts a (tenant, user) pair with a known account email, an
 // optional unread notification, and an optional email opt-in, all via the
 // admin (BYPASSRLS) pool.
@@ -111,7 +102,8 @@ func seedUser(t *testing.T, admin *pgxpool.Pool, accountEmail string, withUnread
 // The sweep enumerates opted-in users through the real SELECT, drives the
 // real email channel per user, and honors default-opted-OUT end-to-end.
 func TestSweepOnce_EnumeratesOptedInOnly(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -150,7 +142,8 @@ func TestSweepOnce_EnumeratesOptedInOnly(t *testing.T) {
 // A two-tenant sweep delivers each tenant's user under that tenant's own
 // context — no cross-tenant leak.
 func TestSweepOnce_TwoTenantsNoCross(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -179,7 +172,8 @@ func TestSweepOnce_TwoTenantsNoCross(t *testing.T) {
 // A second sweep the same UTC day double-CALLS DeliverDigest but does NOT
 // double-SEND (the slice-445 claim-before-send is the idempotency guard).
 func TestSweepOnce_IdempotentNoDoubleSend(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 

@@ -45,16 +45,6 @@ func (f *fakeTransport) count() int {
 	return len(f.sent)
 }
 
-// openPools returns the RLS-enforcing atlas_app pool and the privileged
-// BYPASSRLS migrate pool from the shared internal/dbtest harness (slice 435 /
-// 742). The app pool backs every RLS-bound assertion; the migrate pool is used
-// only for cross-tenant seeding and the append-only delivery-log cleanup the
-// app role cannot DELETE.
-func openPools(t *testing.T) (app, admin *pgxpool.Pool) {
-	t.Helper()
-	return dbtest.NewAppPool(t), dbtest.NewMigratePool(t)
-}
-
 func seedUser(t *testing.T, admin *pgxpool.Pool, email string, withUnread bool) (tenantID, userID uuid.UUID) {
 	t.Helper()
 	tenantID = uuid.New()
@@ -127,7 +117,8 @@ func tenantCtx(t *testing.T, tenantID uuid.UUID) context.Context {
 }
 
 func TestSlackDeliver_OptedIn_MinimumDisclosure(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -160,7 +151,8 @@ func TestSlackDeliver_OptedIn_MinimumDisclosure(t *testing.T) {
 }
 
 func TestSlackDeliver_DefaultOptedOut(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -179,7 +171,8 @@ func TestSlackDeliver_DefaultOptedOut(t *testing.T) {
 }
 
 func TestSlackDeliver_Idempotent(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -204,7 +197,8 @@ func TestSlackDeliver_Idempotent(t *testing.T) {
 }
 
 func TestSlackDeliver_NoCrossTenant(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	trA := &fakeTransport{}
 	chA := slack.NewChannel(app, trA, "https://atlas.example.test")
 
@@ -232,7 +226,8 @@ func TestSlackDeliver_NoCrossTenant(t *testing.T) {
 // with no pref row is delivered (default-on). The muted kind's count must NOT
 // appear in the posted body.
 func TestSlackDeliver_PerKindFilter_MutesOneKeepsOther(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -267,7 +262,8 @@ func TestSlackDeliver_PerKindFilter_MutesOneKeepsOther(t *testing.T) {
 // on SLACK (channel isolation — the slice-583 generalization). master-on +
 // no SLACK row -> default-on deliver, even though an email row says false.
 func TestSlackDeliver_PerKindFilter_EmailOptOutDoesNotMuteSlack(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -295,7 +291,8 @@ func TestSlackDeliver_PerKindFilter_EmailOptOutDoesNotMuteSlack(t *testing.T) {
 // kind on slack collapses the digest to zero -> the delivery is skipped (no
 // post), mirroring the email all-muted case.
 func TestSlackDeliver_PerKindFilter_AllMutedSkips(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 

@@ -37,16 +37,6 @@ func (f *fakeTransport) count() int {
 	return len(f.sent)
 }
 
-// openPools returns the RLS-enforcing atlas_app pool and the privileged
-// BYPASSRLS migrate pool from the shared internal/dbtest harness (slice 435 /
-// 742). The app pool backs every RLS-bound assertion; the migrate pool is used
-// only for cross-tenant seeding and the append-only delivery-log cleanup the
-// app role cannot DELETE.
-func openPools(t *testing.T) (app, admin *pgxpool.Pool) {
-	t.Helper()
-	return dbtest.NewAppPool(t), dbtest.NewMigratePool(t)
-}
-
 func seedUser(t *testing.T, admin *pgxpool.Pool, email string, withUnread bool) (tenantID, userID uuid.UUID) {
 	t.Helper()
 	tenantID = uuid.New()
@@ -118,7 +108,8 @@ func setPref(t *testing.T, admin *pgxpool.Pool, tenantID, userID uuid.UUID, even
 // TestWebhookDeliver_PerKindFilter_MutesOneKeepsOther: master-on + kind-off on
 // WEBHOOK mutes that kind; a sibling with no row is delivered (default-on).
 func TestWebhookDeliver_PerKindFilter_MutesOneKeepsOther(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -152,7 +143,8 @@ func TestWebhookDeliver_PerKindFilter_MutesOneKeepsOther(t *testing.T) {
 // TestWebhookDeliver_PerKindFilter_EmailOptOutDoesNotMuteWebhook: an email
 // opt-out for a kind does NOT mute it on webhook (per-channel isolation).
 func TestWebhookDeliver_PerKindFilter_EmailOptOutDoesNotMuteWebhook(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -182,7 +174,8 @@ func TestWebhookDeliver_PerKindFilter_EmailOptOutDoesNotMuteWebhook(t *testing.T
 // TestWebhookDeliver_PerKindFilter_AllMutedSkips: muting every unread kind on
 // webhook collapses the digest to zero -> skip (no post).
 func TestWebhookDeliver_PerKindFilter_AllMutedSkips(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -203,7 +196,8 @@ func TestWebhookDeliver_PerKindFilter_AllMutedSkips(t *testing.T) {
 }
 
 func TestWebhookDeliver_OptedIn_MinimumDisclosure(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -239,7 +233,8 @@ func TestWebhookDeliver_OptedIn_MinimumDisclosure(t *testing.T) {
 }
 
 func TestWebhookDeliver_DefaultOptedOut(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 	tenantID, userID := seedUser(t, admin, "wh-b@example.test", true)
@@ -254,7 +249,8 @@ func TestWebhookDeliver_DefaultOptedOut(t *testing.T) {
 }
 
 func TestWebhookDeliver_Idempotent(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 	tenantID, userID := seedUser(t, admin, "wh-c@example.test", true)
@@ -275,7 +271,8 @@ func TestWebhookDeliver_Idempotent(t *testing.T) {
 }
 
 func TestWebhookDeliver_NoCrossTenant(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	trA := &fakeTransport{}
 	chA := webhook.NewChannel(app, trA, "https://atlas.example.test")
 	tenantA, userA := seedUser(t, admin, "wh-ta@example.test", true)

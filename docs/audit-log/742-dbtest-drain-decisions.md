@@ -478,3 +478,58 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 19
+
+Files migrated (4 files, 4 distinct packages — the notify cluster; the sibling
+unit tests in these packages (config_test.go, kindfilter_test.go,
+message_test.go, scheduler_test.go, slack_test.go, webhook_test.go) do NOT
+reference the pool helpers and were left untouched):
+
+1. internal/notify/email/integration_test.go
+2. internal/notify/scheduler/integration_test.go
+3. internal/notify/slack/integration_test.go
+4. internal/notify/webhook/integration_test.go
+
+These four suites were already partially on the harness (each imported
+`internal/dbtest` and used `dbtest.WithTenantCtx`); each defined a `openPools`
+TUPLE helper `func openPools(t *testing.T) (app, admin *pgxpool.Pool)` that was
+itself just a thin wrapper returning `dbtest.NewAppPool(t), dbtest.NewMigratePool(t)`.
+The drain split that tuple helper at every call site: `app, admin := openPools(t)`
+→ `app := dbtest.NewAppPool(t)` / `admin := dbtest.NewMigratePool(t)`, and the
+`openPools` func was deleted from each file. Every call site uses BOTH returned
+pools, so both are created at each site. No `appDSN`/`adminDSN`/`openPool`/`freshTenant`
+existed in any of the four files — nothing else to remove.
+
+`freshTenant` carve-out: none of these files has one. Each owns a `seedUser`
+helper that `uuid.New()`s a fresh tenant, INSERTs `users` (+ optional
+`notifications`/opt-in rows), and registers a column-FK-ordered tenant-scoped
+cleanup — this is a row-seeding helper `dbtest.SeedTenant` cannot express
+(returns a `(uuid.UUID, uuid.UUID)` tuple, seeds extra rows), so `seedUser`
+(and the sibling `seedNotification`/`seedEmailPref`/`setPref`) stay inline,
+re-routed only to the migrate pool, exactly as before.
+
+Fake-delivery-server teardown: these notify suites stand up in-memory fake
+delivery sinks (`fakeProvider` Send for email/scheduler, `fakeTransport` Post
+for slack/webhook) — pure in-process structs, not httptest servers, so there is
+no `ts.Close()` to keep; they were left fully intact. No manual pool `.Close()`
+calls existed (the dbtest pools self-close via `t.Cleanup`). `pgxpool` stays
+referenced (every `seed*`/`setPref` signature takes `*pgxpool.Pool`); `uuid`,
+`context`, `sync`, `strings` all still referenced.
+
+Role model preserved throughout: RLS-bound delivery + assertions run through
+`dbtest.NewAppPool`; the BYPASSRLS `dbtest.NewMigratePool` is used only for
+cross-tenant seeding and the append-only delivery-log cleanup the app role
+cannot DELETE (scheduler additionally runs its BYPASSRLS enumeration SELECT
+through the migrate pool, unchanged).
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all four packages; all four suites
+  return `ok` under `go test -tags=integration -p 1` with no DB env (clean SKIP +
+  untouched unit tests pass). Live integration run deferred to CI (no local
+  Postgres this session — batch-9..18 precedent). No production (`!_test.go`) code
+  touched; shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none
