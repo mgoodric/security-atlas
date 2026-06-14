@@ -183,6 +183,8 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Changed
 
+- test(dbtest): migrate internal board + boardnarrative + policy + policy-seed integration suites to the slice-435 dbtest harness (742 drain batch 15).
+
 - test(dbtest): migrate internal eval + freshness + staleness + artifact integration suites to the slice-435 dbtest harness (742 drain batch 14).
 
 - test(dbtest): migrate internal control + exception + decision + drift integration suites to the slice-435 dbtest harness (742 drain batch 13).

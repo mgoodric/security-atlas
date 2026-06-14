@@ -242,3 +242,62 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 15
+
+Files migrated (4 files, 4 distinct packages, each fully owning its DB helpers
+in the named file):
+
+1. **board — `freshTenant` migrated to `dbtest.SeedTenant`.** Pure tenant-scoped
+   DELETE in FK order (`board_packs`, `board_briefs`, `control_evaluations`,
+   `risks`, `controls`, `frameworks`). `appDSN`/`adminDSN`/`openPool` deleted;
+   every `admin := openPool(t, adminDSN(t))` + `defer .Close()` / `app := openPool(t,
+appDSN(t))` + `defer .Close()` block collapsed to `NewMigratePool`/`NewAppPool`
+   (dbtest self-closes, redundant defers removed), including the single app-only
+   block in `TestCreate_ValidationErrors`'s board analogue. `os` import dropped;
+   `pgxpool` stays (inline `seedFramework`/`seedRisk`/`seedControl`/
+   `seedFailingEvaluation` take a pool).
+2. **boardnarrative — `freshTenant` kept inline (CARVE-OUT).** It does MORE than
+   a tenant-scoped DELETE: it `INSERT`s a `tenants` row first
+   (`INSERT INTO tenants (id, name) …`), a shape `dbtest.SeedTenant` does not
+   express (SeedTenant inserts no tenant row). Kept inline; only its pool is
+   re-routed — every per-test `app := openPool(t, appDSN(t))` / `admin :=
+openPool(t, adminDSN(t))` pair → `NewAppPool`/`NewMigratePool`. The old
+   `openPool` registered `t.Cleanup(pool.Close)`; dbtest self-closes, so no manual
+   close survives. `admin` is created in the test body before `freshTenant(t,
+admin)`, so LIFO keeps the migrate pool open during freshTenant's cleanup
+   DELETE. `os` dropped, `time` dropped (no longer referenced), `pgxpool` kept
+   (helper signatures).
+3. **policy — `freshTenant` kept inline (CARVE-OUT).** Its cleanup is NOT a flat
+   tenant-scoped DELETE: the first statement is column-scoped
+   (`DELETE FROM policies WHERE tenant_id = $1 AND predecessor_id IS NOT NULL`) to
+   drop self-FK successors before predecessors — an ordering `dbtest.SeedTenant`
+   (one plain `WHERE tenant_id = $1` per table) cannot express (batch-13 self-FK
+   precedent). Kept inline; only its pool re-routed. `appDSN`/`adminDSN`/`openPool`
+   deleted; the `admin`/`app` `defer .Close()` blocks → `NewMigratePool`/
+   `NewAppPool`, and the app-only block in `TestCreate_ValidationErrors` →
+   `NewAppPool`. `os` dropped; `pgxpool` kept (freshTenant + `seedControl`
+   signatures).
+4. **policy/seed — `freshTenant` kept inline (DOUBLE CARVE-OUT).** Two reasons
+   `dbtest.SeedTenant` cannot express: (a) it returns `uuid.UUID` (callers pass
+   the typed id to `seed.Seed` / `seedControlWithSCFID` / `admin.QueryRow`), not
+   the `string` SeedTenant yields (batch-14 `uuid.UUID` precedent); (b) the same
+   `predecessor_id IS NOT NULL`-first self-FK cleanup as policy (batch-13
+   precedent). Kept inline; only its pool re-routed — the `admin`/`app` `openPool`
+   pairs → `NewMigratePool`/`NewAppPool`, and the three standalone
+   `admin := openPool(t, adminDSN(t))` resolver tests → `NewMigratePool`. The old
+   `openPool` had `t.Cleanup(pool.Close)`; dbtest self-closes, so no manual close
+   survives. `os`/`time` dropped; `pgxpool` kept (helper signatures).
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all four packages; all four suites SKIP
+  cleanly with no DB env (`go test -tags=integration -p 1` → `ok` for board,
+  boardnarrative, policy, policy/seed, and the untouched sibling policy/pdf). The
+  `internal/board` golden-file (`pdf_html_golden_test.go`) + unit tests were NOT
+  touched and run as unit tests. Live integration run deferred to CI (no local
+  Postgres this session — batch-9..14 precedent). No production (`!_test.go`) code
+  touched; shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none
