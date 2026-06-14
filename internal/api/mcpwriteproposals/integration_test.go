@@ -20,7 +20,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -30,52 +29,19 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
+// Slice 435 / 742: appDSN/adminDSN/openPool boilerplate now lives in the
+// shared internal/dbtest harness (NewAppPool = RLS-enforcing atlas_app default;
+// NewMigratePool = privileged BYPASSRLS for seeding + freshTenant cleanup).
 
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM mcp_write_proposals WHERE tenant_id = $1`,
-			`DELETE FROM risks WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"mcp_write_proposals",
+		"risks",
+	)
 }
 
 type harness struct {
@@ -86,7 +52,7 @@ type harness struct {
 
 func setupHTTPServer(t *testing.T, tenant string) harness {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
 	// Slice 197: JWT bearers via slice 190 path. ViewerFor for the
@@ -98,10 +64,7 @@ func setupHTTPServer(t *testing.T, tenant string) harness {
 		t.Fatal("HTTPHandlerForTests nil")
 	}
 	ts := httptest.NewServer(h)
-	t.Cleanup(func() {
-		ts.Close()
-		app.Close()
-	})
+	t.Cleanup(ts.Close)
 	return harness{ts: ts, bearer: bearer, approverBearer: approver}
 }
 
@@ -133,8 +96,7 @@ func doJSON(t *testing.T, method, url, bearer, body string) (*http.Response, []b
 // ----- ISC-40 + ISC-50: POST proposal happy path -----
 
 func TestHTTP_CreateProposal(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	h := setupHTTPServer(t, tenant)
 
@@ -165,8 +127,7 @@ func TestHTTP_CreateProposal(t *testing.T) {
 // ----- ISC-43 + ISC-51 + ISC-A1: confirm applies + records approver -----
 
 func TestHTTP_ConfirmProposal_AppliesAndRecordsApprover(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	h := setupHTTPServer(t, tenant)
 
@@ -226,8 +187,7 @@ func TestHTTP_ConfirmProposal_AppliesAndRecordsApprover(t *testing.T) {
 // ----- ISC-44 + ISC-52: reject path -----
 
 func TestHTTP_RejectProposal(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	h := setupHTTPServer(t, tenant)
 
@@ -258,8 +218,7 @@ func TestHTTP_RejectProposal(t *testing.T) {
 // ----- ISC-45 + ISC-55: non-approver gets 403 on confirm -----
 
 func TestHTTP_ConfirmRequiresApprover(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	h := setupHTTPServer(t, tenant)
 
@@ -290,8 +249,7 @@ func TestHTTP_ConfirmRequiresApprover(t *testing.T) {
 // ----- ISC-53 + RLS: cross-tenant isolation -----
 
 func TestHTTP_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	hA := setupHTTPServer(t, tenantA)
