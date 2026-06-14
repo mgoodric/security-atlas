@@ -26,13 +26,12 @@ package qaisuggest_test
 
 import (
 	"context"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -40,57 +39,19 @@ import (
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
 // freshTenant returns a new tenant id + registers cleanup of the rows this
-// slice's tests create (children first for FK order).
+// slice's tests create (children first for FK order). Pure tenant-scoped
+// DELETE, so it delegates to dbtest.SeedTenant (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM questionnaire_answers WHERE tenant_id = $1`,
-			`DELETE FROM questionnaire_questions WHERE tenant_id = $1`,
-			`DELETE FROM questionnaires WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-			`DELETE FROM policies WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"questionnaire_answers",
+		"questionnaire_questions",
+		"questionnaires",
+		"evidence_records",
+		"controls",
+		"policies",
+	)
 }
 
 func tenantCtx(t *testing.T, tenant string) context.Context {
@@ -151,8 +112,8 @@ func stubWith(store *qaisuggest.Store, draft string) *qaisuggest.Service {
 // ----- AC-13: valid draft with a resolvable citation reaches draft state -----
 
 func TestSuggest_ValidCitationDrafts(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	qID := seedQuestion(t, admin, tenant, "Do you encrypt customer data at rest?")
@@ -229,8 +190,8 @@ func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant, controlTitle string
 // ----- AC-13 (evidence): a draft citing a passing evidence record drafts -----
 
 func TestSuggest_EvidenceCitationDrafts(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	qID := seedQuestion(t, admin, tenant, "Do you run periodic access reviews?")
@@ -255,8 +216,8 @@ func TestSuggest_EvidenceCitationDrafts(t *testing.T) {
 // ----- AC-14: a non-existent-id citation is rejected -> suppressed -----
 
 func TestSuggest_FabricatedCitationRejected(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	qID := seedQuestion(t, admin, tenant, "Do you encrypt data at rest?")
@@ -287,8 +248,8 @@ func TestSuggest_FabricatedCitationRejected(t *testing.T) {
 // ----- AC-15: no backing material -> insufficient, not fabricated -----
 
 func TestSuggest_NoEvidenceInsufficient(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	// A question whose keywords match NO policy/evidence in the tenant.
@@ -319,8 +280,8 @@ func TestSuggest_NoEvidenceInsufficient(t *testing.T) {
 // suggestion is SUPPRESSED. A Tenant-B suggestion can never cite a Tenant-A
 // record (threat-model I, P0-441-3).
 func TestSuggest_CrossTenantCitationSuppressed(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -380,8 +341,8 @@ func TestSuggest_CrossTenantCitationSuppressed(t *testing.T) {
 // ----- AC-17: approval requires human_approver (the DB guard) -----
 
 func TestApprove_RequiresApprover(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	qID := seedQuestion(t, admin, tenant, "Do you encrypt data at rest?")
@@ -438,7 +399,7 @@ func TestApprove_RequiresApprover(t *testing.T) {
 // ----- DB CHECK direct proof: human_approved without approver is impossible --
 
 func TestDBGuard_RejectsApprovedWithoutApprover(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	qID := seedQuestion(t, admin, tenant, "Do you encrypt at rest?")

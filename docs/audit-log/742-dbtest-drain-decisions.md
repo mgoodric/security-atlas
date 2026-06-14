@@ -301,3 +301,54 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 16
+
+Files migrated (4 files, 4 distinct packages, each fully owning its DB helpers
+in the named file; siblings — `helpers_test.go`, `ollama_test.go`,
+`service_test.go`, `qaisuggest_test.go`, `gapexplain_test.go`, the excel/pdf/
+library/fuzz unit tests, `store_helpers_test.go` — are unit tests that do NOT
+reference `appDSN`/`adminDSN`/`openPool`/`freshTenant` and were left untouched):
+
+1. **llm — clean full removal.** `getenv`/`appDSN`/`adminDSN`/`openPool` deleted;
+   `freshTenant` (pure single-table tenant-scoped DELETE on `ai_generations`,
+   returns string) delegates to `dbtest.SeedTenant`. Every `app := openPool(t,
+appDSN(t))` / `admin := openPool(t, adminDSN(t))` (incl. the admin-only
+   `TestReusableCheckTemplate_RejectsAtDBLayer`) → `NewAppPool`/`NewMigratePool`
+   (dbtest self-closes; the old `openPool` registered `t.Cleanup(pool.Close)`, now
+   redundant). `os` dropped (only `getenv` used it); `time` kept (`validReq`);
+   `pgxpool` kept (`mutateUnderTenant`/`rawInsertUnknownSurface`/`freshTenant`
+   signatures). NO fake-Ollama HTTP server in this file — it uses `llm.StubClient`
+   (the slice-498 CI seam), so there was no HTTP server setup/teardown to preserve.
+2. **qaisuggest — clean full removal.** `appDSN`/`adminDSN`/`openPool` deleted;
+   `freshTenant` (FK-ordered tenant-scoped DELETE over 6 tables, returns string)
+   delegates to `dbtest.SeedTenant`. All `app`/`admin` pairs + the admin-only
+   `TestDBGuard_RejectsApprovedWithoutApprover` re-routed. `os` + `time` dropped
+   (no remaining references); `pgxpool` kept (`freshTenant`/`seedQuestion`/
+   `seedPolicy`/`seedEvidence` signatures). Uses `llm.StubClient` — no live Ollama.
+3. **questionnaire — clean full removal.** `package questionnaire` (in-package, not
+   `_test`). `appDSN`/`adminDSN`/`openPool` deleted; `freshTenant` (FK-ordered
+   tenant-scoped DELETE over 4 tables, returns string) delegates to
+   `dbtest.SeedTenant`. App-only `TestStore_CreateQuestionnaire_RejectsMissingTenant`
+   → `NewAppPool`. `os`/`time`/`uuid` dropped (no remaining references); `pgxpool`
+   KEPT for the `freshTenant(admin *pgxpool.Pool)` parameter only.
+4. **gapexplain — clean full removal.** `appDSN`/`adminDSN`/`openPool` deleted;
+   `freshTenant` (FK-ordered tenant-scoped DELETE over 3 tables, returns string)
+   delegates to `dbtest.SeedTenant`. All `app`/`admin` pairs re-routed. `os`
+   dropped; `time`/`fmt` kept (seeders + tests); `pgxpool` kept (seeder signatures).
+   Uses `llm.StubClient` — no live Ollama.
+
+No `freshTenant` carve-out was needed: all four are pure FK-ordered tenant-scoped
+DELETEs returning a `string`, exactly the `dbtest.SeedTenant` shape (no
+tenant-row INSERT, no `uuid.UUID` return, no self-FK column-scoped ordering).
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all four packages; all four suites
+  return `ok` under `go test -tags=integration -p 1` with no DB env (clean SKIP +
+  untouched unit tests pass). Live integration run deferred to CI (no local
+  Postgres this session — batch-9..15 precedent). No production (`!_test.go`) code
+  touched; shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none

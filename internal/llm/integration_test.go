@@ -23,7 +23,6 @@ package llm_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -32,56 +31,19 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func getenv(k string) string { return os.Getenv(k) }
-
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
 // freshTenant returns a unique tenant id and registers cleanup of its
-// ai_generations rows via the admin (BYPASSRLS) pool.
+// ai_generations rows via the admin (BYPASSRLS) pool. Pure tenant-scoped
+// DELETE, so it delegates to dbtest.SeedTenant (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		if _, err := admin.Exec(ctx, `DELETE FROM ai_generations WHERE tenant_id = $1`, tenant); err != nil {
-			t.Logf("cleanup ai_generations: %v", err)
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin, "ai_generations")
 }
 
 func tenantCtx(t *testing.T, tenant string) context.Context {
@@ -107,8 +69,8 @@ func validReq(surface llm.Surface) llm.GenerateRequest {
 // ----- AC-10: smoke path (client -> ai_generations write -> read back) -----
 
 func TestSmokePath_StubClientToAuditWrite(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -146,8 +108,8 @@ func TestSmokePath_StubClientToAuditWrite(t *testing.T) {
 // ----- AC-12: cross-tenant isolation -----
 
 func TestCrossTenantIsolation(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 
@@ -191,8 +153,8 @@ func TestCrossTenantIsolation(t *testing.T) {
 // ----- AC-12: append-only (no UPDATE/DELETE path) -----
 
 func TestAppendOnly_NoUpdateNoDelete(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -274,7 +236,7 @@ func mutateUnderTenant(t *testing.T, app *pgxpool.Pool, tenant, sql string, args
 // shape a consumer like 440/441/471 will use) and prove the CHECK fires.
 
 func TestReusableCheckTemplate_RejectsAtDBLayer(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	ctx := context.Background()
 
 	// Create an ephemeral adopter table using the shipped reusable CHECK.
@@ -334,8 +296,8 @@ func TestReusableCheckTemplate_RejectsAtDBLayer(t *testing.T) {
 // ----- DB CHECK: surface + provenance constraints -----
 
 func TestSurfaceAndProvenanceCheck(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 	writer := llm.NewAuditWriter(app)
