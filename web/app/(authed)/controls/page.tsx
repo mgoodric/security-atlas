@@ -102,7 +102,11 @@ import {
   NEW_CONTROL_FUTURE_REASON,
   NEW_CONTROL_FUTURE_TESTID,
 } from "./new-control-future";
-import { SavedViewsBar, SelectionBar } from "./controls-toolbar";
+import {
+  BulkAssignMessage,
+  SavedViewsBar,
+  SelectionBar,
+} from "./controls-toolbar";
 import {
   isOverCap,
   pruneSelection,
@@ -146,6 +150,17 @@ const SCOPE_CELL_CAP = 50;
 // across pages is fine — the constant lives next to the page that owns
 // it.
 const CONTROLS_PAGE_SIZE = 50;
+
+// Slice 745 — how long the bulk-assign confirmation stays on screen
+// before auto-dismissing, in milliseconds. The message renders in a
+// persistent region above the table (independent of the selection bar)
+// so the operator actually sees it after a successful bulk-assign clears
+// the selection; it then auto-dismisses so a stale confirmation does not
+// linger across unrelated actions. The next bulk-assign attempt also
+// clears it eagerly (onAssignToMe nulls it before the request), so a
+// fresh attempt never shows the previous result. Greppable at module
+// scope per the slice-227 CONTROLS_PAGE_SIZE precedent.
+const BULK_ASSIGN_MESSAGE_TTL_MS = 6000;
 
 // Slice 227 — URL query-string key for the 1-indexed page index. The
 // `page` key is sibling to the filter keys above; the filter-change
@@ -417,6 +432,24 @@ function ControlsPageInner() {
     setAssignMessage(null);
     bulkAssignMutation.mutate(Array.from(selected));
   }, [bulkAssignMutation, selected]);
+
+  // Slice 745 — auto-dismiss the bulk-assign confirmation after a delay so
+  // a stale "Assigned N controls to you." does not linger across unrelated
+  // actions. The message lives in the persistent `BulkAssignMessage` region
+  // (above the table, independent of `selected.size`), so unlike the old
+  // inline span it survives the selection-clear and is actually observable;
+  // this timer is the natural counterpart that retires it. Re-armed each
+  // time a new message is set; cleared on unmount or before the next
+  // message. A null message (the initial / just-cleared state) schedules
+  // nothing.
+  useEffect(() => {
+    if (!assignMessage) return;
+    const handle = window.setTimeout(
+      () => setAssignMessage(null),
+      BULK_ASSIGN_MESSAGE_TTL_MS,
+    );
+    return () => window.clearTimeout(handle);
+  }, [assignMessage]);
 
   // Slice 468 — saved filter-views are now SERVER-BACKED (was client-side
   // localStorage in slice 448). Persistence moved to the (tenant, user)-
@@ -910,9 +943,18 @@ function ControlsPageInner() {
           onClear={onClearSelection}
           onAssignToMe={onAssignToMe}
           assigning={bulkAssignMutation.isPending}
-          assignMessage={assignMessage}
         />
       ) : null}
+      {/* Slice 745 — bulk-assign confirmation in a PERSISTENT region,
+          independent of `selected.size`. The success handler clears the
+          selection in the same batched update that sets the message; when
+          the message lived inside the selection bar (gated on
+          `selected.size > 0`) it unmounted in the same render it was set,
+          so the operator never saw it. Rendering it here, outside the
+          gated bar, lets the confirmation survive the selection-clear and
+          be observable (re-enables slice 743's quarantined message
+          assertion). Auto-dismisses via BULK_ASSIGN_MESSAGE_TTL_MS. */}
+      <BulkAssignMessage message={assignMessage} />
       {cellsCapped ? (
         <Alert data-testid="controls-scope-cells-capped" className="mb-3">
           <AlertTitle>Scope filter capped at {SCOPE_CELL_CAP} cells</AlertTitle>

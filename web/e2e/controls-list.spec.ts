@@ -358,24 +358,22 @@ test.describe("/controls list view", () => {
   // per-item ControlExistsInTenant check resolves and the POST returns 200
   // `{assigned:1}` — verified during slice 743). It asserts:
   //   1. the trigger is a real <button> carrying "bulk assign-owner",
-  //   2. the selection CLEARS on success (`selected.size → 0`, which is the
+  //   2. the success MESSAGE is observable (slice 745 — see below),
+  //   3. the selection CLEARS on success (`selected.size → 0`, which is the
   //      page's observable success effect).
   //
-  // FINDING (slice 743 — NOT a seed gap; P0-743-3): the success MESSAGE
-  // (`controls-bulk-assign-message`) is structurally UNOBSERVABLE in the
-  // current impl, so the message sub-assertion stays commented (it is NOT
-  // weakened — it turns on when the follow-on fixes the impl). The page
-  // (`web/app/(authed)/controls/page.tsx`) renders `<SelectionBar>` — and
-  // the success message lives INSIDE it — gated on `selected.size > 0`. The
-  // bulk-assign `onSuccess` handler calls `setAssignMessage(...)` AND
-  // `setSelected(new Set())` in the same batched update, so `selected.size`
-  // drops to 0 and the SelectionBar (with the message) unmounts in the same
-  // render the message is set — the "Assigned N controls to you." text is
-  // never painted. The POST genuinely succeeds (200, server row written);
-  // only the inline confirmation is unobservable. The fix (surface the
-  // success message OUTSIDE the selection-gated bar, or keep the bar mounted
-  // briefly with the message) is a frontend change outside slice 743's
-  // seed-and-un-quarantine scope; filed as a follow-on.
+  // RESOLVED (slice 745 — closes the slice-743 FINDING): the success MESSAGE
+  // (`controls-bulk-assign-message`) was structurally UNOBSERVABLE in the
+  // slice-468 impl: the page rendered `<SelectionBar>` (and the message
+  // lived INSIDE it) gated on `selected.size > 0`, while the bulk-assign
+  // `onSuccess` handler called `setAssignMessage(...)` AND
+  // `setSelected(new Set())` in the same batched update — so `selected.size`
+  // dropped to 0 and the SelectionBar (with the message) unmounted in the
+  // same render the message was set, and "Assigned N controls to you." was
+  // never painted. Slice 745 moved the confirmation into a persistent
+  // `BulkAssignMessage` region the page renders ABOVE the table, independent
+  // of `selected.size`, so it survives the selection-clear and is now
+  // observable. The message sub-assertion below is re-enabled (AC-3).
   test("slice 468 AC-2: bulk-assign-owner is a working trigger that assigns the selection to me", async ({
     authedPage: page,
   }) => {
@@ -393,12 +391,15 @@ test.describe("/controls list view", () => {
     expect(text).toContain("bulk assign-owner");
     await trigger.click();
     // The success message confirms the round-trip (seeded user is the
-    // owner target; the upstream re-checks per item). QUARANTINED — see the
-    // FINDING above; the message is unmounted with the selection bar on
-    // success, so it is never observable. Turns on with the impl follow-on.
-    //    await expect(
-    //      page.getByTestId("controls-bulk-assign-message"),
-    //    ).toContainText(/assigned \d+ control/i);
+    // owner target; the upstream re-checks per item). Slice 745 fixed the
+    // structural-unobservability finding below: the confirmation now
+    // renders in a PERSISTENT `controls-bulk-assign-message` region above
+    // the table (independent of `selected.size`), so it survives the
+    // selection-clear that runs in the same batched success update and is
+    // observable here. Re-enabled per slice 745 AC-3.
+    await expect(
+      page.getByTestId("controls-bulk-assign-message"),
+    ).toContainText(/assigned \d+ control/i);
     // Selection clears on success — the observable success effect.
     await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
