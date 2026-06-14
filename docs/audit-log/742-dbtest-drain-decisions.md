@@ -91,3 +91,48 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 12
+
+Files migrated (3 files, 3 distinct packages — each fully owns its helpers):
+
+1. `internal/api/adminvendors/export_integration_test.go`
+2. `internal/api/me/profile_integration_test.go`
+3. `internal/api/scfimport/import_test.go`
+
+Pool routing: every RLS-bound assertion / handler-under-test pool →
+`dbtest.NewAppPool`; every catalog-wipe / cross-tenant seed / cleanup pool →
+`dbtest.NewMigratePool`. No assertion defaulted to the privileged pool.
+
+freshTenant / harness judgments:
+
+1. **adminvendors `freshTenant` — migrated to `dbtest.SeedTenant`.** Returns
+   `string`, pure-DELETE cleanup on three tables (`vendor_scope_cells`,
+   `vendors`, `me_audit_log`) scoped by `tenant_id`. `appDSN`/`adminDSN`/
+   `openPool` deleted. `setupHTTPServer`'s `openPool(t, appDSN(t))` →
+   `dbtest.NewAppPool(t)` and its in-closure `app.Close()` dropped (dbtest
+   self-closes); `ts.Close()` kept. The four test-body `admin := openPool(...)`
+   - `defer admin.Close()` pairs collapsed to `admin := dbtest.NewMigratePool(t)`.
+2. **me — `seedTenantAndUser` kept inline (carve-out).** It is NOT a pure-DELETE
+   freshTenant: it INSERTs a `users` row and returns a `(tenantID, userID)`
+   pair — neither shape `SeedTenant` expresses. Only its pools re-routed:
+   `appDSN`/`adminDSN`/`openPool` deleted, every `admin := openPool(t, adminDSN(t))`
+   → `dbtest.NewMigratePool(t)` and `app := openPool(t, appDSN(t))` →
+   `dbtest.NewAppPool(t)`. `openPool` here had registered its own `t.Cleanup`,
+   so no manual `.Close()` existed in test bodies to drop.
+3. **scfimport — no freshTenant (uses `truncateCatalog`).** Only `adminDSN`/
+   `openPool` (privileged catalog-wipe pool) existed; both deleted. The four
+   `openPool(t)` call sites → `dbtest.NewMigratePool(t)` (BYPASSRLS pool backs
+   the `TRUNCATE controls CASCADE` + `DELETE FROM scf_anchors` global-catalog
+   wipes). `os` kept (`TestLoad_RejectsBadSchemaVersion` uses `os.CreateTemp`);
+   `pgxpool` kept (`truncateCatalog`/`loadFixture` signatures); `time` removed.
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all three packages; all three suites
+  SKIP cleanly with no DB env (`go test -tags=integration -p 1` → 3× `ok`). Live
+  integration run deferred to CI (no local Postgres this session — batch-9/10/11
+  precedent). No production (`!_test.go`) code touched; shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none
