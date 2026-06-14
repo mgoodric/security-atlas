@@ -136,3 +136,54 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 13 — `internal/control` + `internal/exception` + `internal/decision` + `internal/drift`
+
+First **non-api** batch: these are service-layer suites that test the stores
+directly (no `httptest` server), so the migration is pure pool plumbing plus
+the `freshTenant` conversions. Files migrated:
+
+1. `internal/control/integration_test.go`
+2. `internal/exception/integration_test.go`
+3. `internal/decision/integration_test.go`
+4. `internal/drift/integration_test.go`
+
+Pool routing: every RLS-bound store assertion → `dbtest.NewAppPool`; every
+fixture seed / tenant cleanup pool → `dbtest.NewMigratePool`. No assertion
+defaulted to the privileged pool.
+
+freshTenant / harness judgments:
+
+1. **control — `freshTenant` migrated to `dbtest.SeedTenant`.** Pure tenant-scoped
+   DELETE in FK order (`evidence_records`, then `controls`). `appDSN`/`adminDSN`/
+   `openPool` deleted; `openPool` here registered its own `t.Cleanup(pool.Close)`,
+   so no manual closes in test bodies. The four `admin := openPool(t, adminDSN(t))`
+   / `app := openPool(t, appDSN(t))` pairs → `NewMigratePool`/`NewAppPool`.
+   `seedSCFAnchor` kept inline (takes `*pgxpool.Pool`, INSERTs framework/version/
+   anchor rows — not a tenant cleanup), so `pgxpool` import stays.
+2. **exception — `freshTenant` migrated to `dbtest.SeedTenant`.** Pure-DELETE on
+   `exception_audit_log`, `exceptions`, `controls`. All 22 `admin`/`app`
+   `openPool` + `defer .Close()` blocks collapsed to `NewMigratePool`/`NewAppPool`
+   (dbtest self-closes, redundant defers removed). `seedControl` kept inline
+   (takes pool); `time` kept (`validCreate`).
+3. **decision — `freshTenant` kept inline (CARVE-OUT).** Its cleanup interleaves
+   `UPDATE decisions SET superseded_by = NULL` before `DELETE FROM decisions`
+   (breaks the self-referential `superseded_by` FK pre-delete) — not an ordered
+   set of pure DELETEs, so `dbtest.SeedTenant` cannot express it. Kept inline;
+   only its pool sourced from `NewMigratePool` at call sites. `TestOverdue`'s
+   extra `migrate := openPool(t, adminDSN(t))` → second `NewMigratePool(t)`.
+   `seedRisk`/`seedControl`/`seedException` kept inline (take pool).
+4. **drift — `freshTenant` migrated to `dbtest.SeedTenant`.** Pure-DELETE on
+   `control_drift_snapshots`, `control_evaluations`, `scope_cells`, `controls`.
+   `seedControl`/`seedEvaluation`/`seedSnapshot`/`seedEvaluationWithCell` kept
+   inline (take pool); `time` kept.
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all four packages; all four suites SKIP
+  cleanly with no DB env (`go test -tags=integration -p 1` → 4× `ok`). Live
+  integration run deferred to CI (no local Postgres this session — batch-9..12
+  precedent). No production (`!_test.go`) code touched; shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none

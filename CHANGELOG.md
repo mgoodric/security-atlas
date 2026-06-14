@@ -183,6 +183,8 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Changed
 
+- test(dbtest): migrate internal control + exception + decision + drift integration suites to the slice-435 dbtest harness (742 drain batch 13).
+
 - test(dbtest): migrate internal/api adminvendors + me-profile + scfimport integration suites to the slice-435 dbtest harness (742 drain batch 12).
 
 - test(dbtest): migrate internal/api csfassessment + dashboardexport + metrics + policies-ack-rate integration suites to the slice-435 dbtest harness (742 drain batch 11).
