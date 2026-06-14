@@ -15,6 +15,8 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // seedVendor POSTs a minimal vendor and returns its id.
@@ -40,8 +42,7 @@ func seedVendor(t *testing.T, tsURL, bearer, name string) string {
 // GET the history, and assert the wire shape + newest-first ordering. This
 // drives RecordReview, ListReviews, and toReviewWire through the router.
 func TestHTTP_RecordAndListReviews(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -117,8 +118,7 @@ func TestHTTP_RecordAndListReviews(t *testing.T) {
 // returns an empty (non-null) series, exercising the empty-slice branch of
 // ListReviews.
 func TestHTTP_ListReviews_EmptyHistory(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -146,8 +146,7 @@ func TestHTTP_ListReviews_EmptyHistory(t *testing.T) {
 // a non-UUID id (400), a malformed JSON body (400), a missing reviewed_at
 // (400), and a bad outcome (400 from the store validator via writeStoreErr).
 func TestHTTP_RecordReview_RejectsBadInput(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -202,8 +201,7 @@ func TestHTTP_RecordReview_RejectsBadInput(t *testing.T) {
 
 // TestHTTP_ListReviews_BadUUID — the non-UUID branch of ListReviews (400).
 func TestHTTP_ListReviews_BadUUID(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -217,8 +215,7 @@ func TestHTTP_ListReviews_BadUUID(t *testing.T) {
 // tenantContext guard). Confirms the credential is required before any DB
 // touch.
 func TestHTTP_Reviews_Unauthenticated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, _ := setupHTTPServer(t, tenant)
 
