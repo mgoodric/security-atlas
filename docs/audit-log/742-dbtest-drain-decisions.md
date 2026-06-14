@@ -187,3 +187,58 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 14 — `internal/eval` + `internal/freshness` + `internal/staleness` + `internal/artifact`
+
+Four more **non-api** service-layer suites. Files migrated:
+
+1. `internal/eval/integration_test.go`
+2. `internal/freshness/integration_test.go`
+3. `internal/staleness/integration_test.go`
+4. `internal/artifact/integration_test.go`
+
+Pool routing: every RLS-bound store assertion → `dbtest.NewAppPool`; every
+fixture seed / tenant cleanup pool → `dbtest.NewMigratePool`. No assertion
+defaulted to the privileged pool.
+
+freshTenant / harness judgments:
+
+1. **eval — `freshTenant` migrated to `dbtest.SeedTenant`.** Pure tenant-scoped
+   DELETE in FK order (`control_evaluations`, `evidence_records`, `scope_cells`,
+   `scope_dimensions`, `controls`). `appDSN`/`adminDSN`/`openPool` deleted; all
+   `admin := openPool(t, adminDSN(t))` + `defer .Close()` / `app := openPool(t,
+appDSN(t))` + `defer .Close()` blocks collapsed to `NewMigratePool`/
+   `NewAppPool` (dbtest self-closes, redundant defers removed). `os` import
+   dropped. `seedControl`/`seedEvidence`/`seedEvidenceWithPayload`/`seedScopeCell`/
+   `countEvaluations` kept inline (take pool), so `pgxpool` import stays.
+2. **freshness — `freshTenant` migrated to `dbtest.SeedTenant`.** Pure-DELETE on
+   `evidence_freshness`, `evidence_records`, `controls`. Same `openPool`+`defer`
+   → `NewMigratePool`/`NewAppPool` collapse; `os` dropped, `pgxpool` kept for the
+   inline `seedControl`/`seedEvidence`/`countEvidenceRecords` helpers.
+3. **staleness — `freshTenant` migrated to `dbtest.SeedTenant`.** Pure-DELETE on
+   `staleness_rollup_log`, `notifications`, `user_notification_preferences`,
+   `evidence_freshness`, `evidence_records`, `controls`, `users`. Same collapse;
+   `os` dropped. `TestScheduler_SweepOnce_DrivesRollupPerTenant` builds
+   `staleness.New(admin, app, nil)` — `admin` (migrator/BYPASSRLS) →
+   `NewMigratePool`, `app` (RLS) → `NewAppPool`, role model preserved.
+   `seedUser`/`seedControl`/`seedEvidence`/etc. kept inline (take pool).
+4. **artifact — `freshTenant` kept inline (CARVE-OUT).** It returns `uuid.UUID`
+   (not `string`): the tests pass the typed id to `tenantCtx` and assert on
+   `tenant.String()`, a shape `dbtest.SeedTenant` (returns `string`) cannot
+   express. Kept inline; only its pool re-routed via `buildStore`, where
+   `admin`/`app` `openPool` → `NewMigratePool`/`NewAppPool` and the per-test
+   `defer admin.Close()` lines were removed (dbtest self-closes). **The MinIO/S3
+   setup stayed intact** (`minioEndpoint`/`minioBucket`/`newS3Client`/
+   `ensureBucket`/`buildStore`'s S3 wiring untouched), so `os` (MinIO env vars)
+   and `pgxpool` (freshTenant + buildStore signatures) both stay imported.
+   `appDSN`/`adminDSN`/`openPool` deleted.
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all four packages; all four suites SKIP
+  cleanly with no DB env (`go test -tags=integration -p 1` → 4× `ok`). Live
+  integration run deferred to CI (no local Postgres this session — batch-9..13
+  precedent). No production (`!_test.go`) code touched; shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none
