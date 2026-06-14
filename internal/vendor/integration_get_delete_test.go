@@ -22,6 +22,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 )
@@ -29,10 +30,8 @@ import (
 // TestGetVendor_RoundTrip — Create then Get and verify every field
 // hydrates back the way it went in.
 func TestGetVendor_RoundTrip(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -77,10 +76,8 @@ func TestGetVendor_RoundTrip(t *testing.T) {
 // TestGetVendor_NotFound — Get on a fabricated UUID returns
 // ErrVendorNotFound, not an opaque pgx error.
 func TestGetVendor_NotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -95,10 +92,8 @@ func TestGetVendor_NotFound(t *testing.T) {
 // created by Tenant A. The DB-layer RLS predicate denies the row; the
 // store surfaces ErrVendorNotFound, not the row.
 func TestGetVendor_RLSIsolatesCrossTenant(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -129,10 +124,8 @@ func TestGetVendor_RLSIsolatesCrossTenant(t *testing.T) {
 // ErrVendorNotFound. The CASCADE on vendor_scope_cells means we do not
 // have to clean up scope-cell bindings separately.
 func TestDeleteVendor_Removes(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -162,10 +155,8 @@ func TestDeleteVendor_Removes(t *testing.T) {
 // merge-blocking evidence that the Delete control the slice adds cannot
 // reach across the tenant boundary.
 func TestDeleteVendor_RLSIsolatesCrossTenant(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -207,10 +198,8 @@ func TestDeleteVendor_RLSIsolatesCrossTenant(t *testing.T) {
 // returns nil (Delete is idempotent by design; the SQL DELETE is a
 // no-op on a missing row).
 func TestDeleteVendor_IdempotentOnMissingRow(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -225,8 +214,7 @@ func TestDeleteVendor_IdempotentOnMissingRow(t *testing.T) {
 // Without this guard, a bug in the API layer could leak a query into the
 // "no tenant set" rabbit hole; the store rejects it before any SQL runs.
 func TestStore_InTx_RejectsMissingTenantContext(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	app := dbtest.NewAppPool(t)
 	store := vendor.NewStore(app)
 
 	// Bare context with no tenant — must reject.
