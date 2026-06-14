@@ -586,6 +586,72 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 detection_tier_actual: none
 detection_tier_target: none
 
+## Batch 22 — internal authz + evidence/ingest + vendor (whole-package, sibling-shared)
+
+Three WHOLE-PACKAGE (sibling-shared) drains, 7 `_test.go` files across 3
+packages, zero behavior change.
+
+- `internal/authz` — DEFs in `matrix_integration_test.go`, called from sibling
+  `audit_guc_integration_test.go`. `appDSN`/`adminDSN`/`openPool` deleted;
+  `freshTenant` is a PURE FK-ordered tenant-scoped DELETE returning a string, so
+  it now delegates to `dbtest.SeedTenant(t, admin, "decision_audit_log",
+"user_roles")` (same tables, same order). Callers' `openPool(t, appDSN(t))` +
+  `defer appPool.Close()` / `openPool(t, adminDSN(t))` + `defer adminPool.Close()`
+  → `dbtest.NewAppPool(t)` / `dbtest.NewMigratePool(t)` (the old `openPool` did
+  NOT self-register cleanup, so the manual `defer .Close()` lines were dropped).
+  `os`/`time`/`uuid` dropped from `matrix_integration_test.go`; `pgxpool` STAYS
+  (`freshTenant` + `tenantTx` signatures) and `pgx` STAYS (`tenantTx` return).
+  The `tenantTx` doc comment about rollback-vs-`pool.Close()` ordering was left
+  intact — the deferred `tx.Rollback` still runs at function return, before the
+  dbtest pool's `t.Cleanup` Close, so the ordering it describes is preserved.
+
+- `internal/evidence/ingest` — DISTINCT DSN shape: the only shared helper is
+  `openPool(t, dsn)`; there is NO `appDSN`/`adminDSN`/`freshTenant`. Callers pass
+  the env DSN directly via the package's own `envOrSkip(t, KEY)`. `DATABASE_URL`
+  is the PRIVILEGED DSN and `DATABASE_URL_APP` is the APP DSN, so
+  `openPool(t, envOrSkip(t, "DATABASE_URL"))` → `dbtest.NewMigratePool(t)` and
+  `openPool(t, envOrSkip(t, "DATABASE_URL_APP"))` → `dbtest.NewAppPool(t)`
+  (matching the dbtest constructors to the role each DSN names). `openPool` and
+  `envOrSkip` were BOTH deleted — after migration `envOrSkip` had zero callers
+  (it was used only for pool-DSN lookup), so it became fully dead and was removed.
+  `boot()`'s pool-only `t.Cleanup(func(){ adminPool.Close(); appPool.Close() })`
+  was dropped (dbtest pools self-close); the advisory-lock conn `defer
+conn.Release()`, the seed-tx commit path, and `ts.Close()`/HTTP teardown were
+  all KEPT. `os` STAYS (`replayMigration` uses `os.ReadFile`); `pgxpool`/`time`
+  STAY (helper signatures + skew math). No NATS buffer in these two files.
+
+- `internal/vendor` — DEFs in `integration_test.go`, called from siblings
+  `integration_get_delete_test.go` + `integration_reviews_test.go`.
+  `appDSN`/`adminDSN`/`openPool` deleted; `freshTenant` is a PURE FK-ordered
+  tenant-scoped DELETE returning a string, so it now delegates to
+  `dbtest.SeedTenant(t, admin, "vendor_scope_cells", "vendors", "scope_cells",
+"scope_dimensions")`. Every `admin`/`app` pool block + its `defer .Close()`
+  pair → `dbtest.NewMigratePool(t)` / `dbtest.NewAppPool(t)`; the single
+  app-only block (`TestStore_InTx_RejectsMissingTenantContext`) → `NewAppPool`.
+  `os` dropped from `integration_test.go`; `time`/`uuid`/`pgxpool` STAY
+  (`parseDate`/`time.Sleep`, `uuid.New`, `freshTenant` signature). `vendor` stands
+  up no httptest server in these files; the back-fill `admin.Exec` in
+  `integration_reviews_test.go` keeps the migrate pool it needs.
+
+No `freshTenant` carve-out this batch — all three are DELETE-only and convert
+cleanly to `dbtest.SeedTenant`.
+
+Role model preserved throughout: RLS-bound assertions run through
+`dbtest.NewAppPool`; the BYPASSRLS `dbtest.NewMigratePool` is used only for
+cross-tenant seed + append-only cleanup. No assertion defaults to the
+privileged pool.
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all 3 packages; all 3 return `ok` under
+  `go test -tags=integration -p 1` with no DB env (clean SKIP + untouched unit
+  tests pass). Live integration run deferred to CI (no local Postgres this
+  session — batch-9..21 precedent). No production (`!_test.go`) code touched;
+  shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none
+
 ## Batch 21 — internal/api anchors + board + freshnessdrift (whole-package, sibling-shared)
 
 Three WHOLE-PACKAGE (sibling-shared) drains: each package DEFINES its pool

@@ -29,6 +29,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
@@ -40,8 +41,7 @@ import (
 // hash-contributing column is still detected (tamper-evidence preserved).
 func TestEvidenceVerify_ProductionRecordValidates_474(t *testing.T) {
 	svc, _, _ := boot(t)
-	adminPool := openPool(t, envOrSkip(t, "DATABASE_URL"))
-	defer adminPool.Close()
+	adminPool := dbtest.NewMigratePool(t)
 	cred := mkCred(tenantA, nil, "")
 
 	// Push a real, scope-bearing record through ingest.
@@ -122,8 +122,7 @@ func TestEvidenceVerify_ProductionRecordValidates_474(t *testing.T) {
 
 func TestEvidenceVerify_DetectsCorruption_AC3(t *testing.T) {
 	svc, appPool, _ := boot(t)
-	adminPool := openPool(t, envOrSkip(t, "DATABASE_URL"))
-	defer adminPool.Close()
+	adminPool := dbtest.NewMigratePool(t)
 	cred := mkCred(tenantA, nil, "")
 
 	// Push one clean record through the real ingest path.
