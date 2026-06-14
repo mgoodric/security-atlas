@@ -23,9 +23,8 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgxpool"
-
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -104,11 +103,7 @@ evidence_queries:
 func setTenantGateMode(t *testing.T, tenant, mode string) {
 	t.Helper()
 	ctx := context.Background()
-	admin, err := pgxpool.New(ctx, adminDSN(t))
-	if err != nil {
-		t.Fatalf("admin pool: %v", err)
-	}
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	if _, err := admin.Exec(ctx,
 		`INSERT INTO tenants (id, name, bundle_gate_mode)
 		 VALUES ($1, $2, $3)
@@ -118,13 +113,7 @@ func setTenantGateMode(t *testing.T, tenant, mode string) {
 	}
 	t.Cleanup(func() {
 		c := context.Background()
-		a, e := pgxpool.New(c, adminDSN(t))
-		if e != nil {
-			t.Logf("cleanup admin pool: %v", e)
-			return
-		}
-		defer a.Close()
-		if _, e := a.Exec(c, `DELETE FROM tenants WHERE id = $1`, tenant); e != nil {
+		if _, e := admin.Exec(c, `DELETE FROM tenants WHERE id = $1`, tenant); e != nil {
 			t.Logf("cleanup tenants row: %v", e)
 		}
 	})
@@ -216,11 +205,11 @@ func TestGate_MandatoryTestsTenantRejectsNoTests(t *testing.T) {
 // Store-level isolation proof in TestList_TenantIsolation.
 func TestGate_TenantIsolation(t *testing.T) {
 	t.Parallel()
-	admin := adminPool(t)
-	app := appPool(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
-	tenantA := freshTenantList(t, admin)
-	tenantB := freshTenantList(t, admin)
+	tenantA := dbtest.SeedTenant(t, admin, "controls")
+	tenantB := dbtest.SeedTenant(t, admin, "controls")
 	setTenantGateMode(t, tenantA, "advisory")
 	// tenantB: deliberately no tenants row → strict default.
 

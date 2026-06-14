@@ -586,6 +586,68 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 detection_tier_actual: none
 detection_tier_target: none
 
+## Batch 23 — internal/api controls + risks (whole-package, sibling-shared)
+
+Two larger WHOLE-PACKAGE (sibling-shared) drains, 9 `_test.go` files across 2
+packages, zero behavior change.
+
+- `internal/api/controls` has TWO def files. `attest_integration_test.go`
+  defined `appDSN`/`adminDSN`/`openPool`/`freshTenant`; `list_integration_test.go`
+  separately defined `appPool`/`adminPool`/`freshTenantList`. All of these are
+  deleted. `freshTenant` (pure tenant-scoped DELETE returning a string) →
+  `dbtest.SeedTenant(t, admin, "evidence_audit_log", "evidence_records",
+"controls")`. `freshTenantList` (pure controls-only DELETE) was fully
+  converted and DELETED — its 5 call sites (3 in list, 2 in gate) inline
+  `dbtest.SeedTenant(t, admin, "controls")` rather than keep a one-line wrapper,
+  so the `func freshTenantList` grep is empty. `setupHTTP`'s pool acquisition is
+  already at function scope; its `t.Cleanup` dropped the redundant
+  `app.Close()`/`admin.Close()` (kept `ts.Close()` — LIFO closes the httptest
+  server before the dbtest pools self-close).
+- controls CARVE-OUTS (pool re-route only): `freshExportTenant` (returns
+  `uuid.UUID`, action-scoped `me_audit_log` DELETE) and `freshHistoryExportTenant`
+  (returns `uuid.UUID`, interleaves an UPDATE + action-scoped DELETE) — neither
+  is expressible via `SeedTenant`. For both, the migrate-pool acquisition was
+  HOISTED out of the `t.Cleanup` closure (a dbtest pool registers its own
+  `t.Cleanup`, which cannot run from inside a running cleanup) and captured by
+  the closure; the action-scoped/UPDATE cleanup body is otherwise unchanged.
+  `gate`'s `setTenantGateMode` similarly collapsed its two transient
+  `pgxpool.New(adminDSN)` opens into a single `dbtest.NewMigratePool(t)`
+  captured by the cleanup (DELETE cleanup is registered after the pool, so LIFO
+  runs the DELETE while the pool is still open).
+- `internal/api/risks`: DEFs in `integration_test.go`
+  (`appDSN`/`adminDSN`/`openPool`/`freshTenant`) deleted; `freshTenant` (pure
+  FK-ordered DELETE returning a string) → `dbtest.SeedTenant(t, admin,
+"risk_control_links", "control_evaluations", "evidence_records", "risks",
+"controls")`. Sibling `hierarchy_integration_test.go`'s own
+  `freshHierarchyTenant` (also a pure DELETE-returns-string, distinct table set)
+  → `dbtest.SeedTenant(t, admin, "risks", "org_units", "org_themes")`.
+  `export_integration_test.go` + `sort_integration_test.go` are caller-only
+  migrations.
+- Imports: controls `attest` keeps `os` (`optionalArtifactStore`), `time`,
+  `context`, `uuid`, `pgxpool`, `pgx` (seed-helper signatures + errors). controls
+  `list` dropped `os`/`time`/`context`-timeout but keeps `context`/`uuid`/
+  `pgxpool` (seed-helper signatures). controls `history_export` dropped `pgxpool`
+  entirely (the `var _ = (*pgxpool.Pool)(nil)` import-keeper was removed with it).
+  risks `integration_test` dropped `os`/`time` (timeout) but keeps `pgxpool`
+  (`freshTenant`/`seedControl` signatures). risks `sort` keeps `pgxpool`/`uuid`/
+  `time` (seed signature + timestamp math). No `freshTenant`/`freshTenantList`
+  became a carve-out.
+
+Role model preserved throughout: RLS-bound assertions run through
+`dbtest.NewAppPool`; the BYPASSRLS `dbtest.NewMigratePool` is used only for
+cross-tenant seed + append-only cleanup. No assertion defaults to the
+privileged pool.
+
+Verification: `goimports -w` applied to all 9; `gofmt -l` clean; `go vet
+-tags=integration` + `go build -tags=integration` clean for both packages; both
+return `ok` under `go test -tags=integration -p 1` with no DB env (clean SKIP +
+untouched unit tests pass). Live integration run deferred to CI (no local
+Postgres this session — batch-9..22 precedent). No production (`!_test.go`) code
+touched; shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none
+
 ## Batch 22 — internal authz + evidence/ingest + vendor (whole-package, sibling-shared)
 
 Three WHOLE-PACKAGE (sibling-shared) drains, 7 `_test.go` files across 3
