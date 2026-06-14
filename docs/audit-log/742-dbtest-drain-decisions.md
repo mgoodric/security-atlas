@@ -45,3 +45,49 @@ Verification: `gofmt -l` clean, `goimports -w` applied, `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 11
+
+Files migrated (4 files, 4 distinct packages, each fully owns its helpers —
+`appDSN`/`adminDSN`/`openPool` deleted in all four):
+
+1. `internal/api/csfassessment/integration_test.go`
+2. `internal/api/dashboardexport/integration_test.go`
+3. `internal/api/metrics/integration_test.go`
+4. `internal/api/policies/ack_rate_integration_test.go`
+
+Pool routing: every RLS-bound assertion / handler-under-test pool →
+`dbtest.NewAppPool`; every catalog-seed / cross-tenant cleanup pool →
+`dbtest.NewMigratePool`. No assertion defaulted to the privileged pool.
+
+freshTenant judgments:
+
+1. **csfassessment — migrated to `dbtest.SeedTenant`.** Returns `string`,
+   pure-DELETE cleanup on four tables scoped by `tenant_id`. The unused `fvID`
+   parameter was dropped from the thin wrapper; call sites updated.
+2. **dashboardexport `freshExportTenant` — carve-out (kept inline).** Returns
+   `uuid.UUID` (not the string `SeedTenant` yields) AND one cleanup row is
+   scoped to `action='dashboard_export'` on `me_audit_log` — neither shape
+   `SeedTenant` expresses. Only its pool re-routed to `NewMigratePool`; the
+   migrate pool is acquired before the closure so dbtest registers its own
+   `t.Cleanup` ahead of teardown (anchors `freshAnchorsTenant` precedent).
+3. **metrics — carve-out (kept inline).** Returns `uuid.UUID`; pool re-routed
+   to `NewMigratePool` only.
+4. **policies — migrated to `dbtest.SeedTenant`.** Returns `string`, pure
+   tenant-scoped DELETE. The original two-phase `policies` delete
+   (`predecessor_id IS NOT NULL` first, then unconstrained) was defensive only:
+   the policies self-FK is `ON DELETE SET NULL` (migration 20260511000016), so a
+   single tenant-scoped `policies` DELETE removes the whole version chain with no
+   constraint violation. Collapsed to one `policies` entry — behavior identical.
+   `setup()`'s manual `app.Close()`/`admin.Close()` dropped (dbtest self-closes);
+   `ts.Close()` kept.
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all four packages; all four suites SKIP
+  cleanly with no DB env (`go test -tags=integration -p 1` → 4× `ok`). Live
+  integration run deferred to CI (no local Postgres this session — batch-9/10
+  precedent). No production (`!_test.go`) code touched; shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none
