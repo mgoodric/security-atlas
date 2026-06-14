@@ -35,6 +35,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/audit/sample"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 )
 
@@ -195,7 +196,7 @@ func exportARJSONFake(t *testing.T, app *pgxpool.Pool, tenant string, periodID u
 	bridge := &captureBridge{}
 	signer, _ := oscal.NewEphemeralSigner()
 	e := oscal.NewExporter(app, bridge, signer)
-	bundle, err := e.Export(ctxFor(t, tenant), oscal.ExportInput{
+	bundle, err := e.Export(dbtest.WithTenantCtx(t, tenant), oscal.ExportInput{
 		AuditPeriodID:     periodID,
 		OrganizationName:  "Acme Security Inc.",
 		SystemName:        "Acme Compliance Platform",
@@ -217,8 +218,8 @@ func exportARJSONFake(t *testing.T, app *pgxpool.Pool, tenant string, periodID u
 // AC-6: an AR exported for a frozen period carries the expected drawn sample
 // ids (reproducible) and walkthrough attachment references.
 func TestAR_CarriesDrawnSampleAndAttachmentRefs(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	registerSampleCleanup(t, admin, tenant)
 	fwVersion := seedFrameworkVersion(t, admin)
@@ -262,8 +263,8 @@ func TestAR_CarriesDrawnSampleAndAttachmentRefs(t *testing.T) {
 // sampled_evidence_ids. The draw is over the persisted frozen draw; a record
 // observed after frozen_at was never in that draw.
 func TestAR_FreezeIntegrity_PostFreezeEvidenceNeverSampled(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	registerSampleCleanup(t, admin, tenant)
 	fwVersion := seedFrameworkVersion(t, admin)
@@ -295,8 +296,8 @@ func TestAR_FreezeIntegrity_PostFreezeEvidenceNeverSampled(t *testing.T) {
 // references never appear in Tenant B's AR. The leak surface is the
 // tenant-scoped DB read; runs through the real read path (fake bridge).
 func TestAR_TenantIsolation_SampledEvidenceAndAttachmentsDoNotLeak(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	registerSampleCleanup(t, admin, tenantA)
@@ -350,8 +351,8 @@ func TestAR_TenantIsolation_SampledEvidenceAndAttachmentsDoNotLeak(t *testing.T)
 // AC-9 (threat-model R): re-running the sampler with the persisted seed
 // against the frozen population yields the same drawn set the AR carries.
 func TestAR_Reproducibility_PersistedSeedReproducesARDraw(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	registerSampleCleanup(t, admin, tenant)
 	fwVersion := seedFrameworkVersion(t, admin)
@@ -395,8 +396,8 @@ func TestAR_Reproducibility_PersistedSeedReproducesARDraw(t *testing.T) {
 // D3: a walkthrough with more attachments than the cap carries the capped
 // prefix plus an honest overflow note — evidence is never silently dropped.
 func TestAR_AttachmentCap_OverflowNotePresent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	registerSampleCleanup(t, admin, tenant)
 	fwVersion := seedFrameworkVersion(t, admin)
@@ -420,8 +421,8 @@ func TestAR_AttachmentCap_OverflowNotePresent(t *testing.T) {
 // fake-bridge tests above prove the read-path correctness; this proves wire
 // fidelity (decision D2).
 func TestAR_RealBridgeRoundTrip(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	registerSampleCleanup(t, admin, tenant)
 	fwVersion := seedFrameworkVersion(t, admin)
@@ -446,7 +447,7 @@ func TestAR_RealBridgeRoundTrip(t *testing.T) {
 
 	signer, _ := oscal.NewEphemeralSigner()
 	e := oscal.NewExporter(app, bridge, signer)
-	bundle, err := e.Export(ctxFor(t, tenant), oscal.ExportInput{
+	bundle, err := e.Export(dbtest.WithTenantCtx(t, tenant), oscal.ExportInput{
 		AuditPeriodID:    periodID,
 		OrganizationName: "Acme Security Inc.",
 		SystemName:       "Acme Compliance Platform",
