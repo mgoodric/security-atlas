@@ -183,6 +183,8 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Changed
 
+- test(dbtest): migrate internal evidence-streambuf + frameworkscope + mcp-writeproposals + platform-status integration suites to the slice-435 dbtest harness (742 drain batch 18).
+
 - test(dbtest): migrate internal metrics-eval + metrics-scheduler + backup + checklist integration suites to the slice-435 dbtest harness (742 drain batch 17).
 
 - test(dbtest): migrate internal llm + qaisuggest + questionnaire + gapexplain integration suites to the slice-435 dbtest harness (742 drain batch 16).

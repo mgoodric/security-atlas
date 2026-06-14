@@ -412,3 +412,69 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 18
+
+Files migrated (4 files, 4 distinct packages, each fully owning its DB helpers
+in the named file; the sibling unit tests in these packages do NOT reference
+`appDSN`/`adminDSN`/`openPool`/`freshTenant` and were left untouched):
+
+1. **internal/evidence/streambuf — carve-out (NATS JetStream harness kept).**
+   `openPool` deleted; the `boot` fixture's `openPool(t, envOrSkip(t, "DATABASE_URL"))`
+   → `dbtest.NewMigratePool(t)` and `openPool(t, envOrSkip(t, "DATABASE_URL_APP"))`
+   → `dbtest.NewAppPool(t)` (role model preserved: the BYPASSRLS migrate pool drives
+   the advisory-lock + TRUNCATE + platform-schema seed; the app pool backs
+   `ingest.New` and every RLS-scoped count/audit/payload assertion). The dbtest pools
+   self-close, so the manual `adminPool.Close()`/`appPool.Close()` on the
+   `streambuf.Open` error path AND in the `t.Cleanup` closure were removed; the NATS
+   stream teardown (`sc.JS().DeleteStream(...)` + `sc.Close()`) is KEPT fully intact.
+   `envOrSkip` stays inline — it is still the only skip path for `NATS_URL` (not a
+   DSN/pool helper, outside the grep AC). `os`/`time`/`pgxpool`/`uuid` etc. all KEPT
+   (envOrSkip, AckWait, fixture struct `pool *pgxpool.Pool`, per-test stream uuid).
+2. **internal/frameworkscope — clean removal + setupHTTPServer hoist.** `appDSN` +
+   `adminDSN` + `openPool` deleted; `freshTenant` (pure FK-ordered tenant-scoped
+   DELETE over 8 tables, returns string) delegates to `dbtest.SeedTenant`. All
+   `admin`/`app` pairs + the two admin-only HTTP tests re-routed to
+   `NewMigratePool`/`NewAppPool`. `setupHTTPServer`'s `app` pool → `dbtest.NewAppPool`,
+   created BEFORE the server-teardown `t.Cleanup` so LIFO closes the httptest server
+   first while the pool is still open; the redundant `app.Close()` was dropped, the
+   `ts.Close()` KEPT. `seedFrameworkVersion`/`seedScopeAndControl`/`withAdminTenant`
+   kept inline (outside the pool/DSN/freshTenant helper set; they perform extra row
+   inserts + GUC-scoped admin transactions `SeedTenant` cannot express). `os` dropped;
+   `uuid`/`pgxpool`/`pgx` kept.
+3. **internal/mcp/writeproposals — clean full removal.** `appDSN` + `adminDSN` +
+   `openPool` deleted; `freshTenant` (pure single-table tenant-scoped DELETE of
+   `mcp_write_proposals`, returns string) delegates to `dbtest.SeedTenant`. Although
+   this package adopts the `ai_assist_human_approver_guard` column set, its seed
+   helper only DELETEs (it does NOT insert proposal rows — the tests create those via
+   `store.Create`), so it is a CLEAN migration, not a carve-out. All `admin`/`app`
+   pairs + the admin-only schema-invariant test (`TestSchemaInvariant_...`) re-routed
+   to `NewMigratePool`/`NewAppPool`; the `mcp_wp_ai_assist_invariant` CHECK assertion
+   and the BYPASSRLS-admin direct-INSERT path are preserved. `os`/`time` dropped;
+   `uuid`/`pgxpool`/`pgx`/`pgconn` kept.
+4. **internal/platform — clean full removal (status_integration_test.go).** `adminDSN`
+   - `appDSN` + `openPool` deleted; every `openPool(t, adminDSN(t))` → `NewMigratePool`
+     and `openPool(t, appDSN(t))` → `NewAppPool`. No `freshTenant` here — the singleton
+     `platform_status` + bootstrap fixtures are managed by `resetPlatformStatus` and
+     `resetBootstrapFixtures` (UPDATE / TRUNCATE-CASCADE helpers), which are NOT the
+     pool/DSN helper set this drain targets and stay inline. Role model preserved: the
+     public-read RLS + app-cannot-write P0 assertions run through the app pool; the
+     write/reset/seed paths through the BYPASSRLS migrate pool. The original `openPool`
+     self-closed via `t.Cleanup`, so there were no manual `.Close()` calls to drop.
+     `os` dropped; `time`/`uuid`/`pgxpool` kept.
+
+One carve-out this batch (streambuf's NATS JetStream harness — Postgres pool
+plumbing migrated, broker scaffolding left intact); the other three are clean
+full removals. writeproposals was verified to be a clean removal (its seed helper
+DELETEs only) despite carrying the AI-assist guard columns.
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all four packages; all four suites return
+  `ok` under `go test -tags=integration -p 1` with no DB env (clean SKIP + untouched
+  unit tests pass). Live integration run deferred to CI (no local Postgres this
+  session — batch-9..17 precedent). No production (`!_test.go`) code touched; shard
+  enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none

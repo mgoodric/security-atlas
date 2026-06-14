@@ -13,61 +13,27 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
+// freshTenant returns a brand-new tenant id and registers cleanup of the rows
+// this slice's tests create (a pure tenant-scoped DELETE returning a string),
+// so it delegates to dbtest.SeedTenant (slice 435 / 742 drain batch 18).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		if _, err := admin.Exec(ctx, `DELETE FROM mcp_write_proposals WHERE tenant_id = $1`, tenant); err != nil {
-			t.Logf("cleanup mcp_write_proposals: %v", err)
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin, "mcp_write_proposals")
 }
 
 func ctxFor(t *testing.T, tenant string) context.Context {
@@ -92,10 +58,8 @@ func validCreate() writeproposals.CreateInput {
 // ----- ISC-22 / ISC-50: Create files a proposal at state=ai_proposed -----
 
 func TestCreate_HappyPath(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := writeproposals.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -121,10 +85,8 @@ func TestCreate_HappyPath(t *testing.T) {
 // ----- ISC-23: Get returns one row tenant-scoped via RLS -----
 
 func TestGet_RoundTrip(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := writeproposals.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -145,10 +107,8 @@ func TestGet_RoundTrip(t *testing.T) {
 // ----- ISC-24 + ISC-53: cross-tenant RLS blocks reads -----
 
 func TestList_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	store := writeproposals.NewStore(app)
@@ -171,10 +131,8 @@ func TestList_CrossTenantIsolation(t *testing.T) {
 // ----- ISC-25 / ISC-26 / ISC-51: Confirm flips state + runs Applier -----
 
 func TestConfirm_FlipsStateAndRunsApplier(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	appliedSubject := "risk-" + uuid.NewString()
@@ -215,10 +173,8 @@ func TestConfirm_FlipsStateAndRunsApplier(t *testing.T) {
 // ----- ISC-28 + ISC-54: double-confirm rejected as wrong state -----
 
 func TestConfirm_RejectsAlreadyApplied(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := writeproposals.NewStore(app).WithApplier(writeproposals.ToolCreateRisk,
 		func(ctx context.Context, tx pgx.Tx, p writeproposals.Proposal) (string, error) {
@@ -241,10 +197,8 @@ func TestConfirm_RejectsAlreadyApplied(t *testing.T) {
 // ----- ISC-27 + ISC-52: Reject is terminal -----
 
 func TestReject_HappyPath(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := writeproposals.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -271,10 +225,8 @@ func TestReject_HappyPath(t *testing.T) {
 // ----- ISC-29: confirm of rejected proposal blocked -----
 
 func TestConfirm_RejectsAlreadyRejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := writeproposals.NewStore(app).WithApplier(writeproposals.ToolCreateRisk,
 		func(ctx context.Context, tx pgx.Tx, p writeproposals.Proposal) (string, error) {
@@ -297,8 +249,7 @@ func TestConfirm_RejectsAlreadyRejected(t *testing.T) {
 // ----- ISC-A4 + ISC-56: schema CHECK enforces AI-assist invariant at DB level -----
 
 func TestSchemaInvariant_BlocksApprovedWithoutApprover(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := context.Background()
 
@@ -334,10 +285,8 @@ func TestSchemaInvariant_BlocksApprovedWithoutApprover(t *testing.T) {
 // ----- ISC-A5: pending-cap enforced at the store layer -----
 
 func TestCreate_EnforcesPendingCap(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := writeproposals.NewStore(app).WithPendingCap(2)
 	ctx := ctxFor(t, tenant)
@@ -377,10 +326,8 @@ func TestCreate_EnforcesPendingCap(t *testing.T) {
 // ----- ISC-21 + AllowedTools defense-in-depth -----
 
 func TestCreate_RejectsUnknownTool(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := writeproposals.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -395,10 +342,8 @@ func TestCreate_RejectsUnknownTool(t *testing.T) {
 // ----- ISC-A1: applier-error rolls back; state stays ai_proposed -----
 
 func TestConfirm_ApplierErrorRollsBack(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := writeproposals.NewStore(app).WithApplier(writeproposals.ToolCreateRisk,
 		func(ctx context.Context, tx pgx.Tx, p writeproposals.Proposal) (string, error) {
