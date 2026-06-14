@@ -8,53 +8,21 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 const (
 	tenantA = "11111111-1111-1111-1111-111111111111"
 	tenantB = "22222222-2222-2222-2222-222222222222"
 )
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-// openPool opens a pgx pool against dsn with a 10s timeout. Tests call
-// Close themselves via t.Cleanup to keep teardown deterministic.
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
 
 // ensureCatalog seeds the global catalog tables (SCF anchors + SOC 2
 // crosswalk) via the shared slice 461 helper. EnsureFullCatalog is
@@ -65,8 +33,7 @@ func openPool(t *testing.T, dsn string) *pgxpool.Pool {
 // guards that mistook a partial-DELETE leftover for "already seeded."
 func ensureCatalog(t *testing.T) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	if err := scfseed.EnsureFullCatalog(context.Background(), pool); err != nil {
 		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
 	}
@@ -77,8 +44,7 @@ func ensureCatalog(t *testing.T) {
 // because the cross-tenant tests need both tenants' controls cleared.
 func wipeTenantControls(t *testing.T) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	// TRUNCATE ... CASCADE rather than enumerate-and-DELETE: many tables
 	// FK-reference controls with ON DELETE RESTRICT — directly
 	// (evidence_records, control_evaluations, walkthroughs, exceptions,
@@ -107,8 +73,7 @@ func wipeTenantControls(t *testing.T) {
 // does not block the test setup.
 func seedControl(t *testing.T, tenantID string, scfAnchorScfID, bundleID, title string) uuid.UUID {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 
 	var anchorID uuid.UUID
 	if err := pool.QueryRow(context.Background(),
@@ -150,7 +115,7 @@ func seedControl(t *testing.T, tenantID string, scfAnchorScfID, bundleID, title 
 // (and every prior slice's) registered.
 func setupHTTPServer(t *testing.T, tenantID string) (*httptest.Server, string) {
 	t.Helper()
-	appPool := openPool(t, appDSN(t))
+	appPool := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(appPool)
 	// Slice 197: JWT bearer via slice 190 path. ViewerFor mirrors
@@ -161,10 +126,7 @@ func setupHTTPServer(t *testing.T, tenantID string) (*httptest.Server, string) {
 		t.Fatal("HTTPHandlerForTests returned nil; AttachDB did not take effect")
 	}
 	ts := httptest.NewServer(handler)
-	t.Cleanup(func() {
-		ts.Close()
-		appPool.Close()
-	})
+	t.Cleanup(ts.Close)
 	return ts, bearer
 }
 
@@ -496,8 +458,7 @@ func TestControlCoverage_FrameworkVersionPin(t *testing.T) {
 func TestControlCoverage_NullAnchorWhenUnanchored(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantControls(t)
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	id := uuid.New()
 	if _, err := pool.Exec(context.Background(), `
         INSERT INTO controls (
@@ -642,8 +603,7 @@ func TestUCFCoverage_RejectsMissingBearer(t *testing.T) {
 // table — if a future refactor adds one this test screams.
 func TestNoFrameworkToFrameworkEdgeTable(t *testing.T) {
 	ensureCatalog(t)
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	var n int
 	if err := pool.QueryRow(context.Background(), `
         SELECT count(*) FROM information_schema.tables
@@ -682,8 +642,7 @@ func TestNoFrameworkToFrameworkEdgeTable(t *testing.T) {
 // the demoseed pattern at internal/demoseed/writers.go (slice 205).
 func seedActivatedFrameworkScope(t *testing.T, tenant string, frameworkVersionID uuid.UUID, name string) uuid.UUID {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	id := uuid.New()
 	predicate := `{"op":"true"}`
 	// predicate_hash matches the demoseed shape: hex(sha256(predicate)).
@@ -707,8 +666,7 @@ func seedActivatedFrameworkScope(t *testing.T, tenant string, frameworkVersionID
 // the per-row coverage isn't null for in-scope rows.
 func seedEvaluation(t *testing.T, tenant string, controlID uuid.UUID, result string, evaluatedAt time.Time) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	id := uuid.New()
 	runID := uuid.New()
 	if _, err := pool.Exec(context.Background(), `
@@ -730,8 +688,7 @@ func seedEvaluation(t *testing.T, tenant string, controlID uuid.UUID, result str
 // the admin pool so RLS does not block setup.
 func seedScopeCell(t *testing.T, tenant string) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	const dims = `{"env":"prod"}`
 	if _, err := pool.Exec(context.Background(),
 		`INSERT INTO scope_cells (id, tenant_id, label, dimensions, dimensions_hash)
@@ -749,8 +706,7 @@ func seedScopeCell(t *testing.T, tenant string) {
 // to activate a framework_scope against.
 func soc2017FrameworkVersionID(t *testing.T) uuid.UUID {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	var id uuid.UUID
 	if err := pool.QueryRow(context.Background(),
 		`SELECT fv.id FROM framework_versions fv
@@ -782,8 +738,7 @@ func soc2017FrameworkVersionID(t *testing.T) uuid.UUID {
 // precedent in internal/evidence/ingest + internal/platform/status.)
 func wipeTenantState(t *testing.T) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	if _, err := pool.Exec(context.Background(),
 		`TRUNCATE controls, framework_scopes, scope_cells RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("wipe tenant state (TRUNCATE CASCADE): %v", err)
