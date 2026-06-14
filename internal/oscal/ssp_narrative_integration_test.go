@@ -32,6 +32,7 @@ import (
 	"google.golang.org/protobuf/encoding/protojson"
 
 	oscalv1 "github.com/mgoodric/security-atlas/gen/proto/oscal/v1"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 )
 
@@ -102,7 +103,7 @@ func exportSSPJSONFake(t *testing.T, app *pgxpool.Pool, tenant string, periodID 
 	bridge := &captureBridge{}
 	signer, _ := oscal.NewEphemeralSigner()
 	e := oscal.NewExporter(app, bridge, signer)
-	bundle, err := e.Export(ctxFor(t, tenant), oscal.ExportInput{
+	bundle, err := e.Export(dbtest.WithTenantCtx(t, tenant), oscal.ExportInput{
 		AuditPeriodID:     periodID,
 		OrganizationName:  "Acme Security Inc.",
 		SystemName:        "Acme Compliance Platform",
@@ -124,8 +125,8 @@ func exportSSPJSONFake(t *testing.T, app *pgxpool.Pool, tenant string, periodID 
 // AC-6: an SSP exported for a tenant with authored control descriptions
 // carries those descriptions verbatim as the implementation statements.
 func TestSSP_CarriesAuthoredDescriptionVerbatim(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwVersion := seedFrameworkVersion(t, admin)
 	periodID, _ := seedPeriod(t, admin, tenant, fwVersion, true /* frozen */)
@@ -149,8 +150,8 @@ func TestSSP_CarriesAuthoredDescriptionVerbatim(t *testing.T) {
 // AC-7: a control with no authored description falls back to the
 // clearly-labeled synthesized summary — never an empty statement, no panic.
 func TestSSP_NoDescriptionFallsBackToLabeledSummary(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwVersion := seedFrameworkVersion(t, admin)
 	periodID, _ := seedPeriod(t, admin, tenant, fwVersion, true /* frozen */)
@@ -178,8 +179,8 @@ func TestSSP_NoDescriptionFallsBackToLabeledSummary(t *testing.T) {
 // this runs through the real DB read path (capturing fake bridge), so the
 // guarantee is proven on every CI run.
 func TestSSP_TenantIsolation_DescriptionDoesNotLeak(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -208,8 +209,8 @@ func TestSSP_TenantIsolation_DescriptionDoesNotLeak(t *testing.T) {
 // when the bridge is unavailable (decision D2). The fake-bridge tests above
 // already prove the read-path correctness; this proves the wire fidelity.
 func TestSSP_RealBridgeRoundTrip(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwVersion := seedFrameworkVersion(t, admin)
 	periodID, _ := seedPeriod(t, admin, tenant, fwVersion, true /* frozen */)
@@ -227,7 +228,7 @@ func TestSSP_RealBridgeRoundTrip(t *testing.T) {
 
 	signer, _ := oscal.NewEphemeralSigner()
 	e := oscal.NewExporter(app, bridge, signer)
-	bundle, err := e.Export(ctxFor(t, tenant), oscal.ExportInput{
+	bundle, err := e.Export(dbtest.WithTenantCtx(t, tenant), oscal.ExportInput{
 		AuditPeriodID:    periodID,
 		OrganizationName: "Acme Security Inc.",
 		SystemName:       "Acme Compliance Platform",
