@@ -39,13 +39,22 @@ export type SelectionBarProps = {
   onAssignToMe: () => void;
   /** True while a bulk-assign request is in flight (disables the trigger). */
   assigning: boolean;
-  /** A human message from the last bulk-assign attempt (success or error). */
-  assignMessage: { kind: "ok" | "error"; text: string } | null;
 };
 
 /**
  * Selection summary + WORKING bulk-action trigger. Rendered by the page
  * only when `selectedCount > 0`.
+ *
+ * Slice 745 — the bulk-assign success/error confirmation is NO LONGER
+ * rendered here. The success handler clears the selection
+ * (`setSelected(new Set())`) in the same batched update that sets the
+ * message, which unmounted this bar (gated on `selected.size > 0`) in the
+ * same render the message was set — the operator never saw the
+ * confirmation (slice 743's quarantined message sub-assertion). The
+ * confirmation now lives in a persistent `BulkAssignMessage` region the
+ * page renders above the table, independent of `selected.size`, so it
+ * survives the selection-clear. See
+ * `docs/audit-log/745-bulk-assign-message-region-decisions.md`.
  */
 export function SelectionBar({
   selectedCount,
@@ -53,7 +62,6 @@ export function SelectionBar({
   onClear,
   onAssignToMe,
   assigning,
-  assignMessage,
 }: SelectionBarProps) {
   return (
     <div
@@ -95,20 +103,6 @@ export function SelectionBar({
       >
         {assigning ? "Assigning…" : "Bulk assign-owner to me"}
       </Button>
-      {assignMessage ? (
-        <span
-          data-testid="controls-bulk-assign-message"
-          role="status"
-          aria-live="polite"
-          className={
-            assignMessage.kind === "error"
-              ? "text-xs font-medium text-destructive"
-              : "text-xs font-medium text-muted-foreground"
-          }
-        >
-          {assignMessage.text}
-        </span>
-      ) : null}
       <Button
         type="button"
         variant="ghost"
@@ -119,6 +113,45 @@ export function SelectionBar({
       >
         Clear selection
       </Button>
+    </div>
+  );
+}
+
+export type BulkAssignMessageProps = {
+  /** The last bulk-assign result message, or null when there is none. */
+  message: { kind: "ok" | "error"; text: string } | null;
+};
+
+/**
+ * Slice 745 — bulk-assign success/error confirmation, rendered by the page
+ * ABOVE the table and INDEPENDENT of `selected.size`. This is the fix for
+ * the structurally-unobservable confirmation: because this region is not
+ * gated on the selection, it survives the `setSelected(new Set())` clear
+ * that runs in the same batched update as the success message set, so the
+ * operator actually sees "Assigned N controls to you." after a successful
+ * bulk-assign. Carries the `controls-bulk-assign-message` testid (moved off
+ * the now-removed inline span in the selection bar) so slice 743's
+ * quarantined e2e sub-assertion turns back on.
+ *
+ * `role="status"` + `aria-live="polite"` keeps the announcement
+ * non-interruptive for screen-reader users (an assistive-tech read of a
+ * background confirmation, not an alert). Auto-dismiss timing is owned by
+ * the page (it nulls the message after a delay / on the next action).
+ */
+export function BulkAssignMessage({ message }: BulkAssignMessageProps) {
+  if (!message) return null;
+  return (
+    <div
+      data-testid="controls-bulk-assign-message"
+      role="status"
+      aria-live="polite"
+      className={
+        message.kind === "error"
+          ? "mb-3 rounded-lg border border-destructive/40 bg-card px-3 py-2 text-sm font-medium text-destructive"
+          : "mb-3 rounded-lg border bg-card px-3 py-2 text-sm font-medium text-muted-foreground"
+      }
+    >
+      {message.text}
     </div>
   );
 }
