@@ -352,3 +352,63 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 17
+
+Files migrated (4 files, 4 distinct packages, each fully owning its DB helpers
+in the named `integration_test.go`; the sibling unit tests — `registry_test.go`,
+`worker_test.go`, `helpers_test.go`, `scheduler_test.go`, `checklist_test.go`,
+`roles_test.go`, `export_test.go` — do NOT reference
+`appDSN`/`adminDSN`/`openPool`/`freshTenant` and were left untouched):
+
+1. **internal/metrics/eval — carve-out (uuid.UUID freshTenant).** `adminDSN` +
+   `openPool` deleted; every `admin := openPool(t, adminDSN(t))` → `NewMigratePool`
+   (8 sites; this suite has no app pool — every evaluator runs through the BYPASSRLS
+   pool per the slice-294 header comment, role model preserved). `freshTenant` returns
+   `uuid.UUID` (the seeders key off it), NOT the string `dbtest.SeedTenant` returns,
+   so it stays INLINE; only its pool is re-routed. `os`/`time` dropped (only the
+   deleted DSN/openPool helpers used them); `uuid`/`pgxpool`/`strings` kept
+   (freshTenant + seeder signatures + error-substring asserts).
+2. **internal/metrics/scheduler — carve-out (uuid.UUID freshTenant).** `appDSN` +
+   `adminDSN` + `openPool` deleted; `admin`/`app` pairs (4 sites) →
+   `NewMigratePool`/`NewAppPool` (role model preserved: RLS-enforced sweepTenant
+   transaction runs through the app pool, BYPASSRLS seeding through migrate).
+   `freshTenant` returns `uuid.UUID` → stays inline, pool re-routed only. `os`
+   dropped; `time` KEPT (`1*time.Hour`, `time.After` in the Run-loop test);
+   `uuid`/`pgxpool` kept.
+3. **internal/backup — carve-out (migratorDSN raw-DSN-string).** `appDSN` +
+   `openPool` deleted; `pool := openPool(t, migDSN)` (4 sites) → `NewMigratePool`,
+   `appPool := openPool(t, appDSN(t))` → `NewAppPool` (AC-7 tenant-role-denied
+   assertion preserved through the app pool). `migratorDSN` stays INLINE: the raw
+   `DATABASE_URL` string is load-bearing beyond pool creation — it is passed to
+   `backup.NewVerifier(...)` (spins an ephemeral restore DB) and `assertNoEphemeralDBs`
+   (`pgx.Connect`); `dbtest.NewMigratePool` returns a pool, not the DSN. The
+   MinIO/object-store scaffolding (`newMinioClient`, `s3.*`, bucket-create) and the
+   pg_dump/restore/ephemeral-DB scaffolding stayed fully intact — only the Postgres
+   pool plumbing was migrated. `os`/`time`/`pgxpool` all KEPT (migratorDSN +
+   newMinioClient + os.WriteFile; time.Date; helper signatures).
+4. **internal/checklist — clean full removal.** `appDSN` + `adminDSN` + `openPool`
+   deleted; `freshTenant` (pure FK-ordered tenant-scoped DELETE over 6 tables,
+   returns string) delegates to `dbtest.SeedTenant`. All `app`/`admin` pairs +
+   the two admin-only DB-guard tests re-routed to `NewAppPool`/`NewMigratePool`.
+   `tenantCtx` (a thin `tenancy.WithTenant` wrapper) kept inline — it is outside the
+   pool/DSN/freshTenant helper set this drain targets and is not a copy of a shared
+   dbtest symbol; `tenancy` import retained. `os`/`time` dropped; `uuid`/`pgxpool`
+   kept (freshTenant signature + seeders). Uses `llm.StubClient` (slice-498 CI seam)
+   — no live Ollama, so no HTTP server setup/teardown to preserve.
+
+Three carve-outs this batch (eval + scheduler uuid.UUID freshTenant; backup
+raw-DSN-string migratorDSN), all consistent with the batch-13/14/15 precedent
+of leaving a helper inline when it does more than dbtest.SeedTenant can express
+(non-string return) or when its raw output is used beyond pool creation.
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all four packages; all four suites return
+  `ok` under `go test -tags=integration -p 1` with no DB env (clean SKIP + untouched
+  unit tests pass). Live integration run deferred to CI (no local Postgres this
+  session — batch-9..16 precedent). No production (`!_test.go`) code touched; shard
+  enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none
