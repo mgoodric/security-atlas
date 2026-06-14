@@ -172,6 +172,20 @@ jobs:
           name: go-unit-coverage
           path: coverage.txt
           if-no-files-found: warn
+      # Slice 695 — build ./cmd/atlas ONCE here and share it with the
+      # three playwright-family jobs via an artifact. They used to each
+      # run `go build -o /usr/local/bin/atlas ./cmd/atlas` on an identical
+      # ubuntu-latest runner (3× redundant host compilations). The target
+      # is OS/arch-coupled to this runner (all consumers are ubuntu-latest),
+      # so a host-built binary is safe to download + exec there.
+      - name: Build atlas server binary
+        run: go build -o atlas ./cmd/atlas
+      - name: Upload atlas binary as workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: atlas-binary
+          path: atlas
+          if-no-files-found: error
 
   # Slice 061 stub: posts pass under the SAME required-check name
   # (`Go · build + test`) when the PR touches no code. Mutually exclusive
@@ -1359,7 +1373,8 @@ jobs:
   # ====================================================================
   frontend-playwright:
     name: Frontend · Playwright e2e
-    needs: changes
+    # Slice 695 — needs build-go for the shared atlas-binary artifact.
+    needs: [changes, build-go]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1479,8 +1494,18 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
-      - name: Build atlas server
-        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      # Slice 695 — download the atlas binary built once by build-go
+      # instead of recompiling it here. All consumers are ubuntu-latest,
+      # matching the build-go runner OS/arch.
+      - name: Download prebuilt atlas binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: atlas-binary
+          path: .
+      - name: Install atlas binary
+        run: |
+          chmod +x atlas
+          sudo mv atlas /usr/local/bin/atlas
       - name: Install web workspace
         working-directory: .
         run: npm install --no-audit --no-fund
@@ -1595,7 +1620,8 @@ jobs:
   # ====================================================================
   frontend-playwright-prod-build:
     name: Frontend · Playwright e2e (prod-build standalone)
-    needs: changes
+    # Slice 695 — needs build-go for the shared atlas-binary artifact.
+    needs: [changes, build-go]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1713,8 +1739,18 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
-      - name: Build atlas server
-        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      # Slice 695 — download the atlas binary built once by build-go
+      # instead of recompiling it here. All consumers are ubuntu-latest,
+      # matching the build-go runner OS/arch.
+      - name: Download prebuilt atlas binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: atlas-binary
+          path: .
+      - name: Install atlas binary
+        run: |
+          chmod +x atlas
+          sudo mv atlas /usr/local/bin/atlas
       - name: Install web workspace
         working-directory: .
         run: npm install --no-audit --no-fund
@@ -1824,7 +1860,8 @@ jobs:
   # ====================================================================
   frontend-ui-honesty:
     name: Frontend · UI honesty (advisory)
-    needs: changes
+    # Slice 695 — needs build-go for the shared atlas-binary artifact.
+    needs: [changes, build-go]
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1928,8 +1965,18 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
-      - name: Build atlas server
-        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      # Slice 695 — download the atlas binary built once by build-go
+      # instead of recompiling it here. All consumers are ubuntu-latest,
+      # matching the build-go runner OS/arch.
+      - name: Download prebuilt atlas binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: atlas-binary
+          path: .
+      - name: Install atlas binary
+        run: |
+          chmod +x atlas
+          sudo mv atlas /usr/local/bin/atlas
       - name: Build web workspace
         working-directory: web
         run: npm run build
