@@ -29,7 +29,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -43,61 +42,28 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool pool/DSN boilerplate this file
+// used to re-derive now lives in the shared internal/dbtest harness (NewAppPool
+// = RLS-enforcing atlas_app default; NewMigratePool = privileged BYPASSRLS for
+// seeding + freshTenant cleanup; WithTenantCtx tags the tenant GUC).
 
 // freshTenant returns a new tenant id and registers a cleanup that deletes
 // every row this slice's tests can create under it.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM risk_control_links WHERE tenant_id = $1`,
-			`DELETE FROM risks WHERE tenant_id = $1`,
-			`DELETE FROM policies WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"control_evaluations",
+		"evidence_records",
+		"risk_control_links",
+		"risks",
+		"policies",
+		"controls",
+	)
 }
 
 // seedControl inserts a minimal control row directly via the admin pool.
@@ -280,8 +246,8 @@ func noRoleRouter(t *testing.T, app *pgxpool.Pool, tenant string) http.Handler {
 // ===== ISC-28a: evidence list respects the 30-day window + control scoping =====
 
 func TestEvidence_WindowAndControlScoping(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -316,8 +282,8 @@ func TestEvidence_WindowAndControlScoping(t *testing.T) {
 // (plus): keyset pagination returns a stable next_cursor.
 
 func TestEvidence_KeysetPagination(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -364,8 +330,8 @@ func TestEvidence_KeysetPagination(t *testing.T) {
 // ===== ISC-28b: policies endpoint returns slice-022-linked policies =====
 
 func TestPolicies_ReturnsLinkedPolicies(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -395,8 +361,8 @@ func TestPolicies_ReturnsLinkedPolicies(t *testing.T) {
 // ===== ISC-28c: risks endpoint returns slice-020-linked risks with residual =====
 
 func TestRisks_ReturnsLinkedRisksWithResidual(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -433,8 +399,8 @@ func TestRisks_ReturnsLinkedRisksWithResidual(t *testing.T) {
 // ===== ISC-28d: history endpoint returns control_evaluations rows newest-first =====
 
 func TestHistory_ReturnsEvaluationsNewestFirst(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -471,8 +437,8 @@ func TestHistory_ReturnsEvaluationsNewestFirst(t *testing.T) {
 // ===== ISC-28e: all four endpoints 403 a role without control-read access =====
 
 func TestAllEndpoints_ForbidNonControlReadRole(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	r := noRoleRouter(t, app, tenant)
@@ -495,8 +461,8 @@ func TestAllEndpoints_ForbidNonControlReadRole(t *testing.T) {
 // ===== ISC-28f: all four endpoints are RLS-isolated across tenants =====
 
 func TestAllEndpoints_RLSIsolatedAcrossTenants(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	// Tenant A owns a control with evidence, a policy, a risk link, and an
 	// evaluation. Tenant B's server must see NONE of it.
@@ -537,8 +503,8 @@ func TestAllEndpoints_RLSIsolatedAcrossTenants(t *testing.T) {
 // ===== input validation =====
 
 func TestEvidence_RejectsBadInput(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 	ctrlID := seedControl(t, admin, tenant)
@@ -594,8 +560,8 @@ func seedEvidenceWithResult(t *testing.T, admin *pgxpool.Pool, tenant string, ct
 // control_id is supplied. Verifies AC-1 of slice 106 + that the wire
 // shape now carries `result`.
 func TestEvidence_TenantWideNoControlID(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -627,8 +593,8 @@ func TestEvidence_TenantWideNoControlID(t *testing.T) {
 
 // ISC: ?kind= narrows the tenant-wide list.
 func TestEvidence_TenantWideKindFilter(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -655,8 +621,8 @@ func TestEvidence_TenantWideKindFilter(t *testing.T) {
 
 // ISC: ?result=fail narrows the tenant-wide list.
 func TestEvidence_TenantWideResultFilter(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -684,8 +650,8 @@ func TestEvidence_TenantWideResultFilter(t *testing.T) {
 
 // ISC: composed filters narrow with AND semantics.
 func TestEvidence_TenantWideComposedFilters(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -709,8 +675,8 @@ func TestEvidence_TenantWideComposedFilters(t *testing.T) {
 
 // ISC: ?source_actor_type / ?source_actor_id narrow on JSONB.
 func TestEvidence_TenantWideSourceActorFilter(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -744,8 +710,8 @@ func TestEvidence_TenantWideSourceActorFilter(t *testing.T) {
 // gate for slice 106 — the optional-control_id branch must NOT bypass
 // RLS.
 func TestEvidence_TenantWideRLSIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -770,8 +736,8 @@ func TestEvidence_TenantWideRLSIsolation(t *testing.T) {
 // ISC: backwards compatibility — the slice-064 ?control_id= shape still
 // works and now also surfaces `result` on each row.
 func TestEvidence_PerControlBackwardsCompatibleWithResult(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -816,8 +782,8 @@ func totalFromBody(body map[string]any) int64 {
 // rows spread across the window boundary; query with a 30-day window
 // that excludes one; assert `total` still reports 3.
 func TestEvidence_TenantWideTotalIgnoresFilters(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -850,8 +816,8 @@ func TestEvidence_TenantWideTotalIgnoresFilters(t *testing.T) {
 // the per-control wire shape is consistent with the tenant-wide wire
 // shape so the frontend can render a single meta-line formatter.)
 func TestEvidence_PerControlTotalIsTenantWide(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -884,8 +850,8 @@ func TestEvidence_PerControlTotalIsTenantWide(t *testing.T) {
 // the slice 106 list-RLS regression-pin (ISC-RLS for the tenant-wide
 // optional-control_id path).
 func TestEvidence_TotalRLSIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -917,8 +883,8 @@ func TestEvidence_TotalRLSIsolation(t *testing.T) {
 // the "tenant exists, no rows" wire shape rather than the "tenant B
 // has rows but RLS excludes them" wire shape.
 func TestEvidence_TotalZeroOnFreshTenant(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
