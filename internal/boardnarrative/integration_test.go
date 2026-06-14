@@ -27,53 +27,26 @@ package boardnarrative_test
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/boardnarrative"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
 // freshTenant returns a new tenant id + registers cleanup of this slice's rows.
+// CARVE-OUT (742 drain batch 15): this helper does MORE than a tenant-scoped
+// DELETE — it INSERTs a `tenants` row first, which dbtest.SeedTenant does not
+// express — so it stays inline; only its pool is re-routed to the slice-435
+// dbtest harness by the callers (admin := dbtest.NewMigratePool(t)).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
@@ -175,8 +148,8 @@ func newService(t *testing.T, appPool *pgxpool.Pool, rollup boardnarrative.Rollu
 // ----- AC-14: valid generation reaches draft state -----
 
 func TestIntegration_ValidGenerationDrafts(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -210,8 +183,8 @@ func TestIntegration_ValidGenerationDrafts(t *testing.T) {
 // ----- AC-15: fabricated number auto-rejects (guardrail 5) -----
 
 func TestIntegration_FabricatedNumberRejected(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -238,8 +211,8 @@ func TestIntegration_FabricatedNumberRejected(t *testing.T) {
 // ----- AC-16: unresolvable citation rejected (guardrail 4) -----
 
 func TestIntegration_UnresolvableCitationRejected(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -263,8 +236,8 @@ func TestIntegration_UnresolvableCitationRejected(t *testing.T) {
 // ----- AC-17: bad section shape rejected (guardrail 6) -----
 
 func TestIntegration_BadShapeRejected(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -286,8 +259,8 @@ func TestIntegration_BadShapeRejected(t *testing.T) {
 // ----- AC-18: cross-tenant citation impossible (threat-model I) -----
 
 func TestIntegration_CrossTenantCitationRejected(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 
@@ -327,8 +300,8 @@ func TestIntegration_CrossTenantCitationRejected(t *testing.T) {
 // ----- AC-19: DB guard — human_approved=TRUE requires human_approver -----
 
 func TestIntegration_ApprovalRequiresApprover(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
