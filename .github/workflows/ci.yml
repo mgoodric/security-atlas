@@ -245,7 +245,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [A, B1, B2, B3]
+        # Slice 747: added B4 + B5. The leg labels here MUST match column 1 of
+        # scripts/integration-shards.txt; run-integration-shard.sh reads each
+        # leg's packages from that manifest. Adding a leg here is a new MATRIX
+        # job, NOT a new required-status-checks context — the required check is
+        # the aggregate `Go · integration (Postgres RLS)` fan-in below (which
+        # `needs:` this whole matrix), so no branch-protection change is needed
+        # (slice 417 AC-11 / slice 747 AC-3).
+        leg: [A, B1, B2, B3, B4, B5]
     services:
       postgres:
         image: postgres:16-alpine
@@ -3235,7 +3242,7 @@ jobs:
   #         `skipped`-while-needed is the exact slice-474 hole: a Go PR
   #         whose shard leg never ran must NOT be mergeable.
   #
-  #   * `tests-integration-shard` is a matrix (legs A/B1/B2/B3). A matrix
+  #   * `tests-integration-shard` is a matrix (legs A/B1/B2/B3/B4). A matrix
   #     job's `result` in `needs` is the AGGREGATE: `success` only if every
   #     leg succeeded; `failure` if any leg failed; `cancelled` if any was
   #     cancelled. So one RED shard ⇒ aggregate `failure` ⇒ gate RED. This
@@ -3385,7 +3392,7 @@ jobs:
     # Own concurrency group with cancel-in-progress: false so a rapid
     # sequence of main merges cannot cancel an in-flight canary leg before
     # it completes — the exact masking mechanism (2) from slice 474. Keyed
-    # off the leg too so the four legs of one push don't cancel each other.
+    # off the leg too so the legs of one push don't cancel each other.
     concurrency:
       group: ci-main-canary-${{ github.sha }}-${{ matrix.leg }}
       cancel-in-progress: false
@@ -3394,7 +3401,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        leg: [A, B1, B2, B3]
+        # Slice 747: added B4 + B5 so the main-canary covers the same legs as
+        # the PR-time tests-integration-shard matrix (one source of truth:
+        # scripts/integration-shards.txt). Keep these two leg lists in lockstep.
+        leg: [A, B1, B2, B3, B4, B5]
     services:
       postgres:
         image: postgres:16-alpine
