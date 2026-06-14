@@ -21,14 +21,13 @@ package scheduler_test
 
 import (
 	"context"
-	"os"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/notify/email"
 	"github.com/mgoodric/security-atlas/internal/notify/scheduler"
 )
@@ -55,26 +54,13 @@ func (f *fakeProvider) recipients() []string {
 	return out
 }
 
+// openPools returns the RLS-enforcing atlas_app pool and the privileged
+// BYPASSRLS migrate pool from the shared internal/dbtest harness (slice 435 /
+// 742). The app pool backs the per-user delivery (real slice-445 channel); the
+// migrate pool runs the BYPASSRLS enumeration query and cross-tenant seeding.
 func openPools(t *testing.T) (app, admin *pgxpool.Pool) {
 	t.Helper()
-	appDSN := os.Getenv("DATABASE_URL_APP")
-	adminDSN := os.Getenv("DATABASE_URL")
-	if appDSN == "" || adminDSN == "" {
-		t.Skip("DATABASE_URL_APP or DATABASE_URL not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	a, err := pgxpool.New(ctx, appDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(app): %v", err)
-	}
-	t.Cleanup(a.Close)
-	b, err := pgxpool.New(ctx, adminDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(admin): %v", err)
-	}
-	t.Cleanup(b.Close)
-	return a, b
+	return dbtest.NewAppPool(t), dbtest.NewMigratePool(t)
 }
 
 // seedUser inserts a (tenant, user) pair with a known account email, an
