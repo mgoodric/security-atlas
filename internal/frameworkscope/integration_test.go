@@ -18,7 +18,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -29,66 +28,29 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant returns a brand-new tenant id and registers cleanup that wipes
-// every row written under it (framework_scopes + framework_versions +
-// frameworks). The cleanup deletes children-first to honour FKs.
+// every row written under it. The cleanup is a pure FK-ordered tenant-scoped
+// DELETE returning a string, so it delegates to dbtest.SeedTenant (slice 435 /
+// 742 drain batch 18). framework_versions + frameworks are tenant-scoped
+// (NULL = global) — only the tenant-owned rows created here are culled.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM framework_scopes WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM scope_cells WHERE tenant_id = $1`,
-			`DELETE FROM scope_dimensions WHERE tenant_id = $1`,
-			`DELETE FROM scopes WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-			// Framework versions + frameworks are tenant-scoped (NULL = global)
-			// — only cull the tenant-owned rows we created here.
-			`DELETE FROM framework_versions WHERE tenant_id = $1`,
-			`DELETE FROM frameworks WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"framework_scopes",
+		"evidence_records",
+		"scope_cells",
+		"scope_dimensions",
+		"scopes",
+		"controls",
+		"framework_versions",
+		"frameworks",
+	)
 }
 
 // seedFrameworkVersion inserts a tenant-owned framework + framework_version
@@ -179,10 +141,8 @@ func withAdminTenant(admin *pgxpool.Pool, tenant string, fn func(context.Context
 // TestCreateAndLifecycle — happy path: draft -> review -> approved ->
 // activated. Covers AC-5, AC-6, AC-7 (partially — no file upload), AC-8.
 func TestCreateAndLifecycle(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 	store := frameworkscope.NewStore(app)
@@ -259,10 +219,8 @@ func TestCreateAndLifecycle(t *testing.T) {
 // supersedes the prior activated row. Tests AC-3 (one-active invariant) by
 // inspecting state of the predecessor after the second activate.
 func TestSupersession(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 	store := frameworkscope.NewStore(app)
@@ -317,10 +275,8 @@ func mustActivate(t *testing.T, ctx context.Context, store *frameworkscope.Store
 // nulled. This is the load-bearing integration test ADR-0001 §Consequences
 // mentions explicitly.
 func TestPredicateEditBouncesApproved(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 	store := frameworkscope.NewStore(app)
@@ -371,10 +327,8 @@ func TestPredicateEditBouncesApproved(t *testing.T) {
 // edit on a `draft` row updates predicate_hash but does NOT change state.
 // (The trigger only fires when old.state in review/approved.)
 func TestPredicateEditOnDraftDoesNotBounce(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 	store := frameworkscope.NewStore(app)
@@ -399,10 +353,8 @@ func TestPredicateEditOnDraftDoesNotBounce(t *testing.T) {
 // rows simultaneously in state `activated` for the same (tenant, fv). Tests
 // the constraint at the DB level by short-circuiting the supersession path.
 func TestOneActivatedAtATime(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 	store := frameworkscope.NewStore(app)
@@ -447,10 +399,8 @@ func TestOneActivatedAtATime(t *testing.T) {
 // TestRLS_OtherTenantCannotSee — AC-4: a second tenant's reads/writes never
 // see this tenant's framework_scopes.
 func TestRLS_OtherTenantCannotSee(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	fvA := seedFrameworkVersion(t, admin, tenantA)
@@ -483,7 +433,10 @@ func TestRLS_OtherTenantCannotSee(t *testing.T) {
 
 func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, string) {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	// dbtest.NewAppPool self-closes via its own t.Cleanup; registering it
+	// before the server-teardown cleanup below means LIFO ordering closes
+	// the httptest server first, while the pool is still open.
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
 	// Slice 197: JWT bearers via slice 190 path.
@@ -496,7 +449,6 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string, str
 	ts := httptest.NewServer(handler)
 	t.Cleanup(func() {
 		ts.Close()
-		app.Close()
 	})
 	return ts, bearer, approver
 }
@@ -529,8 +481,7 @@ func doJSON(t *testing.T, method, url, bearer, body string) (*http.Response, []b
 // TestHTTP_FullLifecycle — AC-5 through AC-8 over the HTTP wire, plus
 // AC-9 (PATCH banner) and AC-10 (filter by state).
 func TestHTTP_FullLifecycle(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 
@@ -626,8 +577,7 @@ func TestHTTP_FullLifecycle(t *testing.T) {
 // uploaded file's hash but reject anything that isn't a 64-char hex sha256
 // so clients can't pass garbage placeholders.
 func TestHTTP_ApproveRejectsBadFileHash(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 	ts, bearer, approver := setupHTTPServer(t, tenant)
@@ -655,10 +605,8 @@ func TestHTTP_ApproveRejectsBadFileHash(t *testing.T) {
 // applicability over 2 cells AND a framework scope predicate that narrows
 // further produces only the intersection.
 func TestHTTP_EffectiveScope(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 
@@ -700,10 +648,8 @@ func TestHTTP_EffectiveScope(t *testing.T) {
 // control is "out of scope" — empty effective_scope; coverage downstream
 // will read this as `n/a`, NOT `fail`.
 func TestHTTP_EffectiveScope_NoActivatedFrameworkScope(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 	controlID, _ := seedScopeAndControl(t, admin, app, tenant, `{"op":"true"}`)
@@ -731,10 +677,8 @@ func TestHTTP_EffectiveScope_NoActivatedFrameworkScope(t *testing.T) {
 // TestHTTP_AsOf — AC-13: a historical query returns the row that was active
 // at the supplied timestamp.
 func TestHTTP_AsOf(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 	store := frameworkscope.NewStore(app)
@@ -777,10 +721,8 @@ func TestHTTP_AsOf(t *testing.T) {
 // framework — the slice ships the column shape; seeding is the deploy-time
 // concern handled by ops scripts. This test exercises the path.)
 func TestHTTP_DefaultScopeSeed(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin, tenant)
 	store := frameworkscope.NewStore(app)
