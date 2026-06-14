@@ -26,69 +26,32 @@ package checklist_test
 
 import (
 	"context"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/checklist"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
+// freshTenant returns a brand-new tenant id + registers cleanup of the rows
+// this slice's tests create. Pure FK-ordered tenant-scoped DELETE returning a
+// string, so it delegates to dbtest.SeedTenant (slice 435 / 742 drain batch 17).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM checklist_items WHERE tenant_id = $1`,
-			`DELETE FROM checklist_sections WHERE tenant_id = $1`,
-			`DELETE FROM ai_generations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-			`DELETE FROM policies WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"checklist_items",
+		"checklist_sections",
+		"ai_generations",
+		"evidence_records",
+		"controls",
+		"policies",
+	)
 }
 
 func tenantCtx(t *testing.T, tenant string) context.Context {
@@ -149,8 +112,8 @@ func stubSvc(app *pgxpool.Pool, draft string) (*checklist.Service, *checklist.St
 // ----- AC-13/AC-14: valid draft persists unapproved; role-split groups -----
 
 func TestGenerate_ValidDraftPersistsUnapproved(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	infraID := seedControl(t, admin, tenant, "Cloud MFA control", "infra", true)
@@ -198,8 +161,8 @@ func TestGenerate_ValidDraftPersistsUnapproved(t *testing.T) {
 }
 
 func TestGenerate_RoleSplitAndUnassignedBucket(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	infraID := seedControl(t, admin, tenant, "Infra control", "infra", true)
@@ -267,8 +230,8 @@ func firstUUID(s string) string {
 // ----- AC-15: a fabricated citation suppresses the section -----
 
 func TestGenerate_FabricatedCitationSuppresses(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	infraID := seedControl(t, admin, tenant, "Infra control", "infra", true)
@@ -302,8 +265,8 @@ func TestGenerate_FabricatedCitationSuppresses(t *testing.T) {
 // ----- AC-16: cross-tenant isolation -----
 
 func TestGenerate_CrossTenantIsolation(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -357,8 +320,8 @@ func TestGenerate_CrossTenantIsolation(t *testing.T) {
 // ----- AC-17: approval requires human_approver (the shared DB guard) -----
 
 func TestApproveSection_RequiresApprover(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	infraID := seedControl(t, admin, tenant, "Infra control", "infra", true)
@@ -401,7 +364,7 @@ func TestApproveSection_RequiresApprover(t *testing.T) {
 // ----- DB CHECK direct proof: ai_assisted+approved with NULL approver fails ---
 
 func TestDBGuard_RejectsApprovedWithoutApprover(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	// The forbidden shape via the admin role (BYPASSRLS): ai_assisted +
@@ -433,7 +396,7 @@ func TestDBGuard_RejectsApprovedWithoutApprover(t *testing.T) {
 // ----- provenance-completeness CHECK: ai_assisted requires full provenance ----
 
 func TestDBGuard_RejectsAIAssistedWithoutProvenance(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	// ai_assisted=TRUE with empty provenance must be rejected by the

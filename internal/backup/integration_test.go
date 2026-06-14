@@ -34,8 +34,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/backup"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
+// migratorDSN is a carve-out from the slice-435 dbtest harness: the raw
+// DATABASE_URL string is load-bearing beyond pool creation — it is passed
+// directly to backup.NewVerifier (which spins up an ephemeral restore DB) and
+// to assertNoEphemeralDBs (which connects via pgx.Connect). dbtest.NewMigratePool
+// returns a *pgxpool.Pool, not the DSN string, so this accessor stays inline;
+// the privileged POOL is re-routed to dbtest.NewMigratePool at the call sites
+// (742 drain batch 17).
 func migratorDSN(t *testing.T) string {
 	t.Helper()
 	v := os.Getenv("DATABASE_URL")
@@ -43,27 +51,6 @@ func migratorDSN(t *testing.T) string {
 		t.Skip("DATABASE_URL not set; skipping integration test")
 	}
 	return v
-}
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
 }
 
 func newMinioClient(t *testing.T) (*s3.Client, string) {
@@ -114,7 +101,7 @@ func cleanupBackupRuns(t *testing.T, pool *pgxpool.Pool) {
 
 func TestBackupRestoreVerifyCycle_Local(t *testing.T) {
 	migDSN := migratorDSN(t)
-	pool := openPool(t, migDSN)
+	pool := dbtest.NewMigratePool(t)
 	cleanupBackupRuns(t, pool)
 	ctx := context.Background()
 
@@ -172,7 +159,7 @@ func TestBackupRestoreVerifyCycle_Local(t *testing.T) {
 
 func TestBackupRestoreVerifyCycle_S3(t *testing.T) {
 	migDSN := migratorDSN(t)
-	pool := openPool(t, migDSN)
+	pool := dbtest.NewMigratePool(t)
 	cleanupBackupRuns(t, pool)
 	cli, bucket := newMinioClient(t)
 	ctx := context.Background()
@@ -209,7 +196,7 @@ func TestBackupRestoreVerifyCycle_S3(t *testing.T) {
 
 func TestVerifyFailsOnCorruptedArtifact(t *testing.T) {
 	migDSN := migratorDSN(t)
-	pool := openPool(t, migDSN)
+	pool := dbtest.NewMigratePool(t)
 	cleanupBackupRuns(t, pool)
 	ctx := context.Background()
 
@@ -285,7 +272,7 @@ func TestRotationBoundsGrowth(t *testing.T) {
 // --- AC-7 / P0-510-1: atlas_app (tenant role) cannot read backup_runs ---
 
 func TestTenantRoleCannotReadBackupRuns(t *testing.T) {
-	appPool := openPool(t, appDSN(t))
+	appPool := dbtest.NewAppPool(t)
 	ctx := context.Background()
 	_, err := appPool.Exec(ctx, `SELECT 1 FROM backup_runs LIMIT 1`)
 	if err == nil {
@@ -305,7 +292,7 @@ func TestTenantRoleCannotReadBackupRuns(t *testing.T) {
 
 func TestFailureRaisesNotification(t *testing.T) {
 	migDSN := migratorDSN(t)
-	pool := openPool(t, migDSN)
+	pool := dbtest.NewMigratePool(t)
 	cleanupBackupRuns(t, pool)
 	ctx := context.Background()
 

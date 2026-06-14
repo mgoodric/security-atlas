@@ -183,6 +183,8 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Changed
 
+- test(dbtest): migrate internal metrics-eval + metrics-scheduler + backup + checklist integration suites to the slice-435 dbtest harness (742 drain batch 17).
+
 - test(dbtest): migrate internal llm + qaisuggest + questionnaire + gapexplain integration suites to the slice-435 dbtest harness (742 drain batch 16).
 
 - test(dbtest): migrate internal board + boardnarrative + policy + policy-seed integration suites to the slice-435 dbtest harness (742 drain batch 15).
