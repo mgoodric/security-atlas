@@ -183,6 +183,8 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Changed
 
+- test(dbtest): migrate internal/api soc2import integration suite to the slice-435 dbtest harness (742 drain batch 24 — final drainable package).
+
 - test(dbtest): migrate internal/api controls + risks integration suites to the slice-435 dbtest harness (742 drain batch 23).
 
 - test(dbtest): migrate internal authz + evidence-ingest + vendor integration suites to the slice-435 dbtest harness (742 drain batch 22).

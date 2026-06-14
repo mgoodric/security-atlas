@@ -586,6 +586,61 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 detection_tier_actual: none
 detection_tier_target: none
 
+## Batch 24 — internal/api soc2import (whole-package, sibling-shared) — FINAL drainable package
+
+WHOLE-PACKAGE drain of `internal/api/soc2import` (8 `_test.go` files), zero
+behavior change. This is the LAST sibling-shared package in the drain backlog.
+
+- Privileged-pool-ONLY package: soc2import imports the global SCF + crosswalk
+  catalog (framework_requirements + fw_to_scf_edges rows are tenant_id-NULL
+  shared reference data), so there is NO app-role pool, NO `appDSN`, and NO
+  `freshTenant` here. The DEF file (`import_test.go`) defined only `adminDSN` +
+  `openPool` (note: `openPool(t)` takes NO dsn arg in this package). Every one
+  of the 36 `openPool(t)` call sites across the 8 files → `dbtest.NewMigratePool(t)`.
+  This preserves behavior exactly: there are no RLS-bound assertions to route to
+  `NewAppPool`, so NewMigratePool throughout is the correct mapping (the catalog
+  seed/wipe legitimately runs on the privileged pool).
+- `adminDSN` + `openPool` deleted from `import_test.go`. The old `openPool`
+  registered its own `t.Cleanup(pool.Close)`, and no caller had a manual
+  `.Close()`/`defer pool.Close()` to drop — dbtest pools self-close via
+  `t.Cleanup`, so cleanup is handled. `scfseed.EnsureSCFCatalog` seeding +
+  `resetCatalog`/`resetISO`/`resetPCI`/`resetCSF`/`resetHIPAA` wipes KEPT
+  verbatim (they legitimately run on the migrate pool, now sourced from
+  `dbtest.NewMigratePool`).
+- Imports: `os` and `time` dropped from `import_test.go` (used only inside the
+  deleted helpers); `context` STAYS (used throughout); `pgxpool` STAYS in the
+  `import_test`, `csf`, `hipaa`, `iso`, and `pci` files (their `reset...` helper
+  signatures take a `pgxpool.Pool`) and in `thr_anchor` (the
+  `anchorsForRequirement` helper signature). The `thr_domain` and `thr_finer`
+  files never imported `pgxpool`. The `pgx` and `dbx` imports in the `thr`
+  files STAY. `dbtest` added manually to each of the 8 files (goimports cannot
+  resolve an internal pkg path not yet referenced); goimports then settled the
+  rest.
+
+This COMPLETES the slice-742 drain. The only remaining un-migrated suite is the
+documented intentional carve-out: the `testing.B` benchmark in
+`internal/api/ucfcoverage/benchmark_test.go`, which cannot use the testing.T-only
+`dbtest` harness (NewMigratePool/NewAppPool take `*testing.T`, not `*testing.B`).
+That carve-out is by design (AC-6 "remaining entries documented as intentionally
+distinct"), not in scope here.
+
+Role model preserved: no assertion defaults to the privileged pool because this
+package has no RLS-bound assertions — it is catalog (tenant-agnostic) data by
+construction.
+
+Verification: `goimports -w` applied per-file; `gofmt -l` clean;
+`go vet -tags=integration ./internal/api/soc2import/...` clean;
+`go build -tags=integration ./internal/api/soc2import/...` clean; the package
+returns `ok` under `go test -tags=integration -p 1` with no DB env (clean SKIP
+via NewMigratePool's DATABASE_URL guard; verified SKIP on the DEF + 3
+representative caller suites). Live integration run deferred to CI (no local
+Postgres this session — batch-9..23 precedent). `grep -rlE 'func (adminDSN|openPool)'`
+and `grep -rlE '\bopenPool\('` over the package return nothing. No production
+(`!_test.go`) code touched; shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none
+
 ## Batch 23 — internal/api controls + risks (whole-package, sibling-shared)
 
 Two larger WHOLE-PACKAGE (sibling-shared) drains, 9 `_test.go` files across 2
