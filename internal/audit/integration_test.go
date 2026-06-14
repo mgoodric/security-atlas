@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"testing"
 	"time"
@@ -28,60 +27,37 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/audit"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// ----- harness helpers (same shape as scope/integration_test.go) -----
+// Slice 435 / 742: the pool/DSN/tenant-seed/tenant-context boilerplate this
+// file used to re-derive (appDSN / adminDSN / openPool / freshTenant / inline
+// tenancy.WithTenant) now lives in the shared internal/dbtest harness.
+// dbtest.NewAppPool opens the RLS-enforcing atlas_app pool (the default —
+// audit.Store and every RLS-bound assertion run through it); dbtest.NewMigratePool
+// opens the privileged BYPASSRLS pool used ONLY for cross-tenant seeding and the
+// append-only sample_audit_log / evidence_records cleanup the app role cannot
+// DELETE. dbtest.SeedTenant returns a fresh tenant id and registers the
+// FK-safe-ordered cleanup through that migrate pool; dbtest.WithTenantCtx tags
+// the tenant GUC context. seedControl / seedEvidence remain suite-local
+// (FK-parent + ledger fixtures dbtest does not provide); they route through the
+// migrate pool exactly as before.
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
+// freshTenant returns a fresh tenant id and registers cleanup of the slice-026
+// tables (children before parents) via the privileged migrate pool — the
+// sample_audit_log + evidence_records rows are append-only under RLS for the
+// app role, so only the migrate role can DELETE them.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM sample_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM sample_annotations WHERE tenant_id = $1`,
-			`DELETE FROM sample_evidence WHERE tenant_id = $1`,
-			`DELETE FROM samples WHERE tenant_id = $1`,
-			`DELETE FROM populations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"sample_audit_log",
+		"sample_annotations",
+		"sample_evidence",
+		"samples",
+		"populations",
+		"evidence_records",
+		"controls",
+	)
 }
 
 func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
@@ -121,29 +97,18 @@ func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.
 	return out
 }
 
-func ctxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
-}
-
 // ===== AC-1: POST /v1/populations returns row_count =====
 
 func TestCreatePopulation_ReturnsRowCount(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	_ = seedEvidence(t, admin, tenant, ctrlID, 25, windowStart)
 
 	store := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	pop, err := store.CreatePopulation(ctx, audit.CreatePopulationInput{
 		ControlID:       ctrlID,
@@ -162,10 +127,8 @@ func TestCreatePopulation_ReturnsRowCount(t *testing.T) {
 // ===== AC-2: same seed -> identical N records =====
 
 func TestDrawSample_IsDeterministic(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -173,7 +136,7 @@ func TestDrawSample_IsDeterministic(t *testing.T) {
 	_ = seedEvidence(t, admin, tenant, ctrlID, 100, windowStart)
 
 	store := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	pop, err := store.CreatePopulation(ctx, audit.CreatePopulationInput{
 		ControlID:       ctrlID,
@@ -226,17 +189,15 @@ func TestDrawSample_IsDeterministic(t *testing.T) {
 // ===== AC-3: Sample row records seed, n, created_by, created_at =====
 
 func TestDrawSample_PersistsSeedAndMetadata(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	_ = seedEvidence(t, admin, tenant, ctrlID, 20, windowStart)
 
 	store := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	pop, err := store.CreatePopulation(ctx, audit.CreatePopulationInput{
 		ControlID:       ctrlID,
@@ -281,17 +242,15 @@ func TestDrawSample_PersistsSeedAndMetadata(t *testing.T) {
 // ===== AC-4: annotation with result in {passed, failed, not-applicable} =====
 
 func TestAnnotateSample_RecordsResultPerRecord(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	_ = seedEvidence(t, admin, tenant, ctrlID, 10, windowStart)
 
 	store := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	pop, err := store.CreatePopulation(ctx, audit.CreatePopulationInput{
 		ControlID:       ctrlID,
@@ -359,17 +318,15 @@ func TestAnnotateSample_RecordsResultPerRecord(t *testing.T) {
 // ===== AC-5: forward-compat audit-period freezing (no-op until slice 028) =====
 
 func TestPopulation_FrozenAtIsForwardCompat(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	all := seedEvidence(t, admin, tenant, ctrlID, 30, windowStart)
 
 	store := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	pop, err := store.CreatePopulation(ctx, audit.CreatePopulationInput{
 		ControlID:       ctrlID,
@@ -417,17 +374,15 @@ func TestPopulation_FrozenAtIsForwardCompat(t *testing.T) {
 // ===== AC-6: every sample pull writes a sample_audit_log row =====
 
 func TestDrawSample_WritesAuditLogWithSeed(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	_ = seedEvidence(t, admin, tenant, ctrlID, 12, windowStart)
 
 	store := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	pop, err := store.CreatePopulation(ctx, audit.CreatePopulationInput{
 		ControlID:       ctrlID,
@@ -472,10 +427,8 @@ func TestDrawSample_WritesAuditLogWithSeed(t *testing.T) {
 // ===== RLS: cross-tenant invisibility =====
 
 func TestPopulation_CrossTenantInvisible(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	ctrlA := seedControl(t, admin, tenantA)
@@ -483,8 +436,8 @@ func TestPopulation_CrossTenantInvisible(t *testing.T) {
 	_ = seedEvidence(t, admin, tenantA, ctrlA, 5, windowStart)
 
 	store := audit.NewStore(app)
-	ctxA := ctxFor(t, tenantA)
-	ctxB := ctxFor(t, tenantB)
+	ctxA := dbtest.WithTenantCtx(t, tenantA)
+	ctxB := dbtest.WithTenantCtx(t, tenantB)
 
 	pop, err := store.CreatePopulation(ctxA, audit.CreatePopulationInput{
 		ControlID:       ctrlA,
@@ -504,17 +457,15 @@ func TestPopulation_CrossTenantInvisible(t *testing.T) {
 // ===== anti-criterion P0: sampling does NOT mutate evidence_records =====
 
 func TestDrawSample_DoesNotMutateLedger(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	seeded := seedEvidence(t, admin, tenant, ctrlID, 20, windowStart)
 
 	store := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	pop, err := store.CreatePopulation(ctx, audit.CreatePopulationInput{
 		ControlID:       ctrlID,
@@ -574,10 +525,8 @@ func less(a, b uuid.UUID) bool {
 // ===== scope-predicate reuse: ensures internal/scope.Evaluate is the path =====
 
 func TestCreatePopulation_AppliesScopePredicate(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	windowStart := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -640,7 +589,7 @@ func TestCreatePopulation_AppliesScopePredicate(t *testing.T) {
 	}
 
 	store := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	predicate, _ := json.Marshal(map[string]any{
 		"op": "eq", "dim": "environment", "value": "prod",
 	})
