@@ -533,3 +533,55 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 
 detection_tier_actual: none
 detection_tier_target: none
+
+## Batch 20 — risk/aggrule + api/vendors + audit/notes (first WHOLE-PACKAGE sibling-shared drain)
+
+Migrated 5 `_test.go` files across 3 packages. This is the FIRST whole-package
+(sibling-shared) drain in the 742 series: in two of the three packages the
+DSN/pool helpers were DEFINED in one file (`integration_test.go`) but CALLED
+from a sibling `_test.go` in the same `_test` package, so all caller files had
+to be migrated before the shared DEFs could be deleted.
+
+- `internal/risk/aggrule` — clean SINGLE-FILE removal. `appDSN`/`adminDSN`/
+  `openPool` deleted; `freshTenant` is a pure FK-ordered tenant-scoped DELETE
+  returning a string, so it delegates to `dbtest.SeedTenant`. The non-pool
+  helpers (`ctxFor` via `tenancy.WithTenant`, `seedOrgUnit`/`seedRisk`/
+  `makeRule`/`metaSeverity`/`tableCount`/…) stay inline. `os` dropped; `time`,
+  `pgxpool`, `uuid`, `context` still referenced.
+
+- `internal/api/vendors` — WHOLE-PACKAGE drain (2 files). DEFs live in
+  `integration_test.go`, called from sibling `integration_reviews_test.go`.
+  `appDSN`/`adminDSN`/`openPool` deleted; `freshTenant` (pure DELETE) →
+  `dbtest.SeedTenant`. `setupHTTPServer`'s app pool → `dbtest.NewAppPool`; its
+  redundant `app.Close()` dropped but `ts.Close()` KEPT (the suite stands up a
+  real `httptest` server). `dbtest.NewAppPool` registers its cleanup before the
+  `ts.Close()` cleanup, so LIFO closes the server first, then the pool. The
+  sibling file gained the `dbtest` import for its `dbtest.NewMigratePool` call
+  sites; `pgxpool` no longer needed there.
+
+- `internal/audit/notes` — WHOLE-PACKAGE drain (2 files) with a `freshTenant`
+  CARVE-OUT. DEFs in `integration_test.go`, called from sibling
+  `integration_slice029_test.go`. `appDSN`/`adminDSN`/`openPool` deleted, but
+  `freshTenant` STAYS INLINE: it interleaves an `UPDATE populations SET
+audit_period_id = NULL, frozen_at = NULL` among the tenant-scoped DELETEs,
+  which `dbtest.SeedTenant` (DELETE-only) cannot express. Only its pool is
+  re-routed (callers pass `dbtest.NewMigratePool(t)`). Non-pool seeders
+  (`seedFrameworkVersion`/`seedPeriod`/`ctxFor`) left inline. The append-only
+  DB-layer tests keep their `tenancy.ApplyTenant(ctx, tx)` transaction idiom
+  unchanged.
+
+Role model preserved throughout: RLS-bound assertions run through
+`dbtest.NewAppPool`; the BYPASSRLS `dbtest.NewMigratePool` is used only for
+cross-tenant seed + append-only cleanup. No assertion defaults to the
+privileged pool.
+
+Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integration`
+
+- `go build -tags=integration` clean for all 3 packages; all 3 return `ok`
+  under `go test -tags=integration -p 1` with no DB env (clean SKIP + untouched
+  unit tests pass). Live integration run deferred to CI (no local Postgres this
+  session — batch-9..19 precedent). No production (`!_test.go`) code touched;
+  shard enrolment unchanged.
+
+detection_tier_actual: none
+detection_tier_target: none

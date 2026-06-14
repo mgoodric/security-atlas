@@ -183,6 +183,8 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
 
 ### Changed
 
+- test(dbtest): migrate internal risk-aggrule + api-vendors + audit-notes integration suites to the slice-435 dbtest harness (742 drain batch 20).
+
 - test(dbtest): migrate internal notify (email + scheduler + slack + webhook) integration suites to the slice-435 dbtest harness (742 drain batch 19).
 
 - test(dbtest): migrate internal evidence-streambuf + frameworkscope + mcp-writeproposals + platform-status integration suites to the slice-435 dbtest harness (742 drain batch 18).

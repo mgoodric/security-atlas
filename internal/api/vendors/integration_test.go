@@ -11,7 +11,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -21,57 +20,24 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
+// freshTenant returns a brand-new tenant id and registers cleanup that wipes
+// every slice-024 row written under it. The cleanup is a pure FK-ordered
+// tenant-scoped DELETE returning a string, so it delegates to
+// dbtest.SeedTenant (slice 435 / 742 drain batch 20).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM vendor_scope_cells WHERE tenant_id = $1`,
-			`DELETE FROM vendors WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"vendor_scope_cells",
+		"vendors",
+	)
 }
 
 func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
 	// Slice 197: JWT bearer via slice 190 path. ViewerFor mirrors
@@ -82,9 +48,10 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 		t.Fatal("HTTPHandlerForTests nil")
 	}
 	ts := httptest.NewServer(h)
+	// The app pool self-closes via dbtest.NewAppPool's t.Cleanup, registered
+	// before this one — LIFO closes the httptest server first, then the pool.
 	t.Cleanup(func() {
 		ts.Close()
-		app.Close()
 	})
 	return ts, bearer
 }
@@ -116,8 +83,7 @@ func doJSON(t *testing.T, method, url, bearer, body string) (*http.Response, []b
 
 // AC-1 + AC-5 end-to-end: POST creates, returns the wire shape.
 func TestHTTP_CreateVendor(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -155,8 +121,7 @@ func TestHTTP_CreateVendor(t *testing.T) {
 
 // AC-2 end-to-end: list with criticality filter.
 func TestHTTP_ListVendors_FilterByCriticality(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -184,8 +149,7 @@ func TestHTTP_ListVendors_FilterByCriticality(t *testing.T) {
 
 // AC-3 end-to-end: GET /v1/vendors/burndown returns on-time fractions.
 func TestHTTP_Burndown(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -231,8 +195,7 @@ func TestHTTP_Burndown(t *testing.T) {
 
 // AC-4 end-to-end: list?overdue=true returns only overdue rows.
 func TestHTTP_ListVendors_OverdueOnly(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -271,8 +234,7 @@ func TestHTTP_ListVendors_OverdueOnly(t *testing.T) {
 
 // Bad criticality filter returns 400.
 func TestHTTP_ListVendors_RejectsBadCriticality(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 	resp, _ := doJSON(t, http.MethodGet, ts.URL+"/v1/vendors?criticality=ultra", bearer, "")
@@ -283,8 +245,7 @@ func TestHTTP_ListVendors_RejectsBadCriticality(t *testing.T) {
 
 // GET on missing id returns 404.
 func TestHTTP_GetVendor_NotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 	resp, _ := doJSON(t, http.MethodGet, ts.URL+"/v1/vendors/"+uuid.NewString(), bearer, "")
@@ -295,8 +256,7 @@ func TestHTTP_GetVendor_NotFound(t *testing.T) {
 
 // PATCH replaces the row.
 func TestHTTP_UpdateVendor(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -325,8 +285,7 @@ func TestHTTP_UpdateVendor(t *testing.T) {
 
 // Unauthenticated request is rejected at the middleware.
 func TestHTTP_AuthRequired(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, _ := setupHTTPServer(t, tenant)
 	resp, _ := doJSON(t, http.MethodGet, ts.URL+"/v1/vendors", "", "")
