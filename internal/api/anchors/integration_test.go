@@ -18,6 +18,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 const tenantA = "11111111-1111-1111-1111-111111111111"
@@ -50,14 +51,13 @@ func setupHTTPServer(t *testing.T) (*httptest.Server, string) {
 	// cannot leave us seeing "rows present" and skipping the reseed (the
 	// original slice 461 seed-order coupling). It also (re)imports the
 	// SOC 2 crosswalk the requirement-traversal route needs.
-	adminPool := openPoolDSN(t, adminDSN(t))
-	defer adminPool.Close()
+	adminPool := dbtest.NewMigratePool(t)
 	if err := scfseed.EnsureFullCatalog(context.Background(), adminPool); err != nil {
 		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
 	}
 
 	// Boot the server with the app role.
-	appPool := openPoolDSN(t, appDSN(t))
+	appPool := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(appPool)
 	// Slice 197: mint a JWT via the slice 190 path; the legacy
@@ -70,10 +70,7 @@ func setupHTTPServer(t *testing.T) (*httptest.Server, string) {
 		t.Fatal("HTTPHandlerForTests returned nil; AttachDB did not take effect")
 	}
 	ts := httptest.NewServer(handler)
-	t.Cleanup(func() {
-		ts.Close()
-		appPool.Close()
-	})
+	t.Cleanup(ts.Close)
 	return ts, bearer
 }
 
