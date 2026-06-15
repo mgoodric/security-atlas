@@ -2732,6 +2732,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/evidence-summary/portfolio:
+    get:
+      summary: GET /v1/evidence-summary/portfolio
+      tags: [evidence]
+      operationId: get-v1-evidence-summary-portfolio
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/evidence/freshness:
     get:
       summary: GET /v1/evidence/freshness

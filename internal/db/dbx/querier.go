@@ -1341,6 +1341,37 @@ type Querier interface {
 	// future RLS-policy regression. The existing ListActiveControls query
 	// carries the same belt-and-suspenders clause.
 	ListActiveControlsForExport(ctx context.Context, arg ListActiveControlsForExportParams) ([]ListActiveControlsForExportRow, error)
+	// Slice 750 — portfolio / multi-control evidence-summary control-set resolver.
+	//
+	// Returns the ACTIVE (non-superseded) controls in the caller's tenant that match
+	// an OPTIONAL filter, ordered deterministically and capped at $limit (the
+	// controls-per-summary bound — the headline P0-750-2 leg). The summary is over
+	// this bounded control set, never the full catalog.
+	//
+	// Filter modes (any ONE of the three AC-1 dimensions, all OPTIONAL via
+	// sqlc.narg so a single query serves every filter the handler accepts; a request
+	// with no filter is the whole-program rollup):
+	//
+	//   * control-family: control_family = sqlc.narg('family')
+	//   * framework:      scf_anchor_id = ANY(sqlc.narg('anchor_ids')) — the handler
+	//                     resolves a framework_version_id to its SCF anchors via the
+	//                     existing UCF traversal (ListSCFAnchorsForVersion) and passes
+	//                     the anchor-id array here; this reuses the existing
+	//                     framework->anchor->control path rather than inventing a new
+	//                     control-by-framework mechanism.
+	//   (scope-cell intersection — applicability_expr ∩ framework_scope.predicate —
+	//    is heavier graph work; deferred to a documented follow-on, not built here.)
+	//
+	// A NULL narg disables that filter clause, so the three modes compose to "AND
+	// of the supplied filters"; in v1 the handler supplies at most one.
+	//
+	// Ordering is bundle_id ASC, id ASC — deterministic, matching ListActiveControls,
+	// so the controls-per-summary cap selects a STABLE subset (not a random one).
+	//
+	// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders alongside
+	// the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant upstream pins the
+	// GUC so the read is tenant-scoped (invariant #6).
+	ListActiveControlsForPortfolio(ctx context.Context, arg ListActiveControlsForPortfolioParams) ([]ListActiveControlsForPortfolioRow, error)
 	// Slice 493 — SSP control-implementation-narrative projection.
 	//
 	// Identical row set to ListActiveControls (every active, non-superseded
