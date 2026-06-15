@@ -54,9 +54,45 @@ no code in between. The counter writeup at
 the rule mechanically against the GitHub Actions API.
 
 A weaker secondary signal — failure on commit A followed by success on
-commit A+1 with no test code change — is **not** counted as a flake by
-v1. It conflates flake with fix-forward. Tightening this is a v2
-question once we have a quarter of v1 data to compare against.
+commit A+1 with no test code change — was **not** counted as a flake by
+the v1 (slice 352) definition, because it conflates flake with
+fix-forward.
+
+### Integration-surface broadening (slice 420)
+
+The strict same-SHA-only v1 rule **under-counted**: slice 352's 90-day
+baseline read 0 flakes across all four surfaces, yet the integration
+scheduler test
+(`TestRun_FiresInlineSweepAndExitsOnCancel`,
+`internal/metrics/scheduler/integration_test.go`) demonstrably flaked
+~6× — including the incident that blocked slice 346's docs-only PR #788.
+The flake was cleared in ways the same-SHA detector does not see (a fresh
+push after a red run, a re-run GitHub recorded without the attempt
+transition the v1 rule keys on). A budget that reads 0 against a surface
+that flakes weekly is a broken signal.
+
+Slice 420 therefore broadens the definition **for the integration surface
+only** (`Go · integration (Postgres RLS)`):
+
+- The counter ALSO counts an **A→A+1 flake** — the integration job red on
+  one push and green on the very next push to the same branch — **but
+  only when the A+1 diff did NOT touch the integration test surface**
+  (`internal/**/*.go`, `migrations/`, `internal/db/`, `cmd/**/*.go`).
+- If A+1's diff DID touch that surface, the transition is treated as a
+  **fix-forward** (A+1 plausibly fixed the failing test) and is **NOT**
+  counted as a flake. This is the load-bearing distinction that keeps the
+  broadening from conflating a real fix with a flake; the rule, its
+  rationale, and its known limitations are recorded in
+  [`docs/audit-log/420-flake-definition-decisions.md`](audit-log/420-flake-definition-decisions.md).
+
+The broadening is **integration-scoped on purpose**: it keys on the exact
+integration job name (a lint / sqlc red run is never mis-attributed), and
+the unit / vitest / Playwright surfaces keep slice 352's same-SHA-only v1
+rule (Playwright already has `retries: 1` and a different flake profile).
+Whether to broaden the other three surfaces is a future-slice question
+once we have a quarter of integration-surface A→A+1 data. The threshold
+numbers in [the budget table](#the-budget) are unchanged — slice 420
+changes only _what counts as a flake_, not the trigger rates.
 
 ## Surface-to-CI-job mapping
 
