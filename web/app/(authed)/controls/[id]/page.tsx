@@ -79,6 +79,7 @@ import {
   fetchEvidenceList,
   type EvidenceListResponse,
 } from "@/lib/api/evidence";
+import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { type AnchorDetail } from "@/lib/api/anchors";
 import { APIError } from "@/lib/api/base";
 
@@ -606,6 +607,14 @@ function ControlDetailPageInner() {
             historyQ={historyQ}
             anchorSCF={anchor ? anchor.scf_id : null}
           />
+        ) : null}
+
+        {/* Slice 384 (AC-26): read-only "Linked Action Plans" section,
+            rendered on the Overview tab. */}
+        {activeTab === "overview" ? (
+          <div className="mt-6">
+            <LinkedActionPlans target="control" targetId={id} />
+          </div>
         ) : null}
 
         {activeTab === "evidence" ? (

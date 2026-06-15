@@ -31,6 +31,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { APIError } from "@/lib/api/base";
 import { fetchRiskDetail } from "@/lib/api/risks";
 
@@ -240,6 +241,9 @@ export default function RiskDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {/* ============ LINKED ACTION PLANS (slice 384, AC-25) ============ */}
+      <LinkedActionPlans target="risk" targetId={id} />
 
       {/* ============ HIERARCHY LINK ============ */}
       <div data-testid="risk-detail-hierarchy-link">

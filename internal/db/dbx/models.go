@@ -894,6 +894,48 @@ func (ns NullVendorReviewOutcome) Value() (driver.Value, error) {
 	return string(ns.VendorReviewOutcome), nil
 }
 
+type ActionPlan struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	Title           string             `json:"title"`
+	Description     *string            `json:"description"`
+	TriggeringEvent *string            `json:"triggering_event"`
+	OwnerID         pgtype.UUID        `json:"owner_id"`
+	DueDate         pgtype.Date        `json:"due_date"`
+	Status          string             `json:"status"`
+	AuditPeriodID   pgtype.UUID        `json:"audit_period_id"`
+	TombstonedAt    pgtype.Timestamptz `json:"tombstoned_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ActionPlanAuditLog struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ActionPlanID pgtype.UUID        `json:"action_plan_id"`
+	ActorID      pgtype.UUID        `json:"actor_id"`
+	ActionType   string             `json:"action_type"`
+	BeforeState  []byte             `json:"before_state"`
+	AfterState   []byte             `json:"after_state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ActionPlanControl struct {
+	ActionPlanID pgtype.UUID        `json:"action_plan_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	LinkedAt     pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy     pgtype.UUID        `json:"linked_by"`
+}
+
+type ActionPlanRisk struct {
+	ActionPlanID pgtype.UUID        `json:"action_plan_id"`
+	RiskID       pgtype.UUID        `json:"risk_id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	LinkedAt     pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy     pgtype.UUID        `json:"linked_by"`
+}
+
 type AdminAuditLogV struct {
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	Ts           pgtype.Timestamptz `json:"ts"`

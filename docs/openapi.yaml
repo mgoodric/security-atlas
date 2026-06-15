@@ -46,6 +46,7 @@ servers:
     description: Self-hosted deployment (replace with your atlas host)
 
 tags:
+  - name: action-plans
   - name: activity
   - name: admin-audit-log
   - name: admin-audit-periods
@@ -166,6 +167,189 @@ paths:
       tags: [system]
       operationId: get-metrics
       x-internal: true
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/action-plans:
+    get:
+      summary: GET /v1/action-plans
+      tags: [action-plans]
+      operationId: get-v1-action-plans
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/action-plans
+      tags: [action-plans]
+      operationId: post-v1-action-plans
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/action-plans/{id}:
+    delete:
+      summary: DELETE /v1/action-plans/{id}
+      tags: [action-plans]
+      operationId: delete-v1-action-plans-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    get:
+      summary: GET /v1/action-plans/{id}
+      tags: [action-plans]
+      operationId: get-v1-action-plans-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    patch:
+      summary: PATCH /v1/action-plans/{id}
+      tags: [action-plans]
+      operationId: patch-v1-action-plans-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/action-plans/{id}/controls/{control_id}:
+    delete:
+      summary: DELETE /v1/action-plans/{id}/controls/{control_id}
+      tags: [action-plans]
+      operationId: delete-v1-action-plans-id-controls-control_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: control_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/action-plans/{id}/controls/{control_id}
+      tags: [action-plans]
+      operationId: post-v1-action-plans-id-controls-control_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: control_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/action-plans/{id}/risks/{risk_id}:
+    delete:
+      summary: DELETE /v1/action-plans/{id}/risks/{risk_id}
+      tags: [action-plans]
+      operationId: delete-v1-action-plans-id-risks-risk_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: risk_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/action-plans/{id}/risks/{risk_id}
+      tags: [action-plans]
+      operationId: post-v1-action-plans-id-risks-risk_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: risk_id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
@@ -1606,6 +1790,26 @@ paths:
       operationId: get-v1-controls-history-export
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/action-plans:
+    get:
+      summary: GET /v1/controls/{id}/action-plans
+      tags: [action-plans]
+      operationId: get-v1-controls-id-action-plans
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
@@ -3822,6 +4026,26 @@ paths:
       summary: GET /v1/risks/{id}
       tags: [risks]
       operationId: get-v1-risks-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/action-plans:
+    get:
+      summary: GET /v1/risks/{id}/action-plans
+      tags: [action-plans]
+      operationId: get-v1-risks-id-action-plans
       security:
         - bearer: []
       parameters:
