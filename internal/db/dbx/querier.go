@@ -652,6 +652,9 @@ type Querier interface {
 	GetCsfProfile(ctx context.Context, arg GetCsfProfileParams) (CsfProfile, error)
 	GetCsfProfileByID(ctx context.Context, arg GetCsfProfileByIDParams) (CsfProfile, error)
 	GetCsfTierRating(ctx context.Context, arg GetCsfTierRatingParams) (CsfTierRating, error)
+	// The framework's current (status='current') global-catalog version, if any.
+	// Returns ErrNoRows when no current version exists yet.
+	GetCurrentFrameworkVersion(ctx context.Context, frameworkID pgtype.UUID) (FrameworkVersion, error)
 	// Lookup by the human-readable decision_id ("DL-2026-04-12"). Unique within
 	// tenant (UNIQUE (tenant_id, decision_id)).
 	GetDecisionByDecisionID(ctx context.Context, arg GetDecisionByDecisionIDParams) (Decision, error)
@@ -699,6 +702,7 @@ type Querier interface {
 	// Returns the row for (tenant, flag_key). pgx.ErrNoRows when absent; the
 	// application falls back to the seed default in that case.
 	GetFeatureFlag(ctx context.Context, arg GetFeatureFlagParams) (FeatureFlag, error)
+	GetFrameworkByID(ctx context.Context, id pgtype.UUID) (Framework, error)
 	// Same as above but uses the framework's "current" version. Convenience
 	// query so callers can omit the version (e.g., "soc2::CC6.6").
 	GetFrameworkRequirementByCurrentVersion(ctx context.Context, arg GetFrameworkRequirementByCurrentVersionParams) (FrameworkRequirement, error)
@@ -717,11 +721,23 @@ type Querier interface {
 	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
 	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
 	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
+	// slice 484: framework-versioning capability — the lifecycle + migration-suggest
+	// review queue + audit queries (ADR 0019). All targets are CATALOG tables (no
+	// tenant RLS); the trust gate is admin-role authz + the append-only audit.
+	// ===== version lifecycle =====
+	// Plain read of one framework_version. Returns ErrNoRows for an unknown id.
+	GetFrameworkVersionByID(ctx context.Context, id pgtype.UUID) (FrameworkVersion, error)
+	// Row-lock the version inside the promotion transaction so a concurrent
+	// promote/revert cannot race the read-validate-write window.
+	GetFrameworkVersionByIDForUpdate(ctx context.Context, id pgtype.UUID) (FrameworkVersion, error)
 	// Resolves "?framework_version=slug:version" into a framework_versions
 	// row. Used by both the anchor->requirements and control->coverage
 	// handlers to translate the URL param into a stable id for the pinned
 	// traversal. NULL tenant_id constraint scopes to the global catalog.
 	GetFrameworkVersionBySlugAndVersion(ctx context.Context, arg GetFrameworkVersionBySlugAndVersionParams) (FrameworkVersion, error)
+	// Row-lock one queue entry inside the approve/reject tx. Returns ErrNoRows for
+	// an unknown id.
+	GetFrameworkVersionMigrationForUpdate(ctx context.Context, id pgtype.UUID) (FrameworkVersionMigration, error)
 	// Look up one edge by (requirement, anchor). Returns ErrNoRows when the
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
@@ -1024,6 +1040,16 @@ type Querier interface {
 	// precision and truncates sub-us nanos), so the verify walk reconstructs the
 	// exact nanosecond timestamp the hash covered.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
+	// ===== audit (append-only) =====
+	// One immutable audit row per lifecycle transition or migration decision
+	// (threat-model R / AC-1 / AC-4). Written in the SAME tx as the act.
+	InsertFrameworkVersionAudit(ctx context.Context, arg InsertFrameworkVersionAuditParams) (FrameworkVersionAudit, error)
+	// Append one suggested/flagged carryover row to the review queue. The job
+	// writes ONLY 'pending' rows; it never mutates a requirement or edge
+	// (P0-484-1 / AC-3). Idempotent re-runs are absorbed by the UNIQUE
+	// (from_version_id, to_version_id, requirement_code, match_kind) constraint —
+	// ON CONFLICT DO NOTHING leaves a previously-decided row untouched.
+	InsertFrameworkVersionMigration(ctx context.Context, arg InsertFrameworkVersionMigrationParams) (FrameworkVersionMigration, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
 	// Append the immutable audit row for a tier transition (threat-model R /
 	// P0-483-4). Written in the SAME transaction as SetFwToScfEdgeTier.
@@ -1873,6 +1899,14 @@ type Querier interface {
 	// under a few hundred for any realistic deployment.
 	ListFrameworkScopes(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkScope, error)
 	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
+	// Audit history for one framework (newest first). Admin-scoped.
+	ListFrameworkVersionAudit(ctx context.Context, frameworkID pgtype.UUID) ([]FrameworkVersionAudit, error)
+	// The review queue for one version pair, oldest first. Admin-scoped read.
+	ListFrameworkVersionMigrations(ctx context.Context, arg ListFrameworkVersionMigrationsParams) ([]FrameworkVersionMigration, error)
+	// ===== migration-suggest review queue =====
+	// All requirement codes for a version, used by the suggest engine to compute
+	// the exact-code set-intersection / set-difference between two versions.
+	ListFrameworkVersionRequirementCodes(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFrameworkVersionRequirementCodesRow, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
 	// The registered frameworks the program runs against — both the global
@@ -2145,6 +2179,15 @@ type Querier interface {
 	// ListRequirementsForAnchor but filtered to a specific framework
 	// version id. Used when the caller passes ?framework_version=slug:version.
 	ListRequirementsForAnchorByFrameworkVersion(ctx context.Context, arg ListRequirementsForAnchorByFrameworkVersionParams) ([]ListRequirementsForAnchorByFrameworkVersionRow, error)
+	// slice 484 (AC-5 / ADR 0019 §4). The DEFAULT (no ?framework_version pin)
+	// reverse traversal: identical to ListRequirementsForAnchor but restricted to
+	// each framework's CURRENT version (fv.status = 'current'). Absent a pin a read
+	// must NOT bleed a legacy/superseded version's requirements (P0-484-5) — for a
+	// framework with two live versions, only the current one's requirements appear.
+	// A pinned read (ListRequirementsForAnchorByFrameworkVersion) can still reach a
+	// legacy version when explicitly requested (ADR 0019 §4 — legacy readable when
+	// pinned).
+	ListRequirementsForAnchorCurrentVersions(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorCurrentVersionsRow, error)
 	// All child risks rolled up under this parent.
 	ListRiskAggregationChildren(ctx context.Context, arg ListRiskAggregationChildrenParams) ([]ListRiskAggregationChildrenRow, error)
 	// All parent risks this child rolls up to. Children can roll up to multiple
@@ -2747,6 +2790,14 @@ type Querier interface {
 	SetAcknowledgmentEvidenceRecord(ctx context.Context, arg SetAcknowledgmentEvidenceRecordParams) error
 	// Slice 055: flip the per-decision OSCAL-narrative opt-out flag.
 	SetDecisionAuditNarrativeOptOut(ctx context.Context, arg SetDecisionAuditNarrativeOptOutParams) (Decision, error)
+	// Record a human's approve/reject on one queue row. Only a 'pending' row can
+	// be decided (the WHERE status='pending' guard makes a double-decide a no-op
+	// that returns no row — the store maps that to ErrAlreadyDecided).
+	SetFrameworkVersionMigrationDecision(ctx context.Context, arg SetFrameworkVersionMigrationDecisionParams) (FrameworkVersionMigration, error)
+	// Flip ONLY the status of one version (the narrow column-level UPDATE grant —
+	// slice 484 D2). Legality is enforced in Go (internal/frameworkversion) BEFORE
+	// this runs; this is the unconditional write inside the lifecycle tx.
+	SetFrameworkVersionStatus(ctx context.Context, arg SetFrameworkVersionStatusParams) error
 	// Flip ONLY the trust tier (the narrow column-level UPDATE grant — slice 483
 	// D1). Legality of the move is enforced in Go (internal/crosswalktier state
 	// machine) BEFORE this runs; this query is the unconditional write inside the

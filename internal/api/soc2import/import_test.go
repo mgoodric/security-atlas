@@ -238,6 +238,20 @@ func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
 	// above. A tenant-scoped table cannot launder a crosswalk through this
 	// exclusion because a crosswalk is shared (tenant-agnostic) catalog data
 	// by construction (invariant #1/#3.5).
+	//
+	// Refinement (slice 484, decisions-log D5): the version-migration review
+	// queue `framework_version_migrations` is a CATALOG table (no tenant_id)
+	// that carries two FKs into framework_requirements
+	// (from_requirement_id, to_requirement_id) — but it is NOT a
+	// framework-to-framework crosswalk. Its rows are INTRA-framework
+	// version-carryover SUGGESTIONS between two adjacent versions of the SAME
+	// framework (e.g. SOC 2:2017 CC6.1 -> SOC 2:2017-rev CC6.1), human-reviewed
+	// and never auto-applied (ADR 0019 §3 / P0-484-4 / invariant #7). It never
+	// maps one framework's requirement to a DIFFERENT framework's requirement,
+	// so it does not bypass the SCF-anchor graph that invariant #1 protects. It
+	// is excluded by name here exactly as fw_to_scf_edges is the one allowed
+	// crosswalk referencer; a genuinely-new cross-framework bridge with a
+	// different table name is still counted and still caught.
 	var refCount int
 	if err := pool.QueryRow(context.Background(), `
 		SELECT count(*)
@@ -246,6 +260,7 @@ func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
 		JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = kcu.constraint_name
 		WHERE kcu.table_schema = 'public'
 		  AND ccu.table_name = 'framework_requirements'
+		  AND kcu.table_name <> 'framework_version_migrations'
 		  AND NOT EXISTS (
 		      SELECT 1
 		      FROM information_schema.columns c

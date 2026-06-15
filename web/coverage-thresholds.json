@@ -295,6 +295,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/api/anchors/[id]/requirements/route.ts": {
+      "statements": 98,
+      "branches": 78,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/anchors/export/route.ts": {
       "statements": 98,
       "branches": 88,
@@ -658,6 +664,12 @@
     "lib/admin/assign-options.ts": {
       "statements": 98,
       "branches": 85,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/anchors/version-options.ts": {
+      "statements": 98,
+      "branches": 98,
       "functions": 98,
       "lines": 98
     },

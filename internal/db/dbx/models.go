@@ -407,6 +407,136 @@ func (ns NullEvidenceResult) Value() (driver.Value, error) {
 	return string(ns.EvidenceResult), nil
 }
 
+type FrameworkVersionAuditAction string
+
+const (
+	FrameworkVersionAuditActionPromote          FrameworkVersionAuditAction = "promote"
+	FrameworkVersionAuditActionRevert           FrameworkVersionAuditAction = "revert"
+	FrameworkVersionAuditActionMigrationApprove FrameworkVersionAuditAction = "migration_approve"
+	FrameworkVersionAuditActionMigrationReject  FrameworkVersionAuditAction = "migration_reject"
+)
+
+func (e *FrameworkVersionAuditAction) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FrameworkVersionAuditAction(s)
+	case string:
+		*e = FrameworkVersionAuditAction(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FrameworkVersionAuditAction: %T", src)
+	}
+	return nil
+}
+
+type NullFrameworkVersionAuditAction struct {
+	FrameworkVersionAuditAction FrameworkVersionAuditAction `json:"framework_version_audit_action"`
+	Valid                       bool                        `json:"valid"` // Valid is true if FrameworkVersionAuditAction is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFrameworkVersionAuditAction) Scan(value interface{}) error {
+	if value == nil {
+		ns.FrameworkVersionAuditAction, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FrameworkVersionAuditAction.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFrameworkVersionAuditAction) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FrameworkVersionAuditAction), nil
+}
+
+type FrameworkVersionMigrationMatchKind string
+
+const (
+	FrameworkVersionMigrationMatchKindExactCode FrameworkVersionMigrationMatchKind = "exact_code"
+	FrameworkVersionMigrationMatchKindAdded     FrameworkVersionMigrationMatchKind = "added"
+	FrameworkVersionMigrationMatchKindRemoved   FrameworkVersionMigrationMatchKind = "removed"
+)
+
+func (e *FrameworkVersionMigrationMatchKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FrameworkVersionMigrationMatchKind(s)
+	case string:
+		*e = FrameworkVersionMigrationMatchKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FrameworkVersionMigrationMatchKind: %T", src)
+	}
+	return nil
+}
+
+type NullFrameworkVersionMigrationMatchKind struct {
+	FrameworkVersionMigrationMatchKind FrameworkVersionMigrationMatchKind `json:"framework_version_migration_match_kind"`
+	Valid                              bool                               `json:"valid"` // Valid is true if FrameworkVersionMigrationMatchKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFrameworkVersionMigrationMatchKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.FrameworkVersionMigrationMatchKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FrameworkVersionMigrationMatchKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFrameworkVersionMigrationMatchKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FrameworkVersionMigrationMatchKind), nil
+}
+
+type FrameworkVersionMigrationStatus string
+
+const (
+	FrameworkVersionMigrationStatusPending  FrameworkVersionMigrationStatus = "pending"
+	FrameworkVersionMigrationStatusApproved FrameworkVersionMigrationStatus = "approved"
+	FrameworkVersionMigrationStatusRejected FrameworkVersionMigrationStatus = "rejected"
+)
+
+func (e *FrameworkVersionMigrationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FrameworkVersionMigrationStatus(s)
+	case string:
+		*e = FrameworkVersionMigrationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FrameworkVersionMigrationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullFrameworkVersionMigrationStatus struct {
+	FrameworkVersionMigrationStatus FrameworkVersionMigrationStatus `json:"framework_version_migration_status"`
+	Valid                           bool                            `json:"valid"` // Valid is true if FrameworkVersionMigrationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFrameworkVersionMigrationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.FrameworkVersionMigrationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FrameworkVersionMigrationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFrameworkVersionMigrationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FrameworkVersionMigrationStatus), nil
+}
+
 type FrameworkVersionStatus string
 
 const (
@@ -1657,6 +1787,35 @@ type FrameworkVersion struct {
 	RequirementCount int32                  `json:"requirement_count"`
 	OscalCatalogUri  *string                `json:"oscal_catalog_uri"`
 	CreatedAt        pgtype.Timestamptz     `json:"created_at"`
+}
+
+type FrameworkVersionAudit struct {
+	ID                 pgtype.UUID                 `json:"id"`
+	FrameworkID        pgtype.UUID                 `json:"framework_id"`
+	FrameworkVersionID pgtype.UUID                 `json:"framework_version_id"`
+	MigrationID        pgtype.UUID                 `json:"migration_id"`
+	Action             FrameworkVersionAuditAction `json:"action"`
+	FromStatus         *FrameworkVersionStatus     `json:"from_status"`
+	ToStatus           *FrameworkVersionStatus     `json:"to_status"`
+	ActorID            pgtype.UUID                 `json:"actor_id"`
+	Note               string                      `json:"note"`
+	CreatedAt          pgtype.Timestamptz          `json:"created_at"`
+}
+
+type FrameworkVersionMigration struct {
+	ID                pgtype.UUID                        `json:"id"`
+	FrameworkID       pgtype.UUID                        `json:"framework_id"`
+	FromVersionID     pgtype.UUID                        `json:"from_version_id"`
+	ToVersionID       pgtype.UUID                        `json:"to_version_id"`
+	FromRequirementID pgtype.UUID                        `json:"from_requirement_id"`
+	ToRequirementID   pgtype.UUID                        `json:"to_requirement_id"`
+	RequirementCode   string                             `json:"requirement_code"`
+	MatchKind         FrameworkVersionMigrationMatchKind `json:"match_kind"`
+	Status            FrameworkVersionMigrationStatus    `json:"status"`
+	ReviewerID        pgtype.UUID                        `json:"reviewer_id"`
+	Note              string                             `json:"note"`
+	CreatedAt         pgtype.Timestamptz                 `json:"created_at"`
+	DecidedAt         pgtype.Timestamptz                 `json:"decided_at"`
 }
 
 type FwToScfEdge struct {

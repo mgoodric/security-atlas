@@ -125,6 +125,40 @@ WHERE e.scf_anchor_id = $1
   AND e.relationship_type <> 'no_relationship'
 ORDER BY f.slug, fv.version, r.code;
 
+-- name: ListRequirementsForAnchorCurrentVersions :many
+-- slice 484 (AC-5 / ADR 0019 §4). The DEFAULT (no ?framework_version pin)
+-- reverse traversal: identical to ListRequirementsForAnchor but restricted to
+-- each framework's CURRENT version (fv.status = 'current'). Absent a pin a read
+-- must NOT bleed a legacy/superseded version's requirements (P0-484-5) — for a
+-- framework with two live versions, only the current one's requirements appear.
+-- A pinned read (ListRequirementsForAnchorByFrameworkVersion) can still reach a
+-- legacy version when explicitly requested (ADR 0019 §4 — legacy readable when
+-- pinned).
+SELECT
+    e.id               AS edge_id,
+    e.framework_requirement_id,
+    e.relationship_type,
+    e.strength,
+    e.source_attribution,
+    e.mapping_tier,
+    e.rationale,
+    r.code,
+    r.title            AS requirement_title,
+    r.body             AS requirement_body,
+    fv.id              AS framework_version_id,
+    fv.version         AS framework_version,
+    fv.status          AS framework_version_status,
+    f.slug             AS framework_slug,
+    f.name             AS framework_name
+FROM fw_to_scf_edges e
+JOIN framework_requirements r ON r.id = e.framework_requirement_id
+JOIN framework_versions fv    ON fv.id = r.framework_version_id
+JOIN frameworks f             ON f.id = fv.framework_id
+WHERE e.scf_anchor_id = $1
+  AND e.relationship_type <> 'no_relationship'
+  AND fv.status = 'current'
+ORDER BY f.slug, fv.version, r.code;
+
 -- name: ListRequirementsForAnchorByFrameworkVersion :many
 -- AC-2 + AC-4 (framework_version pinning). Same as
 -- ListRequirementsForAnchor but filtered to a specific framework

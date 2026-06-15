@@ -180,11 +180,14 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		}
 		reqs = mapPinnedRequirements(got)
 	} else {
-		got, err := h.q.ListRequirementsForAnchor(ctx, ctrl.ScfAnchorID)
+		// slice 484 (AC-5 / ADR 0019 §4): absent a pin, default to each
+		// framework's CURRENT version — never bleed a legacy/superseded
+		// version's requirements into a control's coverage view (P0-484-5).
+		got, err := h.q.ListRequirementsForAnchorCurrentVersions(ctx, ctrl.ScfAnchorID)
 		if err != nil {
-			return coverageView{}, false, fmt.Errorf("list requirements for control: %w", err)
+			return coverageView{}, false, fmt.Errorf("list requirements for control (current): %w", err)
 		}
-		reqs = mapRequirements(got)
+		reqs = mapCurrentVersionRequirements(got)
 	}
 
 	// Slice 256 — per-row weighted Coverage column.
