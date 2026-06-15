@@ -73,3 +73,31 @@ These depend on the public-launch governance posture (slice 181's GOVERNANCE.md 
 - **Two-state ladder (`draft → verified`).** Rejected: simpler, but loses the "claimed for review" signal and a chunk of the audit trail's value for a trust signal that feeds audit-binding artifacts.
 - **`super_admin`-only promotion.** Rejected as the default: verification is routine catalog curation; the audit trail provides accountability without over-narrowing who can do the work. (Available as a future tightening.)
 - **Collapsing provenance and tier into one field.** Rejected (P0-483-3): they answer different questions; an official mapping can still be re-reviewed, and a community draft can become verified — both need both axes.
+
+## Implementation notes (slice 483)
+
+Two build-time refinements were settled during implementation (the slice's
+JUDGMENT calls). They refine, but do not change, the decision above; the full
+build-decision record is [`docs/audit-log/483-mapping-tier-governance-decisions.md`](../audit-log/483-mapping-tier-governance-decisions.md).
+
+- **Write mechanism = narrow column-level grant (not a privileged pool).** The
+  transition handler runs as `atlas_app` with a narrow `GRANT UPDATE
+(mapping_tier, updated_at) ON fw_to_scf_edges` plus `SELECT, INSERT` on the
+  append-only audit table. The tier change and the audit row are written in one `atlas_app`
+  transaction; legality is enforced in Go (the state machine, read `FOR UPDATE`
+  inside the tx) and the trust gate is the admin-role authz check. This is
+  least-privilege — `atlas_app` cannot mutate the STRM edge content
+  (`relationship_type` / `strength` / `source_attribution` / `rationale`)
+  through the grant — and avoids routing a catalog-level edit through the
+  BYPASSRLS pool. (Decisions log D1.)
+- **Endpoint = `POST /v1/admin/crosswalk-edges/{id}/tier`.** Body `{ "tier":
+"<target>", "note": "<optional>" }`; `{id}` is the `fw_to_scf_edges.id`. The
+  reviewer id is taken from the verified admin JWT subject, never the body.
+  Status mapping: 200 success / 403 non-admin / 404 unknown edge / 422 illegal
+  transition (the `draft → verified` skip + moves out of a terminal tier) / 400
+  malformed input. (Decisions log D2.)
+
+Migration: `migrations/sql/20260612080000_crosswalk_mapping_tier.sql`
+(+`.down.sql`). State machine + store: `internal/crosswalktier`. Admin surface:
+`internal/api/admincrosswalktier`. The `scf_official → verified` seed is an
+idempotent in-migration data `UPDATE` (decisions log D3).

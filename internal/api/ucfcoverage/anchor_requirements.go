@@ -143,6 +143,7 @@ func mapRequirements(rows []dbx.ListRequirementsForAnchorRow) []requirementForAn
 			RelationshipType:       string(x.RelationshipType),
 			Strength:               x.Strength,
 			SourceAttribution:      string(x.SourceAttribution),
+			MappingTier:            string(x.MappingTier),
 			Rationale:              x.Rationale,
 		})
 	}
@@ -166,6 +167,7 @@ func mapPinnedRequirements(rows []dbx.ListRequirementsForAnchorByFrameworkVersio
 			RelationshipType:       string(x.RelationshipType),
 			Strength:               x.Strength,
 			SourceAttribution:      string(x.SourceAttribution),
+			MappingTier:            string(x.MappingTier),
 			Rationale:              x.Rationale,
 		})
 	}

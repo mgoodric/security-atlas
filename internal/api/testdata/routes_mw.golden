@@ -210,6 +210,7 @@ POST /v1/admin/authz-bundle/reload 8
 POST /v1/admin/credentials 8
 POST /v1/admin/credentials/{id}/revoke 8
 POST /v1/admin/credentials/{id}/rotate 8
+POST /v1/admin/crosswalk-edges/{id}/tier 8
 POST /v1/admin/demo/seed 8
 POST /v1/admin/demo/teardown 8
 POST /v1/admin/group-role-mappings 8

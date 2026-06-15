@@ -271,7 +271,11 @@ type anchorWire struct {
 	RelationshipType  string  `json:"relationship_type,omitempty"`
 	Strength          float64 `json:"strength,omitempty"`
 	SourceAttribution string  `json:"source_attribution,omitempty"`
-	Rationale         string  `json:"rationale,omitempty"`
+	// MappingTier is the slice-483 trust tier (draft | under_review |
+	// verified | rejected) — additive, orthogonal to source_attribution. No
+	// reviewer identity on this catalog payload (P0-483-6).
+	MappingTier string `json:"mapping_tier,omitempty"`
+	Rationale   string `json:"rationale,omitempty"`
 }
 
 // controlWire is the shape of a control in slice-008 responses.
@@ -323,7 +327,10 @@ type requirementForAnchorWire struct {
 	Strength               float64  `json:"strength"`
 	Coverage               *float64 `json:"coverage"`
 	SourceAttribution      string   `json:"source_attribution"`
-	Rationale              string   `json:"rationale,omitempty"`
+	// MappingTier is the slice-483 trust tier — additive, orthogonal to
+	// source_attribution; no reviewer identity (P0-483-6).
+	MappingTier string `json:"mapping_tier"`
+	Rationale   string `json:"rationale,omitempty"`
 }
 
 // ===== shared write helpers =====

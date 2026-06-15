@@ -206,3 +206,12 @@ CREATE TYPE vendor_review_outcome AS ENUM (
     'fail',
     'waived'
 );
+
+-- ===== From migrations/sql/20260612080000_crosswalk_mapping_tier.sql (slice 483) =====
+
+CREATE TYPE crosswalk_mapping_tier AS ENUM (
+    'draft',
+    'under_review',
+    'verified',
+    'rejected'
+);

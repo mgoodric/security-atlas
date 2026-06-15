@@ -7,6 +7,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
+	"github.com/mgoodric/security-atlas/internal/api/admincrosswalktier"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
 	"github.com/mgoodric/security-atlas/internal/api/admingroupmappings"
 	"github.com/mgoodric/security-atlas/internal/api/adminscim"
@@ -22,6 +23,7 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/scim"
 )
@@ -149,6 +151,16 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Post("/v1/admin/group-role-mappings", groupMapH.Create)
 	root.Get("/v1/admin/group-role-mappings", groupMapH.List)
 	root.Delete("/v1/admin/group-role-mappings/{id}", groupMapH.Delete)
+
+	// Slice 483: crosswalk-mapping verified-tier governance (ADR 0018).
+	// Admin-gated (cred.IsAdmin; a non-admin transition is 403 — threat-model
+	// E) transition of a fw_to_scf_edges row's trust tier. The store flips the
+	// tier and appends an immutable audit row in the same transaction. The
+	// target table is a CATALOG table (no tenant RLS); the gate is this
+	// admin-role authz + the append-only audit trail. Route appended per the
+	// parallel-batch convention (chi.Mux rejects two Mounts at "/").
+	crosswalkTierH := admincrosswalktier.New(crosswalktier.NewStore(s.dbPool))
+	root.Post("/v1/admin/crosswalk-edges/{id}/tier", crosswalkTierH.Transition)
 
 	// Slice 142: super_admin management surface. super_admin-gated
 	// (the handler reads jwtmw.FromContext().SuperAdmin); the OPA

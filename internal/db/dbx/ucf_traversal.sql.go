@@ -55,6 +55,7 @@ SELECT
     e.relationship_type,
     e.strength,
     e.source_attribution,
+    e.mapping_tier,
     e.rationale,
     a.scf_id,
     a.family,
@@ -73,6 +74,7 @@ type ListAnchorsForRequirementWithEdgesRow struct {
 	RelationshipType  StrmRelationshipType       `json:"relationship_type"`
 	Strength          float64                    `json:"strength"`
 	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
+	MappingTier       CrosswalkMappingTier       `json:"mapping_tier"`
 	Rationale         string                     `json:"rationale"`
 	ScfID             string                     `json:"scf_id"`
 	Family            string                     `json:"family"`
@@ -119,6 +121,7 @@ func (q *Queries) ListAnchorsForRequirementWithEdges(ctx context.Context, framew
 			&i.RelationshipType,
 			&i.Strength,
 			&i.SourceAttribution,
+			&i.MappingTier,
 			&i.Rationale,
 			&i.ScfID,
 			&i.Family,
@@ -142,6 +145,7 @@ SELECT
     e.relationship_type,
     e.strength,
     e.source_attribution,
+    e.mapping_tier,
     e.rationale,
     a.scf_id,
     a.family,
@@ -166,6 +170,7 @@ type ListAnchorsForRequirementWithEdgesByFrameworkVersionRow struct {
 	RelationshipType  StrmRelationshipType       `json:"relationship_type"`
 	Strength          float64                    `json:"strength"`
 	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
+	MappingTier       CrosswalkMappingTier       `json:"mapping_tier"`
 	Rationale         string                     `json:"rationale"`
 	ScfID             string                     `json:"scf_id"`
 	Family            string                     `json:"family"`
@@ -193,6 +198,7 @@ func (q *Queries) ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx conte
 			&i.RelationshipType,
 			&i.Strength,
 			&i.SourceAttribution,
+			&i.MappingTier,
 			&i.Rationale,
 			&i.ScfID,
 			&i.Family,
@@ -297,6 +303,7 @@ SELECT
     e.relationship_type,
     e.strength,
     e.source_attribution,
+    e.mapping_tier,
     e.rationale,
     r.code,
     r.title            AS requirement_title,
@@ -321,6 +328,7 @@ type ListRequirementsForAnchorRow struct {
 	RelationshipType       StrmRelationshipType       `json:"relationship_type"`
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
 	Rationale              string                     `json:"rationale"`
 	Code                   string                     `json:"code"`
 	RequirementTitle       string                     `json:"requirement_title"`
@@ -352,6 +360,7 @@ func (q *Queries) ListRequirementsForAnchor(ctx context.Context, scfAnchorID pgt
 			&i.RelationshipType,
 			&i.Strength,
 			&i.SourceAttribution,
+			&i.MappingTier,
 			&i.Rationale,
 			&i.Code,
 			&i.RequirementTitle,
@@ -379,6 +388,7 @@ SELECT
     e.relationship_type,
     e.strength,
     e.source_attribution,
+    e.mapping_tier,
     e.rationale,
     r.code,
     r.title            AS requirement_title,
@@ -409,6 +419,7 @@ type ListRequirementsForAnchorByFrameworkVersionRow struct {
 	RelationshipType       StrmRelationshipType       `json:"relationship_type"`
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
 	Rationale              string                     `json:"rationale"`
 	Code                   string                     `json:"code"`
 	RequirementTitle       string                     `json:"requirement_title"`
@@ -438,6 +449,7 @@ func (q *Queries) ListRequirementsForAnchorByFrameworkVersion(ctx context.Contex
 			&i.RelationshipType,
 			&i.Strength,
 			&i.SourceAttribution,
+			&i.MappingTier,
 			&i.Rationale,
 			&i.Code,
 			&i.RequirementTitle,

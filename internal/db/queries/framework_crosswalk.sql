@@ -93,6 +93,7 @@ SELECT
     e.relationship_type,
     e.strength,
     e.source_attribution,
+    e.mapping_tier,
     e.rationale,
     a.scf_id,
     a.family,
@@ -105,3 +106,50 @@ ORDER BY e.strength DESC, a.scf_id;
 -- name: CountFwToScfEdgesBySourceAttribution :one
 -- Audit query — exposed for integration tests + the audit log.
 SELECT count(*) FROM fw_to_scf_edges WHERE source_attribution = $1;
+
+-- ===== slice 483: crosswalk mapping-tier governance =====
+
+-- name: GetFwToScfEdgeTier :one
+-- Read the current trust tier of one edge by id. The transition store calls
+-- this FOR UPDATE (see GetFwToScfEdgeTierForUpdate) inside the tx; this plain
+-- variant is for read-only callers. Returns ErrNoRows for an unknown edge.
+SELECT id, mapping_tier, source_attribution
+FROM fw_to_scf_edges
+WHERE id = $1;
+
+-- name: GetFwToScfEdgeTierForUpdate :one
+-- Row-lock the edge's tier inside the transition transaction so a concurrent
+-- transition cannot race the read-validate-write window. Returns ErrNoRows for
+-- an unknown edge (the handler maps that to 404).
+SELECT id, mapping_tier, source_attribution
+FROM fw_to_scf_edges
+WHERE id = $1
+FOR UPDATE;
+
+-- name: SetFwToScfEdgeTier :exec
+-- Flip ONLY the trust tier (the narrow column-level UPDATE grant — slice 483
+-- D1). Legality of the move is enforced in Go (internal/crosswalktier state
+-- machine) BEFORE this runs; this query is the unconditional write inside the
+-- same tx that also inserts the audit row.
+UPDATE fw_to_scf_edges
+SET mapping_tier = $2,
+    updated_at   = now()
+WHERE id = $1;
+
+-- name: InsertFwToScfEdgeTierTransition :one
+-- Append the immutable audit row for a tier transition (threat-model R /
+-- P0-483-4). Written in the SAME transaction as SetFwToScfEdgeTier.
+INSERT INTO fw_to_scf_edge_tier_transitions (
+    edge_id, reviewer_id, from_tier, to_tier, note
+)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING *;
+
+-- name: ListFwToScfEdgeTierTransitions :many
+-- Admin/maintainer-scoped read of an edge's transition history (newest first).
+-- NOT on the public /anchors payload — reviewer identity stays behind the admin
+-- boundary (threat-model I / P0-483-6).
+SELECT *
+FROM fw_to_scf_edge_tier_transitions
+WHERE edge_id = $1
+ORDER BY created_at DESC;
