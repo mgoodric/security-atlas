@@ -66,6 +66,7 @@ GET /v1/audit-notes/thread
 GET /v1/audit-periods
 GET /v1/audit-periods/{id}
 GET /v1/audit-periods/{id}/control-state
+GET /v1/audit-periods/{id}/controls/{controlID}/evidence-summary
 GET /v1/board-briefs
 GET /v1/board-briefs/{id}
 GET /v1/board-briefs/{id}.md

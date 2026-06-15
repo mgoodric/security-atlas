@@ -53,7 +53,27 @@ func (s *Service) Summarize(ctx context.Context, controlID uuid.UUID) (Summary, 
 	if err != nil {
 		return Summary{}, fmt.Errorf("evidencesummary: assemble evidence set: %w", err)
 	}
+	return runSummary(ctx, s.client, s.resolver, set), nil
+}
 
+// runSummary is the shared NON-BINDING summarization pipeline used by BOTH the
+// live control-detail surface (Service.Summarize, slice 502) and the
+// period-scoped audit-workspace surface (PeriodService.PeriodSummarize, slice
+// 749). Given an already-assembled deterministic EvidenceSet, it runs ONE bounded
+// generation against the inference client, validates EVERY citation against the
+// supplied resolver + the grounding set (allowedIDs over the EvidenceSet), and
+// returns a read-only Summary. It persists nothing (P0-502-4) and never mutates
+// the EvidenceSet.
+//
+// The contract is identical regardless of corpus: the EvidenceSet is ALWAYS
+// echoed back (AC-7, P0-502-7); the Text + Citations are present only when
+// generation succeeded AND every citation resolved to a tenant-owned row in the
+// grounding set (no fabricated coverage — P0-502-1). On any failure the returned
+// Summary has Suppressed=true and a fixed, leak-safe Reason. Factoring this out
+// is what makes slice 749 a literal thin variant of 502 (the ONLY differences
+// are the corpus the caller assembled and the resolver it passed — the live
+// surface passes a live resolver, the frozen surface passes a horizon-bound one).
+func runSummary(ctx context.Context, client llm.Client, resolver CitationResolver, set EvidenceSet) Summary {
 	sum := Summary{EvidenceSet: set}
 
 	// Nothing to summarize: degrade to the (empty) deterministic list without
@@ -62,10 +82,10 @@ func (s *Service) Summarize(ctx context.Context, controlID uuid.UUID) (Summary, 
 	if len(set.Records) == 0 {
 		sum.Suppressed = true
 		sum.Reason = ReasonNoEvidence
-		return sum, nil
+		return sum
 	}
 
-	res, err := s.client.Generate(ctx, llm.GenerateRequest{
+	res, err := client.Generate(ctx, llm.GenerateRequest{
 		Surface:       llm.SurfaceSummary,
 		PromptVersion: promptVersion,
 		SystemPrompt:  systemPrompt + "\n\nEvidence:\n" + buildPrompt(set),
@@ -83,7 +103,7 @@ func (s *Service) Summarize(ctx context.Context, controlID uuid.UUID) (Summary, 
 		// show.
 		sum.Suppressed = true
 		sum.Reason = ReasonGenerationUnavailable
-		return sum, nil
+		return sum
 	}
 
 	// Provenance is surfaced even if the citation gate later suppresses the
@@ -92,22 +112,22 @@ func (s *Service) Summarize(ctx context.Context, controlID uuid.UUID) (Summary, 
 	sum.ModelVersion = res.ModelVersion
 	sum.ModelProvider = res.ModelProvider
 
-	citations, ok, reason, err := validateCitations(ctx, s.resolver, res.Text, allowedIDs(set))
+	citations, ok, reason, err := validateCitations(ctx, resolver, res.Text, allowedIDs(set))
 	if err != nil {
 		// A resolution query failed (DB error mid-validation). Treat as
 		// suppression, not a hard error — the evidence list still renders. We do
 		// not trust a partially-validated draft.
 		sum.Suppressed = true
 		sum.Reason = ReasonUnresolvedCitation
-		return sum, nil
+		return sum
 	}
 	if !ok {
 		sum.Suppressed = true
 		sum.Reason = reason
-		return sum, nil
+		return sum
 	}
 
 	sum.Text = res.Text
 	sum.Citations = citations
-	return sum, nil
+	return sum
 }

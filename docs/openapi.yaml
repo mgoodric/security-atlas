@@ -1530,6 +1530,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/audit-periods/{id}/controls/{controlID}/evidence-summary:
+    get:
+      summary: GET /v1/audit-periods/{id}/controls/{controlID}/evidence-summary
+      tags: [audit-periods]
+      operationId: get-v1-audit-periods-id-controls-controlID-evidence-summary
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: controlID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}/freeze:
     post:
       summary: POST /v1/audit-periods/{id}/freeze
