@@ -329,6 +329,75 @@ export type ControlGapExplanationResponse = {
   suppressed_reason: string;
 };
 
+// ===== Slice 502 — AI evidence-summarization v0 =====
+//
+// GET /v1/controls/{id}/evidence-summary returns the DETERMINISTIC bounded
+// CURRENT LIVE evidence set ALWAYS (top-N most-recent records), plus a
+// NON-BINDING, cited, local-default-Ollama summary of that evidence when one is
+// available AND every citation resolves to a tenant-owned row. The summary is
+// null when suppressed (graceful degradation); the evidence set is always
+// present. The summary is a comprehension aid — never an audit artifact, with no
+// approve/publish/export affordance. Sibling of slice 444's gap-explanation.
+
+export type EvidenceSummaryFact = {
+  evidence_id: string;
+  evidence_kind: string;
+  result: string;
+  observed_at: string;
+};
+
+export type EvidenceSummarySet = {
+  control_id: string;
+  control_title: string;
+  // The bound: `showing` records of `total` live records on record. The summary
+  // is over the bounded `showing` set, never the full history (P0-502-8).
+  showing: number;
+  total: number;
+  // ALWAYS true — current live evidence only, never a frozen audit-period
+  // population (P0-502-5).
+  live_only: boolean;
+  records: EvidenceSummaryFact[];
+};
+
+export type EvidenceSummaryCitation = {
+  kind: "control" | "evidence";
+  id: string;
+};
+
+export type EvidenceSummaryBody = {
+  text: string;
+  citations: EvidenceSummaryCitation[];
+  model: string;
+  model_name: string;
+  model_version: string;
+  model_provider: string;
+  // ALWAYS false — the summary is non-binding (no approve/publish/export).
+  binding: boolean;
+  // Human-readable "AI-generated summary (model X) — not an audit artifact"
+  // disclosure.
+  disclosure: string;
+};
+
+export type ControlEvidenceSummaryResponse = {
+  control_id: string;
+  evidence: EvidenceSummarySet;
+  // null when the summary was suppressed (generation unavailable, no evidence,
+  // or a citation failed to resolve) — the evidence set still renders.
+  summary: EvidenceSummaryBody | null;
+  suppressed_reason: string;
+};
+
+export async function getControlEvidenceSummary(
+  bearer: string,
+  controlID: string,
+): Promise<ControlEvidenceSummaryResponse> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/evidence-summary`,
+    bearer,
+  );
+  return (await res.json()) as ControlEvidenceSummaryResponse;
+}
+
 export async function getControlHistory(
   bearer: string,
   controlID: string,
@@ -431,5 +500,17 @@ export function fetchControlGapExplanation(
 ): Promise<ControlGapExplanationResponse> {
   return bffControlFetch<ControlGapExplanationResponse>(
     `/api/controls/${encodeURIComponent(controlID)}/gap-explanation`,
+  );
+}
+
+// Slice 502 — browser-side fetcher for the evidence-summary read. Rides the
+// existing bffControlFetch helper so APIError surfaces with the upstream status;
+// the control-detail page's classifyControlDetailError routes 401 / 404 / other
+// for free.
+export function fetchControlEvidenceSummary(
+  controlID: string,
+): Promise<ControlEvidenceSummaryResponse> {
+  return bffControlFetch<ControlEvidenceSummaryResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/evidence-summary`,
   );
 }

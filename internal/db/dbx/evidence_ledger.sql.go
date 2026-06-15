@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countEvidenceRecordsByControl = `-- name: CountEvidenceRecordsByControl :one
+SELECT count(*)
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3)
+`
+
+type CountEvidenceRecordsByControlParams struct {
+	TenantID   pgtype.UUID `json:"tenant_id"`
+	ControlID  pgtype.UUID `json:"control_id"`
+	ControlRef string      `json:"control_ref"`
+}
+
+// Slice 502: total CURRENT LIVE evidence count for one control, used by the
+// evidence-summary surface to render a "showing N of M" bound (the summary is
+// over the bounded top-N, never the full history — P0-502-8). Resolution
+// mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
+func (q *Queries) CountEvidenceRecordsByControl(ctx context.Context, arg CountEvidenceRecordsByControlParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countEvidenceRecordsByControl, arg.TenantID, arg.ControlID, arg.ControlRef)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countEvidenceRecordsByTenant = `-- name: CountEvidenceRecordsByTenant :one
 SELECT count(*) FROM evidence_records WHERE tenant_id = $1
 `

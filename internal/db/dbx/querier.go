@@ -147,6 +147,11 @@ type Querier interface {
 	// DL-YYYY-MM-DD-NNNN identifier. $2 is the start-of-day (inclusive), $3 the
 	// start of the next day (exclusive).
 	CountDecisionsByDecidedDate(ctx context.Context, arg CountDecisionsByDecidedDateParams) (int64, error)
+	// Slice 502: total CURRENT LIVE evidence count for one control, used by the
+	// evidence-summary surface to render a "showing N of M" bound (the summary is
+	// over the bounded top-N, never the full history — P0-502-8). Resolution
+	// mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
+	CountEvidenceRecordsByControl(ctx context.Context, arg CountEvidenceRecordsByControlParams) (int64, error)
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	// Rate numerator: distinct user_ids who (a) are in the denominator set

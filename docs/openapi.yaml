@@ -2197,6 +2197,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/evidence-summary:
+    get:
+      summary: GET /v1/controls/{id}/evidence-summary
+      tags: [controls]
+      operationId: get-v1-controls-id-evidence-summary
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/gap-explanation:
     get:
       summary: GET /v1/controls/{id}/gap-explanation

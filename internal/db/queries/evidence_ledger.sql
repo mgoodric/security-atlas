@@ -64,6 +64,16 @@ LIMIT $4 OFFSET $5;
 -- name: CountEvidenceRecordsByTenant :one
 SELECT count(*) FROM evidence_records WHERE tenant_id = $1;
 
+-- name: CountEvidenceRecordsByControl :one
+-- Slice 502: total CURRENT LIVE evidence count for one control, used by the
+-- evidence-summary surface to render a "showing N of M" bound (the summary is
+-- over the bounded top-N, never the full history — P0-502-8). Resolution
+-- mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
+SELECT count(*)
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3);
+
 -- name: WalkEvidenceRecordsForVerify :many
 -- Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
 -- Read-only integrity walk — recomputes each record's canonical hash and

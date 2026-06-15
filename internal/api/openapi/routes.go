@@ -104,6 +104,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/controls/{id}/coverage", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/coverage"},
 	{Method: "GET", Path: "/v1/controls/{id}/effective-scope", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/effective-scope"},
 	{Method: "GET", Path: "/v1/controls/{id}/effectiveness", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/effectiveness"},
+	{Method: "GET", Path: "/v1/controls/{id}/evidence-summary", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/evidence-summary"},
 	{Method: "GET", Path: "/v1/controls/{id}/gap-explanation", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/gap-explanation"},
 	{Method: "GET", Path: "/v1/controls/{id}/history", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/history"},
 	{Method: "GET", Path: "/v1/controls/{id}/policies", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/policies"},

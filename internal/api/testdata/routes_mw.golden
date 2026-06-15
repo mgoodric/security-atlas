@@ -88,6 +88,7 @@ GET /v1/controls/{id}/attest-form 8
 GET /v1/controls/{id}/coverage 8
 GET /v1/controls/{id}/effective-scope 8
 GET /v1/controls/{id}/effectiveness 8
+GET /v1/controls/{id}/evidence-summary 8
 GET /v1/controls/{id}/gap-explanation 8
 GET /v1/controls/{id}/history 8
 GET /v1/controls/{id}/policies 8
