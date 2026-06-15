@@ -12,6 +12,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // Slice 635 — the SIEM-rule kind's detection anchor RESOLVES against the
@@ -34,7 +35,7 @@ import (
 // `scf_anchor "GOV-01" not found` failure when an anchor was absent. Before
 // slice 635 this returned pgx.ErrNoRows.
 func TestTHRAnchor_ResolvesInSeededCatalog(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 
@@ -93,7 +94,7 @@ func anchorsForRequirement(t *testing.T, pool *pgxpool.Pool, slug, version, code
 // datadog.siem_rule.v1 family anchors at THR-01, and THR-01 now reaches the
 // SOC 2 CC7.2/CC7.3 + ISO A.5.7/A.8.16 requirements through real STRM edges.
 func TestTHRAnchor_DetectionCrosswalkEdgesExist(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	ensureSCFLoaded(t, pool)

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // Slice 646 — the FINER SCF Threat-Management controls (THR-02..THR-10) carry
@@ -37,7 +38,7 @@ import (
 // after the SOC 2 + ISO + CSF crosswalks are imported against the seeded
 // catalog. A dropped or mistyped edge fails here.
 func TestTHRFinerCrosswalk_EdgesResolve(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	resetCSF(t, pool)
@@ -87,7 +88,7 @@ func TestTHRFinerCrosswalk_EdgesResolve(t *testing.T) {
 // CC7.2 -> THR-04 is the honest `intersects_with` (hunting is one technique
 // within CC7.2's broader anomaly monitoring, not an equivalence).
 func TestTHRFinerCrosswalk_RelationshipsAreHonest(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetCSF(t, pool)
 	ensureSCFLoaded(t, pool)
