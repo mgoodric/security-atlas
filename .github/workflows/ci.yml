@@ -191,6 +191,49 @@ jobs:
 
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
 
+  # Slice 695 — build the `atlas` binary ONCE and share it to the three
+  # playwright-family jobs (frontend-playwright / -prod-build / ui-honesty),
+  # which previously each recompiled the identical `./cmd/atlas` target on
+  # the identical ubuntu-latest runner (slice 693 Finding 1.2 / 2.1).
+  #
+  # Why a dedicated job and NOT a step in `build-go`: gating the playwright
+  # jobs on `build-go` (which runs `-race` unit tests, ~7.5 min) serialized
+  # them behind that whole job and made `Frontend · Playwright e2e` the PR
+  # critical path — a measured ~7-min wall-clock regression (slice 695
+  # decisions log D3, run 27581378713). This job does ONLY the atlas compile
+  # + upload (~1 min), so the `needs:` wait the playwright jobs inherit is
+  # ~1 min instead of ~7.5 min: the dedup's billing win is kept (one host
+  # compile shared 3×) WITHOUT the wall-clock regression. It is NOT a
+  # required check (absent from branch-protection) and needs no stub twin —
+  # it is `if: code == 'true'` like `build-go`, so on docs-only PRs it skips
+  # alongside the real playwright jobs (whose stubs then post the checks).
+  build-atlas:
+    name: Go · build atlas binary (shared)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Build atlas binary
+        run: go build -o atlas ./cmd/atlas
+      - name: Upload atlas binary as workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: atlas-binary
+          path: atlas
+          if-no-files-found: error
+
   # ====================================================================
   # Slice 417 — sharded integration matrix (Phase A serial + Phase B fan-out).
   #
@@ -1383,7 +1426,11 @@ jobs:
   # ====================================================================
   frontend-playwright:
     name: Frontend · Playwright e2e
-    needs: changes
+    # Slice 695 — also depends on build-atlas, the lightweight job that
+    # builds + uploads the shared atlas binary this job downloads (instead
+    # of recompiling). NOT build-go: gating on build-go's ~7.5-min -race
+    # unit run regressed wall-clock; build-atlas is ~1 min (decisions D3).
+    needs: [changes, build-atlas]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1503,8 +1550,19 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
-      - name: Build atlas server
-        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      # Slice 695 — download the prebuilt atlas binary from build-atlas instead
+      # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
+      # Unix executable bit, so `install -m 0755` is REQUIRED to make the
+      # downloaded file runnable at /usr/local/bin/atlas.
+      - name: Download prebuilt atlas binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: atlas-binary
+          path: /tmp/atlas-bin
+      - name: Install prebuilt atlas binary
+        run: |
+          install -m 0755 /tmp/atlas-bin/atlas /usr/local/bin/atlas
+          atlas --version || true
       - name: Install web workspace
         working-directory: .
         run: npm install --no-audit --no-fund
@@ -1619,7 +1677,9 @@ jobs:
   # ====================================================================
   frontend-playwright-prod-build:
     name: Frontend · Playwright e2e (prod-build standalone)
-    needs: changes
+    # Slice 695 — also depends on build-atlas (the lightweight shared-binary
+    # job), NOT build-go (its slow -race run regressed wall-clock; decisions D3).
+    needs: [changes, build-atlas]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1737,8 +1797,19 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
-      - name: Build atlas server
-        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      # Slice 695 — download the prebuilt atlas binary from build-atlas instead
+      # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
+      # Unix executable bit, so `install -m 0755` is REQUIRED. The web
+      # standalone build below is unrelated and stays.
+      - name: Download prebuilt atlas binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: atlas-binary
+          path: /tmp/atlas-bin
+      - name: Install prebuilt atlas binary
+        run: |
+          install -m 0755 /tmp/atlas-bin/atlas /usr/local/bin/atlas
+          atlas --version || true
       - name: Install web workspace
         working-directory: .
         run: npm install --no-audit --no-fund
@@ -1848,7 +1919,9 @@ jobs:
   # ====================================================================
   frontend-ui-honesty:
     name: Frontend · UI honesty (advisory)
-    needs: changes
+    # Slice 695 — also depends on build-atlas (the lightweight shared-binary
+    # job), NOT build-go (its slow -race run regressed wall-clock; decisions D3).
+    needs: [changes, build-atlas]
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -1952,8 +2025,18 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
-      - name: Build atlas server
-        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      # Slice 695 — download the prebuilt atlas binary from build-atlas instead
+      # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
+      # Unix executable bit, so `install -m 0755` is REQUIRED.
+      - name: Download prebuilt atlas binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: atlas-binary
+          path: /tmp/atlas-bin
+      - name: Install prebuilt atlas binary
+        run: |
+          install -m 0755 /tmp/atlas-bin/atlas /usr/local/bin/atlas
+          atlas --version || true
       - name: Build web workspace
         working-directory: web
         run: npm run build
