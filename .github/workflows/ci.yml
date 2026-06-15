@@ -992,6 +992,23 @@ jobs:
       - name: Validate config
         run: pre-commit validate-config
       - name: Run all hooks against all files
+        # Slice 698 — skip the language-format hooks that DEDICATED jobs already
+        # enforce, so this job owns only the hooks no other job covers
+        # (trailing-whitespace, end-of-file-fixer, check-yaml/json/toml,
+        # detect-private-key, detect-aws-credentials, mixed-line-ending,
+        # actionlint, cache-path-guard, prettier). Verified coverage:
+        #   gofmt       → `Go · lint` golangci-lint v2 enforces the gofmt +
+        #                 goimports formatters (.golangci.yml formatters block).
+        #   ruff        → `Python · ruff` runs `ruff check .` (whole-repo lint).
+        #   ruff-format → `Python · ruff` runs `ruff format --check .` (whole-repo).
+        # prettier is NOT skipped: no dedicated job runs prettier over the
+        # precommit hook's file set (root markdown/YAML/JSON + web TS/TSX
+        # formatting). `Frontend · lint` is web-scoped and runs eslint only.
+        # Secret-detection + structural hooks are NEVER skipped (GitGuardian is
+        # a backstop, not a replacement). The LOCAL .pre-commit-config.yaml is
+        # unchanged — full enforcement on developer machines. (Slice 693 Finding 6A.)
+        env:
+          SKIP: gofmt,ruff,ruff-format
         run: pre-commit run --all-files --show-diff-on-failure
       # Slice 158 AC-17: smoke test asserts actionlint actually flags
       # the invalid `administration: read` scope. Runs AFTER the
