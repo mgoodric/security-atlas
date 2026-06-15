@@ -3,7 +3,7 @@
 **Cluster:** Docs / Infra
 **Estimate:** 0.5-1d
 **Type:** JUDGMENT
-**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
+**Status:** `ready` (header corrected 2026-06-14 by slice 339 implementation: the prior `merged` was stale/wrong — `docs/openapi.yaml` had zero oauth entries and the routes exist in code; this slice builds it fresh)
 
 ## Narrative
 

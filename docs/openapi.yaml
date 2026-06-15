@@ -85,6 +85,7 @@ tags:
   - name: install
   - name: mcp
   - name: me
+  - name: oauth
   - name: oscal
   - name: policies
   - name: questionnaires
@@ -100,6 +101,30 @@ tags:
   - name: walkthroughs
 
 paths:
+  /.well-known/jwks.json:
+    get:
+      summary: GET /.well-known/jwks.json — JWKS publication (RFC 7517)
+      tags: [oauth]
+      operationId: get-_well-known-jwks_json
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /.well-known/openid-configuration:
+    get:
+      summary: GET /.well-known/openid-configuration — OIDC discovery (RFC 8414 + OIDC Discovery 1.0)
+      tags: [oauth]
+      operationId: get-_well-known-openid-configuration
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /auth/local/login:
     post:
       summary: POST /auth/local/login
@@ -167,6 +192,90 @@ paths:
       tags: [system]
       operationId: get-metrics
       x-internal: true
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/authorize:
+    get:
+      summary: GET /oauth/authorize — authorization endpoint (RFC 6749 §4.1.1 + PKCE RFC 7636)
+      tags: [oauth]
+      operationId: get-oauth-authorize
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/device_authorization:
+    post:
+      summary: POST /oauth/device_authorization — device authorization endpoint (RFC 8628)
+      tags: [oauth]
+      operationId: post-oauth-device_authorization
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/device_authorization/approve:
+    post:
+      summary: POST /oauth/device_authorization/approve — atlas-internal device approval hook
+      tags: [oauth]
+      operationId: post-oauth-device_authorization-approve
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/device_authorization/deny:
+    post:
+      summary: POST /oauth/device_authorization/deny — atlas-internal device denial hook
+      tags: [oauth]
+      operationId: post-oauth-device_authorization-deny
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/introspect:
+    post:
+      summary: POST /oauth/introspect — token introspection (RFC 7662; client auth in body/header)
+      tags: [oauth]
+      operationId: post-oauth-introspect
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/revoke:
+    post:
+      summary: POST /oauth/revoke — token revocation (RFC 7009; client auth in body/header)
+      tags: [oauth]
+      operationId: post-oauth-revoke
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/token:
+    post:
+      summary: POST /oauth/token — token endpoint, dispatches the supported grants (RFC 6749)
+      tags: [oauth]
+      operationId: post-oauth-token
       responses:
         default:
           description: Default response envelope.
