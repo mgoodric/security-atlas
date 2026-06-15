@@ -3524,6 +3524,21 @@ oauth_client:<id>` for client_credentials machine tokens;
 
 ### Fixed
 
+- **slice 420** — the flake-budget counter (`scripts/flake-counter.sh`) now
+  detects **rerun-cleared integration-surface flakes**, closing the slice-352
+  90-day "0 flakes" under-count that the slice-346 / PR-788 scheduler-flake
+  incident contradicted. A new Pass C counts an A→A+1 flake — the
+  `Go · integration (Postgres RLS)` job red on one push and green on the next
+  push to the same branch — **only when** the A+1 diff did NOT touch the
+  integration test surface (a diff that did is a fix-forward, not a flake; the
+  flake-vs-fix-forward rule is recorded in
+  `docs/audit-log/420-flake-definition-decisions.md`). The broadening is
+  integration-scoped (keyed on the exact job name); the unit / vitest /
+  Playwright surface definitions are unchanged. The counter stays report-only:
+  no `t.Skip`, no quarantine, no `-retry`, no threshold re-tuning, no
+  merge-block relaxation. AC-4 (fix-forward not counted) + AC-5 (rerun-cleared
+  counted) are proven in `scripts/flake-counter_test.sh`.
+
 - **slice 183** — UI honesty fix (F-178-1/2/3/7/8 closure): the
   compliance calendar's `linkFor(ev)` helper in
   `web/components/calendar/agenda-view.tsx` and
