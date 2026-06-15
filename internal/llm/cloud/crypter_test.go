@@ -134,7 +134,7 @@ func TestSecret_MasksInEveryFormatPath(t *testing.T) {
 	s := Secret(realKey)
 
 	cases := map[string]string{
-		"%s":  fmt.Sprintf("%s", s),
+		"%s":  s.String(),
 		"%v":  fmt.Sprintf("%v", s),
 		"%q":  fmt.Sprintf("%q", s),
 		"%#v": fmt.Sprintf("%#v", s),

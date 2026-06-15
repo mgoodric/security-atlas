@@ -20,14 +20,12 @@ var (
 	llmRoutingStore *cloud.Store
 )
 
-// llmCrypter is the deployment cloud-key crypter, resolved once from the env.
-// nil when no cloud master key is configured — in that case the routing Store
+// routingStore lazily builds (once) and returns the shared cloud routing Store.
+// The deployment cloud-key crypter is resolved once from the env and handed to
+// the Store: nil when no cloud master key is configured — in that case the Store
 // still serves reads/clears, but a cloud opt-in is rejected with a clear
 // "cloud routing not enabled on this deployment" error (the off-by-default
 // posture: a deployment must explicitly provision a key to enable egress).
-var llmCrypter *cloud.Crypter
-
-// routingStore lazily builds (once) and returns the shared cloud routing Store.
 func (s *Server) routingStore() *cloud.Store {
 	llmRoutingOnce.Do(func() {
 		crypter, err := cloud.NewCrypterFromEnv()
@@ -40,7 +38,6 @@ func (s *Server) routingStore() *cloud.Store {
 			}
 			crypter = nil
 		}
-		llmCrypter = crypter
 		llmRoutingStore = cloud.NewStore(s.dbPool, crypter)
 	})
 	return llmRoutingStore
