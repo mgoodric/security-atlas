@@ -1993,14 +1993,44 @@ jobs:
           echo "report_md=$report_md" >> "$GITHUB_OUTPUT"
           echo "report_json=$report_json" >> "$GITHUB_OUTPUT"
           exit 0
+      - name: Compare finding count against committed baseline
+        id: count
+        # Slice 699 (AC-2): the standing finding count is identical PR-to-PR,
+        # so refreshing the sticky on every run is pure noise. Post/update only
+        # when THIS run's total differs from the baseline committed on main.
+        # When equal (or the report is missing), skip the comment and rely on
+        # the advisory CHECK + the uploaded artifact (both UNCHANGED — AC-4).
+        run: |
+          baseline_file="web/e2e-audit/.ui-honesty-baseline-count"
+          baseline="$(grep -v '^#' "$baseline_file" 2>/dev/null | tr -dc '0-9' || true)"
+          baseline="${baseline:-}"
+          total=""
+          if [ -n "${{ steps.audit.outputs.report_json }}" ] && [ -f "web/${{ steps.audit.outputs.report_json }}" ]; then
+            total=$(jq -r '.summary.total' "web/${{ steps.audit.outputs.report_json }}")
+          fi
+          echo "baseline=${baseline:-<none>}; this run total=${total:-<none>}"
+          # Decide whether to surface the comment.
+          changed=true
+          if [ -n "$total" ] && [ -n "$baseline" ] && [ "$total" = "$baseline" ]; then
+            changed=false
+          fi
+          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
+          echo "baseline=${baseline}" >> "$GITHUB_OUTPUT"
+          if [ "$changed" = "false" ]; then
+            echo "UI-honesty count unchanged vs baseline (${baseline}); skipping comment refresh (slice 699)."
+          fi
       - name: Build sticky comment body
         # Slice 089 / 120 sticky-comment shape. Hidden HTML marker
         # makes the comment idempotent — re-running the workflow
         # updates the same comment instead of stacking.
+        # Slice 699 (AC-2): only built when the count differs from baseline.
+        if: steps.count.outputs.changed == 'true'
         run: |
           {
             echo "<!-- atlas-ui-honesty-marker -->"
             echo "## Frontend · UI honesty (advisory) — slice 178"
+            echo
+            echo "_Finding count changed vs. base (\`${{ steps.count.outputs.baseline }}\` baseline) — refreshing this advisory. Update \`web/e2e-audit/.ui-honesty-baseline-count\` once the new standing count is intentional (slice 699)._"
             echo
             if [ -n "${{ steps.audit.outputs.report_json }}" ] && [ -f "web/${{ steps.audit.outputs.report_json }}" ]; then
               total=$(jq -r '.summary.total' "web/${{ steps.audit.outputs.report_json }}")
@@ -2037,6 +2067,9 @@ jobs:
             echo "_Informational only — never blocks merge. Reproduce locally: see [\`web/e2e-audit/README.md\`](../blob/main/web/e2e-audit/README.md). Slice 178 · ${{ github.run_id }}._"
           } > comment-body.md
       - name: Post or update sticky PR comment
+        # Slice 699 (AC-2): post/update only when the finding count differs
+        # from the committed baseline; otherwise rely on the advisory check.
+        if: steps.count.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -2296,6 +2329,8 @@ jobs:
       - name: Run audit-deps.sh
         id: audit
         run: |
+          # AC-4: the audit CHECK is UNCHANGED — it still runs over all four
+          # manifests and still exits with the script's own rc.
           set +e
           bash scripts/audit-deps.sh > audit-deps.tsv 2> audit-deps.stderr
           rc=$?
@@ -2305,31 +2340,61 @@ jobs:
           echo "phantom_count=$phantom_count" >> "$GITHUB_OUTPUT"
           echo "Phantom-dep findings: $phantom_count"
           exit "$rc"
+      - name: Diff PHANTOM set against committed baseline
+        id: diff
+        run: |
+          # Slice 699 (AC-3): only NEW phantoms (introduced by THIS PR) should
+          # trigger a comment. The baseline file captures the phantom set that
+          # already exists on main (the known false-positives). We post only
+          # when the current run surfaces a phantom NOT in the baseline.
+          baseline="scripts/audit-deps-phantom-baseline.tsv"
+          # Current PHANTOM set, normalized to "ecosystem<TAB>package", sorted.
+          awk -F'\t' '$3=="PHANTOM" { print $1"\t"$2 }' audit-deps.tsv \
+            | sort -u > phantom-current.txt
+          # Baseline set (header-skipped, comment-skipped), same normalization.
+          if [ -f "$baseline" ]; then
+            grep -v '^#' "$baseline" | awk -F'\t' 'NF>=2 && $1!="ecosystem" { print $1"\t"$2 }' \
+              | sort -u > phantom-baseline.txt
+          else
+            : > phantom-baseline.txt
+          fi
+          # NEW = current minus baseline.
+          comm -23 phantom-current.txt phantom-baseline.txt > phantom-new.txt || true
+          new_count=$(grep -c . phantom-new.txt || true)
+          new_count=${new_count:-0}
+          echo "new_count=${new_count}" >> "$GITHUB_OUTPUT"
+          echo "NEW phantom(s) vs baseline: ${new_count}"
       - name: Build comment body
+        # Only assemble + post when this PR introduces a NEW phantom (AC-3).
+        if: steps.diff.outputs.new_count != '0'
         id: body
         run: |
           {
             echo "<!-- atlas-phantom-deps-marker -->"
             echo "## Deps · phantom audit (slice 120)"
             echo
-            phantom_count="${{ steps.audit.outputs.phantom_count }}"
-            if [ "$phantom_count" -eq 0 ]; then
-              echo "No PHANTOM direct dependencies detected across the four manifests. "
-              echo "(\`web/package.json\`, \`go.mod\`, \`oscal-bridge/pyproject.toml\`, \`docs-site/requirements.txt\`)"
-            else
-              echo "$phantom_count direct dep(s) classified PHANTOM — declared in a manifest but not referenced in any source file, allowlisted config, or build script:"
-              echo
-              echo '| ecosystem | package | evidence |'
-              echo '|---|---|---|'
-              awk -F'\t' '$3=="PHANTOM" { printf "| %s | `%s` | (no consumer found) |\n", $1, $2 }' audit-deps.tsv
-              echo
-              echo "Known KEEP cases (peer-detected by their consumer; not actually phantom) are tracked in [\`docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md\`](../blob/main/docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md) D5. If your PR adds a NEW dep that surfaces here, drop the dep (or extend the decisions-log KEEP table with rationale)."
-            fi
+            new_count="${{ steps.diff.outputs.new_count }}"
+            echo "${new_count} **new** direct dep(s) classified PHANTOM by this PR — declared in a manifest but not referenced in any source file, allowlisted config, or build script:"
+            echo
+            echo '| ecosystem | package | evidence |'
+            echo '|---|---|---|'
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              eco=$(printf '%s' "$line" | cut -f1)
+              pkg=$(printf '%s' "$line" | cut -f2)
+              [ -n "$pkg" ] || continue
+              echo "| ${eco} | \`${pkg}\` | (no consumer found) |"
+            done < phantom-new.txt
+            echo
+            echo "Known KEEP cases (peer-detected by their consumer; not actually phantom) are tracked in [\`docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md\`](../blob/main/docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md) D5. Drop the dep, or — if it is a genuine peer-detected KEEP — add it to \`scripts/audit-deps-phantom-baseline.tsv\` with rationale."
             echo
             echo "---"
             echo "_Informational only. Reproduce locally: \`bash scripts/audit-deps.sh\`. Slice 120 · ${{ github.run_id }}._"
           } > comment-body.md
       - name: Post or update sticky PR comment
+        # Slice 699: post ONLY on a NEW phantom. The baseline phantoms (known
+        # false-positives that exist on main) no longer re-trigger a comment.
+        if: steps.diff.outputs.new_count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -2354,6 +2419,8 @@ jobs:
           path: |
             audit-deps.tsv
             audit-deps.stderr
+            phantom-current.txt
+            phantom-new.txt
             comment-body.md
           if-no-files-found: warn
 
@@ -3132,6 +3199,12 @@ jobs:
       pull-requests: write
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Slice 699: full history so `git diff origin/main...HEAD` can scope
+          # the sticky comment to the test files THIS PR changed (the underlying
+          # whole-repo check below still scans every file — only the comment is
+          # diff-scoped).
+          fetch-depth: 0
 
       - name: Run assertion-density self-test
         run: bash scripts/assertion-density_test.sh
@@ -3141,18 +3214,45 @@ jobs:
         run: |
           # Advisory by design: the script always exits 0 (warnings go to
           # stderr). Capture both streams for the sticky PR comment.
+          # AC-4: this whole-repo scan is the CHECK and is UNCHANGED — it still
+          # runs over every *_test.go and reports the same below-threshold count.
           set +e
           bash scripts/assertion-density.sh > density.txt 2> density.warn
           rc=$?
           set -e
           # Count below-threshold files from the JSON view (deterministic).
-          below=$(DENSITY_FORMAT=json bash scripts/assertion-density.sh \
-            | jq -r '.below_threshold')
+          # Also persist the JSON so the comment step can diff-scope its rows.
+          DENSITY_FORMAT=json bash scripts/assertion-density.sh > density.json
+          below=$(jq -r '.below_threshold' density.json)
           echo "below=$below" >> "$GITHUB_OUTPUT"
           echo "assertion-density below-threshold file(s): $below"
           cat density.txt
           cat density.warn || true
           exit "$rc"
+
+      - name: Scope below-threshold findings to PR-changed files
+        id: scope
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # Slice 699 (AC-1): render only the below-threshold test files that
+          # THIS PR touched. `git diff --name-only origin/<base>...HEAD` yields
+          # repo-relative paths (no leading ./); the density JSON keys files as
+          # ./<path>, so we strip the ./ before matching.
+          git fetch --no-tags --depth=0 origin "${BASE_REF}" >/dev/null 2>&1 || \
+            git fetch --no-tags origin "${BASE_REF}" >/dev/null 2>&1 || true
+          git diff --name-only "origin/${BASE_REF}...HEAD" -- '*_test.go' \
+            | sort -u > changed-tests.txt || true
+          changed_count=$(wc -l < changed-tests.txt | tr -d ' ')
+          echo "changed test file(s): ${changed_count}"
+          # Filter the below-threshold rows to the changed set.
+          jq -r '.rows[] | select(.below_threshold == true) | .file | ltrimstr("./")' \
+            density.json | sort -u > below-all.txt
+          # Intersection: below-threshold AND changed-in-this-PR.
+          comm -12 below-all.txt changed-tests.txt > below-changed.txt || true
+          scoped_count=$(wc -l < below-changed.txt | tr -d ' ')
+          echo "scoped=${scoped_count}" >> "$GITHUB_OUTPUT"
+          echo "below-threshold findings in changed files: ${scoped_count}"
 
       - name: Build comment body
         run: |
@@ -3160,18 +3260,30 @@ jobs:
             echo "<!-- atlas-assertion-density-marker -->"
             echo "## QA · assertion density (slice 353 Q-6)"
             echo
+            scoped="${{ steps.scope.outputs.scoped }}"
             below="${{ steps.density.outputs.below }}"
-            if [ "$below" -eq 0 ]; then
-              echo "Every scanned Go test file meets the assertion-density threshold "
-              echo "(1 assertion per 20 LOC)."
+            if [ "$scoped" -eq 0 ]; then
+              echo "No assertion-density findings in the test files this PR changed."
+              echo
+              echo "(Whole-repo scan still reports ${below} file(s) below the "
+              echo "1-assertion-per-20-LOC threshold; the full census is the status "
+              echo "check + the \`assertion-density-report\` artifact, scoped out of "
+              echo "this comment per slice 699.)"
             else
-              echo "$below test file(s) fall below the assertion-density threshold "
-              echo "(fewer than 1 assertion per 20 LOC). Low density often means a test "
-              echo "exercises code for coverage without asserting on the result:"
+              echo "${scoped} test file(s) **changed in this PR** fall below the "
+              echo "assertion-density threshold (fewer than 1 assertion per 20 LOC). "
+              echo "Low density often means a test exercises code for coverage "
+              echo "without asserting on the result:"
               echo
               echo '```'
-              cat density.warn
+              # Render only the warn lines for the changed-and-below files.
+              while IFS= read -r f; do
+                grep -F -- "./${f}:" density.warn || true
+              done < below-changed.txt
               echo '```'
+              echo
+              echo "(Whole-repo scan reports ${below} file(s) below threshold; the "
+              echo "full census is the \`assertion-density-report\` artifact.)"
             fi
             echo
             echo "---"
@@ -3203,6 +3315,8 @@ jobs:
           path: |
             density.txt
             density.warn
+            density.json
+            below-changed.txt
             density-comment.md
           if-no-files-found: warn
 
