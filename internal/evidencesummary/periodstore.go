@@ -116,7 +116,7 @@ func (s *PeriodStore) PeriodEvidenceSet(ctx context.Context, controlID, auditPer
 		// nothing period-scoped to summarize — refuse rather than silently fall
 		// through to live state (which would be exactly the live/frozen mixing
 		// P0-749-1 forbids).
-		if !(period.Status == auditPeriodFrozenStatus && period.FrozenAt.Valid) {
+		if period.Status != auditPeriodFrozenStatus || !period.FrozenAt.Valid {
 			return ErrPeriodNotFrozen
 		}
 		out.AuditPeriodID = auditPeriodID
