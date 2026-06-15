@@ -100,6 +100,50 @@ func (ns NullControlLifecycleState) Value() (driver.Value, error) {
 	return string(ns.ControlLifecycleState), nil
 }
 
+type CrosswalkMappingTier string
+
+const (
+	CrosswalkMappingTierDraft       CrosswalkMappingTier = "draft"
+	CrosswalkMappingTierUnderReview CrosswalkMappingTier = "under_review"
+	CrosswalkMappingTierVerified    CrosswalkMappingTier = "verified"
+	CrosswalkMappingTierRejected    CrosswalkMappingTier = "rejected"
+)
+
+func (e *CrosswalkMappingTier) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CrosswalkMappingTier(s)
+	case string:
+		*e = CrosswalkMappingTier(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CrosswalkMappingTier: %T", src)
+	}
+	return nil
+}
+
+type NullCrosswalkMappingTier struct {
+	CrosswalkMappingTier CrosswalkMappingTier `json:"crosswalk_mapping_tier"`
+	Valid                bool                 `json:"valid"` // Valid is true if CrosswalkMappingTier is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCrosswalkMappingTier) Scan(value interface{}) error {
+	if value == nil {
+		ns.CrosswalkMappingTier, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CrosswalkMappingTier.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCrosswalkMappingTier) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CrosswalkMappingTier), nil
+}
+
 type CrosswalkSourceAttribution string
 
 const (
@@ -1625,6 +1669,17 @@ type FwToScfEdge struct {
 	Rationale              string                     `json:"rationale"`
 	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+}
+
+type FwToScfEdgeTierTransition struct {
+	ID         pgtype.UUID          `json:"id"`
+	EdgeID     pgtype.UUID          `json:"edge_id"`
+	ReviewerID pgtype.UUID          `json:"reviewer_id"`
+	FromTier   CrosswalkMappingTier `json:"from_tier"`
+	ToTier     CrosswalkMappingTier `json:"to_tier"`
+	Note       string               `json:"note"`
+	CreatedAt  pgtype.Timestamptz   `json:"created_at"`
 }
 
 type GroupRoleAuditLog struct {

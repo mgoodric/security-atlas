@@ -726,6 +726,15 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// ===== slice 483: crosswalk mapping-tier governance =====
+	// Read the current trust tier of one edge by id. The transition store calls
+	// this FOR UPDATE (see GetFwToScfEdgeTierForUpdate) inside the tx; this plain
+	// variant is for read-only callers. Returns ErrNoRows for an unknown edge.
+	GetFwToScfEdgeTier(ctx context.Context, id pgtype.UUID) (GetFwToScfEdgeTierRow, error)
+	// Row-lock the edge's tier inside the transition transaction so a concurrent
+	// transition cannot race the read-validate-write window. Returns ErrNoRows for
+	// an unknown edge (the handler maps that to 404).
+	GetFwToScfEdgeTierForUpdate(ctx context.Context, id pgtype.UUID) (GetFwToScfEdgeTierForUpdateRow, error)
 	// Single mapping by id within the tenant. 404 (ErrNoRows) when absent.
 	GetGroupRoleMapping(ctx context.Context, arg GetGroupRoleMappingParams) (OidcIdpGroupMapping, error)
 	// Fetch one imported catalog by id. RLS scopes to the caller's tenant; a
@@ -1016,6 +1025,9 @@ type Querier interface {
 	// exact nanosecond timestamp the hash covered.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Append the immutable audit row for a tier transition (threat-model R /
+	// P0-483-4). Written in the SAME transaction as SetFwToScfEdgeTier.
+	InsertFwToScfEdgeTierTransition(ctx context.Context, arg InsertFwToScfEdgeTierTransitionParams) (FwToScfEdgeTierTransition, error)
 	// Grants a role to the user with origin='group-derived'. Idempotent on the
 	// composite PK. granted_by records the derivation source label.
 	InsertGroupDerivedRole(ctx context.Context, arg InsertGroupDerivedRoleParams) error
@@ -1867,6 +1879,10 @@ type Querier interface {
 	// catalog (`tenant_id IS NULL`) and any tenant-private frameworks. Drives
 	// the per-framework posture rows in the brief (one row per framework).
 	ListFrameworksForTenant(ctx context.Context, tenantID pgtype.UUID) ([]Framework, error)
+	// Admin/maintainer-scoped read of an edge's transition history (newest first).
+	// NOT on the public /anchors payload — reviewer identity stays behind the admin
+	// boundary (threat-model I / P0-483-6).
+	ListFwToScfEdgeTierTransitions(ctx context.Context, edgeID pgtype.UUID) ([]FwToScfEdgeTierTransition, error)
 	// Reverse traversal — given a requirement, return all SCF anchors it maps
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
@@ -2731,6 +2747,11 @@ type Querier interface {
 	SetAcknowledgmentEvidenceRecord(ctx context.Context, arg SetAcknowledgmentEvidenceRecordParams) error
 	// Slice 055: flip the per-decision OSCAL-narrative opt-out flag.
 	SetDecisionAuditNarrativeOptOut(ctx context.Context, arg SetDecisionAuditNarrativeOptOutParams) (Decision, error)
+	// Flip ONLY the trust tier (the narrow column-level UPDATE grant — slice 483
+	// D1). Legality of the move is enforced in Go (internal/crosswalktier state
+	// machine) BEFORE this runs; this query is the unconditional write inside the
+	// same tx that also inserts the audit row.
+	SetFwToScfEdgeTier(ctx context.Context, arg SetFwToScfEdgeTierParams) error
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
 	// Stamp populations.frozen_at from the parent period's frozen_at. Called

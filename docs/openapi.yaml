@@ -52,6 +52,7 @@ tags:
   - name: admin-audit-periods
   - name: admin-authz-bundle
   - name: admin-credentials
+  - name: admin-crosswalk-tier
   - name: admin-demo
   - name: admin-evidence
   - name: admin-exceptions
@@ -616,6 +617,26 @@ paths:
       summary: POST /v1/admin/credentials/{id}/rotate
       tags: [admin-credentials]
       operationId: post-v1-admin-credentials-id-rotate
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-edges/{id}/tier:
+    post:
+      summary: POST /v1/admin/crosswalk-edges/{id}/tier — transition a crosswalk mapping's trust tier (slice 483)
+      tags: [admin-crosswalk-tier]
+      operationId: post-v1-admin-crosswalk-edges-id-tier
       security:
         - adminBearer: []
       parameters:
