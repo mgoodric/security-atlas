@@ -1506,6 +1506,12 @@ type Querier interface {
 	// All answers for a questionnaire, joined to the questions table so
 	// callers can render the questionnaire end-to-end in a single read.
 	ListAnswersForQuestionnaire(ctx context.Context, arg ListAnswersForQuestionnaireParams) ([]QuestionnaireAnswer, error)
+	// ListApprovedBoardNarrativeSections returns ONLY the human-approved sections
+	// for a (tenant, period_end), in section_key order. This is the AC-13 read: the
+	// board pack ships only approved sections, so an UNapproved (or suppressed,
+	// never-persisted) section is structurally excluded — it is not in this result.
+	// Scoped to the tenant + human_approved=TRUE under the caller's RLS transaction.
+	ListApprovedBoardNarrativeSections(ctx context.Context, arg ListApprovedBoardNarrativeSectionsParams) ([]BoardNarrativeSection, error)
 	// Per-artifact recent history. Used by the admin view (slice 040) and
 	// the audit-export bundler (slice 029). Cap at 100 rows.
 	ListArtifactAccessLog(ctx context.Context, arg ListArtifactAccessLogParams) ([]ArtifactAccessLog, error)

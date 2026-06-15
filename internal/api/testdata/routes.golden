@@ -242,6 +242,7 @@ POST /v1/board-packs/{id}/publish
 POST /v1/board-packs/{id}/sections/{key}/approve
 POST /v1/board/narrative/approve
 POST /v1/board/narrative/generate
+POST /v1/board/narrative/generate-all
 POST /v1/calendar/subscription
 POST /v1/controls/checklist/sections/{id}:approve
 POST /v1/controls/checklist:generate

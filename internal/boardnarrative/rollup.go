@@ -48,10 +48,27 @@ type Rollup struct {
 	// number, so not part of AllowedNumbers).
 	FrameworkNames []string `json:"framework_names"`
 
+	// ===== slice 501 risk-posture-section fields =====
+	// Populated only for the risk_posture_summary section (riskSeverity=true).
+	// RiskCount is how many open risks are aging in the register;
+	// WorstResidualSeverity is the worst residual severity rounded to an int;
+	// OldestRiskAgeDays is the oldest risk age in days.
+	RiskCount             int `json:"risk_count,omitempty"`
+	WorstResidualSeverity int `json:"worst_residual_severity,omitempty"`
+	OldestRiskAgeDays     int `json:"oldest_risk_age_days,omitempty"`
+
 	// Excerpts are the bounded, tenant-owned control/evidence excerpts the
 	// model may cite (guardrail 1's "cited evidence excerpts", P0-440-8). Each
 	// carries a canonical UUID the model cites verbatim.
 	Excerpts []Excerpt `json:"excerpts"`
+
+	// ===== slice 501 section discriminators (unexported — not serialized) =====
+	// riskSeverity marks a risk-posture rollup so AllowedNumbers emits the
+	// risk-section fields; driftOnly marks a drift-activity rollup. Both default
+	// false — a zero-value Rollup is a coverage rollup, preserving the slice-440
+	// behavior exactly.
+	riskSeverity bool
+	driftOnly    bool
 }
 
 // Excerpt is one bounded, tenant-owned piece of citable material behind the
@@ -125,6 +142,25 @@ func RollupFromBrief(b board.Brief, excerpts []Excerpt) (Rollup, error) {
 // "84% coverage and 84%..." — same value, different sentence) and strict on
 // WHETHER the value exists in the pre-computation at all.
 func (r Rollup) AllowedNumbers() map[int]bool {
+	// Risk-posture section: only the risk integers are ground truth.
+	if r.riskSeverity {
+		return map[int]bool{
+			r.RiskCount:             true,
+			r.WorstResidualSeverity: true,
+			r.OldestRiskAgeDays:     true,
+		}
+	}
+	// Drift-activity section: only the drift integers are ground truth.
+	if r.driftOnly {
+		return map[int]bool{
+			r.FlippedOutCount: true,
+			r.WindowDays:      true,
+			abs(r.Delta):      true,
+			r.Delta:           true,
+		}
+	}
+	// Coverage section (slice-440 default — a zero-value Rollup is a coverage
+	// rollup, so the behavior is byte-for-byte the slice-440 set).
 	allow := map[int]bool{
 		r.CoveragePct:     true,
 		r.FreshnessPct:    true,

@@ -37,22 +37,25 @@ const expectedItems = 4
 // of a line (the numbered-template shape). The capture group is the item index.
 var numberedItemPattern = regexp.MustCompile(`(?m)^\s*(\d+)\.\s+\S`)
 
-// enforceShape is the guardrail-6 gate. It returns ok=true iff the draft
-// conforms to the numbered coverage-section template: the exact H2 heading is
-// present, and the body contains EXACTLY expectedItems numbered items numbered
-// 1..expectedItems in ascending order with no gaps, duplicates, or extras.
+// enforceShapeFor is the reusable, section-agnostic guardrail-6 gate (slice
+// 501). It returns ok=true iff the draft conforms to the supplied numbered
+// template: the exact H2 heading is present, and the body contains EXACTLY
+// wantItems numbered items numbered 1..wantItems in ascending order with no
+// gaps, duplicates, or extras. Every section supplies its own (heading,
+// wantItems) from its SectionDef; the structural check is identical across
+// sections.
 //
 // Returns ok=false (NOT an error) on any structural violation — a shape failure
 // is a normal suppression outcome mapped to ReasonBadShape.
-func enforceShape(text string) bool {
-	if !strings.Contains(text, sectionHeading) {
+func enforceShapeFor(text, heading string, wantItems int) bool {
+	if !strings.Contains(text, heading) {
 		return false
 	}
 	matches := numberedItemPattern.FindAllStringSubmatch(text, -1)
-	if len(matches) != expectedItems {
+	if len(matches) != wantItems {
 		return false
 	}
-	// The item indices must be exactly 1, 2, ..., expectedItems in order.
+	// The item indices must be exactly 1, 2, ..., wantItems in order.
 	for i, m := range matches {
 		want := itoa(i + 1)
 		if m[1] != want {
@@ -60,4 +63,11 @@ func enforceShape(text string) bool {
 		}
 	}
 	return true
+}
+
+// enforceShape is the slice-440 coverage-section convenience over
+// enforceShapeFor (heading + item count fixed to the coverage template). Kept so
+// the coverage call site + tests are unchanged.
+func enforceShape(text string) bool {
+	return enforceShapeFor(text, sectionHeading, expectedItems)
 }

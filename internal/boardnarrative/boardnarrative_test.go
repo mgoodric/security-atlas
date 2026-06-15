@@ -465,6 +465,10 @@ func (f fakeRollups) CoverageRollup(_ context.Context, _ string) (Rollup, error)
 	return f.r, f.err
 }
 
+func (f fakeRollups) SectionRollup(_ context.Context, _ SectionKey, _ string) (Rollup, error) {
+	return f.r, f.err
+}
+
 type fakeResolver struct {
 	owned map[string]CitationKind
 }
