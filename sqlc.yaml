@@ -82,6 +82,7 @@ sql:
       - "migrations/sql/20260612060000_control_owner_assign_saved_views.sql"
       - "migrations/sql/20260612070000_action_plans.sql"
       - "migrations/sql/20260612080000_crosswalk_mapping_tier.sql"
+      - "migrations/sql/20260612090000_framework_versioning.sql"
     queries: "internal/db/queries"
     gen:
       go:

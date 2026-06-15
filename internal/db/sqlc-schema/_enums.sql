@@ -215,3 +215,24 @@ CREATE TYPE crosswalk_mapping_tier AS ENUM (
     'verified',
     'rejected'
 );
+
+-- ===== From migrations/sql/20260612090000_framework_versioning.sql (slice 484) =====
+
+CREATE TYPE framework_version_migration_status AS ENUM (
+    'pending',
+    'approved',
+    'rejected'
+);
+
+CREATE TYPE framework_version_migration_match_kind AS ENUM (
+    'exact_code',
+    'added',
+    'removed'
+);
+
+CREATE TYPE framework_version_audit_action AS ENUM (
+    'promote',
+    'revert',
+    'migration_approve',
+    'migration_reject'
+);

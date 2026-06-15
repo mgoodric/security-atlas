@@ -9,6 +9,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/admincrosswalktier"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
+	"github.com/mgoodric/security-atlas/internal/api/adminframeworkversions"
 	"github.com/mgoodric/security-atlas/internal/api/admingroupmappings"
 	"github.com/mgoodric/security-atlas/internal/api/adminscim"
 	"github.com/mgoodric/security-atlas/internal/api/adminsso"
@@ -25,6 +26,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
+	"github.com/mgoodric/security-atlas/internal/frameworkversion"
 	"github.com/mgoodric/security-atlas/internal/scim"
 )
 
@@ -161,6 +163,22 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// parallel-batch convention (chi.Mux rejects two Mounts at "/").
 	crosswalkTierH := admincrosswalktier.New(crosswalktier.NewStore(s.dbPool))
 	root.Post("/v1/admin/crosswalk-edges/{id}/tier", crosswalkTierH.Transition)
+
+	// Slice 484: framework-versioning capability (ADR 0019). Admin-gated
+	// (cred.IsAdmin; a non-admin promotion is 403 — threat-model E /
+	// P0-484-3) version lifecycle (promote a version to current + demote the
+	// prior to legacy, audited + reversible), the migration-suggest job
+	// (exact requirement-code 1:1 carryovers into a human-reviewed queue,
+	// NEVER auto-applied — P0-484-1), and the suggestion approve/reject path.
+	// Targets are CATALOG tables (no tenant RLS); the gate is admin-role
+	// authz + the append-only framework_version_audit. Routes appended per the
+	// parallel-batch convention.
+	frameworkVersionsH := adminframeworkversions.New(frameworkversion.NewStore(s.dbPool))
+	root.Post("/v1/admin/framework-versions/{id}/promote", frameworkVersionsH.Promote)
+	root.Post("/v1/admin/framework-versions/{id}/revert", frameworkVersionsH.Revert)
+	root.Post("/v1/admin/framework-versions/migrations:suggest", frameworkVersionsH.Suggest)
+	root.Get("/v1/admin/framework-versions/migrations", frameworkVersionsH.ListMigrations)
+	root.Post("/v1/admin/framework-versions/migrations/{id}/decision", frameworkVersionsH.Decide)
 
 	// Slice 142: super_admin management surface. super_admin-gated
 	// (the handler reads jwtmw.FromContext().SuperAdmin); the OPA

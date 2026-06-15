@@ -57,6 +57,7 @@ tags:
   - name: admin-evidence
   - name: admin-exceptions
   - name: admin-feature-flags
+  - name: admin-framework-versions
   - name: admin-group-role-mappings
   - name: admin-install
   - name: admin-policies
@@ -745,6 +746,94 @@ paths:
         - adminBearer: []
       parameters:
         - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/migrations:
+    get:
+      summary: GET /v1/admin/framework-versions/migrations — list the version-migration review queue (slice 484)
+      tags: [admin-framework-versions]
+      operationId: get-v1-admin-framework-versions-migrations
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/migrations/{id}/decision:
+    post:
+      summary: POST /v1/admin/framework-versions/migrations/{id}/decision — approve/reject one migration suggestion (slice 484)
+      tags: [admin-framework-versions]
+      operationId: post-v1-admin-framework-versions-migrations-id-decision
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/migrations:suggest:
+    post:
+      summary: POST /v1/admin/framework-versions/migrations:suggest — run the migration-suggest job for a version pair (slice 484)
+      tags: [admin-framework-versions]
+      operationId: post-v1-admin-framework-versions-migrations_suggest
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/{id}/promote:
+    post:
+      summary: POST /v1/admin/framework-versions/{id}/promote — promote a framework version to current (slice 484)
+      tags: [admin-framework-versions]
+      operationId: post-v1-admin-framework-versions-id-promote
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/{id}/revert:
+    post:
+      summary: POST /v1/admin/framework-versions/{id}/revert — reverse a version promotion (slice 484)
+      tags: [admin-framework-versions]
+      operationId: post-v1-admin-framework-versions-id-revert
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
           in: path
           required: true
           schema:

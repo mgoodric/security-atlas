@@ -42,6 +42,7 @@ GET /v1/admin/demo/status 8
 GET /v1/admin/evidence/export 8
 GET /v1/admin/exceptions/export 8
 GET /v1/admin/features 8
+GET /v1/admin/framework-versions/migrations 8
 GET /v1/admin/group-role-mappings 8
 GET /v1/admin/policies/export 8
 GET /v1/admin/samples/export 8
@@ -213,6 +214,10 @@ POST /v1/admin/credentials/{id}/rotate 8
 POST /v1/admin/crosswalk-edges/{id}/tier 8
 POST /v1/admin/demo/seed 8
 POST /v1/admin/demo/teardown 8
+POST /v1/admin/framework-versions/migrations/{id}/decision 8
+POST /v1/admin/framework-versions/migrations:suggest 8
+POST /v1/admin/framework-versions/{id}/promote 8
+POST /v1/admin/framework-versions/{id}/revert 8
 POST /v1/admin/group-role-mappings 8
 POST /v1/admin/install/reset-bootstrap 8
 POST /v1/admin/scim-credentials 8

@@ -469,3 +469,92 @@ func (q *Queries) ListRequirementsForAnchorByFrameworkVersion(ctx context.Contex
 	}
 	return items, nil
 }
+
+const listRequirementsForAnchorCurrentVersions = `-- name: ListRequirementsForAnchorCurrentVersions :many
+SELECT
+    e.id               AS edge_id,
+    e.framework_requirement_id,
+    e.relationship_type,
+    e.strength,
+    e.source_attribution,
+    e.mapping_tier,
+    e.rationale,
+    r.code,
+    r.title            AS requirement_title,
+    r.body             AS requirement_body,
+    fv.id              AS framework_version_id,
+    fv.version         AS framework_version,
+    fv.status          AS framework_version_status,
+    f.slug             AS framework_slug,
+    f.name             AS framework_name
+FROM fw_to_scf_edges e
+JOIN framework_requirements r ON r.id = e.framework_requirement_id
+JOIN framework_versions fv    ON fv.id = r.framework_version_id
+JOIN frameworks f             ON f.id = fv.framework_id
+WHERE e.scf_anchor_id = $1
+  AND e.relationship_type <> 'no_relationship'
+  AND fv.status = 'current'
+ORDER BY f.slug, fv.version, r.code
+`
+
+type ListRequirementsForAnchorCurrentVersionsRow struct {
+	EdgeID                 pgtype.UUID                `json:"edge_id"`
+	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`
+	RelationshipType       StrmRelationshipType       `json:"relationship_type"`
+	Strength               float64                    `json:"strength"`
+	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Rationale              string                     `json:"rationale"`
+	Code                   string                     `json:"code"`
+	RequirementTitle       string                     `json:"requirement_title"`
+	RequirementBody        string                     `json:"requirement_body"`
+	FrameworkVersionID     pgtype.UUID                `json:"framework_version_id"`
+	FrameworkVersion       string                     `json:"framework_version"`
+	FrameworkVersionStatus FrameworkVersionStatus     `json:"framework_version_status"`
+	FrameworkSlug          string                     `json:"framework_slug"`
+	FrameworkName          string                     `json:"framework_name"`
+}
+
+// slice 484 (AC-5 / ADR 0019 §4). The DEFAULT (no ?framework_version pin)
+// reverse traversal: identical to ListRequirementsForAnchor but restricted to
+// each framework's CURRENT version (fv.status = 'current'). Absent a pin a read
+// must NOT bleed a legacy/superseded version's requirements (P0-484-5) — for a
+// framework with two live versions, only the current one's requirements appear.
+// A pinned read (ListRequirementsForAnchorByFrameworkVersion) can still reach a
+// legacy version when explicitly requested (ADR 0019 §4 — legacy readable when
+// pinned).
+func (q *Queries) ListRequirementsForAnchorCurrentVersions(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorCurrentVersionsRow, error) {
+	rows, err := q.db.Query(ctx, listRequirementsForAnchorCurrentVersions, scfAnchorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRequirementsForAnchorCurrentVersionsRow
+	for rows.Next() {
+		var i ListRequirementsForAnchorCurrentVersionsRow
+		if err := rows.Scan(
+			&i.EdgeID,
+			&i.FrameworkRequirementID,
+			&i.RelationshipType,
+			&i.Strength,
+			&i.SourceAttribution,
+			&i.MappingTier,
+			&i.Rationale,
+			&i.Code,
+			&i.RequirementTitle,
+			&i.RequirementBody,
+			&i.FrameworkVersionID,
+			&i.FrameworkVersion,
+			&i.FrameworkVersionStatus,
+			&i.FrameworkSlug,
+			&i.FrameworkName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
