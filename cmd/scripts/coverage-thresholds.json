@@ -314,6 +314,7 @@
     "gen/proto/",
     "internal/api/admin/",
     "internal/api/admincrosswalktier/",
+    "internal/api/adminframeworkversions/",
     "internal/api/anchors/",
     "internal/api/anchorseed/",
     "internal/api/artifacts/",
