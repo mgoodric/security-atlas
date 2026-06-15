@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -275,6 +276,41 @@ func (s *Store) ListSnapshot(ctx context.Context, frozenAt time.Time) ([]ActionP
 		return nil
 	})
 	return out, err
+}
+
+// PeriodSnapshotLister returns a period.ActionPlanSnapshotLister closure bound
+// to this store. It is the slice-748 wiring seam: the internal/audit/period
+// frozen-view assembly (Store.Snapshot) reads remediation commitments through
+// an injected function rather than importing internal/actionplan, so the period
+// package stays a leaf of the audit subtree and no import cycle forms (the
+// dependency points actionplan -> period here, the safe direction; period never
+// imports actionplan). See slice 748 decisions log D1.
+//
+// The returned closure delegates to ListSnapshot, projecting each ActionPlan
+// into the minimal period.ActionPlanRef the frozen view carries. ListSnapshot's
+// created_at <= horizon filter is what honors invariant #10 + P0-384-5: a plan
+// created or mutated after the freeze is excluded, and a later edit of a
+// pre-freeze plan never changes a past frozen view's output.
+func (s *Store) PeriodSnapshotLister() period.ActionPlanSnapshotLister {
+	return func(ctx context.Context, horizon time.Time) ([]period.ActionPlanRef, error) {
+		plans, err := s.ListSnapshot(ctx, horizon)
+		if err != nil {
+			return nil, err
+		}
+		refs := make([]period.ActionPlanRef, len(plans))
+		for i, p := range plans {
+			refs[i] = period.ActionPlanRef{
+				ID:            p.ID,
+				Title:         p.Title,
+				Status:        p.Status,
+				OwnerID:       p.OwnerID,
+				DueDate:       p.DueDate,
+				AuditPeriodID: p.AuditPeriodID,
+				CreatedAt:     p.CreatedAt,
+			}
+		}
+		return refs, nil
+	}
 }
 
 // UpdateInput is the API shape for PATCH /v1/action-plans/{id}. Every field

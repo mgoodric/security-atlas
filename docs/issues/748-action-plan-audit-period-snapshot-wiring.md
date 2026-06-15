@@ -70,6 +70,10 @@ the loop between the slice-384 foundation and the slice-028 freezing primitive.
 
 ## Status
 
-`not-ready` — blocked on slice 384 landing on `main` (this slice extends the
-`actionplan.Store.ListSnapshot` method + the `action_plans.audit_period_id`
-column that slice 384 introduces). Flip to `ready` once 384 merges.
+`in-review` — slice 384 has merged on `main`, clearing the blocker; this slice
+is built. `period.Store.Snapshot` (new `internal/audit/period/snapshot.go`) draws
+action plans through the injected `actionplan.Store.PeriodSnapshotLister()` seam
+at the period's `frozen_at` horizon. Read-side wiring only — no migration, no new
+route. AC-1/AC-2/AC-4/AC-5 covered by live integration tests; AC-3 is N/A (OSCAL
+POA&M does not yet consume action plans — that is slice-384 spillover #1, out of
+scope). Decisions log: `docs/audit-log/748-actionplan-audit-period-snapshot-decisions.md`.
