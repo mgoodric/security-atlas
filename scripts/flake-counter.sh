@@ -202,6 +202,82 @@ surface_job_name() {
   echo ""
 }
 
+# ---------- integration-surface broadening (slice 420) ----------
+#
+# The exact required CI check name for the integration surface. The
+# A->A+1 broadening below keys on this name ONLY (P0-4): a lint / sqlc /
+# govulncheck failure must NEVER be mis-attributed to the integration
+# surface. This is the same string slice 352 put in the SURFACES table
+# for the `go-integration` slug; it is repeated here as a named constant
+# so the broadening is unambiguously integration-scoped and greppable.
+INTEGRATION_JOB_NAME="Go · integration (Postgres RLS)"
+
+# The integration test surface, as a regex over changed-file paths. A
+# commit that changes a file matching this is considered to have touched
+# the code that `go test -tags=integration -p 1 ./internal/...` exercises
+# (and therefore could legitimately FIX an integration failure). Kept as
+# a POSIX ERE (no GNU-only \b / \s — BSD grep on macOS silently no-ops
+# those; this bit slice 339). Matches Go source under internal/, plus the
+# migrations / sqlc generated surface that integration tests run against.
+INTEGRATION_CODE_PATH_RE='^(internal/.*\.go|migrations/|internal/db/|cmd/.*\.go)'
+
+# is_integration_surface JOB_NAME -> exit 0 iff the job name is EXACTLY
+# the integration surface check. Used to gate the A->A+1 broadening so it
+# cannot fire on any other surface (P0-4, P0-6: detection-only, scoped).
+is_integration_surface() {
+  [[ "$1" == "$INTEGRATION_JOB_NAME" ]]
+}
+
+# classify_integration_transition FAIL_CONCLUSION SUCC_CONCLUSION CHANGED_FILES
+#
+# THE LOAD-BEARING JUDGMENT (P0-3 / AC-4 / AC-5). Decides whether an
+# integration-surface failure on commit A that is GREEN on the immediate
+# child commit A+1 is a FLAKE (the test is non-deterministic) or a
+# FIX-FORWARD (A+1's code actually fixed the failing test).
+#
+#   FAIL_CONCLUSION  the integration job's conclusion on commit A
+#                    (one of failure / timed_out / cancelled to qualify)
+#   SUCC_CONCLUSION  the integration job's conclusion on commit A+1
+#                    (must be "success" to qualify)
+#   CHANGED_FILES    newline-separated list of paths A+1 changed relative
+#                    to A (the GitHub compare API `files[].filename`)
+#
+# Rule (mechanically defensible, documented in
+# docs/audit-log/420-flake-definition-decisions.md):
+#   - If A did not fail (or A+1 did not succeed): "not-applicable".
+#   - Else if A+1's changed-files set intersects the integration test
+#     surface (INTEGRATION_CODE_PATH_RE): "fix-forward" — A+1 plausibly
+#     FIXED the failing integration test, so it is NOT a flake (AC-4).
+#   - Else (A+1 changed nothing on the integration surface — e.g. a docs
+#     only push, a CHANGELOG bump, an unrelated connector): "flake" —
+#     the integration job went red then green with no relevant code
+#     change, which is the scheduler-flake shape (AC-5).
+#
+# Emits exactly one of: not-applicable | fix-forward | flake
+classify_integration_transition() {
+  local fail_concl="$1" succ_concl="$2" changed_files="$3"
+
+  case "$fail_concl" in
+    failure | timed_out | cancelled) : ;;
+    *)
+      echo "not-applicable"
+      return 0
+      ;;
+  esac
+  if [[ "$succ_concl" != "success" ]]; then
+    echo "not-applicable"
+    return 0
+  fi
+
+  # Did A+1 touch the integration test surface? grep -E (POSIX ERE,
+  # portable on BSD + GNU). Empty changed-files -> no match -> flake.
+  if printf '%s\n' "$changed_files" | grep -Eq "$INTEGRATION_CODE_PATH_RE"; then
+    echo "fix-forward"
+  else
+    echo "flake"
+  fi
+}
+
 # ---------- fetch runs ----------
 
 # Use the REST API directly via `gh api` with paging so we can pull
@@ -301,7 +377,12 @@ ATTEMPTS_BY_SHA=$(mktemp)
 JOBS_TMP=$(mktemp)
 FLAKE_EVENTS=$(mktemp)
 SURFACE_ATTEMPTS=$(mktemp)
-trap 'rm -f "$RUNS_JSON" "$ATTEMPTS_BY_SHA" "$JOBS_TMP" "$FLAKE_EVENTS" "$SURFACE_ATTEMPTS"' EXIT
+# slice 420 — integration-surface timeline for the A->A+1 broadening:
+# one row per (sha, branch) with the integration job's FINAL conclusion
+# + run start time + a failure-run URL. Pass C walks this ordered by
+# branch + time to find red->green-on-next-push transitions.
+INTEG_TIMELINE=$(mktemp)
+trap 'rm -f "$RUNS_JSON" "$ATTEMPTS_BY_SHA" "$JOBS_TMP" "$FLAKE_EVENTS" "$SURFACE_ATTEMPTS" "$INTEG_TIMELINE"' EXIT
 
 # head_sha -> list of "attempt:run_id" sorted ascending
 if ! jq -sc 'group_by(.head_sha) | .[] | {head_sha: .[0].head_sha, head_branch: (.[0].head_branch // ""), attempts: [.[] | {attempt: .run_attempt, run_id: .id, conclusion: .conclusion, started: .run_started_at, html_url: .html_url}] | sort_by(.attempt)} | select(.attempts | length >= 1)' \
@@ -330,7 +411,7 @@ cleanup_per_surface() {
           "/tmp/flake_events_$slug.$$"
   done
 }
-trap 'cleanup_per_surface; rm -f "$RUNS_JSON" "$ATTEMPTS_BY_SHA" "$JOBS_TMP" "$FLAKE_EVENTS" "$SURFACE_ATTEMPTS"' EXIT
+trap 'cleanup_per_surface; rm -f "$RUNS_JSON" "$ATTEMPTS_BY_SHA" "$JOBS_TMP" "$FLAKE_EVENTS" "$SURFACE_ATTEMPTS" "$INTEG_TIMELINE"' EXIT
 
 # Iterate per-sha groups.
 #
@@ -368,6 +449,21 @@ while IFS= read -r group; do
       echo $((cur + 1)) > "/tmp/flake_attempts_$slug.$$"
     done
   fi
+
+  # slice 420 — record this SHA in the integration A->A+1 timeline using
+  # the run-level FINAL conclusion as a cheap candidate proxy. This is a
+  # CANDIDATE filter only: Pass C re-confirms a red candidate via a
+  # targeted integration-JOB fetch (P0-4: never trust the run-level
+  # conclusion alone to attribute a failure to the integration surface —
+  # a lint failure also reds the run). Columns:
+  #   run_started \t branch \t sha \t run_conclusion \t failure_run_url \t last_run_id \t last_attempt_no
+  first_started=$(echo "$attempts" | jq -r '.[0].started // ""')
+  last_run_id=$(echo "$attempts" | jq -r ".[$((num_attempts - 1))].run_id")
+  last_attempt_no=$(echo "$attempts" | jq -r ".[$((num_attempts - 1))].attempt")
+  fail_url=$(echo "$attempts" | jq -r '[.[] | select(.conclusion=="failure" or .conclusion=="timed_out" or .conclusion=="cancelled") | .html_url] | (.[0] // "")')
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "$first_started" "$branch" "$sha" "$last_conclusion" "$fail_url" "$last_run_id" "$last_attempt_no" \
+    >> "$INTEG_TIMELINE"
 
   # Pass B — only multi-attempt with mixed conclusions get the
   # expensive per-attempt-job API treatment.
@@ -445,6 +541,100 @@ while IFS= read -r group; do
 done < "$ATTEMPTS_BY_SHA"
 
 log "processed $sha_processed shas; $sha_with_multi had multi-attempt mixed conclusions"
+
+# ---------- Pass C: integration A->A+1 broadening (slice 420) ----------
+#
+# Catches the scheduler-flake shape the same-SHA Pass B misses: the
+# integration job goes RED on one push and GREEN on the very next push to
+# the same branch, with NO change to the integration test surface in
+# between. That red->green-on-next-push with no relevant code change is a
+# flake (AC-5); the same transition WITH an integration-code change is a
+# fix-forward and is NOT counted (AC-4 / P0-3).
+#
+# Scope (P0-4): keyed on the EXACT integration job name only. A red run
+# is only treated as an integration failure after a targeted job-level
+# fetch confirms `Go · integration (Postgres RLS)` itself failed — a
+# lint / sqlc red run is ignored.
+#
+# Cost: bounded. The per-branch walk is pure-bash over the already-
+# fetched timeline; API calls (integration-job confirm + compare) fire
+# ONLY on a red->green adjacency, which is rare.
+#
+# fetch_integration_conclusion RUN_ID ATTEMPT -> echoes the integration
+# job's conclusion for that run/attempt ("" if absent / fetch failed).
+fetch_integration_conclusion() {
+  local run_id="$1" attempt_no="$2"
+  gh api -H "Accept: application/vnd.github+json" \
+    "repos/$FLAKE_REPO/actions/runs/$run_id/attempts/$attempt_no/jobs" \
+    --jq ".jobs[] | select(.name == \"$INTEGRATION_JOB_NAME\") | .conclusion" \
+    2>/dev/null | head -n 1 || true
+}
+
+# fetch_changed_files BASE_SHA HEAD_SHA -> newline-separated changed
+# paths from the GitHub compare API ("" on failure / empty diff).
+fetch_changed_files() {
+  local base="$1" head="$2"
+  gh api -H "Accept: application/vnd.github+json" \
+    "repos/$FLAKE_REPO/compare/$base...$head" \
+    --jq '.files[].filename' \
+    2>/dev/null || true
+}
+
+integ_aafwd_flakes=0
+if [[ -s "$INTEG_TIMELINE" ]]; then
+  # Sort by branch then by run-start time so adjacent rows within a
+  # branch are chronological pushes.
+  sorted_timeline=$(sort -t$'\t' -k2,2 -k1,1 "$INTEG_TIMELINE")
+
+  prev_branch=""
+  prev_concl=""
+  prev_sha=""
+  prev_fail_url=""
+  prev_run_id=""
+  prev_attempt=""
+  while IFS=$'\t' read -r _c_started c_branch c_sha c_concl c_fail_url c_run_id c_attempt; do
+    [[ -z "$c_sha" ]] && continue
+
+    # Only a transition WITHIN the same branch is an A->A+1 push pair.
+    if [[ "$c_branch" == "$prev_branch" && -n "$prev_branch" ]]; then
+      # Candidate: previous push red-ish, this push green.
+      if [[ "$prev_concl" == "failure" || "$prev_concl" == "timed_out" || "$prev_concl" == "cancelled" ]] \
+         && [[ "$c_concl" == "success" ]]; then
+        # P0-4: confirm the RED run's failure was the integration job
+        # itself (not lint/sqlc reddening the run-level conclusion).
+        red_integ=$(fetch_integration_conclusion "$prev_run_id" "$prev_attempt")
+        if [[ "$red_integ" == "failure" || "$red_integ" == "timed_out" || "$red_integ" == "cancelled" ]]; then
+          # Confirm the GREEN run's integration job actually succeeded
+          # (run-level success could mask a path-filtered integration job;
+          # we only count a real red->green of the integration surface).
+          green_integ=$(fetch_integration_conclusion "$c_run_id" "$c_attempt")
+          if [[ "$green_integ" == "success" ]]; then
+            changed=$(fetch_changed_files "$prev_sha" "$c_sha")
+            verdict=$(classify_integration_transition "$red_integ" "$green_integ" "$changed")
+            log "A->A+1 integ candidate ${prev_sha:0:10}->${c_sha:0:10} branch=$c_branch verdict=$verdict"
+            if [[ "$verdict" == "flake" ]]; then
+              cur=$(cat "/tmp/flake_count_go-integration.$$")
+              echo $((cur + 1)) > "/tmp/flake_count_go-integration.$$"
+              integ_aafwd_flakes=$((integ_aafwd_flakes + 1))
+              ev_url="$prev_fail_url"
+              [[ -z "$ev_url" ]] && ev_url="https://github.com/$FLAKE_REPO/commit/$prev_sha"
+              printf '%s\t%s\t%s\n' "$prev_sha" "$c_branch" "$ev_url" \
+                >> "/tmp/flake_events_go-integration.$$"
+            fi
+          fi
+        fi
+      fi
+    fi
+
+    prev_branch="$c_branch"
+    prev_concl="$c_concl"
+    prev_sha="$c_sha"
+    prev_fail_url="$c_fail_url"
+    prev_run_id="$c_run_id"
+    prev_attempt="$c_attempt"
+  done <<<"$sorted_timeline"
+fi
+log "Pass C: counted $integ_aafwd_flakes A->A+1 integration flake(s)"
 
 # ---------- compute rates ----------
 
@@ -594,6 +784,14 @@ EOF
 - Counts one **flake event** per \`(head_sha, surface)\` pair where
   the surface job failed on an earlier attempt and succeeded on a
   later attempt (same SHA, no code change in between).
+- **Integration surface only (slice 420):** ALSO counts an A->A+1
+  flake — the \`$INTEGRATION_JOB_NAME\` job red on one push and green on
+  the very next push to the same branch — but only when the A+1 diff did
+  NOT touch the integration test surface (a diff that did is a
+  fix-forward, not a flake). This catches rerun-cleared timing flakes
+  (e.g. the scheduler goroutine race) that the same-SHA rule missed. The
+  broadening is integration-scoped; the unit / vitest / Playwright
+  surfaces keep the same-SHA-only v1 rule.
 - Aggregates flake events and total attempts per surface; the rate is
   \`flakes / attempts * 100\`.
 - "Skipped" job conclusions (path-filter stubs) do not count toward

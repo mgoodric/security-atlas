@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Select } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -25,16 +26,40 @@ import {
 } from "@/components/ui/table";
 import { type AnchorDetail } from "@/lib/api/anchors";
 import { APIError } from "@/lib/api/base";
+import {
+  ALL_CURRENT,
+  buildVersionOptions,
+  pinFor,
+} from "@/lib/anchors/version-options";
 
 export default function SCFAnchorDetailPage() {
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
 
-  const { data, isLoading, error } = useQuery<AnchorDetail>({
-    queryKey: ["anchor", id],
+  // Slice 484 — the selected framework version. ALL_CURRENT (no pin) is the
+  // default; selecting a specific version re-queries with the pin.
+  const [selectedVersion, setSelectedVersion] = useState<string>(ALL_CURRENT);
+
+  // The unpinned (current-versions) query — also drives the selector option
+  // set, so the dropdown lists the versions actually present for this anchor.
+  const base = useQuery<AnchorDetail>({
+    queryKey: ["anchor", id, ALL_CURRENT],
     queryFn: () => fetchAnchorDetail(id),
     enabled: Boolean(id),
   });
+
+  const pinned = useQuery<AnchorDetail>({
+    queryKey: ["anchor", id, selectedVersion],
+    queryFn: () => fetchAnchorDetail(id, pinFor(selectedVersion)),
+    enabled: Boolean(id) && selectedVersion !== ALL_CURRENT,
+  });
+
+  const isPinned = selectedVersion !== ALL_CURRENT;
+  const data = isPinned ? pinned.data : base.data;
+  const isLoading = isPinned ? pinned.isLoading : base.isLoading;
+  const error = isPinned ? pinned.error : base.error;
+
+  const options = useMemo(() => buildVersionOptions(base.data), [base.data]);
 
   useEffect(() => {
     if (error instanceof APIError && error.status === 401) {
@@ -52,6 +77,29 @@ export default function SCFAnchorDetailPage() {
           ← All anchors
         </Link>
       </div>
+
+      {options.length > 1 ? (
+        <div className="flex max-w-xs flex-col gap-1">
+          <label
+            htmlFor="framework-version-select"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            Framework version
+          </label>
+          <Select
+            id="framework-version-select"
+            data-testid="framework-version-select"
+            value={selectedVersion}
+            onChange={(e) => setSelectedVersion(e.target.value)}
+          >
+            {options.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </Select>
+        </div>
+      ) : null}
 
       {isLoading ? <Skeleton className="h-32 w-full" /> : null}
 
@@ -150,10 +198,15 @@ function AnchorDetailView({ detail }: { detail: AnchorDetail }) {
   );
 }
 
-async function fetchAnchorDetail(id: string): Promise<AnchorDetail> {
-  const res = await fetch(
-    `/api/anchors/${encodeURIComponent(id)}/requirements`,
-  );
+async function fetchAnchorDetail(
+  id: string,
+  frameworkVersion?: string,
+): Promise<AnchorDetail> {
+  let url = `/api/anchors/${encodeURIComponent(id)}/requirements`;
+  if (frameworkVersion) {
+    url += `?framework_version=${encodeURIComponent(frameworkVersion)}`;
+  }
+  const res = await fetch(url);
   if (!res.ok) {
     throw new APIError(res.status, `${res.status} ${res.statusText}`);
   }

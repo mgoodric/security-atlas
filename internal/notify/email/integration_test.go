@@ -23,17 +23,15 @@ package email_test
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/notify/email"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // fakeProvider is the in-memory SMTP sink (AC-11). It records every
@@ -63,28 +61,6 @@ func (f *fakeProvider) recipients() []string {
 		out = append(out, m.Recipient)
 	}
 	return out
-}
-
-func openPools(t *testing.T) (app, admin *pgxpool.Pool) {
-	t.Helper()
-	appDSN := os.Getenv("DATABASE_URL_APP")
-	adminDSN := os.Getenv("DATABASE_URL")
-	if appDSN == "" || adminDSN == "" {
-		t.Skip("DATABASE_URL_APP or DATABASE_URL not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	a, err := pgxpool.New(ctx, appDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(app): %v", err)
-	}
-	t.Cleanup(a.Close)
-	b, err := pgxpool.New(ctx, adminDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(admin): %v", err)
-	}
-	t.Cleanup(b.Close)
-	return a, b
 }
 
 // seedUser inserts a (tenant, user) pair with a known account email and
@@ -125,17 +101,14 @@ func seedUser(t *testing.T, admin *pgxpool.Pool, accountEmail string, withUnread
 
 func tenantCtx(t *testing.T, tenantID uuid.UUID) context.Context {
 	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
+	return dbtest.WithTenantCtx(t, tenantID.String())
 }
 
 // AC-11 + AC-9: an opted-in user with unread notifications gets a digest
 // delivered via the sink; the outcome is recorded.
 func TestDeliverDigest_OptedIn_Delivers(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -161,7 +134,8 @@ func TestDeliverDigest_OptedIn_Delivers(t *testing.T) {
 
 // P0-445-7: default opted-OUT — no opt-in row means no send.
 func TestDeliverDigest_DefaultOptedOut(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -191,7 +165,8 @@ func TestDeliverDigest_DefaultOptedOut(t *testing.T) {
 // AC-15 / D5: idempotency — a second delivery the same UTC day does NOT
 // double-send (the claim collides on the UNIQUE key).
 func TestDeliverDigest_Idempotent(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -224,7 +199,8 @@ func TestDeliverDigest_Idempotent(t *testing.T) {
 // Two tenants each run delivery under their OWN tenant GUC; each sink send
 // must carry only that tenant's recipient.
 func TestDeliverDigest_NoCrossTenant(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	provA := &fakeProvider{}
 	provB := &fakeProvider{}
 	chA := email.NewChannel(app, provA, "https://atlas.example.test")
@@ -315,7 +291,8 @@ func seedEmailPref(t *testing.T, admin *pgxpool.Pool, tenantID, userID uuid.UUID
 // digest still goes to the same account email (the master opt-in is on and at
 // least one un-muted kind remains). A muted kind must not redirect delivery.
 func TestDeliverDigest_PerKindMute_RemovesCountKeepsDelivery(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -366,7 +343,8 @@ func TestDeliverDigest_PerKindMute_RemovesCountKeepsDelivery(t *testing.T) {
 // digest has zero surviving kinds and is skipped (no empty email sent). Master
 // is on; the per-kind filter narrows to nothing.
 func TestDeliverDigest_AllKindsMuted_Skips(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -396,7 +374,8 @@ func TestDeliverDigest_AllKindsMuted_Skips(t *testing.T) {
 // AC-8: a failing provider records outcome=failed and surfaces the error;
 // the digest is NOT marked sent (re-attemptable next tick).
 func TestDeliverDigest_FailureRecorded(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{failWith: errors.New("smtp dial timeout")}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 

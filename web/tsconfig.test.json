@@ -1,0 +1,9 @@
+{
+  "_comment": "Slice 450 — test-infra typecheck config, SEPARATE from the production tsconfig.json so that `next build` (and the self-host web Docker image build) does not typecheck test infrastructure. vitest 4 changed the vitest / vitest/config package export + type-declaration structure, so the imports in vitest.config.ts and every *.test.ts no longer resolve in the production build context (they did under vitest 2), failing the prod image build with 'Cannot find module vitest/config'. tsconfig.json therefore EXCLUDES vitest.config.ts + **/*.test.ts, and this config re-includes them so they stay type-checked via `npm run typecheck` (which runs both configs; devDeps present means the vitest types resolve). vitest itself never reads either tsconfig (it transpiles via esbuild), so the split does not affect the runner. See docs/audit-log/450-*.md D6.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": ["vitest.config.ts", "**/*.test.ts"],
+  "exclude": ["node_modules", "e2e", ".next"]
+}

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // Slice 481 integration suite — the FRAMEWORK-AGNOSTIC crosswalk importer
@@ -73,7 +74,7 @@ func resetHIPAA(t *testing.T, pool *pgxpool.Pool) {
 // fw_to_scf_edges rows for the HIPAA Security Rule, and re-importing is
 // idempotent.
 func TestHIPAAImport_CreatesRowsAndIsIdempotent(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetHIPAA(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadHIPAACrosswalk(t)
@@ -112,7 +113,7 @@ func TestHIPAAImport_CreatesRowsAndIsIdempotent(t *testing.T) {
 // rows; all five frameworks coexist in the same graph with distinct
 // framework_version_ids.
 func TestHIPAAImport_DoesNotDisturbOtherFrameworks(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	resetPCI(t, pool)
@@ -192,7 +193,7 @@ func TestHIPAAImport_DoesNotDisturbOtherFrameworks(t *testing.T) {
 // with the STRM edge type. Mirrors the query the GET
 // /v1/requirements/{id}/anchors read path runs. HIPAA 164.312(a)(1) -> IAC-01.
 func TestHIPAAImport_RequirementResolvesToAnchorsWithSTRMType(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetHIPAA(t, pool)
 	ensureSCFLoaded(t, pool)
 	if _, err := soc2import.Import(context.Background(), pool, loadHIPAACrosswalk(t)); err != nil {
@@ -242,7 +243,7 @@ func TestHIPAAImport_RequirementResolvesToAnchorsWithSTRMType(t *testing.T) {
 // demonstrated at five frameworks: one control, N frameworks, NO per-framework
 // duplicated control and NO requirement -> requirement edge.
 func TestHIPAAImport_SharedAnchorSatisfiesFiveFrameworks_Invariant1(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	resetPCI(t, pool)
@@ -349,7 +350,7 @@ func TestHIPAAImport_SharedAnchorSatisfiesFiveFrameworks_Invariant1(t *testing.T
 // catalog projection. The assertion is column-exhaustive: any new tenant-scoped
 // column added to this projection would fail the test.
 func TestHIPAAImport_AnchorsReadCarriesNoTenantScopedData(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetHIPAA(t, pool)
 	ensureSCFLoaded(t, pool)
 	if _, err := soc2import.Import(context.Background(), pool, loadHIPAACrosswalk(t)); err != nil {
@@ -420,7 +421,7 @@ func TestHIPAAImport_AnchorsReadCarriesNoTenantScopedData(t *testing.T) {
 // is a clear loader error, not a panic and not a dangling edge. The whole
 // import rolls back, leaving no HIPAA requirement rows behind.
 func TestHIPAAImport_RejectsEdgeToNonexistentAnchor(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetHIPAA(t, pool)
 	ensureSCFLoaded(t, pool)
 

@@ -21,14 +21,14 @@ package scheduler_test
 
 import (
 	"context"
-	"os"
+	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/notify/email"
 	"github.com/mgoodric/security-atlas/internal/notify/scheduler"
 )
@@ -55,32 +55,40 @@ func (f *fakeProvider) recipients() []string {
 	return out
 }
 
-func openPools(t *testing.T) (app, admin *pgxpool.Pool) {
-	t.Helper()
-	appDSN := os.Getenv("DATABASE_URL_APP")
-	adminDSN := os.Getenv("DATABASE_URL")
-	if appDSN == "" || adminDSN == "" {
-		t.Skip("DATABASE_URL_APP or DATABASE_URL not set; skipping integration test")
+// bodyFor returns the rendered HTML body of the (first) digest delivered to
+// the given recipient, or "" if none was sent. Used by the slice-541 AC-2
+// test to assert a slice-439 staleness notification SURFACED in the digest
+// the scheduler sweep delivered.
+func (f *fakeProvider) bodyFor(recipient string) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, m := range f.sent {
+		if m.Recipient == recipient {
+			return m.HTMLBody
+		}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	a, err := pgxpool.New(ctx, appDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(app): %v", err)
-	}
-	t.Cleanup(a.Close)
-	b, err := pgxpool.New(ctx, adminDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(admin): %v", err)
-	}
-	t.Cleanup(b.Close)
-	return a, b
+	return ""
 }
 
 // seedUser inserts a (tenant, user) pair with a known account email, an
 // optional unread notification, and an optional email opt-in, all via the
-// admin (BYPASSRLS) pool.
+// admin (BYPASSRLS) pool. withUnread seeds a generic 'audit_note.reply'
+// notification; for a specific notification type use seedUserWithType.
 func seedUser(t *testing.T, admin *pgxpool.Pool, accountEmail string, withUnread, optIn bool) (tenantID, userID uuid.UUID) {
+	t.Helper()
+	notifType := ""
+	if withUnread {
+		notifType = "audit_note.reply"
+	}
+	return seedUserWithType(t, admin, accountEmail, notifType, optIn)
+}
+
+// seedUserWithType is seedUser with an explicit unread-notification type. A
+// non-empty notifType seeds exactly one unread notification of that type; ""
+// seeds none. This is the slice-541 seam: AC-2 seeds the slice-439
+// 'evidence.staleness' type to prove a staleness notification flows through
+// the sweep into the delivered digest.
+func seedUserWithType(t *testing.T, admin *pgxpool.Pool, accountEmail, notifType string, optIn bool) (tenantID, userID uuid.UUID) {
 	t.Helper()
 	tenantID = uuid.New()
 	userID = uuid.New()
@@ -91,11 +99,11 @@ func seedUser(t *testing.T, admin *pgxpool.Pool, accountEmail string, withUnread
 	`, userID, tenantID, accountEmail); err != nil {
 		t.Fatalf("seed user: %v", err)
 	}
-	if withUnread {
+	if notifType != "" {
 		if _, err := admin.Exec(ctx, `
 			INSERT INTO notifications (id, tenant_id, recipient_user_id, type, payload, created_at)
-			VALUES ($1, $2, $3, 'audit_note.reply', '{}'::jsonb, now())
-		`, uuid.New(), tenantID, userID.String()); err != nil {
+			VALUES ($1, $2, $3, $4, '{}'::jsonb, now())
+		`, uuid.New(), tenantID, userID.String(), notifType); err != nil {
 			t.Fatalf("seed notification: %v", err)
 		}
 	}
@@ -125,7 +133,8 @@ func seedUser(t *testing.T, admin *pgxpool.Pool, accountEmail string, withUnread
 // The sweep enumerates opted-in users through the real SELECT, drives the
 // real email channel per user, and honors default-opted-OUT end-to-end.
 func TestSweepOnce_EnumeratesOptedInOnly(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -164,7 +173,8 @@ func TestSweepOnce_EnumeratesOptedInOnly(t *testing.T) {
 // A two-tenant sweep delivers each tenant's user under that tenant's own
 // context — no cross-tenant leak.
 func TestSweepOnce_TwoTenantsNoCross(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -193,7 +203,8 @@ func TestSweepOnce_TwoTenantsNoCross(t *testing.T) {
 // A second sweep the same UTC day double-CALLS DeliverDigest but does NOT
 // double-SEND (the slice-445 claim-before-send is the idempotency guard).
 func TestSweepOnce_IdempotentNoDoubleSend(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	prov := &fakeProvider{}
 	ch := email.NewChannel(app, prov, "https://atlas.example.test")
 
@@ -223,5 +234,52 @@ func TestSweepOnce_IdempotentNoDoubleSend(t *testing.T) {
 	}
 	if n != 1 {
 		t.Fatalf("expected exactly 1 send to idem user, got %d", n)
+	}
+}
+
+// TestSweepOnce_StalenessNotificationFlowsToDigest is the slice-541 AC-2
+// regression guard. Slice 439 PRODUCES staleness reminders as in-app
+// notifications with type 'evidence.staleness'; slice 445 DELIVERS all of an
+// opted-in user's unread notifications in the digest; slice 582 SWEEPS the
+// opted-in users on a tick. This test pins the full 439 -> 445 -> 582 path:
+// a real 'evidence.staleness' notification, seeded for an opted-in user, must
+// surface in the digest the scheduler sweep delivers (with the stale-evidence
+// label rendered in the body). It runs through the REAL email channel and
+// scheduler against real Postgres + RLS — exactly the wiring slice 541 owns.
+//
+// Without this test the wiring is silent: dropping 'evidence.staleness' from
+// the digest type-label map, or excluding it via the per-kind email filter,
+// would regress the staleness-to-inbox loop with no failing test. This guards
+// it.
+func TestSweepOnce_StalenessNotificationFlowsToDigest(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	prov := &fakeProvider{}
+	ch := email.NewChannel(app, prov, "https://atlas.example.test")
+
+	// Opted-in user whose ONLY unread notification is a slice-439 staleness
+	// reminder. Default-on per-kind email pref (no pref row) keeps it included.
+	const recip = "stale@example.test"
+	seedUserWithType(t, admin, recip, "evidence.staleness", true)
+
+	s := scheduler.New(admin, []scheduler.Channel{scheduler.EmailChannel(ch)}, nil)
+	rep, err := s.SweepOnce(context.Background())
+	if err != nil {
+		t.Fatalf("SweepOnce: %v", err)
+	}
+	if rep.Sent < 1 {
+		t.Fatalf("staleness-only opted-in user should be delivered, got %+v", rep)
+	}
+
+	body := prov.bodyFor(recip)
+	if body == "" {
+		t.Fatalf("no digest delivered to %s; the staleness notification did not flow through the sweep", recip)
+	}
+	// The generic slice-445 digest renders 'evidence.staleness' via the closed
+	// type-label map ("Stale-evidence digests"). Its presence proves the
+	// staleness notification reached the delivered digest body (AC-2). The
+	// label is the human-facing, minimum-disclosure summary — no payload.
+	if !strings.Contains(body, "Stale-evidence digests") {
+		t.Fatalf("delivered digest body must summarize the staleness notification; body=%q", body)
 	}
 }

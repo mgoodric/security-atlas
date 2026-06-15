@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // Slice 641 — the FULL SCF Threat-Management (THR) domain is present in the
@@ -47,7 +48,7 @@ var thrDomain = []string{
 // A missing row here is a fixture regression: a THR anchor was dropped or its
 // scf_id/family was mistyped.
 func TestTHRDomain_AllAnchorsResolveInSeededCatalog(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 
@@ -80,7 +81,7 @@ func TestTHRDomain_AllAnchorsResolveInSeededCatalog(t *testing.T) {
 // the single slice-635 domain-head anchor. It guards against a regression that
 // silently collapses the import back to the THR-01-only state.
 func TestTHRDomain_HasMoreThanTheDomainHead(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 

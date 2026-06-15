@@ -21,6 +21,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 )
@@ -28,10 +29,8 @@ import (
 // TestRecordReview_RoundTrip — record a review, read it back, and confirm the
 // vendor's last_review_date scalar is bumped to the review date (AC-2 / D2).
 func TestRecordReview_RoundTrip(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
@@ -81,10 +80,8 @@ func TestRecordReview_RoundTrip(t *testing.T) {
 // pulls last_review_date below an existing newer review (the scalar tracks
 // the MOST-RECENT reviewed_at, not the last-recorded).
 func TestRecordReview_BackdatedDoesNotRegressScalar(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
@@ -124,10 +121,8 @@ func TestRecordReview_BackdatedDoesNotRegressScalar(t *testing.T) {
 // TestListReviews_NewestFirst — AC-3 ordering. Three reviews recorded out of
 // chronological order come back newest reviewed_at first.
 func TestListReviews_NewestFirst(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
@@ -170,10 +165,8 @@ func TestListReviews_NewestFirst(t *testing.T) {
 // review history; the RLS predicate makes A's rows invisible, so B sees an
 // empty series (never a leak).
 func TestListReviews_RLSIsolatesCrossTenant(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -213,10 +206,8 @@ func TestListReviews_RLSIsolatesCrossTenant(t *testing.T) {
 // composite FK (tenant_id, vendor_id) -> vendors finds no parent under B's
 // tenant and the insert maps to ErrVendorNotFound. A's history is untouched.
 func TestRecordReview_RLSIsolatesCrossTenantWrite(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -262,10 +253,8 @@ func TestRecordReview_RLSIsolatesCrossTenantWrite(t *testing.T) {
 // whatever the live DB happened to back-fill, so the test is hermetic per
 // tenant.
 func TestBackfill_OneRowPerLastReviewDate(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)

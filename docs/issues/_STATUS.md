@@ -7,26 +7,24 @@
 >
 > Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
 
-**Generated:** 2026-06-12 · **Total slices:** 624
+**Generated:** 2026-06-12 · **Total slices:** 628
 
 ## Counts
 
 | State | Count |
 | --- | --- |
-| merged | 551 |
-| in-progress | 1 |
-| ready | 70 |
-| not-ready | 2 |
+| merged | 564 |
+| ready | 53 |
+| not-ready | 11 |
 
 ## Ready set
 
-095 112 113 114 115 118 134 228 230 232 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 434 435 436 440 442 446 450 452 453 468 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 676 694 695 696 697 698 699 700 701 702 703
+095 272 323 330 336 338 339 354 355 356 357 358 368 384 415 418 419 420 483 484 499 500 501 502 504 505 506 507 517 518 528 536 537 541 544 545 546 567 651 658 694 695 696 697 698 699 700 701 702 703 741 742 743
 
 ## In-flight
 
 | Slice | State | PR / Branch |
 | --- | --- | --- |
-| 448 | in-progress | feat/448-bulk-ops-saved-views |
 
 ## All slices
 
@@ -143,13 +141,13 @@
 | 109 | Pin the sqlc toolchain version so `sqlc generate` is reproduc... | merged | #243 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 110 | BFF forwards atlas_session cookie alongside bearer for /v1/me... | merged | #249 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 111 | Enable full assertions in `dashboard.spec.ts` (post-082 stabi... | merged | #111 | 2026-05-21 | 8c3b3551 |
-| 112 | Extend `control-detail.sql` to FULL coverage + enable asserti... | ready |  |  |  |
-| 113 | Extend `audit-workspace.sql` to FULL coverage + enable assert... | ready |  |  |  |
-| 114 | Extend `risk-hierarchy.sql` to FULL coverage + enable asserti... | ready |  |  |  |
-| 115 | Extend `admin-bootstrap.sql` to FULL coverage + enable assert... | ready |  |  |  |
+| 112 | Extend `control-detail.sql` to FULL coverage + enable asserti... | not-ready |  |  | maintainer-gated staged e2e-seed rollout (112 narrative: maintainer flips to ready after >=5 clean Playwright runs + 111 merged; 116 then promotes e2e to required once 111-115 land) |
+| 113 | Extend `audit-workspace.sql` to FULL coverage + enable assert... | not-ready |  |  | maintainer-gated staged e2e-seed rollout (sibling of 112; extends audit-workspace.sql; maintainer flips to ready) |
+| 114 | Extend `risk-hierarchy.sql` to FULL coverage + enable asserti... | not-ready |  |  | maintainer-gated staged e2e-seed rollout (sibling of 112; extends risk-hierarchy.sql; maintainer flips to ready) |
+| 115 | Extend `admin-bootstrap.sql` to FULL coverage + enable assert... | not-ready |  |  | maintainer-gated staged e2e-seed rollout (sibling of 112; extends admin-bootstrap.sql; maintainer flips to ready) |
 | 116 | Promote `Frontend · Playwright e2e` to required-checks in br... | merged | #494 | 2026-05-22 | 963e60e8 |
 | 117 | Adopt StepSecurity Harden-Runner (audit mode → block mode) | merged | #262 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
-| 118 | Promote StepSecurity Harden-Runner to block mode | ready |  |  |  |
+| 118 | Promote StepSecurity Harden-Runner to block mode | not-ready |  |  | blocked on maintainer StepSecurity Harden-Runner audit-mode review before block-mode promotion (external action, not a code dep) |
 | 119 | Fix recurring `port 3000 already in use` flake in `Frontend ... | merged | #259 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 120 | Audit and remove phantom (unused) dependencies across all man... | merged | #264 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 121 | Add OTel SDK to atlas (traces + metrics + Go runtime telemetry) | merged | #269 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
@@ -165,7 +163,7 @@
 | 131 | Fix slice 029 integration tests' `SET LOCAL $1` syntax error | merged | #484 | 2026-05-22 | 29ab44d4 |
 | 132 | README refresh with fresh screenshots (v1.10.0+ baseline) | merged | #296 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 133 | mkdocs user docs content refresh (slice 058 follow-on) | merged | #389 | 2026-05-20 | b64cb069 |
-| 134 | Refresh slice-070 onboarding walkthroughs against current mai... | ready |  |  |  |
+| 134 | Refresh slice-070 onboarding walkthroughs against current mai... | not-ready |  |  | maintainer-gated: refreshing slice-070 onboarding walkthroughs needs a maintainer-scheduled interactive recording session |
 | 135 | Data-export library + audit-log export (reference implementat... | merged | #297 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 136 | Risk register data export (CSV / JSON / XLSX) | merged | #378 | 2026-05-19 | c80bec31 |
 | 137 | Controls UCF graph data export (CSV / JSON / XLSX) | merged | #384 | 2026-05-19 | 4300cde2 |
@@ -259,11 +257,11 @@
 | 225 | UI honesty: "New control" button on /controls is silently dis... | merged | #561 | 2026-05-23 | ef3c4a28 |
 | 226 | Add Frameworks-per-row column to /controls list | merged | #553 |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
 | 227 | Add pagination to /controls list | merged | #576 | 2026-05-23 | 58422721 |
-| 228 | UI honesty: dashboard global command-K search bar missing fro... | ready |  |  |  |
+| 228 | UI honesty: dashboard global command-K search bar missing fro... | not-ready |  |  | no backing endpoint: needs a unified /v1/search OR a UI fan-out design (neither exists today) |
 | 229 | UI honesty: dashboard header lacks tenant + snapshot-freshnes... | merged | #592 | 2026-05-23 | 6c8fa4eb |
-| 230 | UI honesty: dashboard "Export" and "New board report" header ... | ready |  |  |  |
+| 230 | UI honesty: dashboard "Export" and "New board report" header ... | not-ready |  |  | no dashboard-snapshot export endpoint exists (one of the two dashboard actions is unbacked) |
 | 231 | UI parity: dashboard mockup-stale "SOC 2 Type II · Q2 2026 i... | merged | #537 | 2026-05-23 | a5bbf03a |
-| 232 | UI honesty: dashboard activity-feed "View full activity ledge... | ready |  |  |  |
+| 232 | UI honesty: dashboard activity-feed "View full activity ledge... | not-ready |  |  | no public non-admin /activity ledger route exists (the View-full-activity link has no backing surface) |
 | 233 | UI honesty: /evidence "Push evidence" CTA is disabled with no... | merged | #558 | 2026-05-23 | ebf7502a |
 | 234 | UI honesty: /evidence filter row missing three pills (Source,... | merged | #568 | 2026-05-23 | 1bea0cd4 |
 | 235 | UI honesty: /evidence header missing audit-period banner + gl... | merged | #606 | 2026-05-24 | 0351f05c |
@@ -459,26 +457,26 @@
 | 431 | External-IdP / OIDC operator setup guide | merged | #994 | 2026-06-04 | bdca8df7 |
 | 432 | Operator backup/restore + upgrade runbooks, surfaced in the d... | merged | #1001 | 2026-06-04 | 9537f74c |
 | 433 | gitignore the `.understand-anything/` local-analysis cache | merged | #978 | 2026-06-03 | 1508501c |
-| 434 | One-time audit + reconcile of the stale `not-ready` `_STATUS.... | ready |  |  |  |
-| 435 | Shared integration-test DB/tenant harness package (`internal/... | ready |  |  |  |
-| 436 | Split the three oversized hand-written god-files | ready |  |  |  |
+| 434 | One-time audit + reconcile of the stale `not-ready` `_STATUS.... | merged |  |  | status-event hygiene: emitted not-ready events for the 9 false-ready rows (112-115/118/134/228/230/232); generated _STATUS now matches the files. Done inline per the rescope. |
+| 435 | Shared integration-test DB/tenant harness package (`internal/... | merged |  | 2026-06-12 | 986c95fb |
+| 436 | Split the three oversized hand-written god-files | merged |  | 2026-06-12 | 94795ab2 |
 | 437 | Archive `Plans/mockups/` iteration-1 HTML out of the active tree | merged | #980 | 2026-06-04 | 7ce4cc6f |
 | 438 | ISO 27001:2022 crosswalk loader (2nd framework — proves the... | merged | #1011 | 2026-06-04 | af5aec7f |
 | 439 | Evidence-staleness digest + alerting (honest, named-interval) | merged |  | 2026-06-11 | a9ec52b7 |
-| 440 | Board-narrative AI v0 — one numbered section, end-to-end | ready |  |  |  |
+| 440 | Board-narrative AI v0 — one numbered section, end-to-end | merged |  | 2026-06-12 | c9c79891 |
 | 441 | Questionnaire AI-answer suggestion v0 (cited drafts, one-clic... | merged |  | 2026-06-12 | bf191829 |
-| 442 | GCP connector (highest-demand missing cloud) | ready |  |  |  |
+| 442 | GCP connector (highest-demand missing cloud) | merged |  | 2026-06-12 | e7befdbf |
 | 443 | Slack connector | merged |  | 2026-06-11 | 8e866181 |
 | 444 | AI gap-explanation v0 (plain-language, cited, non-binding) | merged |  | 2026-06-11 | 6bcc6942 |
 | 445 | Email/SMTP notification channel (delivery substrate) | merged |  |  | gen-status backfill: pre-convention merge; authority _STATUS_HISTORY.md (git slice-NNN detection gap) |
-| 446 | Disclosure / breach-notification workflow decision spike + AD... | ready |  |  |  |
+| 446 | Disclosure / breach-notification workflow decision spike + AD... | merged |  | 2026-06-12 | baf49acd |
 | 447 | PCI DSS v4.0 crosswalk loader (3rd framework; scope-reduction... | merged | #1017 | 2026-06-05 | 69078c86 |
-| 448 | Bulk operations + saved filter-views (operator ergonomics, co... | in-progress |  |  | feat/448-bulk-ops-saved-views |
+| 448 | Bulk operations + saved filter-views (operator ergonomics, co... | merged |  |  | frontend shell (controls multi-select + saved filter-views) merged via PR #1012 (2026-06-04); generator missed the (#448) paren-convention merge + a stale feat/448 branch showed in-progress. 468 (server-backed completion) is the remaining spillover. |
 | 449 | OPA 1.4 → 1.17 embedded-engine upgrade (13 minors on the au... | merged | #1319 | 2026-06-11 | 05bb92a3 |
-| 450 | vitest 4 + @vitest/coverage-v8 4 paired migration | ready |  |  |  |
+| 450 | vitest 4 + @vitest/coverage-v8 4 paired migration | merged |  | 2026-06-12 | 8589f281 |
 | 451 | SLSA provenance + SBOM for binary / CLI / SDK releases | merged | #990 | 2026-06-04 | 750d0eca |
-| 452 | Node version alignment: @types/node + CI + runtime + engines ... | ready |  |  |  |
-| 453 | TypeScript 6 migration | ready |  |  |  |
+| 452 | Node version alignment: @types/node + CI + runtime + engines ... | merged |  | 2026-06-12 | c6625930 |
+| 453 | TypeScript 6 migration | merged |  | 2026-06-12 | 0ab184bd |
 | 454 | go-otel observability group bump (13 modules) | merged | #986 | 2026-06-04 | b839f98a |
 | 455 | OIDC-identity-strategy decision spike (unblocks cosign keyles... | merged |  | 2026-06-11 | a5bc0ea9 |
 | 456 | `internal/api/oauth` residual coverage: audit-write + signer-... | merged | #1022 | 2026-06-05 | 02c926f9 |
@@ -493,7 +491,7 @@
 | 465 | `TRUST_FORWARDED_HEADERS` is server-read but not plumbed thro... | merged | #1004 | 2026-06-04 | 7b54bec7 |
 | 466 | `TRUSTED_PROXY_CIDRS` allowlist as the structural fix for X-F... | merged | #1016 | 2026-06-04 | 4d54e0e8 |
 | 467 | ISO 27001:2022 full Annex A coverage completion | merged |  | 2026-06-11 | 594c4696 |
-| 468 | Server-backed bulk-assign-owner + saved filter-views (controls) | ready |  |  |  |
+| 468 | Server-backed bulk-assign-owner + saved filter-views (controls) | merged |  | 2026-06-12 | 52665a3a |
 | 469 | Sweep `web/app/**` stale `Plans/mockups/` citations to the ar... | merged | #1015 | 2026-06-04 | cbd26d51 |
 | 470 | header-overwriting reverse-proxy container in the e2e seed ha... | merged | #1021 | 2026-06-06 | 4c5496df |
 | 471 | Role-scoped control-implementation checklist generator v0 (ci... | merged |  | 2026-06-12 | 9c500311 |
@@ -625,7 +623,7 @@
 | 673 | Board Packs list fails to load in seeded tenant — `/api/boa... | merged | #1258 | 2026-06-10 | 07b24d13 |
 | 674 | Dashboard/breadcrumb shows "Default Tenant" while the active ... | merged |  | 2026-06-11 | f850f1dd |
 | 675 | Calendar agenda missing audit-period / vendor-review / policy... | merged |  | 2026-06-11 | 6be54edf |
-| 676 | Pervasive 503s on Next.js RSC prefetch/navigation requests | ready |  |  |  |
+| 676 | Pervasive 503s on Next.js RSC prefetch/navigation requests | merged |  | 2026-06-12 | 841ce5d7 |
 | 677 | Metrics correctness pass (freshness contradiction, count labe... | merged |  | 2026-06-11 | 5ac10361 |
 | 678 | Demo seed completeness: org_units, questionnaires, ack-role u... | merged |  | 2026-06-11 | 01f4038d |
 | 679 | Vendor UX/data: name/domain spacing, missing Delete control, ... | merged |  | 2026-06-11 | a490e17a |
@@ -656,3 +654,7 @@
 | 704 | Contract-tier rollout: tenant-wide `/v1/evidence` ledger wind... | merged |  | 2026-06-11 | f882950d |
 | 732 | Calendar/dashboard exception event labels show the raw contro... | merged |  | 2026-06-11 | 9159b6a5 |
 | 733 | Live group-role derivation wiring + SCIM /Groups REST resource | merged |  | 2026-06-12 | 5591029b |
+| 740 | vitest 4 coverage-floor re-baseline (AST-aware v8 provider) | merged |  |  | floor re-baseline folded into slice 450 (8589f281) per maintainer approval 2026-06-12; the 68 re-baselined web floors are on main via 450; standalone slice superseded, dataset retained in the doc |
+| 741 | Auto-regenerate `_STATUS.md` and eliminate the per-merge reco... | ready |  |  |  |
+| 742 | Migrate remaining integration suites to `internal/dbtest` (dr... | ready |  |  |  |
+| 743 | Controls-list Playwright e2e — seed fixture + un-comment sl... | ready |  |  |  |

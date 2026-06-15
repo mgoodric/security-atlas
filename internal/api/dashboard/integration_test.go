@@ -28,7 +28,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -43,39 +42,15 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/dashboard"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool pool/DSN boilerplate this file
+// used to re-derive now lives in the shared internal/dbtest harness (NewAppPool
+// = RLS-enforcing atlas_app default; NewMigratePool = privileged BYPASSRLS for
+// seeding + freshTenant cleanup).
 
 // freshTenant returns a new tenant id and registers a cleanup that deletes
 // every row this slice's tests can create under it. Catalog rows (frameworks,
@@ -84,28 +59,19 @@ func openPool(t *testing.T, dsn string) *pgxpool.Pool {
 // cleanup so they do not leak across tests.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_freshness WHERE tenant_id = $1`,
-			`DELETE FROM evidence_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM exceptions WHERE tenant_id = $1`,
-			`DELETE FROM policy_acknowledgments WHERE tenant_id = $1`,
-			`DELETE FROM vendors WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
-			`DELETE FROM risks WHERE tenant_id = $1`,
-			`DELETE FROM policies WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-			`DELETE FROM users WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"control_evaluations",
+		"evidence_freshness",
+		"evidence_audit_log",
+		"exceptions",
+		"policy_acknowledgments",
+		"vendors",
+		"audit_periods",
+		"risks",
+		"policies",
+		"controls",
+		"users",
+	)
 }
 
 // framework bundles the ids a seeded framework version exposes so the tests
@@ -409,8 +375,8 @@ func noRoleRouter(t *testing.T, app *pgxpool.Pool, tenant string) http.Handler {
 // ===== ISC-18: framework posture aggregates correctly across versions =====
 
 func TestFrameworkPosture_AggregatesAcrossVersions(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -471,8 +437,8 @@ func TestFrameworkPosture_AggregatesAcrossVersions(t *testing.T) {
 // produces a positive trend delta.
 
 func TestFrameworkPosture_TrendReflectsGrowth(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -507,8 +473,8 @@ func TestFrameworkPosture_TrendReflectsGrowth(t *testing.T) {
 // ===== ISC-19: activity feed paginates newest-first with a stable cursor =====
 
 func TestActivity_PaginatesNewestFirst(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -569,8 +535,8 @@ func TestActivity_PaginatesNewestFirst(t *testing.T) {
 // ===== ISC-21: upcoming rollup merges all four sources date-sorted =====
 
 func TestUpcoming_MergesAllFourSourcesDateSorted(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -629,8 +595,8 @@ func TestUpcoming_MergesAllFourSourcesDateSorted(t *testing.T) {
 // ISC-21 (category filter arm): ?category= narrows to one source.
 
 func TestUpcoming_CategoryFilter(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -660,8 +626,8 @@ func TestUpcoming_CategoryFilter(t *testing.T) {
 // NOT contain the raw control UUID. Mirrors the calendar exception-label fix
 // so the two upcoming-event surfaces read identically (slice 675 vocabulary).
 func TestUpcoming_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -694,8 +660,8 @@ func TestUpcoming_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
 // ===== ISC-22: all four endpoints 403 a role without program-read access =====
 
 func TestAllEndpoints_ForbidNonProgramReadRole(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	r := noRoleRouter(t, app, tenant)
 
@@ -716,8 +682,8 @@ func TestAllEndpoints_ForbidNonProgramReadRole(t *testing.T) {
 // ===== ISC-23: all four endpoints are RLS-isolated across tenants =====
 
 func TestAllEndpoints_RLSIsolatedAcrossTenants(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	// Tenant A owns a covered control, an ingest event, an exception, and an
 	// audit period. Tenant B's server must see NONE of it in the
@@ -768,8 +734,8 @@ func TestAllEndpoints_RLSIsolatedAcrossTenants(t *testing.T) {
 // ===== input validation =====
 
 func TestDashboard_RejectsBadInput(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -803,8 +769,8 @@ func TestDashboard_RejectsBadInput(t *testing.T) {
 // empty envelope.
 
 func TestDashboard_EmptyTenant_FrameworkPostureReturnsEmptyEnvelope(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -827,8 +793,8 @@ func TestDashboard_EmptyTenant_FrameworkPostureReturnsEmptyEnvelope(t *testing.T
 }
 
 func TestDashboard_EmptyTenant_ActivityReturnsEmptyEnvelope(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 

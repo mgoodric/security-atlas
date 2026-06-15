@@ -15,17 +15,15 @@ package slack_test
 
 import (
 	"context"
-	"os"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/notify/slack"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 type fakeTransport struct {
@@ -45,28 +43,6 @@ func (f *fakeTransport) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.sent)
-}
-
-func openPools(t *testing.T) (app, admin *pgxpool.Pool) {
-	t.Helper()
-	appDSN := os.Getenv("DATABASE_URL_APP")
-	adminDSN := os.Getenv("DATABASE_URL")
-	if appDSN == "" || adminDSN == "" {
-		t.Skip("DATABASE_URL_APP or DATABASE_URL not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	a, err := pgxpool.New(ctx, appDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(app): %v", err)
-	}
-	t.Cleanup(a.Close)
-	b, err := pgxpool.New(ctx, adminDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(admin): %v", err)
-	}
-	t.Cleanup(b.Close)
-	return a, b
 }
 
 func seedUser(t *testing.T, admin *pgxpool.Pool, email string, withUnread bool) (tenantID, userID uuid.UUID) {
@@ -137,15 +113,12 @@ func setPref(t *testing.T, admin *pgxpool.Pool, tenantID, userID uuid.UUID, even
 
 func tenantCtx(t *testing.T, tenantID uuid.UUID) context.Context {
 	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
+	return dbtest.WithTenantCtx(t, tenantID.String())
 }
 
 func TestSlackDeliver_OptedIn_MinimumDisclosure(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -178,7 +151,8 @@ func TestSlackDeliver_OptedIn_MinimumDisclosure(t *testing.T) {
 }
 
 func TestSlackDeliver_DefaultOptedOut(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -197,7 +171,8 @@ func TestSlackDeliver_DefaultOptedOut(t *testing.T) {
 }
 
 func TestSlackDeliver_Idempotent(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -222,7 +197,8 @@ func TestSlackDeliver_Idempotent(t *testing.T) {
 }
 
 func TestSlackDeliver_NoCrossTenant(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	trA := &fakeTransport{}
 	chA := slack.NewChannel(app, trA, "https://atlas.example.test")
 
@@ -250,7 +226,8 @@ func TestSlackDeliver_NoCrossTenant(t *testing.T) {
 // with no pref row is delivered (default-on). The muted kind's count must NOT
 // appear in the posted body.
 func TestSlackDeliver_PerKindFilter_MutesOneKeepsOther(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -285,7 +262,8 @@ func TestSlackDeliver_PerKindFilter_MutesOneKeepsOther(t *testing.T) {
 // on SLACK (channel isolation — the slice-583 generalization). master-on +
 // no SLACK row -> default-on deliver, even though an email row says false.
 func TestSlackDeliver_PerKindFilter_EmailOptOutDoesNotMuteSlack(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -313,7 +291,8 @@ func TestSlackDeliver_PerKindFilter_EmailOptOutDoesNotMuteSlack(t *testing.T) {
 // kind on slack collapses the digest to zero -> the delivery is skipped (no
 // post), mirroring the email all-muted case.
 func TestSlackDeliver_PerKindFilter_AllMutedSkips(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := slack.NewChannel(app, tr, "https://atlas.example.test")
 

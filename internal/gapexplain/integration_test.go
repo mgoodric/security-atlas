@@ -24,13 +24,13 @@ package gapexplain_test
 import (
 	"context"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/gapexplain"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -38,54 +38,16 @@ import (
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
 // freshTenant returns a new tenant id + registers cleanup of the rows this
-// slice's tests create.
+// slice's tests create. Pure tenant-scoped DELETE in FK order, so it
+// delegates to dbtest.SeedTenant (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM evidence_freshness WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"evidence_freshness",
+		"evidence_records",
+		"controls",
+	)
 }
 
 // seedControl inserts a minimal control row (mirrors the slice-064 harness).
@@ -164,8 +126,8 @@ func stubWith(store *gapexplain.Store, draft string) *gapexplain.Service {
 // ----- AC-8: valid explanation with resolvable citations renders -----
 
 func TestExplain_ValidCitationsRender(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	observed := time.Now().UTC().Add(-120 * 24 * time.Hour)
@@ -204,8 +166,8 @@ func TestExplain_ValidCitationsRender(t *testing.T) {
 // ----- AC-9: a non-existent-id citation is suppressed -> rollup only -----
 
 func TestExplain_NonExistentCitationSuppressed(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	observed := time.Now().UTC().Add(-120 * 24 * time.Hour)
@@ -247,8 +209,8 @@ func TestExplain_NonExistentCitationSuppressed(t *testing.T) {
 // tenant-owned and the explanation is SUPPRESSED. A Tenant-B explanation can
 // never cite a Tenant-A record (threat-model I, P0-444-2).
 func TestExplain_CrossTenantCitationSuppressed(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)

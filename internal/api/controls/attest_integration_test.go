@@ -38,58 +38,22 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
-// ----- env helpers -----
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // ----- tenant + SCF anchor scaffolding (mirrors slice-009) -----
 
+// freshTenant returns a brand-new tenant id and registers cleanup. The
+// cleanup is a pure tenant-scoped DELETE returning a string, so it
+// delegates to dbtest.SeedTenant (slice 435 / 742 drain batch 23).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM evidence_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"evidence_audit_log",
+		"evidence_records",
+		"controls",
+	)
 }
 
 func seedSCFAnchor(t *testing.T, admin *pgxpool.Pool, code, family string) string {
@@ -280,8 +244,8 @@ const ownerRole = "control_owner"
 // admin, owner (holding control_owner role), and plain (no role).
 func setupHTTP(t *testing.T) setupResult {
 	t.Helper()
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
 	seedSCFAnchor(t, admin, "IAC-06", "IAC")
 	tenant := freshTenant(t, admin)
@@ -314,8 +278,6 @@ func setupHTTP(t *testing.T) setupResult {
 	ts := httptest.NewServer(h)
 	t.Cleanup(func() {
 		ts.Close()
-		app.Close()
-		admin.Close()
 	})
 	return setupResult{
 		server:    ts,
@@ -479,8 +441,7 @@ func TestAttest_HappyPath_NoArtifact(t *testing.T) {
 	}
 
 	// Cross-check the ledger directly.
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	var (
 		kind          *string
 		actorAttrib   []byte
@@ -698,16 +659,15 @@ func TestAttest_CrossTenant_NotFound(t *testing.T) {
 	// Bundle is owned by tenant A; bearer below is for tenant B.
 	controlID := uploadBundle(t, s, "attest_cross_tenant")
 
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenantB := freshTenant(t, admin)
-	ingest := ingest.New(openPool(t, appDSN(t)), s.registry)
+	ingest := ingest.New(dbtest.NewAppPool(t), s.registry)
 	srvB := api.New(api.Config{
 		RotationGrace:  time.Hour,
 		SchemaRegistry: s.registry,
 		IngestService:  ingest,
 	})
-	srvB.AttachDB(openPool(t, appDSN(t)))
+	srvB.AttachDB(dbtest.NewAppPool(t))
 	bearerB := srvB.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenantB), []string{ownerRole}))
 	h := srvB.HTTPHandlerForTests()
 	tsB := httptest.NewServer(h)
