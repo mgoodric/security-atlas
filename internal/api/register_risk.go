@@ -3,6 +3,8 @@ package api
 import (
 	"github.com/go-chi/chi/v5"
 
+	"github.com/mgoodric/security-atlas/internal/actionplan"
+	actionplansapi "github.com/mgoodric/security-atlas/internal/api/actionplans"
 	aggregationrulesapi "github.com/mgoodric/security-atlas/internal/api/aggregationrules"
 	orgunitsapi "github.com/mgoodric/security-atlas/internal/api/orgunits"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
@@ -57,8 +59,31 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// Literal-suffix route declared before the generic /v1/risks/{id} so
 	// chi's declaration-order match keeps it ahead.
 	root.Post("/v1/risks/{id}/controls", risksH.LinkControl)
+	// Slice 384: read-only "Linked Action Plans" section on /risks/{id}
+	// (AC-25). Literal-suffix route declared before the generic
+	// /v1/risks/{id} so chi's declaration-order match keeps it ahead.
+	actionPlansH := actionplansapi.New(actionplan.NewStore(s.dbPool))
+	root.Get("/v1/risks/{id}/action-plans", actionPlansH.PlansForRisk)
 	root.Get("/v1/risks/{id}", risksH.GetRisk)
 	root.Delete("/v1/risks/{id}", risksH.DeleteRisk)
+	// Slice 384: ActionPlan primitive — the fourth first-class risk-register
+	// primitive (canvas §6). Routes appended per the parallel-batch
+	// convention (chi rejects two Mounts at "/"). The M2M link sub-resources
+	// use distinct path shapes (/{id}/risks/{risk_id}, /{id}/controls/
+	// {control_id}) so there is no shadowing with the bare /{id} routes.
+	// AC-25/AC-26: the read-only linked-plans section on /controls/{id} is
+	// registered here too (it shares the root router; the path shape is
+	// distinct from the bare /v1/controls/{id} declared in registerControls).
+	root.Post("/v1/action-plans", actionPlansH.CreateActionPlan)
+	root.Get("/v1/action-plans", actionPlansH.ListActionPlans)
+	root.Get("/v1/action-plans/{id}", actionPlansH.GetActionPlan)
+	root.Patch("/v1/action-plans/{id}", actionPlansH.UpdateActionPlan)
+	root.Delete("/v1/action-plans/{id}", actionPlansH.DeleteActionPlan)
+	root.Post("/v1/action-plans/{id}/risks/{risk_id}", actionPlansH.LinkRisk)
+	root.Delete("/v1/action-plans/{id}/risks/{risk_id}", actionPlansH.UnlinkRisk)
+	root.Post("/v1/action-plans/{id}/controls/{control_id}", actionPlansH.LinkControl)
+	root.Delete("/v1/action-plans/{id}/controls/{control_id}", actionPlansH.UnlinkControl)
+	root.Get("/v1/controls/{id}/action-plans", actionPlansH.PlansForControl)
 	// Slice 053: theme catalog + per-risk theme tagging.
 	themesH := themesapi.New(risksStore)
 	root.Get("/v1/themes", themesH.ListVisible)

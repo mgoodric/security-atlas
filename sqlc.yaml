@@ -80,6 +80,7 @@ sql:
       - "migrations/sql/20260612040000_scim_groups.sql"
       - "migrations/sql/20260612050000_board_narrative_ai.sql"
       - "migrations/sql/20260612060000_control_owner_assign_saved_views.sql"
+      - "migrations/sql/20260612070000_action_plans.sql"
     queries: "internal/db/queries"
     gen:
       go:

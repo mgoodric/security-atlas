@@ -11,6 +11,17 @@ import (
 )
 
 type Querier interface {
+	ActionPlanControlExists(ctx context.Context, arg ActionPlanControlExistsParams) (bool, error)
+	// AC-19: same cross-tenant deny for controls.
+	ActionPlanControlExistsInTenant(ctx context.Context, arg ActionPlanControlExistsInTenantParams) (bool, error)
+	// AC-10 tampering guard: owner_id must resolve to a user in the caller's
+	// tenant. RLS hides cross-tenant users.
+	ActionPlanOwnerExistsInTenant(ctx context.Context, arg ActionPlanOwnerExistsInTenantParams) (bool, error)
+	ActionPlanRiskExists(ctx context.Context, arg ActionPlanRiskExistsParams) (bool, error)
+	// ===== existence probes for cross-tenant linkage guards =====
+	// AC-17/AC-29: a risk_id that does not resolve in the caller's tenant is a
+	// 404 (cross-tenant deny). RLS hides the cross-tenant row so EXISTS is false.
+	ActionPlanRiskExistsInTenant(ctx context.Context, arg ActionPlanRiskExistsInTenantParams) (bool, error)
 	// HITL transition: staged -> active OR inactive -> active (reactivation).
 	// Sets activated_by + activated_at; the engine reads activated_at as the
 	// "do not consider risks older than this" cut-off so re-activation never
@@ -119,6 +130,8 @@ type Querier interface {
 	// Count of all generations for the current tenant. Used by the cross-tenant
 	// isolation integration test to prove tenant B sees zero of tenant A's rows.
 	CountAIGenerationsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	CountActionPlanControls(ctx context.Context, arg CountActionPlanControlsParams) (int64, error)
+	CountActionPlanRisks(ctx context.Context, arg CountActionPlanRisksParams) (int64, error)
 	// Count of all checklist sections visible to the caller's tenant. Used by the
 	// cross-tenant isolation integration test to prove tenant B sees zero of
 	// tenant A's rows (AC-8).
@@ -192,6 +205,10 @@ type Querier interface {
 	// Returns one row per criticality present in the result set; empty bands are
 	// not included (callers fill in zero where needed).
 	CountVendorsForBurndown(ctx context.Context, arg CountVendorsForBurndownParams) ([]CountVendorsForBurndownRow, error)
+	// ActionPlan primitive (slice 384). Tenant-scoped CRUD + M2M linkage +
+	// append-only audit log. Every query filters tenant_id explicitly (RLS is
+	// the backstop; the explicit predicate keeps the plan index-friendly).
+	CreateActionPlan(ctx context.Context, arg CreateActionPlanParams) (ActionPlan, error)
 	// Insert a parent risk for slice 053 manual aggregation. The shape mirrors
 	// CreateRisk but with `level`, `org_unit_id`, and `themes` plumbed through —
 	// those columns exist on `risks` per slice 052's ALTER. The aggregated
@@ -548,6 +565,9 @@ type Querier interface {
 	GetAPIKeyByID(ctx context.Context, arg GetAPIKeyByIDParams) (ApiKey, error)
 	// Idempotency lookup for the handler's deduplicate path.
 	GetAcknowledgmentByToken(ctx context.Context, arg GetAcknowledgmentByTokenParams) (PolicyAcknowledgment, error)
+	// Live (non-tombstoned) plan by id. A tombstoned plan reads as absent
+	// (AC-14: subsequent GET returns 404).
+	GetActionPlanByID(ctx context.Context, arg GetActionPlanByIDParams) (ActionPlan, error)
 	// Returns the currently-active framework scope for a given framework version,
 	// i.e. the (at most one) row in state `activated` for that (tenant, fv) pair.
 	// AC-3: a partial UNIQUE index guarantees at most one row matches.
@@ -1149,6 +1169,12 @@ type Querier interface {
 	// consistent with the ledger (AC-2, decisions log D2). Returns no row when the
 	// vendor has no reviews; the store treats pgx.ErrNoRows as "leave the scalar".
 	LatestVendorReviewDate(ctx context.Context, arg LatestVendorReviewDateParams) (pgtype.Date, error)
+	// ===== M2M: controls =====
+	LinkActionPlanControl(ctx context.Context, arg LinkActionPlanControlParams) error
+	// ===== M2M: risks =====
+	// Idempotent at the handler layer (it checks existence first); the PK makes
+	// a duplicate INSERT a unique-violation the store maps to 409.
+	LinkActionPlanRisk(ctx context.Context, arg LinkActionPlanRiskParams) error
 	// ===== decision_controls =====
 	LinkDecisionControl(ctx context.Context, arg LinkDecisionControlParams) error
 	// ===== decision_exceptions =====
@@ -1202,6 +1228,23 @@ type Querier interface {
 	// RLS scopes both tables to the caller's tenant; the leading $1 tenant_id
 	// predicate is defense-in-depth behind RLS (the slice-030 pattern).
 	ListAcceptedVendorClaimsForExport(ctx context.Context, tenantID pgtype.UUID) ([]ListAcceptedVendorClaimsForExportRow, error)
+	ListActionPlanAuditLog(ctx context.Context, arg ListActionPlanAuditLogParams) ([]ActionPlanAuditLog, error)
+	ListActionPlanControls(ctx context.Context, arg ListActionPlanControlsParams) ([]ListActionPlanControlsRow, error)
+	// Powers the "Linked Action Plans" read-only section on /controls/{id} (AC-26).
+	ListActionPlanIDsForControl(ctx context.Context, arg ListActionPlanIDsForControlParams) ([]ListActionPlanIDsForControlRow, error)
+	// Powers the "Linked Action Plans" read-only section on /risks/{id} (AC-25).
+	// Joins to action_plans so tombstoned plans are excluded.
+	ListActionPlanIDsForRisk(ctx context.Context, arg ListActionPlanIDsForRiskParams) ([]ListActionPlanIDsForRiskRow, error)
+	ListActionPlanRisks(ctx context.Context, arg ListActionPlanRisksParams) ([]ListActionPlanRisksRow, error)
+	// Cursor pagination on created_at DESC, id DESC. The cursor is the
+	// (created_at, id) of the last row of the previous page; when the cursor
+	// timestamp is NULL (sqlc.narg), the first page is returned. Tombstoned
+	// rows are excluded.
+	ListActionPlans(ctx context.Context, arg ListActionPlansParams) ([]ActionPlan, error)
+	// AC-27 audit-period-freezing snapshot: only plans created on or before the
+	// period's frozen_at horizon are included in the period's snapshot. Live
+	// state continues independently; this read is the frozen view.
+	ListActionPlansSnapshot(ctx context.Context, arg ListActionPlansSnapshotParams) ([]ActionPlan, error)
 	// The engine's hot path: every 'active' rule for the tenant. Runs on every
 	// risk write. Hits idx_aggregation_rules_tenant_status.
 	ListActiveAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)
@@ -2738,6 +2781,9 @@ type Querier interface {
 	// superseded_by at the new row, stamp superseded_at = now(). Skips the
 	// new row itself (id <> @new_id) so a re-running activation is idempotent.
 	SupersedePreviousActivated(ctx context.Context, arg SupersedePreviousActivatedParams) error
+	// Soft-delete (P0-384-6). Sets tombstoned_at; the row is preserved. A
+	// second tombstone is a no-op-miss (already tombstoned -> zero rows -> 404).
+	TombstoneActionPlan(ctx context.Context, arg TombstoneActionPlanParams) (ActionPlan, error)
 	// Best-effort timestamp bump. Failure here is logged but never blocks the
 	// authenticated request.
 	TouchAPIKeyLastUsed(ctx context.Context, tokenHash []byte) error
@@ -2746,12 +2792,18 @@ type Querier interface {
 	// Update last_seen_at and (when given) bump expires_at. Caller computes the
 	// new expires_at — sliding-window logic lives in the sessions package.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	UnlinkActionPlanControl(ctx context.Context, arg UnlinkActionPlanControlParams) (int64, error)
+	UnlinkActionPlanRisk(ctx context.Context, arg UnlinkActionPlanRiskParams) (int64, error)
 	UnlinkDecisionControl(ctx context.Context, arg UnlinkDecisionControlParams) error
 	UnlinkDecisionException(ctx context.Context, arg UnlinkDecisionExceptionParams) error
 	UnlinkDecisionRisk(ctx context.Context, arg UnlinkDecisionRiskParams) error
 	UnlinkDecisionScopePredicate(ctx context.Context, arg UnlinkDecisionScopePredicateParams) error
 	UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) error
 	UnlinkRiskControl(ctx context.Context, arg UnlinkRiskControlParams) error
+	// Updates the editable fields + status in one statement. The DB transition
+	// trigger (action_plans_status_transition_trg) rejects an illegal status
+	// edge; the store also validates before calling. updated_at is bumped.
+	UpdateActionPlan(ctx context.Context, arg UpdateActionPlanParams) (ActionPlan, error)
 	// Edit the threshold fields + the rule body. Does NOT touch status or
 	// activation metadata — a threshold edit is not a lifecycle transition and
 	// (per the issue's notes) must NOT retroactively re-fire on pre-edit data.
@@ -2977,6 +3029,10 @@ type Querier interface {
 	// every value, including the raw model draft, as a parameter -- the model
 	// output is treated as opaque data, never SQL.
 	WriteAIGeneration(ctx context.Context, arg WriteAIGenerationParams) (AiGeneration, error)
+	// ===== append-only audit log =====
+	// Every mutation writes one row (AC-16). UPDATE/DELETE are rejected by the
+	// append-only trigger; this INSERT is the only path that writes here.
+	WriteActionPlanAuditLog(ctx context.Context, arg WriteActionPlanAuditLogParams) (ActionPlanAuditLog, error)
 	// ===== aggregation_rule_audit_log (append-only) =====
 	// Append-only. Every lifecycle transition (created / activated /
 	// deactivated / reactivated) and every threshold edit writes one row

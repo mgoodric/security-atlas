@@ -1,5 +1,8 @@
 DELETE /scim/v2/Groups/{id}
 DELETE /scim/v2/Users/{id}
+DELETE /v1/action-plans/{id}
+DELETE /v1/action-plans/{id}/controls/{control_id}
+DELETE /v1/action-plans/{id}/risks/{risk_id}
 DELETE /v1/admin/group-role-mappings/{id}
 DELETE /v1/admin/scim-credentials/{id}
 DELETE /v1/admin/super-admins/{user_id}
@@ -26,6 +29,8 @@ GET /scim/v2/Schemas
 GET /scim/v2/ServiceProviderConfig
 GET /scim/v2/Users
 GET /scim/v2/Users/{id}
+GET /v1/action-plans
+GET /v1/action-plans/{id}
 GET /v1/activity
 GET /v1/activity/unified
 GET /v1/admin/audit-log
@@ -74,6 +79,7 @@ GET /v1/controls/checklist/{generationID}/export.md
 GET /v1/controls/drift
 GET /v1/controls/export
 GET /v1/controls/history/export
+GET /v1/controls/{id}/action-plans
 GET /v1/controls/{id}/applicability
 GET /v1/controls/{id}/attest-form
 GET /v1/controls/{id}/coverage
@@ -143,6 +149,7 @@ GET /v1/risks/export
 GET /v1/risks/heatmap
 GET /v1/risks/theme-heatmap
 GET /v1/risks/{id}
+GET /v1/risks/{id}/action-plans
 GET /v1/risks/{id}/aggregation
 GET /v1/samples/{id}
 GET /v1/samples/{id}/annotations
@@ -162,6 +169,7 @@ GET /v1/walkthroughs/{id}
 GET /v1/walkthroughs/{id}/export
 PATCH /scim/v2/Groups/{id}
 PATCH /scim/v2/Users/{id}
+PATCH /v1/action-plans/{id}
 PATCH /v1/admin/features/{key}
 PATCH /v1/admin/sso
 PATCH /v1/admin/users/{id}/roles
@@ -195,6 +203,9 @@ POST /oauth/revoke
 POST /oauth/token
 POST /scim/v2/Groups
 POST /scim/v2/Users
+POST /v1/action-plans
+POST /v1/action-plans/{id}/controls/{control_id}
+POST /v1/action-plans/{id}/risks/{risk_id}
 POST /v1/admin/authz-bundle/reload
 POST /v1/admin/credentials
 POST /v1/admin/credentials/{id}/revoke
