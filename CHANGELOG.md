@@ -3582,6 +3582,18 @@ oauth_client:<id>` for client_credentials machine tokens;
 
 ### Changed
 
+- **slices 483 + 484 (governance decisions)** — recorded the two deferred catalog
+  governance decisions as ADRs and flipped both slices `not-ready → ready`.
+  [`docs/adr/0018-crosswalk-mapping-verified-tier.md`](docs/adr/0018-crosswalk-mapping-verified-tier.md)
+  settles the crosswalk-mapping verified-tier sub-question (three-state ladder
+  `draft → under_review → verified` + `rejected`; promotion gated to any admin/maintainer
+  role; `mapping_tier` kept orthogonal to `source_attribution`; contributed-controls +
+  marketplace deferred). [`docs/adr/0019-framework-versioning-capability.md`](docs/adr/0019-framework-versioning-capability.md)
+  settles framework-versioning (prior version → `superseded`; migration-suggest is
+  exact requirement-code match only, never auto-applied; superseded versions readable
+  when pinned; proof loads a synthetic adjacent SOC 2 revision). No code change — decision
+  records that unblock the two slices for build.
+
 - **slice 459** — swept stale `Plans/mockups/` provenance citations in source
   code comments to the archived path `Plans/_archive/mockups/`. Slice 437
   `git mv`'d the iteration-1 HTML mockups out of the active tree and repointed
