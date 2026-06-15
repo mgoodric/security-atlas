@@ -911,7 +911,7 @@ jobs:
           node-version: "22"
           cache: "npm"
       - name: Install workspaces
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build web workspace
         run: npm run build --workspace @security-atlas/web --if-present
       - name: Build sdk-typescript workspace
@@ -1329,7 +1329,7 @@ jobs:
           cache: "npm"
       - name: Install workspaces
         working-directory: .
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Run vitest (with coverage)
         run: npm run test:coverage
       - name: Upload coverage summary as workflow artifact
@@ -1386,7 +1386,7 @@ jobs:
           cache: "npm"
       - name: Install workspaces
         working-directory: .
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Run eslint
         run: npm run lint
 
@@ -1565,7 +1565,7 @@ jobs:
           atlas --version || true
       - name: Install web workspace
         working-directory: .
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build web workspace
         working-directory: web
         run: npm run build
@@ -1812,7 +1812,7 @@ jobs:
           atlas --version || true
       - name: Install web workspace
         working-directory: .
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build web workspace (standalone output)
         # Slice 387 — `build:standalone` = `next build && cp -r public
         # .next/standalone/web/public`. The bare `next build` does NOT
@@ -1977,7 +1977,7 @@ jobs:
           node-version: "22"
           cache: "npm"
       - name: Install workspaces
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Validate mockup-spec manifest (schema + file-existence)
         # AC-10a / P0-178-11. Runs the manifest validator's vitest
         # smoke test which calls `loadManifest()` end-to-end. Fails
