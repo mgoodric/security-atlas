@@ -1887,6 +1887,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/board/narrative/generate-all:
+    post:
+      summary: POST /v1/board/narrative/generate-all — draft the full multi-section narrative
+      tags: [board]
+      operationId: post-v1-board-narrative-generate-all
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/calendar:
     get:
       summary: GET /v1/calendar

@@ -124,6 +124,10 @@ func (s fixedRollupSource) CoverageRollup(_ context.Context, _ string) (boardnar
 	return s.r, nil
 }
 
+func (s fixedRollupSource) SectionRollup(_ context.Context, _ boardnarrative.SectionKey, _ string) (boardnarrative.Rollup, error) {
+	return s.r, nil
+}
+
 func validStubDraft(ctrlID string) string {
 	return strings.Join([]string{
 		"## Control coverage summary",

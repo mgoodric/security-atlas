@@ -257,6 +257,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/board-packs/{id}/sections/{key}/approve", Tag: "board", Tier: "bearer", Internal: false, Summary: "POST /v1/board-packs/{id}/sections/{key}/approve"},
 	{Method: "POST", Path: "/v1/board/narrative/approve", Tag: "board", Tier: "bearer", Internal: false, Summary: "POST /v1/board/narrative/approve"},
 	{Method: "POST", Path: "/v1/board/narrative/generate", Tag: "board", Tier: "bearer", Internal: false, Summary: "POST /v1/board/narrative/generate"},
+	{Method: "POST", Path: "/v1/board/narrative/generate-all", Tag: "board", Tier: "bearer", Internal: false, Summary: "POST /v1/board/narrative/generate-all — draft the full multi-section narrative"},
 	{Method: "POST", Path: "/v1/calendar/subscription", Tag: "calendar", Tier: "bearer", Internal: false, Summary: "POST /v1/calendar/subscription"},
 	{Method: "POST", Path: "/v1/controls/{id}/attestations", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/{id}/attestations"},
 	{Method: "POST", Path: "/v1/controls/checklist:generate", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/checklist:generate"},

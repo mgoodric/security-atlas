@@ -88,24 +88,38 @@ func buildPrompt(r Rollup) string {
 	return b.String()
 }
 
-// promptContextInputs builds the structured context map recorded on the
-// ai_generations audit row (R-mitigation: which rollup + excerpt ids backed the
-// section is reconstructable). The model consumes the system prompt + the built
-// context string; this map is the forensic record, not an additional prompt.
-func promptContextInputs(r Rollup) map[string]any {
+// sectionContextInputs builds the structured forensic context map recorded on
+// the ai_generations audit row (R-mitigation) for ANY section (slice 501). It
+// dispatches on the section so each row records exactly the rollup fields that
+// section grounded on plus the citable ids. The cited ids are common to every
+// section.
+func sectionContextInputs(section SectionKey, r Rollup) map[string]any {
 	ids := make([]string, 0, len(r.Excerpts))
 	for _, e := range r.Excerpts {
 		ids = append(ids, string(e.Kind)+":"+e.ID)
 	}
-	return map[string]any{
-		"period_end":             r.PeriodEnd,
-		"control_coverage_pct":   r.CoveragePct,
-		"evidence_freshness_pct": r.FreshnessPct,
-		"drift_delta_30d":        r.Delta,
-		"controls_drifted_out":   r.FlippedOutCount,
-		"framework_count":        r.FrameworkCount,
-		"citable_ids":            ids,
+	base := map[string]any{
+		"section":     string(section),
+		"period_end":  r.PeriodEnd,
+		"citable_ids": ids,
 	}
+	switch section {
+	case SectionRiskPosture:
+		base["open_risks_aging"] = r.RiskCount
+		base["worst_residual_severity"] = r.WorstResidualSeverity
+		base["oldest_risk_age_days"] = r.OldestRiskAgeDays
+	case SectionDriftActivity:
+		base["drift_window_days"] = r.WindowDays
+		base["drift_delta_30d"] = r.Delta
+		base["controls_drifted_out"] = r.FlippedOutCount
+	default: // coverage
+		base["control_coverage_pct"] = r.CoveragePct
+		base["evidence_freshness_pct"] = r.FreshnessPct
+		base["drift_delta_30d"] = r.Delta
+		base["controls_drifted_out"] = r.FlippedOutCount
+		base["framework_count"] = r.FrameworkCount
+	}
+	return base
 }
 
 // oneLine collapses whitespace so a multi-line excerpt does not break the
