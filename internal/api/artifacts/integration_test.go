@@ -29,25 +29,14 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool DB pool/DSN boilerplate this
+// file used to re-derive now lives in the shared internal/dbtest harness
+// (NewAppPool = RLS-enforcing atlas_app default; NewMigratePool = privileged
+// BYPASSRLS for seeding + freshTenant cleanup). The MinIO/S3 env helpers below
+// stay suite-local.
 
 func minioEndpoint(t *testing.T) string {
 	t.Helper()
@@ -64,17 +53,6 @@ func minioBucket() string {
 		return "atlas-artifacts-test"
 	}
 	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
 }
 
 func newS3Client(t *testing.T, endpoint string) *s3.Client {
@@ -114,19 +92,10 @@ func ensureBucket(t *testing.T, cli *s3.Client, bucket string) {
 
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM artifact_access_log WHERE tenant_id = $1`,
-			`DELETE FROM artifacts WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"artifact_access_log",
+		"artifacts",
+	)
 }
 
 type setup struct {
@@ -137,8 +106,7 @@ type setup struct {
 
 func setupHTTPServer(t *testing.T, tenant string) setup {
 	t.Helper()
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
 	endpoint := minioEndpoint(t)
 	bucket := minioBucket()
 	cli := newS3Client(t, endpoint)
@@ -165,11 +133,7 @@ func setupHTTPServer(t *testing.T, tenant string) setup {
 		t.Fatal("HTTPHandlerForTests nil")
 	}
 	ts := httptest.NewServer(h)
-	t.Cleanup(func() {
-		ts.Close()
-		app.Close()
-		admin.Close()
-	})
+	t.Cleanup(ts.Close)
 	return setup{server: ts, bearer: bearer, bucket: bucket}
 }
 
@@ -227,8 +191,7 @@ func getArtifact(t *testing.T, s setup, id string, ttlQuery string) (*http.Respo
 
 // AC-1 + AC-2 + ISC-17 + ISC-20: round-trip upload then signed download.
 func TestHTTP_UploadThenDownload(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	s := setupHTTPServer(t, tenant)
 
@@ -287,8 +250,7 @@ func TestHTTP_UploadThenDownload(t *testing.T) {
 
 // AC-3 + ISC-21 + ISC-A1 — cross-tenant GET returns 404, not 403.
 func TestHTTP_CrossTenantReturns404(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 
@@ -318,8 +280,7 @@ func TestHTTP_CrossTenantReturns404(t *testing.T) {
 
 // AC-2 + ISC-A2 — client-requested huge TTL is clamped server-side.
 func TestHTTP_TTLClampedToOneHour(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	s := setupHTTPServer(t, tenant)
 
@@ -369,8 +330,7 @@ func TestHTTP_TTLClampedToOneHour(t *testing.T) {
 // AC-6 + ISC-22 + ISC-23 + ISC-A3 — every upload + every download adds
 // an audit row.
 func TestHTTP_AuditRowsEmitted(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	s := setupHTTPServer(t, tenant)
 
@@ -419,8 +379,7 @@ func TestHTTP_AuditRowsEmitted(t *testing.T) {
 // AC-1 oversize — body > MaxUploadBytes is rejected with 413 before
 // touching S3 or DB.
 func TestHTTP_UploadOversizeReturns413(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	s := setupHTTPServer(t, tenant)
 

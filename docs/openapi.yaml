@@ -46,15 +46,18 @@ servers:
     description: Self-hosted deployment (replace with your atlas host)
 
 tags:
+  - name: action-plans
   - name: activity
   - name: admin-audit-log
   - name: admin-audit-periods
   - name: admin-authz-bundle
   - name: admin-credentials
+  - name: admin-crosswalk-tier
   - name: admin-demo
   - name: admin-evidence
   - name: admin-exceptions
   - name: admin-feature-flags
+  - name: admin-framework-versions
   - name: admin-group-role-mappings
   - name: admin-install
   - name: admin-policies
@@ -84,10 +87,12 @@ tags:
   - name: install
   - name: mcp
   - name: me
+  - name: oauth
   - name: oscal
   - name: policies
   - name: questionnaires
   - name: risks
+  - name: saved-views
   - name: schemas
   - name: scopes
   - name: search
@@ -98,6 +103,30 @@ tags:
   - name: walkthroughs
 
 paths:
+  /.well-known/jwks.json:
+    get:
+      summary: GET /.well-known/jwks.json — JWKS publication (RFC 7517)
+      tags: [oauth]
+      operationId: get-_well-known-jwks_json
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /.well-known/openid-configuration:
+    get:
+      summary: GET /.well-known/openid-configuration — OIDC discovery (RFC 8414 + OIDC Discovery 1.0)
+      tags: [oauth]
+      operationId: get-_well-known-openid-configuration
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /auth/local/login:
     post:
       summary: POST /auth/local/login
@@ -165,6 +194,273 @@ paths:
       tags: [system]
       operationId: get-metrics
       x-internal: true
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/authorize:
+    get:
+      summary: GET /oauth/authorize — authorization endpoint (RFC 6749 §4.1.1 + PKCE RFC 7636)
+      tags: [oauth]
+      operationId: get-oauth-authorize
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/device_authorization:
+    post:
+      summary: POST /oauth/device_authorization — device authorization endpoint (RFC 8628)
+      tags: [oauth]
+      operationId: post-oauth-device_authorization
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/device_authorization/approve:
+    post:
+      summary: POST /oauth/device_authorization/approve — atlas-internal device approval hook
+      tags: [oauth]
+      operationId: post-oauth-device_authorization-approve
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/device_authorization/deny:
+    post:
+      summary: POST /oauth/device_authorization/deny — atlas-internal device denial hook
+      tags: [oauth]
+      operationId: post-oauth-device_authorization-deny
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/introspect:
+    post:
+      summary: POST /oauth/introspect — token introspection (RFC 7662; client auth in body/header)
+      tags: [oauth]
+      operationId: post-oauth-introspect
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/revoke:
+    post:
+      summary: POST /oauth/revoke — token revocation (RFC 7009; client auth in body/header)
+      tags: [oauth]
+      operationId: post-oauth-revoke
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /oauth/token:
+    post:
+      summary: POST /oauth/token — token endpoint, dispatches the supported grants (RFC 6749)
+      tags: [oauth]
+      operationId: post-oauth-token
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/action-plans:
+    get:
+      summary: GET /v1/action-plans
+      tags: [action-plans]
+      operationId: get-v1-action-plans
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/action-plans
+      tags: [action-plans]
+      operationId: post-v1-action-plans
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/action-plans/{id}:
+    delete:
+      summary: DELETE /v1/action-plans/{id}
+      tags: [action-plans]
+      operationId: delete-v1-action-plans-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    get:
+      summary: GET /v1/action-plans/{id}
+      tags: [action-plans]
+      operationId: get-v1-action-plans-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    patch:
+      summary: PATCH /v1/action-plans/{id}
+      tags: [action-plans]
+      operationId: patch-v1-action-plans-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/action-plans/{id}/controls/{control_id}:
+    delete:
+      summary: DELETE /v1/action-plans/{id}/controls/{control_id}
+      tags: [action-plans]
+      operationId: delete-v1-action-plans-id-controls-control_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: control_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/action-plans/{id}/controls/{control_id}
+      tags: [action-plans]
+      operationId: post-v1-action-plans-id-controls-control_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: control_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/action-plans/{id}/risks/{risk_id}:
+    delete:
+      summary: DELETE /v1/action-plans/{id}/risks/{risk_id}
+      tags: [action-plans]
+      operationId: delete-v1-action-plans-id-risks-risk_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: risk_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/action-plans/{id}/risks/{risk_id}
+      tags: [action-plans]
+      operationId: post-v1-action-plans-id-risks-risk_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: risk_id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
@@ -337,6 +633,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-edges/{id}/tier:
+    post:
+      summary: POST /v1/admin/crosswalk-edges/{id}/tier — transition a crosswalk mapping's trust tier (slice 483)
+      tags: [admin-crosswalk-tier]
+      operationId: post-v1-admin-crosswalk-edges-id-tier
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/demo/seed:
     post:
       summary: POST /v1/admin/demo/seed
@@ -430,6 +746,94 @@ paths:
         - adminBearer: []
       parameters:
         - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/migrations:
+    get:
+      summary: GET /v1/admin/framework-versions/migrations — list the version-migration review queue (slice 484)
+      tags: [admin-framework-versions]
+      operationId: get-v1-admin-framework-versions-migrations
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/migrations/{id}/decision:
+    post:
+      summary: POST /v1/admin/framework-versions/migrations/{id}/decision — approve/reject one migration suggestion (slice 484)
+      tags: [admin-framework-versions]
+      operationId: post-v1-admin-framework-versions-migrations-id-decision
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/migrations:suggest:
+    post:
+      summary: POST /v1/admin/framework-versions/migrations:suggest — run the migration-suggest job for a version pair (slice 484)
+      tags: [admin-framework-versions]
+      operationId: post-v1-admin-framework-versions-migrations_suggest
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/{id}/promote:
+    post:
+      summary: POST /v1/admin/framework-versions/{id}/promote — promote a framework version to current (slice 484)
+      tags: [admin-framework-versions]
+      operationId: post-v1-admin-framework-versions-id-promote
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/framework-versions/{id}/revert:
+    post:
+      summary: POST /v1/admin/framework-versions/{id}/revert — reverse a version promotion (slice 484)
+      tags: [admin-framework-versions]
+      operationId: post-v1-admin-framework-versions-id-revert
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
           in: path
           required: true
           schema:
@@ -1414,6 +1818,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/board/narrative/approve:
+    post:
+      summary: POST /v1/board/narrative/approve
+      tags: [board]
+      operationId: post-v1-board-narrative-approve
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/board/narrative/generate:
+    post:
+      summary: POST /v1/board/narrative/generate
+      tags: [board]
+      operationId: post-v1-board-narrative-generate
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/calendar:
     get:
       summary: GET /v1/calendar
@@ -1584,6 +2016,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/action-plans:
+    get:
+      summary: GET /v1/controls/{id}/action-plans
+      tags: [action-plans]
+      operationId: get-v1-controls-id-action-plans
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/applicability:
     get:
       summary: GET /v1/controls/{id}/applicability
@@ -1744,6 +2196,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/owner:
+    post:
+      summary: POST /v1/controls/{id}/owner
+      tags: [controls]
+      operationId: post-v1-controls-id-owner
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/policies:
     get:
       summary: GET /v1/controls/{id}/policies
@@ -1797,6 +2269,20 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls:bulk-assign-owner:
+    post:
+      summary: POST /v1/controls:bulk-assign-owner
+      tags: [controls]
+      operationId: post-v1-controls_bulk-assign-owner
+      security:
+        - bearer: []
       responses:
         default:
           description: Default response envelope.
@@ -3774,6 +4260,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/action-plans:
+    get:
+      summary: GET /v1/risks/{id}/action-plans
+      tags: [action-plans]
+      operationId: get-v1-risks-id-action-plans
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/aggregation:
     get:
       summary: GET /v1/risks/{id}/aggregation
@@ -3917,6 +4423,53 @@ paths:
       summary: POST /v1/samples/{id}/annotations
       tags: [audit-samples]
       operationId: post-v1-samples-id-annotations
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/saved-views:
+    get:
+      summary: GET /v1/saved-views
+      tags: [saved-views]
+      operationId: get-v1-saved-views
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/saved-views
+      tags: [saved-views]
+      operationId: post-v1-saved-views
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/saved-views/{id}:
+    delete:
+      summary: DELETE /v1/saved-views/{id}
+      tags: [saved-views]
+      operationId: delete-v1-saved-views-id
       security:
         - bearer: []
       parameters:

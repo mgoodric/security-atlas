@@ -22,9 +22,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -32,58 +30,11 @@ import (
 	apicontrols "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 )
-
-func appPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL_APP")
-	if dsn == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
-func adminPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
-func freshTenantList(t *testing.T, admin *pgxpool.Pool) string {
-	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
-}
 
 // insertAnchor seeds a global SCF anchor (no tenant) so a tenant
 // control can FK to a real anchor id.
@@ -190,10 +141,10 @@ func callList(t *testing.T, pool *pgxpool.Pool, tenantID string) *httptest.Respo
 
 func TestList_EmptyTenant(t *testing.T) {
 	t.Parallel()
-	admin := adminPool(t)
-	app := appPool(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
-	tenant := freshTenantList(t, admin)
+	tenant := dbtest.SeedTenant(t, admin, "controls")
 	rr := callList(t, app, tenant)
 
 	if rr.Code != http.StatusOK {
@@ -219,10 +170,10 @@ func TestList_EmptyTenant(t *testing.T) {
 
 func TestList_PopulatedTenant(t *testing.T) {
 	t.Parallel()
-	admin := adminPool(t)
-	app := appPool(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
-	tenant := freshTenantList(t, admin)
+	tenant := dbtest.SeedTenant(t, admin, "controls")
 	anchor := insertAnchor(t, admin, "IAC-06", "Identity & Access Mgmt")
 	want1 := insertControl(t, admin, tenant, anchor, "Access review quarterly", "Identity & Access Mgmt", "ctrl-iac-06")
 	want2 := insertControl(t, admin, tenant, anchor, "MFA enforced", "Identity & Access Mgmt", "ctrl-iac-06-mfa")
@@ -261,11 +212,11 @@ func TestList_PopulatedTenant(t *testing.T) {
 
 func TestList_TenantIsolation(t *testing.T) {
 	t.Parallel()
-	admin := adminPool(t)
-	app := appPool(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
-	tenantA := freshTenantList(t, admin)
-	tenantB := freshTenantList(t, admin)
+	tenantA := dbtest.SeedTenant(t, admin, "controls")
+	tenantB := dbtest.SeedTenant(t, admin, "controls")
 	anchor := insertAnchor(t, admin, "IAC-06", "Identity & Access Mgmt")
 	tenantAControl := insertControl(t, admin, tenantA, anchor, "Tenant A only", "Identity & Access Mgmt", "ctrl-iac-06-a")
 

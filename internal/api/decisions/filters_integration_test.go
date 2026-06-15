@@ -26,7 +26,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -40,51 +39,22 @@ import (
 	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/decision"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool pool/DSN boilerplate this file
+// used to re-derive now lives in the shared internal/dbtest harness (NewAppPool
+// = RLS-enforcing atlas_app default; NewMigratePool = privileged BYPASSRLS for
+// seeding + freshTenant cleanup).
 
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		if _, err := admin.Exec(context.Background(),
-			`DELETE FROM decisions WHERE tenant_id = $1`, tenant); err != nil {
-			t.Logf("cleanup decisions: %v", err)
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"decisions",
+	)
 }
 
 // seedDecision inserts a decision row directly (admin/BYPASSRLS) so the
@@ -179,8 +149,8 @@ func idsOf(body map[string]any) map[string]bool {
 // ===== ISC-29: richer filters work and compose =====
 
 func TestListDecisions_RicherFiltersComposeAndWork(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -260,8 +230,8 @@ func TestListDecisions_RicherFiltersComposeAndWork(t *testing.T) {
 // ===== ISC-29: RLS isolation across tenants =====
 
 func TestListDecisions_RLSIsolatedAcrossTenants(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 
@@ -283,8 +253,8 @@ func TestListDecisions_RLSIsolatedAcrossTenants(t *testing.T) {
 // ===== ISC-29: 403 for a role without program-read access =====
 
 func TestListDecisions_403WithoutProgramRead(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	r := noRoleRouter(t, app, tenant)
 	ts := httptest.NewServer(r)

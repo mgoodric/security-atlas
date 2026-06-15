@@ -1,73 +1,96 @@
 // Slice 098 — Playwright E2E for the /controls list view.
 //
-// Runner status (post-slice-069 / 071 audit):
-// Playwright IS installed in `web/`. This spec is quarantined behind
-// slice 082 (the seed-data harness) per slice 079's decision; when that
-// harness lands, the un-commented assertions below become the gate. The
-// test bodies are preserved verbatim as a reviewable contract per the
-// slice 040 / 042 / 056 / 060 / 064 / 071 / 094 precedent.
+// Slice 743 — UN-QUARANTINED. This spec was quarantined behind the
+// slice-082 seed-data harness per slice 079's decision. Slice 743 wires
+// it to `seedFromFixture("controls-list")` and un-comments the slice-098
+// (AC-1 / AC-3 / AC-4 / AC-6), slice-448 (AC-1 / AC-3 / AC-4 / AC-5),
+// and slice-468 (AC-2) assertion bodies so the controls-list spec joins
+// the gated `Frontend · Playwright e2e` CI rotation.
+//
+// The fixture seeds its OWN current-SCF spine + 3 anchors (the CI e2e
+// database has no SCF import step, so `scf_anchors` is otherwise empty)
+// and mirrors each anchor id into a matching `controls` row so the
+// slice-468 bulk-assign-owner round-trip resolves a real control per
+// selected row. See fixtures/e2e/controls-list.sql for the full
+// rationale.
+//
+// STILL QUARANTINED (preconditions out of scope for slice 743's seed):
+//   - slice 224 (Scope pill) — needs a 2nd scope cell + per-cell
+//     control_evaluations rows.
+//   - slice 226 (Frameworks column) — needs fw_to_scf_edges crosswalk
+//     rows so an anchor carries a non-empty frameworks set.
+//   - slice 227 (pagination footer) — needs >=51 anchors for a 2-page
+//     result.
+//   - slice 225 (New-control disclosure) — a toolbar-copy assertion
+//     orthogonal to the seed; left for a focused un-quarantine.
+// These bodies stay commented; a later slice that seeds their
+// preconditions turns them on (P0-743-3 — no assertion is relaxed to
+// pass).
 //
 // Run locally:
 //   cd web
 //   npx playwright install chromium     # once per machine
 //   npx playwright test e2e/controls-list.spec.ts
-//
-// Pre-conditions the seed-data harness (slice 082) must establish
-// before the commented assertions are turned on:
-//   - PLATFORM_BASE_URL points at a running platform instance
-//   - TEST_BEARER carries a credential in a tenant that has at least
-//     the seeded SCF anchor catalog loaded (slice 006 SCF import is
-//     enough — no per-tenant control instantiation required for v1).
-//   - At least three families represented (the design assumes the user
-//     can filter by family).
-//
-// AC-8 coverage targets: list renders, filter narrows results, empty
-// state appears on no-match, row click navigates.
 
-import { test } from "@playwright/test";
+import { expect, test } from "./fixtures";
+
+import { seedFromFixture } from "./seed";
 
 test.describe("/controls list view", () => {
-  test("AC-1: /controls renders the anchor table for any signed-in user", async () => {
-    //    await page.goto("/login");
-    //    await page.fill('input[name="token"]', process.env.TEST_BEARER!);
-    //    await page.click("button[type=submit]");
-    //    await page.goto("/controls");
-    //    await expect(page.getByRole("heading", { name: /Controls/ })).toBeVisible();
-    //    await expect(page.getByTestId("list-page")).toBeVisible();
-    //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
+  test.beforeAll(() => {
+    seedFromFixture("controls-list");
   });
 
-  test("AC-3: horizontal pill filter row narrows the result set", async () => {
-    //    await page.goto("/controls");
-    //    const initial = await page.getByTestId("list-table-row").count();
-    //    const familyPill = page.getByLabel("Family");
-    //    await familyPill.selectOption({ index: 1 });   // first non-ALL option
-    //    await page.waitForLoadState("networkidle");
-    //    const filtered = await page.getByTestId("list-table-row").count();
-    //    expect(filtered).toBeLessThan(initial);
-    // The filter row is horizontal (P0-A2) — verify NO left sidebar.
-    //    await expect(page.getByTestId("list-filter-pills")).toBeVisible();
+  test("AC-1: /controls renders the anchor table for any signed-in user", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls");
+    await expect(page.getByRole("heading", { name: /Controls/ })).toBeVisible();
+    await expect(page.getByTestId("list-page")).toBeVisible();
+    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
   });
 
-  test("AC-4: empty state surfaces when filters return zero rows", async () => {
-    //    await page.goto("/controls?family=DOES-NOT-EXIST");
-    //    await expect(page.getByTestId("list-empty-state")).toBeVisible();
-    //    await expect(
-    //      page.getByText("No controls match these filters"),
-    //    ).toBeVisible();
-    // The CTA reads "Clear filters" and clearing returns the user to a populated table.
-    //    await page.getByTestId("list-empty-state-cta").click();
-    //    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
+  test("AC-3: horizontal pill filter row narrows the result set", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls");
+    // The list loads client-side via TanStack Query — wait for the first
+    // row to render before counting, else `initial` races the fetch to 0.
+    await expect(page.getByTestId("list-table-row").first()).toBeVisible();
+    const initial = await page.getByTestId("list-table-row").count();
+    const familyPill = page.getByLabel("Family");
+    await familyPill.selectOption({ index: 1 }); // first non-ALL option
+    await page.waitForLoadState("networkidle");
+    const filtered = await page.getByTestId("list-table-row").count();
+    expect(filtered).toBeLessThan(initial);
+    // The filter row is horizontal (P0-A2) — verify the pill row renders.
+    await expect(page.getByTestId("list-filter-pills")).toBeVisible();
   });
 
-  test("AC-6: row click navigates to /controls/[id]", async () => {
-    //    await page.goto("/controls");
-    //    const firstRow = page.getByTestId("list-table-row").first();
-    //    const scfIdLink = firstRow.getByTestId("controls-row-scf-id");
-    //    const href = await scfIdLink.getAttribute("href");
-    //    expect(href).toMatch(/^\/controls\//);
-    //    await scfIdLink.click();
-    //    await expect(page).toHaveURL(/\/controls\/[^/]+$/);
+  test("AC-4: empty state surfaces when filters return zero rows", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls?family=DOES-NOT-EXIST");
+    await expect(page.getByTestId("list-empty-state")).toBeVisible();
+    await expect(
+      page.getByText("No controls match these filters"),
+    ).toBeVisible();
+    // The CTA reads "Clear filters" and clearing returns the user to a
+    // populated table.
+    await page.getByTestId("list-empty-state-cta").click();
+    await expect(page.getByTestId("list-table-wrap")).toBeVisible();
+  });
+
+  test("AC-6: row click navigates to /controls/[id]", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls");
+    const firstRow = page.getByTestId("list-table-row").first();
+    const scfIdLink = firstRow.getByTestId("controls-row-scf-id");
+    const href = await scfIdLink.getAttribute("href");
+    expect(href).toMatch(/^\/controls\//);
+    await scfIdLink.click();
+    await expect(page).toHaveURL(/\/controls\/[^/]+$/);
   });
 
   // Slice 224 — Scope filter pill (5th pill, server-side intersection).
@@ -79,6 +102,8 @@ test.describe("/controls list view", () => {
   //   - At least one control_evaluations row recorded against each
   //     cell so the worst_per_anchor rollup narrows visibly when the
   //     pill is set.
+  // STILL QUARANTINED (slice 743): these preconditions are out of scope
+  // for the controls-list seed.
   test("slice 224 AC-1: Scope pill renders as 5th filter pill", async () => {
     //    await page.goto("/controls");
     //    await expect(page.getByTestId("list-filter-pill-framework")).toBeVisible();
@@ -117,6 +142,8 @@ test.describe("/controls list view", () => {
   //     array. The setupHTTPServer in the Go integration tests already
   //     does this for the integration suite; the seed harness must
   //     replicate the bring-up for the e2e harness.
+  // STILL QUARANTINED (slice 743): the fw_to_scf_edges crosswalk rows are
+  // out of scope for the controls-list seed.
   test("slice 226 AC-5: Frameworks column header is present", async () => {
     //    await page.goto("/controls");
     //    await expect(
@@ -159,6 +186,8 @@ test.describe("/controls list view", () => {
   //     `CONTROLS_PAGE_SIZE = 50` produces a 2-page result). The SCF
   //     bootstrap importer (slice 006) ships ~53 anchors on the
   //     atlas-edge instance, which already satisfies this on main.
+  // STILL QUARANTINED (slice 743): the controls-list seed ships 3
+  // anchors, not the >=51 a 2-page result needs.
   test("AC-227-1: pagination footer renders with truth-telling summary", async () => {
     //    await page.goto("/controls");
     //    const footer = page.getByTestId("controls-pagination");
@@ -230,9 +259,9 @@ test.describe("/controls list view", () => {
     //   2. No disabled `<button>` with the literal text "New control"
     //      exists anywhere on the page.
     //
-    // Quarantined behind the slice 082 seed harness like the rest of
-    // this file. Bodies left commented so the contract is reviewable;
-    // when the harness lands the assertions turn on.
+    // STILL QUARANTINED (slice 743): a toolbar-copy assertion
+    // orthogonal to the controls-list seed; left for a focused
+    // un-quarantine.
     //    await page.goto("/controls");
     //    const disclosure = page.getByTestId(
     //      "controls-new-control-disabled-reason",
@@ -254,130 +283,217 @@ test.describe("/controls list view", () => {
   // ------------------------------------------------------------------
   // Slice 448 — multi-select + saved filter-views (operator ergonomics).
   //
-  // Quarantined behind the slice 082 seed-data harness exactly like the
-  // rest of this file (the entire spec's assertions are commented; the
-  // bodies are the reviewable contract per the slice 040/094/224/227
-  // precedent). Pre-conditions the seed harness must establish before
-  // these turn on:
-  //   - PLATFORM_BASE_URL + TEST_BEARER as for the AC-1 case above (the
-  //     seeded SCF anchor catalog is enough — slice 006 import).
-  //   - At least three anchor rows so select-all-in-view + per-row
-  //     toggles exercise a non-degenerate set.
+  // Un-quarantined by slice 743. The seeded fixture ships 3 anchor rows
+  // (each backed by a tenant control of the same id), the demo user as
+  // the assign target, and a clean saved_views / owner-assignments reset.
   //
-  // SCOPE NOTE (decisions log 448 D1): the bulk-assign-OWNER action is
-  // future-state-disclosed in v1 (no per-control owner-assign mutation
-  // exists on `main`; the controls table carries a read-only owner_role
-  // string). The selection machinery + the cap surface + the saved-view
-  // persistence are the real, shipped surface; the server-backed bulk
-  // endpoint + saved-views table are the slice-448 spillover. These
-  // assertions therefore exercise the selection + saved-view UI and the
-  // bulk-assign DISCLOSURE — not a live mutation POST.
-  test("slice 448 AC-1: each row carries a select checkbox + a select-all header", async () => {
-    //    await page.goto("/controls");
-    //    await expect(page.getByTestId("controls-select-all")).toBeVisible();
-    //    const rowChecks = page.getByTestId("controls-row-select");
-    //    expect(await rowChecks.count()).toBeGreaterThan(0);
+  // SCOPE NOTE (decisions log 468): the slice-448 bulk-assign FUTURE-STATE
+  // disclosure was replaced by a WORKING trigger once the server-backed
+  // endpoint landed (slice 468). The slice-468 AC-2 body below drives the
+  // real mutation; the selection machinery + cap surface + saved-view
+  // persistence are exercised against the live server-backed store.
+  // NOTE on checkbox locators: the Checkbox primitive
+  // (web/components/ui/checkbox.tsx) wraps Base UI's Checkbox.Root, which
+  // renders a `role="checkbox"` element. The `data-testid` is plumbed for
+  // discoverability, but Base UI resolves the testid to multiple DOM nodes
+  // during hydration, so the unique, accessible locator is the ARIA role +
+  // its aria-label. We use getByRole for the select checkboxes; this is the
+  // stable selector, not a relaxation of the slice-448 contract.
+  test("slice 448 AC-1: each row carries a select checkbox + a select-all header", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls");
+    await expect(page.getByTestId("list-table-row").first()).toBeVisible();
+    await expect(
+      page.getByRole("checkbox", { name: "Select all controls in view" }),
+    ).toBeVisible();
+    const rowChecks = page.getByRole("checkbox", { name: /^Select control / });
+    expect(await rowChecks.count()).toBeGreaterThan(0);
   });
 
-  test("slice 448 AC-1: selecting a row reveals the selection bar with a live count", async () => {
-    //    await page.goto("/controls");
-    //    // No selection bar before any row is selected.
-    //    await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
-    //    await page.getByTestId("controls-row-select").first().click();
-    //    await expect(page.getByTestId("controls-selection-bar")).toBeVisible();
-    //    await expect(page.getByTestId("controls-selection-count")).toContainText(
-    //      "1 selected",
-    //    );
+  test("slice 448 AC-1: selecting a row reveals the selection bar with a live count", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls");
+    await expect(page.getByTestId("list-table-row").first()).toBeVisible();
+    // No selection bar before any row is selected.
+    await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
+    await page
+      .getByRole("checkbox", { name: /^Select control / })
+      .first()
+      .click();
+    await expect(page.getByTestId("controls-selection-bar")).toBeVisible();
+    await expect(page.getByTestId("controls-selection-count")).toContainText(
+      "1 selected",
+    );
   });
 
-  test("slice 448 AC-1: select-all-in-view toggles every visible row", async () => {
-    //    await page.goto("/controls");
-    //    const rowChecks = page.getByTestId("controls-row-select");
-    //    const total = await rowChecks.count();
-    //    await page.getByTestId("controls-select-all").click();
-    //    await expect(page.getByTestId("controls-selection-count")).toContainText(
-    //      `${total} selected`,
-    //    );
-    //    // Toggling the header again clears the visible selection.
-    //    await page.getByTestId("controls-select-all").click();
-    //    await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
+  test("slice 448 AC-1: select-all-in-view toggles every visible row", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls");
+    await expect(page.getByTestId("list-table-row").first()).toBeVisible();
+    const rowChecks = page.getByRole("checkbox", { name: /^Select control / });
+    const total = await rowChecks.count();
+    const selectAll = page.getByRole("checkbox", {
+      name: "Select all controls in view",
+    });
+    await selectAll.click();
+    await expect(page.getByTestId("controls-selection-count")).toContainText(
+      `${total} selected`,
+    );
+    // Toggling the header again clears the visible selection.
+    await selectAll.click();
+    await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
 
-  test("slice 448 AC-2: the bulk-assign action is disclosed as future-state (no vapor POST)", async () => {
-    //    await page.goto("/controls");
-    //    await page.getByTestId("controls-row-select").first().click();
-    //    const disclosure = page.getByTestId("controls-bulk-assign-future");
-    //    await expect(disclosure).toBeVisible();
-    //    // Load-bearing substring (pinned so a copy rewrite is one place).
-    //    const text = (await disclosure.textContent())?.toLowerCase() ?? "";
-    //    expect(text).toContain("bulk assign-owner");
-    //    const title = await disclosure.getAttribute("title");
-    //    expect(title?.toLowerCase()).toContain("bulk assign-owner");
-    //    // It is NOT a <button> firing a mutation — the disclosure IS the
-    //    // affordance (slice 225 label-honesty pattern).
-    //    await expect(
-    //      page.locator("button", { hasText: /^Bulk assign-owner/ }),
-    //    ).toHaveCount(0);
+  // Slice 468 — the bulk-assign action is now a WORKING trigger (the
+  // slice-448 future-state disclosure was replaced once the server-backed
+  // endpoint landed). Assigning the selected set to the current user round-
+  // trips to `/v1/controls:bulk-assign-owner` (the upstream re-checks role +
+  // tenant PER ITEM — AC-11). The seeded demo user is the assign target.
+  //
+  // The test drives the REAL round-trip end-to-end (the seed mirrors each
+  // anchor id into a tenant `controls` row of the same id, so the upstream
+  // per-item ControlExistsInTenant check resolves and the POST returns 200
+  // `{assigned:1}` — verified during slice 743). It asserts:
+  //   1. the trigger is a real <button> carrying "bulk assign-owner",
+  //   2. the success MESSAGE is observable (slice 745 — see below),
+  //   3. the selection CLEARS on success (`selected.size → 0`, which is the
+  //      page's observable success effect).
+  //
+  // RESOLVED (slice 745 — closes the slice-743 FINDING): the success MESSAGE
+  // (`controls-bulk-assign-message`) was structurally UNOBSERVABLE in the
+  // slice-468 impl: the page rendered `<SelectionBar>` (and the message
+  // lived INSIDE it) gated on `selected.size > 0`, while the bulk-assign
+  // `onSuccess` handler called `setAssignMessage(...)` AND
+  // `setSelected(new Set())` in the same batched update — so `selected.size`
+  // dropped to 0 and the SelectionBar (with the message) unmounted in the
+  // same render the message was set, and "Assigned N controls to you." was
+  // never painted. Slice 745 moved the confirmation into a persistent
+  // `BulkAssignMessage` region the page renders ABOVE the table, independent
+  // of `selected.size`, so it survives the selection-clear and is now
+  // observable. The message sub-assertion below is re-enabled (AC-3).
+  test("slice 468 AC-2: bulk-assign-owner is a working trigger that assigns the selection to me", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls");
+    await expect(page.getByTestId("list-table-row").first()).toBeVisible();
+    await page
+      .getByRole("checkbox", { name: /^Select control / })
+      .first()
+      .click();
+    await expect(page.getByTestId("controls-selection-bar")).toBeVisible();
+    const trigger = page.getByTestId("controls-bulk-assign-owner");
+    await expect(trigger).toBeVisible();
+    // It IS a real <button> now (slice 468 replaced the disclosure span).
+    const text = (await trigger.textContent())?.toLowerCase() ?? "";
+    expect(text).toContain("bulk assign-owner");
+    await trigger.click();
+    // The success message confirms the round-trip (seeded user is the
+    // owner target; the upstream re-checks per item). Slice 745 fixed the
+    // structural-unobservability finding below: the confirmation now
+    // renders in a PERSISTENT `controls-bulk-assign-message` region above
+    // the table (independent of `selected.size`), so it survives the
+    // selection-clear that runs in the same batched success update and is
+    // observable here. Re-enabled per slice 745 AC-3.
+    await expect(
+      page.getByTestId("controls-bulk-assign-message"),
+    ).toContainText(/assigned \d+ control/i);
+    // Selection clears on success — the observable success effect.
+    await expect(page.getByTestId("controls-selection-bar")).toHaveCount(0);
   });
 
-  test("slice 448 AC-3: the selection cap is communicated in the selection bar", async () => {
-    //    await page.goto("/controls");
-    //    await page.getByTestId("controls-row-select").first().click();
-    //    // The cap copy is always present in the selection bar.
-    //    await expect(page.getByTestId("controls-selection-bar")).toContainText(
-    //      /cap \d+ per bulk action/,
-    //    );
-    //    // The over-cap alert is absent for a small selection. (Driving the
-    //    // selection over the cap requires a >200-row seeded catalog; the
-    //    // over-cap branch is unit-pinned in selection.test.ts — isOverCap.)
-    //    await expect(page.getByTestId("controls-selection-overcap")).toHaveCount(0);
+  test("slice 448 AC-3: the selection cap is communicated in the selection bar", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls");
+    await expect(page.getByTestId("list-table-row").first()).toBeVisible();
+    await page
+      .getByRole("checkbox", { name: /^Select control / })
+      .first()
+      .click();
+    // The cap copy is always present in the selection bar.
+    await expect(page.getByTestId("controls-selection-bar")).toContainText(
+      /cap \d+ per bulk action/,
+    );
+    // The over-cap alert is absent for a small selection. (Driving the
+    // selection over the cap requires a >200-row seeded catalog; the
+    // over-cap branch is unit-pinned in selection.test.ts — isOverCap.)
+    await expect(page.getByTestId("controls-selection-overcap")).toHaveCount(0);
   });
 
-  test("slice 448 AC-4 + AC-5: save the current filter set as a named view, then re-apply it", async () => {
-    //    // Save is disabled until a filter is active.
-    //    await page.goto("/controls");
-    //    await expect(page.getByTestId("controls-save-view-open")).toBeDisabled();
-    //    // Apply a filter, then save.
-    //    await page.getByLabel("Family").selectOption({ index: 1 });
-    //    await page.waitForLoadState("networkidle");
-    //    await expect(page.getByTestId("controls-save-view-open")).toBeEnabled();
-    //    await page.getByTestId("controls-save-view-open").click();
-    //    await page.getByTestId("controls-save-view-name").fill("Weekly triage");
-    //    await page.getByTestId("controls-save-view-confirm").click();
-    //    // The view is now selectable.
-    //    const select = page.getByTestId("controls-saved-views-select");
-    //    await expect(select).toContainText("Weekly triage");
-    //    // Clear filters (None), then re-load the saved view and confirm the
-    //    // family filter is re-applied to the URL.
-    //    await select.selectOption({ label: "None" });
-    //    await page.waitForLoadState("networkidle");
-    //    await select.selectOption({ label: "Weekly triage" });
-    //    await page.waitForLoadState("networkidle");
-    //    expect(new URL(page.url()).searchParams.get("family")).not.toBeNull();
+  test("slice 448 AC-4 + AC-5: save the current filter set as a named view, then re-apply it", async ({
+    authedPage: page,
+  }) => {
+    // Save is disabled until a filter is active.
+    await page.goto("/controls");
+    await expect(page.getByTestId("controls-save-view-open")).toBeDisabled();
+    // Apply a filter, then save.
+    await page.getByLabel("Family").selectOption({ index: 1 });
+    await page.waitForLoadState("networkidle");
+    await expect(page.getByTestId("controls-save-view-open")).toBeEnabled();
+    await page.getByTestId("controls-save-view-open").click();
+    await page.getByTestId("controls-save-view-name").fill("Weekly triage");
+    await page.getByTestId("controls-save-view-confirm").click();
+    // The view is now selectable.
+    const select = page.getByTestId("controls-saved-views-select");
+    await expect(select).toContainText("Weekly triage");
+    // Clear filters (None), then re-load the saved view and confirm the
+    // family filter is re-applied to the URL. The filter state lives in the
+    // URL (the page does router.replace), and that update is async — wait on
+    // the URL change between selections rather than networkidle, which does
+    // NOT settle a client-side router.replace.
+    await select.selectOption({ label: "None" });
+    await page.waitForURL((u) => !u.searchParams.has("family"));
+    await select.selectOption({ label: "Weekly triage" });
+    await page.waitForURL((u) => u.searchParams.has("family"));
+    expect(new URL(page.url()).searchParams.get("family")).not.toBeNull();
   });
 
-  test("slice 448 AC-4: a duplicate view name is rejected with an inline error", async () => {
-    //    await page.goto("/controls?family=IAC");
-    //    await page.getByTestId("controls-save-view-open").click();
-    //    await page.getByTestId("controls-save-view-name").fill("My view");
-    //    await page.getByTestId("controls-save-view-confirm").click();
-    //    // Save the same name again.
-    //    await page.getByTestId("controls-save-view-open").click();
-    //    await page.getByTestId("controls-save-view-name").fill("my view");
-    //    await page.getByTestId("controls-save-view-confirm").click();
-    //    await expect(page.getByTestId("controls-save-view-error")).toContainText(
-    //      /already exists/i,
-    //    );
+  test("slice 448 AC-4: a duplicate view name is rejected with an inline error", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls?family=IAC");
+    await page.getByTestId("controls-save-view-open").click();
+    await page.getByTestId("controls-save-view-name").fill("My view");
+    await page.getByTestId("controls-save-view-confirm").click();
+    // Wait for the first save to settle before re-opening.
+    await expect(page.getByTestId("controls-saved-views-select")).toContainText(
+      "My view",
+    );
+    // Save the same name again (case-insensitive duplicate).
+    await page.getByTestId("controls-save-view-open").click();
+    await page.getByTestId("controls-save-view-name").fill("my view");
+    await page.getByTestId("controls-save-view-confirm").click();
+    await expect(page.getByTestId("controls-save-view-error")).toContainText(
+      /already exists/i,
+    );
   });
 
-  test("slice 448 AC-5: a saved view can be deleted", async () => {
-    //    await page.goto("/controls?family=IAC");
-    //    await page.getByTestId("controls-save-view-open").click();
-    //    await page.getByTestId("controls-save-view-name").fill("Disposable");
-    //    await page.getByTestId("controls-save-view-confirm").click();
-    //    await page.getByTestId("controls-saved-views-delete").click();
-    //    await expect(
-    //      page.getByTestId("controls-saved-views-select"),
-    //    ).not.toContainText("Disposable");
+  // Un-quarantined by slice 746. The slice-743 finding (stale post-delete
+  // `<select>`) was a real live-impl bug: the saved-views BFF GET handler
+  // returned the browser-facing Response without `Cache-Control: no-store`,
+  // so the React-Query refetch after a DELETE could be served the
+  // browser-HTTP-cached (pre-delete) body and the deleted view lingered
+  // until a hard reload. Slice 746 attaches `Cache-Control: no-store` to the
+  // saved-views BFF GET (per-route, via the opt-in `noStore` wrapper — the
+  // shared `forwardJSON` default is unchanged), so the in-place refetch now
+  // returns the fresh (shorter) list and the deleted view drops out without
+  // a page reload. This assertion is the oracle for that fix.
+  test("slice 448 AC-5: a saved view can be deleted", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls?family=IAC");
+    await page.getByTestId("controls-save-view-open").click();
+    await page.getByTestId("controls-save-view-name").fill("Disposable");
+    await page.getByTestId("controls-save-view-confirm").click();
+    await expect(page.getByTestId("controls-saved-views-select")).toContainText(
+      "Disposable",
+    );
+    await page.getByTestId("controls-saved-views-delete").click();
+    await expect(
+      page.getByTestId("controls-saved-views-select"),
+    ).not.toContainText("Disposable");
   });
 });

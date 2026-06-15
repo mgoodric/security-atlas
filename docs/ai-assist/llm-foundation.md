@@ -140,3 +140,25 @@ predicate is authored exactly once going forward.
   the visible routing banner. It extends, it does not change, this interface.
 - **Slice 500** adds pgvector grounding — it assembles `GenerateRequest.Context`
   upstream; the client still takes pre-assembled context.
+
+## Surfaces landed on this substrate
+
+- **Slice 441 — questionnaire-answer suggestion** (`internal/qaisuggest`,
+  `surface='questionnaire'`): cited draft answers, one-click approval.
+- **Slice 444 — gap explanation** (`internal/gapexplain`): non-binding,
+  never-persisted cited explanations.
+- **Slice 471 — role-scoped control-implementation checklist**
+  (`internal/checklist`, `surface='checklist'`): per-role cited task lists.
+- **Slice 440 — board-narrative AI v0** (`internal/boardnarrative`,
+  `surface='board_narrative'`): the **highest-risk** surface. Ships ONE numbered
+  section (`control_coverage_summary`) with all seven guardrails — hybrid input,
+  per-section approval, full audit, mandatory citations, **numeric-claim
+  verification** (every number checked against the deterministic `board.Brief`
+  rollup — a fabricated statistic auto-rejects the draft), section-shape
+  enforcement, and banned-phrase tone enforcement (slice-182 list wired into the
+  system prompt). The rollup reuses the slice-031 brief data path via
+  `board.Generator.Assemble` (a read-only assemble, no `board_briefs` write).
+  Approvable record: `board_narrative_sections`, adopting the shared
+  `ai_assist_human_approver_guard` CHECK. Remaining sections, cloud-LLM opt-in,
+  and the regenerate-with-instruction affordance are follow-ons. See
+  `docs/audit-log/440-board-narrative-ai-v0-decisions.md`.

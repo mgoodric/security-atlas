@@ -8,53 +8,21 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 const (
 	tenantA = "11111111-1111-1111-1111-111111111111"
 	tenantB = "22222222-2222-2222-2222-222222222222"
 )
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-// openPool opens a pgx pool against dsn with a 10s timeout. Tests call
-// Close themselves via t.Cleanup to keep teardown deterministic.
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
 
 // ensureCatalog seeds the global catalog tables (SCF anchors + SOC 2
 // crosswalk) via the shared slice 461 helper. EnsureFullCatalog is
@@ -65,8 +33,7 @@ func openPool(t *testing.T, dsn string) *pgxpool.Pool {
 // guards that mistook a partial-DELETE leftover for "already seeded."
 func ensureCatalog(t *testing.T) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	if err := scfseed.EnsureFullCatalog(context.Background(), pool); err != nil {
 		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
 	}
@@ -77,8 +44,7 @@ func ensureCatalog(t *testing.T) {
 // because the cross-tenant tests need both tenants' controls cleared.
 func wipeTenantControls(t *testing.T) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	// TRUNCATE ... CASCADE rather than enumerate-and-DELETE: many tables
 	// FK-reference controls with ON DELETE RESTRICT — directly
 	// (evidence_records, control_evaluations, walkthroughs, exceptions,
@@ -107,8 +73,7 @@ func wipeTenantControls(t *testing.T) {
 // does not block the test setup.
 func seedControl(t *testing.T, tenantID string, scfAnchorScfID, bundleID, title string) uuid.UUID {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 
 	var anchorID uuid.UUID
 	if err := pool.QueryRow(context.Background(),
@@ -150,7 +115,7 @@ func seedControl(t *testing.T, tenantID string, scfAnchorScfID, bundleID, title 
 // (and every prior slice's) registered.
 func setupHTTPServer(t *testing.T, tenantID string) (*httptest.Server, string) {
 	t.Helper()
-	appPool := openPool(t, appDSN(t))
+	appPool := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(appPool)
 	// Slice 197: JWT bearer via slice 190 path. ViewerFor mirrors
@@ -161,10 +126,7 @@ func setupHTTPServer(t *testing.T, tenantID string) (*httptest.Server, string) {
 		t.Fatal("HTTPHandlerForTests returned nil; AttachDB did not take effect")
 	}
 	ts := httptest.NewServer(handler)
-	t.Cleanup(func() {
-		ts.Close()
-		appPool.Close()
-	})
+	t.Cleanup(ts.Close)
 	return ts, bearer
 }
 
@@ -496,8 +458,7 @@ func TestControlCoverage_FrameworkVersionPin(t *testing.T) {
 func TestControlCoverage_NullAnchorWhenUnanchored(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantControls(t)
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	id := uuid.New()
 	if _, err := pool.Exec(context.Background(), `
         INSERT INTO controls (
@@ -642,8 +603,7 @@ func TestUCFCoverage_RejectsMissingBearer(t *testing.T) {
 // table — if a future refactor adds one this test screams.
 func TestNoFrameworkToFrameworkEdgeTable(t *testing.T) {
 	ensureCatalog(t)
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	var n int
 	if err := pool.QueryRow(context.Background(), `
         SELECT count(*) FROM information_schema.tables
@@ -682,8 +642,7 @@ func TestNoFrameworkToFrameworkEdgeTable(t *testing.T) {
 // the demoseed pattern at internal/demoseed/writers.go (slice 205).
 func seedActivatedFrameworkScope(t *testing.T, tenant string, frameworkVersionID uuid.UUID, name string) uuid.UUID {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	id := uuid.New()
 	predicate := `{"op":"true"}`
 	// predicate_hash matches the demoseed shape: hex(sha256(predicate)).
@@ -707,8 +666,7 @@ func seedActivatedFrameworkScope(t *testing.T, tenant string, frameworkVersionID
 // the per-row coverage isn't null for in-scope rows.
 func seedEvaluation(t *testing.T, tenant string, controlID uuid.UUID, result string, evaluatedAt time.Time) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	id := uuid.New()
 	runID := uuid.New()
 	if _, err := pool.Exec(context.Background(), `
@@ -730,8 +688,7 @@ func seedEvaluation(t *testing.T, tenant string, controlID uuid.UUID, result str
 // the admin pool so RLS does not block setup.
 func seedScopeCell(t *testing.T, tenant string) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	const dims = `{"env":"prod"}`
 	if _, err := pool.Exec(context.Background(),
 		`INSERT INTO scope_cells (id, tenant_id, label, dimensions, dimensions_hash)
@@ -749,8 +706,7 @@ func seedScopeCell(t *testing.T, tenant string) {
 // to activate a framework_scope against.
 func soc2017FrameworkVersionID(t *testing.T) uuid.UUID {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	var id uuid.UUID
 	if err := pool.QueryRow(context.Background(),
 		`SELECT fv.id FROM framework_versions fv
@@ -782,8 +738,7 @@ func soc2017FrameworkVersionID(t *testing.T) uuid.UUID {
 // precedent in internal/evidence/ingest + internal/platform/status.)
 func wipeTenantState(t *testing.T) {
 	t.Helper()
-	pool := openPool(t, adminDSN(t))
-	defer pool.Close()
+	pool := dbtest.NewMigratePool(t)
 	if _, err := pool.Exec(context.Background(),
 		`TRUNCATE controls, framework_scopes, scope_cells RESTART IDENTITY CASCADE`); err != nil {
 		t.Fatalf("wipe tenant state (TRUNCATE CASCADE): %v", err)
@@ -1223,5 +1178,124 @@ func TestRequirementCoverage_Slice482_RLSScopedRollup(t *testing.T) {
 	}
 	if gotB.ConfidenceBand != "uncovered" {
 		t.Fatalf("RLS VIOLATION: tenant B confidence_band = %q; want uncovered — tenant A's state leaked", gotB.ConfidenceBand)
+	}
+}
+
+// TestAnchorRequirements_VersionPinNoBleed is the slice 484 load-bearing AC-7 /
+// P0-484-5 proof: two versions of ONE framework coexist; the default (no-pin)
+// read returns ONLY the current version's requirement, and pinning to the
+// legacy ("superseded") version returns ONLY that version's requirement — no
+// cross-version bleed in either direction.
+//
+// Self-contained: seeds its own framework + unique anchor with two versions so
+// it is independent of the shared SOC 2 catalog. The current version (2017)
+// carries code VSN-CUR; the legacy synthetic-rev carries VSN-LEG.
+func TestAnchorRequirements_VersionPinNoBleed(t *testing.T) {
+	ensureCatalog(t)
+	pool := dbtest.NewMigratePool(t)
+	ctx := context.Background()
+	uniq := uuid.NewString()[:8]
+	slug := "vsn-" + uniq
+
+	fwID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO frameworks (id, tenant_id, slug, name, issuer, description)
+		VALUES ($1, NULL, $2, 'slice484 no-bleed fw', 'test', '')`, fwID, slug); err != nil {
+		t.Fatalf("seed framework: %v", err)
+	}
+	// Shared SCF anchor (carries its own framework_version FK).
+	scfVerID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+		VALUES ($1, NULL, $2, 'scf-484', 'current')`, scfVerID, fwID); err != nil {
+		t.Fatalf("seed scf version: %v", err)
+	}
+	anchorSCFID := "VSN-" + uniq
+	anchorID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description)
+		VALUES ($1, $2, $3, 'IAC', 'no-bleed anchor', '')`, anchorID, scfVerID, anchorSCFID); err != nil {
+		t.Fatalf("seed anchor: %v", err)
+	}
+
+	curID := uuid.New()
+	legID := uuid.New()
+	if _, err := pool.Exec(ctx, `INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+		VALUES ($1, NULL, $2, '2017', 'current'), ($3, NULL, $2, '2017-synthetic-rev', 'legacy')`,
+		curID, fwID, legID); err != nil {
+		t.Fatalf("seed versions: %v", err)
+	}
+
+	seed := func(versionID uuid.UUID, code string) {
+		reqID := uuid.New()
+		if _, err := pool.Exec(ctx, `INSERT INTO framework_requirements (id, framework_version_id, code, title, body)
+			VALUES ($1, $2, $3, $4, '')`, reqID, versionID, code, "req "+code); err != nil {
+			t.Fatalf("seed req %s: %v", code, err)
+		}
+		edgeID := uuid.New()
+		if _, err := pool.Exec(ctx, `INSERT INTO fw_to_scf_edges
+			(id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale)
+			VALUES ($1, $2, $3, 'equal', 1.0, 'community_draft', '')`, edgeID, reqID, anchorID); err != nil {
+			t.Fatalf("seed edge %s: %v", code, err)
+		}
+	}
+	seed(curID, "VSN-CUR")
+	seed(legID, "VSN-LEG")
+
+	t.Cleanup(func() {
+		c := context.Background()
+		// The immutability trigger fires only on UPDATE (slice 484 D6), so
+		// DELETE of a frozen version's requirements is allowed.
+		_, _ = pool.Exec(c, `DELETE FROM fw_to_scf_edges WHERE framework_requirement_id IN (
+			SELECT id FROM framework_requirements WHERE framework_version_id IN ($1, $2))`, curID, legID)
+		_, _ = pool.Exec(c, `DELETE FROM framework_requirements WHERE framework_version_id IN ($1, $2)`, curID, legID)
+		_, _ = pool.Exec(c, `DELETE FROM scf_anchors WHERE id = $1`, anchorID)
+		_, _ = pool.Exec(c, `UPDATE frameworks SET latest_version_id = NULL WHERE id = $1`, fwID)
+		_, _ = pool.Exec(c, `DELETE FROM framework_versions WHERE framework_id = $1`, fwID)
+		_, _ = pool.Exec(c, `DELETE FROM frameworks WHERE id = $1`, fwID)
+	})
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+
+	codesOf := func(path string) []string {
+		resp, body := get(t, ts, path, bearer)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s status = %d; body=%s", path, resp.StatusCode, body)
+		}
+		var got struct {
+			Requirements []struct {
+				Code             string `json:"code"`
+				FrameworkVersion string `json:"framework_version"`
+			} `json:"requirements"`
+		}
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("unmarshal %s: %v\nbody=%s", path, err, body)
+		}
+		out := make([]string, 0, len(got.Requirements))
+		for _, r := range got.Requirements {
+			out = append(out, r.Code+"@"+r.FrameworkVersion)
+		}
+		return out
+	}
+
+	// Look the anchor up by UUID (the handler supports the UUID path); the
+	// scf_id path requires the anchor live under the 'scf' framework's current
+	// version, which this isolated synthetic anchor deliberately does not.
+	base := "/v1/anchors/" + anchorID.String() + "/requirements"
+
+	// Default (no pin): ONLY the current version (P0-484-5).
+	def := codesOf(base)
+	if len(def) != 1 || def[0] != "VSN-CUR@2017" {
+		t.Fatalf("default read should return ONLY the current version, got %v", def)
+	}
+
+	// Pinned to the legacy version: ONLY the legacy row (legacy readable when
+	// explicitly pinned — ADR 0019 §4), no current bleed.
+	leg := codesOf(base + "?framework_version=" + slug + ":2017-synthetic-rev")
+	if len(leg) != 1 || leg[0] != "VSN-LEG@2017-synthetic-rev" {
+		t.Fatalf("legacy pin should return ONLY the legacy version, got %v", leg)
+	}
+
+	// Pinned to current: ONLY the current row.
+	cur := codesOf(base + "?framework_version=" + slug + ":2017")
+	if len(cur) != 1 || cur[0] != "VSN-CUR@2017" {
+		t.Fatalf("current pin should return ONLY the current version, got %v", cur)
 	}
 }

@@ -5,8 +5,12 @@
 version selection
 **Type:** JUDGMENT (the 1:1 migration-suggestion heuristic + the
 deprecated-version read policy are subjective calls)
-**Status:** `not-ready` (depends on a second version of an already-loaded
-framework existing to migrate between — see Dependencies)
+**Status:** `ready` (decision recorded 2026-06-15 in
+[`docs/adr/0019-framework-versioning-capability.md`](../adr/0019-framework-versioning-capability.md):
+prior version → `superseded` on promotion (enum value already exists); migration-suggest is
+**exact requirement-code match only** (rest flagged for human review, never auto-applied);
+superseded versions readable when explicitly pinned, reads default to `current`; the proof loads a
+**synthetic adjacent SOC 2 revision** alongside SOC 2:2017. The AC-10 ADR is satisfied by 0019.)
 
 ## Narrative
 
@@ -203,13 +207,10 @@ is a review queue, not an applied change — approval is the privileged act.
   requirements + edges pinned to a `framework_version_id`.
 - **#006** (SCF catalog importer) — `merged`. The SCF-release pin half of the
   §3.3 dual-pin.
-- **A second version of an already-loaded framework** — the capability needs two
-  versions of one framework to migrate between. This slice loads that second
-  version (synthetic or a genuine adjacent revision) as part of its proof.
-  Marked `not-ready` until at least one framework has a stable first version on
-  `main` to add a second version to (SOC 2:2017 / ISO:2022 qualify — so the
-  block is light; flip to `ready` once the implementing agent picks the concrete
-  second version to load).
+- **A second version of an already-loaded framework** — RESOLVED 2026-06-15 (ADR 0019):
+  the proof loads a **synthetic adjacent SOC 2 revision** alongside the on-`main` SOC 2:2017,
+  clearly labeled synthetic. No upstream sourcing needed; the block is lifted and the slice is
+  `ready`.
 - **#028** (audit-period freezing) — `merged`. Composes; version pin × freeze.
 
 ## Anti-criteria (P0 — block merge)

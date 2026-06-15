@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // Slice 480 integration suite — the FRAMEWORK-AGNOSTIC crosswalk importer
@@ -61,7 +62,7 @@ func resetCSF(t *testing.T, pool *pgxpool.Pool) {
 // AC-2 + AC-6 — importing the CSF crosswalk creates framework_requirements +
 // fw_to_scf_edges rows for NIST CSF 2.0, and re-importing is idempotent.
 func TestCSFImport_CreatesRowsAndIsIdempotent(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCSF(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCSFCrosswalk(t)
@@ -99,7 +100,7 @@ func TestCSFImport_CreatesRowsAndIsIdempotent(t *testing.T) {
 // AC-2 — importing CSF does NOT disturb the SOC 2 / ISO / PCI rows; all four
 // frameworks coexist in the same graph with distinct framework_version_ids.
 func TestCSFImport_DoesNotDisturbOtherFrameworks(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	resetPCI(t, pool)
@@ -170,7 +171,7 @@ func TestCSFImport_DoesNotDisturbOtherFrameworks(t *testing.T) {
 // with the STRM edge type. Mirrors the query the GET
 // /v1/requirements/{slug}/anchors read path runs. CSF PR.AA-01 -> IAC-01.
 func TestCSFImport_RequirementResolvesToAnchorsWithSTRMType(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCSF(t, pool)
 	ensureSCFLoaded(t, pool)
 	if _, err := soc2import.Import(context.Background(), pool, loadCSFCrosswalk(t)); err != nil {
@@ -219,7 +220,7 @@ func TestCSFImport_RequirementResolvesToAnchorsWithSTRMType(t *testing.T) {
 // invariant #1 demonstrated at four frameworks: one control, N frameworks, NO
 // per-framework duplicated control and NO requirement -> requirement edge.
 func TestCSFImport_SharedAnchorSatisfiesFourFrameworks_Invariant1(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	resetPCI(t, pool)
@@ -323,7 +324,7 @@ func TestCSFImport_SharedAnchorSatisfiesFourFrameworks_Invariant1(t *testing.T) 
 // CSF GOVERN reaches governance coverage ONLY through an SCF anchor, never via
 // a CSF -> SOC 2 requirement-to-requirement edge.
 func TestCSFImport_GovernFunctionMapsToGovernanceAnchor_NoSOC2Analog(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetCSF(t, pool)
 	ensureSCFLoaded(t, pool)
@@ -400,7 +401,7 @@ func TestCSFImport_GovernFunctionMapsToGovernanceAnchor_NoSOC2Analog(t *testing.
 // is a clear loader error, not a panic and not a dangling edge. The whole
 // import rolls back, leaving no CSF requirement rows behind.
 func TestCSFImport_RejectsEdgeToNonexistentAnchor(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCSF(t, pool)
 	ensureSCFLoaded(t, pool)
 

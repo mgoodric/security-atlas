@@ -11,6 +11,17 @@ import (
 )
 
 type Querier interface {
+	ActionPlanControlExists(ctx context.Context, arg ActionPlanControlExistsParams) (bool, error)
+	// AC-19: same cross-tenant deny for controls.
+	ActionPlanControlExistsInTenant(ctx context.Context, arg ActionPlanControlExistsInTenantParams) (bool, error)
+	// AC-10 tampering guard: owner_id must resolve to a user in the caller's
+	// tenant. RLS hides cross-tenant users.
+	ActionPlanOwnerExistsInTenant(ctx context.Context, arg ActionPlanOwnerExistsInTenantParams) (bool, error)
+	ActionPlanRiskExists(ctx context.Context, arg ActionPlanRiskExistsParams) (bool, error)
+	// ===== existence probes for cross-tenant linkage guards =====
+	// AC-17/AC-29: a risk_id that does not resolve in the caller's tenant is a
+	// 404 (cross-tenant deny). RLS hides the cross-tenant row so EXISTS is false.
+	ActionPlanRiskExistsInTenant(ctx context.Context, arg ActionPlanRiskExistsInTenantParams) (bool, error)
 	// HITL transition: staged -> active OR inactive -> active (reactivation).
 	// Sets activated_by + activated_at; the engine reads activated_at as the
 	// "do not consider risks older than this" cut-off so re-activation never
@@ -37,6 +48,12 @@ type Querier interface {
 	// Idempotent: ON CONFLICT DO NOTHING because the PK already enforces no
 	// duplicates, so re-adding is a no-op.
 	AddVendorScopeCell(ctx context.Context, arg AddVendorScopeCellParams) error
+	// ApproveBoardNarrativeSection records the operator's edited final text +
+	// approver and flips human_approved=TRUE (one-click per section). The DB CHECK
+	// makes human_approved=TRUE with a blank approver impossible (P0-440-2); the
+	// service rejects a blank approver before this call. Scoped to the tenant +
+	// the AI-assisted draft; an absent/cross-tenant id returns no row.
+	ApproveBoardNarrativeSection(ctx context.Context, arg ApproveBoardNarrativeSectionParams) (BoardNarrativeSection, error)
 	// One-click per-section approval (AC-10): flip human_approved=TRUE + record the
 	// approver on an AI-assisted, currently-unapproved section. The
 	// ai_assisted=TRUE AND human_approver IS NOT NULL guard in the WHERE means an
@@ -105,9 +122,16 @@ type Querier interface {
 	ClaimStalenessRollup(ctx context.Context, arg ClaimStalenessRollupParams) (pgtype.UUID, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
+	// Per-item existence + tenant check (AC-6 / AC-7): does this control id
+	// exist and is it visible to the calling tenant? Run inside the tenant-GUC
+	// tx so RLS hides cross-tenant rows — a control in another tenant returns
+	// false. The bulk path calls this per submitted id before any mutation.
+	ControlExistsInTenant(ctx context.Context, arg ControlExistsInTenantParams) (bool, error)
 	// Count of all generations for the current tenant. Used by the cross-tenant
 	// isolation integration test to prove tenant B sees zero of tenant A's rows.
 	CountAIGenerationsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	CountActionPlanControls(ctx context.Context, arg CountActionPlanControlsParams) (int64, error)
+	CountActionPlanRisks(ctx context.Context, arg CountActionPlanRisksParams) (int64, error)
 	// Count of all checklist sections visible to the caller's tenant. Used by the
 	// cross-tenant isolation integration test to prove tenant B sees zero of
 	// tenant A's rows (AC-8).
@@ -158,6 +182,9 @@ type Querier interface {
 	// Total group count in the tenant (List envelope totalResults).
 	CountSCIMGroups(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountSCIMUsers(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// The user's saved-view count for a surface — used to enforce the per-user
+	// cap before INSERT.
+	CountSavedViews(ctx context.Context, arg CountSavedViewsParams) (int64, error)
 	CountScopeCells(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Return the row count for the caller's tenant. Used by the slice 126
 	// integration test to assert exactly-1 fallback row after the 10001-record
@@ -178,6 +205,10 @@ type Querier interface {
 	// Returns one row per criticality present in the result set; empty bands are
 	// not included (callers fill in zero where needed).
 	CountVendorsForBurndown(ctx context.Context, arg CountVendorsForBurndownParams) ([]CountVendorsForBurndownRow, error)
+	// ActionPlan primitive (slice 384). Tenant-scoped CRUD + M2M linkage +
+	// append-only audit log. Every query filters tenant_id explicitly (RLS is
+	// the backstop; the explicit predicate keeps the plan index-friendly).
+	CreateActionPlan(ctx context.Context, arg CreateActionPlanParams) (ActionPlan, error)
 	// Insert a parent risk for slice 053 manual aggregation. The shape mirrors
 	// CreateRisk but with `level`, `org_unit_id`, and `themes` plumbed through —
 	// those columns exist on `risks` per slice 052's ALTER. The aggregated
@@ -418,6 +449,10 @@ type Querier interface {
 	// independent of parent).
 	DeleteOrgUnit(ctx context.Context, arg DeleteOrgUnitParams) error
 	DeleteRisk(ctx context.Context, arg DeleteRiskParams) error
+	// Delete one of the caller's own views. The user_id predicate means a
+	// caller can never delete another user's view even within the same tenant.
+	// RETURNING lets the handler 404 when the id was not the caller's.
+	DeleteSavedView(ctx context.Context, arg DeleteSavedViewParams) (pgtype.UUID, error)
 	// Tenant-private themes only — the policy forbids deleting defaults
 	// regardless of what this query asks for.
 	DeleteTenantTheme(ctx context.Context, arg DeleteTenantThemeParams) error
@@ -530,6 +565,9 @@ type Querier interface {
 	GetAPIKeyByID(ctx context.Context, arg GetAPIKeyByIDParams) (ApiKey, error)
 	// Idempotency lookup for the handler's deduplicate path.
 	GetAcknowledgmentByToken(ctx context.Context, arg GetAcknowledgmentByTokenParams) (PolicyAcknowledgment, error)
+	// Live (non-tombstoned) plan by id. A tombstoned plan reads as absent
+	// (AC-14: subsequent GET returns 404).
+	GetActionPlanByID(ctx context.Context, arg GetActionPlanByIDParams) (ActionPlan, error)
 	// Returns the currently-active framework scope for a given framework version,
 	// i.e. the (at most one) row in state `activated` for that (tenant, fv) pair.
 	// AC-3: a partial UNIQUE index guarantees at most one row matches.
@@ -585,6 +623,9 @@ type Querier interface {
 	// 404). The returned `content` + `narrative_md` are the verbatim frozen
 	// snapshot — AC-5 (re-fetch returns the original content).
 	GetBoardBriefByID(ctx context.Context, arg GetBoardBriefByIDParams) (BoardBrief, error)
+	// GetBoardNarrativeSectionByID returns one section by id under the caller's
+	// tenant (used by the approval flow + tests).
+	GetBoardNarrativeSectionByID(ctx context.Context, arg GetBoardNarrativeSectionByIDParams) (BoardNarrativeSection, error)
 	// Fetch one pack by id. RLS scopes the lookup to the caller's tenant — a
 	// cross-tenant id returns ErrNoRows (the handler maps that to 404). Works
 	// for both draft and published packs.
@@ -598,9 +639,22 @@ type Querier interface {
 	// is TEXT (slice 002); slice 017 stores JSON in that text.
 	GetControlApplicabilityExpr(ctx context.Context, arg GetControlApplicabilityExprParams) (GetControlApplicabilityExprRow, error)
 	GetControlByID(ctx context.Context, arg GetControlByIDParams) (GetControlByIDRow, error)
+	// Slice 468: server-backed control owner-assignment + saved filter-views.
+	//
+	// Every query here is tenant-scoped on tenant_id ($1 or sqlc.arg) AND runs
+	// inside a tenant-GUC tx — RLS is the real boundary; the explicit tenant_id
+	// predicate keeps the query plan tight and is belt-and-braces. The single-
+	// item assign path and the bulk path BOTH go through UpsertControlOwner so
+	// the per-item write is byte-identical (no drift — P0-467-1 / AC-11).
+	// The current owner-user assignment for a control (if any). Returns
+	// pgx.ErrNoRows when the control has no assigned owner-user yet.
+	GetControlOwnerAssignment(ctx context.Context, arg GetControlOwnerAssignmentParams) (ControlOwnerAssignment, error)
 	GetCsfProfile(ctx context.Context, arg GetCsfProfileParams) (CsfProfile, error)
 	GetCsfProfileByID(ctx context.Context, arg GetCsfProfileByIDParams) (CsfProfile, error)
 	GetCsfTierRating(ctx context.Context, arg GetCsfTierRatingParams) (CsfTierRating, error)
+	// The framework's current (status='current') global-catalog version, if any.
+	// Returns ErrNoRows when no current version exists yet.
+	GetCurrentFrameworkVersion(ctx context.Context, frameworkID pgtype.UUID) (FrameworkVersion, error)
 	// Lookup by the human-readable decision_id ("DL-2026-04-12"). Unique within
 	// tenant (UNIQUE (tenant_id, decision_id)).
 	GetDecisionByDecisionID(ctx context.Context, arg GetDecisionByDecisionIDParams) (Decision, error)
@@ -648,6 +702,7 @@ type Querier interface {
 	// Returns the row for (tenant, flag_key). pgx.ErrNoRows when absent; the
 	// application falls back to the seed default in that case.
 	GetFeatureFlag(ctx context.Context, arg GetFeatureFlagParams) (FeatureFlag, error)
+	GetFrameworkByID(ctx context.Context, id pgtype.UUID) (Framework, error)
 	// Same as above but uses the framework's "current" version. Convenience
 	// query so callers can omit the version (e.g., "soc2::CC6.6").
 	GetFrameworkRequirementByCurrentVersion(ctx context.Context, arg GetFrameworkRequirementByCurrentVersionParams) (FrameworkRequirement, error)
@@ -666,15 +721,36 @@ type Querier interface {
 	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
 	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
 	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
+	// slice 484: framework-versioning capability — the lifecycle + migration-suggest
+	// review queue + audit queries (ADR 0019). All targets are CATALOG tables (no
+	// tenant RLS); the trust gate is admin-role authz + the append-only audit.
+	// ===== version lifecycle =====
+	// Plain read of one framework_version. Returns ErrNoRows for an unknown id.
+	GetFrameworkVersionByID(ctx context.Context, id pgtype.UUID) (FrameworkVersion, error)
+	// Row-lock the version inside the promotion transaction so a concurrent
+	// promote/revert cannot race the read-validate-write window.
+	GetFrameworkVersionByIDForUpdate(ctx context.Context, id pgtype.UUID) (FrameworkVersion, error)
 	// Resolves "?framework_version=slug:version" into a framework_versions
 	// row. Used by both the anchor->requirements and control->coverage
 	// handlers to translate the URL param into a stable id for the pinned
 	// traversal. NULL tenant_id constraint scopes to the global catalog.
 	GetFrameworkVersionBySlugAndVersion(ctx context.Context, arg GetFrameworkVersionBySlugAndVersionParams) (FrameworkVersion, error)
+	// Row-lock one queue entry inside the approve/reject tx. Returns ErrNoRows for
+	// an unknown id.
+	GetFrameworkVersionMigrationForUpdate(ctx context.Context, id pgtype.UUID) (FrameworkVersionMigration, error)
 	// Look up one edge by (requirement, anchor). Returns ErrNoRows when the
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// ===== slice 483: crosswalk mapping-tier governance =====
+	// Read the current trust tier of one edge by id. The transition store calls
+	// this FOR UPDATE (see GetFwToScfEdgeTierForUpdate) inside the tx; this plain
+	// variant is for read-only callers. Returns ErrNoRows for an unknown edge.
+	GetFwToScfEdgeTier(ctx context.Context, id pgtype.UUID) (GetFwToScfEdgeTierRow, error)
+	// Row-lock the edge's tier inside the transition transaction so a concurrent
+	// transition cannot race the read-validate-write window. Returns ErrNoRows for
+	// an unknown edge (the handler maps that to 404).
+	GetFwToScfEdgeTierForUpdate(ctx context.Context, id pgtype.UUID) (GetFwToScfEdgeTierForUpdateRow, error)
 	// Single mapping by id within the tenant. 404 (ErrNoRows) when absent.
 	GetGroupRoleMapping(ctx context.Context, arg GetGroupRoleMappingParams) (OidcIdpGroupMapping, error)
 	// Fetch one imported catalog by id. RLS scopes to the caller's tenant; a
@@ -964,7 +1040,20 @@ type Querier interface {
 	// precision and truncates sub-us nanos), so the verify walk reconstructs the
 	// exact nanosecond timestamp the hash covered.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
+	// ===== audit (append-only) =====
+	// One immutable audit row per lifecycle transition or migration decision
+	// (threat-model R / AC-1 / AC-4). Written in the SAME tx as the act.
+	InsertFrameworkVersionAudit(ctx context.Context, arg InsertFrameworkVersionAuditParams) (FrameworkVersionAudit, error)
+	// Append one suggested/flagged carryover row to the review queue. The job
+	// writes ONLY 'pending' rows; it never mutates a requirement or edge
+	// (P0-484-1 / AC-3). Idempotent re-runs are absorbed by the UNIQUE
+	// (from_version_id, to_version_id, requirement_code, match_kind) constraint —
+	// ON CONFLICT DO NOTHING leaves a previously-decided row untouched.
+	InsertFrameworkVersionMigration(ctx context.Context, arg InsertFrameworkVersionMigrationParams) (FrameworkVersionMigration, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Append the immutable audit row for a tier transition (threat-model R /
+	// P0-483-4). Written in the SAME transaction as SetFwToScfEdgeTier.
+	InsertFwToScfEdgeTierTransition(ctx context.Context, arg InsertFwToScfEdgeTierTransitionParams) (FwToScfEdgeTierTransition, error)
 	// Grants a role to the user with origin='group-derived'. Idempotent on the
 	// composite PK. granted_by records the derivation source label.
 	InsertGroupDerivedRole(ctx context.Context, arg InsertGroupDerivedRoleParams) error
@@ -1056,6 +1145,10 @@ type Querier interface {
 	// (atlas_app pool + tenancy GUC). The source string distinguishes
 	// 'evaluator:<name>' from 'manual:<user-uuid>' provenance.
 	InsertMetricObservation(ctx context.Context, arg InsertMetricObservationParams) (MetricObservation, error)
+	// Append one repudiation-ledger row (threat-model R / P0-448-4). is_bulk
+	// distinguishes a bulk event (control_ids carries the whole applied set)
+	// from a single-item event (one id). Append-only by RLS construction.
+	InsertOwnerAssignmentAudit(ctx context.Context, arg InsertOwnerAssignmentAuditParams) (InsertOwnerAssignmentAuditRow, error)
 	// Slice 023 — policy acknowledgment queries.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -1099,6 +1192,11 @@ type Querier interface {
 	// plaintext bearer (safe to surface).
 	InsertSCIMCredential(ctx context.Context, arg InsertSCIMCredentialParams) (ScimCredential, error)
 	InsertSampleEvidence(ctx context.Context, arg InsertSampleEvidenceParams) error
+	// Persist a new saved view. The case-insensitive unique index
+	// (tenant_id, user_id, surface, lower(name)) rejects a duplicate name with
+	// a unique-violation the handler maps to 409. filters is the handler-
+	// validated criteria payload (threat-model T).
+	InsertSavedView(ctx context.Context, arg InsertSavedViewParams) (SavedView, error)
 	// Adds a single (tenant, user, role) assignment. Idempotent under the
 	// composite PK; conflicts are silently no-op so concurrent admins
 	// granting the same role don't fail.
@@ -1109,6 +1207,12 @@ type Querier interface {
 	// consistent with the ledger (AC-2, decisions log D2). Returns no row when the
 	// vendor has no reviews; the store treats pgx.ErrNoRows as "leave the scalar".
 	LatestVendorReviewDate(ctx context.Context, arg LatestVendorReviewDateParams) (pgtype.Date, error)
+	// ===== M2M: controls =====
+	LinkActionPlanControl(ctx context.Context, arg LinkActionPlanControlParams) error
+	// ===== M2M: risks =====
+	// Idempotent at the handler layer (it checks existence first); the PK makes
+	// a duplicate INSERT a unique-violation the store maps to 409.
+	LinkActionPlanRisk(ctx context.Context, arg LinkActionPlanRiskParams) error
 	// ===== decision_controls =====
 	LinkDecisionControl(ctx context.Context, arg LinkDecisionControlParams) error
 	// ===== decision_exceptions =====
@@ -1162,6 +1266,23 @@ type Querier interface {
 	// RLS scopes both tables to the caller's tenant; the leading $1 tenant_id
 	// predicate is defense-in-depth behind RLS (the slice-030 pattern).
 	ListAcceptedVendorClaimsForExport(ctx context.Context, tenantID pgtype.UUID) ([]ListAcceptedVendorClaimsForExportRow, error)
+	ListActionPlanAuditLog(ctx context.Context, arg ListActionPlanAuditLogParams) ([]ActionPlanAuditLog, error)
+	ListActionPlanControls(ctx context.Context, arg ListActionPlanControlsParams) ([]ListActionPlanControlsRow, error)
+	// Powers the "Linked Action Plans" read-only section on /controls/{id} (AC-26).
+	ListActionPlanIDsForControl(ctx context.Context, arg ListActionPlanIDsForControlParams) ([]ListActionPlanIDsForControlRow, error)
+	// Powers the "Linked Action Plans" read-only section on /risks/{id} (AC-25).
+	// Joins to action_plans so tombstoned plans are excluded.
+	ListActionPlanIDsForRisk(ctx context.Context, arg ListActionPlanIDsForRiskParams) ([]ListActionPlanIDsForRiskRow, error)
+	ListActionPlanRisks(ctx context.Context, arg ListActionPlanRisksParams) ([]ListActionPlanRisksRow, error)
+	// Cursor pagination on created_at DESC, id DESC. The cursor is the
+	// (created_at, id) of the last row of the previous page; when the cursor
+	// timestamp is NULL (sqlc.narg), the first page is returned. Tombstoned
+	// rows are excluded.
+	ListActionPlans(ctx context.Context, arg ListActionPlansParams) ([]ActionPlan, error)
+	// AC-27 audit-period-freezing snapshot: only plans created on or before the
+	// period's frozen_at horizon are included in the period's snapshot. Live
+	// state continues independently; this read is the frozen view.
+	ListActionPlansSnapshot(ctx context.Context, arg ListActionPlansSnapshotParams) ([]ActionPlan, error)
 	// The engine's hot path: every 'active' rule for the tenant. Runs on every
 	// risk write. Hits idx_aggregation_rules_tenant_status.
 	ListActiveAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)
@@ -1778,12 +1899,24 @@ type Querier interface {
 	// under a few hundred for any realistic deployment.
 	ListFrameworkScopes(ctx context.Context, tenantID pgtype.UUID) ([]FrameworkScope, error)
 	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
+	// Audit history for one framework (newest first). Admin-scoped.
+	ListFrameworkVersionAudit(ctx context.Context, frameworkID pgtype.UUID) ([]FrameworkVersionAudit, error)
+	// The review queue for one version pair, oldest first. Admin-scoped read.
+	ListFrameworkVersionMigrations(ctx context.Context, arg ListFrameworkVersionMigrationsParams) ([]FrameworkVersionMigration, error)
+	// ===== migration-suggest review queue =====
+	// All requirement codes for a version, used by the suggest engine to compute
+	// the exact-code set-intersection / set-difference between two versions.
+	ListFrameworkVersionRequirementCodes(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFrameworkVersionRequirementCodesRow, error)
 	ListFrameworkVersionsBySlug(ctx context.Context, slug string) ([]FrameworkVersion, error)
 	ListFrameworks(ctx context.Context) ([]Framework, error)
 	// The registered frameworks the program runs against — both the global
 	// catalog (`tenant_id IS NULL`) and any tenant-private frameworks. Drives
 	// the per-framework posture rows in the brief (one row per framework).
 	ListFrameworksForTenant(ctx context.Context, tenantID pgtype.UUID) ([]Framework, error)
+	// Admin/maintainer-scoped read of an edge's transition history (newest first).
+	// NOT on the public /anchors payload — reviewer identity stays behind the admin
+	// boundary (threat-model I / P0-483-6).
+	ListFwToScfEdgeTierTransitions(ctx context.Context, edgeID pgtype.UUID) ([]FwToScfEdgeTierTransition, error)
 	// Reverse traversal — given a requirement, return all SCF anchors it maps
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
@@ -1899,6 +2032,9 @@ type Querier interface {
 	// (testability) and timezone semantics (vendor reviews are date-granular,
 	// not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
+	// Read the assignment audit ledger for the tenant, newest first. Used by
+	// the integration tests (and a future "who reassigned these?" surface).
+	ListOwnerAssignmentAudit(ctx context.Context, arg ListOwnerAssignmentAuditParams) ([]ControlOwnerAssignmentAuditLog, error)
 	// ===== control_drift_snapshots =====
 	// The drift snapshot input: for one tenant, the set of controls "passing" as
 	// of `as_of` under the worst-cell rollup. A control passes iff EVERY
@@ -2043,6 +2179,15 @@ type Querier interface {
 	// ListRequirementsForAnchor but filtered to a specific framework
 	// version id. Used when the caller passes ?framework_version=slug:version.
 	ListRequirementsForAnchorByFrameworkVersion(ctx context.Context, arg ListRequirementsForAnchorByFrameworkVersionParams) ([]ListRequirementsForAnchorByFrameworkVersionRow, error)
+	// slice 484 (AC-5 / ADR 0019 §4). The DEFAULT (no ?framework_version pin)
+	// reverse traversal: identical to ListRequirementsForAnchor but restricted to
+	// each framework's CURRENT version (fv.status = 'current'). Absent a pin a read
+	// must NOT bleed a legacy/superseded version's requirements (P0-484-5) — for a
+	// framework with two live versions, only the current one's requirements appear.
+	// A pinned read (ListRequirementsForAnchorByFrameworkVersion) can still reach a
+	// legacy version when explicitly requested (ADR 0019 §4 — legacy readable when
+	// pinned).
+	ListRequirementsForAnchorCurrentVersions(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorCurrentVersionsRow, error)
 	// All child risks rolled up under this parent.
 	ListRiskAggregationChildren(ctx context.Context, arg ListRiskAggregationChildrenParams) ([]ListRiskAggregationChildrenRow, error)
 	// All parent risks this child rolls up to. Children can roll up to multiple
@@ -2210,6 +2355,18 @@ type Querier interface {
 	// position) so the AR's sampled_evidence_ids preserve the auditor's sample
 	// order (AC-9 reproducibility).
 	ListSampledEvidenceForPeriod(ctx context.Context, arg ListSampledEvidenceForPeriodParams) ([]ListSampledEvidenceForPeriodRow, error)
+	// Slice 468: per-(tenant, user) saved filter-views for the /controls list.
+	//
+	// The TENANT half of isolation is RLS (current_tenant_matches on every
+	// policy); the USER half is the mandatory user_id predicate on every query
+	// here, sourced from the verified credential in the handler — NEVER the
+	// request body (threat-model I / P0-448-5). There is no app.current_user
+	// GUC at v1, so the user cut lives in the WHERE clause, exactly as
+	// user_notification_preferences (slice 016) does it.
+	// A user's saved views for a surface, oldest-first (stable display order).
+	// user_id is ALWAYS the calling credential's id — a caller can never pass
+	// another user's id to read their views.
+	ListSavedViews(ctx context.Context, arg ListSavedViewsParams) ([]SavedView, error)
 	// Enumerate the active tenant's scope cells. Newest first.
 	ListScopeCells(ctx context.Context, tenantID pgtype.UUID) ([]ScopeCell, error)
 	// Enumerate the active tenant's declared dimensions. Ordering: builtins first
@@ -2633,6 +2790,19 @@ type Querier interface {
 	SetAcknowledgmentEvidenceRecord(ctx context.Context, arg SetAcknowledgmentEvidenceRecordParams) error
 	// Slice 055: flip the per-decision OSCAL-narrative opt-out flag.
 	SetDecisionAuditNarrativeOptOut(ctx context.Context, arg SetDecisionAuditNarrativeOptOutParams) (Decision, error)
+	// Record a human's approve/reject on one queue row. Only a 'pending' row can
+	// be decided (the WHERE status='pending' guard makes a double-decide a no-op
+	// that returns no row — the store maps that to ErrAlreadyDecided).
+	SetFrameworkVersionMigrationDecision(ctx context.Context, arg SetFrameworkVersionMigrationDecisionParams) (FrameworkVersionMigration, error)
+	// Flip ONLY the status of one version (the narrow column-level UPDATE grant —
+	// slice 484 D2). Legality is enforced in Go (internal/frameworkversion) BEFORE
+	// this runs; this is the unconditional write inside the lifecycle tx.
+	SetFrameworkVersionStatus(ctx context.Context, arg SetFrameworkVersionStatusParams) error
+	// Flip ONLY the trust tier (the narrow column-level UPDATE grant — slice 483
+	// D1). Legality of the move is enforced in Go (internal/crosswalktier state
+	// machine) BEFORE this runs; this query is the unconditional write inside the
+	// same tx that also inserts the audit row.
+	SetFwToScfEdgeTier(ctx context.Context, arg SetFwToScfEdgeTierParams) error
 	// Point a framework at its current version.
 	SetLatestVersion(ctx context.Context, arg SetLatestVersionParams) error
 	// Stamp populations.frozen_at from the parent period's frozen_at. Called
@@ -2683,6 +2853,9 @@ type Querier interface {
 	// superseded_by at the new row, stamp superseded_at = now(). Skips the
 	// new row itself (id <> @new_id) so a re-running activation is idempotent.
 	SupersedePreviousActivated(ctx context.Context, arg SupersedePreviousActivatedParams) error
+	// Soft-delete (P0-384-6). Sets tombstoned_at; the row is preserved. A
+	// second tombstone is a no-op-miss (already tombstoned -> zero rows -> 404).
+	TombstoneActionPlan(ctx context.Context, arg TombstoneActionPlanParams) (ActionPlan, error)
 	// Best-effort timestamp bump. Failure here is logged but never blocks the
 	// authenticated request.
 	TouchAPIKeyLastUsed(ctx context.Context, tokenHash []byte) error
@@ -2691,12 +2864,18 @@ type Querier interface {
 	// Update last_seen_at and (when given) bump expires_at. Caller computes the
 	// new expires_at — sliding-window logic lives in the sessions package.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	UnlinkActionPlanControl(ctx context.Context, arg UnlinkActionPlanControlParams) (int64, error)
+	UnlinkActionPlanRisk(ctx context.Context, arg UnlinkActionPlanRiskParams) (int64, error)
 	UnlinkDecisionControl(ctx context.Context, arg UnlinkDecisionControlParams) error
 	UnlinkDecisionException(ctx context.Context, arg UnlinkDecisionExceptionParams) error
 	UnlinkDecisionRisk(ctx context.Context, arg UnlinkDecisionRiskParams) error
 	UnlinkDecisionScopePredicate(ctx context.Context, arg UnlinkDecisionScopePredicateParams) error
 	UnlinkRiskAggregation(ctx context.Context, arg UnlinkRiskAggregationParams) error
 	UnlinkRiskControl(ctx context.Context, arg UnlinkRiskControlParams) error
+	// Updates the editable fields + status in one statement. The DB transition
+	// trigger (action_plans_status_transition_trg) rejects an illegal status
+	// edge; the store also validates before calling. updated_at is bumped.
+	UpdateActionPlan(ctx context.Context, arg UpdateActionPlanParams) (ActionPlan, error)
 	// Edit the threshold fields + the rule body. Does NOT touch status or
 	// activation metadata — a threshold edit is not a lifecycle transition and
 	// (per the issue's notes) must NOT retroactively re-fire on pre-edit data.
@@ -2791,6 +2970,20 @@ type Querier interface {
 	// with secret-unchanged semantics. id is supplied by the caller (UUIDv4)
 	// so the insert path is deterministic in tests.
 	UpsertAdminSSO(ctx context.Context, arg UpsertAdminSSOParams) (UpsertAdminSSORow, error)
+	// Slice 440 — board-narrative AI v0 per-section record queries. Every query is
+	// tenant-scoped (tenant_id = $1) and runs under the caller's RLS transaction
+	// (app.current_tenant) so cross-tenant rows are invisible (invariant #6).
+	// UpsertBoardNarrativeDraft persists a validated, UNAPPROVED draft section
+	// (ai_assisted=TRUE, human_approved=FALSE, human_approver=NULL). Regeneration
+	// for the same (tenant, period_end, section_key) replaces the prior unapproved
+	// draft (the immutable history is the ai_generations ledger). The draft text +
+	// model provenance are bound as parameters (P0-498-7 — model output is never
+	// interpolated into SQL).
+	UpsertBoardNarrativeDraft(ctx context.Context, arg UpsertBoardNarrativeDraftParams) (BoardNarrativeSection, error)
+	// Assign (or re-assign) a control's owner-user. The SINGLE per-item write
+	// the single-item path AND the bulk path both call — one row per control.
+	// Re-assigning UPSERTs onto the (tenant_id, control_id) PK.
+	UpsertControlOwner(ctx context.Context, arg UpsertControlOwnerParams) (ControlOwnerAssignment, error)
 	// ===== csf_profiles =====
 	// Insert (or no-op update) the single profile per (tenant, framework_version,
 	// kind). Re-creating the same kind returns the existing row (its name/updated
@@ -2880,6 +3073,10 @@ type Querier interface {
 	UpsertUserNotificationPreference(ctx context.Context, arg UpsertUserNotificationPreferenceParams) error
 	// Set a user's webhook-channel master opt-in.
 	UpsertWebhookOptIn(ctx context.Context, arg UpsertWebhookOptInParams) (bool, error)
+	// Target-owner validation (AC-6, threat-model T): is owner_user_id a real,
+	// active user in the calling tenant? RLS hides cross-tenant users; the
+	// status gate rejects a disabled user as an assignment target.
+	UserExistsInTenant(ctx context.Context, arg UserExistsInTenantParams) (bool, error)
 	// Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
 	// Read-only integrity walk — recomputes each record's canonical hash and
 	// compares to the stored `hash`. Ordered by id ASC so the caller can page
@@ -2904,6 +3101,10 @@ type Querier interface {
 	// every value, including the raw model draft, as a parameter -- the model
 	// output is treated as opaque data, never SQL.
 	WriteAIGeneration(ctx context.Context, arg WriteAIGenerationParams) (AiGeneration, error)
+	// ===== append-only audit log =====
+	// Every mutation writes one row (AC-16). UPDATE/DELETE are rejected by the
+	// append-only trigger; this INSERT is the only path that writes here.
+	WriteActionPlanAuditLog(ctx context.Context, arg WriteActionPlanAuditLogParams) (ActionPlanAuditLog, error)
 	// ===== aggregation_rule_audit_log (append-only) =====
 	// Append-only. Every lifecycle transition (created / activated /
 	// deactivated / reactivated) and every threshold edit writes one row

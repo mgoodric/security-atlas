@@ -100,6 +100,50 @@ func (ns NullControlLifecycleState) Value() (driver.Value, error) {
 	return string(ns.ControlLifecycleState), nil
 }
 
+type CrosswalkMappingTier string
+
+const (
+	CrosswalkMappingTierDraft       CrosswalkMappingTier = "draft"
+	CrosswalkMappingTierUnderReview CrosswalkMappingTier = "under_review"
+	CrosswalkMappingTierVerified    CrosswalkMappingTier = "verified"
+	CrosswalkMappingTierRejected    CrosswalkMappingTier = "rejected"
+)
+
+func (e *CrosswalkMappingTier) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CrosswalkMappingTier(s)
+	case string:
+		*e = CrosswalkMappingTier(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CrosswalkMappingTier: %T", src)
+	}
+	return nil
+}
+
+type NullCrosswalkMappingTier struct {
+	CrosswalkMappingTier CrosswalkMappingTier `json:"crosswalk_mapping_tier"`
+	Valid                bool                 `json:"valid"` // Valid is true if CrosswalkMappingTier is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCrosswalkMappingTier) Scan(value interface{}) error {
+	if value == nil {
+		ns.CrosswalkMappingTier, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CrosswalkMappingTier.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCrosswalkMappingTier) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CrosswalkMappingTier), nil
+}
+
 type CrosswalkSourceAttribution string
 
 const (
@@ -361,6 +405,136 @@ func (ns NullEvidenceResult) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.EvidenceResult), nil
+}
+
+type FrameworkVersionAuditAction string
+
+const (
+	FrameworkVersionAuditActionPromote          FrameworkVersionAuditAction = "promote"
+	FrameworkVersionAuditActionRevert           FrameworkVersionAuditAction = "revert"
+	FrameworkVersionAuditActionMigrationApprove FrameworkVersionAuditAction = "migration_approve"
+	FrameworkVersionAuditActionMigrationReject  FrameworkVersionAuditAction = "migration_reject"
+)
+
+func (e *FrameworkVersionAuditAction) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FrameworkVersionAuditAction(s)
+	case string:
+		*e = FrameworkVersionAuditAction(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FrameworkVersionAuditAction: %T", src)
+	}
+	return nil
+}
+
+type NullFrameworkVersionAuditAction struct {
+	FrameworkVersionAuditAction FrameworkVersionAuditAction `json:"framework_version_audit_action"`
+	Valid                       bool                        `json:"valid"` // Valid is true if FrameworkVersionAuditAction is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFrameworkVersionAuditAction) Scan(value interface{}) error {
+	if value == nil {
+		ns.FrameworkVersionAuditAction, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FrameworkVersionAuditAction.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFrameworkVersionAuditAction) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FrameworkVersionAuditAction), nil
+}
+
+type FrameworkVersionMigrationMatchKind string
+
+const (
+	FrameworkVersionMigrationMatchKindExactCode FrameworkVersionMigrationMatchKind = "exact_code"
+	FrameworkVersionMigrationMatchKindAdded     FrameworkVersionMigrationMatchKind = "added"
+	FrameworkVersionMigrationMatchKindRemoved   FrameworkVersionMigrationMatchKind = "removed"
+)
+
+func (e *FrameworkVersionMigrationMatchKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FrameworkVersionMigrationMatchKind(s)
+	case string:
+		*e = FrameworkVersionMigrationMatchKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FrameworkVersionMigrationMatchKind: %T", src)
+	}
+	return nil
+}
+
+type NullFrameworkVersionMigrationMatchKind struct {
+	FrameworkVersionMigrationMatchKind FrameworkVersionMigrationMatchKind `json:"framework_version_migration_match_kind"`
+	Valid                              bool                               `json:"valid"` // Valid is true if FrameworkVersionMigrationMatchKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFrameworkVersionMigrationMatchKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.FrameworkVersionMigrationMatchKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FrameworkVersionMigrationMatchKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFrameworkVersionMigrationMatchKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FrameworkVersionMigrationMatchKind), nil
+}
+
+type FrameworkVersionMigrationStatus string
+
+const (
+	FrameworkVersionMigrationStatusPending  FrameworkVersionMigrationStatus = "pending"
+	FrameworkVersionMigrationStatusApproved FrameworkVersionMigrationStatus = "approved"
+	FrameworkVersionMigrationStatusRejected FrameworkVersionMigrationStatus = "rejected"
+)
+
+func (e *FrameworkVersionMigrationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FrameworkVersionMigrationStatus(s)
+	case string:
+		*e = FrameworkVersionMigrationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FrameworkVersionMigrationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullFrameworkVersionMigrationStatus struct {
+	FrameworkVersionMigrationStatus FrameworkVersionMigrationStatus `json:"framework_version_migration_status"`
+	Valid                           bool                            `json:"valid"` // Valid is true if FrameworkVersionMigrationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFrameworkVersionMigrationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.FrameworkVersionMigrationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FrameworkVersionMigrationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFrameworkVersionMigrationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FrameworkVersionMigrationStatus), nil
 }
 
 type FrameworkVersionStatus string
@@ -894,6 +1068,48 @@ func (ns NullVendorReviewOutcome) Value() (driver.Value, error) {
 	return string(ns.VendorReviewOutcome), nil
 }
 
+type ActionPlan struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	Title           string             `json:"title"`
+	Description     *string            `json:"description"`
+	TriggeringEvent *string            `json:"triggering_event"`
+	OwnerID         pgtype.UUID        `json:"owner_id"`
+	DueDate         pgtype.Date        `json:"due_date"`
+	Status          string             `json:"status"`
+	AuditPeriodID   pgtype.UUID        `json:"audit_period_id"`
+	TombstonedAt    pgtype.Timestamptz `json:"tombstoned_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ActionPlanAuditLog struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ActionPlanID pgtype.UUID        `json:"action_plan_id"`
+	ActorID      pgtype.UUID        `json:"actor_id"`
+	ActionType   string             `json:"action_type"`
+	BeforeState  []byte             `json:"before_state"`
+	AfterState   []byte             `json:"after_state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ActionPlanControl struct {
+	ActionPlanID pgtype.UUID        `json:"action_plan_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	LinkedAt     pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy     pgtype.UUID        `json:"linked_by"`
+}
+
+type ActionPlanRisk struct {
+	ActionPlanID pgtype.UUID        `json:"action_plan_id"`
+	RiskID       pgtype.UUID        `json:"risk_id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	LinkedAt     pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy     pgtype.UUID        `json:"linked_by"`
+}
+
 type AdminAuditLogV struct {
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	Ts           pgtype.Timestamptz `json:"ts"`
@@ -1100,6 +1316,27 @@ type BoardBrief struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type BoardNarrativeSection struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	SectionKey    string             `json:"section_key"`
+	PeriodEnd     string             `json:"period_end"`
+	RawDraft      string             `json:"raw_draft"`
+	OperatorEdit  string             `json:"operator_edit"`
+	FinalText     string             `json:"final_text"`
+	Citations     []byte             `json:"citations"`
+	AuthoredBy    string             `json:"authored_by"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+	PromptVersion string             `json:"prompt_version"`
+	ModelName     string             `json:"model_name"`
+	ModelVersion  string             `json:"model_version"`
+	ModelProvider string             `json:"model_provider"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BoardPack struct {
 	ID          pgtype.UUID        `json:"id"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`
@@ -1206,6 +1443,25 @@ type ControlEvaluation struct {
 	FreshnessClass        *string            `json:"freshness_class"`
 	Trigger               string             `json:"trigger"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+type ControlOwnerAssignment struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	ControlID   pgtype.UUID        `json:"control_id"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
+	AssignedBy  pgtype.UUID        `json:"assigned_by"`
+	AssignedAt  pgtype.Timestamptz `json:"assigned_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ControlOwnerAssignmentAuditLog struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
+	ActorUserID pgtype.UUID        `json:"actor_user_id"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
+	ControlIds  []pgtype.UUID      `json:"control_ids"`
+	IsBulk      bool               `json:"is_bulk"`
 }
 
 type CsfAssessmentAudit struct {
@@ -1533,6 +1789,35 @@ type FrameworkVersion struct {
 	CreatedAt        pgtype.Timestamptz     `json:"created_at"`
 }
 
+type FrameworkVersionAudit struct {
+	ID                 pgtype.UUID                 `json:"id"`
+	FrameworkID        pgtype.UUID                 `json:"framework_id"`
+	FrameworkVersionID pgtype.UUID                 `json:"framework_version_id"`
+	MigrationID        pgtype.UUID                 `json:"migration_id"`
+	Action             FrameworkVersionAuditAction `json:"action"`
+	FromStatus         *FrameworkVersionStatus     `json:"from_status"`
+	ToStatus           *FrameworkVersionStatus     `json:"to_status"`
+	ActorID            pgtype.UUID                 `json:"actor_id"`
+	Note               string                      `json:"note"`
+	CreatedAt          pgtype.Timestamptz          `json:"created_at"`
+}
+
+type FrameworkVersionMigration struct {
+	ID                pgtype.UUID                        `json:"id"`
+	FrameworkID       pgtype.UUID                        `json:"framework_id"`
+	FromVersionID     pgtype.UUID                        `json:"from_version_id"`
+	ToVersionID       pgtype.UUID                        `json:"to_version_id"`
+	FromRequirementID pgtype.UUID                        `json:"from_requirement_id"`
+	ToRequirementID   pgtype.UUID                        `json:"to_requirement_id"`
+	RequirementCode   string                             `json:"requirement_code"`
+	MatchKind         FrameworkVersionMigrationMatchKind `json:"match_kind"`
+	Status            FrameworkVersionMigrationStatus    `json:"status"`
+	ReviewerID        pgtype.UUID                        `json:"reviewer_id"`
+	Note              string                             `json:"note"`
+	CreatedAt         pgtype.Timestamptz                 `json:"created_at"`
+	DecidedAt         pgtype.Timestamptz                 `json:"decided_at"`
+}
+
 type FwToScfEdge struct {
 	ID                     pgtype.UUID                `json:"id"`
 	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`
@@ -1543,6 +1828,17 @@ type FwToScfEdge struct {
 	Rationale              string                     `json:"rationale"`
 	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+}
+
+type FwToScfEdgeTierTransition struct {
+	ID         pgtype.UUID          `json:"id"`
+	EdgeID     pgtype.UUID          `json:"edge_id"`
+	ReviewerID pgtype.UUID          `json:"reviewer_id"`
+	FromTier   CrosswalkMappingTier `json:"from_tier"`
+	ToTier     CrosswalkMappingTier `json:"to_tier"`
+	Note       string               `json:"note"`
+	CreatedAt  pgtype.Timestamptz   `json:"created_at"`
 }
 
 type GroupRoleAuditLog struct {
@@ -1955,6 +2251,17 @@ type SampleEvidence struct {
 	TenantID         pgtype.UUID `json:"tenant_id"`
 	EvidenceRecordID pgtype.UUID `json:"evidence_record_id"`
 	Ordinal          int32       `json:"ordinal"`
+}
+
+type SavedView struct {
+	ID        pgtype.UUID        `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Surface   string             `json:"surface"`
+	Name      string             `json:"name"`
+	Filters   []byte             `json:"filters"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type ScfAnchor struct {

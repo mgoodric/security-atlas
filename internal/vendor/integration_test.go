@@ -9,66 +9,29 @@ package vendor_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 )
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant returns a brand-new tenant id and registers cleanup. Each test
 // owns its own tenant so RLS guarantees isolation and tests can run in any
-// order.
+// order. The cleanup is a pure FK-ordered tenant-scoped DELETE returning a
+// string, so it delegates to dbtest.SeedTenant (slice 435 / 742 drain batch 22).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM vendor_scope_cells WHERE tenant_id = $1`,
-			`DELETE FROM vendors WHERE tenant_id = $1`,
-			`DELETE FROM scope_cells WHERE tenant_id = $1`,
-			`DELETE FROM scope_dimensions WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"vendor_scope_cells",
+		"vendors",
+		"scope_cells",
+		"scope_dimensions",
+	)
 }
 
 func tenantCtx(t *testing.T, tenant string) context.Context {
@@ -93,10 +56,8 @@ func parseDate(t *testing.T, s string) time.Time {
 
 // AC-1: Create with the full lite payload, including DPA + cadence.
 func TestCreateVendor_FullPayload(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -135,10 +96,8 @@ func TestCreateVendor_FullPayload(t *testing.T) {
 
 // AC-1 negative: dpa_signed=true without dpa_signed_at must be rejected.
 func TestCreateVendor_RejectsDPAWithoutDate(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -158,10 +117,8 @@ func TestCreateVendor_RejectsDPAWithoutDate(t *testing.T) {
 // AC-1 negative: invalid criticality is rejected at the Go layer (before the
 // enum check at the DB).
 func TestCreateVendor_RejectsBadCriticality(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -178,10 +135,8 @@ func TestCreateVendor_RejectsBadCriticality(t *testing.T) {
 
 // AC-2: List filter by criticality returns only matching rows.
 func TestListVendors_FilterByCriticality(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -226,10 +181,8 @@ func TestListVendors_FilterByCriticality(t *testing.T) {
 // quarterly and cutoff well past the old review, the "long ago" and the
 // "never reviewed" rows must surface as overdue.
 func TestListVendors_FilterByOverdue(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -274,10 +227,8 @@ func TestListVendors_FilterByOverdue(t *testing.T) {
 
 // AC-3: Burndown returns review-on-time fraction per criticality band.
 func TestBurndown_ReviewOnTimeFraction(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -324,10 +275,8 @@ func TestBurndown_ReviewOnTimeFraction(t *testing.T) {
 
 // AC-3 edge case: Burndown returns 1.0 on empty tenant.
 func TestBurndown_EmptyTenantOnTime(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -343,10 +292,8 @@ func TestBurndown_EmptyTenantOnTime(t *testing.T) {
 
 // AC-6: Vendors are scope-tagged. Bind two cells; List returns them.
 func TestCreateVendor_AttachesScopeCells(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -381,10 +328,8 @@ func TestCreateVendor_AttachesScopeCells(t *testing.T) {
 
 // Update re-binds the cell set: remove A, add C.
 func TestUpdateVendor_RebindsScopeCells(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -437,10 +382,8 @@ func TestUpdateVendor_RebindsScopeCells(t *testing.T) {
 
 // Domain natural-key dedup: same lowercased domain within a tenant rejected.
 func TestCreateVendor_RejectsDuplicateDomain(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -468,10 +411,8 @@ func TestCreateVendor_RejectsDuplicateDomain(t *testing.T) {
 
 // NULL domain rows must NOT collide — partial unique index excludes them.
 func TestCreateVendor_NullDomainsCoexist(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -489,10 +430,8 @@ func TestCreateVendor_NullDomainsCoexist(t *testing.T) {
 
 // RLS: tenant B cannot read tenant A's vendors.
 func TestRLS_OtherTenantCannotSeeVendors(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	store := vendor.NewStore(app)
@@ -518,10 +457,8 @@ func TestRLS_OtherTenantCannotSeeVendors(t *testing.T) {
 
 // Round-trip: update preserves fields and bumps updated_at.
 func TestUpdateVendor_RoundTrip(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)
@@ -559,10 +496,8 @@ func TestUpdateVendor_RoundTrip(t *testing.T) {
 
 // Update on a missing vendor returns ErrVendorNotFound.
 func TestUpdateVendor_NotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := vendor.NewStore(app)
 	ctx := tenantCtx(t, tenant)

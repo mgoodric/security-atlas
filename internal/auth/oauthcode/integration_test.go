@@ -30,33 +30,21 @@ package oauthcode_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// openPool opens the atlas_app pool used for the oauthcode tables.
-// Skips when DATABASE_URL_APP is unset.
-func openPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL_APP")
-	if dsn == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
+// Slice 435 / 742: the inline atlas_app pool boilerplate (openPool /
+// DATABASE_URL_APP / pgxpool dial) this file used to re-derive now lives in
+// the shared internal/dbtest harness. dbtest.NewAppPool opens the
+// RLS-enforcing application-role pool — neither oauth_auth_codes nor
+// oauth_client_redirect_uris is tenant-scoped, so no tenant context is
+// applied (production path exercised exactly).
 
 // uniqueCode returns a 32-byte random code unique to this test run,
 // matching the production code-shape (UUIDv4 string is well over
@@ -86,7 +74,7 @@ func freshInsertParams(code string) oauthcode.InsertParams {
 // InsertParams round-trips through the DB and returns an AuthCode
 // with the right values.
 func TestInsertHappyPath(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -117,7 +105,7 @@ func TestInsertHappyPath(t *testing.T) {
 // code value — the application layer rejects before issuing a DB
 // call.
 func TestInsertRejectsEmptyCode(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -131,7 +119,7 @@ func TestInsertRejectsEmptyCode(t *testing.T) {
 // method — only S256 is supported; the schema CHECK would reject
 // other values anyway, but the application layer fails fast.
 func TestInsertRejectsNonS256Method(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -146,7 +134,7 @@ func TestInsertRejectsNonS256Method(t *testing.T) {
 // branches: empty RolesJSON becomes `{}`, nil AvailableTenants
 // becomes an empty slice.
 func TestInsertDefaultsEmptyRolesAndTenants(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -167,7 +155,7 @@ func TestInsertDefaultsEmptyRolesAndTenants(t *testing.T) {
 
 // TestConsumeOnceHappyPath covers the happy single-redemption.
 func TestConsumeOnceHappyPath(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -190,7 +178,7 @@ func TestConsumeOnceHappyPath(t *testing.T) {
 // TestConsumeOnceEmptyCodeReturnsNotFound: the defensive empty-code
 // guard collapses to ErrNotFound rather than reaching the DB.
 func TestConsumeOnceEmptyCodeReturnsNotFound(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -202,7 +190,7 @@ func TestConsumeOnceEmptyCodeReturnsNotFound(t *testing.T) {
 // TestConsumeOnceUnknownCodeReturnsNotFound: a code that never lived
 // returns ErrNotFound.
 func TestConsumeOnceUnknownCodeReturnsNotFound(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -214,7 +202,7 @@ func TestConsumeOnceUnknownCodeReturnsNotFound(t *testing.T) {
 // TestConsumeOnceTwiceReturnsAlreadyConsumed: the one-shot
 // enforcement returns ErrAlreadyConsumed on the second call.
 func TestConsumeOnceTwiceReturnsAlreadyConsumed(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -234,7 +222,7 @@ func TestConsumeOnceTwiceReturnsAlreadyConsumed(t *testing.T) {
 // the code's expiry so ConsumeOnce returns ErrExpired without
 // consuming.
 func TestConsumeOnceExpiredReturnsExpired(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	ctx := context.Background()
 
 	// Insert with the real clock so the row has a real expires_at.
@@ -258,7 +246,7 @@ func TestConsumeOnceExpiredReturnsExpired(t *testing.T) {
 // TestSweepExpiredDeletesOldRows: SweepExpired removes rows created
 // before the threshold, preserves rows created after.
 func TestSweepExpiredDeletesOldRows(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -286,7 +274,7 @@ func TestSweepExpiredDeletesOldRows(t *testing.T) {
 
 // TestRegisterRedirectURIHappyPath covers the simple INSERT path.
 func TestRegisterRedirectURIHappyPath(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -301,7 +289,7 @@ func TestRegisterRedirectURIHappyPath(t *testing.T) {
 // TestRegisterRedirectURIDuplicateReturnsSentinel: re-registering
 // the same pair returns ErrDuplicateRedirectURI.
 func TestRegisterRedirectURIDuplicateReturnsSentinel(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -320,7 +308,7 @@ func TestRegisterRedirectURIDuplicateReturnsSentinel(t *testing.T) {
 // TestRegisterRedirectURIRejectsEmptyArgs covers the application-
 // layer guard.
 func TestRegisterRedirectURIRejectsEmptyArgs(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -335,7 +323,7 @@ func TestRegisterRedirectURIRejectsEmptyArgs(t *testing.T) {
 // TestIsRedirectURIRegistered covers the three branches: registered →
 // true, unregistered → false, empty-arg → false.
 func TestIsRedirectURIRegistered(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 
@@ -384,7 +372,7 @@ func TestIsRedirectURIRegistered(t *testing.T) {
 // returns the DB-stored URI value + true; miss returns ("", false);
 // empty-arg returns ("", false).
 func TestLookupRedirectURI(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthcode.New(pool)
 	ctx := context.Background()
 

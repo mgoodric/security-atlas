@@ -42,7 +42,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -51,42 +50,17 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping slice 293 integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping slice 293 integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
 // freshTenant returns a brand-new tenant UUID and registers cleanup of
 // every row the slice 293 tests can introduce.
+//
+// Carve-out (742 drain batch 11): this helper returns uuid.UUID, not the
+// string dbtest.SeedTenant yields, so it stays inline; only its cleanup pool
+// is re-routed onto the shared dbtest.NewMigratePool.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	tenant := uuid.New()
@@ -238,8 +212,8 @@ func decodeMap(t *testing.T, resp *http.Response) map[string]any {
 // ----- tests -----
 
 func TestIntegration_ListCatalog_ReturnsSeededRows(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	boardID := "ms.slice293.board." + uuid.NewString()[:8]
@@ -278,8 +252,8 @@ func TestIntegration_ListCatalog_ReturnsSeededRows(t *testing.T) {
 }
 
 func TestIntegration_GetCatalog_HappyPathAndNotFound(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	boardID := "ms.slice293.board." + uuid.NewString()[:8]
@@ -307,8 +281,8 @@ func TestIntegration_GetCatalog_HappyPathAndNotFound(t *testing.T) {
 }
 
 func TestIntegration_GetCascade_HappyAndTruncation(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	boardID := "ms.slice293.board." + uuid.NewString()[:8]
@@ -349,8 +323,8 @@ func TestIntegration_GetCascade_HappyAndTruncation(t *testing.T) {
 }
 
 func TestIntegration_CreateInput_HappyAndWrongStrategy(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	boardID := "ms.slice293.board." + uuid.NewString()[:8]
@@ -430,8 +404,8 @@ func TestIntegration_CreateInput_HappyAndWrongStrategy(t *testing.T) {
 }
 
 func TestIntegration_ListObservations_ReflectsManualInput(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	boardID := "ms.slice293.board." + uuid.NewString()[:8]
@@ -490,8 +464,8 @@ func TestIntegration_ListObservations_ReflectsManualInput(t *testing.T) {
 }
 
 func TestIntegration_Target_UpsertAndRead(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	boardID := "ms.slice293.board." + uuid.NewString()[:8]

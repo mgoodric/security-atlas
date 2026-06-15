@@ -24,12 +24,14 @@ scrape_configs:
       - targets: ["localhost:9090"]
 
   - job_name: otel-collector-app-metrics
-    # Metrics atlas pushed via OTLP — the collector re-exposes them
-    # under this scrape endpoint with the `atlas_` namespace prefix.
+    # Metrics from all producers pushing through the collector via OTLP.
+    # Producers are distinguished by the service_name label (a resource
+    # attribute promoted to a label via resource_to_telemetry_conversion),
+    # not by a metric-name prefix.
     static_configs:
       - targets: ["otel-collector:8889"]
     metric_relabel_configs:
-      # Drop the unit suffix prom-exporter auto-appends (atlas_http_server_duration_seconds → atlas_http_server_duration)
+      # Drop the unit suffix prom-exporter auto-appends (http_server_duration_seconds → http_server_duration)
       # if you find it noisy. Commented out by default; uncomment to apply.
       # - source_labels: [__name__]
       #   regex: '(.+)_seconds$'

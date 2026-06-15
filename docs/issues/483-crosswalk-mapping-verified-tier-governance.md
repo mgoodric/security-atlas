@@ -4,8 +4,12 @@
 **Estimate:** L (2-3d) — schema + state-machine + review API + audit trail
 **Type:** JUDGMENT (the tier definitions + who-can-promote are governance
 policy calls)
-**Status:** `not-ready` (depends on the OQ governance decision being recorded —
-see Dependencies)
+**Status:** `ready` (governance decision recorded 2026-06-15 in
+[`docs/adr/0018-crosswalk-mapping-verified-tier.md`](../adr/0018-crosswalk-mapping-verified-tier.md):
+three-state ladder `draft → under_review → verified` (+ `rejected`); promotion gated to any
+admin/maintainer role; provenance vs tier kept orthogonal; `scf_official` seeds at `verified`,
+`community_draft` at `draft`; read exposes the tier label but the slice-482 confidence formula is
+unchanged for now. The slice's AC-9 ADR is satisfied by 0018 — the build implements against it.)
 
 ## Narrative
 
@@ -189,11 +193,11 @@ rejected 403). This is the load-bearing E mitigation.
 
 ## Dependencies
 
-- **OQ — control-catalog governance.** The maintainer should record the
-  mapping-tier governance decision (the ADR in AC-9 is where it lands) before
-  this ships. Marked `not-ready` until the maintainer signs off on the tier
-  ladder + promotion-role choice (this is a real governance fork per CLAUDE.md
-  "Open decisions remaining," not a routine design call the agent self-resolves).
+- **OQ — control-catalog governance.** RESOLVED 2026-06-15 — the maintainer recorded the
+  mapping-tier governance decision in [`docs/adr/0018-crosswalk-mapping-verified-tier.md`](../adr/0018-crosswalk-mapping-verified-tier.md)
+  (tier ladder + promotion-role choice + provenance/tier orthogonality + deferrals). This
+  unblocks the slice; the AC-9 ADR is satisfied by 0018 (the build implements against it,
+  expanding 0018 only if implementation surfaces a refinement).
 - **#438** (generic crosswalk loader + `source_attribution`) — `merged`. This
   slice adds the orthogonal tier dimension.
 - **#482** (coverage-strength rollup) — composes: the rollup may weight by tier

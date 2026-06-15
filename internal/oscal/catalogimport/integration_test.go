@@ -34,68 +34,30 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/oscal/catalogimport"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
-func ctxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool/ctxFor pool/DSN/tenant-context
+// boilerplate this file used to re-derive now lives in the shared
+// internal/dbtest harness. dbtest.NewAppPool opens the RLS-enforcing atlas_app
+// pool (the default for every RLS-bound assertion); dbtest.NewMigratePool opens
+// the privileged BYPASSRLS pool used only for cross-tenant seeding and the
+// freshTenant cleanup the app role cannot perform; dbtest.WithTenantCtx tags the
+// tenant GUC context. The in-tx tenancy.ApplyTenant GUC wiring in the test
+// bodies is unchanged.
 
 // freshTenant returns a fresh tenant id and registers cleanup of the three
-// slice-492 tables.
+// slice-492 tables (children before parent) via the privileged migrate pool.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM imported_catalog_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM imported_catalog_controls WHERE tenant_id = $1`,
-			`DELETE FROM imported_catalogs WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"imported_catalog_audit_log",
+		"imported_catalog_controls",
+		"imported_catalogs",
+	)
 }
 
 func loadFixture(t *testing.T, name string) []byte {
@@ -206,8 +168,8 @@ func seedCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool, scfID string) {
 // ===== AC-9: end-to-end import of a real OSCAL catalog =====
 
 func TestImport_ValidCatalogEndToEnd(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	seedCurrentSCFAnchor(t, admin, "IAC-06")
 
@@ -220,7 +182,7 @@ func TestImport_ValidCatalogEndToEnd(t *testing.T) {
 	defer func() { _ = bridge.Close() }()
 
 	im := catalogimport.NewImporter(app, bridge)
-	report, err := im.Import(ctxFor(t, tenant), catalogimport.Request{
+	report, err := im.Import(dbtest.WithTenantCtx(t, tenant), catalogimport.Request{
 		OscalJSON:   loadFixture(t, "catalog_minimal_valid.json"),
 		SourceLabel: "NIST 800-53 test",
 		ImportedBy:  "grc-tester",
@@ -312,8 +274,8 @@ func TestImport_ValidCatalogEndToEnd(t *testing.T) {
 // ===== AC-10: malformed catalog -> transactional rollback, nothing persisted =====
 
 func TestImport_MalformedCatalogPersistsNothing(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	addr, stop := startBridge(t)
@@ -325,7 +287,7 @@ func TestImport_MalformedCatalogPersistsNothing(t *testing.T) {
 	defer func() { _ = bridge.Close() }()
 
 	im := catalogimport.NewImporter(app, bridge)
-	_, err = im.Import(ctxFor(t, tenant), catalogimport.Request{
+	_, err = im.Import(dbtest.WithTenantCtx(t, tenant), catalogimport.Request{
 		OscalJSON:   loadFixture(t, "catalog_malformed.json"),
 		SourceLabel: "bad",
 		ImportedBy:  "grc-tester",
@@ -363,8 +325,8 @@ func TestImport_MalformedCatalogPersistsNothing(t *testing.T) {
 // ===== AC-11: tenant isolation — Tenant A's import never lands under Tenant B =====
 
 func TestImport_TenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 
@@ -377,7 +339,7 @@ func TestImport_TenantIsolation(t *testing.T) {
 	defer func() { _ = bridge.Close() }()
 
 	im := catalogimport.NewImporter(app, bridge)
-	report, err := im.Import(ctxFor(t, tenantA), catalogimport.Request{
+	report, err := im.Import(dbtest.WithTenantCtx(t, tenantA), catalogimport.Request{
 		OscalJSON:   loadFixture(t, "catalog_minimal_valid.json"),
 		SourceLabel: "Tenant A catalog",
 		ImportedBy:  "grc-a",
@@ -389,7 +351,7 @@ func TestImport_TenantIsolation(t *testing.T) {
 
 	// Tenant B, running under RLS via the app role, sees NOTHING of A's import.
 	ctx := context.Background()
-	bCtx := ctxFor(t, tenantB)
+	bCtx := dbtest.WithTenantCtx(t, tenantB)
 	tx, err := app.Begin(bCtx)
 	if err != nil {
 		t.Fatalf("begin tx as tenant B: %v", err)

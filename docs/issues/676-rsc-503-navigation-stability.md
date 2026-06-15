@@ -5,6 +5,23 @@
 **Type:** JUDGMENT (root-cause: overload vs cascading backend error vs handler bug)
 **Status:** `ready` — surfaced by the 2026-06-10 demo-tenant UI audit (ATLAS-026).
 
+> **SCOUT + RESCOPE (2026-06-12).** A code-level scout narrowed the root cause and
+> removed the confounders, converting this from "investigation-led <70%" to a bounded
+> fix. (1) The three data-error pages the 503s concentrated on — board-packs (**673**),
+> OSCAL component-definitions (**659**), metrics (**677**) — are now ALL MERGED, so the
+> symptom-503s on those should be largely gone. (2) The remaining RSC 503s are NOT
+> emitted by app code (the `app/api/**` 503s are upstream-translations, unrelated);
+> they originate at the **edge nginx proxy**, which is configured with
+> **`worker_connections 64`** (`deploy/docker/proxy/nginx.conf`) — far too low for
+> Next.js RSC prefetch bursts (every visible link prefetches a `?_rsc=` GET), so under
+> a prefetch burst nginx exhausts its connection budget and returns 503.
+> RESCOPED to a bounded fix: **raise `worker_connections`** (64 → e.g. 1024) + add
+> upstream `keepalive` + verify `proxy_http_version 1.1`/`Connection ""` on the
+> `atlas_upstream` block so RSC prefetch bursts are absorbed; then **re-verify the
+> `?_rsc=` 503 rate** against the edge stack via the `web/e2e/` live-smoke harness.
+> If a residual 503 remains after the proxy fix + the merged data-error siblings, file
+> a follow-on for the specific surface. Scope = the proxy tuning + the re-verify.
+
 ## Narrative
 
 A large volume of RSC requests (URLs with `?_rsc=…`) across `/dashboard`,

@@ -32,6 +32,28 @@
 // own threshold-check; the existing CI `Frontend · vitest` job fails
 // red on any per-file regression below floor. Closes slice 334 V-1
 // (HIGH) and slice 069's deferred follow-up "raise the bar" promise.
+//
+// Slice 450 — vitest 2 → 4 + @vitest/coverage-v8 2 → 4 paired bump.
+// The config shape below is unchanged across the bump (it was already
+// TS/ESM `defineConfig` from `vitest/config`; the `provider: "v8"`,
+// `reporter: ["text", "json-summary"]`, `thresholds`, and include/
+// exclude globs all remain valid in vitest 4 — no deprecation warnings
+// emitted). The `environment: "node"` pin (slice 069 P0-A3) is retained
+// verbatim. ONE load-bearing behaviour change rode in with the v8
+// provider major: coverage-v8 4 maps V8 coverage through the new
+// AST-aware remapper (`ast-v8-to-istanbul`, invoked unconditionally —
+// there is no longer a toggle for the legacy `v8-to-istanbul` path).
+// AST-aware mapping no longer credits a module with statement/line
+// coverage merely for being transitively module-loaded by a test that
+// never calls its functions — i.e. it eliminates the "phantom coverage"
+// the thresholds-file $comment already documents for the slice-396
+// barrel-retire. The slice-347 floors were seeded on the OLD provider's
+// numbers, so the new (more honest) accounting trips a batch of floors
+// whose recorded value reflected phantom coverage. Re-baselining those
+// floors to the AST-accurate numbers is a floor-change and therefore
+// belongs to a dedicated floor-recalibration slice (P0-450-3 reserves
+// floor edits for floor-lift slices, not tooling bumps) — tracked as
+// the slice-450 spillover. See docs/audit-log/450-*.md D-section.
 
 import { defineConfig } from "vitest/config";
 import { fileURLToPath } from "node:url";
