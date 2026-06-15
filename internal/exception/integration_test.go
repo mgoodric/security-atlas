@@ -11,7 +11,6 @@ package exception_test
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -20,57 +19,24 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ---- harness helpers ----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
+// freshTenant returns a brand-new tenant id and registers cleanup of every
+// table the exception tests touch. Pure tenant-scoped DELETE in FK order
+// (audit log, then exceptions, then controls), so it delegates to
+// dbtest.SeedTenant (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM exception_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM exceptions WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"exception_audit_log",
+		"exceptions",
+		"controls",
+	)
 }
 
 // seedControl creates a control row directly via the admin pool (BYPASSRLS).
@@ -116,10 +82,8 @@ func validCreate(controlID uuid.UUID, requester string) exception.CreateInput {
 // ---- AC-1: POST /v1/exceptions creates with required fields ----
 
 func TestCreate_HappyPath(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -151,10 +115,8 @@ func TestCreate_HappyPath(t *testing.T) {
 // ---- AC-1 validation: required fields ----
 
 func TestCreate_RejectsMissingControl(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := exception.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -167,10 +129,8 @@ func TestCreate_RejectsMissingControl(t *testing.T) {
 }
 
 func TestCreate_RejectsMissingJustification(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -185,10 +145,8 @@ func TestCreate_RejectsMissingJustification(t *testing.T) {
 }
 
 func TestCreate_RejectsMissingExpiresAt(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -205,10 +163,8 @@ func TestCreate_RejectsMissingExpiresAt(t *testing.T) {
 // ---- AC-2 / anti-criterion P0: 365-day cap ----
 
 func TestCreate_RejectsExpiresAtOver365Days(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -224,10 +180,8 @@ func TestCreate_RejectsExpiresAtOver365Days(t *testing.T) {
 }
 
 func TestCreate_Accepts365DayBoundary(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -250,10 +204,8 @@ func TestCreate_Accepts365DayBoundary(t *testing.T) {
 // ---- AC-2: expires_at in past rejected ----
 
 func TestCreate_RejectsExpiresAtInPast(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -270,10 +222,8 @@ func TestCreate_RejectsExpiresAtInPast(t *testing.T) {
 // ---- AC-3: requested -> approved transition ----
 
 func TestApprove_Transitions(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -303,10 +253,8 @@ func TestApprove_Transitions(t *testing.T) {
 // ---- AC-3 / SoD (ISC-43): same credential cannot file + approve ----
 
 func TestApprove_RejectsSelfApproval(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -323,10 +271,8 @@ func TestApprove_RejectsSelfApproval(t *testing.T) {
 }
 
 func TestDeny_RejectsSelfDenial(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -342,10 +288,8 @@ func TestDeny_RejectsSelfDenial(t *testing.T) {
 // ---- AC-3: requested -> denied transition ----
 
 func TestDeny_Transitions(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -368,10 +312,8 @@ func TestDeny_Transitions(t *testing.T) {
 // ---- AC-4 enable: approved -> active transition ----
 
 func TestActivate_Transitions(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -396,10 +338,8 @@ func TestActivate_Transitions(t *testing.T) {
 // ---- Wrong-state transitions return ErrWrongState ----
 
 func TestApprove_RejectsAlreadyDenied(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -414,10 +354,8 @@ func TestApprove_RejectsAlreadyDenied(t *testing.T) {
 }
 
 func TestActivate_RejectsNonApprovedState(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -434,10 +372,8 @@ func TestActivate_RejectsNonApprovedState(t *testing.T) {
 // ---- AC-4 read accessor: Active(controlID) returns active rows only ----
 
 func TestActive_ReturnsActiveRowsOnly(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -464,10 +400,8 @@ func TestActive_ReturnsActiveRowsOnly(t *testing.T) {
 // ---- AC-5: auto-expiry marks expires_at < now active rows expired ----
 
 func TestExpirer_ExpiresActiveRows(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -519,10 +453,8 @@ func TestExpirer_ExpiresActiveRows(t *testing.T) {
 // ---- AC-5 idempotence: second sweep is a no-op ----
 
 func TestExpirer_IsIdempotent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -551,10 +483,8 @@ func TestExpirer_IsIdempotent(t *testing.T) {
 // ---- AC-6: GET /v1/exceptions/expiring ----
 
 func TestExpiring_ReturnsRowsInsideWindow(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -585,10 +515,8 @@ func TestExpiring_ReturnsRowsInsideWindow(t *testing.T) {
 // ---- AC-7: every state transition writes one audit row ----
 
 func TestAuditLog_CapturesFullLifecycle(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)
@@ -616,10 +544,8 @@ func TestAuditLog_CapturesFullLifecycle(t *testing.T) {
 // ---- Invariant 6: cross-tenant SELECT under RLS returns 0 rows ----
 
 func TestRLS_CrossTenantInvisible(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	ctrlA := seedControl(t, admin, tenantA)
@@ -649,10 +575,8 @@ func TestRLS_CrossTenantInvisible(t *testing.T) {
 // ---- D3 composite FK: cross-tenant control_id rejected ----
 
 func TestCreate_RejectsCrossTenantControl(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	ctrlB := seedControl(t, admin, tenantB)
@@ -682,10 +606,8 @@ func TestCreate_RejectsCrossTenantControl(t *testing.T) {
 // ---- audit_log append-only: no UPDATE/DELETE policy ----
 
 func TestAuditLog_IsAppendOnly(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := exception.NewStore(app)

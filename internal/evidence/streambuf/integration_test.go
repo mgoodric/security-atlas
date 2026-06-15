@@ -40,6 +40,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -56,17 +57,6 @@ func envOrSkip(t *testing.T, key string) string {
 		t.Skipf("%s not set; skipping integration test", key)
 	}
 	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	p, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return p
 }
 
 // boot wipes ledger + registry, seeds the platform schemas, seeds an
@@ -86,8 +76,10 @@ type fixture struct {
 func boot(t *testing.T) *fixture {
 	t.Helper()
 	natsURL := envOrSkip(t, "NATS_URL")
-	adminPool := openPool(t, envOrSkip(t, "DATABASE_URL"))
-	appPool := openPool(t, envOrSkip(t, "DATABASE_URL_APP"))
+	// dbtest pools self-close via their own t.Cleanup (slice 435 / 742 drain
+	// batch 18); the manual adminPool/appPool Close() calls are gone.
+	adminPool := dbtest.NewMigratePool(t)
+	appPool := dbtest.NewAppPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -196,20 +188,17 @@ func boot(t *testing.T) *fixture {
 	defer sbCancel()
 	sc, err := streambuf.Open(sbCtx, streamCfg)
 	if err != nil {
-		adminPool.Close()
-		appPool.Close()
 		t.Fatalf("streambuf.Open: %v", err)
 	}
 
 	t.Cleanup(func() {
 		// Best-effort stream cleanup so successive runs don't accumulate
-		// per-test streams in the broker.
+		// per-test streams in the broker. The dbtest pools self-close via
+		// their own t.Cleanup, so only the NATS stream teardown remains here.
 		cleanCtx, cleanCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanCancel()
 		_ = sc.JS().DeleteStream(cleanCtx, streamCfg.StreamName)
 		sc.Close()
-		adminPool.Close()
-		appPool.Close()
 	})
 	return &fixture{conn: sc, svc: svc, pool: appPool, reg: reg, logger: logger, tenant: tenantA}
 }

@@ -33,7 +33,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -43,42 +42,13 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // enableFeatureFlag turns a gating feature flag ON for the test tenant.
 // Slice 660 wrapped the board (briefs + packs) routes in
@@ -104,6 +74,11 @@ func enableFeatureFlag(t *testing.T, admin *pgxpool.Pool, tenant, key, category 
 	})
 }
 
+// freshTenant is a CARVE-OUT (742 drain batch 21): it does MORE than a
+// tenant-scoped DELETE — it interleaves an enableFeatureFlag upsert (turning
+// board.reporting ON for the new tenant) that dbtest.SeedTenant cannot
+// express. So it stays inline; only its callers' pools are re-routed onto the
+// dbtest harness.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
@@ -289,8 +264,8 @@ func doRaw(t *testing.T, env testEnv, path string) (*http.Response, []byte) {
 // posture, drift count, and top-3 risks, with a templated narrative =====
 
 func TestGenerate_PinnedBriefWithAllSections(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -370,8 +345,8 @@ func TestGenerate_PinnedBriefWithAllSections(t *testing.T) {
 // ===== AC-1: a malformed period_end is rejected 400 =====
 
 func TestGenerate_MalformedPeriodEndIs400(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -400,8 +375,8 @@ func TestGenerate_MalformedPeriodEndIs400(t *testing.T) {
 // ORIGINAL frozen content — the snapshot is immutable =====
 
 func TestGet_ReturnsFrozenContentAfterLiveChange(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -446,8 +421,8 @@ func TestGet_ReturnsFrozenContentAfterLiveChange(t *testing.T) {
 // NEW brief row with a NEW id — never an edit of the pinned snapshot =====
 
 func TestGenerate_RepeatedPeriodEndCreatesNewBrief(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -479,8 +454,8 @@ func TestGenerate_RepeatedPeriodEndCreatesNewBrief(t *testing.T) {
 // ===== AC-4: GET .../{id}.md returns the frozen Markdown narrative =====
 
 func TestMarkdown_ReturnsFrozenNarrative(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -507,8 +482,8 @@ func TestMarkdown_ReturnsFrozenNarrative(t *testing.T) {
 // ===== AC-4: GET .../{id}/pdf returns a PDF (or 503 when chrome is absent) =====
 
 func TestPDF_ReturnsPDFOrServiceUnavailable(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -556,8 +531,8 @@ func TestPDF_RenderDeadlineDegradesTo503(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(2, time.Nanosecond, time.Second))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -584,8 +559,8 @@ func TestPDF_QueueSaturationDegradesTo503(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 5*time.Second, 0))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -636,8 +611,8 @@ func TestPDF_StressNoNonGraceful(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 50*time.Millisecond, 80*time.Millisecond))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -671,8 +646,8 @@ func safePrefix(b []byte) string {
 // ===== unknown id -> 404; missing bearer -> 401 =====
 
 func TestGet_UnknownIDIs404(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -683,8 +658,8 @@ func TestGet_UnknownIDIs404(t *testing.T) {
 }
 
 func TestBoardBriefs_MissingBearerIs401(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -701,8 +676,8 @@ func TestBoardBriefs_MissingBearerIs401(t *testing.T) {
 // ===== RLS: cross-tenant isolation — tenant A never sees tenant B's briefs ==
 
 func TestBoardBriefs_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 

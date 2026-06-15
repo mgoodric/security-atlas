@@ -4,33 +4,20 @@ package revocation_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// openPool opens the atlas_app pool used for the revocation tables.
-// Skips when DATABASE_URL_APP is unset, matching slice 188's pattern.
-func openPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL_APP")
-	if dsn == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
+// Slice 435 / 742: the inline atlas_app pool boilerplate (openPool /
+// DATABASE_URL_APP / pgxpool dial) this file used to re-derive now lives in
+// the shared internal/dbtest harness. dbtest.NewAppPool opens the
+// RLS-enforcing application-role pool — these tables are not tenant-scoped,
+// so no tenant context is applied (production path exercised exactly).
 
 // uniqueJTI returns a fresh jti string so concurrent runs do not
 // collide on the PK.
@@ -40,7 +27,7 @@ func uniqueJTI(prefix string) string {
 
 // TestRevokeAndCheck covers the Revoke -> IsRevoked happy path.
 func TestRevokeAndCheck(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := revocation.New(pool)
 	ctx := context.Background()
 
@@ -62,7 +49,7 @@ func TestRevokeAndCheck(t *testing.T) {
 
 // TestIsRevokedFalseForUnknown covers the negative path.
 func TestIsRevokedFalseForUnknown(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := revocation.New(pool)
 	ctx := context.Background()
 
@@ -78,7 +65,7 @@ func TestIsRevokedFalseForUnknown(t *testing.T) {
 // TestRevokeIdempotent covers the ON CONFLICT DO UPDATE path: a
 // second call must not error.
 func TestRevokeIdempotent(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := revocation.New(pool)
 	ctx := context.Background()
 
@@ -105,7 +92,7 @@ func TestRevokeIdempotent(t *testing.T) {
 // past must NOT be reported as revoked (the JWT validator's exp check
 // rejects it independently; the row is dead weight pending sweeper).
 func TestIsRevokedFalseAfterExpiry(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := revocation.New(pool)
 	ctx := context.Background()
 
@@ -128,7 +115,7 @@ func TestIsRevokedFalseAfterExpiry(t *testing.T) {
 // TestSweepDeletesExpiredRows covers the sweeper's garbage-collection
 // behaviour.
 func TestSweepDeletesExpiredRows(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := revocation.New(pool)
 	ctx := context.Background()
 
@@ -165,7 +152,7 @@ func TestSweepDeletesExpiredRows(t *testing.T) {
 // — the audit log answers "how many revocation calls have we seen
 // for this jti" which is forensically valuable.
 func TestAuditLogAppended(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := revocation.New(pool)
 	ctx := context.Background()
 

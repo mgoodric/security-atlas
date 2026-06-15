@@ -23,71 +23,36 @@ package aggregationrules_test
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool pool/DSN boilerplate this file
+// used to re-derive now lives in the shared internal/dbtest harness.
+// dbtest.NewAppPool opens the RLS-enforcing atlas_app pool (the default for
+// every RLS-bound assertion); dbtest.NewMigratePool opens the privileged
+// BYPASSRLS pool used only for cross-tenant seeding and the freshTenant cleanup
+// the app role cannot perform; dbtest.WithTenantCtx tags the tenant GUC context.
 
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM aggregation_rule_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM aggregation_rule_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM aggregation_rules WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"aggregation_rule_evaluations",
+		"aggregation_rule_audit_log",
+		"aggregation_rules",
+	)
 }
 
 // testEnv bundles the running server with the bearer token whose credential
@@ -196,8 +161,8 @@ func ruleObj(t *testing.T, body map[string]any) map[string]any {
 // ===== ISC-24: POST accepts JSON, creates status=staged =====
 
 func TestHTTP_PostJSON_CreatesStaged_ISC24(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts := testServer(t, app, tenant)
 
@@ -220,8 +185,8 @@ func TestHTTP_PostJSON_CreatesStaged_ISC24(t *testing.T) {
 // ===== ISC-25: POST accepts YAML, creates status=staged =====
 
 func TestHTTP_PostYAML_CreatesStaged_ISC25(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts := testServer(t, app, tenant)
 
@@ -244,8 +209,8 @@ func TestHTTP_PostYAML_CreatesStaged_ISC25(t *testing.T) {
 // ===== ISC-26: POST returns 400 with field-level errors on an invalid rule =====
 
 func TestHTTP_PostInvalid_FieldLevel400_ISC26(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts := testServer(t, app, tenant)
 
@@ -284,8 +249,8 @@ func TestHTTP_PostInvalid_FieldLevel400_ISC26(t *testing.T) {
 // ===== ISC-27: GET lists tenant rules; GET /{id} returns one =====
 
 func TestHTTP_ListAndGet_ISC27(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts := testServer(t, app, tenant)
 
@@ -338,10 +303,7 @@ func patch(t *testing.T, env testEnv, path string) (*http.Response, map[string]a
 // auditLogRowCount counts audit-log rows for a rule via the store.
 func auditLogRowCount(t *testing.T, app *pgxpool.Pool, tenant, ruleID string) int {
 	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	store := aggrule.NewStore(app)
 	id, err := uuid.Parse(ruleID)
 	if err != nil {
@@ -357,8 +319,8 @@ func auditLogRowCount(t *testing.T, app *pgxpool.Pool, tenant, ruleID string) in
 // ===== ISC-28: PATCH /{id}/activate flips staged->active + writes audit-log row =====
 
 func TestHTTP_Activate_ISC28(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts := testServer(t, app, tenant)
 
@@ -397,8 +359,8 @@ func TestHTTP_Activate_ISC28(t *testing.T) {
 // ===== ISC-29: PATCH /{id}/deactivate flips active->inactive + writes audit-log row =====
 
 func TestHTTP_Deactivate_ISC29(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts := testServer(t, app, tenant)
 

@@ -29,10 +29,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -40,58 +38,25 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool pool/DSN boilerplate this file
+// used to re-derive now lives in the shared internal/dbtest harness
+// (NewAppPool = RLS-enforcing atlas_app default; NewMigratePool = privileged
+// BYPASSRLS for seeding + freshTenant cleanup; WithTenantCtx tags the GUC).
 
 // freshTenant returns a new tenant id with a deferred cleanup that
 // scrubs every row this slice's fixtures can create.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM risks WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"evidence_records",
+		"risks",
+		"controls",
+	)
 }
 
 // seedControl inserts an active (non-superseded) control with the
@@ -217,8 +182,8 @@ func hitsAsSlice(body map[string]any) []map[string]any {
 // ===== IST-1: cross-tenant isolation (AC-6 / P0-A3) =====
 
 func TestSlice268_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 
@@ -292,8 +257,8 @@ func TestSlice268_CrossTenantIsolation(t *testing.T) {
 // ===== IST-2: happy path — multi-token query, all three types =====
 
 func TestSlice268_HappyPath_MultiToken_AllTypes(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	// "iam access review" — three tokens that compose differently
@@ -360,8 +325,8 @@ func TestSlice268_HappyPath_MultiToken_AllTypes(t *testing.T) {
 // ===== IST-3: types filter narrows the domain set =====
 
 func TestSlice268_TypesFilter(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	const token = "phoenixfilter"
@@ -393,8 +358,8 @@ func TestSlice268_TypesFilter(t *testing.T) {
 // ===== IST-5: 400 validations =====
 
 func TestSlice268_BadRequests(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -427,8 +392,8 @@ func TestSlice268_BadRequests(t *testing.T) {
 // ===== IST-6: global cap (P0-A6) =====
 
 func TestSlice268_GlobalCap(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	const token = "capspring"
@@ -460,8 +425,8 @@ func TestSlice268_GlobalCap(t *testing.T) {
 // ===== IST-7: partial_types always present (empty array, not null) =====
 
 func TestSlice268_PartialTypesAlwaysArray(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	seedControl(t, admin, tenant, "iam access", "desc")
 	env := testServer(t, app, tenant)
@@ -499,8 +464,8 @@ func TestSlice268_PartialTypesAlwaysArray(t *testing.T) {
 // "encryption" token and confirm tenant A's `q=encryption` search never
 // returns it — controls stay RLS-scoped exactly as before.
 func TestSlice661_AnchorSearch_EmptyTenant(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	// Seed the bundled SCF catalog (CRY-04, CRY-08, ... — tenant-agnostic).
 	if err := scfseed.EnsureFullCatalog(context.Background(), admin); err != nil {

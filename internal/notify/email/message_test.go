@@ -165,6 +165,43 @@ func TestTypeLabel_UnknownIsGeneric(t *testing.T) {
 	}
 }
 
+// TestTypeLabel_StalenessHasSpecificLabel is the slice-541 unit-tier guard on
+// the 439 -> 445 wiring: the slice-439 'evidence.staleness' notification type
+// must resolve to its OWN human label in the digest (not the generic "Other
+// notifications" fallback), so a staleness reminder reads as such in the
+// inbox. Dropping the type from the label map would regress AC-2 silently;
+// this pins it at the fast tier (the integration test pins the full sweep).
+func TestTypeLabel_StalenessHasSpecificLabel(t *testing.T) {
+	t.Parallel()
+	got := typeLabel("evidence.staleness")
+	if got == typeLabel("totally.unknown.type") {
+		t.Fatalf("evidence.staleness fell through to the generic label: %q", got)
+	}
+	if got != "Stale-evidence digests" {
+		t.Fatalf("evidence.staleness label = %q, want %q", got, "Stale-evidence digests")
+	}
+}
+
+// TestBuildDigest_StalenessSurfacesInBody proves a digest built from an
+// 'evidence.staleness' type count renders the staleness label in the body —
+// the unit-tier complement to the scheduler integration test's full-sweep
+// proof (slice-541 AC-2; slice-353 Q-2 fast pure-Go branch).
+func TestBuildDigest_StalenessSurfacesInBody(t *testing.T) {
+	t.Parallel()
+	msg, err := BuildDigest(DigestInput{
+		Recipient:   "op@example.test",
+		BaseURL:     "https://atlas.example.test",
+		TypeCounts:  map[string]int{"evidence.staleness": 3},
+		TotalUnread: 3,
+	})
+	if err != nil {
+		t.Fatalf("BuildDigest: %v", err)
+	}
+	if !strings.Contains(msg.HTMLBody, "Stale-evidence digests") {
+		t.Fatalf("staleness label missing from digest body: %q", msg.HTMLBody)
+	}
+}
+
 // AC-5: the digest key is deterministic per UTC day so a same-day
 // re-run collides (idempotency / 24h rate-limit, D5/D6).
 func TestDigestKeyForDay(t *testing.T) {

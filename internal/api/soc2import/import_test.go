@@ -4,37 +4,15 @@ package soc2import_test
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return dsn
-}
-
-func openPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, adminDSN(t))
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 // resetCatalog wipes every slice-007-owned catalog table so each test
 // starts with a clean SOC 2 mapping graph. We DO NOT wipe scf_anchors or
@@ -92,7 +70,7 @@ func loadCrosswalk(t *testing.T) *soc2import.Crosswalk {
 // AC-1 + ISC-15 — first import creates rows and reports them; second
 // import with the same crosswalk is a no-op (idempotent).
 func TestImport_FirstRunCreatesRequirementsAndEdges(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)
@@ -116,7 +94,7 @@ func TestImport_FirstRunCreatesRequirementsAndEdges(t *testing.T) {
 }
 
 func TestImport_SecondRunSameCrosswalkIsIdempotent(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)
@@ -143,7 +121,7 @@ func TestImport_SecondRunSameCrosswalkIsIdempotent(t *testing.T) {
 // and the agent-authored crosswalk uses 'community_draft' on every row
 // pending HITL approval.
 func TestImport_EveryDraftedEdgeIsCommunityDraft(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)
@@ -175,7 +153,7 @@ func TestImport_EveryDraftedEdgeIsCommunityDraft(t *testing.T) {
 // The DB CHECK and ENUM enforce this; the test confirms the importer
 // faithfully writes the values from the crosswalk.
 func TestImport_EveryEdgeHasValidSTRMTypeAndStrength(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)
@@ -220,7 +198,7 @@ func TestImport_EveryEdgeHasValidSTRMTypeAndStrength(t *testing.T) {
 // If a future schema slice adds a fw_to_fw_edges table, this test fails
 // and the constitutional violation is caught at CI time.
 func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 
 	var n int
@@ -260,6 +238,20 @@ func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
 	// above. A tenant-scoped table cannot launder a crosswalk through this
 	// exclusion because a crosswalk is shared (tenant-agnostic) catalog data
 	// by construction (invariant #1/#3.5).
+	//
+	// Refinement (slice 484, decisions-log D5): the version-migration review
+	// queue `framework_version_migrations` is a CATALOG table (no tenant_id)
+	// that carries two FKs into framework_requirements
+	// (from_requirement_id, to_requirement_id) — but it is NOT a
+	// framework-to-framework crosswalk. Its rows are INTRA-framework
+	// version-carryover SUGGESTIONS between two adjacent versions of the SAME
+	// framework (e.g. SOC 2:2017 CC6.1 -> SOC 2:2017-rev CC6.1), human-reviewed
+	// and never auto-applied (ADR 0019 §3 / P0-484-4 / invariant #7). It never
+	// maps one framework's requirement to a DIFFERENT framework's requirement,
+	// so it does not bypass the SCF-anchor graph that invariant #1 protects. It
+	// is excluded by name here exactly as fw_to_scf_edges is the one allowed
+	// crosswalk referencer; a genuinely-new cross-framework bridge with a
+	// different table name is still counted and still caught.
 	var refCount int
 	if err := pool.QueryRow(context.Background(), `
 		SELECT count(*)
@@ -268,6 +260,7 @@ func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
 		JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = kcu.constraint_name
 		WHERE kcu.table_schema = 'public'
 		  AND ccu.table_name = 'framework_requirements'
+		  AND kcu.table_name <> 'framework_version_migrations'
 		  AND NOT EXISTS (
 		      SELECT 1
 		      FROM information_schema.columns c
@@ -333,7 +326,7 @@ func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
 // suspenders proof that even if the loader is bypassed, Postgres
 // refuses to store an out-of-range edge.
 func TestSchema_StrengthCheckConstraintRejectsOutOfRange(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)

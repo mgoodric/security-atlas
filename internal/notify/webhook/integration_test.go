@@ -8,17 +8,15 @@ package webhook_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/notify/webhook"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 type fakeTransport struct {
@@ -37,28 +35,6 @@ func (f *fakeTransport) count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.sent)
-}
-
-func openPools(t *testing.T) (app, admin *pgxpool.Pool) {
-	t.Helper()
-	appDSN := os.Getenv("DATABASE_URL_APP")
-	adminDSN := os.Getenv("DATABASE_URL")
-	if appDSN == "" || adminDSN == "" {
-		t.Skip("DATABASE_URL_APP or DATABASE_URL not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	a, err := pgxpool.New(ctx, appDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(app): %v", err)
-	}
-	t.Cleanup(a.Close)
-	b, err := pgxpool.New(ctx, adminDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(admin): %v", err)
-	}
-	t.Cleanup(b.Close)
-	return a, b
 }
 
 func seedUser(t *testing.T, admin *pgxpool.Pool, email string, withUnread bool) (tenantID, userID uuid.UUID) {
@@ -97,11 +73,7 @@ func seedUser(t *testing.T, admin *pgxpool.Pool, email string, withUnread bool) 
 
 func tenantCtx(t *testing.T, tenantID uuid.UUID) context.Context {
 	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
+	return dbtest.WithTenantCtx(t, tenantID.String())
 }
 
 // seedNotification inserts one unread notification of the given type (slice-583
@@ -136,7 +108,8 @@ func setPref(t *testing.T, admin *pgxpool.Pool, tenantID, userID uuid.UUID, even
 // TestWebhookDeliver_PerKindFilter_MutesOneKeepsOther: master-on + kind-off on
 // WEBHOOK mutes that kind; a sibling with no row is delivered (default-on).
 func TestWebhookDeliver_PerKindFilter_MutesOneKeepsOther(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -170,7 +143,8 @@ func TestWebhookDeliver_PerKindFilter_MutesOneKeepsOther(t *testing.T) {
 // TestWebhookDeliver_PerKindFilter_EmailOptOutDoesNotMuteWebhook: an email
 // opt-out for a kind does NOT mute it on webhook (per-channel isolation).
 func TestWebhookDeliver_PerKindFilter_EmailOptOutDoesNotMuteWebhook(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -200,7 +174,8 @@ func TestWebhookDeliver_PerKindFilter_EmailOptOutDoesNotMuteWebhook(t *testing.T
 // TestWebhookDeliver_PerKindFilter_AllMutedSkips: muting every unread kind on
 // webhook collapses the digest to zero -> skip (no post).
 func TestWebhookDeliver_PerKindFilter_AllMutedSkips(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -221,7 +196,8 @@ func TestWebhookDeliver_PerKindFilter_AllMutedSkips(t *testing.T) {
 }
 
 func TestWebhookDeliver_OptedIn_MinimumDisclosure(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 
@@ -257,7 +233,8 @@ func TestWebhookDeliver_OptedIn_MinimumDisclosure(t *testing.T) {
 }
 
 func TestWebhookDeliver_DefaultOptedOut(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 	tenantID, userID := seedUser(t, admin, "wh-b@example.test", true)
@@ -272,7 +249,8 @@ func TestWebhookDeliver_DefaultOptedOut(t *testing.T) {
 }
 
 func TestWebhookDeliver_Idempotent(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tr := &fakeTransport{}
 	ch := webhook.NewChannel(app, tr, "https://atlas.example.test")
 	tenantID, userID := seedUser(t, admin, "wh-c@example.test", true)
@@ -293,7 +271,8 @@ func TestWebhookDeliver_Idempotent(t *testing.T) {
 }
 
 func TestWebhookDeliver_NoCrossTenant(t *testing.T) {
-	app, admin := openPools(t)
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	trA := &fakeTransport{}
 	chA := webhook.NewChannel(app, trA, "https://atlas.example.test")
 	tenantA, userA := seedUser(t, admin, "wh-ta@example.test", true)

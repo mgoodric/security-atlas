@@ -48,16 +48,20 @@ exporters:
       enabled: true
       queue_size: 5000
 
-  # Expose metrics on :8889 for Prometheus to scrape.
+  # Expose metrics on :8889 for Prometheus to scrape. No namespace prefix:
+  # resource attributes (service.name, host.name, deployment.environment)
+  # become Prometheus labels via resource_to_telemetry_conversion, so
+  # multiple producers (security-atlas, codex, claude-code) can share this
+  # collector without metric-name collisions or rename pain. Producers are
+  # distinguished by {service_name="..."} filters, not a metric-name prefix.
   prometheus:
     endpoint: 0.0.0.0:8889
-    # Use the namespace prefix so user-defined metrics + auto-emitted
-    # ones (http_*, db_client_*) are clearly attributable to atlas.
-    namespace: atlas
     # Send "stale markers" so a disappearing series doesn't haunt
     # dashboards as a flatline.
     send_timestamps: true
     metric_expiration: 5m
+    resource_to_telemetry_conversion:
+      enabled: true
 
 extensions:
   health_check:

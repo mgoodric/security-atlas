@@ -17,66 +17,30 @@ package freshness_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant cleans every slice-016 + dependency table for the tenant after
-// the test. evidence_freshness is dropped first (it FKs to controls).
+// the test. evidence_freshness is dropped first (it FKs to controls). Pure
+// tenant-scoped DELETE in FK order, so it delegates to dbtest.SeedTenant
+// (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM evidence_freshness WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"evidence_freshness",
+		"evidence_records",
+		"controls",
+	)
 }
 
 func ctxFor(t *testing.T, tenant string) context.Context {
@@ -152,10 +116,8 @@ func countEvidenceRecords(t *testing.T, admin *pgxpool.Pool, tenant string, ctrl
 // ===== tracer bullet: Refresh derives valid_until from freshest observed_at =====
 
 func TestRefresh_DerivesValidUntilFromFreshestObservedAt(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -209,10 +171,8 @@ func TestRefresh_DerivesValidUntilFromFreshestObservedAt(t *testing.T) {
 // evidence is fresh =====
 
 func TestRefresh_RespectsPerControlFreshnessClass(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -256,10 +216,8 @@ func TestRefresh_RespectsPerControlFreshnessClass(t *testing.T) {
 // model but is NEVER deleted from the evidence ledger =====
 
 func TestRefresh_StaleRecordFlaggedButNeverDeleted(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -301,10 +259,8 @@ func TestRefresh_StaleRecordFlaggedButNeverDeleted(t *testing.T) {
 // ===== a control with NO evidence is is_stale=true and has no valid_until =====
 
 func TestRefresh_NoEvidenceControlIsStale(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -337,10 +293,8 @@ func TestRefresh_NoEvidenceControlIsStale(t *testing.T) {
 // ===== Refresh is idempotent: running it twice UPSERTs, not duplicates =====
 
 func TestRefresh_IsIdempotent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -371,10 +325,8 @@ func TestRefresh_IsIdempotent(t *testing.T) {
 // tenant B's rows =====
 
 func TestRefresh_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 

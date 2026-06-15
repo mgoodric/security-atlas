@@ -37,6 +37,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/orgunits"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
@@ -45,23 +46,16 @@ import (
 // freshHierarchyTenant returns a new tenant id and registers cleanup for
 // every slice-052/053 table the hierarchy tests touch. Distinct from the
 // slice-020 freshTenant in integration_test.go — that one does not clean
-// org_units / org_themes.
+// org_units / org_themes. The cleanup is a pure tenant-scoped DELETE
+// returning a string, so it delegates to dbtest.SeedTenant with its own
+// table list (slice 435 / 742 drain batch 23).
 func freshHierarchyTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM risks WHERE tenant_id = $1`,
-			`DELETE FROM org_units WHERE tenant_id = $1`,
-			`DELETE FROM org_themes WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"risks",
+		"org_units",
+		"org_themes",
+	)
 }
 
 // seedOrgUnit inserts an org_unit and returns its id.
@@ -165,8 +159,8 @@ func noRoleHierarchyRouter(t *testing.T, app *pgxpool.Pool, tenant string) http.
 // ===== ISC-26: org-unit risk counts aggregate by severity =====
 
 func TestOrgUnitRiskCounts_AggregateBySeverity(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshHierarchyTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -216,8 +210,8 @@ func TestOrgUnitRiskCounts_AggregateBySeverity(t *testing.T) {
 // ===== ISC-26 (back-compat arm): no param -> shape unchanged =====
 
 func TestOrgUnitList_WithoutParam_NoRiskCounts(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshHierarchyTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -242,8 +236,8 @@ func TestOrgUnitList_WithoutParam_NoRiskCounts(t *testing.T) {
 // ===== ISC-27: riskWire carries new fields; theme+org_unit filters compose =====
 
 func TestListRisks_NewFieldsAndComposableFilters(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshHierarchyTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -324,8 +318,8 @@ func TestListRisks_NewFieldsAndComposableFilters(t *testing.T) {
 // ===== ISC-28: theme-heatmap grid aggregates, built-ins first =====
 
 func TestThemeHeatmap_AggregatesGridBuiltinsFirst(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshHierarchyTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -389,8 +383,8 @@ func TestThemeHeatmap_AggregatesGridBuiltinsFirst(t *testing.T) {
 // ===== ISC-29 (risk arm): RLS isolation across tenants =====
 
 func TestThemeHeatmap_RLSIsolatedAcrossTenants(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshHierarchyTenant(t, admin)
 	tenantB := freshHierarchyTenant(t, admin)
 
@@ -426,8 +420,8 @@ func TestThemeHeatmap_RLSIsolatedAcrossTenants(t *testing.T) {
 // ===== ISC-29 (risk arm): 403 for a role without program-read access =====
 
 func TestRiskHierarchyEndpoints_403WithoutProgramRead(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshHierarchyTenant(t, admin)
 	r := noRoleHierarchyRouter(t, app, tenant)
 	ts := httptest.NewServer(r)

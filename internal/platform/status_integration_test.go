@@ -19,45 +19,15 @@ package platform_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/platform"
 )
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // resetPlatformStatus restores the singleton row to its post-migration
 // state (both timestamps NULL). Tests that flip the marker call this in
@@ -77,8 +47,8 @@ func resetPlatformStatus(t *testing.T, admin *pgxpool.Pool) {
 // RLS policy lets atlas_app read the singleton row, and a fresh post-
 // migration state reports first_install=true.
 func TestIsFirstInstall_PublicReadFromAppPool(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetPlatformStatus(t, admin)
 
 	s := platform.NewStatus(app, admin)
@@ -94,8 +64,8 @@ func TestIsFirstInstall_PublicReadFromAppPool(t *testing.T) {
 // TestMarkFirstSignin_FlipsMarker covers AC-14(b): MarkFirstSignin
 // flips first_signin_at and the subsequent IsFirstInstall returns false.
 func TestMarkFirstSignin_FlipsMarker(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetPlatformStatus(t, admin)
 	t.Cleanup(func() { resetPlatformStatus(t, admin) })
 
@@ -121,8 +91,8 @@ func TestMarkFirstSignin_FlipsMarker(t *testing.T) {
 // TestMarkFirstSignin_Idempotent covers AC-14(c): a second
 // MarkFirstSignin call is a no-op (didWrite=false, timestamp unchanged).
 func TestMarkFirstSignin_Idempotent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetPlatformStatus(t, admin)
 	t.Cleanup(func() { resetPlatformStatus(t, admin) })
 
@@ -154,7 +124,7 @@ func TestMarkFirstSignin_Idempotent(t *testing.T) {
 // TestSingletonConstraint covers AC-14(d): the singleton_lock CHECK +
 // PRIMARY KEY admits only one row.
 func TestSingletonConstraint(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	resetPlatformStatus(t, admin)
 
 	_, err := admin.Exec(context.Background(),
@@ -169,8 +139,8 @@ func TestSingletonConstraint(t *testing.T) {
 // FORCE ROW LEVEL SECURITY. An UPDATE attempt from the app pool reports
 // zero rows affected (RLS-filtered).
 func TestAppPoolCannotWrite(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetPlatformStatus(t, admin)
 	t.Cleanup(func() { resetPlatformStatus(t, admin) })
 
@@ -196,8 +166,8 @@ func TestAppPoolCannotWrite(t *testing.T) {
 
 // TestResetBootstrap_RefusesWithoutForce covers AC-8's foot-gun gate.
 func TestResetBootstrap_RefusesWithoutForce(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetPlatformStatus(t, admin)
 	t.Cleanup(func() { resetPlatformStatus(t, admin) })
 
@@ -214,8 +184,8 @@ func TestResetBootstrap_RefusesWithoutForce(t *testing.T) {
 
 // TestResetBootstrap_ForceClearsBoth covers AC-8 with --force.
 func TestResetBootstrap_ForceClearsBoth(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetPlatformStatus(t, admin)
 	t.Cleanup(func() { resetPlatformStatus(t, admin) })
 
@@ -268,8 +238,8 @@ func resetBootstrapFixtures(t *testing.T, admin *pgxpool.Pool) {
 // — anything else (an error OR a returned UUID) means the method
 // regressed back to readPool-based RLS-vulnerable behavior.
 func TestStatus_BootstrapTenantID_RequiresWritePool(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetBootstrapFixtures(t, admin)
 	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
 
@@ -303,8 +273,8 @@ func TestStatus_BootstrapTenantID_RequiresWritePool(t *testing.T) {
 // Verifies the writePool path (the only correct path — atlas_app
 // readPool would see zero rows due to RLS without a tenant GUC).
 func TestStatus_BootstrapTenantID_PrimaryQueryHitsTenantsRow(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetBootstrapFixtures(t, admin)
 	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
 
@@ -331,8 +301,8 @@ func TestStatus_BootstrapTenantID_PrimaryQueryHitsTenantsRow(t *testing.T) {
 // the oldest user's tenant_id. This is the path the live atlas-edge
 // instance (pre-slice-210 seed.sql) walks until its next re-bootstrap.
 func TestStatus_BootstrapTenantID_FallbackToUsers(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetBootstrapFixtures(t, admin)
 	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
 
@@ -365,8 +335,8 @@ func TestStatus_BootstrapTenantID_FallbackToUsers(t *testing.T) {
 // state: no tenants, no users. Returns (uuid.Nil, nil) so the
 // install-state handler omits the field gracefully.
 func TestStatus_BootstrapTenantID_NoBootstrapAtAll(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	resetBootstrapFixtures(t, admin)
 	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
 

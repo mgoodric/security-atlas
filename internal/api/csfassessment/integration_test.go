@@ -24,10 +24,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -35,39 +33,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 type testEnv struct {
 	server *httptest.Server
@@ -171,32 +140,26 @@ func seedCSFVersion(t *testing.T, admin *pgxpool.Pool) (fvID uuid.UUID, reqIDs [
 	return fvID, reqIDs
 }
 
-func freshTenant(t *testing.T, admin *pgxpool.Pool, fvID uuid.UUID) string {
+// freshTenant returns a brand-new tenant id and registers cleanup of every
+// table the slice 515 tests can introduce. Pure-DELETE cleanup scoped by
+// tenant_id, so it delegates to dbtest.SeedTenant (slice 435 / 742 drain).
+func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM csf_assessment_audit WHERE tenant_id = $1`,
-			`DELETE FROM csf_profile_selections WHERE tenant_id = $1`,
-			`DELETE FROM csf_profiles WHERE tenant_id = $1`,
-			`DELETE FROM csf_tier_ratings WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"csf_assessment_audit",
+		"csf_profile_selections",
+		"csf_profiles",
+		"csf_tier_ratings",
+	)
 }
 
 // ===== AC-2: Tier rating CRUD =====
 
 func TestTier_SetReadReRate(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	fvID, _ := seedCSFVersion(t, admin)
-	tenant := freshTenant(t, admin, fvID)
+	tenant := freshTenant(t, admin)
 	env := engineerServer(t, app, tenant)
 	q := "?framework_version=" + fvID.String()
 
@@ -232,10 +195,10 @@ func TestTier_SetReadReRate(t *testing.T) {
 }
 
 func TestTier_InvalidRejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	fvID, _ := seedCSFVersion(t, admin)
-	tenant := freshTenant(t, admin, fvID)
+	tenant := freshTenant(t, admin)
 	env := engineerServer(t, app, tenant)
 	resp, _ := do(t, env, http.MethodPut, "/v1/csf/tier?framework_version="+fvID.String(), `{"tier":"tier5_godmode"}`)
 	if resp.StatusCode != http.StatusBadRequest {
@@ -246,10 +209,10 @@ func TestTier_InvalidRejected(t *testing.T) {
 // ===== R: audit row written =====
 
 func TestTier_WritesAuditRow(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	fvID, _ := seedCSFVersion(t, admin)
-	tenant := freshTenant(t, admin, fvID)
+	tenant := freshTenant(t, admin)
 	env := engineerServer(t, app, tenant)
 
 	do(t, env, http.MethodPut, "/v1/csf/tier?framework_version="+fvID.String(), `{"tier":"tier3_repeatable"}`)
@@ -269,10 +232,10 @@ func TestTier_WritesAuditRow(t *testing.T) {
 // ===== AC-2 / AC-3: profile + selections + gap =====
 
 func TestProfileSelectionsAndGap(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	fvID, reqIDs := seedCSFVersion(t, admin)
-	tenant := freshTenant(t, admin, fvID)
+	tenant := freshTenant(t, admin)
 	env := engineerServer(t, app, tenant)
 	q := "?framework_version=" + fvID.String()
 
@@ -340,10 +303,10 @@ func TestProfileSelectionsAndGap(t *testing.T) {
 // ===== E: role cut =====
 
 func TestRoleCut_ViewerCannotEdit_EngineerAndAdminCan(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	fvID, _ := seedCSFVersion(t, admin)
-	tenant := freshTenant(t, admin, fvID)
+	tenant := freshTenant(t, admin)
 	q := "?framework_version=" + fvID.String()
 
 	// Viewer cannot set a Tier (403) but can read (200).
@@ -381,11 +344,11 @@ func TestRoleCut_ViewerCannotEdit_EngineerAndAdminCan(t *testing.T) {
 // return tenant B's (empty) state; tenant B's writes never touch tenant A's
 // rows; and tenant A's rows are unchanged after tenant B's activity.
 func TestRLS_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	fvID, reqIDs := seedCSFVersion(t, admin)
-	tenantA := freshTenant(t, admin, fvID)
-	tenantB := freshTenant(t, admin, fvID)
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
 	q := "?framework_version=" + fvID.String()
 
 	// Tenant A builds an assessment: a Tier + a current selection.
@@ -457,10 +420,10 @@ func TestRLS_CrossTenantIsolation(t *testing.T) {
 // RLS (current_tenant_matches returns false when the GUC is unset). This is the
 // fail-closed guarantee invariant #6 demands.
 func TestRLS_DenyOnMissingContext(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	fvID, _ := seedCSFVersion(t, admin)
-	tenant := freshTenant(t, admin, fvID)
+	tenant := freshTenant(t, admin)
 
 	// Seed a tier row directly as the admin (bypass-RLS) role.
 	if _, err := admin.Exec(context.Background(), `

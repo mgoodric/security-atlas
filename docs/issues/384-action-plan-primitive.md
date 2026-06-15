@@ -3,7 +3,7 @@
 **Cluster:** Risk register
 **Estimate:** 3d
 **Type:** JUDGMENT
-**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
+**Status:** `ready` (corrected 2026-06-14: the prior `merged` header was a bad reconcile — the slice was unbuilt on `main`; built fresh in the slice-384 PR)
 
 ## Narrative
 

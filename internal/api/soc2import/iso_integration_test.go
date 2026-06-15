@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // Slice 438 integration suite — the FRAMEWORK-AGNOSTIC crosswalk importer
@@ -62,7 +63,7 @@ func resetISO(t *testing.T, pool *pgxpool.Pool) {
 // AC-4 + AC-5 — importing the ISO crosswalk creates framework_requirements
 // + fw_to_scf_edges rows for ISO 27001:2022, and re-importing is idempotent.
 func TestISOImport_CreatesRowsAndIsIdempotent(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetISO(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadISOCrosswalk(t)
@@ -105,7 +106,7 @@ func TestISOImport_CreatesRowsAndIsIdempotent(t *testing.T) {
 // the created-row counts to len(cw.Requirements)/len(cw.Mappings); this test
 // pins the ABSOLUTE Annex A count so a silently-shrunk crosswalk is caught.
 func TestISOImport_FullAnnexA_ImportsAll93Controls(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetISO(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadISOCrosswalk(t)
@@ -163,7 +164,7 @@ func TestISOImport_FullAnnexA_ImportsAll93Controls(t *testing.T) {
 // 36 original controls (and their anchor mappings) still resolve after the
 // full-coverage extension. This is the no-regression-of-the-subset guard.
 func TestISOImport_FullAnnexA_PreservesSlice438Subset(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetISO(t, pool)
 	ensureSCFLoaded(t, pool)
 	if _, err := soc2import.Import(context.Background(), pool, loadISOCrosswalk(t)); err != nil {
@@ -208,7 +209,7 @@ func TestISOImport_FullAnnexA_PreservesSlice438Subset(t *testing.T) {
 // coexist in the same graph with distinct framework_version_ids.
 // AC-3 — an ISO `A.x` code and a SOC 2 `CCx` code coexist without collision.
 func TestISOImport_DoesNotDisturbSOC2(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	ensureSCFLoaded(t, pool)
@@ -268,7 +269,7 @@ func TestISOImport_DoesNotDisturbSOC2(t *testing.T) {
 // (its `anchors[]` field) — the read path already exists and is exercised
 // here at the SQL layer.
 func TestISOImport_RequirementResolvesToAnchorsWithSTRMType(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetISO(t, pool)
 	ensureSCFLoaded(t, pool)
 	if _, err := soc2import.Import(context.Background(), pool, loadISOCrosswalk(t)); err != nil {
@@ -315,7 +316,7 @@ func TestISOImport_RequirementResolvesToAnchorsWithSTRMType(t *testing.T) {
 // This is invariant #1 demonstrated: one control, two frameworks, NO
 // per-framework duplicated control and NO requirement->requirement edge.
 func TestISOImport_SharedAnchorSatisfiesBothFrameworks_Invariant1(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	ensureSCFLoaded(t, pool)
@@ -401,7 +402,7 @@ func contains(ss []string, want string) bool {
 // AC-2 + P0-438-4 — an edge whose scf_anchor does not resolve to a real
 // anchor is a clear loader error, not a panic and not a dangling edge.
 func TestISOImport_RejectsEdgeToNonexistentAnchor(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetISO(t, pool)
 	ensureSCFLoaded(t, pool)
 
