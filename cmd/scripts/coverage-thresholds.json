@@ -86,6 +86,7 @@
     "connectors/azure/internal/idem": 98,
     "connectors/azure/internal/keyvault": 90,
     "connectors/azure/internal/nsg": 90,
+    "connectors/azure/internal/provision": 90,
     "connectors/azure/internal/storage": 91,
     "connectors/gcp/internal/gcpapi": 81,
     "connectors/gcp/internal/gcpauth": 98,
