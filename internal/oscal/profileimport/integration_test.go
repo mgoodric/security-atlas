@@ -37,68 +37,31 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 	"github.com/mgoodric/security-atlas/internal/oscal/profileimport"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
-func ctxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool/ctxFor pool/DSN/tenant-context
+// boilerplate this file used to re-derive now lives in the shared
+// internal/dbtest harness. dbtest.NewAppPool opens the RLS-enforcing atlas_app
+// pool (the default for every RLS-bound assertion); dbtest.NewMigratePool opens
+// the privileged BYPASSRLS pool used only for cross-tenant seeding and the
+// freshTenant cleanup the app role cannot perform; dbtest.WithTenantCtx tags the
+// tenant GUC context. The in-tx tenancy.ApplyTenant GUC wiring in the test
+// bodies is unchanged.
 
 // freshTenant returns a fresh tenant id and registers cleanup of the
-// (slice-492-shared) imported tables.
+// (slice-492-shared) imported tables (children before parent) via the
+// privileged migrate pool.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM imported_catalog_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM imported_catalog_controls WHERE tenant_id = $1`,
-			`DELETE FROM imported_catalogs WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"imported_catalog_audit_log",
+		"imported_catalog_controls",
+		"imported_catalogs",
+	)
 }
 
 func loadFixture(t *testing.T, name string) []byte {
@@ -201,8 +164,8 @@ func seedCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool, scfID string) {
 // ===== AC-9: end-to-end resolve of a real FedRAMP-style profile =====
 
 func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	seedCurrentSCFAnchor(t, admin, "IAC-06")
 
@@ -215,7 +178,7 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 	defer func() { _ = bridge.Close() }()
 
 	im := profileimport.NewImporter(app, bridge)
-	report, err := im.Import(ctxFor(t, tenant), profileimport.Request{
+	report, err := im.Import(dbtest.WithTenantCtx(t, tenant), profileimport.Request{
 		ProfileJSON: loadFixture(t, "profile_baseline.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "FedRAMP Moderate test",
@@ -324,8 +287,8 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 // ===== AC-10: an unresolvable / EXTERNAL import.href errors WITHOUT fetching =====
 
 func TestImportProfile_ExternalHrefRejectedWithoutFetch(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	addr, stop := startBridge(t)
@@ -337,7 +300,7 @@ func TestImportProfile_ExternalHrefRejectedWithoutFetch(t *testing.T) {
 	defer func() { _ = bridge.Close() }()
 
 	im := profileimport.NewImporter(app, bridge)
-	_, err = im.Import(ctxFor(t, tenant), profileimport.Request{
+	_, err = im.Import(dbtest.WithTenantCtx(t, tenant), profileimport.Request{
 		ProfileJSON: loadFixture(t, "profile_external_href.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "malicious",
@@ -376,8 +339,8 @@ func TestImportProfile_ExternalHrefRejectedWithoutFetch(t *testing.T) {
 // ===== AC-11: a malformed profile rolls back, nothing persisted =====
 
 func TestImportProfile_MalformedPersistsNothing(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	addr, stop := startBridge(t)
@@ -389,7 +352,7 @@ func TestImportProfile_MalformedPersistsNothing(t *testing.T) {
 	defer func() { _ = bridge.Close() }()
 
 	im := profileimport.NewImporter(app, bridge)
-	_, err = im.Import(ctxFor(t, tenant), profileimport.Request{
+	_, err = im.Import(dbtest.WithTenantCtx(t, tenant), profileimport.Request{
 		ProfileJSON: loadFixture(t, "profile_malformed.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "bad",
@@ -413,8 +376,8 @@ func TestImportProfile_MalformedPersistsNothing(t *testing.T) {
 // ===== AC-4 (slice 578): a two-level chain resolves end-to-end =====
 
 func TestImportProfile_ChainedResolvesEndToEnd(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	seedCurrentSCFAnchor(t, admin, "IAC-06")
 
@@ -427,7 +390,7 @@ func TestImportProfile_ChainedResolvesEndToEnd(t *testing.T) {
 	defer func() { _ = bridge.Close() }()
 
 	im := profileimport.NewImporter(app, bridge)
-	report, err := im.Import(ctxFor(t, tenant), profileimport.Request{
+	report, err := im.Import(dbtest.WithTenantCtx(t, tenant), profileimport.Request{
 		// entry profile -> intermediate profile -> base catalog.
 		ProfileJSON: loadFixture(t, "profile_chained_entry.json"),
 		Profiles:    [][]byte{loadFixture(t, "profile_intermediate.json")},
@@ -478,8 +441,8 @@ func TestImportProfile_ChainedResolvesEndToEnd(t *testing.T) {
 // ===== AC-4 (slice 578): a cyclic chain errors WITHOUT looping or fetching =====
 
 func TestImportProfile_CyclicChainRejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	// A -> B -> A. The Go-side chain validator rejects this BEFORE the bridge
@@ -496,7 +459,7 @@ func TestImportProfile_CyclicChainRejected(t *testing.T) {
 	im := profileimport.NewImporter(app, bridge)
 	done := make(chan error, 1)
 	go func() {
-		_, ierr := im.Import(ctxFor(t, tenant), profileimport.Request{
+		_, ierr := im.Import(dbtest.WithTenantCtx(t, tenant), profileimport.Request{
 			ProfileJSON: loadFixture(t, "profile_cycle_a.json"),
 			Profiles:    [][]byte{loadFixture(t, "profile_cycle_b.json")},
 			Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
@@ -537,8 +500,8 @@ func TestImportProfile_CyclicChainRejected(t *testing.T) {
 // ===== AC-12: tenant isolation — Tenant A's baseline never lands under Tenant B =====
 
 func TestImportProfile_TenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 
@@ -551,7 +514,7 @@ func TestImportProfile_TenantIsolation(t *testing.T) {
 	defer func() { _ = bridge.Close() }()
 
 	im := profileimport.NewImporter(app, bridge)
-	report, err := im.Import(ctxFor(t, tenantA), profileimport.Request{
+	report, err := im.Import(dbtest.WithTenantCtx(t, tenantA), profileimport.Request{
 		ProfileJSON: loadFixture(t, "profile_baseline.json"),
 		Catalogs:    [][]byte{loadFixture(t, "base_catalog.json")},
 		SourceLabel: "Tenant A baseline",
@@ -564,7 +527,7 @@ func TestImportProfile_TenantIsolation(t *testing.T) {
 
 	// Tenant B, running under RLS via the app role, sees NOTHING of A's import.
 	ctx := context.Background()
-	bCtx := ctxFor(t, tenantB)
+	bCtx := dbtest.WithTenantCtx(t, tenantB)
 	tx, err := app.Begin(bCtx)
 	if err != nil {
 		t.Fatalf("begin tx as tenant B: %v", err)

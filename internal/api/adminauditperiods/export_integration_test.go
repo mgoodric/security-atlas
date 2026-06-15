@@ -24,7 +24,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -34,62 +33,29 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ===== Harness =====
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
+// Slice 435 / 742: appDSN/adminDSN/openPool boilerplate now lives in the
+// shared internal/dbtest harness (NewAppPool = RLS-enforcing atlas_app default;
+// NewMigratePool = privileged BYPASSRLS for seeding + freshTenant cleanup).
 
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
-			`DELETE FROM framework_versions WHERE tenant_id = $1`,
-			`DELETE FROM frameworks WHERE tenant_id = $1`,
-			`DELETE FROM me_audit_log WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"audit_period_audit_log",
+		"audit_periods",
+		"framework_versions",
+		"frameworks",
+		"me_audit_log",
+	)
 }
 
 func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
 	// Slice 197: JWT bearer via slice 190 path (admin claims).
@@ -99,10 +65,7 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 		t.Fatal("HTTPHandlerForTests nil")
 	}
 	ts := httptest.NewServer(h)
-	t.Cleanup(func() {
-		ts.Close()
-		app.Close()
-	})
+	t.Cleanup(ts.Close)
 	return ts, bearer
 }
 
@@ -225,8 +188,7 @@ func extractSearchableText(t *testing.T, format string, body []byte) string {
 // for the CSV happy path. Header row is emitted and contains the
 // canonical column set.
 func TestAuditPeriodsExport_HappyPathCSV(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -266,8 +228,7 @@ func TestAuditPeriodsExport_HappyPathCSV(t *testing.T) {
 // row for a frozen seed must carry frozen_at, frozen_by, and
 // frozen_hash all non-empty.
 func TestAuditPeriodsExport_FreezeMetadataIncluded(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -312,8 +273,7 @@ func TestAuditPeriodsExport_FreezeMetadataIncluded(t *testing.T) {
 // MUST carry action='audit_periods_export', the tenant id, and a
 // success result.
 func TestAuditPeriodsExport_MetaAuditFires(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -363,8 +323,7 @@ func TestAuditPeriodsExport_MetaAuditFires(t *testing.T) {
 // runs the export; the response body MUST NOT contain anything
 // uniquely identifying tenant B's seeded period.
 func TestAuditPeriodsExport_CrossTenantIsolationAllThreeFormats(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	tsA, bearerA := setupHTTPServer(t, tenantA)

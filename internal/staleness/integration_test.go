@@ -19,7 +19,6 @@ package staleness_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -28,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/audit/notifications"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/staleness"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -35,57 +35,20 @@ import (
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant returns a new tenant id and registers cleanup of every table
-// this slice touches for that tenant.
+// this slice touches for that tenant. Pure tenant-scoped DELETE in FK order,
+// so it delegates to dbtest.SeedTenant (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM staleness_rollup_log WHERE tenant_id = $1`,
-			`DELETE FROM notifications WHERE tenant_id = $1`,
-			`DELETE FROM user_notification_preferences WHERE tenant_id = $1`,
-			`DELETE FROM evidence_freshness WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-			`DELETE FROM users WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"staleness_rollup_log",
+		"notifications",
+		"user_notification_preferences",
+		"evidence_freshness",
+		"evidence_records",
+		"controls",
+		"users",
+	)
 }
 
 func ctxFor(t *testing.T, tenant string) context.Context {
@@ -199,10 +162,8 @@ type notificationRow struct {
 // ===== AC-10: the rollup writes the expected staleness notifications =====
 
 func TestRollup_WritesStalenessAlertForStaleControl(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -246,10 +207,8 @@ func TestRollup_WritesStalenessAlertForStaleControl(t *testing.T) {
 }
 
 func TestRollup_FreshControlProducesNoNotification(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -275,10 +234,8 @@ func TestRollup_FreshControlProducesNoNotification(t *testing.T) {
 // ===== AC-4: the weekly digest summarizes stale + approaching =====
 
 func TestRollup_WeeklyDigestSummarizes(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -332,10 +289,8 @@ func TestRollup_WeeklyDigestSummarizes(t *testing.T) {
 // ===== AC-11: TENANT ISOLATION — the load-bearing test (threat-model I) =====
 
 func TestRollup_TenantIsolation_NoCrossTenantLeak(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	// Tenant A has a stale control + a user. Tenant B has a user but NO stale
 	// evidence. After running BOTH tenants' rollups, Tenant B's user must have
@@ -395,10 +350,8 @@ func TestRollup_TenantIsolation_NoCrossTenantLeak(t *testing.T) {
 // A second isolation angle: a rollup run while the GUC is set to tenant A must
 // never address tenant B's USERS — even though B has its own stale evidence.
 func TestRollup_DoesNotAddressOtherTenantUsers(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -429,10 +382,8 @@ func TestRollup_DoesNotAddressOtherTenantUsers(t *testing.T) {
 // ===== AC-12: idempotency — a second run produces no duplicates =====
 
 func TestRollup_Idempotent_NoDuplicateOnRerun(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -475,10 +426,8 @@ func TestRollup_Idempotent_NoDuplicateOnRerun(t *testing.T) {
 // ===== AC-7: per-user in_app opt-out is honored =====
 
 func TestRollup_OptOutSuppressesDelivery(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -510,10 +459,8 @@ func TestRollup_OptOutSuppressesDelivery(t *testing.T) {
 // the scheduler altitude (not just the store).
 
 func TestScheduler_SweepOnce_DrivesRollupPerTenant(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)

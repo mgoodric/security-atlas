@@ -15,7 +15,7 @@
 #
 # Usage:
 #   scripts/run-integration-shard.sh <LEG> <coverprofile-path>
-#     <LEG>               one of: A B1 B2 B3 (must match column 1 of the manifest)
+#     <LEG>               one of: A B1 B2 B3 B4 B5 (must match column 1 of the manifest)
 #     <coverprofile-path> where to write this leg's coverage profile
 #
 # Env:
@@ -46,9 +46,9 @@ if [[ ! -r "$MANIFEST" ]]; then
   exit 2
 fi
 case "$LEG" in
-  A | B1 | B2 | B3) : ;;
+  A | B1 | B2 | B3 | B4 | B5) : ;;
   *)
-    echo "run-integration-shard: unknown leg '$LEG' (expected A|B1|B2|B3)" >&2
+    echo "run-integration-shard: unknown leg '$LEG' (expected A|B1|B2|B3|B4|B5)" >&2
     exit 2
     ;;
 esac

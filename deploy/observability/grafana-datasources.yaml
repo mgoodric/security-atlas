@@ -29,7 +29,8 @@ datasources:
       httpMethod: POST
       timeInterval: 15s
       # Trace-to-metrics: a span's serviceName + operation gets linked
-      # to the corresponding atlas_http_server_duration metric.
+      # to the corresponding http_server_duration metric (scoped by the
+      # service_name label, not a metric-name prefix).
       exemplarTraceIdDestinations:
         - name: trace_id
           datasourceUid: security-atlas-tempo
@@ -65,9 +66,9 @@ datasources:
           - key: service.name
         queries:
           - name: "Request rate"
-            query: "sum(rate(atlas_http_server_duration_count{$$__tags}[5m]))"
+            query: "sum(rate(http_server_duration_count{$$__tags}[5m]))"
           - name: "Error rate"
-            query: 'sum(rate(atlas_http_server_duration_count{$$__tags,http_status_code=~"5.."}[5m]))'
+            query: 'sum(rate(http_server_duration_count{$$__tags,http_status_code=~"5.."}[5m]))'
       # Service map (Tempo derives this from trace data via metrics-
       # generator we enabled in tempo.yaml).
       serviceMap:

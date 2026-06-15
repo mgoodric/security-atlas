@@ -5,6 +5,19 @@
 **Type:** JUDGMENT
 **Status:** `ready` (no technical dependency — the audit reads `main` + the merge trail)
 
+> **AUTOMATION RESCOPE (2026-06-12).** This slice predates the generated-status
+> model (#1265) and was originally framed as "hand-edit `_STATUS.md` rows" — which
+> is now OBSOLETE (the file is generated; hand-edits trip `check-status-drift`).
+> RESCOPED to the generated-model equivalent: **emit `just event <NNN> <state>` per
+> row**, then `just status` + reconcile. A live audit (2026-06-12) found only **9 of
+> the named rows are actually wrong** — the generator shows `ready` but the slice
+> FILE says `not-ready`: **112, 113, 114, 115, 118, 134, 228, 230, 232**. The rest
+> (111/116/125/131/133/136-139/142/143/145/175/177) are already correctly `merged`
+> or `superseded` by the generator — leave them. For each of the 9: read its slice
+> file, check whether its named blocker (a missing endpoint / external action) is now
+> resolved on `main`, then `just event <NNN> merged|superseded|not-ready "<reason+evidence>"`.
+> Do NOT hand-edit `_STATUS.md`. Scope is the 9 rows only.
+
 ## Narrative
 
 `docs/issues/_STATUS.md` is the canonical "what's left" tracker — the

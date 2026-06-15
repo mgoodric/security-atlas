@@ -28,68 +28,33 @@ package aggrule_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
+// freshTenant returns a brand-new tenant id and registers cleanup that wipes
+// every slice-054 row written under it. The cleanup is a pure FK-ordered
+// tenant-scoped DELETE returning a string, so it delegates to
+// dbtest.SeedTenant (slice 435 / 742 drain batch 20).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM aggregation_rule_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM aggregation_rule_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM aggregation_rules WHERE tenant_id = $1`,
-			`DELETE FROM risk_aggregations WHERE tenant_id = $1`,
-			`DELETE FROM risks WHERE tenant_id = $1`,
-			`DELETE FROM org_units WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"aggregation_rule_evaluations",
+		"aggregation_rule_audit_log",
+		"aggregation_rules",
+		"risk_aggregations",
+		"risks",
+		"org_units",
+	)
 }
 
 func ctxFor(t *testing.T, tenant string) context.Context {
@@ -199,8 +164,8 @@ func metaRiskCount(t *testing.T, admin *pgxpool.Pool, tenant string) int {
 // ===== ISC-17: Evaluate fires only on active rules =====
 
 func TestEngine_OnlyActiveRulesFire_ISC17(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 	store := aggrule.NewStore(app)
@@ -256,8 +221,8 @@ func TestEngine_OnlyActiveRulesFire_ISC17(t *testing.T) {
 // ===== ISC-18: one meta-risk per (rule_id, window_start); re-run updates =====
 
 func TestEngine_WindowIdempotency_ISC18(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 	store := aggrule.NewStore(app)
@@ -313,8 +278,8 @@ func TestEngine_WindowIdempotency_ISC18(t *testing.T) {
 // ===== ISC-19: candidate read excludes rule_generated meta-risks =====
 
 func TestEngine_CycleExclusion_ISC19(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 	store := aggrule.NewStore(app)
@@ -373,8 +338,8 @@ func TestEngine_CycleExclusion_ISC19(t *testing.T) {
 // ===== ISC-20: exactly one aggregation_rule_evaluations row per active rule per cycle =====
 
 func TestEngine_OneEvaluationRowPerRulePerCycle_ISC20(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 	store := aggrule.NewStore(app)
@@ -425,8 +390,8 @@ func TestEngine_OneEvaluationRowPerRulePerCycle_ISC20(t *testing.T) {
 // ===== ISC-21: closing a child does not close the parent; severity recomputes lower =====
 
 func TestEngine_ChildCloseDoesNotCloseParent_ISC21(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 	store := aggrule.NewStore(app)
@@ -500,8 +465,8 @@ func TestEngine_ChildCloseDoesNotCloseParent_ISC21(t *testing.T) {
 // ===== ISC-22: re-activation does not re-fire on pre-activation risks =====
 
 func TestEngine_ReactivationNoHistoricalRefire_ISC22(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 	store := aggrule.NewStore(app)
@@ -587,8 +552,8 @@ func TestEngine_ReactivationNoHistoricalRefire_ISC22(t *testing.T) {
 // (plus the ledger) — it never inserts or deletes a non-meta risk, and never
 // touches controls.
 func TestEngine_NarrowWriter_ISC23(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 	store := aggrule.NewStore(app)
@@ -642,8 +607,8 @@ func TestEngine_NarrowWriter_ISC23(t *testing.T) {
 // ===== ISC-30: AC-7 E2E flow =====
 
 func TestEngine_E2E_OwnershipCrossTeam_ISC30(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 	store := aggrule.NewStore(app)

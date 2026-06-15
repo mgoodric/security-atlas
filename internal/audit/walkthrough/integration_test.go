@@ -21,7 +21,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -30,60 +29,36 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/audit/walkthrough"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// ----- harness -----
+// Slice 435 / 742: the pool/DSN/tenant-seed/tenant-context boilerplate this
+// file used to re-derive (appDSN / adminDSN / openPool / freshTenant / inline
+// tenancy.WithTenant) now lives in the shared internal/dbtest harness.
+// dbtest.NewAppPool opens the RLS-enforcing atlas_app pool (the default — the
+// walkthrough.Store and every RLS-bound assertion run through it);
+// dbtest.NewMigratePool opens the privileged BYPASSRLS pool used ONLY for
+// cross-tenant fixture seeding, the append-only walkthrough_audit_log cleanup,
+// and the out-of-band tamper mutations the app role cannot perform.
+// dbtest.WithTenantCtx tags the tenant GUC context. seedFrameworkVersion /
+// seedControl remain suite-local (FK-parent fixtures dbtest does not provide);
+// they route through the migrate pool exactly as before.
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
+// freshTenant returns a fresh tenant id and registers cleanup of the slice-027
+// tables (children before parents) via the privileged migrate pool — the
+// append-only walkthrough_audit_log / audit_period_audit_log / evidence_records
+// rows are not DELETE-able by the app role.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM walkthrough_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM walkthrough_attachments WHERE tenant_id = $1`,
-			`DELETE FROM walkthroughs WHERE tenant_id = $1`,
-			`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"walkthrough_audit_log",
+		"walkthrough_attachments",
+		"walkthroughs",
+		"audit_period_audit_log",
+		"audit_periods",
+		"evidence_records",
+		"controls",
+	)
 }
 
 func seedFrameworkVersion(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
@@ -118,29 +93,18 @@ func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 	return ctrlID
 }
 
-func ctxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
-}
-
 // ----- tests -----
 
 // AC-1: POST /v1/walkthroughs creates with control_id + narrative; the
 // initial canonical_hash is stamped.
 func TestCreate_StampsInitialHash(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 
 	store := walkthrough.NewStore(walkthrough.Config{Pool: app})
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	w, err := store.Create(ctx, walkthrough.CreateInput{
 		ControlID:  ctrlID,
@@ -166,15 +130,13 @@ func TestCreate_StampsInitialHash(t *testing.T) {
 // canonical_hash to commit to the new attachment set. The post-add hash
 // must NOT equal the pre-add hash.
 func TestAddAttachment_RecomputesHash(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 
 	store := walkthrough.NewStore(walkthrough.Config{Pool: app})
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	w, err := store.Create(ctx, walkthrough.CreateInput{
 		ControlID: ctrlID,
@@ -207,15 +169,13 @@ func TestAddAttachment_RecomputesHash(t *testing.T) {
 // AC-4: GET /v1/walkthroughs/:id returns the walkthrough with the
 // attachment list and a tamper-detected flag = false on the happy path.
 func TestGet_ReturnsAttachmentsAndCleanTamperFlag(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 
 	store := walkthrough.NewStore(walkthrough.Config{Pool: app})
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	w, err := store.Create(ctx, walkthrough.CreateInput{
 		ControlID: ctrlID,
@@ -258,15 +218,13 @@ func TestGet_ReturnsAttachmentsAndCleanTamperFlag(t *testing.T) {
 // next Get. The mutation must NOT silently flip the stored
 // canonical_hash, so the GET-time re-hash deviates.
 func TestGet_DetectsAttachmentTampering(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 
 	store := walkthrough.NewStore(walkthrough.Config{Pool: app})
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	w, err := store.Create(ctx, walkthrough.CreateInput{
 		ControlID: ctrlID,
@@ -315,17 +273,15 @@ func TestGet_DetectsAttachmentTampering(t *testing.T) {
 // points at a frozen period, AddAttachment + Finalize both return
 // ErrPeriodFrozen.
 func TestMutationAfterPeriodFreeze_Rejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 
 	periodStore := period.NewStore(app)
 	wtStore := walkthrough.NewStore(walkthrough.Config{Pool: app})
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	p, err := periodStore.Create(ctx, period.CreateInput{
 		Name:               "Slice 027 freeze test",
@@ -375,15 +331,13 @@ func TestMutationAfterPeriodFreeze_Rejected(t *testing.T) {
 
 // Tamper rejection writes a tamper_detected row to the audit log.
 func TestTamperDetection_WritesAuditLog(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 
 	store := walkthrough.NewStore(walkthrough.Config{Pool: app})
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	w, err := store.Create(ctx, walkthrough.CreateInput{
 		ControlID: ctrlID,
@@ -446,15 +400,13 @@ func TestTamperDetection_WritesAuditLog(t *testing.T) {
 // AC-5 (JSON side): finalize then export to JSON. The export shape must
 // carry the audit-binding hash + every attachment.
 func TestFinalizeAndExportJSON(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 
 	store := walkthrough.NewStore(walkthrough.Config{Pool: app})
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	w, err := store.Create(ctx, walkthrough.CreateInput{
 		ControlID: ctrlID,
@@ -519,10 +471,8 @@ func TestFinalizeAndExportJSON(t *testing.T) {
 // RLS: a tenant cannot read another tenant's walkthroughs. Two distinct
 // tenant GUC contexts must yield two non-overlapping List results.
 func TestRLS_TenantBoundaryEnforced(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	ctrlA := seedControl(t, admin, tenantA)
@@ -530,7 +480,7 @@ func TestRLS_TenantBoundaryEnforced(t *testing.T) {
 
 	store := walkthrough.NewStore(walkthrough.Config{Pool: app})
 
-	wA, err := store.Create(ctxFor(t, tenantA), walkthrough.CreateInput{
+	wA, err := store.Create(dbtest.WithTenantCtx(t, tenantA), walkthrough.CreateInput{
 		ControlID: ctrlA,
 		Narrative: "tenant A walkthrough",
 		CreatedBy: "key_test_027_rls_a",
@@ -538,7 +488,7 @@ func TestRLS_TenantBoundaryEnforced(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create A: %v", err)
 	}
-	wB, err := store.Create(ctxFor(t, tenantB), walkthrough.CreateInput{
+	wB, err := store.Create(dbtest.WithTenantCtx(t, tenantB), walkthrough.CreateInput{
 		ControlID: ctrlB,
 		Narrative: "tenant B walkthrough",
 		CreatedBy: "key_test_027_rls_b",
@@ -548,7 +498,7 @@ func TestRLS_TenantBoundaryEnforced(t *testing.T) {
 	}
 
 	// Tenant A's List must NOT include the tenant-B walkthrough.
-	listA, err := store.List(ctxFor(t, tenantA))
+	listA, err := store.List(dbtest.WithTenantCtx(t, tenantA))
 	if err != nil {
 		t.Fatalf("List A: %v", err)
 	}
@@ -560,12 +510,12 @@ func TestRLS_TenantBoundaryEnforced(t *testing.T) {
 	// Tenant A cannot Get the tenant-B walkthrough -- the RLS-shielded
 	// lookup returns ErrNotFound, NOT a 403, to avoid existence
 	// disclosure.
-	if _, err := store.Get(ctxFor(t, tenantA), wB.ID); !errors.Is(err, walkthrough.ErrNotFound) {
+	if _, err := store.Get(dbtest.WithTenantCtx(t, tenantA), wB.ID); !errors.Is(err, walkthrough.ErrNotFound) {
 		t.Fatalf("RLS: tenant A get on tenant B walkthrough: expected ErrNotFound, got %v", err)
 	}
 
 	// And the symmetric check.
-	if _, err := store.Get(ctxFor(t, tenantB), wA.ID); !errors.Is(err, walkthrough.ErrNotFound) {
+	if _, err := store.Get(dbtest.WithTenantCtx(t, tenantB), wA.ID); !errors.Is(err, walkthrough.ErrNotFound) {
 		t.Fatalf("RLS: tenant B get on tenant A walkthrough: expected ErrNotFound, got %v", err)
 	}
 }
