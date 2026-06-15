@@ -3585,6 +3585,13 @@ oauth_client:<id>` for client_credentials machine tokens;
 
 ### Changed
 
+- **ADR-0010 + ADR-0016 (status reconciliation)** — flipped both from `Proposed` to
+  `Accepted` (maintainer-approved 2026-06-15) to match shipped reality: the OSCAL
+  cosign migration already landed via slice 413 (Phase 1 `cosign-kms` + retained
+  `embedded-ed25519`), slice 414 (Phase 2 `cosign-keyless`, opt-in), and slice 455
+  (ADR-0016 OIDC-identity decision). Marked the slice-368 tracking parent `merged`.
+  Docs-only reconciliation; no code change.
+
 - **slices 483 + 484 (governance decisions)** — recorded the two deferred catalog
   governance decisions as ADRs and flipped both slices `not-ready → ready`.
   [`docs/adr/0018-crosswalk-mapping-verified-tier.md`](docs/adr/0018-crosswalk-mapping-verified-tier.md)
