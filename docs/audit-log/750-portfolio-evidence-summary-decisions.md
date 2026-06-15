@@ -4,22 +4,27 @@
 them here; the maintainer iterates post-deployment from the "Revisit once in use"
 list. This log does NOT block merge.
 
-- detection_tier_actual: integration
-- detection_tier_target: integration
+- detection_tier_actual: playwright
+- detection_tier_target: playwright
 
-(One coverage-tier issue surfaced DURING the slice and was caught at the
-integration tier, where it belongs: the first cut of the package's new code
-dropped both packages' merged coverage below their ratchet floors
-(`internal/evidencesummary` 86, `internal/api/evidencesummary` 88) because the
-framework-filter store path, the generation-error degrade path, and the handler
-internal-error / tenant-missing / framework-filter branches were not yet
-exercised. Caught locally by running the integration-tag coverage the
-`Go · integration (Postgres RLS)` merge-gate measures, and fixed in the SAME
-change by adding the missing integration + unit tests (no floor was lowered —
-P0-347-1 / the Go-side ratchet). No product bug surfaced: every constitutional AC
-— two-level bound (AC-1), citation gate (AC-2), numeric-claim suppression (AC-3),
-cross-tenant isolation across the whole set (AC-4) — passed first run against
-real Postgres + RLS via the slice-498 `StubClient` CI seam.)
+(The load-bearing defect on this slice was a dashboard-invariant regression
+caught at the **Playwright** tier — exactly where it should be. The first cut of
+the dashboard panel client-fetched `/api/dashboard/portfolio-summary` on mount
+via `useQuery`, which violated the slice-380 invariant that the FIRST dashboard
+load fires ZERO `/api/dashboard/*` BFF requests (all dashboard data is prefetched
+server-side). The existing `dashboard-server-component.spec.ts` AC-4/AC-8 spec
+caught it in CI (failed on the initial run AND retry #1 — not a flake). The fix is
+also the correct design (D5): the panel is now operator-triggered/on-demand, so it
+fires nothing on first paint AND never runs an expensive LLM generation on a
+passive dashboard view. A new Playwright assertion proves idle-on-mount +
+fetch-on-click so the regression cannot recur. A separate, non-product
+coverage-tier item also surfaced during the original build and was caught at the
+integration tier: the first cut dropped both Go packages' merged coverage below
+their ratchet floors (`internal/evidencesummary` 86, `internal/api/evidencesummary` 88) — fixed in the same change by adding the missing integration + unit tests, no
+floor lowered (P0-347-1). No product/constitutional bug surfaced: two-level bound
+(AC-1), citation gate (AC-2), numeric-claim suppression (AC-3), cross-tenant
+isolation across the whole set (AC-4) all passed first run against real Postgres +
+RLS via the slice-498 `StubClient` CI seam.)
 
 ## Context
 
@@ -158,6 +163,39 @@ exactly as a single-control one; the cross-control grounding gate over
 suppression vocabulary, citation gate (`validateCitations`), UUID parsing, and
 `allowedIDs`-style grounding are reused verbatim. The ONLY genuinely new logic is
 the two-level corpus assembly + the numeric gate.
+
+### D5 — The dashboard panel is OPERATOR-TRIGGERED / on-demand, not auto-fired. `HIGH` (fix-forward after CI)
+
+**The problem (caught by CI).** The first cut of `portfolio-summary-panel.tsx`
+mounted a `useQuery` that client-fetched `/api/dashboard/portfolio-summary` on
+mount. This failed `dashboard-server-component.spec.ts` (the slice-380 AC-4/AC-8
+spec) — the dashboard's load-bearing invariant is that the FIRST load fires ZERO
+`/api/dashboard/*` BFF requests, because every dashboard panel's data is
+prefetched server-side in the sibling Server Component and shipped via
+`HydrationBoundary`. An auto-firing client query violates that contract.
+
+**Options.** (a) Prefetch the portfolio summary server-side like the other six
+panels (restores the zero-BFF invariant). (b) Make the panel operator-triggered —
+no fetch on mount; fetch only when the operator clicks "Generate summary".
+
+**Chosen: (b).** Prefetching (a) would technically satisfy the spec but is the
+WRONG design: a portfolio summary is an **expensive local-LLM generation**, and
+prefetching it server-side would run an LLM call on EVERY dashboard load (every
+SSR render of the home screen), for a comprehension aid the operator may never
+look at. That is exactly the "continuous monitoring that's actually 24-hour
+polling" anti-pattern energy applied to inference cost. Operator-triggered (b)
+simultaneously: (1) restores the slice-380 zero-BFF-on-first-load invariant (the
+query is `enabled: triggered`, so nothing fires on mount), and (2) runs the LLM
+only when the operator explicitly asks for it. The panel renders an idle state
+with a "Generate summary" button; clicking it sets `triggered=true` and the query
+fires once. All the AC-5 work (non-binding disclosure, BOTH-bound labels, no
+approve/export, graceful degradation) is preserved on the rendered result.
+
+**Regression guard.** `dashboard-server-component.spec.ts` gains (i) an assertion
+in the existing zero-BFF test that the portfolio panel renders its idle state and
+fires nothing on first paint, and (ii) a new test proving the BFF request fires
+ONLY after the trigger click. The detection-tier classification above is set to
+`playwright`/`playwright` accordingly.
 
 ## Inherited 502/749 calls (re-affirmed, unchanged)
 
