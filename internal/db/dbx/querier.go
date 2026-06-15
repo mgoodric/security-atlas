@@ -453,6 +453,10 @@ type Querier interface {
 	// caller can never delete another user's view even within the same tenant.
 	// RETURNING lets the handler 404 when the id was not the caller's.
 	DeleteSavedView(ctx context.Context, arg DeleteSavedViewParams) (pgtype.UUID, error)
+	// Clear the tenant's routing config (revert to the local-ollama default). The
+	// key ciphertext is removed with the row. Returns rows affected so the caller
+	// can distinguish "cleared" from "was already absent".
+	DeleteTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Tenant-private themes only — the policy forbids deleting defaults
 	// regardless of what this query asks for.
 	DeleteTenantTheme(ctx context.Context, arg DeleteTenantThemeParams) error
@@ -898,6 +902,18 @@ type Querier interface {
 	// Returns ErrNoRows when the caller's tenant_id GUC does not match
 	// the requested id (RLS filters the row out).
 	GetTenantByID(ctx context.Context, id pgtype.UUID) (GetTenantByIDRow, error)
+	// tenant_llm_routing — slice 499 per-tenant cloud-LLM opt-in routing config.
+	//
+	// One row per tenant. Absence of a row => local-ollama (the off-by-default
+	// posture). Every query is tenant-scoped via the leading tenant_id predicate;
+	// four-policy RLS under FORCE keeps the cross-tenant boundary safe even on a
+	// misconfigured query (P0-499-5). The provider API key is stored ONLY as
+	// AES-256-GCM ciphertext (api_key_ciphertext); the plaintext is bound as a
+	// parameter by the encrypting store and never appears in a query, a log, or an
+	// API response (P0-499-4).
+	// Fetch the current routing config for the tenant. Returns no rows when the
+	// tenant has never opted in (=> the router treats that as local-ollama).
+	GetTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID) (TenantLlmRouting, error)
 	// Lookup by case-insensitive email within a tenant. Used by /auth/local/login.
 	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error)
 	GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error)
@@ -3062,6 +3078,12 @@ type Querier interface {
 	// Set a user's Slack-channel master opt-in. (tenant_id, user_id) PK is the
 	// conflict target.
 	UpsertSlackOptIn(ctx context.Context, arg UpsertSlackOptInParams) (bool, error)
+	// Set or replace the tenant's routing config (the tenant-admin "switch
+	// provider / rotate key" action). The closed-enum provider CHECK and the
+	// key-presence CHECK are enforced at the DB; the ciphertext is a bound
+	// parameter (never interpolated). updated_at is bumped on every write
+	// (app-layer now(), no trigger — matches the repo convention).
+	UpsertTenantLLMRouting(ctx context.Context, arg UpsertTenantLLMRoutingParams) (TenantLlmRouting, error)
 	// Used by the OIDC callback: provision-on-first-sign-in by (idp_issuer, idp_subject).
 	// The composite UNIQUE index on (idp_issuer, idp_subject) WHERE both non-empty
 	// is the conflict target. On conflict we update display_name + email (the IdP

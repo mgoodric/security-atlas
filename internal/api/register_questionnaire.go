@@ -40,7 +40,9 @@ func (s *Server) registerQuestionnaire(root *chi.Mux) {
 	qaiStore := qaisuggest.NewStore(s.dbPool)
 	qaiSvc := qaisuggest.NewService(
 		qaiStore,
-		llm.NewOllamaClient(llm.ConfigFromEnv()),
+		// Slice 499: per-tenant inference router (local-Ollama default, cloud
+		// opt-in resolved under app.current_tenant). Call site unchanged.
+		s.inferenceClient(),
 		qaiStore,
 		qaiStore,
 	)
@@ -60,7 +62,9 @@ func (s *Server) registerQuestionnaire(root *chi.Mux) {
 	checklistStore := checklist.NewStore(s.dbPool)
 	checklistSvc := checklist.NewService(
 		checklistStore,
-		llm.NewOllamaClient(llm.ConfigFromEnv()),
+		// Slice 499: per-tenant inference router (local-Ollama default, cloud
+		// opt-in resolved under app.current_tenant). Call site unchanged.
+		s.inferenceClient(),
 		checklistStore,
 		checklistStore,
 		llm.NewAuditWriter(s.dbPool),
