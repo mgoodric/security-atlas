@@ -266,3 +266,41 @@ func TestGeneration_Validate(t *testing.T) {
 		})
 	}
 }
+
+// TestExportedHelpersForCloud covers the slice-499 exported wrappers
+// (GenerateRequest.Validate / RenderContextPrompt / ModelVersionTag) that the
+// sibling internal/llm/cloud package calls so the cloud Client shares the EXACT
+// in-package contract. They delegate to the unexported forms; this proves the
+// delegation and keeps the exported surface covered in this package's own
+// profile (the cloud callers live in another package).
+func TestExportedHelpersForCloud(t *testing.T) {
+	t.Parallel()
+
+	// Validate mirrors validate(): a good request passes, an over-cap one is
+	// rejected with the same sentinel.
+	if err := validReq().Validate(); err != nil {
+		t.Fatalf("Validate(valid) = %v", err)
+	}
+	over := validReq()
+	over.MaxTokens = MaxTokenBudget + 1
+	if err := over.Validate(); !errors.Is(err, ErrTokenBudgetExceeded) {
+		t.Fatalf("Validate(over-cap) = %v, want ErrTokenBudgetExceeded", err)
+	}
+
+	// RenderContextPrompt mirrors renderContextPrompt (deterministic, sorted).
+	if RenderContextPrompt(nil) != "" {
+		t.Error("RenderContextPrompt(nil) != empty")
+	}
+	got := RenderContextPrompt(map[string]any{"b": 2, "a": 1})
+	if got != renderContextPrompt(map[string]any{"a": 1, "b": 2}) {
+		t.Errorf("RenderContextPrompt mismatch: %q", got)
+	}
+
+	// ModelVersionTag mirrors modelVersionTag.
+	if ModelVersionTag("claude-3-5-sonnet:20241022") != "20241022" {
+		t.Errorf("ModelVersionTag tag-extract failed: %q", ModelVersionTag("claude-3-5-sonnet:20241022"))
+	}
+	if ModelVersionTag("") != "unknown" {
+		t.Error("ModelVersionTag(empty) != unknown")
+	}
+}

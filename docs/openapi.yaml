@@ -60,6 +60,7 @@ tags:
   - name: admin-framework-versions
   - name: admin-group-role-mappings
   - name: admin-install
+  - name: admin-llm-routing
   - name: admin-policies
   - name: admin-samples
   - name: admin-scim-credentials
@@ -897,6 +898,46 @@ paths:
       summary: POST /v1/admin/install/reset-bootstrap
       tags: [admin-install]
       operationId: post-v1-admin-install-reset-bootstrap
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/llm-routing:
+    delete:
+      summary: DELETE /v1/admin/llm-routing — clear cloud-LLM routing, revert to local-ollama (slice 499)
+      tags: [admin-llm-routing]
+      operationId: delete-v1-admin-llm-routing
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    get:
+      summary: GET /v1/admin/llm-routing — read the tenant's cloud-LLM routing config (masked; slice 499)
+      tags: [admin-llm-routing]
+      operationId: get-v1-admin-llm-routing
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/admin/llm-routing — set/replace cloud-LLM provider + (encrypted, write-only) key (slice 499)
+      tags: [admin-llm-routing]
+      operationId: put-v1-admin-llm-routing
       security:
         - adminBearer: []
       responses:

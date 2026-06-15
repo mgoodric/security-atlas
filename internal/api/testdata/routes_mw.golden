@@ -4,6 +4,7 @@ DELETE /v1/action-plans/{id} 8
 DELETE /v1/action-plans/{id}/controls/{control_id} 8
 DELETE /v1/action-plans/{id}/risks/{risk_id} 8
 DELETE /v1/admin/group-role-mappings/{id} 8
+DELETE /v1/admin/llm-routing 8
 DELETE /v1/admin/scim-credentials/{id} 8
 DELETE /v1/admin/super-admins/{user_id} 8
 DELETE /v1/csf/profiles/{kind}/selections/{requirement_id} 8
@@ -44,6 +45,7 @@ GET /v1/admin/exceptions/export 8
 GET /v1/admin/features 8
 GET /v1/admin/framework-versions/migrations 8
 GET /v1/admin/group-role-mappings 8
+GET /v1/admin/llm-routing 8
 GET /v1/admin/policies/export 8
 GET /v1/admin/samples/export 8
 GET /v1/admin/scim-credentials 8
@@ -286,6 +288,7 @@ POST /v1/walkthroughs/{id}/attachments 8
 POST /v1/walkthroughs/{id}:finalize 8
 PUT /scim/v2/Groups/{id} 9
 PUT /scim/v2/Users/{id} 9
+PUT /v1/admin/llm-routing 8
 PUT /v1/board-packs/{id}/sections/{key} 9
 PUT /v1/csf/profiles/{kind} 8
 PUT /v1/csf/profiles/{kind}/selections 8

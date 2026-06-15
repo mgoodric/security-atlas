@@ -459,4 +459,97 @@ test.describe("questionnaires (slice 263)", () => {
       timeout: 30_000,
     });
   });
+
+  // Slice 499 (AC-7 / AC-8 / AC-12): the config-driven cloud-routing banner.
+  // It is driven by the tenant routing config (GET /api/admin/llm-routing),
+  // not by a per-draft flag — so it renders on the AI surface BEFORE any draft
+  // is generated when the tenant is on a cloud provider, and is ABSENT on
+  // local-ollama. Both cases are route-mocked (the hermetic-mock pattern), so
+  // the spec is deterministic and never depends on the shared seed.
+
+  test("AC-12: routing banner RENDERS when the tenant is on a cloud provider", async ({
+    authedPage: page,
+  }) => {
+    await page.route(`**/api/questionnaires/${Q_ID}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(detailBody()),
+      });
+    });
+    await page.route(
+      `**/api/questionnaires/${Q_ID}/suggestions**`,
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ suggestions: [] }),
+        });
+      },
+    );
+    // Tenant is on a cloud provider (anthropic) — the banner must show.
+    await page.route("**/api/admin/llm-routing", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          provider: "anthropic",
+          is_cloud: true,
+          has_api_key: true,
+        }),
+      });
+    });
+
+    await page.goto(`/questionnaires/${Q_ID}`);
+    await expect(page.getByTestId("ai-suggest-panel")).toBeVisible({
+      timeout: 30_000,
+    });
+    // Config-driven banner is visible at draft-generation time (no draft yet).
+    const banner = page.getByTestId("cloud-routing-banner");
+    await expect(banner).toBeVisible({ timeout: 30_000 });
+    await expect(banner).toContainText("your data leaves this deployment");
+    await expect(banner).toContainText("Anthropic");
+  });
+
+  test("AC-7: routing banner is ABSENT when the tenant is on local-ollama", async ({
+    authedPage: page,
+  }) => {
+    await page.route(`**/api/questionnaires/${Q_ID}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(detailBody()),
+      });
+    });
+    await page.route(
+      `**/api/questionnaires/${Q_ID}/suggestions**`,
+      async (route) => {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ suggestions: [] }),
+        });
+      },
+    );
+    // Tenant is on the local-ollama default — NO banner.
+    await page.route("**/api/admin/llm-routing", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          provider: "local-ollama",
+          is_cloud: false,
+          has_api_key: false,
+        }),
+      });
+    });
+
+    await page.goto(`/questionnaires/${Q_ID}`);
+    await expect(page.getByTestId("ai-suggest-panel")).toBeVisible({
+      timeout: 30_000,
+    });
+    // The panel rendered AND the routing config resolved (local) — the banner
+    // must not be present.
+    await expect(page.getByTestId("cloud-routing-banner")).toHaveCount(0);
+  });
 });

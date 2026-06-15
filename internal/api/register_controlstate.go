@@ -9,7 +9,6 @@ import (
 	oscalprovenanceapi "github.com/mgoodric/security-atlas/internal/api/oscalprovenance"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/gapexplain"
-	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/scope"
 )
 
@@ -69,7 +68,9 @@ func (s *Server) registerControlState(root *chi.Mux) {
 	gapExplainStore := gapexplain.NewStore(s.dbPool)
 	gapExplainSvc := gapexplain.NewService(
 		gapExplainStore,
-		llm.NewOllamaClient(llm.ConfigFromEnv()),
+		// Slice 499: per-tenant inference router (local-Ollama default, cloud
+		// opt-in resolved under app.current_tenant). Call site unchanged.
+		s.inferenceClient(),
 		gapExplainStore,
 	)
 	gapExplainH := gapexplainapi.New(gapExplainSvc)
