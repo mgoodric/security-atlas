@@ -1,0 +1,17 @@
+# audit-deps-phantom-baseline.tsv — slice 699
+#
+# The set of direct deps that scripts/audit-deps.sh classifies PHANTOM on
+# `main` but which are known false-positives (peer-detected by their
+# consumer; see docs/audit-log/120-...-decisions.md D5). The phantom-deps
+# CI job posts a sticky PR comment ONLY when a run surfaces a PHANTOM that
+# is NOT in this baseline — i.e. a phantom THIS PR introduced (AC-3).
+#
+# Format: one "ecosystem<TAB>package" per line. Lines starting with '#'
+# and the header row are ignored.
+#
+# Maintenance: when a new genuine KEEP false-positive is discovered, add it
+# here with a rationale comment (and the audit-log D5 table). Refreshing
+# this baseline after a manifest cleanup is a documented maintenance task,
+# not a slice.
+ecosystem	package
+npm	react-dom
