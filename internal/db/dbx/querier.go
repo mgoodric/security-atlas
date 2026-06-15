@@ -152,6 +152,12 @@ type Querier interface {
 	// over the bounded top-N, never the full history — P0-502-8). Resolution
 	// mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
 	CountEvidenceRecordsByControl(ctx context.Context, arg CountEvidenceRecordsByControlParams) (int64, error)
+	// Slice 749: total FROZEN-population evidence count for one control bounded by
+	// the audit-period freeze horizon (observed_at <= frozen_at), for the
+	// "showing N of M" UI label. Mirrors CountEvidenceRecordsByControl's resolution
+	// and the ListEvidenceRecordsByControlBeforeHorizon horizon predicate so the
+	// count and the bounded list agree on the frozen population (P0-749-1).
+	CountEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg CountEvidenceRecordsByControlBeforeHorizonParams) (int64, error)
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	// Rate numerator: distinct user_ids who (a) are in the denominator set
@@ -1872,6 +1878,19 @@ type Querier interface {
 	// on observed_at lets the evaluator stream historical state without
 	// worrying about UPDATEs since slice 002.
 	ListEvidenceRecordsByControl(ctx context.Context, arg ListEvidenceRecordsByControlParams) ([]EvidenceRecord, error)
+	// Slice 749: the FROZEN-population variant of ListEvidenceRecordsByControl.
+	// Returns the top-N most-recent evidence records for one control bounded by an
+	// audit-period freeze horizon: observed_at <= frozen_at (invariant #10). The
+	// bound is the period's audit_periods.frozen_at, passed by the caller after it
+	// has resolved the period; this query NEVER reads the period row itself, it only
+	// applies the horizon it is given. Mirrors ListEvidenceRecordsByControl's
+	// (control_id = $2 OR control_ref = $3) resolution and observed_at DESC order so
+	// the bounded top-N is the N most-recent records WITHIN the frozen population —
+	// never a post-freeze (live) record (P0-749-1). The COALESCE-to-infinity on a
+	// NULL horizon mirrors the slice-026/028 frozen-sample read path: an open period
+	// (frozen_at NULL) falls through to live state, but the slice-749 surface only
+	// summarizes FROZEN periods, so in practice the horizon is always set.
+	ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error)
 	ListExceptionAuditLog(ctx context.Context, arg ListExceptionAuditLogParams) ([]ExceptionAuditLog, error)
 	// Returns every exception for the tenant, newest first. The handler applies
 	// status filter in-memory because the cardinality is small (canvas §1.4

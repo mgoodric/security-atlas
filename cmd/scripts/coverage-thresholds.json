@@ -202,7 +202,7 @@
     "internal/api/controls": 75,
     "internal/api/credstore": 69,
     "internal/api/decisions": 37,
-    "internal/api/evidencesummary": 85,
+    "internal/api/evidencesummary": 88,
     "internal/api/freshnessdrift": 81,
     "internal/api/gapexplain": 75,
     "internal/api/llmrouting": 76,

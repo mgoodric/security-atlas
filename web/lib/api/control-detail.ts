@@ -514,3 +514,67 @@ export function fetchControlEvidenceSummary(
     `/api/controls/${encodeURIComponent(controlID)}/evidence-summary`,
   );
 }
+
+// ===== Slice 749 — period-scoped (frozen) evidence summary =====
+//
+// The audit-workspace sibling of the slice-502 live evidence summary above. For
+// ONE control WITHIN one FROZEN audit period it returns the DETERMINISTIC bounded
+// FROZEN-population evidence set (observed_at <= frozen_at — invariant #10) plus a
+// NON-BINDING, cited, local-default-Ollama summary of that frozen evidence. The
+// summary is a comprehension aid OVER the frozen sample, clearly labeled
+// period-scoped + frozen-as-of `frozen_at`; there is NO approve/publish/export
+// path (P0-502-3) and it is never persisted (P0-502-4). The wire shape reuses the
+// slice-502 fact/citation/summary shapes; the evidence set differs only in that
+// it is `frozen` (not `live_only`) and carries the freeze horizon + period id.
+
+export type PeriodEvidenceSummarySet = {
+  control_id: string;
+  control_title: string;
+  audit_period_id: string;
+  // The period's freeze horizon (RFC3339). The corpus draws ONLY from evidence
+  // with observed_at <= frozen_at (invariant #10, P0-749-1).
+  frozen_at: string;
+  // ALWAYS true — frozen audit-period population, never current live evidence.
+  frozen: boolean;
+  showing: number;
+  total: number;
+  records: EvidenceSummaryFact[];
+};
+
+export type PeriodEvidenceSummaryResponse = {
+  audit_period_id: string;
+  control_id: string;
+  evidence: PeriodEvidenceSummarySet;
+  // null when the summary was suppressed (generation unavailable, no frozen
+  // evidence, or a citation failed to resolve) — the frozen evidence set still
+  // renders.
+  summary: EvidenceSummaryBody | null;
+  suppressed_reason: string;
+};
+
+export async function getPeriodEvidenceSummary(
+  bearer: string,
+  auditPeriodID: string,
+  controlID: string,
+): Promise<PeriodEvidenceSummaryResponse> {
+  const res = await apiFetch(
+    `/v1/audit-periods/${encodeURIComponent(
+      auditPeriodID,
+    )}/controls/${encodeURIComponent(controlID)}/evidence-summary`,
+    bearer,
+  );
+  return (await res.json()) as PeriodEvidenceSummaryResponse;
+}
+
+// Browser-side fetcher for the period-scoped evidence summary. Rides the
+// bffControlFetch helper so APIError surfaces with the upstream status.
+export function fetchPeriodEvidenceSummary(
+  auditPeriodID: string,
+  controlID: string,
+): Promise<PeriodEvidenceSummaryResponse> {
+  return bffControlFetch<PeriodEvidenceSummaryResponse>(
+    `/api/audit/periods/${encodeURIComponent(
+      auditPeriodID,
+    )}/controls/${encodeURIComponent(controlID)}/evidence-summary`,
+  );
+}
