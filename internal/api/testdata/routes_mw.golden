@@ -104,6 +104,7 @@ GET /v1/decisions/overdue 8
 GET /v1/decisions/{id} 8
 GET /v1/decisions/{id}/audit-log 8
 GET /v1/evidence 8
+GET /v1/evidence-summary/portfolio 8
 GET /v1/evidence/freshness 8
 GET /v1/exceptions 8
 GET /v1/exceptions/expiring 8

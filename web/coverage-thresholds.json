@@ -661,6 +661,12 @@
       "functions": 0,
       "lines": 0
     },
+    "components/dashboard/portfolio-summary-view.ts": {
+      "statements": 98,
+      "branches": 93,
+      "functions": 98,
+      "lines": 98
+    },
     "components/dashboards-metrics/format.ts": {
       "statements": 0,
       "branches": 0,
