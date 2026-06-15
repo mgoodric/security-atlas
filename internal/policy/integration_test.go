@@ -14,48 +14,26 @@ package policy_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ---- harness helpers ----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
+// freshTenant CARVE-OUT (742 drain batch 15): cleanup is NOT a flat
+// tenant-scoped DELETE — the first statement is column-scoped
+// (`predecessor_id IS NOT NULL`) to drop self-FK successors before their
+// predecessors, an ordering dbtest.SeedTenant cannot express (it only emits
+// `WHERE tenant_id = $1` per table). So it stays inline; only its pool is
+// re-routed to the slice-435 dbtest harness by the callers
+// (admin := dbtest.NewMigratePool(t)). (batch-13 self-FK precedent.)
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
@@ -118,10 +96,8 @@ func validCreate(linked []uuid.UUID, creator string) policy.CreateInput {
 // ---- AC-1 part A: POST /v1/policies creates a draft ----
 
 func TestCreate_HappyPath(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := policy.NewStore(app)
@@ -148,10 +124,8 @@ func TestCreate_HappyPath(t *testing.T) {
 // ---- AC-7: orphan_policy warning on read ----
 
 func TestCreate_OrphanWarning(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := policy.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -169,10 +143,8 @@ func TestCreate_OrphanWarning(t *testing.T) {
 // ---- AC-1: state machine transitions draft -> under_review -> approved ----
 
 func TestStateMachine_Transitions(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := policy.NewStore(app)
@@ -201,10 +173,8 @@ func TestStateMachine_Transitions(t *testing.T) {
 // ---- AC-1 part B: Publish creates a versioned row ----
 
 func TestPublish_FirstVersion(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := policy.NewStore(app)
@@ -240,10 +210,8 @@ func TestPublish_FirstVersion(t *testing.T) {
 // ---- AC-7 + anti-criterion P0: orphan publish is blocked ----
 
 func TestPublish_OrphanRejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := policy.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -270,10 +238,8 @@ func TestPublish_OrphanRejected(t *testing.T) {
 // ---- transitions reject wrong prior state ----
 
 func TestApprove_RejectsFromDraft(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctrl := seedControl(t, admin, tenant)
 	store := policy.NewStore(app)
@@ -290,10 +256,8 @@ func TestApprove_RejectsFromDraft(t *testing.T) {
 // ---- AC-1: version chain stays within tenant ----
 
 func TestVersionChain_TenantBoundary(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	ctrlA := seedControl(t, admin, tenantA)
@@ -320,10 +284,8 @@ func TestVersionChain_TenantBoundary(t *testing.T) {
 // ---- get returns ErrNotFound for unknown id ----
 
 func TestGet_NotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := policy.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -337,8 +299,7 @@ func TestGet_NotFound(t *testing.T) {
 // ---- create validation: required fields ----
 
 func TestCreate_ValidationErrors(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	app := dbtest.NewAppPool(t)
 	store := policy.NewStore(app)
 	ctx := ctxFor(t, uuid.NewString())
 

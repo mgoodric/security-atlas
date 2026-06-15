@@ -30,7 +30,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -40,61 +39,28 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool pool/DSN boilerplate this file
+// used to re-derive now lives in the shared internal/dbtest harness (NewAppPool
+// = RLS-enforcing atlas_app default; NewMigratePool = privileged BYPASSRLS for
+// seeding + freshTenant cleanup).
 
 // freshTenant returns a new tenant id and registers a cleanup that
 // removes every row this slice's tests can create under it.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM exceptions WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-			`DELETE FROM policies WHERE tenant_id = $1`,
-			`DELETE FROM vendors WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"control_evaluations",
+		"exceptions",
+		"controls",
+		"policies",
+		"vendors",
+		"audit_periods",
+	)
 }
 
 // seedFrameworkVersion seeds the minimum catalog rows for an audit_period FK.
@@ -298,8 +264,8 @@ func decodeJSON(t *testing.T, body []byte) map[string]any {
 // ----- ISC-94-1 + 94-2: RLS isolation across tenants -----
 
 func TestCalendar_RLSIsolatesExceptionsAcrossTenants(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -340,8 +306,8 @@ func TestCalendar_RLSIsolatesExceptionsAcrossTenants(t *testing.T) {
 // UUID. The label is built in the calendar SQL JOIN (single source of
 // truth); the handler passes it through verbatim.
 func TestCalendar_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	now := time.Now().UTC()
@@ -374,8 +340,8 @@ func TestCalendar_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
 // edge case: a control with NO SCF code falls back to "Exception on
 // <control name>" — it must still never print a bare UUID.
 func TestCalendar_ExceptionTitleFallsBackWhenNoSCFCode(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	now := time.Now().UTC()
@@ -405,8 +371,8 @@ func TestCalendar_ExceptionTitleFallsBackWhenNoSCFCode(t *testing.T) {
 }
 
 func TestCalendar_RLSIsolatesControlCadenceAcrossTenants(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -432,8 +398,8 @@ func TestCalendar_RLSIsolatesControlCadenceAcrossTenants(t *testing.T) {
 // ----- ISC-94-3 + 94-4: cadence math -----
 
 func TestCalendar_ControlCadenceMathDueSoon(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	now := time.Now().UTC()
@@ -465,8 +431,8 @@ func TestCalendar_ControlCadenceMathDueSoon(t *testing.T) {
 }
 
 func TestCalendar_ControlCadenceMathOverdueWhenNeverEvaluated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	// Control with cadence but NO evaluations -> status=overdue at now().
@@ -495,8 +461,8 @@ func TestCalendar_ControlCadenceMathOverdueWhenNeverEvaluated(t *testing.T) {
 // default window appears in the agenda with type=vendor. Before slice 675
 // the calendar's UNION had no vendor branch, so this returned 0 events.
 func TestCalendar_SurfacesVendorReviews(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	now := time.Now().UTC()
@@ -531,8 +497,8 @@ func TestCalendar_SurfacesVendorReviews(t *testing.T) {
 // tenant with an audit period + a vendor review + an exception shows ALL
 // three in the agenda (the demo-audit bug was: exceptions only).
 func TestCalendar_AgendaSourcesAllDashboardTypes(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin)
@@ -569,8 +535,8 @@ func TestCalendar_AgendaSourcesAllDashboardTypes(t *testing.T) {
 // ----- ISC-94-5: truncation flag fires at the 500-event threshold -----
 
 func TestCalendar_TruncationFiresAt500Events(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	now := time.Now().UTC()
@@ -607,8 +573,8 @@ func TestCalendar_TruncationFiresAt500Events(t *testing.T) {
 // ----- ISC-94-6: ICS feed validates as RFC 5545 -----
 
 func TestCalendarICS_FeedShapeValidates(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin)
@@ -695,8 +661,8 @@ func TestCalendarICS_FeedShapeValidates(t *testing.T) {
 // ----- ISC-94-7: ICS auth rejects missing token + non-calendar-scope tokens -----
 
 func TestCalendarICS_RejectsMissingToken(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	env := testServer(t, app, tenant)
@@ -710,8 +676,8 @@ func TestCalendarICS_RejectsMissingToken(t *testing.T) {
 }
 
 func TestCalendarICS_RejectsNonCalendarScopeToken(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	env := testServer(t, app, tenant)

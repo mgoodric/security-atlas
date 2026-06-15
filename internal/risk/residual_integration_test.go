@@ -15,8 +15,10 @@
 //                       risk.Store + eval.Engine run against this so RLS is
 //                       enforced.
 //
-// These tests share the harness helpers (appDSN/adminDSN/openPool/
-// freshTenant/seedControl/ctxFor) declared in integration_test.go.
+// These tests use the shared internal/dbtest harness (NewMigratePool /
+// NewAppPool / WithTenantCtx) plus the freshTenant + seed* helpers declared
+// in integration_test.go. Slice 435 replaced the per-file
+// appDSN/adminDSN/openPool/ctxFor boilerplate with dbtest.
 
 package risk_test
 
@@ -29,6 +31,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/scope"
@@ -101,14 +104,12 @@ func newDeriver(app *pgxpool.Pool) *risk.ResidualDeriver {
 // ===== AC-7 / ISC-39, ISC-40: risk with no linked controls =====
 
 func TestResidual_NoLinkedControlsWarnsAndEqualsInherent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 4, 4) // inherent 16
+	riskID := seedNistRisk(t, migrate, tenant, 4, 4) // inherent 16
 	deriver := newDeriver(app)
 
 	res, err := deriver.Derive(ctx, riskID, false)
@@ -132,15 +133,13 @@ func TestResidual_NoLinkedControlsWarnsAndEqualsInherent(t *testing.T) {
 // ===== ISC-41: risk with >=1 linked control has no warning =====
 
 func TestResidual_LinkedControlClearsWarning(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 3, 3)
-	ctrlID := seedEvalControl(t, admin, tenant)
+	riskID := seedNistRisk(t, migrate, tenant, 3, 3)
+	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 	if err := store.LinkControl(ctx, risk.LinkControlInput{RiskID: riskID, ControlID: ctrlID}); err != nil {
 		t.Fatalf("LinkControl: %v", err)
@@ -161,15 +160,13 @@ func TestResidual_LinkedControlClearsWarning(t *testing.T) {
 // ===== AC-3 / AC-4 / ISC-24..28: effectiveness breakdown components =====
 
 func TestResidual_BreakdownReflectsOperationalPassRate(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 5, 5) // inherent 25
-	ctrlID := seedEvalControl(t, admin, tenant)
+	riskID := seedNistRisk(t, migrate, tenant, 5, 5) // inherent 25
+	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 	// Link with explicit weights: design 1.0, weights 0.0/1.0/0.0 so the
 	// composite effectiveness is purely the operational pass rate. That
@@ -190,11 +187,11 @@ func TestResidual_BreakdownReflectsOperationalPassRate(t *testing.T) {
 
 	engine := eval.NewEngine(eval.NewStore(app), scope.NewStore(app))
 	// Two evaluation runs: pass, then fail. Rolling pass rate = 1/2 = 0.5.
-	seedEvidence(t, admin, tenant, ctrlID, "pass", time.Now().UTC().Add(-2*24*time.Hour))
+	seedEvidence(t, migrate, tenant, ctrlID, "pass", time.Now().UTC().Add(-2*24*time.Hour))
 	if _, err := engine.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
 		t.Fatalf("EvaluateControl run 1: %v", err)
 	}
-	seedEvidence(t, admin, tenant, ctrlID, "fail", time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvidence(t, migrate, tenant, ctrlID, "fail", time.Now().UTC().Add(-1*24*time.Hour))
 	if _, err := engine.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
 		t.Fatalf("EvaluateControl run 2: %v", err)
 	}
@@ -224,15 +221,13 @@ func TestResidual_BreakdownReflectsOperationalPassRate(t *testing.T) {
 // ===== ISC-28: control with no evaluations -> operational no_data =====
 
 func TestResidual_NoEvaluationsFlagsNoData(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 2, 2)
-	ctrlID := seedEvalControl(t, admin, tenant)
+	riskID := seedNistRisk(t, migrate, tenant, 2, 2)
+	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 	if err := store.LinkControl(ctx, risk.LinkControlInput{RiskID: riskID, ControlID: ctrlID}); err != nil {
 		t.Fatalf("LinkControl: %v", err)
@@ -256,15 +251,13 @@ func TestResidual_NoEvaluationsFlagsNoData(t *testing.T) {
 // ===== AC-6 / ISC-37, ISC-38: control flip moves residual =====
 
 func TestResidual_ControlFlipPassToFailRaisesResidual(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 5, 5) // inherent 25
-	ctrlID := seedEvalControl(t, admin, tenant)
+	riskID := seedNistRisk(t, migrate, tenant, 5, 5) // inherent 25
+	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 	// Weights isolate operational so the flip is fully visible.
 	if err := store.LinkControl(ctx, risk.LinkControlInput{
@@ -283,7 +276,7 @@ func TestResidual_ControlFlipPassToFailRaisesResidual(t *testing.T) {
 	deriver := risk.NewResidualDeriver(store, engine)
 
 	// All-passing evidence -> operational 1.0 -> residual 0.
-	seedEvidence(t, admin, tenant, ctrlID, "pass", time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvidence(t, migrate, tenant, ctrlID, "pass", time.Now().UTC().Add(-1*24*time.Hour))
 	if _, err := engine.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
 		t.Fatalf("EvaluateControl pass: %v", err)
 	}
@@ -293,7 +286,7 @@ func TestResidual_ControlFlipPassToFailRaisesResidual(t *testing.T) {
 	}
 
 	// Flip: add a fail record, re-evaluate -> operational 0.5 -> residual rises.
-	seedEvidence(t, admin, tenant, ctrlID, "fail", time.Now().UTC().Add(-1*time.Hour))
+	seedEvidence(t, migrate, tenant, ctrlID, "fail", time.Now().UTC().Add(-1*time.Hour))
 	if _, err := engine.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
 		t.Fatalf("EvaluateControl fail: %v", err)
 	}
@@ -311,14 +304,12 @@ func TestResidual_ControlFlipPassToFailRaisesResidual(t *testing.T) {
 // ===== ISC-11 / ISC-23: DeriveAndPersist writes residual_score JSONB =====
 
 func TestResidual_DeriveAndPersistWritesResidualScore(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 4, 4) // inherent 16
+	riskID := seedNistRisk(t, migrate, tenant, 4, 4) // inherent 16
 	deriver := newDeriver(app)
 
 	if _, err := deriver.DeriveAndPersist(ctx, riskID, false); err != nil {
@@ -326,7 +317,7 @@ func TestResidual_DeriveAndPersistWritesResidualScore(t *testing.T) {
 	}
 	// Read residual_score straight from the DB to confirm the write landed.
 	var blob []byte
-	if err := admin.QueryRow(context.Background(),
+	if err := migrate.QueryRow(context.Background(),
 		`SELECT residual_score FROM risks WHERE tenant_id = $1 AND id = $2`,
 		tenant, riskID).Scan(&blob); err != nil {
 		t.Fatalf("read residual_score: %v", err)
@@ -350,14 +341,12 @@ func TestResidual_DeriveAndPersistWritesResidualScore(t *testing.T) {
 // ===== AC-1 / ISC-19, ISC-20: link errors =====
 
 func TestLinkControl_UnknownControlIsNotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 1, 1)
+	riskID := seedNistRisk(t, migrate, tenant, 1, 1)
 	store := risk.NewStore(app)
 	err := store.LinkControl(ctx, risk.LinkControlInput{
 		RiskID:    riskID,
@@ -369,14 +358,12 @@ func TestLinkControl_UnknownControlIsNotFound(t *testing.T) {
 }
 
 func TestLinkControl_UnknownRiskIsNotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	ctrlID := seedEvalControl(t, admin, tenant)
+	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 	err := store.LinkControl(ctx, risk.LinkControlInput{
 		RiskID:    uuid.New(), // does not exist
@@ -390,15 +377,13 @@ func TestLinkControl_UnknownRiskIsNotFound(t *testing.T) {
 // ===== ISC-18: linking is idempotent =====
 
 func TestLinkControl_IdempotentRelink(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 3, 3)
-	ctrlID := seedEvalControl(t, admin, tenant)
+	riskID := seedNistRisk(t, migrate, tenant, 3, 3)
+	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 
 	in := risk.LinkControlInput{RiskID: riskID, ControlID: ctrlID}
@@ -420,28 +405,26 @@ func TestLinkControl_IdempotentRelink(t *testing.T) {
 // ===== ISC-42: risk_control_links weight rows are tenant-isolated =====
 
 func TestLinkControl_WeightsAreTenantIsolated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenantA := freshTenant(t, admin)
-	tenantB := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantA := freshTenant(t, migrate)
+	tenantB := freshTenant(t, migrate)
 
-	riskA := seedNistRisk(t, admin, tenantA, 4, 4)
-	ctrlA := seedEvalControl(t, admin, tenantA)
+	riskA := seedNistRisk(t, migrate, tenantA, 4, 4)
+	ctrlA := seedEvalControl(t, migrate, tenantA)
 	store := risk.NewStore(app)
-	if err := store.LinkControl(ctxFor(t, tenantA), risk.LinkControlInput{
+	if err := store.LinkControl(dbtest.WithTenantCtx(t, tenantA), risk.LinkControlInput{
 		RiskID: riskA, ControlID: ctrlA,
 		DesignScore: 0.9, DesignScoreSet: true,
 	}); err != nil {
 		t.Fatalf("LinkControl tenant A: %v", err)
 	}
 	// Tenant B cannot see tenant A's risk at all (RLS) — Get returns NotFound.
-	if _, err := store.Get(ctxFor(t, tenantB), riskA); err != risk.ErrNotFound {
+	if _, err := store.Get(dbtest.WithTenantCtx(t, tenantB), riskA); err != risk.ErrNotFound {
 		t.Fatalf("ISC-42: tenant B should not see tenant A's risk, got %v", err)
 	}
 	// And the deriver for tenant B treats riskA as not found.
-	if _, err := newDeriver(app).Derive(ctxFor(t, tenantB), riskA, false); err != risk.ErrNotFound {
+	if _, err := newDeriver(app).Derive(dbtest.WithTenantCtx(t, tenantB), riskA, false); err != risk.ErrNotFound {
 		t.Fatalf("ISC-42: tenant B deriver should not see tenant A's risk, got %v", err)
 	}
 }

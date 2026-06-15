@@ -32,7 +32,6 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -44,59 +43,25 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool pool/DSN boilerplate this file
+// used to re-derive now lives in the shared internal/dbtest harness (NewAppPool
+// = RLS-enforcing atlas_app default; NewMigratePool = privileged BYPASSRLS for
+// seeding + freshTenant cleanup).
 
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		// Order matters — child rows first.
-		for _, stmt := range []string{
-			`DELETE FROM questionnaire_answers WHERE tenant_id = $1`,
-			`DELETE FROM questionnaire_questions WHERE tenant_id = $1`,
-			`DELETE FROM questionnaires WHERE tenant_id = $1`,
-			`DELETE FROM answer_library WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"questionnaire_answers",
+		"questionnaire_questions",
+		"questionnaires",
+		"answer_library",
+	)
 }
 
 type testEnv struct {
@@ -196,8 +161,8 @@ func doMultipart(t *testing.T, env testEnv, path string, filename string, payloa
 // ===== AC-A1 / AC-A6: create + list =====
 
 func TestCreateAndList(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -223,8 +188,8 @@ func TestCreateAndList(t *testing.T) {
 // ===== AC-A2 / AC-A3 / AC-A4: import + read + answer round-trip =====
 
 func TestImportAnswerExportRoundTrip(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -279,8 +244,8 @@ func TestImportAnswerExportRoundTrip(t *testing.T) {
 // ===== AC-X-5 / RLS: cross-tenant suggestion isolation =====
 
 func TestCrossTenantSuggestionIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	envA := testServer(t, app, tenantA)
@@ -361,8 +326,8 @@ func pickExistingAnchor(t *testing.T, admin *pgxpool.Pool) string {
 // ===== AC-A5: PDF export — skipped if Chrome unavailable =====
 
 func TestExportPDF_SmokeTest(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -421,8 +386,8 @@ func TestExportPDF_RenderDeadlineDegradesTo503(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(2, time.Nanosecond, time.Second))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -445,8 +410,8 @@ func TestExportPDF_StressNoNonGraceful(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 50*time.Millisecond, 80*time.Millisecond))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -478,8 +443,8 @@ func min(a, b int) int {
 // ===== oversize upload =====
 
 func TestImportExcel_OversizeRejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 

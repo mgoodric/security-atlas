@@ -298,6 +298,29 @@ func DefaultSeed() []KindVersion {
 		{Kind: "slack.workspace_member.v1", Version: "1.0.0"},
 		{Kind: "slack.admin_audit_event.v1", Version: "1.0.0"},
 		{Kind: "slack.retention_settings.v1", Version: "1.0.0"},
+		// Slice 442: GCP connector — the highest-demand missing cloud after
+		// AWS, for the SaaS-startup persona that runs on GCP. ONE connector,
+		// TWO evidence surfaces. Read-only least-privilege identity (ADC /
+		// service-account key, roles/iam.securityReviewer +
+		// roles/storage.bucketViewer); CONFIGURATION + binding METADATA ONLY —
+		// never stored object contents, a service-account KEY, or a secret
+		// VALUE (threat-model I; a reflection guard + an over-collection test
+		// fail the build if a content/secret field is ever added). Pull profile
+		// on an honest interval; platform wire stays push (invariant #3).
+		//   - iam_policy_binding: access evidence (one record per project-IAM
+		//     (role, member) binding + service-account inventory facts).
+		//     Anchors IAC-21 (Privileged Account Management — the "who has what
+		//     role" surface) + IAC-15 (Account Review — feeds access review).
+		//     The spec candidate IAC-22 (Least Privilege) is ABSENT from the
+		//     bundled SCF catalog fixture, so IAC-21 — the closest present
+		//     privileged-access anchor — is the primary (decisions-log D3).
+		//   - storage_bucket_config: bucket hardening evidence (encryption,
+		//     public-access prevention, uniform access, versioning, retention).
+		//     Anchors CRY-04 (Encryption At Rest) + NET-04 (Boundary Protection
+		//     — the public-access dimension); the SAME pair the analogous
+		//     azure.storage_account_config.v1 kind uses.
+		{Kind: "gcp.iam_policy_binding.v1", Version: "1.0.0"},
+		{Kind: "gcp.storage_bucket_config.v1", Version: "1.0.0"},
 	}
 }
 

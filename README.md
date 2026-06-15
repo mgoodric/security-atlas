@@ -19,57 +19,66 @@
   <img alt="security-atlas program dashboard: drift, freshness, top risks, upcoming reviews" src="./docs/images/hero-dashboard.png">
 </picture>
 
-Open-source, self-hostable GRC platform: a control-graph and evidence-pipeline that lets a single security program operate against many frameworks (SOC 2, ISO 27001, NIST CSF, PCI DSS, HIPAA, GDPR) from one source of truth.
-
-The spine is the [Secure Controls Framework](https://securecontrolsframework.com/) (~1,400 controls crosswalked to 200+ frameworks via NIST IR 8477 STRM). The wire format is NIST OSCAL. The target user is the solo security leader at a 50–150-person security-product startup who runs the entire program (risk register, board reporting, SOC 2, vendor reviews, policies, exceptions) alone.
-
-**v1 complete; operator-grade today.** All 69 v1 slices are merged on `main`; v2 follow-on work is well underway. The current release is **v1.10.0** (2026-05-18). 120+ slices have shipped, including the unified audit-log trio (124 + 125 + 126 + 129 + 130: admin-visible `/audit-log` aggregation across nine per-domain log surfaces with an external HMAC-signed sink) and the CI hardening trilogy (117 + 127 + 128: StepSecurity Harden-Runner, branch-protection drift detection, and SHA-pinned GitHub Actions with a BLOCKING pin-check guard). See [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) for the design canvas, [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) for the slice backlog, [`docs/issues/_STATUS.md`](./docs/issues/_STATUS.md) for the live merge trail, and [`CHANGELOG.md`](./CHANGELOG.md) for the per-release notes.
+**Run your whole security-compliance program — SOC 2, ISO 27001, and more — from one open-source app you host yourself.**
 
 ---
+
+## What is this?
+
+If you run security or compliance at a company, you know the drill: prove to auditors and customers that you actually do what your policies say. That means collecting evidence (screenshots, config exports, access reviews), mapping it to controls, and doing it again for every framework — SOC 2, then ISO 27001, then a customer's security questionnaire — usually in a pile of spreadsheets or a SaaS tool that holds your data hostage and gets expensive at renewal.
+
+**security-atlas is a GRC platform** (GRC = Governance, Risk, and Compliance) that runs your entire program from a single source of truth — and you host it on your own server, so your evidence never leaves your control.
+
+The core idea: **write a control once, satisfy many frameworks at once.** Most tools make you re-create the same control for every framework you're audited against. security-atlas keeps one set of controls and maps each to the frameworks it satisfies, so adding ISO 27001 on top of SOC 2 is mostly mapping, not re-work. It does this using the [Secure Controls Framework](https://securecontrolsframework.com/) (SCF) — an open catalog of ~1,400 controls already cross-referenced to 200+ frameworks.
+
+## What it does
+
+- **Collects evidence automatically** from the systems you already run — AWS, GitHub, Okta, GCP, Azure, Kubernetes, and more — through open, read-only connectors. Manual evidence (a signed policy, a meeting note) is a first-class citizen too.
+- **Maps one control to many frameworks**, so SOC 2, ISO 27001, NIST CSF, PCI DSS, HIPAA, and GDPR draw from the same controls instead of duplicated copies.
+- **Runs your SOC 2 audit** end to end: an auditor workspace, evidence sampling, and a frozen audit period so the auditor sees a stable snapshot while your live program keeps moving.
+- **Generates the board report** — the quarterly security update for your leadership, drafted from real data with every number checked against the source.
+- **Tracks risks, policies, exceptions, and vendor reviews** in the same place, linked to the controls they affect.
+- **Exports in OSCAL** (the NIST open standard for compliance data), so your data is portable and not locked in.
+
+## Who it's for
+
+The first user we built for is the **solo security leader at a 50–150-person startup** who runs the entire program alone — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — and whose own customers will scrutinize how they handle security. If that's you, the goal is simple: run your next SOC 2 audit out of security-atlas and build your next board pack from it, without reaching for a spreadsheet to fill a gap.
 
 ## Project status
 
 security-atlas is a **pure-community open-source project** under the
-[Apache 2.0 license](./LICENSE). There is **no hosted SaaS** offered by
-the project owners and **no enterprise edition** with proprietary
-features. This posture is time-bounded; the maintainer will re-evaluate
-on **2028-05-20** (or earlier, if release-download stats cross 100
-deployed self-hosts). The full governance model, funding posture, and
-bus-factor / succession plan live in [`GOVERNANCE.md`](./GOVERNANCE.md).
+[Apache 2.0 license](./LICENSE). v1 is complete and operator-grade; active
+v2 development continues. There is **no hosted SaaS** offered by the project
+owners and **no paid edition** with locked-away features — you run the whole
+thing yourself.
+
+For what shipped and when, see the [latest release](https://github.com/mgoodric/security-atlas/releases/latest)
+and [`CHANGELOG.md`](./CHANGELOG.md). The full governance model, funding
+posture, and succession plan live in [`GOVERNANCE.md`](./GOVERNANCE.md); the
+re-evaluation triggers for the no-SaaS posture are documented there.
 
 ---
 
-## Why security-atlas
+## Why security-atlas (the design bets)
 
-Existing GRC tools optimize for the first-SOC-2-in-90-days SMB sale. They model controls per-framework, store evidence in a vendor cloud, and the Year-2 renewal cliff is well-documented.
+Existing GRC tools optimize for the first-SOC-2-in-90-days SMB sale. They model controls per-framework, store evidence in a vendor cloud, and the Year-2 renewal cliff is well-documented. security-atlas makes the opposite bets:
 
-security-atlas inverts the model:
-
-- **One control, N framework satisfactions.** The Unified Control Framework is a graph with STRM-typed edges through SCF anchors. Never duplicate controls per framework.
-- **Append-only evidence ledger.** Ingestion and evaluation are separated stages; evaluation never writes to source-of-truth evidence. Point-in-time replay is always possible.
-- **Self-hostable from day one.** Single mid-size VM runs the whole platform. NATS JetStream (single binary) · Postgres · S3-compatible artifact store.
+- **One control, N framework satisfactions.** The Unified Control Framework is a graph with STRM-typed edges through SCF anchors. Controls are never duplicated per framework.
+- **Append-only evidence ledger.** Ingestion and evaluation are separate stages; evaluation never writes to source-of-truth evidence. Point-in-time replay is always possible, so a bug in scoring can never corrupt the record.
+- **Self-hostable from day one.** A single mid-size VM runs the whole platform: NATS JetStream (single binary) · Postgres · an S3-compatible artifact store.
 - **OSCAL-native.** Ingest catalogs / profiles / component-definitions; export SSP / AP / AR / POA&M.
 
----
-
-## What's new in v1.10.0 (2026-05-18)
-
-The two recent capability batches that materially changed the operator experience:
-
-- **Unified audit-log trio.** Slices 124 + 125 + 126 + 129 + 130 land a single admin-facing `/audit-log` page that aggregates across nine per-domain audit-log tables (decisions, evidence, exceptions, sample, audit-period, aggregation-rule, feature-flag, me, walkthrough) via a `GET /v1/admin/audit-log/unified` endpoint, with an HMAC-SHA256-signed external JSONL sink for tamper-evident off-host retention and a backpressure-to-fallback table so no record is ever silent-dropped. The role guard admits admin + auditor + grc_engineer; the wire format includes `actor_name` resolution via LEFT JOIN on `users` (per-tenant RLS isolation).
-- **CI hardening trilogy.** Slices 117 + 127 + 128 close three supply-chain gaps: StepSecurity Harden-Runner audit mode on every CI job, branch-protection file ↔ live drift detection on every PR + push to main, and SHA-pinning of every GitHub Action across every workflow with a BLOCKING `actions-pin-check` guard that fails the build on any non-40-char-hex `uses:` line.
-
-See [`CHANGELOG.md`](./CHANGELOG.md) for the full per-release notes; the [`docs/audit-log/`](./docs/audit-log/) directory holds per-slice decision logs that record the JUDGMENT calls behind each merged feature.
+The complete design rationale — invariants, anti-patterns we reject, and the AI-assist boundary — lives in the [architecture canvas](./Plans/ARCHITECTURE_CANVAS.md) and [`CLAUDE.md`](./CLAUDE.md).
 
 ---
 
 ## Screenshots
 
-Captured from the running app against the slice-057 hermetic stub-server demo fixtures (`fixtures/readme-demo/`). Run `ATLAS_DEMO_SEED=1 just refresh-screenshots` to regenerate them. The capture pipeline refuses to run unless `ATLAS_DEMO_SEED=1` is set and the upstream HTTP target is loopback / RFC1918 private (slice 132 information-disclosure safety gate; every captured PNG is public forever once the README merges). Light and dark variants below; the page selects per `prefers-color-scheme`.
+Captured from the running app against the hermetic demo fixtures (`fixtures/readme-demo/`). Run `ATLAS_DEMO_SEED=1 just refresh-screenshots` to regenerate them. The capture pipeline refuses to run unless `ATLAS_DEMO_SEED=1` is set and the upstream HTTP target is loopback / RFC1918 private (an information-disclosure safety gate; every captured PNG is public forever once the README merges). Light and dark variants below; the page selects per `prefers-color-scheme`.
 
-### Control detail: UCF crosswalks
+### Control detail: framework crosswalks
 
-One control, N framework satisfactions. STRM-typed edges through an SCF anchor.
+One control, many framework satisfactions. STRM-typed edges through a single SCF anchor.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/control-detail-dark.png">
@@ -89,7 +98,7 @@ The auditor's surface. Period header with frozen-at timestamp; sampling, walkthr
 
 ### Board pack preview: the quarterly artifact
 
-The v1 binary success-test artifact. Templated narrative per section, per-section approval, frozen on publish.
+The leadership-facing report. Templated narrative per section, per-section approval, frozen on publish.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/board-pack-preview-dark.png">
@@ -114,11 +123,11 @@ just migrate-up
 just build
 ```
 
-Detailed local dev setup, prerequisites, and the full `just` recipe surface live in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+Detailed local dev setup, prerequisites, and the full `just` recipe surface live in [`CONTRIBUTING.md`](./CONTRIBUTING.md). For a production self-host walkthrough (docker-compose, service roles, backups), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md).
 
 ### Your first sign-in (self-host)
 
-The platform mints a one-time bootstrap admin bearer at startup. The `/login` page detects fresh-install state and shows three orthogonal ways to find the token:
+The platform mints a one-time bootstrap admin token at startup. The `/login` page detects fresh-install state and shows three orthogonal ways to find it:
 
 - **docker-compose:** `docker compose logs atlas 2>&1 | grep BOOTSTRAP_TOKEN`
 - **Helm:** `kubectl logs deploy/atlas --tail=200 2>&1 | grep BOOTSTRAP_TOKEN`
@@ -170,23 +179,23 @@ The same version also renders in the bottom-right of every page in the web UI; c
 
 ## Documentation
 
-- **Design canvas:** [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) (vision, primitives, UCF, evidence engine, scope, risk, metrics, audit workflow, tech stack, roadmap, open questions)
-- **Constitutional principles:** [`CLAUDE.md`](./CLAUDE.md) (10 architecture invariants, anti-patterns we reject, AI-assist boundary, licensing constraints)
+- **User guide (docs site):** [`docs-site/docs/`](./docs-site/docs/) — install, configuration, first audit, framework setup, connector authoring, OAuth/OIDC setup, board reporting, metrics, backups, and upgrades.
+- **Design canvas:** [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) — vision, primitives, the control graph, evidence engine, scope, risk, metrics, audit workflow, tech stack, roadmap, open questions.
+- **Constitutional principles:** [`CLAUDE.md`](./CLAUDE.md) — the architecture invariants, anti-patterns we reject, the AI-assist boundary, and licensing constraints.
 - **Self-hosting guide:** [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md)
-- **Measuring your program:** slice 076 lands a curated 40-metric catalog (board / program / team cascades) + the read/write API + a 15-minute evaluator cron. See the [metrics docs](./docs-site/docs/metrics.md) for what's in the catalog, how the cascade composes, and how to interpret a dip.
-- **ADRs:** [`docs/adr/`](./docs/adr/)
-- **Release readiness:** [`docs/RELEASE_READINESS.md`](./docs/RELEASE_READINESS.md)
-- **Slice backlog:** [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md)
+- **Architecture decisions (ADRs):** [`docs/adr/`](./docs/adr/)
+- **Release & verification:** [`docs/releases.md`](./docs/releases.md) · [`docs/RELEASE_READINESS.md`](./docs/RELEASE_READINESS.md)
+- **Slice backlog (how the project is built):** [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) · live merge trail in [`docs/issues/_STATUS.md`](./docs/issues/_STATUS.md)
 
 ---
 
 ## Authentication
 
-security-atlas authenticates request hot-path traffic via an internal OAuth 2.0 Authorization Server that issues JWT access tokens carrying tenant-in-claim (RFC 9068 JWT Profile + RFC 8693 Token Exchange). The architectural commitment is captured in [ADR-0003](./docs/adr/0003-oauth-authorization-server.md); the resolution context lives in [`Plans/canvas/11-open-questions.md`](./Plans/canvas/11-open-questions.md) item 21.
+security-atlas authenticates request traffic via an internal **OAuth 2.0 Authorization Server** that issues short-lived **JWT access tokens** carrying the tenant in-claim (RFC 9068 JWT Profile + RFC 8693 Token Exchange for tenant switching). This is the live auth mechanism today — the JWKS endpoint (`/.well-known/jwks.json`), OIDC discovery (`/.well-known/openid-configuration`), and the grant flows (authorization-code + PKCE for the browser, device-code for the CLI, client-credentials for services) are all shipped.
 
-Slice 187 ships the cryptographic + discovery scaffolding (JWT signing keypair · JWKS endpoint at `/.well-known/jwks.json` · OIDC discovery at `/.well-known/openid-configuration`). The remaining auth-substrate-v2 spine slices (188-192) ship the OAuth grant flows, JWT validation middleware, frontend OAuth client, SDK migration, and multi-tenant tenant-switch. Existing bearer-token API keys (slice 034) remain valid through a 90-day deprecation window once the OAuth flows are live.
+The Authorization Server layers on an OIDC relying party: the relying party authenticates the human against your external IdP (Okta, Entra ID, Google, etc.); the AS layer mints the atlas JWT. Two roles, one server process — security-atlas is not itself an IdP. The architectural commitment is captured in [ADR-0003](./docs/adr/0003-oauth-authorization-server.md); operator setup lives in the [OAuth grants](./docs-site/docs/oauth-grants.md) and [OIDC setup](./docs-site/docs/oidc-setup.md) guides.
 
-The atlas AS is layered on the slice-034 OIDC RP: the RP authenticates the human via an external IdP (atlas-as-OIDC-RP); the AS layer mints the atlas JWT (atlas-as-issuer). Two distinct roles, one server process.
+---
 
 ## Security
 
@@ -194,12 +203,11 @@ security-atlas treats security as a first-class concern. The project ships with:
 
 - **Reporting channel:** see [`SECURITY.md`](./SECURITY.md) for the private vulnerability disclosure process and response timelines. Please **do not** open a public issue for a security finding.
 - **Pipeline hardening:** CodeQL static analysis (Go + JS/TS), GitGuardian secret scanning, and Dependabot version-bump alerts run on every PR.
-- **Dependency vulnerability scanning:** [`Go · govulncheck`](./.github/workflows/ci.yml) (Go call-graph-aware CVE detection), [`Frontend · npm audit`](./.github/workflows/ci.yml) (runtime-shipped JS deps in `web/`), and [`Container · Trivy scan`](./.github/workflows/ci.yml) (OS-package CVEs in the built atlas image). All three fail on HIGH/CRITICAL; reports upload as workflow artifacts. Triage runbook + suppression-mechanism reference: [`docs/audit-log/089-dependency-vulnerability-scanning-decisions.md`](./docs/audit-log/089-dependency-vulnerability-scanning-decisions.md). These complement Dependabot: Dependabot opens PRs when an upgrade is available; these flag known CVEs on the current version when no upgrade exists yet.
+- **Dependency vulnerability scanning:** [`Go · govulncheck`](./.github/workflows/ci.yml) (Go call-graph-aware CVE detection), [`Frontend · npm audit`](./.github/workflows/ci.yml) (runtime-shipped JS deps in `web/`), and [`Container · Trivy scan`](./.github/workflows/ci.yml) (OS-package CVEs in the built atlas image). All three fail on HIGH/CRITICAL; reports upload as workflow artifacts. These complement Dependabot: Dependabot opens PRs when an upgrade is available; these flag known CVEs on the current version when no upgrade exists yet.
 - **Hardening headers:** HSTS / CSP / X-Frame-Options / X-Content-Type-Options / Referrer-Policy applied on every response. See [`internal/api/securityheaders/`](./internal/api/securityheaders/).
-- **Audit reports:** maintainer-led security audits live under [`docs/audits/`](./docs/audits/). The first-pass audit is [`2026-Q2-security-audit.md`](./docs/audits/2026-Q2-security-audit.md) (Q2 2026, performed at slice 085).
+- **Audit reports:** maintainer-led security audits live under [`docs/audits/`](./docs/audits/). The first-pass audit is [`2026-Q2-security-audit.md`](./docs/audits/2026-Q2-security-audit.md).
 - **Audit cadence:** quarterly scheduled review, plus an additional audit after any major change to authentication, authorization, middleware, or evidence-ingestion code paths. First-pass audits are not a substitute for third-party penetration testing; they catch the high-yield patterns automated scanners miss.
-- **Remediation tracking:** actionable findings from each audit are filed as discrete remediation slices under [`docs/issues/`](./docs/issues/) and tracked through the normal review/merge process. The audit report's "Remediation status" lines point at the merge commits that resolved each finding.
-- **CLI HTTP timeouts:** atlas-cli HTTP calls timeout via [`cmd/atlas-cli/cmdhttp`](./cmd/atlas-cli/cmdhttp/client.go). Default 30s. See `cmdhttp/client.go`.
+- **Remediation tracking:** actionable findings from each audit are filed as discrete remediation slices under [`docs/issues/`](./docs/issues/) and tracked through the normal review/merge process.
 
 ---
 

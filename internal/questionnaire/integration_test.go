@@ -33,67 +33,29 @@ package questionnaire
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
+// freshTenant returns a new tenant id + registers cleanup of the rows this
+// slice's tests create (children → parents so FKs do not block the delete).
+// Pure tenant-scoped DELETE in FK order, so it delegates to dbtest.SeedTenant
+// (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		// Order: children → parents so FKs do not block the delete.
-		for _, stmt := range []string{
-			`DELETE FROM questionnaire_answers WHERE tenant_id = $1`,
-			`DELETE FROM questionnaire_questions WHERE tenant_id = $1`,
-			`DELETE FROM questionnaires WHERE tenant_id = $1`,
-			`DELETE FROM answer_library WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"questionnaire_answers",
+		"questionnaire_questions",
+		"questionnaires",
+		"answer_library",
+	)
 }
 
 func ctxFor(t *testing.T, tenant string) context.Context {
@@ -108,8 +70,8 @@ func ctxFor(t *testing.T, tenant string) context.Context {
 // ----- Store CRUD round-trip -----
 
 func TestStore_CreateGetList_RoundTrip(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	store := NewStore(app)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -156,7 +118,7 @@ func TestStore_CreateGetList_RoundTrip(t *testing.T) {
 }
 
 func TestStore_CreateQuestionnaire_RejectsMissingTenant(t *testing.T) {
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	store := NewStore(app)
 	_, err := store.CreateQuestionnaire(context.Background(), CreateQuestionnaireParams{
 		Name: "x",
@@ -170,8 +132,8 @@ func TestStore_CreateQuestionnaire_RejectsMissingTenant(t *testing.T) {
 }
 
 func TestStore_AddQuestionsFromParse_MappedAndUnmapped(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	store := NewStore(app)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -210,8 +172,8 @@ func TestStore_AddQuestionsFromParse_MappedAndUnmapped(t *testing.T) {
 }
 
 func TestStore_UpsertAnswer_WithLibrarySave(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	store := NewStore(app)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -270,8 +232,8 @@ func TestStore_UpsertAnswer_WithLibrarySave(t *testing.T) {
 }
 
 func TestStore_UpsertAnswer_NoLibrarySaveWhenNarrativeEmpty(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	store := NewStore(app)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -304,8 +266,8 @@ func TestStore_UpsertAnswer_NoLibrarySaveWhenNarrativeEmpty(t *testing.T) {
 }
 
 func TestStore_ListQuestionsWithAnswers_StitchesAnswers(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	store := NewStore(app)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
@@ -346,8 +308,8 @@ func TestStore_ListQuestionsWithAnswers_StitchesAnswers(t *testing.T) {
 // ----- RLS isolation — the canvas-§5.4 invariant -----
 
 func TestSuggestForAnchor_RLS_TenantIsolation(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	store := NewStore(app)
 
 	tenantA := freshTenant(t, admin)
@@ -392,8 +354,8 @@ func TestSuggestForAnchor_RLS_TenantIsolation(t *testing.T) {
 }
 
 func TestSuggestForAnchorWithPool_RejectsEmptyAnchor(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	store := NewStore(app)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)

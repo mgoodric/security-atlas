@@ -21,6 +21,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 const (
@@ -28,45 +29,16 @@ const (
 	tenantB = "22222222-2222-2222-2222-222222222222"
 )
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	p, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return p
-}
-
 // wipeAndImport removes any pre-existing schema rows and re-imports the
 // platform bundle. Tests are unit-isolated by always running against a
 // clean state for evidence_kind_schemas.
 func wipeAndImport(t *testing.T) (*schemaregistry.Service, *pgxpool.Pool) {
 	t.Helper()
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	if _, err := admin.Exec(context.Background(), "DELETE FROM evidence_kind_schemas"); err != nil {
 		t.Fatalf("wipe: %v", err)
 	}
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	svc := schemaregistry.NewService(app)
 	// Run the import via the admin pool (BYPASSRLS) because global rows
 	// have tenant_id NULL.
@@ -77,10 +49,6 @@ func wipeAndImport(t *testing.T) (*schemaregistry.Service, *pgxpool.Pool) {
 	if err := svc.LoadFromDB(context.Background()); err != nil {
 		t.Fatalf("LoadFromDB: %v", err)
 	}
-	t.Cleanup(func() {
-		admin.Close()
-		app.Close()
-	})
 	return svc, app
 }
 
@@ -143,8 +111,7 @@ func reqJSON(t *testing.T, ts *httptest.Server, method, path, bearer string, bod
 // AC-3: ten v1 platform schemas ship in the bundle.
 func TestImport_TenPlatformSchemas(t *testing.T) {
 	_, _ = wipeAndImport(t)
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	app := dbtest.NewAppPool(t)
 	// Set the GUC so RLS lets us see tenant_id NULL rows (the policy is
 	// tenant_id IS NULL OR current_tenant_matches; the NULL branch is
 	// always visible regardless of the GUC, but the test sets it anyway
@@ -415,7 +382,7 @@ func TestRegister_TenantIsolated(t *testing.T) {
 	tsA.Close()
 
 	// Independent server bound to tenant B's bearer.
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	t.Cleanup(app.Close)
 	svcB := schemaregistry.NewService(app)
 	if err := svcB.LoadFromDB(context.Background()); err != nil {
@@ -493,8 +460,7 @@ func TestMigration_RoundTrip(t *testing.T) {
 		t.Skip("DATABASE_URL not set")
 	}
 	// Apply down then up via psql-equivalent SQL statements directly.
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	// down
 	if _, err := admin.Exec(context.Background(), "DROP TABLE IF EXISTS evidence_kind_schemas"); err != nil {
 		t.Fatalf("down: %v", err)
@@ -510,8 +476,7 @@ func TestMigration_RoundTrip(t *testing.T) {
 		t.Fatalf("re-apply: %v", err)
 	}
 	// Sanity: insert one row through atlas_app's RLS path.
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	app := dbtest.NewAppPool(t)
 	ctx := context.Background()
 	conn, err := app.Acquire(ctx)
 	if err != nil {
@@ -542,7 +507,7 @@ func TestMigration_RoundTrip(t *testing.T) {
 		t.Fatalf("RLS leak: tenant B sees %d rows; want 0", n)
 	}
 	// Cleanup.
-	admPool := openPool(t, adminDSN(t))
+	admPool := dbtest.NewMigratePool(t)
 	defer admPool.Close()
 	_, _ = admPool.Exec(ctx, "DELETE FROM evidence_kind_schemas WHERE id=$1", id)
 }

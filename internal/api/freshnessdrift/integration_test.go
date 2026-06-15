@@ -27,7 +27,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -36,6 +35,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -43,54 +43,19 @@ import (
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
+// freshTenant returns a brand-new tenant id and registers cleanup that wipes
+// every slice-016 row written under it. The cleanup is a pure FK-ordered
+// tenant-scoped DELETE returning a string, so it delegates to
+// dbtest.SeedTenant (slice 435 / 742 drain batch 21).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM evidence_freshness WHERE tenant_id = $1`,
-			`DELETE FROM control_drift_snapshots WHERE tenant_id = $1`,
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"evidence_freshness",
+		"control_drift_snapshots",
+		"control_evaluations",
+		"evidence_records",
+		"controls",
+	)
 }
 
 func ctxFor(t *testing.T, tenant string) context.Context {
@@ -237,8 +202,8 @@ func get(t *testing.T, env testEnv, path string) (*http.Response, map[string]any
 // distribution by freshness_class =====
 
 func TestFreshness_ReturnsClassDistribution(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -290,8 +255,8 @@ func TestFreshness_ReturnsClassDistribution(t *testing.T) {
 // ===== AC-1: omitting ?bucket= still returns the class distribution =====
 
 func TestFreshness_DefaultBucketIsClass(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -313,8 +278,8 @@ func TestFreshness_DefaultBucketIsClass(t *testing.T) {
 // ===== AC-1: an unsupported ?bucket= value is rejected 400 =====
 
 func TestFreshness_UnsupportedBucketIs400(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -328,8 +293,8 @@ func TestFreshness_UnsupportedBucketIs400(t *testing.T) {
 // the stale total) but the ledger row is NEVER deleted =====
 
 func TestFreshness_StaleFlaggedButLedgerRecordPreserved(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -364,8 +329,8 @@ func TestFreshness_StaleFlaggedButLedgerRecordPreserved(t *testing.T) {
 // flipped pass->fail with the signed delta =====
 
 func TestDrift_ReturnsPassToFailFlipsWithDelta(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -413,8 +378,8 @@ func TestDrift_ReturnsPassToFailFlipsWithDelta(t *testing.T) {
 // ===== AC-3: ?since= defaults to 7d when omitted =====
 
 func TestDrift_SinceDefaultsToSevenDays(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -439,8 +404,8 @@ func TestDrift_SinceDefaultsToSevenDays(t *testing.T) {
 // ===== AC-3: a malformed ?since= is rejected 400 =====
 
 func TestDrift_MalformedSinceIs400(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -456,8 +421,8 @@ func TestDrift_MalformedSinceIs400(t *testing.T) {
 // B's read-model rows =====
 
 func TestFreshnessDrift_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 
@@ -499,8 +464,8 @@ func TestFreshnessDrift_CrossTenantIsolation(t *testing.T) {
 // ===== auth: missing bearer -> 401 on both endpoints =====
 
 func TestFreshnessDrift_MissingBearerIs401(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 

@@ -28,26 +28,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
 
 func minioEndpoint(t *testing.T) string {
 	t.Helper()
@@ -65,17 +48,6 @@ func minioBucket(t *testing.T) string {
 		return "atlas-artifacts-test"
 	}
 	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
 }
 
 // newS3Client builds an S3 client targeting MinIO with path-style
@@ -117,6 +89,10 @@ func ensureBucket(t *testing.T, cli *s3.Client, bucket string) {
 	}
 }
 
+// freshTenant is kept inline (742 drain carve-out): it returns a uuid.UUID
+// (the artifact tests pass the typed id to tenantCtx + assert on
+// tenant.String()), a shape dbtest.SeedTenant — which returns a string —
+// cannot express. Only its pool is re-routed to the dbtest harness.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	tenant := uuid.New()
@@ -145,8 +121,8 @@ func tenantCtx(t *testing.T, tenant uuid.UUID) context.Context {
 
 func buildStore(t *testing.T) (*artifact.Store, *pgxpool.Pool, *pgxpool.Pool, *s3.Client, string) {
 	t.Helper()
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	endpoint := minioEndpoint(t)
 	bucket := minioBucket(t)
 	cli := newS3Client(t, endpoint)
@@ -168,7 +144,6 @@ func buildStore(t *testing.T) (*artifact.Store, *pgxpool.Pool, *pgxpool.Pool, *s
 // re-hashes server-side.
 func TestStore_PutAndGet_RoundTrip(t *testing.T) {
 	store, _, admin, cli, bucket := buildStore(t)
-	defer admin.Close()
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -225,7 +200,6 @@ func TestStore_PutAndGet_RoundTrip(t *testing.T) {
 // is rejected.
 func TestStore_Put_RejectsHashMismatch(t *testing.T) {
 	store, _, admin, _, _ := buildStore(t)
-	defer admin.Close()
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -246,7 +220,6 @@ func TestStore_Put_RejectsHashMismatch(t *testing.T) {
 // reveals existence.
 func TestStore_Get_CrossTenantReturnsNotFound(t *testing.T) {
 	store, _, admin, _, _ := buildStore(t)
-	defer admin.Close()
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 
@@ -273,7 +246,6 @@ func TestStore_Get_CrossTenantReturnsNotFound(t *testing.T) {
 // ISC-13 + ISC-A2 — Presign returns a URL with TTL ≤ MaxDownloadTTL.
 func TestStore_Presign_TTLBound(t *testing.T) {
 	store, _, admin, _, _ := buildStore(t)
-	defer admin.Close()
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -320,7 +292,6 @@ func TestStore_Presign_TTLBound(t *testing.T) {
 // audit row.
 func TestStore_LogAccess_AuditRowsPersist(t *testing.T) {
 	store, _, admin, _, _ := buildStore(t)
-	defer admin.Close()
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -378,7 +349,6 @@ func TestStore_LogAccess_AuditRowsPersist(t *testing.T) {
 // ISC-18 / ErrOversized — over-cap body is rejected at the Store layer.
 func TestStore_Put_RejectsOversized(t *testing.T) {
 	store, _, admin, _, _ := buildStore(t)
-	defer admin.Close()
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 
@@ -399,7 +369,6 @@ func TestStore_Put_RejectsOversized(t *testing.T) {
 // id, no second S3 write attempt.
 func TestStore_Put_DedupOnContentHash(t *testing.T) {
 	store, _, admin, _, _ := buildStore(t)
-	defer admin.Close()
 	tenant := freshTenant(t, admin)
 	ctx := tenantCtx(t, tenant)
 

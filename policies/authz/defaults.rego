@@ -55,3 +55,19 @@ allow if {
     input.resource.type == "search"
     count(input.user.roles) > 0
 }
+
+# Slice 468 — per-user saved filter-views (`/v1/saved-views`).
+#
+# A self-service surface: ANY authenticated user with a role may manage
+# THEIR OWN saved views (read + write + delete). Like the slice-029
+# `/v1/me/notifications` and slice-016 user-preferences surfaces, the
+# per-USER isolation is enforced at the query layer (the handler pins
+# `user_id = caller` on every query, sourced from the verified
+# credential, never the body) — so one user can never read or mutate
+# another's view even within the same tenant (threat-model I / P0-448-5).
+# RLS enforces the TENANT half. Default-deny still applies: a roleless
+# credential falls through to the baseline.
+allow if {
+    input.resource.type == "saved-views"
+    count(input.user.roles) > 0
+}

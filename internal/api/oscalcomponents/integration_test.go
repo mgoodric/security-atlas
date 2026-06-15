@@ -33,10 +33,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,39 +42,10 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // freshTenant returns a new tenant id and registers a cleanup that deletes
 // every row this slice's tests can create under it.
@@ -300,8 +269,8 @@ func do(t *testing.T, env testEnv, method, path, body string) (*http.Response, m
 // ===== AC-1: list =====
 
 func TestList_ReturnsDefinitions(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	seedComponentDef(t, admin, tenant)
 	env := ownerServer(t, app, tenant)
@@ -340,8 +309,8 @@ func TestList_ReturnsDefinitions(t *testing.T) {
 // in a deploy. It asserts the exact symptom-page wire shape: 200, an empty
 // list, and count=0.
 func TestList_EmptyTenantReturns200EmptyList(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	// A brand-new tenant with NO imported_catalogs rows — the EMPTY/default
 	// tenant shape that 500'd on edge. freshTenant registers the cleanup;
 	// nothing is seeded.
@@ -369,8 +338,8 @@ func TestList_EmptyTenantReturns200EmptyList(t *testing.T) {
 // ===== AC-2: get detail + unmapped flag =====
 
 func TestGet_ReturnsClaimsWithUnmappedFlag(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	defID, _ := seedComponentDef(t, admin, tenant)
 	env := ownerServer(t, app, tenant)
@@ -410,8 +379,8 @@ func TestGet_ReturnsClaimsWithUnmappedFlag(t *testing.T) {
 // ===== AC-3: accept disposition + audit + assertion boundary =====
 
 func TestAccept_DispositionsClaimAndAudits(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
 	claimID := claims[0].claimID
@@ -478,8 +447,8 @@ func TestAccept_DispositionsClaimAndAudits(t *testing.T) {
 // ===== AC-4: reject + needs-info =====
 
 func TestRejectAndNeedsInfo(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
 	env := approverServer(t, app, tenant)
@@ -497,8 +466,8 @@ func TestRejectAndNeedsInfo(t *testing.T) {
 // ===== AC-5: RLS isolation =====
 
 func TestRLS_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	defA, claimsA := seedComponentDef(t, admin, tenantA)
@@ -537,8 +506,8 @@ func TestRLS_CrossTenantIsolation(t *testing.T) {
 // ===== authz: read role + write role gates =====
 
 func TestAuthz_BareCredForbiddenRead(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	// A bare push credential (no owner/approver/admin flag) cannot read.
 	env := newServer(t, app, testjwt.ViewerFor(uuid.MustParse(tenant)))
@@ -549,8 +518,8 @@ func TestAuthz_BareCredForbiddenRead(t *testing.T) {
 }
 
 func TestAuthz_NonApproverForbiddenDisposition(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
 	// An owner can READ but cannot DISPOSITION (write needs approver/admin).
@@ -562,8 +531,8 @@ func TestAuthz_NonApproverForbiddenDisposition(t *testing.T) {
 }
 
 func TestGet_UnknownID404(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := ownerServer(t, app, tenant)
 	resp, _ := do(t, env, http.MethodGet, "/v1/oscal/component-definitions/"+uuid.New().String(), "")
@@ -580,8 +549,8 @@ func TestGet_UnknownID404(t *testing.T) {
 // written, and — the load-bearing boundary — NOTHING is written to
 // control_evaluations.
 func TestMapScfAnchor_MapsClaimAndAudits(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
 	scfID := ensureCurrentSCFAnchor(t, admin)
@@ -670,8 +639,8 @@ func TestMapScfAnchor_MapsClaimAndAudits(t *testing.T) {
 // scf_id with no bundled anchor is rejected 422 — a mapping must target a real
 // SCF anchor (invariant #7), never a free-form string.
 func TestMapScfAnchor_UnknownAnchor422(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
 	env := approverServer(t, app, tenant)
@@ -695,8 +664,8 @@ func TestMapScfAnchor_UnknownAnchor422(t *testing.T) {
 
 // TestMapScfAnchor_UnknownClaim404 asserts an unknown claim id 404s.
 func TestMapScfAnchor_UnknownClaim404(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	scfID := ensureCurrentSCFAnchor(t, admin)
 	env := approverServer(t, app, tenant)
@@ -710,8 +679,8 @@ func TestMapScfAnchor_UnknownClaim404(t *testing.T) {
 
 // TestMapScfAnchor_NonApproverForbidden asserts an owner (read role) cannot map.
 func TestMapScfAnchor_NonApproverForbidden(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_, claims := seedComponentDef(t, admin, tenant)
 	scfID := ensureCurrentSCFAnchor(t, admin)
@@ -728,8 +697,8 @@ func TestMapScfAnchor_NonApproverForbidden(t *testing.T) {
 // tenant A's claim — the cross-tenant claim id resolves to 404 under RLS, and
 // tenant A's claim stays unmapped.
 func TestMapScfAnchor_RLSCrossTenantDenied(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	_, claimsA := seedComponentDef(t, admin, tenantA)

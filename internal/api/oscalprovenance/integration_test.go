@@ -28,9 +28,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -42,57 +40,19 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/oscalprovenance"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // freshTenant returns a new tenant id and registers a cleanup that deletes
 // every row this slice's tests can create under it.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM imported_catalog_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM imported_catalogs WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"imported_catalog_audit_log",
+		"imported_catalogs",
+	)
 }
 
 // chainSeed is one {role, sha256, bytes} entry in a seeded provenance chain.
@@ -189,8 +149,8 @@ func provURL(id uuid.UUID) string {
 // ===== AC-1: a chained import returns its ordered chain =====
 
 func TestProvenance_ChainedImport(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -227,8 +187,8 @@ func TestProvenance_ChainedImport(t *testing.T) {
 // ===== AC-2: a single-level import returns its two-element chain =====
 
 func TestProvenance_SingleLevelImport(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -256,8 +216,8 @@ func TestProvenance_SingleLevelImport(t *testing.T) {
 // ===== AC-3: the read is RLS-isolated across tenants =====
 
 func TestProvenance_RLSIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -287,8 +247,8 @@ func TestProvenance_RLSIsolation(t *testing.T) {
 // ===== plus: an unknown id 404s =====
 
 func TestProvenance_UnknownID(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -301,8 +261,8 @@ func TestProvenance_UnknownID(t *testing.T) {
 // ===== plus: a no-role credential 403s (handler-level guard) =====
 
 func TestProvenance_Forbidden_NoRole(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	chain := []chainSeed{{Role: "entry-profile", Sha256: "aa", Bytes: 1}, {Role: "catalog", Sha256: "bb", Bytes: 2}}

@@ -243,6 +243,7 @@ type anchorEdge struct {
 	relationshipType  string
 	strength          float64
 	sourceAttribution string
+	mappingTier       string
 	rationale         string
 }
 
@@ -266,6 +267,7 @@ func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UU
 				relationshipType:  string(r.RelationshipType),
 				strength:          r.Strength,
 				sourceAttribution: string(r.SourceAttribution),
+				mappingTier:       string(r.MappingTier),
 				rationale:         r.Rationale,
 			}
 		}
@@ -352,6 +354,7 @@ func anchorWiresFromAnchors(anchors []anchorEdge) []anchorWire {
 			RelationshipType:  a.relationshipType,
 			Strength:          a.strength,
 			SourceAttribution: a.sourceAttribution,
+			MappingTier:       a.mappingTier,
 			Rationale:         a.rationale,
 		})
 	}

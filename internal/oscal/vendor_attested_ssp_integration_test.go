@@ -32,6 +32,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
 )
 
@@ -136,8 +137,8 @@ func countControlEvaluations(t *testing.T, admin *pgxpool.Pool, tenant string) i
 // and asserts the control_evaluations count is UNCHANGED by the export (no
 // fabricated coverage).
 func TestExport_AcceptedVendorClaim_VendorAttestedAndNoFabricatedCoverage(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwVersion := seedFrameworkVersion(t, admin)
 	periodID, _ := seedPeriod(t, admin, tenant, fwVersion, true /* frozen */)
@@ -175,7 +176,7 @@ func TestExport_AcceptedVendorClaim_VendorAttestedAndNoFabricatedCoverage(t *tes
 	signer, _ := oscal.NewEphemeralSigner()
 	e := oscal.NewExporter(app, bridge, signer)
 
-	bundle, err := e.Export(ctxFor(t, tenant), oscal.ExportInput{
+	bundle, err := e.Export(dbtest.WithTenantCtx(t, tenant), oscal.ExportInput{
 		AuditPeriodID:     periodID,
 		OrganizationName:  "Acme Security Inc.",
 		SystemName:        "Acme Compliance Platform",

@@ -19,13 +19,13 @@ package eval_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/scope"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -40,56 +40,19 @@ func jsonString(s string) string {
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant cleans every slice-012 + dependency table for the tenant after
 // the test so reruns do not accumulate. control_evaluations is dropped first
-// (it FKs to controls + scope_cells).
+// (it FKs to controls + scope_cells). Pure tenant-scoped DELETE in FK order,
+// so it delegates to dbtest.SeedTenant (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM scope_cells WHERE tenant_id = $1`,
-			`DELETE FROM scope_dimensions WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"control_evaluations",
+		"evidence_records",
+		"scope_cells",
+		"scope_dimensions",
+		"controls",
+	)
 }
 
 func ctxFor(t *testing.T, tenant string) context.Context {
@@ -203,10 +166,8 @@ func countEvaluations(t *testing.T, admin *pgxpool.Pool, tenant string) int {
 // ===== AC-4: manual_attested control with a fresh attestation -> pass =====
 
 func TestEvaluateControl_ManualAttestedFreshAttestationIsPass(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -243,10 +204,8 @@ func TestEvaluateControl_ManualAttestedFreshAttestationIsPass(t *testing.T) {
 // ===== AC-5: freshest evidence past freshness_class max age -> stale =====
 
 func TestEvaluateControl_EvidencePastWindowIsStale(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -283,10 +242,8 @@ func TestEvaluateControl_EvidencePastWindowIsStale(t *testing.T) {
 // ===== AC-3: evaluation is idempotent =====
 
 func TestEvaluateControl_IdempotentComputedColumns(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -337,10 +294,8 @@ func TestEvaluateControl_IdempotentComputedColumns(t *testing.T) {
 // ===== AC-7: replay — delete control_evaluations, re-run, identical state =====
 
 func TestReplay_ReproducesIdenticalStateFromLedger(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -428,10 +383,8 @@ func assertSameState(t *testing.T, label string, before, after []eval.State) {
 // ===== AC-1: per-scope-cell evaluation — one row per applicable cell =====
 
 func TestEvaluateControl_OneRowPerApplicableScopeCell(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -476,10 +429,8 @@ func TestEvaluateControl_OneRowPerApplicableScopeCell(t *testing.T) {
 // ===== AC-1: ?scope= filter narrows the returned cells =====
 
 func TestControlState_ScopeFilterNarrowsCells(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -522,10 +473,8 @@ func TestControlState_ScopeFilterNarrowsCells(t *testing.T) {
 // ===== AC-6: effectiveness — rolling 30-day pass rate =====
 
 func TestEffectiveness_RollingPassRate(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -574,10 +523,8 @@ func TestEffectiveness_RollingPassRate(t *testing.T) {
 // ===== unknown control id -> ErrControlNotFound =====
 
 func TestControlState_UnknownControlIsNotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -590,10 +537,8 @@ func TestControlState_UnknownControlIsNotFound(t *testing.T) {
 // ===== Rego evidence query path — bundle-declared query drives the result ==
 
 func TestEvaluateControl_RegoEvidenceQueryDrivesResult(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -636,10 +581,8 @@ result := "pass" if {
 // ===== AC-9 / AC-7: a JSON-path-only control evaluates to real state =====
 
 func TestEvaluateControl_JSONPathEvidenceQueryProducesState(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -687,10 +630,8 @@ func TestEvaluateControl_JSONPathEvidenceQueryProducesState(t *testing.T) {
 // ===== AC-8 / AC-7: a SQL-only control evaluates to real state =====
 
 func TestEvaluateControl_SQLEvidenceQueryProducesState(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -744,10 +685,8 @@ func TestEvaluateControl_SQLEvidenceQueryProducesState(t *testing.T) {
 // non-evidence table (threat-model I / P0-495-2) =====
 
 func TestEvaluateControl_SQLCannotReadOtherTenantOrNonEvidenceTable(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	// Tenant B holds secret evidence. Tenant A authors a malicious SQL query
 	// that TRIES to read evidence_records directly (the live table, all
@@ -810,10 +749,8 @@ func TestEvaluateControl_SQLCannotReadOtherTenantOrNonEvidenceTable(t *testing.T
 // (threat-model D) =====
 
 func TestEvaluateControl_SQLTimeoutYieldsInconclusiveNotHang(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -853,10 +790,8 @@ func TestEvaluateControl_SQLTimeoutYieldsInconclusiveNotHang(t *testing.T) {
 // through the existing precedence =====
 
 func TestEvaluateControl_MixedLanguageRollup(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -891,10 +826,8 @@ result := "pass" if { count(input.records) > 0 }`
 // ===== fail-loud: a persisted unsupported language errors, never silent =====
 
 func TestEvaluateControl_UnsupportedLanguageFailsLoud(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 

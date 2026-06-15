@@ -116,6 +116,7 @@ fi
 #   r.METHOD("/path", ...)          — RegisterRoutes/Routes style
 #   root.Method(http.MethodX, "/path", ...) — version handler style
 #   r.Method(http.MethodX, "/path", ...)    — defensive
+#   r.METHOD(PathConst, ...)        — internal/api/oauth const-based style (block C)
 #
 # Output: sorted "METHOD PATH" lines.
 {
@@ -127,6 +128,32 @@ fi
     "$ROOT/internal/api/" --include="*.go" --exclude="*_test.go" \
     | sed -E 's/.*Method\(http\.Method(Get|Post|Patch|Put|Delete), "([^"]+)".*/\1 \2/' \
     | awk '{print toupper($1)" "$2}'
+  # Block C (slice 339): the OAuth AS package registers its /oauth/* and
+  # /.well-known/* routes via `r.Get(PathConst, ...)` / `r.Post(PathConst, ...)`
+  # — a CONST identifier, not a string literal, and on prefixes the two
+  # literal-greps above intentionally do not match. Resolve each const to
+  # its declared literal so these routes appear in the coverage set.
+  # Without this block, declaring them in RouteSpecs would falsely trip the
+  # stale-entry check (declared-but-not-registered). See slice 339
+  # decisions log D2.
+  # Patterns avoid \b and \s so they behave identically on GNU sed (CI,
+  # Linux) and BSD sed (macOS, local repro) — neither escape is portable.
+  oauth_dir="$ROOT/internal/api/oauth"
+  if [[ -d "$oauth_dir" ]]; then
+    {
+      # const defs:  PathX = "/literal"   ->  emit "C PathX /literal"
+      grep -rhE '(Path[A-Za-z0-9]+)[ ]*=[ ]*"(/oauth/|/\.well-known/)' \
+        "$oauth_dir" --include="*.go" --exclude="*_test.go" \
+        | sed -E 's/.*(Path[A-Za-z0-9]+)[ ]*=[ ]*"([^"]+)".*/C \1 \2/'
+      # Mount calls:  r.Get(PathX, ...)   ->  emit "M Get PathX"
+      grep -rhE 'r\.(Get|Post|Patch|Put|Delete)\(Path[A-Za-z0-9]+,' \
+        "$oauth_dir" --include="*.go" --exclude="*_test.go" \
+        | sed -E 's/.*r\.(Get|Post|Patch|Put|Delete)\((Path[A-Za-z0-9]+),.*/M \1 \2/'
+    } | awk '
+      $1 == "C" { lit[$2] = $3; next }
+      $1 == "M" { if ($3 in lit) print toupper($2)" "lit[$3] }
+    '
+  fi
 } | sort -u > "$tmp_actual"
 
 # Extract declared RouteSpecs from routes.go via the same line shape

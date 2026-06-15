@@ -299,6 +299,10 @@ connector-build:
 connector-build-slack:
     go build -o ./bin/slack-connector ./connectors/slack/cmd/slack-connector
 
+# Build the GCP connector binary (slice 442).
+connector-build-gcp:
+    go build -o ./bin/gcp-connector ./connectors/gcp/cmd/gcp-connector
+
 # Trigger a connector run. Args: <vendor> <kind>. Required env vars:
 #   SECURITY_ATLAS_ENDPOINT  platform gRPC endpoint
 #   SECURITY_ATLAS_TOKEN     bearer token (issued via `atlas-cli credentials issue`)

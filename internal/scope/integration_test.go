@@ -14,7 +14,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -25,78 +24,43 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/scope"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
+// Slice 435: the pool/DSN/tenant-seed/context boilerplate this file used to
+// re-derive (appDSN/adminDSN/openPool/inline tenancy.WithTenant) now lives in
+// the shared internal/dbtest harness. dbtest.NewMigratePool / NewAppPool open
+// the two pools; dbtest.WithTenantCtx tags the tenant context;
+// dbtest.SeedTenant (via freshTenant below) seeds + cleans up.
 
 // freshTenant returns a brand-new tenant id and registers a cleanup that wipes
-// every row written under it. Each test owns its own tenant so RLS guarantees
-// isolation and tests can run in any order.
-func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
+// every row written under it through the privileged (migrate) pool — the
+// append-only evidence_records is among them, so the migrate pool is required.
+// Each test owns its own tenant so RLS guarantees isolation and tests can run
+// in any order.
+func freshTenant(t *testing.T, migrate *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM scope_cells WHERE tenant_id = $1`,
-			`DELETE FROM scope_dimensions WHERE tenant_id = $1`,
-			`DELETE FROM scopes WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, migrate,
+		"evidence_records",
+		"scope_cells",
+		"scope_dimensions",
+		"scopes",
+		"controls",
+	)
 }
 
 // TestSeedTenant_IsIdempotent — AC-5: fresh deploys seed a single default cell
 // with sane defaults (bu=default, env=prod, data_classification=internal).
 // Calling SeedTenant twice returns the same cell and never creates duplicates.
 func TestSeedTenant_IsIdempotent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
-	tenant := freshTenant(t, admin)
+	tenant := freshTenant(t, migrate)
 	store := scope.NewStore(app)
 
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	first, err := store.SeedTenant(ctx)
 	if err != nil {
@@ -145,14 +109,12 @@ func TestSeedTenant_IsIdempotent(t *testing.T) {
 // drop cells whose dimensions don't match the schema. The store must reject
 // with ErrInvalidDimension.
 func TestCreateCell_RejectsUndeclaredDimension(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := scope.NewStore(app)
 
-	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	if _, err := store.SeedTenant(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -170,14 +132,12 @@ func TestCreateCell_RejectsUndeclaredDimension(t *testing.T) {
 // TestCreateCell_RejectsValueOutsideAllowedValues — same anti-criterion: when
 // a dimension declares allowed_values, writes with other values are rejected.
 func TestCreateCell_RejectsValueOutsideAllowedValues(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := scope.NewStore(app)
 
-	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	if _, err := store.SeedTenant(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -194,14 +154,12 @@ func TestCreateCell_RejectsValueOutsideAllowedValues(t *testing.T) {
 // TestCreateCell_DuplicateReturnsCellExists — UNIQUE on (tenant_id,
 // dimensions_hash) prevents duplicates.
 func TestCreateCell_DuplicateReturnsCellExists(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := scope.NewStore(app)
 
-	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	if _, err := store.SeedTenant(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -222,14 +180,12 @@ func TestCreateCell_DuplicateReturnsCellExists(t *testing.T) {
 // TestCreateCell_DimensionOrderDoesNotMatter — canonical hash dedupes regardless
 // of map iteration order. This is what makes the UNIQUE constraint trustworthy.
 func TestCreateCell_DimensionOrderDoesNotMatter(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := scope.NewStore(app)
 
-	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	if _, err := store.SeedTenant(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -248,14 +204,12 @@ func TestCreateCell_DimensionOrderDoesNotMatter(t *testing.T) {
 // selects only prod+restricted+confidential; ControlApplicability returns
 // exactly those cells.
 func TestControlApplicability_AppliesExpression(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := scope.NewStore(app)
 
-	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	if _, err := store.SeedTenant(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -282,7 +236,7 @@ func TestControlApplicability_AppliesExpression(t *testing.T) {
 		{"op":"in","dim":"environment","values":["prod","staging"]},
 		{"op":"in","dim":"data_classification","values":["restricted","confidential"]}
 	]}`
-	if err := withAdminTenant(admin, tenant, func(ctx context.Context, tx pgx.Tx) error {
+	if err := withAdminTenant(migrate, tenant, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
 			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)
@@ -315,14 +269,12 @@ func TestControlApplicability_AppliesExpression(t *testing.T) {
 // slice-002 sets applicability_expr default to the literal string "true",
 // which must mean "match every cell".
 func TestControlApplicability_LegacyTrueReturnsAllCells(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := scope.NewStore(app)
 
-	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	if _, err := store.SeedTenant(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -335,7 +287,7 @@ func TestControlApplicability_LegacyTrueReturnsAllCells(t *testing.T) {
 
 	controlID := uuid.NewString()
 	bundleID := "scope-it-legacy-" + controlID
-	if err := withAdminTenant(admin, tenant, func(ctx context.Context, tx pgx.Tx) error {
+	if err := withAdminTenant(migrate, tenant, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
 			VALUES ($1, $2, 'IAC-99', 'all', 'IAC', 'automated', 'true', $3)
@@ -357,15 +309,13 @@ func TestControlApplicability_LegacyTrueReturnsAllCells(t *testing.T) {
 // TestRLS_OtherTenantCannotSeeCells — Invariant 6. Tenant A creates cells;
 // Tenant B opens its own context and sees zero of them.
 func TestRLS_OtherTenantCannotSeeCells(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenantA := freshTenant(t, admin)
-	tenantB := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantA := freshTenant(t, migrate)
+	tenantB := freshTenant(t, migrate)
 	store := scope.NewStore(app)
 
-	ctxA, _ := tenancy.WithTenant(context.Background(), tenantA)
+	ctxA := dbtest.WithTenantCtx(t, tenantA)
 	if _, err := store.SeedTenant(ctxA); err != nil {
 		t.Fatalf("seed A: %v", err)
 	}
@@ -375,7 +325,7 @@ func TestRLS_OtherTenantCannotSeeCells(t *testing.T) {
 		t.Fatalf("CreateCell A: %v", err)
 	}
 
-	ctxB, _ := tenancy.WithTenant(context.Background(), tenantB)
+	ctxB := dbtest.WithTenantCtx(t, tenantB)
 	cells, err := store.ListCells(ctxB)
 	if err != nil {
 		t.Fatalf("ListCells B: %v", err)
@@ -389,7 +339,7 @@ func TestRLS_OtherTenantCannotSeeCells(t *testing.T) {
 
 func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
 	// Slice 197: JWT bearer via slice 190 path.
@@ -399,10 +349,8 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 		t.Fatal("HTTPHandlerForTests nil; AttachDB ineffective")
 	}
 	ts := httptest.NewServer(handler)
-	t.Cleanup(func() {
-		ts.Close()
-		app.Close()
-	})
+	// The app pool is closed by dbtest.NewAppPool's own t.Cleanup.
+	t.Cleanup(ts.Close)
 	return ts, bearer
 }
 
@@ -440,14 +388,12 @@ func nilOr(s string) io.Reader {
 
 // TestHTTP_CreateAndListCells — AC-2 + AC-7.
 func TestHTTP_CreateAndListCells(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, migrate)
 
 	// Pre-seed so the dimension schema exists.
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	app := dbtest.NewAppPool(t)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	if _, err := scope.NewStore(app).SeedTenant(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -485,13 +431,11 @@ func TestHTTP_CreateAndListCells(t *testing.T) {
 
 // TestHTTP_PostRejectsBadDimensions — anti-criterion enforcement at HTTP layer.
 func TestHTTP_PostRejectsBadDimensions(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, migrate)
 
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	app := dbtest.NewAppPool(t)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	if _, err := scope.NewStore(app).SeedTenant(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -507,14 +451,12 @@ func TestHTTP_PostRejectsBadDimensions(t *testing.T) {
 // TestHTTP_ControlApplicability_EndToEnd — AC-7. Insert a control + a few cells,
 // GET /v1/controls/:id/applicability, confirm the wire shape.
 func TestHTTP_ControlApplicability_EndToEnd(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, migrate)
 
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	app := dbtest.NewAppPool(t)
 	store := scope.NewStore(app)
-	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 	if _, err := store.SeedTenant(ctx); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -529,7 +471,7 @@ func TestHTTP_ControlApplicability_EndToEnd(t *testing.T) {
 	controlID := uuid.NewString()
 	bundleID := "scope-it-http-" + controlID
 	exprJSON := `{"op":"eq","dim":"environment","value":"prod"}`
-	if err := withAdminTenant(admin, tenant, func(ctx context.Context, tx pgx.Tx) error {
+	if err := withAdminTenant(migrate, tenant, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
 			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)

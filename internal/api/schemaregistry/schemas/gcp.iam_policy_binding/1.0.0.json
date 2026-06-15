@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/gcp.iam_policy_binding/1.0.0.json",
+  "x-evidence-kind": "gcp.iam_policy_binding.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-21", "IAC-15"],
+  "title": "GCP project IAM policy binding",
+  "description": "One record per (role, member) binding in a GCP project's IAM policy, enriched with service-account inventory facts (whether the member is a service account and whether that account is disabled). Pulled read-only from Cloud Resource Manager (getIamPolicy) + the IAM service-accounts list (roles/iam.securityReviewer). Binding + assignment METADATA only — never a service-account KEY, never object/secret contents. The platform evaluator decides least-privilege fit per (control, binding); the connector emits descriptive (INCONCLUSIVE) records, except a disabled service-account grant which is PASS (inert).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["member", "member_type", "role"],
+  "properties": {
+    "member": {
+      "type": "string",
+      "minLength": 1,
+      "description": "GCP IAM member string (e.g. serviceAccount:svc@proj.iam.gserviceaccount.com, user:alice@example.com, group:..). The opaque principal identifier GCP itself records on the binding — not personal contact PII."
+    },
+    "member_type": {
+      "type": "string",
+      "enum": [
+        "user",
+        "serviceAccount",
+        "group",
+        "domain",
+        "specialGroup",
+        "unknown"
+      ],
+      "description": "Kind of the bound principal."
+    },
+    "role": {
+      "type": "string",
+      "minLength": 1,
+      "description": "GCP IAM role on the binding (e.g. roles/owner, roles/storage.admin, roles/viewer)."
+    },
+    "is_privileged": {
+      "type": "boolean",
+      "description": "Connector-side heuristic: the role is a known high-privilege / primitive role (owner/editor/IAM-admin family)."
+    },
+    "is_service_acc": {
+      "type": "boolean",
+      "description": "True when the bound member is a service account (vs a human/group)."
+    },
+    "disabled": {
+      "type": "boolean",
+      "description": "For service-account members: the service account is disabled (deprovisioned) — the grant is inert."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable reason when the verdict is pass/inconclusive."
+    }
+  }
+}
