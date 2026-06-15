@@ -69,9 +69,14 @@ subcommand below and `docs/audit-log/522-azure-eventgrid-decisions.md`.
 - **DoS bounding:** a bounded event queue + a coalescing window collapse an event
   storm into one re-read per resource; the body is size-bounded (413). The pull
   profile is the reconciliation backstop for any dropped event.
-- **No new permission:** the re-read uses the **same** read-only Graph + ARM Reader
-  set as the pull profile (plus the operator's Event-Grid subscription read,
-  configured in Azure). No write path; no new evidence kind.
+- **No new permission (receiver):** the re-read uses the **same** read-only Graph +
+  ARM Reader set as the pull profile (plus the operator's Event-Grid subscription
+  read, configured in Azure). The steady-state receiver has **no write code path**
+  and never holds a write scope; it emits no new evidence kind. Creating the
+  Event-Grid plumbing the receiver listens behind is a **separate, opt-in,
+  privileged** action — see the `provision` subcommand below (slice 658). The
+  receiver and the provisioner are deliberately distinct processes with distinct
+  credentials.
 - **Bind / TLS:** defaults to loopback (`127.0.0.1:8485`). Event Grid requires an
   HTTPS endpoint with a valid certificate — terminate TLS at a reverse proxy in
   front of this process.
@@ -137,8 +142,9 @@ permission, and do **not** grant Owner / Contributor / User Access Administrator
 on the subscription. Do **not** use the broad **Global Administrator** /
 **Global Reader** directory roles where the narrow `Directory.Read.All` +
 `Application.Read.All` application permissions suffice — least privilege prefers
-the narrower set. The connector has no write code path; the only Graph/ARM
-operations it issues are reads (`GET .../roleAssignments`,
+the narrower set. The connector's steady-state code paths (`run` pull +
+`eventgrid` subscribe receiver) have **no write code path**; the only Graph/ARM
+operations they issue are reads (`GET .../roleAssignments`,
 `GET .../storageAccounts`, `GET .../managedClusters`,
 `GET .../networkSecurityGroups`, `GET .../Microsoft.KeyVault/vaults`,
 `GET .../firewallPolicies`, `GET .../firewallPolicies/<policy>/ruleCollectionGroups`).
@@ -153,6 +159,46 @@ Key-Vault **and** Azure-Firewall evidence all need only the single ARM Reader
 role. Grant only the set for the kinds you run (use `--skip-entra` /
 `--skip-storage` / `--skip-aks` / `--skip-nsg` / `--skip-keyvault` /
 `--skip-firewall` to run a subset of surfaces).
+
+> **The one write surface is the opt-in `provision` subcommand (slice 658).** The
+> banned-permissions rule above governs the steady-state `run` / `eventgrid`
+> credential. The `provision` / `deprovision` subcommands are a **separate,
+> one-shot, privileged** action you run with your **own elevated, short-lived**
+> credential (distinct env vars — see below) carrying ARM
+> `Microsoft.EventGrid/*` write + `Microsoft.Insights/diagnosticSettings/write`.
+> Those actions are **operator-supplied for that single run**, never held by the
+> long-lived receiver. Run `atlas-azure provision --print-rbac` for the exact
+> action list.
+
+## Event-Grid provisioning (opt-in, privileged — slice 658)
+
+The `eventgrid` receiver **receives** events but deliberately does **not** create
+the Azure Event-Grid system topic + event subscription (or the Activity-Log
+diagnostic setting) that route events to its webhook. Auto-creating those requires
+a **write** scope the steady-state receiver must never hold (P0-658-1). So
+provisioning is a **separate, opt-in, one-shot** operator action:
+
+- **Distinct elevated credential.** `provision` / `deprovision` read their **own**
+  env vars — `AZURE_PROVISION_TENANT_ID` / `AZURE_PROVISION_CLIENT_ID` /
+  `AZURE_PROVISION_CLIENT_SECRET` — **not** the receiver's read-only `AZURE_*`.
+  Supply a short-lived credential with the write role for the single run, then
+  revoke it.
+- **ARM management API only.** Provisioning talks to **Azure's** ARM API; it does
+  **not** touch the security-atlas platform and does **not** widen the platform
+  push wire (invariant #3 / P0-658-2).
+- **Idempotent.** ARM PUT is upsert, so re-running an already-provisioned plan
+  succeeds. `deprovision` (or `provision --teardown`) DELETEs what `provision`
+  created; deleting an absent resource is a no-op.
+- **Exact RBAC actions** the elevated credential needs:
+
+  | Action                                                       | Why                                                              |
+  | ------------------------------------------------------------ | ---------------------------------------------------------------- |
+  | `Microsoft.EventGrid/systemTopics/write`                     | create the system topic                                          |
+  | `Microsoft.EventGrid/systemTopics/delete`                    | tear down the system topic                                       |
+  | `Microsoft.EventGrid/systemTopics/eventSubscriptions/write`  | create the event subscription to the receiver webhook            |
+  | `Microsoft.EventGrid/systemTopics/eventSubscriptions/delete` | tear down the event subscription                                 |
+  | `Microsoft.Insights/diagnosticSettings/write`                | create the Activity-Log diagnostic setting (`--with-diagnostic`) |
+  | `Microsoft.Insights/diagnosticSettings/delete`               | tear down the Activity-Log diagnostic setting                    |
 
 ## Subcommands
 
@@ -189,6 +235,32 @@ atlas-azure eventgrid \
 
 # Print the least-privilege Azure permissions.
 atlas-azure permissions
+
+# [PRIVILEGED, opt-in, one-shot — slice 658] Provision the Event-Grid plumbing the
+# receiver listens behind. Run with your OWN ELEVATED, short-lived credential
+# (DISTINCT env vars from the receiver's read-only AZURE_*). Then revoke it.
+atlas-azure provision --print-rbac   # show the exact write actions required
+
+export AZURE_PROVISION_TENANT_ID=<elevated-tenant-guid>
+export AZURE_PROVISION_CLIENT_ID=<elevated-app-client-id>
+export AZURE_PROVISION_CLIENT_SECRET=<elevated-app-secret>
+export AZURE_EVENTGRID_DELIVERY_KEY=<delivery-key-the-receiver-verifies>
+
+atlas-azure provision \
+  --subscription-id <subscription-guid> \
+  --resource-group rg-atlas \
+  --location eastus \
+  --webhook-host https://atlas.example.com \
+  --path /webhooks/azure/eventgrid \
+  --with-diagnostic                  # also route Activity-Log events (optional)
+
+# Tear it all down when you retire the receiver:
+atlas-azure deprovision \
+  --subscription-id <subscription-guid> \
+  --resource-group rg-atlas \
+  --location eastus \
+  --webhook-host https://atlas.example.com \
+  --with-diagnostic
 ```
 
 | Flag                 | Subcommand  | Required | Default                       | Notes                                                                                                                                                                               |
@@ -343,12 +415,6 @@ The connector ships six evidence surfaces. It does **not** ship:
   cursor-pagination follow-on (filed as spillover slice 634)
 - route tables / VNet peering topology
 - Azure-Policy evidence
-- **Event-Grid subscription / Activity-Log diagnostic-setting auto-provisioning** —
-  the `eventgrid` subscribe receiver (slice 522) **receives** events; it does not
-  auto-create the Event-Grid system topic / diagnostic setting that routes events to
-  the webhook (the operator wires that in the portal / IaC). Auto-provisioning would
-  need a write-scope permission this connector excludes — filed as a follow-on
-  spillover
 - cursor pagination / multi-subscription auto-enumeration (v0 reads a bounded
   first page for one subscription)
 
