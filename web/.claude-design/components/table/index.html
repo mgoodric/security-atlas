@@ -26,12 +26,19 @@
   table.ds-table th.ds-cell-num { text-align: right; }
   table.ds-table .ds-cell-id { font-weight: 500; font-family: var(--font-mono); font-size: 0.8rem; }
 
-  .ds-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
+  .ds-pill { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px;
     border-radius: var(--radius-4xl); font-size: 0.75rem; font-weight: 500; line-height: 1; white-space: nowrap; }
-  .ds-pill--ok { background: var(--primary); color: var(--primary-foreground); }
+  .ds-pill .led { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
+  /* Soft semantic status pills — deep same-hue text on its tint (WCAG AA). */
+  .ds-pill--pass { background: color-mix(in oklab, var(--pass) 15%, transparent); color: var(--pass); }
+  .ds-pill--info { background: color-mix(in oklab, var(--info) 15%, transparent); color: var(--info); }
+  .ds-pill--progress { background: color-mix(in oklab, var(--progress) 15%, transparent); color: var(--progress); }
+  .ds-pill--gap { background: color-mix(in oklab, var(--critical) 15%, transparent); color: var(--critical); }
   .ds-pill--neutral { background: var(--secondary); color: var(--secondary-foreground); }
-  .ds-pill--gap { background: color-mix(in oklab, var(--destructive) 10%, transparent); color: var(--destructive); }
-  .dark .ds-pill--gap { background: color-mix(in oklab, var(--destructive) 20%, transparent); }
+  .dark .ds-pill--pass { background: color-mix(in oklab, var(--pass) 24%, transparent); }
+  .dark .ds-pill--info { background: color-mix(in oklab, var(--info) 24%, transparent); }
+  .dark .ds-pill--progress { background: color-mix(in oklab, var(--progress) 24%, transparent); }
+  .dark .ds-pill--gap { background: color-mix(in oklab, var(--critical) 24%, transparent); }
 </style>
 </head>
 <body>
@@ -44,10 +51,10 @@
           <th>Control</th><th>Family</th><th>Status</th><th>Owner</th><th class="ds-cell-num">Freshness</th>
         </tr></thead>
         <tbody>
-          <tr><td class="ds-cell-id">SCF:IAC-06</td><td>Identity &amp; Access</td><td><span class="ds-pill ds-pill--ok">Compliant</span></td><td>Security Lead</td><td class="ds-cell-num">2d</td></tr>
-          <tr data-state="selected"><td class="ds-cell-id">SCF:CRY-03</td><td>Cryptographic</td><td><span class="ds-pill ds-pill--neutral">In review</span></td><td>Eng owner</td><td class="ds-cell-num">11d</td></tr>
-          <tr><td class="ds-cell-id">SCF:MON-01</td><td>Monitoring</td><td><span class="ds-pill ds-pill--gap">Gap</span></td><td>Unassigned</td><td class="ds-cell-num">95d</td></tr>
-          <tr><td class="ds-cell-id">SCF:RSK-04</td><td>Risk Mgmt</td><td><span class="ds-pill ds-pill--ok">Compliant</span></td><td>Compliance</td><td class="ds-cell-num">6d</td></tr>
+          <tr><td class="ds-cell-id">SCF:IAC-06</td><td>Identity &amp; Access</td><td><span class="ds-pill ds-pill--pass"><span class="led"></span>Compliant</span></td><td>Security Lead</td><td class="ds-cell-num">2d</td></tr>
+          <tr data-state="selected"><td class="ds-cell-id">SCF:CRY-03</td><td>Cryptographic</td><td><span class="ds-pill ds-pill--info"><span class="led"></span>In review</span></td><td>Eng owner</td><td class="ds-cell-num">11d</td></tr>
+          <tr><td class="ds-cell-id">SCF:MON-01</td><td>Monitoring</td><td><span class="ds-pill ds-pill--gap"><span class="led"></span>Gap</span></td><td>Unassigned</td><td class="ds-cell-num">95d</td></tr>
+          <tr><td class="ds-cell-id">SCF:RSK-04</td><td>Risk Mgmt</td><td><span class="ds-pill ds-pill--pass"><span class="led"></span>Compliant</span></td><td>Compliance</td><td class="ds-cell-num">6d</td></tr>
         </tbody>
       </table>
     </div>
@@ -60,10 +67,10 @@
           <th>Control</th><th>Family</th><th>Status</th><th>Owner</th><th class="ds-cell-num">Freshness</th>
         </tr></thead>
         <tbody>
-          <tr><td class="ds-cell-id">SCF:IAC-06</td><td>Identity &amp; Access</td><td><span class="ds-pill ds-pill--ok">Compliant</span></td><td>Security Lead</td><td class="ds-cell-num">2d</td></tr>
-          <tr data-state="selected"><td class="ds-cell-id">SCF:CRY-03</td><td>Cryptographic</td><td><span class="ds-pill ds-pill--neutral">In review</span></td><td>Eng owner</td><td class="ds-cell-num">11d</td></tr>
-          <tr><td class="ds-cell-id">SCF:MON-01</td><td>Monitoring</td><td><span class="ds-pill ds-pill--gap">Gap</span></td><td>Unassigned</td><td class="ds-cell-num">95d</td></tr>
-          <tr><td class="ds-cell-id">SCF:RSK-04</td><td>Risk Mgmt</td><td><span class="ds-pill ds-pill--ok">Compliant</span></td><td>Compliance</td><td class="ds-cell-num">6d</td></tr>
+          <tr><td class="ds-cell-id">SCF:IAC-06</td><td>Identity &amp; Access</td><td><span class="ds-pill ds-pill--pass"><span class="led"></span>Compliant</span></td><td>Security Lead</td><td class="ds-cell-num">2d</td></tr>
+          <tr data-state="selected"><td class="ds-cell-id">SCF:CRY-03</td><td>Cryptographic</td><td><span class="ds-pill ds-pill--info"><span class="led"></span>In review</span></td><td>Eng owner</td><td class="ds-cell-num">11d</td></tr>
+          <tr><td class="ds-cell-id">SCF:MON-01</td><td>Monitoring</td><td><span class="ds-pill ds-pill--gap"><span class="led"></span>Gap</span></td><td>Unassigned</td><td class="ds-cell-num">95d</td></tr>
+          <tr><td class="ds-cell-id">SCF:RSK-04</td><td>Risk Mgmt</td><td><span class="ds-pill ds-pill--pass"><span class="led"></span>Compliant</span></td><td>Compliance</td><td class="ds-cell-num">6d</td></tr>
         </tbody>
       </table>
     </div>

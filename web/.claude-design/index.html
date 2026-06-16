@@ -35,7 +35,7 @@
 <body>
 <div class="wrap">
   <h1>security-atlas Design System</h1>
-  <p class="sub">Live mirror of <code>web/components/ui</code> (shadcn &middot; base-nova &middot; <strong>neutral</strong>). Tokens are extracted verbatim from <code>web/app/globals.css</code> &mdash; pure achromatic oklch surfaces with a single chromatic destructive. No brand hue has been chosen yet. Every card renders in both light and dark. Edit on the canvas, then pull changes back into the codebase one component at a time.</p>
+  <p class="sub">Live mirror of <code>web/components/ui</code> (shadcn &middot; base-nova &middot; <strong>neutral</strong>). Surfaces stay neutral and primary stays near-black, with a <strong>muted-pastel accent layer</strong> on top: a semantic status family, a recolored chart ramp, and soft surface washes. Every colored text/icon is the deep same-hue tone, measured &ge;4.5:1 (WCAG&nbsp;AA). Every card renders in both light and dark. Edit on the canvas, then pull changes back into the codebase one component at a time.</p>
 
   <h2>Core tokens</h2>
   <div class="swatch-stage">
@@ -75,6 +75,50 @@
         <div class="sw"><div class="chip" style="background:var(--chart-3)"></div><span class="lbl">chart-3</span></div>
         <div class="sw"><div class="chip" style="background:var(--chart-4)"></div><span class="lbl">chart-4</span></div>
         <div class="sw"><div class="chip" style="background:var(--chart-5)"></div><span class="lbl">chart-5</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Semantic status family</h2>
+  <div class="swatch-stage">
+    <div class="swatch-pane">
+      <p class="ds-label" style="margin-bottom:10px">Light &middot; deep tones (text/icon) &middot; all &ge;4.5:1 on their tint</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:var(--pass)"></div><span class="lbl">pass</span></div>
+        <div class="sw"><div class="chip" style="background:var(--info)"></div><span class="lbl">info</span></div>
+        <div class="sw"><div class="chip" style="background:var(--warning)"></div><span class="lbl">warning</span></div>
+        <div class="sw"><div class="chip" style="background:var(--critical)"></div><span class="lbl">critical</span></div>
+        <div class="sw"><div class="chip" style="background:var(--progress)"></div><span class="lbl">progress</span></div>
+        <div class="sw"><div class="chip" style="background:var(--brand)"></div><span class="lbl">brand</span></div>
+      </div>
+      <p class="ds-label" style="margin:14px 0 10px">Soft tints &middot; fills</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--pass) 15%, var(--background))"></div><span class="lbl">pass/15</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--info) 15%, var(--background))"></div><span class="lbl">info/15</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--warning) 15%, var(--background))"></div><span class="lbl">warning/15</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--critical) 15%, var(--background))"></div><span class="lbl">critical/15</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--progress) 15%, var(--background))"></div><span class="lbl">progress/15</span></div>
+        <div class="sw"><div class="chip" style="background:var(--surface-1)"></div><span class="lbl">surface-1</span></div>
+      </div>
+    </div>
+    <div class="swatch-pane dark">
+      <p class="ds-label" style="margin-bottom:10px">Dark &middot; deep tones (text/icon)</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:var(--pass)"></div><span class="lbl">pass</span></div>
+        <div class="sw"><div class="chip" style="background:var(--info)"></div><span class="lbl">info</span></div>
+        <div class="sw"><div class="chip" style="background:var(--warning)"></div><span class="lbl">warning</span></div>
+        <div class="sw"><div class="chip" style="background:var(--critical)"></div><span class="lbl">critical</span></div>
+        <div class="sw"><div class="chip" style="background:var(--progress)"></div><span class="lbl">progress</span></div>
+        <div class="sw"><div class="chip" style="background:var(--brand)"></div><span class="lbl">brand</span></div>
+      </div>
+      <p class="ds-label" style="margin:14px 0 10px">Soft tints &middot; fills</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--pass) 24%, var(--card))"></div><span class="lbl">pass/24</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--info) 24%, var(--card))"></div><span class="lbl">info/24</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--warning) 24%, var(--card))"></div><span class="lbl">warning/24</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--critical) 24%, var(--card))"></div><span class="lbl">critical/24</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--progress) 24%, var(--card))"></div><span class="lbl">progress/24</span></div>
+        <div class="sw"><div class="chip" style="background:var(--surface-1)"></div><span class="lbl">surface-1</span></div>
       </div>
     </div>
   </div>

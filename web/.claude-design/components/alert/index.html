@@ -31,6 +31,17 @@
 
   .alert-destructive { color: var(--destructive); }
   .alert-destructive .alert__desc { color: color-mix(in oklab, var(--destructive) 90%, transparent); }
+
+  /* Tinted semantic variants — soft same-hue fill, deep text (WCAG AA).
+     Title resolves to --foreground for max legibility; the deep hue carries
+     the icon and frames the card. */
+  .alert-pass { background: color-mix(in oklab, var(--pass) 14%, var(--background)); color: var(--pass);
+    border-color: color-mix(in oklab, var(--pass) 26%, transparent); }
+  .alert-info { background: color-mix(in oklab, var(--info) 14%, var(--background)); color: var(--info);
+    border-color: color-mix(in oklab, var(--info) 26%, transparent); }
+  .alert-pass .alert__title, .alert-info .alert__title { color: var(--foreground); }
+  .dark .alert-pass { background: color-mix(in oklab, var(--pass) 20%, var(--card)); }
+  .dark .alert-info { background: color-mix(in oklab, var(--info) 20%, var(--card)); }
 </style>
 </head>
 <body>
@@ -48,6 +59,18 @@
       <div class="alert__title">Could not create tenant</div>
       <div class="alert__desc">A tenant with that slug already exists. Choose a different slug and try again.</div>
     </div>
+    <p class="ds-label">Pass — Light</p>
+    <div class="alert alert-pass">
+      <span class="alert__icon" aria-hidden="true">✓</span>
+      <div class="alert__title">Control CC6.1 passing</div>
+      <div class="alert__desc">Evidence observed 2 days ago, within the freshness window.</div>
+    </div>
+    <p class="ds-label">Info — Light</p>
+    <div class="alert alert-info">
+      <span class="alert__icon" aria-hidden="true">ℹ</span>
+      <div class="alert__title">Mapped to 4 frameworks</div>
+      <div class="alert__desc">This control satisfies SOC 2, ISO 27001, HIPAA, and PCI DSS requirements.</div>
+    </div>
   </div>
   <div class="ds-stage ds-stage--dark dark">
     <p class="ds-label">Default — Dark</p>
@@ -61,6 +84,18 @@
       <span class="alert__icon" aria-hidden="true">⚠</span>
       <div class="alert__title">Could not create tenant</div>
       <div class="alert__desc">A tenant with that slug already exists. Choose a different slug and try again.</div>
+    </div>
+    <p class="ds-label">Pass — Dark</p>
+    <div class="alert alert-pass">
+      <span class="alert__icon" aria-hidden="true">✓</span>
+      <div class="alert__title">Control CC6.1 passing</div>
+      <div class="alert__desc">Evidence observed 2 days ago, within the freshness window.</div>
+    </div>
+    <p class="ds-label">Info — Dark</p>
+    <div class="alert alert-info">
+      <span class="alert__icon" aria-hidden="true">ℹ</span>
+      <div class="alert__title">Mapped to 4 frameworks</div>
+      <div class="alert__desc">This control satisfies SOC 2, ISO 27001, HIPAA, and PCI DSS requirements.</div>
     </div>
   </div>
 </div>
