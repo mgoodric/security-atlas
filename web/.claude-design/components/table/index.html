@@ -1,0 +1,73 @@
+<!-- @dsCard group="Layout" name="Table" subtitle="Header + rows · controls list" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Table — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Table — translated from web/components/ui/table.tsx (base-nova / neutral).
+     table: w-full text-sm. th: h-10 px-2 text-left font-medium text-foreground.
+     td: p-2 align-middle. tr: border-b, hover/selected -> bg-muted/50 (selected
+     uses solid bg-muted). thead [&_tr]:border-b; tbody [&_tr:last-child]:border-0. */
+  .ds-table-wrap { width: 100%; overflow-x: auto; }
+  table.ds-table { width: 100%; border-collapse: collapse;
+    font-family: var(--font-sans); font-size: 0.875rem; color: var(--foreground); }
+  table.ds-table thead tr { border-bottom: 1px solid var(--border); }
+  table.ds-table th { height: 40px; padding: 0 8px; text-align: left; vertical-align: middle;
+    font-weight: 500; white-space: nowrap; color: var(--foreground); }
+  table.ds-table tbody tr { border-bottom: 1px solid var(--border); transition: background-color .15s ease; }
+  table.ds-table tbody tr:last-child { border-bottom: 0; }
+  table.ds-table tbody tr:hover { background: color-mix(in oklab, var(--muted) 50%, transparent); }
+  table.ds-table tr[data-state="selected"] { background: var(--muted); }
+  table.ds-table td { padding: 8px; vertical-align: middle; white-space: nowrap; }
+  table.ds-table .ds-cell-num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.ds-table th.ds-cell-num { text-align: right; }
+  table.ds-table .ds-cell-id { font-weight: 500; font-family: var(--font-mono); font-size: 0.8rem; }
+
+  .ds-pill { display: inline-flex; align-items: center; height: 20px; padding: 0 8px;
+    border-radius: var(--radius-4xl); font-size: 0.75rem; font-weight: 500; line-height: 1; white-space: nowrap; }
+  .ds-pill--ok { background: var(--primary); color: var(--primary-foreground); }
+  .ds-pill--neutral { background: var(--secondary); color: var(--secondary-foreground); }
+  .ds-pill--gap { background: color-mix(in oklab, var(--destructive) 10%, transparent); color: var(--destructive); }
+  .dark .ds-pill--gap { background: color-mix(in oklab, var(--destructive) 20%, transparent); }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">Controls — Light</p>
+    <div class="ds-table-wrap">
+      <table class="ds-table">
+        <thead><tr>
+          <th>Control</th><th>Family</th><th>Status</th><th>Owner</th><th class="ds-cell-num">Freshness</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="ds-cell-id">SCF:IAC-06</td><td>Identity &amp; Access</td><td><span class="ds-pill ds-pill--ok">Compliant</span></td><td>Security Lead</td><td class="ds-cell-num">2d</td></tr>
+          <tr data-state="selected"><td class="ds-cell-id">SCF:CRY-03</td><td>Cryptographic</td><td><span class="ds-pill ds-pill--neutral">In review</span></td><td>Eng owner</td><td class="ds-cell-num">11d</td></tr>
+          <tr><td class="ds-cell-id">SCF:MON-01</td><td>Monitoring</td><td><span class="ds-pill ds-pill--gap">Gap</span></td><td>Unassigned</td><td class="ds-cell-num">95d</td></tr>
+          <tr><td class="ds-cell-id">SCF:RSK-04</td><td>Risk Mgmt</td><td><span class="ds-pill ds-pill--ok">Compliant</span></td><td>Compliance</td><td class="ds-cell-num">6d</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">Controls — Dark</p>
+    <div class="ds-table-wrap">
+      <table class="ds-table">
+        <thead><tr>
+          <th>Control</th><th>Family</th><th>Status</th><th>Owner</th><th class="ds-cell-num">Freshness</th>
+        </tr></thead>
+        <tbody>
+          <tr><td class="ds-cell-id">SCF:IAC-06</td><td>Identity &amp; Access</td><td><span class="ds-pill ds-pill--ok">Compliant</span></td><td>Security Lead</td><td class="ds-cell-num">2d</td></tr>
+          <tr data-state="selected"><td class="ds-cell-id">SCF:CRY-03</td><td>Cryptographic</td><td><span class="ds-pill ds-pill--neutral">In review</span></td><td>Eng owner</td><td class="ds-cell-num">11d</td></tr>
+          <tr><td class="ds-cell-id">SCF:MON-01</td><td>Monitoring</td><td><span class="ds-pill ds-pill--gap">Gap</span></td><td>Unassigned</td><td class="ds-cell-num">95d</td></tr>
+          <tr><td class="ds-cell-id">SCF:RSK-04</td><td>Risk Mgmt</td><td><span class="ds-pill ds-pill--ok">Compliant</span></td><td>Compliance</td><td class="ds-cell-num">6d</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+</body>
+</html>

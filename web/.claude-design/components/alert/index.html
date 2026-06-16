@@ -1,0 +1,68 @@
+<!-- @dsCard group="Feedback" name="Alert" subtitle="default · destructive" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Alert — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Alert — translated from web/components/ui/alert.tsx (base-nova / neutral).
+     Container: rounded-lg border bg-card px-2.5 py-2 text-sm, grid with an
+     icon column (auto_1fr, gap-x-2) when an icon is present. Two variants:
+       default     -> text-card-foreground
+       destructive -> text-destructive, description at text-destructive/90
+     Title: font-medium. Description: text-sm text-muted-foreground (the
+     destructive variant overrides it to a 90% destructive tint). */
+  .alert {
+    position: relative; display: grid; width: 100%;
+    grid-template-columns: auto 1fr; column-gap: 8px; row-gap: 2px;
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    background: var(--card); color: var(--card-foreground);
+    padding: 8px 10px; font-family: var(--font-sans); font-size: 0.875rem;
+    text-align: left; max-width: 460px;
+  }
+  .alert__icon { grid-row: span 2; width: 16px; height: 16px;
+    transform: translateY(2px); color: currentColor; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 14px; }
+  .alert__title { grid-column: 2; font-weight: 500; line-height: 1.25; }
+  .alert__desc { grid-column: 2; font-size: 0.875rem; line-height: 1.4;
+    color: var(--muted-foreground); }
+
+  .alert-destructive { color: var(--destructive); }
+  .alert-destructive .alert__desc { color: color-mix(in oklab, var(--destructive) 90%, transparent); }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">Default — Light</p>
+    <div class="alert">
+      <span class="alert__icon" aria-hidden="true">ℹ</span>
+      <div class="alert__title">Audit period frozen</div>
+      <div class="alert__desc">Sample populations now draw only from evidence observed before the freeze. Live state continues independently.</div>
+    </div>
+    <p class="ds-label">Destructive — Light</p>
+    <div class="alert alert-destructive" role="alert">
+      <span class="alert__icon" aria-hidden="true">⚠</span>
+      <div class="alert__title">Could not create tenant</div>
+      <div class="alert__desc">A tenant with that slug already exists. Choose a different slug and try again.</div>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">Default — Dark</p>
+    <div class="alert">
+      <span class="alert__icon" aria-hidden="true">ℹ</span>
+      <div class="alert__title">Audit period frozen</div>
+      <div class="alert__desc">Sample populations now draw only from evidence observed before the freeze. Live state continues independently.</div>
+    </div>
+    <p class="ds-label">Destructive — Dark</p>
+    <div class="alert alert-destructive" role="alert">
+      <span class="alert__icon" aria-hidden="true">⚠</span>
+      <div class="alert__title">Could not create tenant</div>
+      <div class="alert__desc">A tenant with that slug already exists. Choose a different slug and try again.</div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
