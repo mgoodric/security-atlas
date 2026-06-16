@@ -1,14 +1,19 @@
 /* security-atlas Design System — shared tokens.
-   These values mirror web/app/globals.css VERBATIM. The palette is the
-   shadcn base-nova / baseColor "neutral" seed: pure achromatic oklch
-   (chroma 0, no hue) for every surface, with a single chromatic
-   destructive (red, hue ~27). No brand hue has been introduced — the
-   system is intentionally neutral until a brand color is decided.
+   Achromatic shadcn base-nova / "neutral" surfaces, PLUS a muted-pastel
+   accent layer added on the Claude Design canvas (light + dark parity).
+   Surfaces stay neutral and primary stays near-black; the new chromatic
+   tokens (--pass / --info / --warning / --critical / --progress / --brand,
+   the recolored --chart-* ramp, and the --surface-* washes) are the DEEP
+   same-hue tones. Components pair each with a soft tint via color-mix
+   (see badge/alert/table). Every tone is measured ≥4.5:1 as text on its
+   tint — WCAG AA, the same floor the --muted-foreground decision set.
 
-   This file is GENERATED from web/app/globals.css. If globals.css
-   changes, re-extract these blocks (the :root + .dark token sets) so the
-   previews and the running app stay in lockstep. Do NOT hand-edit colors
-   here — change them in globals.css first. */
+   This file is GENERATED from web/app/globals.css. When pulling back to
+   code, the accent layer lands in globals.css (:root + .dark) and
+   re-extracts here; keep previews and app in lockstep. Do NOT hand-edit
+   colors here — change them in globals.css first. Contrast was verified by
+   converting each oklch() to sRGB and computing WCAG relative-luminance
+   contrast. */
 
 @import url("https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap");
 
@@ -33,14 +38,29 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+
+  /* Muted-pastel accent layer — deep same-hue tones (primary stays black).
+     As text on their own color-mix tint, measured on white:
+     pass 4.73 · info 4.72 · warning 4.71 · critical 4.77 · progress 4.73 ·
+     brand 4.72 (all :1). */
+  --pass: oklch(0.545 0.1 155);
+  --info: oklch(0.555 0.1 245);
+  --warning: oklch(0.56 0.095 75);
+  --critical: oklch(0.57 0.14 28);
+  --progress: oklch(0.565 0.1 292);
+  --brand: oklch(0.56 0.13 265);
+  --surface-1: color-mix(in oklab, var(--brand) 4%, var(--background));
+  --surface-2: color-mix(in oklab, var(--info) 3.5%, var(--background));
+
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Categorical chart ramp — recolored to the accent hues (was achromatic). */
+  --chart-1: oklch(0.62 0.085 155);
+  --chart-2: oklch(0.62 0.09 245);
+  --chart-3: oklch(0.62 0.085 75);
+  --chart-4: oklch(0.62 0.09 292);
+  --chart-5: oklch(0.62 0.11 28);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -82,14 +102,27 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+
+  /* Muted-pastel accent layer — dark-tuned (lighter tones on dark surfaces).
+     As text on their tint over the dark card, measured:
+     pass 7.06 · info 6.76 · warning 6.61 · critical 6.40 · progress 6.48 (:1). */
+  --pass: oklch(0.7 0.11 155);
+  --info: oklch(0.7 0.11 245);
+  --warning: oklch(0.7 0.1 75);
+  --critical: oklch(0.7 0.11 28);
+  --progress: oklch(0.7 0.11 292);
+  --brand: oklch(0.72 0.11 265);
+  --surface-1: color-mix(in oklab, var(--brand) 8%, var(--card));
+  --surface-2: color-mix(in oklab, var(--info) 7%, var(--card));
+
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --chart-1: oklch(0.72 0.1 155);
+  --chart-2: oklch(0.72 0.1 245);
+  --chart-3: oklch(0.74 0.1 75);
+  --chart-4: oklch(0.72 0.1 292);
+  --chart-5: oklch(0.7 0.12 28);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
