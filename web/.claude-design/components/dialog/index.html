@@ -1,0 +1,89 @@
+<!-- @dsCard group="Overlays" name="Dialog" subtitle="Modal (static, open)" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Dialog — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Dialog — translated from web/components/ui/dialog.tsx (base-nova / neutral,
+     slice 097). Rendered as a STATIC open modal scoped inside each stage,
+     not a full-viewport fixed overlay. Metrics mirror the source:
+       backdrop -> bg-foreground/40 backdrop-blur-[1px]
+       content  -> rounded-xl bg-card p-6 text-card-foreground,
+                   ring-1 ring-foreground/10, shadow-lg, max-w-md (28rem)
+       header   -> flex-col gap-1.5
+       title    -> text-lg font-semibold tracking-tight
+       desc     -> text-sm text-muted-foreground
+       footer   -> mt-6 flex justify-end gap-2 */
+
+  .btn { display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px; white-space: nowrap; border: 1px solid transparent;
+    border-radius: var(--radius-lg); font-family: var(--font-sans);
+    font-size: 0.875rem; font-weight: 500; height: 32px; padding: 0 10px; cursor: pointer; }
+  .btn-default { background: var(--primary); color: var(--primary-foreground); }
+  .btn-outline { border-color: var(--border); background: var(--background); color: var(--foreground); }
+  .btn-destructive { background: color-mix(in oklab, var(--destructive) 10%, transparent); color: var(--destructive); }
+  .dark .btn-destructive { background: color-mix(in oklab, var(--destructive) 20%, transparent); }
+
+  .dialog-scene { position: relative; height: 320px; border-radius: var(--radius-lg);
+    overflow: hidden; border: 1px solid var(--border); }
+  /* backdrop = bg-foreground/40 + a slight blur */
+  .dialog-scrim { position: absolute; inset: 0;
+    background: color-mix(in oklab, var(--foreground) 40%, transparent);
+    backdrop-filter: blur(1px);
+    display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .dialog-content { position: relative; width: 100%; max-width: 28rem;
+    display: flex; flex-direction: column; gap: 24px;
+    border-radius: var(--radius-xl); background: var(--card); color: var(--card-foreground);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent),
+      0 16px 32px -8px color-mix(in oklab, black 35%, transparent),
+      0 6px 14px -6px color-mix(in oklab, black 30%, transparent);
+    padding: 24px; font-size: 0.875rem; text-align: left; }
+  .dialog-header { display: flex; flex-direction: column; gap: 6px; }
+  .dialog-title { font-size: 1.125rem; line-height: 1.2; font-weight: 600;
+    letter-spacing: -0.01em; margin: 0; }
+  .dialog-desc { font-size: 0.875rem; line-height: 1.45; color: var(--muted-foreground); margin: 0; }
+  .dialog-footer { display: flex; justify-content: flex-end; gap: 8px; }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">Dialog — Light</p>
+    <div class="dialog-scene">
+      <div class="dialog-scrim">
+        <div class="dialog-content" role="dialog" aria-modal="true" aria-labelledby="dlg-l">
+          <div class="dialog-header">
+            <h2 class="dialog-title" id="dlg-l">Freeze audit period?</h2>
+            <p class="dialog-desc">Sample populations will draw only from evidence observed on or before today. Live state continues independently. This cannot be undone for the frozen window.</p>
+          </div>
+          <div class="dialog-footer">
+            <button class="btn btn-outline">Cancel</button>
+            <button class="btn btn-default">Freeze period</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">Dialog — Dark</p>
+    <div class="dialog-scene">
+      <div class="dialog-scrim">
+        <div class="dialog-content" role="dialog" aria-modal="true" aria-labelledby="dlg-d">
+          <div class="dialog-header">
+            <h2 class="dialog-title" id="dlg-d">Freeze audit period?</h2>
+            <p class="dialog-desc">Sample populations will draw only from evidence observed on or before today. Live state continues independently. This cannot be undone for the frozen window.</p>
+          </div>
+          <div class="dialog-footer">
+            <button class="btn btn-outline">Cancel</button>
+            <button class="btn btn-default">Freeze period</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,93 @@
+<!-- @dsCard group="Forms" name="Select" subtitle="Native select · default · focus · disabled · open list" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Select — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Select — translated from web/components/ui/select.tsx (slice 527).
+     This is a NATIVE <select> styled to match the Input primitive (NOT a
+     base-ui popup combobox). h-8 (32px) rounded-lg border-input
+     bg-transparent px-2.5 py-1 md:text-sm, same focus ring as Input
+     (ring-3 ring-ring/50), disabled bg-input/50. Dark mode bg-input/30.
+     The open-list panel below is a STATIC depiction of the platform's
+     native dropdown so the card shows the resting + expanded shape. */
+  .sel {
+    appearance: none; -webkit-appearance: none;
+    display: block; width: 240px; min-width: 0; height: 32px;
+    padding: 4px 30px 4px 10px; border: 1px solid var(--input);
+    border-radius: var(--radius-lg); background: transparent; color: var(--foreground);
+    font-family: var(--font-sans); font-size: 0.875rem; line-height: 1.25; outline: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+                      linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+    background-position: calc(100% - 16px) 14px, calc(100% - 11px) 14px;
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+  .dark .sel { background-color: color-mix(in oklab, var(--input) 30%, transparent); }
+  .sel--focus { border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
+  .sel--disabled { opacity: .5; cursor: not-allowed;
+    background-color: color-mix(in oklab, var(--input) 50%, transparent); }
+  .dark .sel--disabled { background-color: color-mix(in oklab, var(--input) 80%, transparent); }
+
+  /* Static open native list (platform-styled approximation). */
+  .sel-panel { width: 240px; border-radius: var(--radius-md); overflow: hidden;
+    background: var(--popover); color: var(--popover-foreground);
+    box-shadow: 0 4px 6px -1px color-mix(in oklab, var(--foreground) 12%, transparent);
+    outline: 1px solid color-mix(in oklab, var(--foreground) 10%, transparent); outline-offset: -1px; }
+  .sel-opt { padding: 6px 10px; font-size: 0.875rem; }
+  .sel-opt--active { background: var(--accent); color: var(--accent-foreground); }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">States — Light</p>
+    <div class="ds-row" style="align-items:flex-start; gap:28px">
+      <div class="ds-col">
+        <span class="ds-label">Default</span>
+        <select class="sel"><option>Assign owner…</option></select>
+        <span class="ds-label">Focus</span>
+        <select class="sel sel--focus"><option>Security Lead</option></select>
+        <span class="ds-label">Disabled</span>
+        <select class="sel sel--disabled" disabled><option>Locked (audit frozen)</option></select>
+      </div>
+      <div class="ds-col">
+        <span class="ds-label">Open list</span>
+        <div class="sel-panel" role="listbox" aria-label="Assign owner">
+          <div class="sel-opt">Unassigned</div>
+          <div class="sel-opt sel-opt--active">Security Lead</div>
+          <div class="sel-opt">Compliance Manager</div>
+          <div class="sel-opt">Engineering owner</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">States — Dark</p>
+    <div class="ds-row" style="align-items:flex-start; gap:28px">
+      <div class="ds-col">
+        <span class="ds-label">Default</span>
+        <select class="sel"><option>Assign owner…</option></select>
+        <span class="ds-label">Focus</span>
+        <select class="sel sel--focus"><option>Security Lead</option></select>
+        <span class="ds-label">Disabled</span>
+        <select class="sel sel--disabled" disabled><option>Locked (audit frozen)</option></select>
+      </div>
+      <div class="ds-col">
+        <span class="ds-label">Open list</span>
+        <div class="sel-panel" role="listbox" aria-label="Assign owner">
+          <div class="sel-opt">Unassigned</div>
+          <div class="sel-opt sel-opt--active">Security Lead</div>
+          <div class="sel-opt">Compliance Manager</div>
+          <div class="sel-opt">Engineering owner</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>
