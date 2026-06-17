@@ -1,6 +1,6 @@
 # ADR 0016 — OIDC identity for cosign-keyless OSCAL-bundle signing
 
-**Status:** Proposed — **ADOPT-DEFERRED** (recommendation pending maintainer sign-off; this ADR is the slice-455 decision gate that unblocks slice 414 / 368b).
+**Status:** Accepted (maintainer-approved 2026-06-15). Adopts the opt-in private-Sigstore path (atlas's scoped `client:oscal-signer` identity federated into an operator-run Fulcio + Rekor; public-IdP and Sigstore-root-onboarding options rejected); `cosign-kms` + `embedded-ed25519` remain the defaults for all primary deployment shapes. Unblocked + shipped as slice 414 (cosign-keyless, opt-in).
 
 **Date:** 2026-06-11
 

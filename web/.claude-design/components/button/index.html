@@ -1,0 +1,103 @@
+<!-- @dsCard group="Actions" name="Button" subtitle="6 variants · 4 sizes + icon sizes" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Button — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Button — translated from web/components/ui/button.tsx (base-nova / neutral).
+     Six variants: default (solid primary), outline, secondary, ghost,
+     destructive (a SOFT tint — bg-destructive/10 text-destructive, NOT a
+     solid red), link. Sizes: xs / sm / default / lg, plus square icon
+     sizes (icon-xs / icon-sm / icon / icon-lg). */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px; white-space: nowrap; flex-shrink: 0;
+    border: 1px solid transparent; border-radius: var(--radius-lg);
+    font-family: var(--font-sans); font-size: 0.875rem; font-weight: 500;
+    height: 32px; padding: 0 10px; cursor: pointer;
+    transition: background-color .15s ease, color .15s ease, border-color .15s ease, transform .05s ease;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn:focus-visible { outline: none; border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
+  .btn[disabled] { pointer-events: none; opacity: .5; }
+
+  .btn-default { background: var(--primary); color: var(--primary-foreground); }
+  .btn-default:hover { background: color-mix(in oklab, var(--primary) 80%, transparent); }
+  .btn-outline { border-color: var(--border); background: var(--background); color: var(--foreground); }
+  .btn-outline:hover { background: var(--muted); }
+  .dark .btn-outline { border-color: var(--input); background: color-mix(in oklab, var(--input) 30%, transparent); }
+  .dark .btn-outline:hover { background: color-mix(in oklab, var(--input) 50%, transparent); }
+  .btn-secondary { background: var(--secondary); color: var(--secondary-foreground); }
+  .btn-secondary:hover { background: color-mix(in oklab, var(--secondary) 80%, var(--background)); }
+  .btn-ghost { background: transparent; color: var(--foreground); }
+  .btn-ghost:hover { background: var(--muted); }
+  /* destructive — soft tint, lifts to /20 in dark via .dark scope */
+  .btn-destructive { background: color-mix(in oklab, var(--destructive) 10%, transparent); color: var(--destructive); }
+  .btn-destructive:hover { background: color-mix(in oklab, var(--destructive) 20%, transparent); }
+  .dark .btn-destructive { background: color-mix(in oklab, var(--destructive) 20%, transparent); }
+  .dark .btn-destructive:hover { background: color-mix(in oklab, var(--destructive) 30%, transparent); }
+  .btn-link { background: transparent; color: var(--primary); text-underline-offset: 4px; padding: 0; height: auto; }
+  .btn-link:hover { text-decoration: underline; }
+
+  .btn-xs { height: 24px; padding: 0 8px; font-size: 0.75rem; border-radius: min(var(--radius-md), 10px); }
+  .btn-sm { height: 28px; padding: 0 10px; font-size: 0.8rem; border-radius: min(var(--radius-md), 12px); }
+  .btn-lg { height: 36px; padding: 0 10px; }
+  .btn-icon-xs { width: 24px; height: 24px; padding: 0; border-radius: min(var(--radius-md), 10px); }
+  .btn-icon-sm { width: 28px; height: 28px; padding: 0; border-radius: min(var(--radius-md), 12px); }
+  .btn-icon { width: 32px; height: 32px; padding: 0; }
+  .btn-icon-lg { width: 36px; height: 36px; padding: 0; }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">Variants — Light</p>
+    <div class="ds-row">
+      <button class="btn btn-default">Run evaluation</button>
+      <button class="btn btn-outline">Export OSCAL</button>
+      <button class="btn btn-secondary">Add evidence</button>
+      <button class="btn btn-ghost">Cancel</button>
+      <button class="btn btn-destructive">Delete control</button>
+      <button class="btn btn-link">View framework</button>
+      <button class="btn btn-default" disabled>Disabled</button>
+    </div>
+    <p class="ds-label">Sizes</p>
+    <div class="ds-row">
+      <button class="btn btn-default btn-xs">xs</button>
+      <button class="btn btn-default btn-sm">sm</button>
+      <button class="btn btn-default">default</button>
+      <button class="btn btn-default btn-lg">lg</button>
+    </div>
+    <p class="ds-label">Icon sizes</p>
+    <div class="ds-row">
+      <button class="btn btn-outline btn-icon-xs" aria-label="add">＋</button>
+      <button class="btn btn-outline btn-icon-sm" aria-label="add">＋</button>
+      <button class="btn btn-outline btn-icon" aria-label="add">＋</button>
+      <button class="btn btn-outline btn-icon-lg" aria-label="add">＋</button>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">Variants — Dark</p>
+    <div class="ds-row">
+      <button class="btn btn-default">Run evaluation</button>
+      <button class="btn btn-outline">Export OSCAL</button>
+      <button class="btn btn-secondary">Add evidence</button>
+      <button class="btn btn-ghost">Cancel</button>
+      <button class="btn btn-destructive">Delete control</button>
+      <button class="btn btn-link">View framework</button>
+    </div>
+    <p class="ds-label">Icon sizes</p>
+    <div class="ds-row">
+      <button class="btn btn-outline btn-icon-xs" aria-label="add">＋</button>
+      <button class="btn btn-outline btn-icon-sm" aria-label="add">＋</button>
+      <button class="btn btn-outline btn-icon" aria-label="add">＋</button>
+      <button class="btn btn-outline btn-icon-lg" aria-label="add">＋</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

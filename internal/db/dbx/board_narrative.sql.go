@@ -105,6 +105,63 @@ func (q *Queries) GetBoardNarrativeSectionByID(ctx context.Context, arg GetBoard
 	return i, err
 }
 
+const listApprovedBoardNarrativeSections = `-- name: ListApprovedBoardNarrativeSections :many
+SELECT id, tenant_id, section_key, period_end, raw_draft, operator_edit, final_text, citations, authored_by, ai_assisted, human_approved, human_approver, prompt_version, model_name, model_version, model_provider, created_at, updated_at FROM board_narrative_sections
+WHERE tenant_id = $1
+  AND period_end = $2
+  AND human_approved = TRUE
+ORDER BY section_key ASC
+`
+
+type ListApprovedBoardNarrativeSectionsParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	PeriodEnd string      `json:"period_end"`
+}
+
+// ListApprovedBoardNarrativeSections returns ONLY the human-approved sections
+// for a (tenant, period_end), in section_key order. This is the AC-13 read: the
+// board pack ships only approved sections, so an UNapproved (or suppressed,
+// never-persisted) section is structurally excluded — it is not in this result.
+// Scoped to the tenant + human_approved=TRUE under the caller's RLS transaction.
+func (q *Queries) ListApprovedBoardNarrativeSections(ctx context.Context, arg ListApprovedBoardNarrativeSectionsParams) ([]BoardNarrativeSection, error) {
+	rows, err := q.db.Query(ctx, listApprovedBoardNarrativeSections, arg.TenantID, arg.PeriodEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []BoardNarrativeSection
+	for rows.Next() {
+		var i BoardNarrativeSection
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.SectionKey,
+			&i.PeriodEnd,
+			&i.RawDraft,
+			&i.OperatorEdit,
+			&i.FinalText,
+			&i.Citations,
+			&i.AuthoredBy,
+			&i.AiAssisted,
+			&i.HumanApproved,
+			&i.HumanApprover,
+			&i.PromptVersion,
+			&i.ModelName,
+			&i.ModelVersion,
+			&i.ModelProvider,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertBoardNarrativeDraft = `-- name: UpsertBoardNarrativeDraft :one
 
 INSERT INTO board_narrative_sections (

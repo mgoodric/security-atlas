@@ -139,6 +139,13 @@ type GenerateRequest struct {
 	Timeout time.Duration
 }
 
+// Validate runs the shared mandatory-field + cap contract. It is the exported
+// entry point a cloud Client implementation in a sibling package (internal/llm/cloud,
+// slice 499) calls so its rejection of an over-cap / malformed request is
+// IDENTICAL to the in-package Ollama / Stub clients — there is exactly one
+// definition of the contract. In-package callers use the unexported validate().
+func (r GenerateRequest) Validate() error { return r.validate() }
+
 // validate enforces the mandatory-field + cap invariants shared by every
 // implementation. Called by each Client.Generate at entry so the rejection
 // is identical across Ollama / Stub / cloud.

@@ -1,0 +1,87 @@
+<!-- @dsCard group="Overlays" name="Sheet" subtitle="Slide-out drawer (static, open · left)" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sheet — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Sheet — translated from web/components/ui/sheet.tsx (base-nova / neutral,
+     slice 277). A side-anchored drawer built on @base-ui/react Dialog.
+     Rendered STATIC and open, anchored to the left edge, inside each stage.
+     Metrics mirror the source:
+       backdrop -> bg-foreground/40 backdrop-blur-[1px]
+       content  -> w-72 (18rem) max-w-[85vw], inset-y-0 left-0, border-r,
+                   flex-col gap-4 bg-background p-6 text-foreground,
+                   ring-1 ring-foreground/10 shadow-lg
+       header   -> flex-col gap-1.5
+       title    -> text-base font-semibold tracking-tight
+       desc     -> text-sm text-muted-foreground */
+  .sheet-scene { position: relative; height: 340px; border-radius: var(--radius-lg);
+    overflow: hidden; border: 1px solid var(--border); }
+  .sheet-scrim { position: absolute; inset: 0;
+    background: color-mix(in oklab, var(--foreground) 40%, transparent);
+    backdrop-filter: blur(1px); }
+  .sheet-content { position: absolute; inset: 0 auto 0 0; width: 18rem; max-width: 85%;
+    display: flex; flex-direction: column; gap: 16px;
+    background: var(--background); color: var(--foreground); padding: 24px;
+    border-right: 1px solid var(--border);
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent),
+      16px 0 32px -8px color-mix(in oklab, black 35%, transparent); }
+  .sheet-header { display: flex; flex-direction: column; gap: 6px; }
+  .sheet-title { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+  .sheet-desc { font-size: 0.875rem; color: var(--muted-foreground); margin: 0; }
+  .sheet-nav { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; }
+  .sheet-link { display: flex; align-items: center; gap: 8px;
+    padding: 8px 10px; border-radius: var(--radius-md);
+    font-size: 0.875rem; color: var(--foreground); }
+  .sheet-link--active { background: var(--accent); color: var(--accent-foreground); font-weight: 500; }
+  .sheet-link .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted-foreground); }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">Sheet — Light</p>
+    <div class="sheet-scene">
+      <div class="sheet-scrim"></div>
+      <div class="sheet-content" role="dialog" aria-modal="true" aria-labelledby="sh-l">
+        <div class="sheet-header">
+          <h2 class="sheet-title" id="sh-l">security-atlas</h2>
+          <p class="sheet-desc">Control graph &amp; evidence pipeline</p>
+        </div>
+        <nav class="sheet-nav">
+          <a class="sheet-link sheet-link--active"><span class="dot"></span>Dashboard</a>
+          <a class="sheet-link"><span class="dot"></span>Controls</a>
+          <a class="sheet-link"><span class="dot"></span>Evidence</a>
+          <a class="sheet-link"><span class="dot"></span>Frameworks</a>
+          <a class="sheet-link"><span class="dot"></span>Risks</a>
+          <a class="sheet-link"><span class="dot"></span>Audit periods</a>
+        </nav>
+      </div>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">Sheet — Dark</p>
+    <div class="sheet-scene">
+      <div class="sheet-scrim"></div>
+      <div class="sheet-content" role="dialog" aria-modal="true" aria-labelledby="sh-d">
+        <div class="sheet-header">
+          <h2 class="sheet-title" id="sh-d">security-atlas</h2>
+          <p class="sheet-desc">Control graph &amp; evidence pipeline</p>
+        </div>
+        <nav class="sheet-nav">
+          <a class="sheet-link sheet-link--active"><span class="dot"></span>Dashboard</a>
+          <a class="sheet-link"><span class="dot"></span>Controls</a>
+          <a class="sheet-link"><span class="dot"></span>Evidence</a>
+          <a class="sheet-link"><span class="dot"></span>Frameworks</a>
+          <a class="sheet-link"><span class="dot"></span>Risks</a>
+          <a class="sheet-link"><span class="dot"></span>Audit periods</a>
+        </nav>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

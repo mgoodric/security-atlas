@@ -56,3 +56,15 @@ RETURNING *;
 -- name: GetBoardNarrativeSectionByID :one
 SELECT * FROM board_narrative_sections
 WHERE tenant_id = $1 AND id = $2;
+
+-- ListApprovedBoardNarrativeSections returns ONLY the human-approved sections
+-- for a (tenant, period_end), in section_key order. This is the AC-13 read: the
+-- board pack ships only approved sections, so an UNapproved (or suppressed,
+-- never-persisted) section is structurally excluded — it is not in this result.
+-- Scoped to the tenant + human_approved=TRUE under the caller's RLS transaction.
+-- name: ListApprovedBoardNarrativeSections :many
+SELECT * FROM board_narrative_sections
+WHERE tenant_id = $1
+  AND period_end = $2
+  AND human_approved = TRUE
+ORDER BY section_key ASC;

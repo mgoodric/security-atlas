@@ -234,6 +234,7 @@ func (s *Server) buildRouter() *chi.Mux {
 	s.registerCalendar(root)
 	s.registerBoard(root, featureFlagStore, freshnessStore, driftStore, vendorStore)
 	s.registerQuestionnaire(root)
+	s.registerLLMRouting(root)
 	s.registerAdmin(root, featureFlagStore)
 	s.registerMetrics(root)
 	return root
