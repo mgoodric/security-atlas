@@ -200,4 +200,9 @@ var (
 	// ErrApproverRequired is returned by Approve when the approver id is blank —
 	// the Go mirror of the DB CHECK (P0-440-2).
 	ErrApproverRequired = errors.New("boardnarrative: approval requires a human_approver")
+
+	// ErrUnknownSection is returned when a section key has no SectionDef in the
+	// registry (a programmer error — the caller asked to generate a section that
+	// is not part of the AI-drafted set). Slice 501.
+	ErrUnknownSection = errors.New("boardnarrative: unknown section key")
 )

@@ -61,23 +61,30 @@ func extractNumbers(text string) []int {
 // digit run that overflows int fails verification rather than being dropped.
 const overflowSentinel = int(^uint(0) >> 1) // math.MaxInt
 
-// verifyNumbers is the AC-5 / guardrail-5 gate — THE defining board-narrative
-// guardrail. It parses every number from the draft and confirms each one is a
-// value the deterministic rollup produced (Rollup.AllowedNumbers). A SINGLE
-// number outside the allowed set fails the WHOLE draft: a board narrative with
-// even one fabricated statistic is unacceptable, because the board cannot tell
-// the fabricated number from the real ones.
+// VerifyNumbers is the reusable numeric-claim verification library (AC-3) — THE
+// defining board-narrative guardrail, generalized across sections (slice 501).
+// Given a draft, the section's set of permitted integer values (its
+// deterministic pre-computation's AllowedNumbers), and the period-end label, it
+// parses EVERY number from the draft and confirms each one is a permitted value.
+// A SINGLE number outside the allowed set fails the WHOLE draft: a board
+// narrative with even one fabricated statistic is unacceptable, because the
+// board cannot tell the fabricated number from the real ones.
+//
+// This is the slice-182 "numeric-verification library" deliverable: it depends
+// on NOTHING section-specific — only the (string, allowed-set, label) triple —
+// so every section (and every future section) consumes the identical
+// auto-reject-on-mismatch extraction logic. Slice 440's one-section check
+// (verifyNumbers) is now a thin wrapper that supplies the coverage rollup's
+// AllowedNumbers; new sections supply their own (see sections.go).
 //
 // The period-end date label (a YYYY-MM-DD string in the heading) is the one
-// permitted "number-shaped" token that is NOT a rollup statistic; it is
-// stripped before extraction (stripLabelDate) so the year/month/day digits do
-// not false-positive as fabricated statistics.
+// permitted "number-shaped" token that is NOT a statistic; it is stripped before
+// extraction (stripLabelDate) so the year/month/day digits do not false-positive
+// as fabricated statistics. List markers + cited UUIDs are likewise stripped.
 //
-// Returns ok=false (NOT an error) when a number does not match — a numeric
-// mismatch is a normal suppression outcome the caller maps to
-// ReasonNumericMismatch.
-func verifyNumbers(text string, r Rollup) bool {
-	allowed := r.AllowedNumbers()
+// Returns false (NOT an error) when a number does not match — a numeric mismatch
+// is a normal suppression outcome the caller maps to ReasonNumericMismatch.
+func VerifyNumbers(text string, allowed map[int]bool, periodEnd string) bool {
 	// Strip the three classes of legitimate number-shaped tokens that are NOT
 	// statistics before extraction:
 	//   1. the leading numbered-list markers ("1. ", "2. ", ...) — they are the
@@ -89,13 +96,21 @@ func verifyNumbers(text string, r Rollup) bool {
 	// must be a ground-truth value.
 	stripped := listMarkerPattern.ReplaceAllString(text, "")
 	stripped = uuidPattern.ReplaceAllString(stripped, " ")
-	stripped = stripLabelDate(stripped, r.PeriodEnd)
+	stripped = stripLabelDate(stripped, periodEnd)
 	for _, n := range extractNumbers(stripped) {
 		if !allowed[n] {
 			return false
 		}
 	}
 	return true
+}
+
+// verifyNumbers is the slice-440 one-section convenience over VerifyNumbers,
+// kept so the coverage-section call site (and its tests) are unchanged. It
+// supplies the coverage Rollup's AllowedNumbers + PeriodEnd to the reusable
+// library.
+func verifyNumbers(text string, r Rollup) bool {
+	return VerifyNumbers(text, r.AllowedNumbers(), r.PeriodEnd)
 }
 
 // stripLabelDate removes the exact period-end label (e.g. "2026-05-31") from

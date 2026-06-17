@@ -4,6 +4,7 @@ DELETE /v1/action-plans/{id} 8
 DELETE /v1/action-plans/{id}/controls/{control_id} 8
 DELETE /v1/action-plans/{id}/risks/{risk_id} 8
 DELETE /v1/admin/group-role-mappings/{id} 8
+DELETE /v1/admin/llm-routing 8
 DELETE /v1/admin/scim-credentials/{id} 8
 DELETE /v1/admin/super-admins/{user_id} 8
 DELETE /v1/csf/profiles/{kind}/selections/{requirement_id} 8
@@ -44,6 +45,7 @@ GET /v1/admin/exceptions/export 8
 GET /v1/admin/features 8
 GET /v1/admin/framework-versions/migrations 8
 GET /v1/admin/group-role-mappings 8
+GET /v1/admin/llm-routing 8
 GET /v1/admin/policies/export 8
 GET /v1/admin/samples/export 8
 GET /v1/admin/scim-credentials 8
@@ -64,6 +66,7 @@ GET /v1/audit-notes/thread 8
 GET /v1/audit-periods 8
 GET /v1/audit-periods/{id} 8
 GET /v1/audit-periods/{id}/control-state 8
+GET /v1/audit-periods/{id}/controls/{controlID}/evidence-summary 8
 GET /v1/board-briefs 9
 GET /v1/board-briefs/{id} 9
 GET /v1/board-briefs/{id}.md 9
@@ -86,6 +89,7 @@ GET /v1/controls/{id}/attest-form 8
 GET /v1/controls/{id}/coverage 8
 GET /v1/controls/{id}/effective-scope 8
 GET /v1/controls/{id}/effectiveness 8
+GET /v1/controls/{id}/evidence-summary 8
 GET /v1/controls/{id}/gap-explanation 8
 GET /v1/controls/{id}/history 8
 GET /v1/controls/{id}/policies 8
@@ -100,6 +104,7 @@ GET /v1/decisions/overdue 8
 GET /v1/decisions/{id} 8
 GET /v1/decisions/{id}/audit-log 8
 GET /v1/evidence 8
+GET /v1/evidence-summary/portfolio 8
 GET /v1/evidence/freshness 8
 GET /v1/exceptions 8
 GET /v1/exceptions/expiring 8
@@ -239,6 +244,7 @@ POST /v1/board-packs/{id}/publish 9
 POST /v1/board-packs/{id}/sections/{key}/approve 9
 POST /v1/board/narrative/approve 9
 POST /v1/board/narrative/generate 9
+POST /v1/board/narrative/generate-all 9
 POST /v1/calendar/subscription 8
 POST /v1/controls/checklist/sections/{id}:approve 8
 POST /v1/controls/checklist:generate 8
@@ -286,6 +292,7 @@ POST /v1/walkthroughs/{id}/attachments 8
 POST /v1/walkthroughs/{id}:finalize 8
 PUT /scim/v2/Groups/{id} 9
 PUT /scim/v2/Users/{id} 9
+PUT /v1/admin/llm-routing 8
 PUT /v1/board-packs/{id}/sections/{key} 9
 PUT /v1/csf/profiles/{kind} 8
 PUT /v1/csf/profiles/{kind}/selections 8

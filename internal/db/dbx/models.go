@@ -2402,6 +2402,15 @@ type Tenant struct {
 	BundleGateMode string `json:"bundle_gate_mode"`
 }
 
+// Slice 499 per-tenant cloud-LLM opt-in routing. Absence of a row => local-ollama (the off-by-default posture). provider is a closed enum (no free-text URL). api_key_ciphertext is AES-256-GCM, never plaintext, never returned/logged.
+type TenantLlmRouting struct {
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	Provider         string             `json:"provider"`
+	ApiKeyCiphertext *string            `json:"api_key_ciphertext"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type User struct {
 	ID             pgtype.UUID        `json:"id"`
 	TenantID       pgtype.UUID        `json:"tenant_id"`

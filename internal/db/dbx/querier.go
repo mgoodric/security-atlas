@@ -147,6 +147,17 @@ type Querier interface {
 	// DL-YYYY-MM-DD-NNNN identifier. $2 is the start-of-day (inclusive), $3 the
 	// start of the next day (exclusive).
 	CountDecisionsByDecidedDate(ctx context.Context, arg CountDecisionsByDecidedDateParams) (int64, error)
+	// Slice 502: total CURRENT LIVE evidence count for one control, used by the
+	// evidence-summary surface to render a "showing N of M" bound (the summary is
+	// over the bounded top-N, never the full history — P0-502-8). Resolution
+	// mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
+	CountEvidenceRecordsByControl(ctx context.Context, arg CountEvidenceRecordsByControlParams) (int64, error)
+	// Slice 749: total FROZEN-population evidence count for one control bounded by
+	// the audit-period freeze horizon (observed_at <= frozen_at), for the
+	// "showing N of M" UI label. Mirrors CountEvidenceRecordsByControl's resolution
+	// and the ListEvidenceRecordsByControlBeforeHorizon horizon predicate so the
+	// count and the bounded list agree on the frozen population (P0-749-1).
+	CountEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg CountEvidenceRecordsByControlBeforeHorizonParams) (int64, error)
 	CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
 	// Rate numerator: distinct user_ids who (a) are in the denominator set
@@ -453,6 +464,10 @@ type Querier interface {
 	// caller can never delete another user's view even within the same tenant.
 	// RETURNING lets the handler 404 when the id was not the caller's.
 	DeleteSavedView(ctx context.Context, arg DeleteSavedViewParams) (pgtype.UUID, error)
+	// Clear the tenant's routing config (revert to the local-ollama default). The
+	// key ciphertext is removed with the row. Returns rows affected so the caller
+	// can distinguish "cleared" from "was already absent".
+	DeleteTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Tenant-private themes only — the policy forbids deleting defaults
 	// regardless of what this query asks for.
 	DeleteTenantTheme(ctx context.Context, arg DeleteTenantThemeParams) error
@@ -898,6 +913,18 @@ type Querier interface {
 	// Returns ErrNoRows when the caller's tenant_id GUC does not match
 	// the requested id (RLS filters the row out).
 	GetTenantByID(ctx context.Context, id pgtype.UUID) (GetTenantByIDRow, error)
+	// tenant_llm_routing — slice 499 per-tenant cloud-LLM opt-in routing config.
+	//
+	// One row per tenant. Absence of a row => local-ollama (the off-by-default
+	// posture). Every query is tenant-scoped via the leading tenant_id predicate;
+	// four-policy RLS under FORCE keeps the cross-tenant boundary safe even on a
+	// misconfigured query (P0-499-5). The provider API key is stored ONLY as
+	// AES-256-GCM ciphertext (api_key_ciphertext); the plaintext is bound as a
+	// parameter by the encrypting store and never appears in a query, a log, or an
+	// API response (P0-499-4).
+	// Fetch the current routing config for the tenant. Returns no rows when the
+	// tenant has never opted in (=> the router treats that as local-ollama).
+	GetTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID) (TenantLlmRouting, error)
 	// Lookup by case-insensitive email within a tenant. Used by /auth/local/login.
 	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error)
 	GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error)
@@ -1314,6 +1341,37 @@ type Querier interface {
 	// future RLS-policy regression. The existing ListActiveControls query
 	// carries the same belt-and-suspenders clause.
 	ListActiveControlsForExport(ctx context.Context, arg ListActiveControlsForExportParams) ([]ListActiveControlsForExportRow, error)
+	// Slice 750 — portfolio / multi-control evidence-summary control-set resolver.
+	//
+	// Returns the ACTIVE (non-superseded) controls in the caller's tenant that match
+	// an OPTIONAL filter, ordered deterministically and capped at $limit (the
+	// controls-per-summary bound — the headline P0-750-2 leg). The summary is over
+	// this bounded control set, never the full catalog.
+	//
+	// Filter modes (any ONE of the three AC-1 dimensions, all OPTIONAL via
+	// sqlc.narg so a single query serves every filter the handler accepts; a request
+	// with no filter is the whole-program rollup):
+	//
+	//   * control-family: control_family = sqlc.narg('family')
+	//   * framework:      scf_anchor_id = ANY(sqlc.narg('anchor_ids')) — the handler
+	//                     resolves a framework_version_id to its SCF anchors via the
+	//                     existing UCF traversal (ListSCFAnchorsForVersion) and passes
+	//                     the anchor-id array here; this reuses the existing
+	//                     framework->anchor->control path rather than inventing a new
+	//                     control-by-framework mechanism.
+	//   (scope-cell intersection — applicability_expr ∩ framework_scope.predicate —
+	//    is heavier graph work; deferred to a documented follow-on, not built here.)
+	//
+	// A NULL narg disables that filter clause, so the three modes compose to "AND
+	// of the supplied filters"; in v1 the handler supplies at most one.
+	//
+	// Ordering is bundle_id ASC, id ASC — deterministic, matching ListActiveControls,
+	// so the controls-per-summary cap selects a STABLE subset (not a random one).
+	//
+	// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders alongside
+	// the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant upstream pins the
+	// GUC so the read is tenant-scoped (invariant #6).
+	ListActiveControlsForPortfolio(ctx context.Context, arg ListActiveControlsForPortfolioParams) ([]ListActiveControlsForPortfolioRow, error)
 	// Slice 493 — SSP control-implementation-narrative projection.
 	//
 	// Identical row set to ListActiveControls (every active, non-superseded
@@ -1485,6 +1543,12 @@ type Querier interface {
 	// All answers for a questionnaire, joined to the questions table so
 	// callers can render the questionnaire end-to-end in a single read.
 	ListAnswersForQuestionnaire(ctx context.Context, arg ListAnswersForQuestionnaireParams) ([]QuestionnaireAnswer, error)
+	// ListApprovedBoardNarrativeSections returns ONLY the human-approved sections
+	// for a (tenant, period_end), in section_key order. This is the AC-13 read: the
+	// board pack ships only approved sections, so an UNapproved (or suppressed,
+	// never-persisted) section is structurally excluded — it is not in this result.
+	// Scoped to the tenant + human_approved=TRUE under the caller's RLS transaction.
+	ListApprovedBoardNarrativeSections(ctx context.Context, arg ListApprovedBoardNarrativeSectionsParams) ([]BoardNarrativeSection, error)
 	// Per-artifact recent history. Used by the admin view (slice 040) and
 	// the audit-export bundler (slice 029). Cap at 100 rows.
 	ListArtifactAccessLog(ctx context.Context, arg ListArtifactAccessLogParams) ([]ArtifactAccessLog, error)
@@ -1845,6 +1909,19 @@ type Querier interface {
 	// on observed_at lets the evaluator stream historical state without
 	// worrying about UPDATEs since slice 002.
 	ListEvidenceRecordsByControl(ctx context.Context, arg ListEvidenceRecordsByControlParams) ([]EvidenceRecord, error)
+	// Slice 749: the FROZEN-population variant of ListEvidenceRecordsByControl.
+	// Returns the top-N most-recent evidence records for one control bounded by an
+	// audit-period freeze horizon: observed_at <= frozen_at (invariant #10). The
+	// bound is the period's audit_periods.frozen_at, passed by the caller after it
+	// has resolved the period; this query NEVER reads the period row itself, it only
+	// applies the horizon it is given. Mirrors ListEvidenceRecordsByControl's
+	// (control_id = $2 OR control_ref = $3) resolution and observed_at DESC order so
+	// the bounded top-N is the N most-recent records WITHIN the frozen population —
+	// never a post-freeze (live) record (P0-749-1). The COALESCE-to-infinity on a
+	// NULL horizon mirrors the slice-026/028 frozen-sample read path: an open period
+	// (frozen_at NULL) falls through to live state, but the slice-749 surface only
+	// summarizes FROZEN periods, so in practice the horizon is always set.
+	ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error)
 	ListExceptionAuditLog(ctx context.Context, arg ListExceptionAuditLogParams) ([]ExceptionAuditLog, error)
 	// Returns every exception for the tenant, newest first. The handler applies
 	// status filter in-memory because the cardinality is small (canvas §1.4
@@ -3062,6 +3139,12 @@ type Querier interface {
 	// Set a user's Slack-channel master opt-in. (tenant_id, user_id) PK is the
 	// conflict target.
 	UpsertSlackOptIn(ctx context.Context, arg UpsertSlackOptInParams) (bool, error)
+	// Set or replace the tenant's routing config (the tenant-admin "switch
+	// provider / rotate key" action). The closed-enum provider CHECK and the
+	// key-presence CHECK are enforced at the DB; the ciphertext is a bound
+	// parameter (never interpolated). updated_at is bumped on every write
+	// (app-layer now(), no trigger — matches the repo convention).
+	UpsertTenantLLMRouting(ctx context.Context, arg UpsertTenantLLMRoutingParams) (TenantLlmRouting, error)
 	// Used by the OIDC callback: provision-on-first-sign-in by (idp_issuer, idp_subject).
 	// The composite UNIQUE index on (idp_issuer, idp_subject) WHERE both non-empty
 	// is the conflict target. On conflict we update display_name + email (the IdP

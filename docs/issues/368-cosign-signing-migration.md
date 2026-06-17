@@ -3,7 +3,7 @@
 **Cluster:** Oscal
 **Estimate:** 5d (re-scoped into 368a ~3d + 368b ~2d — see "Re-scoped by ADR-0010")
 **Type:** JUDGMENT
-**Status:** `in-progress` (tracking parent — ADR-0010 approved; split into 413 Phase 1 in-progress + 414 Phase 2 gated)
+**Status:** `merged` (tracking parent — ADR-0010 Accepted 2026-06-15; both phases shipped: 413 Phase 1 `cosign-kms`+`embedded-ed25519` merged, 414 Phase 2 `cosign-keyless` merged after ADR-0016/455 resolved the OIDC-identity decision. No further work on this parent.)
 **Gated by:** [ADR-0010](../adr/0010-oscal-cosign-signing.md) (slice 400 decision spike)
 
 ## Re-scoped by ADR-0010 (slice 400 decision spike)

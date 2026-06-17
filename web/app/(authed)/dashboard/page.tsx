@@ -35,6 +35,7 @@ import {
 } from "@/components/dashboard/dashboard-header-subtitle";
 import { EvidenceFreshnessPanel } from "@/components/dashboard/evidence-freshness-panel";
 import { FrameworkPosturePanel } from "@/components/dashboard/framework-posture-panel";
+import { PortfolioSummaryPanel } from "@/components/dashboard/portfolio-summary-panel";
 import { RecentDriftPanel } from "@/components/dashboard/recent-drift-panel";
 import { TopRisksPanel } from "@/components/dashboard/top-risks-panel";
 import { UpcomingPanel } from "@/components/dashboard/upcoming-panel";
@@ -179,6 +180,16 @@ export default function DashboardPage() {
           }}
         />
       </div>
+
+      {/* ============ PORTFOLIO AI EVIDENCE SUMMARY (slice 750) ============ */}
+      {/*
+        Non-binding, cited, local-default AI summary of current live evidence
+        across a bounded set of controls (whole program by default). The
+        deterministic two-level-bounded rollup renders always; the summary
+        degrades gracefully and never blocks the dashboard (AC-7). No
+        approve/publish/export affordance (AC-5).
+      */}
+      <PortfolioSummaryPanel />
 
       {/* ============ ACTIVITY FEED ============ */}
       <ActivityFeedPanel

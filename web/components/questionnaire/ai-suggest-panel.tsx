@@ -21,6 +21,7 @@
 
 import { useState } from "react";
 
+import { CloudRoutingBanner } from "@/components/llm/cloud-routing-banner";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   type AISuggestViewModel,
@@ -127,6 +128,18 @@ export function AISuggestPanel({
         </button>
       </div>
 
+      {/* Slice 499: config-driven routing banner. Shown whenever the tenant is
+          on a cloud provider — at draft-generation time AND draft-review time
+          (AC-8), driven by the tenant routing config, not hardcoded here. The
+          reusable component self-resolves via the routing config and renders
+          nothing on local-ollama (AC-7). */}
+      <CloudRoutingBanner />
+
+      {/* Defense-in-depth: the per-draft cloud flag from the generation result
+          (the actual provider that served THIS draft). Redundant with the
+          config-driven banner above on a steady cloud config, but it catches a
+          draft that was cloud-routed even if the config view is momentarily
+          stale. */}
       {vm && vm.cloudRouted ? (
         <Alert data-testid="ai-suggest-cloud-banner">
           <AlertTitle>Cloud LLM routing</AlertTitle>

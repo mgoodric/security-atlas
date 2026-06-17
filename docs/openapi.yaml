@@ -60,6 +60,7 @@ tags:
   - name: admin-framework-versions
   - name: admin-group-role-mappings
   - name: admin-install
+  - name: admin-llm-routing
   - name: admin-policies
   - name: admin-samples
   - name: admin-scim-credentials
@@ -906,6 +907,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/llm-routing:
+    delete:
+      summary: DELETE /v1/admin/llm-routing — clear cloud-LLM routing, revert to local-ollama (slice 499)
+      tags: [admin-llm-routing]
+      operationId: delete-v1-admin-llm-routing
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    get:
+      summary: GET /v1/admin/llm-routing — read the tenant's cloud-LLM routing config (masked; slice 499)
+      tags: [admin-llm-routing]
+      operationId: get-v1-admin-llm-routing
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/admin/llm-routing — set/replace cloud-LLM provider + (encrypted, write-only) key (slice 499)
+      tags: [admin-llm-routing]
+      operationId: put-v1-admin-llm-routing
+      security:
+        - adminBearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/policies/export:
     get:
       summary: GET /v1/admin/policies/export
@@ -1489,6 +1530,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/audit-periods/{id}/controls/{controlID}/evidence-summary:
+    get:
+      summary: GET /v1/audit-periods/{id}/controls/{controlID}/evidence-summary
+      tags: [audit-periods]
+      operationId: get-v1-audit-periods-id-controls-controlID-evidence-summary
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: controlID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/audit-periods/{id}/freeze:
     post:
       summary: POST /v1/audit-periods/{id}/freeze
@@ -1846,6 +1912,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/board/narrative/generate-all:
+    post:
+      summary: POST /v1/board/narrative/generate-all — draft the full multi-section narrative
+      tags: [board]
+      operationId: post-v1-board-narrative-generate-all
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/calendar:
     get:
       summary: GET /v1/calendar
@@ -2141,6 +2221,26 @@ paths:
       summary: GET /v1/controls/{id}/effectiveness
       tags: [controls]
       operationId: get-v1-controls-id-effectiveness
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/{id}/evidence-summary:
+    get:
+      summary: GET /v1/controls/{id}/evidence-summary
+      tags: [controls]
+      operationId: get-v1-controls-id-evidence-summary
       security:
         - bearer: []
       parameters:
@@ -2623,6 +2723,20 @@ paths:
       summary: GET /v1/evidence
       tags: [evidence]
       operationId: get-v1-evidence
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/evidence-summary/portfolio:
+    get:
+      summary: GET /v1/evidence-summary/portfolio
+      tags: [evidence]
+      operationId: get-v1-evidence-summary-portfolio
       security:
         - bearer: []
       responses:
