@@ -1,0 +1,118 @@
+<!-- @dsCard group="Layout" name="Card" subtitle="Header · content · footer · action" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Card — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Card — translated from web/components/ui/card.tsx (base-nova / neutral).
+     Card: flex-col gap-4 overflow-hidden rounded-xl bg-card py-4 text-sm
+     text-card-foreground ring-1 ring-foreground/10 (NOT a 1px border).
+     A footer-bearing card drops bottom padding
+     (has-data-[slot=card-footer]:pb-0); the muted footer bleeds to the
+     edge with its own top border. Header is a grid that opens a second
+     column when a CardAction is present. Title uses font-heading
+     (= font-sans here) text-base leading-snug font-medium. */
+  .card {
+    display: flex; flex-direction: column; gap: 16px;
+    overflow: hidden; border-radius: var(--radius-xl);
+    background: var(--card); color: var(--card-foreground);
+    padding: 16px 0;
+    font-family: var(--font-sans); font-size: 0.875rem;
+    box-shadow: 0 0 0 1px color-mix(in oklab, var(--foreground) 10%, transparent);
+    width: 340px; max-width: 100%;
+  }
+  .card.has-footer { padding-bottom: 0; }
+
+  .card-header {
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: start; gap: 4px; padding: 0 16px;
+  }
+  .card-title-wrap { grid-column: 1; }
+  .card-title { font-size: 1rem; line-height: 1.375; font-weight: 500; }
+  .card-description { font-size: 0.875rem; color: var(--muted-foreground); margin-top: 2px; }
+  .card-action { grid-column: 2; grid-row: 1; align-self: start; justify-self: end; }
+
+  .card-content { padding: 0 16px; line-height: 1.55; }
+  .card-content p { margin: 0; }
+  .card-content p + p { margin-top: 8px; }
+
+  .card-footer {
+    display: flex; align-items: center; gap: 8px;
+    border-top: 1px solid var(--border);
+    border-bottom-left-radius: var(--radius-xl);
+    border-bottom-right-radius: var(--radius-xl);
+    background: color-mix(in oklab, var(--muted) 50%, transparent);
+    padding: 16px;
+  }
+
+  /* size=sm: gap-3 py-3, header/content px-3, footer p-3 */
+  .card.card-sm { gap: 12px; padding: 12px 0; }
+  .card.card-sm.has-footer { padding-bottom: 0; }
+  .card.card-sm .card-header, .card.card-sm .card-content { padding-left: 12px; padding-right: 12px; }
+  .card.card-sm .card-title { font-size: 0.875rem; }
+  .card.card-sm .card-footer { padding: 12px; }
+
+  /* footer button + badge subset */
+  .btn { display: inline-flex; align-items: center; justify-content: center;
+    gap: 6px; white-space: nowrap; border: 1px solid transparent;
+    border-radius: var(--radius-lg); font-family: var(--font-sans);
+    font-size: 0.875rem; font-weight: 500; height: 32px; padding: 0 10px; cursor: pointer; }
+  .btn-default { background: var(--primary); color: var(--primary-foreground); }
+  .btn-outline { border-color: var(--border); background: var(--background); color: var(--foreground); }
+  .badge { display: inline-flex; align-items: center; height: 20px; padding: 0.125rem 0.5rem;
+    border-radius: var(--radius-4xl); font-size: 0.75rem; font-weight: 500; line-height: 1;
+    background: var(--secondary); color: var(--secondary-foreground); }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">Card — Light</p>
+    <div class="ds-row" style="align-items:flex-start">
+      <div class="card has-footer">
+        <div class="card-header">
+          <div class="card-title-wrap">
+            <div class="card-title">SCF:IAC-06 · Multi-factor authentication</div>
+            <div class="card-description">Identity & Access Management · 4 framework satisfactions</div>
+          </div>
+          <div class="card-action"><span class="badge">In scope</span></div>
+        </div>
+        <div class="card-content">
+          <p>Evidence covers SCF:IAC-06 across SOC 2, ISO 27001, and PCI DSS. Freshness is 95 days on the Okta access-review feed.</p>
+          <p>Two manual attestations are pending owner sign-off this quarter.</p>
+        </div>
+        <div class="card-footer">
+          <button class="btn btn-default">Open control</button>
+          <button class="btn btn-outline">View evidence</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">Card — Dark</p>
+    <div class="ds-row" style="align-items:flex-start">
+      <div class="card has-footer">
+        <div class="card-header">
+          <div class="card-title-wrap">
+            <div class="card-title">SCF:IAC-06 · Multi-factor authentication</div>
+            <div class="card-description">Identity & Access Management · 4 framework satisfactions</div>
+          </div>
+          <div class="card-action"><span class="badge">In scope</span></div>
+        </div>
+        <div class="card-content">
+          <p>Evidence covers SCF:IAC-06 across SOC 2, ISO 27001, and PCI DSS. Freshness is 95 days on the Okta access-review feed.</p>
+          <p>Two manual attestations are pending owner sign-off this quarter.</p>
+        </div>
+        <div class="card-footer">
+          <button class="btn btn-default">Open control</button>
+          <button class="btn btn-outline">View evidence</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

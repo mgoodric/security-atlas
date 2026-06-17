@@ -64,6 +64,51 @@ LIMIT $4 OFFSET $5;
 -- name: CountEvidenceRecordsByTenant :one
 SELECT count(*) FROM evidence_records WHERE tenant_id = $1;
 
+-- name: CountEvidenceRecordsByControl :one
+-- Slice 502: total CURRENT LIVE evidence count for one control, used by the
+-- evidence-summary surface to render a "showing N of M" bound (the summary is
+-- over the bounded top-N, never the full history — P0-502-8). Resolution
+-- mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
+SELECT count(*)
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3);
+
+-- name: ListEvidenceRecordsByControlBeforeHorizon :many
+-- Slice 749: the FROZEN-population variant of ListEvidenceRecordsByControl.
+-- Returns the top-N most-recent evidence records for one control bounded by an
+-- audit-period freeze horizon: observed_at <= frozen_at (invariant #10). The
+-- bound is the period's audit_periods.frozen_at, passed by the caller after it
+-- has resolved the period; this query NEVER reads the period row itself, it only
+-- applies the horizon it is given. Mirrors ListEvidenceRecordsByControl's
+-- (control_id = $2 OR control_ref = $3) resolution and observed_at DESC order so
+-- the bounded top-N is the N most-recent records WITHIN the frozen population —
+-- never a post-freeze (live) record (P0-749-1). The COALESCE-to-infinity on a
+-- NULL horizon mirrors the slice-026/028 frozen-sample read path: an open period
+-- (frozen_at NULL) falls through to live state, but the slice-749 surface only
+-- summarizes FROZEN periods, so in practice the horizon is always set.
+SELECT *
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3)
+  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                              'infinity'::timestamptz)
+ORDER BY observed_at DESC
+LIMIT $4 OFFSET $5;
+
+-- name: CountEvidenceRecordsByControlBeforeHorizon :one
+-- Slice 749: total FROZEN-population evidence count for one control bounded by
+-- the audit-period freeze horizon (observed_at <= frozen_at), for the
+-- "showing N of M" UI label. Mirrors CountEvidenceRecordsByControl's resolution
+-- and the ListEvidenceRecordsByControlBeforeHorizon horizon predicate so the
+-- count and the bounded list agree on the frozen population (P0-749-1).
+SELECT count(*)
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3)
+  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                              'infinity'::timestamptz);
+
 -- name: WalkEvidenceRecordsForVerify :many
 -- Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
 -- Read-only integrity walk — recomputes each record's canonical hash and

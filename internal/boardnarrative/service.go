@@ -11,15 +11,24 @@ import (
 	"github.com/mgoodric/security-atlas/internal/llm"
 )
 
-// RollupSource assembles the deterministic rollup for the coverage section
-// under the caller's RLS context: it reuses the existing board.Brief data path
-// for the numbers and reads the bounded, tenant-owned citable control/evidence
-// excerpts behind them. Production is *Store; tests supply a fake so the
-// suppression + cross-tenant branches are exercised without a live Postgres.
+// RollupSource assembles the deterministic rollup for a section under the
+// caller's RLS context: it reuses the existing board.Brief data path for the
+// numbers and reads the bounded, tenant-owned citable control/evidence excerpts
+// behind them. Production is *Store; tests supply a fake so the suppression +
+// cross-tenant branches are exercised without a live Postgres.
 type RollupSource interface {
-	// CoverageRollup computes the Brief-grounded rollup for `periodEnd` plus the
-	// bounded citable excerpts, all under the requesting tenant's RLS context.
+	// CoverageRollup computes the Brief-grounded coverage rollup for `periodEnd`
+	// plus the bounded citable excerpts, all under the requesting tenant's RLS
+	// context. Kept for the slice-440 one-section call site + its tests.
 	CoverageRollup(ctx context.Context, periodEnd string) (Rollup, error)
+
+	// SectionRollup computes the deterministic rollup for ANY section key
+	// (slice 501) for `periodEnd`, under the requesting tenant's RLS context. It
+	// projects the SAME board.Brief data path through the section's
+	// SectionDef.buildRollup, so every section grounds on the same frozen Brief
+	// + the same bounded citable excerpts. Returns ErrUnknownSection for a key
+	// that has no SectionDef.
+	SectionRollup(ctx context.Context, section SectionKey, periodEnd string) (Rollup, error)
 }
 
 // AuditSink persists the full append-only generation record (system prompt +
@@ -105,24 +114,41 @@ type GenerateParams struct {
 // is unreachable, the tenant context is missing) or ErrNoBriefData (no posture
 // to summarize).
 func (s *Service) Generate(ctx context.Context, p GenerateParams) (SectionResult, error) {
-	out := SectionResult{Section: SectionControlCoverage}
+	return s.GenerateSection(ctx, SectionControlCoverage, p)
+}
+
+// GenerateSection produces (and persists, on success) a validated DRAFT of ANY
+// AI-drafted section (slice 501) in the caller's tenant context. It is the
+// section-agnostic generalization of the slice-440 coverage pipeline: it looks
+// the section's SectionDef up, assembles that section's deterministic rollup,
+// runs ONE bounded generation through the per-tenant inference client, and
+// validates the draft through the SAME FOUR pre-operator gates (shape, tone,
+// numeric, citations) in the SAME order — no gate added, none weakened
+// (P0-501-6). The outcome shape (Drafted | Suppressed) is identical to Generate.
+//
+// Returns ErrUnknownSection for a key with no SectionDef (a programmer error).
+func (s *Service) GenerateSection(ctx context.Context, section SectionKey, p GenerateParams) (SectionResult, error) {
+	def, ok := sectionDef(section)
+	if !ok {
+		return SectionResult{}, fmt.Errorf("%w: %q", ErrUnknownSection, section)
+	}
+	out := SectionResult{Section: section}
 
 	// Guardrail 1 (input shape) — assemble the deterministic rollup + bounded
-	// cited excerpts under the caller's RLS. The numbers come from the existing
-	// board.Brief data path; the excerpts are the tenant-owned controls/evidence
-	// behind them.
-	rollup, err := s.rollups.CoverageRollup(ctx, p.PeriodEnd)
+	// cited excerpts under the caller's RLS, projected through THIS section's
+	// SectionDef from the existing board.Brief data path.
+	rollup, err := s.rollups.SectionRollup(ctx, section, p.PeriodEnd)
 	if err != nil {
-		return SectionResult{}, err // ErrNoBriefData or infra failure
+		return SectionResult{}, err // ErrNoBriefData / ErrUnknownSection / infra
 	}
 	sortExcerpts(rollup.Excerpts)
 
-	system := buildSystemPrompt() + "\n\n" + buildPrompt(rollup)
+	system := def.systemPrompt() + "\n\n" + def.userPrompt(rollup)
 	req := llm.GenerateRequest{
 		Surface:       llm.SurfaceBoardNarrative,
-		PromptVersion: promptVersion,
+		PromptVersion: def.PromptVersion,
 		SystemPrompt:  system,
-		Context:       promptContextInputs(rollup),
+		Context:       sectionContextInputs(section, rollup),
 		MaxTokens:     MaxSectionTokens,
 		Timeout:       GenerationTimeout,
 	}
@@ -138,8 +164,8 @@ func (s *Service) Generate(ctx context.Context, p GenerateParams) (SectionResult
 	out.ModelName = res.ModelName
 	out.ModelVersion = res.ModelVersion
 	out.ModelProvider = res.ModelProvider
-	// v0 is local Ollama only (P0-440-5). A non-local provider would set the
-	// banner flag; in v0 this is structurally false.
+	// Local Ollama by default (slice 499 per-tenant routing); a cloud provider
+	// sets the banner flag the frontend renders.
 	out.CloudRouted = isCloudProvider(res.ModelProvider)
 
 	// Guardrail 3 (audit) — persist the FULL forensic record of THIS generation
@@ -151,14 +177,14 @@ func (s *Service) Generate(ctx context.Context, p GenerateParams) (SectionResult
 	if s.audit != nil {
 		gen := llm.Generation{
 			Surface:        llm.SurfaceBoardNarrative,
-			PromptVersion:  promptVersion,
+			PromptVersion:  def.PromptVersion,
 			ModelName:      res.ModelName,
 			ModelVersion:   res.ModelVersion,
 			ModelProvider:  res.ModelProvider,
 			SystemPrompt:   req.SystemPrompt,
 			ContextInputs:  req.Context,
 			RawDraft:       res.Text,
-			SurfaceSubject: p.PeriodEnd + ":" + string(SectionControlCoverage),
+			SurfaceSubject: p.PeriodEnd + ":" + string(section),
 		}
 		if aerr := s.audit.Write(ctx, gen); aerr != nil {
 			return SectionResult{}, fmt.Errorf("boardnarrative: audit write: %w", aerr)
@@ -167,14 +193,15 @@ func (s *Service) Generate(ctx context.Context, p GenerateParams) (SectionResult
 
 	// Guardrail 6 (section shape) — freestyle output is rejected. Checked first
 	// because a misshapen draft is the cheapest reject and the others assume the
-	// numbered structure.
-	if !enforceShape(res.Text) {
+	// numbered structure. Section-parameterized via the SectionDef.
+	if !enforceShapeFor(res.Text, def.Heading, def.ExpectedItems) {
 		out.Suppressed = true
 		out.Reason = ReasonBadShape
 		return out, nil
 	}
 
-	// Guardrail 7 (tone) — a banned marketing phrase rejects the draft.
+	// Guardrail 7 (tone) — a banned marketing phrase rejects the draft. The
+	// banned-phrase check is section-agnostic (one list, allow-list-honoring).
 	if containsBannedPhrase(res.Text) {
 		out.Suppressed = true
 		out.Reason = ReasonBannedPhrase
@@ -182,9 +209,10 @@ func (s *Service) Generate(ctx context.Context, p GenerateParams) (SectionResult
 	}
 
 	// Guardrail 5 (numeric verification) — THE defining board-narrative
-	// guardrail. Every number in the draft must be a value the deterministic
-	// rollup produced; a single mismatch auto-rejects the draft.
-	if !verifyNumbers(res.Text, rollup) {
+	// guardrail, via the reusable numeric library (slice 501). Every number in
+	// the draft must be a value THIS section's deterministic rollup produced; a
+	// single mismatch auto-rejects the draft BEFORE the operator sees it.
+	if !VerifyNumbers(res.Text, rollup.AllowedNumbers(), rollup.PeriodEnd) {
 		out.Suppressed = true
 		out.Reason = ReasonNumericMismatch
 		return out, nil
@@ -193,28 +221,28 @@ func (s *Service) Generate(ctx context.Context, p GenerateParams) (SectionResult
 	// Guardrail 4 (mandatory citations) — every cited id must be in the
 	// grounding set AND resolve to a tenant-owned row. A single failure
 	// suppresses the whole draft; because a suppressed draft must never reach
-	// the operator (P0-440-4), NOTHING is persisted.
-	citations, ok, reason, verr := validateCitations(ctx, s.res, res.Text, rollup.allowedExcerptIDs())
+	// the operator (P0-501-2), NOTHING is persisted.
+	citations, cok, reason, verr := validateCitations(ctx, s.res, res.Text, rollup.allowedExcerptIDs())
 	if verr != nil {
 		out.Suppressed = true
 		out.Reason = ReasonUnresolvedCitation
 		return out, nil
 	}
-	if !ok {
+	if !cok {
 		out.Suppressed = true
 		out.Reason = reason
 		return out, nil
 	}
 
 	// Valid, fully-validated draft. Persist as an UNAPPROVED per-section record
-	// (P0-440-1). The operator approves it in a separate one-click action.
+	// (P0-501-1). The operator approves it in a separate one-click action.
 	citationsJSON, jerr := json.Marshal(citations)
 	if jerr != nil {
 		return SectionResult{}, fmt.Errorf("boardnarrative: marshal citations: %w", jerr)
 	}
-	recordID, perr := s.store.PersistDraft(ctx, SectionControlCoverage, p.PeriodEnd, res.Text, citationsJSON, Provenance{
+	recordID, perr := s.store.PersistDraft(ctx, section, p.PeriodEnd, res.Text, citationsJSON, Provenance{
 		AuthoredBy:    p.AuthoredBy,
-		PromptVersion: promptVersion,
+		PromptVersion: def.PromptVersion,
 		ModelName:     res.ModelName,
 		ModelVersion:  res.ModelVersion,
 		ModelProvider: res.ModelProvider,
@@ -226,6 +254,32 @@ func (s *Service) Generate(ctx context.Context, p GenerateParams) (SectionResult
 	out.RecordID = recordID
 	out.Draft = res.Text
 	out.Citations = citations
+	return out, nil
+}
+
+// GenerateAll drafts EVERY AI-drafted section (the full narrative) for the
+// period, in canonical order (slice 501 — AC-1/AC-7). Each section runs the
+// independent four-gate pipeline; a section that fails a gate is SUPPRESSED
+// (Suppressed=true with a Reason) and persists nothing, exactly as in the
+// one-section path — one section's suppression does NOT abort the others (a
+// real board pack can ship the sections that passed and the operator
+// regenerates the rest). The returned slice is one SectionResult per section in
+// canonical order.
+//
+// A genuine infra error (DB unreachable, audit-write failure) is returned as
+// the error and aborts — those are not "the operator can retry" outcomes. An
+// ErrNoBriefData (no posture to summarize) is returned as the error because it
+// applies to the WHOLE narrative, not one section.
+func (s *Service) GenerateAll(ctx context.Context, p GenerateParams) ([]SectionResult, error) {
+	keys := sortedSectionKeys()
+	out := make([]SectionResult, 0, len(keys))
+	for _, key := range keys {
+		res, err := s.GenerateSection(ctx, key, p)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, res)
+	}
 	return out, nil
 }
 

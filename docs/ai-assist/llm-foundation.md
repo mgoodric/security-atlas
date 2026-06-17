@@ -147,6 +147,16 @@ predicate is authored exactly once going forward.
   `surface='questionnaire'`): cited draft answers, one-click approval.
 - **Slice 444 — gap explanation** (`internal/gapexplain`): non-binding,
   never-persisted cited explanations.
+- **Slice 502 — evidence summarization** (`internal/evidencesummary`,
+  `surface='summary'`): the §10.2 sibling of 444. For one control it summarizes
+  the **current live** evidence content (bounded top-N most-recent records, never
+  the full history; never a frozen audit-period population — invariant #10) into
+  a non-binding, cited, never-persisted plain-language summary in the
+  control-detail view. Same validate-every-citation-then-suppress +
+  graceful-degradation (the deterministic evidence list always renders) +
+  no-approve/publish/export contract as 444; routes via the slice-499 per-tenant
+  inference client (local Ollama default). See
+  `docs/audit-log/502-evidence-summarization-v0-decisions.md`.
 - **Slice 471 — role-scoped control-implementation checklist**
   (`internal/checklist`, `surface='checklist'`): per-role cited task lists.
 - **Slice 440 — board-narrative AI v0** (`internal/boardnarrative`,

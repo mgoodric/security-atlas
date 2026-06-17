@@ -61,6 +61,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { CoverageTable } from "@/components/control/coverage-table";
 import { FreshnessClock } from "@/components/control/freshness-clock";
+import { EvidenceSummaryCard } from "@/components/control/evidence-summary";
 import { GapExplanationCard } from "@/components/control/gap-explanation";
 
 import { UcfMiniViz } from "@/components/control/ucf-mini-viz";
@@ -189,6 +190,14 @@ export function OverviewPanel({
             Self-contained card (own query); renders the rollup always and the
             explanation when available + non-suppressed (AC-6/AC-7). */}
         <GapExplanationCard id={id} />
+
+        {/* AI EVIDENCE-SUMMARY — slice 502: non-binding, cited,
+            local-default-Ollama plain-language summary of the control's bounded
+            CURRENT LIVE evidence set. Sibling of slice 444's gap-explanation.
+            Self-contained card (own query); renders the bounded evidence label
+            always and the summary when available + non-suppressed (AC-6/AC-7);
+            no approve/publish/export affordance (AC-5/P0-502-3). */}
+        <EvidenceSummaryCard id={id} />
 
         {/* EFFECTIVE SCOPE */}
         <Card data-testid="effective-scope-section">

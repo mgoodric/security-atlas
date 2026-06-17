@@ -56,6 +56,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { type AnchorWithState } from "@/lib/api/anchors";
@@ -176,6 +177,40 @@ const RESULT_OPTIONS: { value: string; label: string }[] = [
   { value: "insufficient_evidence", label: "insufficient_evidence" },
   { value: "not_applicable", label: "not_applicable" },
 ];
+
+// Slice <NNN> — map the control evaluation `result` enum (the real wire
+// values from `AnchorState.result`, enumerated by RESULT_OPTIONS above)
+// onto the semantic Badge variants introduced with the PR-#1427 tokens.
+// The design canvas's table card (web/.claude-design/components/table/)
+// uses example labels (Compliant / In review / Gap); the REAL enum is
+// pass / fail / insufficient_evidence / not_applicable, so the mapping
+// is by semantic intent, not by the card's display strings:
+//   pass                  -> pass     (green  — control passing)
+//   fail                  -> critical (red    — the card's "Gap")
+//   insufficient_evidence -> warning  (amber  — needs attention, not a hard fail)
+//   not_applicable        -> secondary (neutral — out of scope, no signal hue)
+// `info` and `progress` from the badge family have no member in the
+// control-result enum, so they are intentionally unused here (they exist
+// for other surfaces and the design preview).
+type StatusBadgeVariant =
+  | "pass"
+  | "critical"
+  | "warning"
+  | "secondary"
+  | "outline";
+
+const RESULT_BADGE_VARIANT: Record<string, StatusBadgeVariant> = {
+  pass: "pass",
+  fail: "critical",
+  insufficient_evidence: "warning",
+  not_applicable: "secondary",
+};
+
+function resultBadgeVariant(result: string): StatusBadgeVariant {
+  // Unknown / future result values fall back to a neutral outline pill
+  // rather than mis-signalling a semantic color.
+  return RESULT_BADGE_VARIANT[result] ?? "outline";
+}
 
 const FRESHNESS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All" },
@@ -725,9 +760,27 @@ function ControlsPageInner() {
     {
       id: "result",
       header: "State",
+      // Slice <NNN> — semantic status pill using the Badge variants wired
+      // from the PR-#1427 tokens. The variant is chosen by the real
+      // evaluation `result` enum (see resultBadgeVariant); a 6px LED dot
+      // (inheriting the deep same-hue text via bg-current) mirrors the
+      // design canvas's table card. The variant text color is the deep
+      // token on its soft tint — >=4.5:1 (WCAG AA). The raw enum value
+      // remains the visible text, so screen readers and existing filters
+      // read the same token.
       cell: (row) =>
         row.state ? (
-          <span className="font-mono text-xs">{row.state.result}</span>
+          <Badge
+            variant={resultBadgeVariant(row.state.result)}
+            data-testid="controls-row-state"
+            data-result={row.state.result}
+          >
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full bg-current"
+            />
+            {row.state.result}
+          </Badge>
         ) : (
           <span className="text-muted-foreground">—</span>
         ),

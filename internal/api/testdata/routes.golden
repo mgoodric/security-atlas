@@ -4,6 +4,7 @@ DELETE /v1/action-plans/{id}
 DELETE /v1/action-plans/{id}/controls/{control_id}
 DELETE /v1/action-plans/{id}/risks/{risk_id}
 DELETE /v1/admin/group-role-mappings/{id}
+DELETE /v1/admin/llm-routing
 DELETE /v1/admin/scim-credentials/{id}
 DELETE /v1/admin/super-admins/{user_id}
 DELETE /v1/csf/profiles/{kind}/selections/{requirement_id}
@@ -44,6 +45,7 @@ GET /v1/admin/exceptions/export
 GET /v1/admin/features
 GET /v1/admin/framework-versions/migrations
 GET /v1/admin/group-role-mappings
+GET /v1/admin/llm-routing
 GET /v1/admin/policies/export
 GET /v1/admin/samples/export
 GET /v1/admin/scim-credentials
@@ -64,6 +66,7 @@ GET /v1/audit-notes/thread
 GET /v1/audit-periods
 GET /v1/audit-periods/{id}
 GET /v1/audit-periods/{id}/control-state
+GET /v1/audit-periods/{id}/controls/{controlID}/evidence-summary
 GET /v1/board-briefs
 GET /v1/board-briefs/{id}
 GET /v1/board-briefs/{id}.md
@@ -86,6 +89,7 @@ GET /v1/controls/{id}/attest-form
 GET /v1/controls/{id}/coverage
 GET /v1/controls/{id}/effective-scope
 GET /v1/controls/{id}/effectiveness
+GET /v1/controls/{id}/evidence-summary
 GET /v1/controls/{id}/gap-explanation
 GET /v1/controls/{id}/history
 GET /v1/controls/{id}/policies
@@ -100,6 +104,7 @@ GET /v1/decisions/overdue
 GET /v1/decisions/{id}
 GET /v1/decisions/{id}/audit-log
 GET /v1/evidence
+GET /v1/evidence-summary/portfolio
 GET /v1/evidence/freshness
 GET /v1/exceptions
 GET /v1/exceptions/expiring
@@ -239,6 +244,7 @@ POST /v1/board-packs/{id}/publish
 POST /v1/board-packs/{id}/sections/{key}/approve
 POST /v1/board/narrative/approve
 POST /v1/board/narrative/generate
+POST /v1/board/narrative/generate-all
 POST /v1/calendar/subscription
 POST /v1/controls/checklist/sections/{id}:approve
 POST /v1/controls/checklist:generate
@@ -286,6 +292,7 @@ POST /v1/walkthroughs/{id}/attachments
 POST /v1/walkthroughs/{id}:finalize
 PUT /scim/v2/Groups/{id}
 PUT /scim/v2/Users/{id}
+PUT /v1/admin/llm-routing
 PUT /v1/board-packs/{id}/sections/{key}
 PUT /v1/csf/profiles/{kind}
 PUT /v1/csf/profiles/{kind}/selections

@@ -50,11 +50,16 @@ func New(svc *boardnarrative.Service) *Handler {
 // router (the Mount-append convention — chi panics on duplicate Mount at "/").
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/v1/board/narrative/generate", h.Generate)
+	r.Post("/v1/board/narrative/generate-all", h.GenerateAll)
 	r.Post("/v1/board/narrative/approve", h.Approve)
 }
 
 type generateRequest struct {
 	PeriodEnd string `json:"period_end"`
+	// Section optionally selects ONE AI-drafted section to (re)generate
+	// (slice 501). Empty means the slice-440 default (control_coverage_summary)
+	// so existing callers are unchanged.
+	Section string `json:"section,omitempty"`
 }
 
 // Generate produces a validated, cited DRAFT of the control-coverage-summary
@@ -85,7 +90,56 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "period_end is required (YYYY-MM-DD)")
 		return
 	}
-	out, err := h.svc.Generate(ctx, boardnarrative.GenerateParams{
+	params := boardnarrative.GenerateParams{PeriodEnd: req.PeriodEnd, AuthoredBy: cred.ID}
+	section := boardnarrative.SectionControlCoverage
+	if req.Section != "" {
+		section = boardnarrative.SectionKey(req.Section)
+	}
+	out, err := h.svc.GenerateSection(ctx, section, params)
+	if err != nil {
+		switch {
+		case errors.Is(err, boardnarrative.ErrUnknownSection):
+			httpresp.WriteError(w, http.StatusBadRequest, "unknown board-narrative section")
+		case errors.Is(err, boardnarrative.ErrNoBriefData):
+			httpresp.WriteError(w, http.StatusUnprocessableEntity, "no program posture data to summarize for this period")
+		default:
+			httperr.WriteInternal(w, r, "board-narrative", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+// GenerateAll drafts the FULL multi-section narrative for the period (slice
+// 501): every AI-drafted section runs its independent four-gate pipeline and is
+// returned as its own SectionResult (Drafted | Suppressed). A suppressed section
+// persists nothing and carries a fixed reason; the operator approves the drafted
+// sections one click at a time and regenerates the suppressed ones. The board
+// pack ships only approved sections (the assembly excludes the rest).
+func (h *Handler) GenerateAll(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to generate a board-narrative section")
+		return
+	}
+	if h.svc == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "board-narrative AI is not enabled on this deployment")
+		return
+	}
+	var req generateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON")
+		return
+	}
+	if req.PeriodEnd == "" {
+		httpresp.WriteError(w, http.StatusBadRequest, "period_end is required (YYYY-MM-DD)")
+		return
+	}
+	out, err := h.svc.GenerateAll(ctx, boardnarrative.GenerateParams{
 		PeriodEnd:  req.PeriodEnd,
 		AuthoredBy: cred.ID,
 	})
@@ -97,7 +151,7 @@ func (h *Handler) Generate(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "board-narrative", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, out)
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"sections": out})
 }
 
 type approveRequest struct {

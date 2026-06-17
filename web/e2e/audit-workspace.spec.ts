@@ -168,6 +168,34 @@ test.describe("audit workspace", () => {
     //    await expect(page.getByTestId("annotation-notes-input").first()).toHaveValue("WIP: missing approver");
   });
 
+  test("slice 749: frozen period shows the period-scoped evidence summary, labeled + non-binding", async () => {
+    // Pre-condition (slice 082 harness): the auditor's assigned period is
+    // FROZEN and has at least one in-window evidence record for the opened
+    // control, so the period-scoped summary card renders. An OPEN period must
+    // NOT render the card (the backend 409s — P0-749-1: never mix live + frozen).
+    //    await page.goto(`/audit/${KNOWN_CONTROL_ID}`);
+    // The card renders above the activity tabs.
+    //    await expect(page.getByTestId("period-evidence-summary-section")).toBeVisible();
+    // AC-4: the load-bearing period-scoped + frozen-as-of label is present, so the
+    // auditor can never mistake this for live evidence.
+    //    await expect(page.getByTestId("period-evidence-summary-frozen-label"))
+    //      .toContainText("Period-scoped");
+    //    await expect(page.getByTestId("period-evidence-summary-frozen-label"))
+    //      .toContainText("frozen as of");
+    // AC-4 / AC-6: the non-binding disclosure names the model + the not-an-audit-
+    // artifact notice (rendered when the local-Ollama summary is available).
+    //    await expect(page.getByTestId("period-evidence-summary-disclosure"))
+    //      .toContainText("not an audit artifact");
+    // AC-4 / P0-502-3: there is NO approve/publish/export affordance anywhere in
+    // the card — a comprehension aid OVER the frozen sample, never an artifact.
+    //    const card = page.getByTestId("period-evidence-summary-section");
+    //    await expect(card.getByRole("button", { name: /approve|publish|export/i }))
+    //      .toHaveCount(0);
+    // AC-7: when generation is unavailable the deterministic frozen-evidence bound
+    // still renders (graceful degradation).
+    //    await expect(page.getByTestId("period-evidence-summary-bound")).toBeVisible();
+  });
+
   test("P0-1: workspace never fetches data outside the assigned period", async () => {
     // Static guarantee, asserted by inspection + network log:
     //   - the page resolves the period ONLY via /v1/me/audit-period

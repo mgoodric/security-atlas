@@ -27,6 +27,14 @@
   --color-input: var(--input);
   --color-border: var(--border);
   --color-destructive: var(--destructive);
+  --color-pass: var(--pass);
+  --color-info: var(--info);
+  --color-warning: var(--warning);
+  --color-critical: var(--critical);
+  --color-progress: var(--progress);
+  --color-brand: var(--brand);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
@@ -69,14 +77,31 @@
   --accent: oklch(0.97 0 0);
   --accent-foreground: oklch(0.205 0 0);
   --destructive: oklch(0.577 0.245 27.325);
+
+  /* Muted-pastel accent layer (claude.ai/design pull-back, 2026-06) — deep
+     same-hue tones; surfaces stay neutral and --primary stays near-black.
+     Each pairs with a soft tint via color-mix in the consuming component.
+     As text on their own tint, measured on white: pass 4.73 · info 4.72 ·
+     warning 4.71 · critical 4.77 · progress 4.73 · brand 4.72 (:1) — clears
+     the WCAG AA 4.5:1 floor the slice-360 --muted-foreground decision set. */
+  --pass: oklch(0.545 0.1 155);
+  --info: oklch(0.555 0.1 245);
+  --warning: oklch(0.56 0.095 75);
+  --critical: oklch(0.57 0.14 28);
+  --progress: oklch(0.565 0.1 292);
+  --brand: oklch(0.56 0.13 265);
+  --surface-1: color-mix(in oklab, var(--brand) 4%, var(--background));
+  --surface-2: color-mix(in oklab, var(--info) 3.5%, var(--background));
+
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
   --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  /* Categorical chart ramp — recolored to the accent hues (was achromatic). */
+  --chart-1: oklch(0.62 0.085 155);
+  --chart-2: oklch(0.62 0.09 245);
+  --chart-3: oklch(0.62 0.085 75);
+  --chart-4: oklch(0.62 0.09 292);
+  --chart-5: oklch(0.62 0.11 28);
   --radius: 0.625rem;
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
@@ -104,14 +129,27 @@
   --accent: oklch(0.269 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.704 0.191 22.216);
+
+  /* Muted-pastel accent layer — dark-tuned (lighter tones on dark surfaces).
+     As text on their tint over the dark card, measured: pass 7.06 · info 6.76 ·
+     warning 6.61 · critical 6.40 · progress 6.48 (:1). */
+  --pass: oklch(0.7 0.11 155);
+  --info: oklch(0.7 0.11 245);
+  --warning: oklch(0.7 0.1 75);
+  --critical: oklch(0.7 0.11 28);
+  --progress: oklch(0.7 0.11 292);
+  --brand: oklch(0.72 0.11 265);
+  --surface-1: color-mix(in oklab, var(--brand) 8%, var(--card));
+  --surface-2: color-mix(in oklab, var(--info) 7%, var(--card));
+
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
   --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --chart-1: oklch(0.72 0.1 155);
+  --chart-2: oklch(0.72 0.1 245);
+  --chart-3: oklch(0.74 0.1 75);
+  --chart-4: oklch(0.72 0.1 292);
+  --chart-5: oklch(0.7 0.12 28);
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: oklch(0.488 0.243 264.376);
