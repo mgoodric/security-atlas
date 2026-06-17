@@ -3,7 +3,7 @@
   "$methodology": "Floors are derived from a measured `npm run test:coverage` run on the slice 347 baseline. Each floor is set at `max(0, floor(measured - 2pp))` — the floor RATCHETS the current actual minus a 2-pp noise band, never reaches above it (slice 069 P0-A4 mirror via P0-347-3).",
   "$how_to_raise": "Raise a per-file floor in a follow-up slice that (a) writes the additional tests to actually hit the new bar, (b) lifts the number here in the same PR. Do NOT raise floors in a slice that does not also write the tests. The ratchet contract is monotonic ↑ — never lower a floor (P0-347-1).",
   "$how_to_extend": "When a new test file lands and brings new measured coverage on a previously-uncovered module, add a row here in the same PR. Default floor is `floor(measured - 2pp)`. 0% files are intentionally omitted — they have no floor signal until a first test brings non-zero coverage; the omission is documented and not a regression.",
-  "$omitted_zero_pct_count": 74,
+  "$omitted_zero_pct_count": 76,
   "$omitted_zero_pct_rationale": "74 files in the coverage `include` set measured 0% statements (no tests reach their executable bodies yet). They are intentionally omitted from the threshold map — the ratchet starts at truth, not aspiration (P0-347-3). When a future slice adds the first test for one of these files, it lifts the file into the map with floor = floor(measured - 2pp). Until then, they contribute no enforcement signal, which is the correct shape for a monotonic ratchet. Slice 370 note: the api.ts god-file split (slice 328 H-2) replaced the single `lib/api.ts` floor with per-domain floors; the four split-out modules that measured 0% statements (attest.ts, framework-scopes.ts, me.ts, vendors.ts) are omitted under this same rationale — their coverage lived under the god-file's 16% aggregate, which carried no per-function signal. Slice 396 note: the `lib/api.ts` barrel was retired (Phase 3 of the 370 split — all import sites migrated to per-domain paths by slice 395), so its floor was removed; `apiBaseURL`'s URL-resolution test moved to `lib/api/base.test.ts` and `lib/api/base.ts` keeps its floor 98. Retiring the barrel also exposed that four domain modules (board.ts 17%, risk-hierarchy.ts 8%, exceptions.ts 2%, evidence.ts 1% — all functions:0) had no DIRECT test importer; their nonzero statement/line floors were a measurement artifact of the barrel's `export *` transitively module-loading them during the single `apiBaseURL` barrel test. With the barrel gone they measure their true 0% (no test calls their functions), so per P0-347-3 (start at truth) their phantom floors were removed into this omitted-zero set — NOT a real-coverage regression. Real coverage for these fetch-wrapper modules is the job of the slice-349/392 contract-tier rollout, not the barrel-retire.",
   "$schema_version": 1,
   "thresholds": {
@@ -252,6 +252,12 @@
       "branches": 85,
       "functions": 98,
       "lines": 98
+    },
+    "app/api/admin/llm-routing/route.ts": {
+      "statements": 83,
+      "branches": 98,
+      "functions": 98,
+      "lines": 83
     },
     "app/api/admin/me/route.ts": {
       "statements": 98,
@@ -589,6 +595,12 @@
       "functions": 98,
       "lines": 98
     },
+    "components/audit/period-evidence-summary-view.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "components/board-pack/pack-breadcrumb-segments.ts": {
       "statements": 98,
       "branches": 98,
@@ -631,6 +643,12 @@
       "functions": 98,
       "lines": 98
     },
+    "components/control/evidence-summary-view.ts": {
+      "statements": 98,
+      "branches": 90,
+      "functions": 98,
+      "lines": 98
+    },
     "components/control/gap-explanation-view.ts": {
       "statements": 98,
       "branches": 90,
@@ -642,6 +660,12 @@
       "branches": 0,
       "functions": 0,
       "lines": 0
+    },
+    "components/dashboard/portfolio-summary-view.ts": {
+      "statements": 98,
+      "branches": 93,
+      "functions": 98,
+      "lines": 98
     },
     "components/dashboards-metrics/format.ts": {
       "statements": 0,
@@ -866,6 +890,12 @@
       "lines": 98
     },
     "lib/feature-nav.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/llm-routing/routing.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,

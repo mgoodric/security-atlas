@@ -98,6 +98,8 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newRunCmd())
 	root.AddCommand(newEventGridCmd())
 	root.AddCommand(newPermissionsCmd())
+	root.AddCommand(newProvisionCmd())
+	root.AddCommand(newDeprovisionCmd())
 	return root
 }
 

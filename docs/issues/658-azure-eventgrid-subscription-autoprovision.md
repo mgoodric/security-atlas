@@ -3,7 +3,21 @@
 **Cluster:** Connectors
 **Estimate:** M (2-3d)
 **Type:** JUDGMENT (write-scope boundary + provisioning UX)
-**Status:** `not-ready` (needs the write-scope-permission decision resolved first)
+**Status:** `in-progress`
+
+## Decision (maintainer, 2026-06-15 — RESOLVED)
+
+The write-scope boundary is resolved: provisioning ships as a **SEPARATE,
+opt-in, one-shot `provision` / `deprovision` subcommand** the operator runs with
+**their own elevated, short-lived Azure credential** (its own env vars
+`AZURE_PROVISION_TENANT_ID` / `AZURE_PROVISION_CLIENT_ID` /
+`AZURE_PROVISION_CLIENT_SECRET`), distinct from the receiver's read-only
+`AZURE_*`. The long-lived `eventgrid` receiver **never** holds a write scope
+(P0-658-1). Provisioning talks to Azure's ARM management API only — it does not
+widen the platform push wire (P0-658-2). Diagnostic-setting provisioning is
+**included** (opt-in within the opt-in command via `--with-diagnostic`). Full
+rationale + the exact RBAC actions are in
+`docs/audit-log/658-azure-provisioning-decisions.md`.
 
 ## Narrative
 
@@ -28,14 +42,24 @@ to hold a write-scope credential at all, or keep provisioning operator-owned (po
 / IaC / a separate one-shot `provision` subcommand the operator runs with elevated
 creds, separate from the long-lived receiver's read-only creds)?
 
-## Acceptance criteria (draft — pending the write-scope decision)
+## Acceptance criteria (finalized against the resolved decision)
 
-- [ ] **AC-1.** A documented, opt-in path to provision the Event-Grid subscription
-      pointed at the connector's webhook (separate elevated credential, NOT the
-      receiver's read-only credential).
-- [ ] **AC-2.** Honest naming + docs: provisioning is a distinct, privileged action;
-      the steady-state receiver stays read-only.
-- [ ] **AC-3.** Teardown / cleanup on operator request.
+- [x] **AC-1.** `atlas-azure provision` — an opt-in path that, given the
+      operator's elevated credential (its own `AZURE_PROVISION_*` env vars, NOT
+      the receiver's read-only `AZURE_*`), creates the Event-Grid **system topic** + **event subscription** pointed at the receiver's webhook (derived from
+      `--webhook-host` + `--path`), carries the delivery key, and — with
+      `--with-diagnostic` — the Activity-Log diagnostic setting. Idempotent
+      (ARM PUT upsert). Implemented in
+      `connectors/azure/cmd/atlas-azure/cmd_provision.go` +
+      `connectors/azure/internal/provision/`.
+- [x] **AC-2.** Honest naming + docs: the `provision` / `deprovision` help text
+      and the README scope the "no write path" claim to the **receiver** and label
+      provisioning a distinct PRIVILEGED action requiring a separate elevated
+      credential; the exact RBAC actions are documented (and printable via
+      `provision --print-rbac`) as operator-supplied, never connector-held.
+- [x] **AC-3.** `atlas-azure deprovision` (and `provision --teardown`) DELETEs the
+      event subscription, system topic, and diagnostic setting; idempotent (DELETE
+      of an absent resource is a no-op).
 
 ## Anti-criteria
 

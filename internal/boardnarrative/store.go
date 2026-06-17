@@ -86,6 +86,20 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, *dbx.
 // the citable-read transaction because the assembler opens its own tenant-scoped
 // transactions (board.Store); both run under the same RLS context from ctx.
 func (s *Store) CoverageRollup(ctx context.Context, periodEnd string) (Rollup, error) {
+	return s.SectionRollup(ctx, SectionControlCoverage, periodEnd)
+}
+
+// SectionRollup assembles the deterministic rollup for ANY section (slice 501)
+// under the caller's tenant context. It assembles the board.Brief + the bounded
+// citable excerpts ONCE (the same RLS-scoped reads the coverage section uses)
+// and projects them through the section's SectionDef.buildRollup, so every
+// section grounds on the same frozen Brief without a new source-of-truth read.
+// Returns ErrUnknownSection for a key with no SectionDef.
+func (s *Store) SectionRollup(ctx context.Context, section SectionKey, periodEnd string) (Rollup, error) {
+	def, ok := sectionDef(section)
+	if !ok {
+		return Rollup{}, fmt.Errorf("%w: %q", ErrUnknownSection, section)
+	}
 	brief, err := s.assembler.Assemble(ctx, periodEnd)
 	if err != nil {
 		return Rollup{}, err
@@ -94,7 +108,7 @@ func (s *Store) CoverageRollup(ctx context.Context, periodEnd string) (Rollup, e
 	if err != nil {
 		return Rollup{}, err
 	}
-	return RollupFromBrief(brief, excerpts)
+	return def.buildRollup(brief, excerpts)
 }
 
 // citableExcerpts reads the bounded set of tenant-owned controls (with a recent
@@ -281,6 +295,34 @@ func (s *Store) GetSection(ctx context.Context, recordID uuid.UUID) (dbx.BoardNa
 	})
 	if err != nil {
 		return dbx.BoardNarrativeSection{}, err
+	}
+	return out, nil
+}
+
+// ApprovedNarrative returns the APPROVED sections of the narrative for a period,
+// in section_key order, under the caller's tenant context (slice 501 — AC-13).
+// This is the board-pack-ships-only-approved read: a section that is unapproved
+// (or was suppressed and never persisted) is structurally absent from the
+// result, so the assembled board pack can never include it. The query filters
+// human_approved=TRUE under RLS.
+func (s *Store) ApprovedNarrative(ctx context.Context, periodEnd string) ([]ApprovedSection, error) {
+	var out []ApprovedSection
+	err := s.inTx(ctx, func(ctx context.Context, _ pgx.Tx, q *dbx.Queries, tenantID uuid.UUID) error {
+		rows, err := q.ListApprovedBoardNarrativeSections(ctx, dbx.ListApprovedBoardNarrativeSectionsParams{
+			TenantID:  pgUUID(tenantID),
+			PeriodEnd: periodEnd,
+		})
+		if err != nil {
+			return fmt.Errorf("boardnarrative: list approved sections: %w", err)
+		}
+		out = make([]ApprovedSection, 0, len(rows))
+		for _, row := range rows {
+			out = append(out, approvedFromRow(row))
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return out, nil
 }

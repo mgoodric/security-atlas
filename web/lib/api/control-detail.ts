@@ -329,6 +329,75 @@ export type ControlGapExplanationResponse = {
   suppressed_reason: string;
 };
 
+// ===== Slice 502 — AI evidence-summarization v0 =====
+//
+// GET /v1/controls/{id}/evidence-summary returns the DETERMINISTIC bounded
+// CURRENT LIVE evidence set ALWAYS (top-N most-recent records), plus a
+// NON-BINDING, cited, local-default-Ollama summary of that evidence when one is
+// available AND every citation resolves to a tenant-owned row. The summary is
+// null when suppressed (graceful degradation); the evidence set is always
+// present. The summary is a comprehension aid — never an audit artifact, with no
+// approve/publish/export affordance. Sibling of slice 444's gap-explanation.
+
+export type EvidenceSummaryFact = {
+  evidence_id: string;
+  evidence_kind: string;
+  result: string;
+  observed_at: string;
+};
+
+export type EvidenceSummarySet = {
+  control_id: string;
+  control_title: string;
+  // The bound: `showing` records of `total` live records on record. The summary
+  // is over the bounded `showing` set, never the full history (P0-502-8).
+  showing: number;
+  total: number;
+  // ALWAYS true — current live evidence only, never a frozen audit-period
+  // population (P0-502-5).
+  live_only: boolean;
+  records: EvidenceSummaryFact[];
+};
+
+export type EvidenceSummaryCitation = {
+  kind: "control" | "evidence";
+  id: string;
+};
+
+export type EvidenceSummaryBody = {
+  text: string;
+  citations: EvidenceSummaryCitation[];
+  model: string;
+  model_name: string;
+  model_version: string;
+  model_provider: string;
+  // ALWAYS false — the summary is non-binding (no approve/publish/export).
+  binding: boolean;
+  // Human-readable "AI-generated summary (model X) — not an audit artifact"
+  // disclosure.
+  disclosure: string;
+};
+
+export type ControlEvidenceSummaryResponse = {
+  control_id: string;
+  evidence: EvidenceSummarySet;
+  // null when the summary was suppressed (generation unavailable, no evidence,
+  // or a citation failed to resolve) — the evidence set still renders.
+  summary: EvidenceSummaryBody | null;
+  suppressed_reason: string;
+};
+
+export async function getControlEvidenceSummary(
+  bearer: string,
+  controlID: string,
+): Promise<ControlEvidenceSummaryResponse> {
+  const res = await apiFetch(
+    `/v1/controls/${encodeURIComponent(controlID)}/evidence-summary`,
+    bearer,
+  );
+  return (await res.json()) as ControlEvidenceSummaryResponse;
+}
+
 export async function getControlHistory(
   bearer: string,
   controlID: string,
@@ -431,5 +500,81 @@ export function fetchControlGapExplanation(
 ): Promise<ControlGapExplanationResponse> {
   return bffControlFetch<ControlGapExplanationResponse>(
     `/api/controls/${encodeURIComponent(controlID)}/gap-explanation`,
+  );
+}
+
+// Slice 502 — browser-side fetcher for the evidence-summary read. Rides the
+// existing bffControlFetch helper so APIError surfaces with the upstream status;
+// the control-detail page's classifyControlDetailError routes 401 / 404 / other
+// for free.
+export function fetchControlEvidenceSummary(
+  controlID: string,
+): Promise<ControlEvidenceSummaryResponse> {
+  return bffControlFetch<ControlEvidenceSummaryResponse>(
+    `/api/controls/${encodeURIComponent(controlID)}/evidence-summary`,
+  );
+}
+
+// ===== Slice 749 — period-scoped (frozen) evidence summary =====
+//
+// The audit-workspace sibling of the slice-502 live evidence summary above. For
+// ONE control WITHIN one FROZEN audit period it returns the DETERMINISTIC bounded
+// FROZEN-population evidence set (observed_at <= frozen_at — invariant #10) plus a
+// NON-BINDING, cited, local-default-Ollama summary of that frozen evidence. The
+// summary is a comprehension aid OVER the frozen sample, clearly labeled
+// period-scoped + frozen-as-of `frozen_at`; there is NO approve/publish/export
+// path (P0-502-3) and it is never persisted (P0-502-4). The wire shape reuses the
+// slice-502 fact/citation/summary shapes; the evidence set differs only in that
+// it is `frozen` (not `live_only`) and carries the freeze horizon + period id.
+
+export type PeriodEvidenceSummarySet = {
+  control_id: string;
+  control_title: string;
+  audit_period_id: string;
+  // The period's freeze horizon (RFC3339). The corpus draws ONLY from evidence
+  // with observed_at <= frozen_at (invariant #10, P0-749-1).
+  frozen_at: string;
+  // ALWAYS true — frozen audit-period population, never current live evidence.
+  frozen: boolean;
+  showing: number;
+  total: number;
+  records: EvidenceSummaryFact[];
+};
+
+export type PeriodEvidenceSummaryResponse = {
+  audit_period_id: string;
+  control_id: string;
+  evidence: PeriodEvidenceSummarySet;
+  // null when the summary was suppressed (generation unavailable, no frozen
+  // evidence, or a citation failed to resolve) — the frozen evidence set still
+  // renders.
+  summary: EvidenceSummaryBody | null;
+  suppressed_reason: string;
+};
+
+export async function getPeriodEvidenceSummary(
+  bearer: string,
+  auditPeriodID: string,
+  controlID: string,
+): Promise<PeriodEvidenceSummaryResponse> {
+  const res = await apiFetch(
+    `/v1/audit-periods/${encodeURIComponent(
+      auditPeriodID,
+    )}/controls/${encodeURIComponent(controlID)}/evidence-summary`,
+    bearer,
+  );
+  return (await res.json()) as PeriodEvidenceSummaryResponse;
+}
+
+// Browser-side fetcher for the period-scoped evidence summary. Rides the
+// bffControlFetch helper so APIError surfaces with the upstream status.
+export function fetchPeriodEvidenceSummary(
+  auditPeriodID: string,
+  controlID: string,
+): Promise<PeriodEvidenceSummaryResponse> {
+  return bffControlFetch<PeriodEvidenceSummaryResponse>(
+    `/api/audit/periods/${encodeURIComponent(
+      auditPeriodID,
+    )}/controls/${encodeURIComponent(controlID)}/evidence-summary`,
   );
 }

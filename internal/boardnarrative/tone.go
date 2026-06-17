@@ -1,6 +1,9 @@
 package boardnarrative
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // Tone enforcement — guardrail 7 (the banned-phrase discipline). The
 // board-narrative voice is measured, factual, slightly defensive — never
@@ -61,6 +64,19 @@ var bannedPhrases = []string{
 // (case-insensitive). The first match short-circuits — a single banned phrase
 // fails the whole draft (guardrail 7), the same all-or-nothing discipline as
 // the citation + numeric gates.
+//
+// Two layers (AC-5 + AC-6):
+//
+//  1. The Section-1 unambiguous list (bannedPhrases) — phrases with NO
+//     legitimate use in a board narrative. Plain case-insensitive Contains; no
+//     false-positive risk.
+//  2. The Section-3 context-sensitive words (carveOutWords) — words like
+//     "robust" / "leverage" / "strong" / "improve" that have BOTH a banned
+//     filler form and a permitted form (the slice-182 Section-3 allow-list). For
+//     these we reject ONLY when the word appears in its banned form and is NOT
+//     covered by an allow-list pattern, so "robust against unauthorized merges"
+//     (permitted) passes while "we have a robust program" (filler) is rejected
+//     (P0-501-3 / P0-501-4 — honor the allow-list, no false-reject).
 func containsBannedPhrase(text string) bool {
 	lower := strings.ToLower(text)
 	for _, p := range bannedPhrases {
@@ -68,7 +84,92 @@ func containsBannedPhrase(text string) bool {
 			return true
 		}
 	}
+	for _, w := range carveOutWords {
+		if w.banned(lower) {
+			return true
+		}
+	}
 	return false
+}
+
+// carveOutWord is one slice-182 Section-3 context-sensitive word: a word that is
+// banned as filler but PERMITTED in a specific, legitimate form. The
+// post-generation gate must reject the filler form WITHOUT false-rejecting the
+// permitted form (AC-6). Each word ships:
+//
+//   - word: the bare word (lower-case), the thing we look for at all;
+//   - permitted: a regex matching the LEGITIMATE forms (Section-3 allow-list);
+//     any occurrence matched by this is exempt from rejection;
+//   - banned: a regex matching the FILLER forms (Section-3 "NOT OK when…").
+//
+// Reject logic (allowList-honoring): the word triggers a rejection iff a
+// FILLER-form occurrence exists. We do NOT reject merely because the word is
+// present (that would over-fire on the permitted form); we reject only the
+// filler patterns. This is the deliberate "instruct + review the words that
+// sometimes are right; exact-match the phrases that can never be" strictness
+// (decisions log) made concrete for the carve-out words.
+type carveOutWord struct {
+	word   string
+	filler *regexp.Regexp
+}
+
+// banned reports whether the word appears in a banned (filler) form in lower
+// (already lower-cased). The allow-list is honored implicitly: the filler regex
+// matches ONLY the illegitimate forms enumerated in slice-182 Section-3, so a
+// permitted usage (e.g. "robust against unauthorized merges") never matches.
+func (c carveOutWord) banned(lower string) bool {
+	if !strings.Contains(lower, c.word) {
+		return false
+	}
+	return c.filler.MatchString(lower)
+}
+
+// carveOutWords are the slice-182 Section-3 context-sensitive words. The filler
+// regex for each encodes the "NOT OK when…" column; the implicit complement (any
+// other usage, including the "OK when…" forms) is permitted. Sourced from
+// docs/governance/board-narrative-tone-anti-patterns.md Section 3.
+//
+//   - robust (P1):   banned as "robust <abstract noun>" filler ("robust program",
+//     "robust controls", "robust posture"); permitted as "robust against …".
+//   - leverage (P7 / Section-1 #7): banned as the verb "leverage …"; the noun
+//     "leverage" is rare in this domain, so the verb form is the filler.
+//   - strong (P3):   banned as "strong <abstract noun>" / "strong commitment";
+//     permitted when quantified ("strong … (94% vs 88%)") — the bare
+//     intensifier-before-a-noun is the filler.
+//   - mature/maturity (P9): banned as "mature <noun>" editorial qualifier.
+//   - comprehensive (P7): banned as "comprehensive <noun>" intensifier.
+//
+// The filler patterns are intentionally conservative (anchored to the specific
+// illegitimate constructions) so the gate never false-rejects a permitted form —
+// the human operator + the system-prompt instruction catch any residue, exactly
+// the slice-182 division of labor.
+var carveOutWords = []carveOutWord{
+	// NOTE: Go's regexp (RE2) has NO lookaround. The filler patterns are
+	// written WITHOUT lookahead: each enumerates the specific illegitimate
+	// "<word> <abstract-noun>" constructions from Section 3's "NOT OK when…"
+	// column. The permitted forms ("robust against …", "leverage" as a noun,
+	// "strong … (94% vs 88%)", a cited maturity tier, "comprehensive … coverage
+	// of …") do NOT match these patterns, so they are not false-rejected (AC-6).
+	{
+		word:   "robust",
+		filler: regexp.MustCompile(`robust\s+(program|controls?|posture|security|solution|framework)`),
+	},
+	{
+		word:   "leverage",
+		filler: regexp.MustCompile(`\bleverage\s+(the|our|its|their|a|an)\b`),
+	},
+	{
+		word:   "strong",
+		filler: regexp.MustCompile(`strong\s+(security|commitment|posture|program|controls?|culture)`),
+	},
+	{
+		word:   "mature",
+		filler: regexp.MustCompile(`mature\s+(security\s+)?(program|posture|organization|practice)`),
+	},
+	{
+		word:   "comprehensive",
+		filler: regexp.MustCompile(`comprehensive\s+(solution|program|approach)`),
+	},
 }
 
 // BannedPhraseListForPrompt renders the banned-phrase list as a newline bullet

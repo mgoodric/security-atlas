@@ -89,7 +89,10 @@ func (s *Server) registerBoard(root *chi.Mux, featureFlagStore *featureflag.Stor
 		boardNarrativeStore := boardnarrative.NewStore(s.dbPool, boardGen)
 		boardNarrativeSvc := boardnarrative.NewService(
 			boardNarrativeStore,
-			llm.NewOllamaClient(llm.ConfigFromEnv()),
+			// Slice 499: per-tenant inference router (local-Ollama default,
+			// cloud opt-in resolved under app.current_tenant). Call site
+			// unchanged.
+			s.inferenceClient(),
 			boardNarrativeStore,
 			boardnarrative.NewAuditSink(llm.NewAuditWriter(s.dbPool)),
 			boardNarrativeStore,

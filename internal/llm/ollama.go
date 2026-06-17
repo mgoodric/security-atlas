@@ -143,6 +143,17 @@ func (c *OllamaClient) Generate(ctx context.Context, req GenerateRequest) (Gener
 	}, nil
 }
 
+// RenderContextPrompt is the exported entry point a sibling-package cloud
+// Client (internal/llm/cloud, slice 499) uses to render the assembled context
+// into the SAME deterministic prompt string the Ollama client sends, so the
+// forensic audit record is reproducible across backends.
+func RenderContextPrompt(ctxInputs map[string]any) string { return renderContextPrompt(ctxInputs) }
+
+// ModelVersionTag is the exported entry point a sibling-package cloud Client
+// (slice 499) uses to derive the model_version provenance tag from a resolved
+// model id, identically to the Ollama client.
+func ModelVersionTag(modelID string) string { return modelVersionTag(modelID) }
+
 // renderContextPrompt deterministically renders the assembled context into a
 // single opaque prompt string. Keys are emitted in a stable (sorted) order so
 // the same context produces the same prompt -- important for the forensic
