@@ -67,14 +67,14 @@ jobs:
           disable-sudo: true
 
       - name: Checkout (with full history for changelog)
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # GoReleaser needs the full history + tags to render the conv-commit
           # changelog and to detect the previous tag.
           fetch-depth: 0
 
       - name: Set up Go
-        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
@@ -197,7 +197,7 @@ jobs:
         # attest-build-provenance pattern; pinned to the same SHA. The
         # `attestations: write` + `id-token: write` this needs are scoped at
         # the job level (see this job's `permissions:` block — P0-451-5).
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
         with:
           subject-path: |
             dist/*.tar.gz
