@@ -428,7 +428,7 @@ func (h *Handler) pagination(r *http.Request) (int32, int32) {
 	limit := h.defaultLimit
 	offset := int32(0)
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+		if parsed, err := strconv.ParseInt(v, 10, 32); err == nil && parsed > 0 {
 			limit = int32(parsed)
 			if limit > h.maxLimit {
 				limit = h.maxLimit
@@ -436,7 +436,7 @@ func (h *Handler) pagination(r *http.Request) (int32, int32) {
 		}
 	}
 	if v := r.URL.Query().Get("offset"); v != "" {
-		if parsed, err := strconv.Atoi(v); err == nil && parsed >= 0 {
+		if parsed, err := strconv.ParseInt(v, 10, 32); err == nil && parsed >= 0 {
 			offset = int32(parsed)
 		}
 	}
