@@ -21,7 +21,9 @@
 #   guards the discipline by failing CI on any future regression.
 #
 # Scope: every `uses:` line found by `grep -hE '^[[:space:]]+(- )?uses: '`
-# across `.github/workflows/*.yml`. Both YAML styles are accepted:
+# across `.github/workflows/*.yml` AND every in-repo composite action at
+# `.github/actions/*/action.yml` (slice 418). Both YAML styles are
+# accepted:
 #   - the named-step form `        uses: foo/bar@<sha>`
 #   - the compact list-item form `      - uses: foo/bar@<sha>`
 # The check is "is the reference after the `@` a 40-character
@@ -29,9 +31,23 @@
 # allowed and recommended (so Dependabot's `# <tag>` lookup convention
 # still works) but the SHA itself is what the check enforces.
 #
+# LOCAL ACTION REFERENCES ARE EXEMPT (slice 418 AC-10). A `uses:` whose
+# value starts with `./` names an action that lives in THIS repository at
+# that path (e.g. `uses: ./.github/actions/atlas-stack-up`). There is no
+# `@<ref>` to pin: the action's code is checked out with the repo at the
+# same commit the workflow runs from, so it is already immutable-by-
+# construction and carries none of the tag-jacking exposure a
+# third-party action does. Pinning is meaningless for it; the guard
+# counts these separately and reports them rather than failing. Scanning
+# `.github/actions/*/action.yml` is the other half of that trade: a
+# local action is exempt from pinning ITSELF, so the third-party actions
+# it composes must still be checked — otherwise a composite action would
+# be an un-audited hole in the discipline.
+#
 # Output:
 #   - On success (no tag-pinned actions): one line
-#     "no tag-pinned actions detected (N pinned across M files)" + exit 0.
+#     "no tag-pinned actions detected (N pinned, L local across M files)"
+#     + exit 0.
 #   - On violation: prints every offending line with file path + line
 #     number + the offending `uses: ...` text + a reconcile hint, then
 #     exits 1.
@@ -42,6 +58,12 @@
 #                        Used by the test harness to point at a
 #                        synthetic fixture tree without polluting the
 #                        real in-tree files.
+#   ATLAS_ACTIONS_DIR    Override the composite-action directory the
+#                        script additionally scans (default:
+#                        $REPO/.github/actions). Unlike the workflows
+#                        directory, an absent or empty actions directory
+#                        is NOT an error — a repo need not have any
+#                        in-tree composite actions.
 #
 # Required:
 #   - `grep` on PATH (every POSIX system has it)
@@ -79,6 +101,29 @@ if [[ ${#yml_files[@]} -eq 0 ]]; then
   exit 2
 fi
 
+# Slice 418 — also scan in-repo composite actions. A composite action's
+# steps can carry third-party `uses:` lines, which must be SHA-pinned by
+# the same discipline. An absent/empty actions directory is fine.
+# `ROOT` is set only when the workflows dir was NOT overridden. When the
+# test harness points ATLAS_WORKFLOWS_DIR at a fixture tree, leaving
+# ACTIONS_DIR empty keeps the run hermetic (the real in-tree
+# .github/actions/ is not pulled in behind the fixture's back); the
+# harness sets ATLAS_ACTIONS_DIR explicitly when it wants action files.
+if [[ -n "${ATLAS_ACTIONS_DIR:-}" ]]; then
+  ACTIONS_DIR="$ATLAS_ACTIONS_DIR"
+elif [[ -n "${ROOT:-}" ]]; then
+  ACTIONS_DIR="$ROOT/.github/actions"
+else
+  ACTIONS_DIR=""
+fi
+
+if [[ -n "$ACTIONS_DIR" && -d "$ACTIONS_DIR" ]]; then
+  shopt -s nullglob
+  action_files=("$ACTIONS_DIR"/*/action.yml "$ACTIONS_DIR"/*/action.yaml)
+  shopt -u nullglob
+  yml_files+=("${action_files[@]}")
+fi
+
 # Walk every `uses:` line in every workflow. The regex extracts the
 # `<repo>@<ref>` after the colon-space. Any ref that is NOT a 40-char
 # lowercase hex string is a violation.
@@ -97,6 +142,7 @@ fi
 
 violations=0
 pinned=0
+local_refs=0
 
 # We emit findings to a temp file so the final summary line is
 # unambiguous on stdout while the per-line findings go to stderr.
@@ -125,6 +171,15 @@ for f in "${yml_files[@]}"; do
     # Drop the trailing `# <tag>` comment if present, plus the
     # whitespace between the ref and the `#`.
     ref_part="${uses_val%% #*}"
+    # Slice 418 — a `./`-prefixed value names an in-repo action checked
+    # out at the workflow's own commit. There is no `@<ref>` to pin and
+    # no tag-jacking surface. Count it, do not flag it. (The third-party
+    # `uses:` lines INSIDE that action are checked too — the actions dir
+    # is part of the scanned file set above.)
+    if [[ "$ref_part" == ./* ]]; then
+      local_refs=$((local_refs + 1))
+      continue
+    fi
     # ref_part is now `<repo>@<ref>` (no trailing comment).
     ref="${ref_part##*@}"
     # If `ref` is exactly 40 lowercase-hex chars, pass.
@@ -139,7 +194,7 @@ for f in "${yml_files[@]}"; do
 done
 
 if [[ $violations -eq 0 ]]; then
-  echo "check-action-pins: no tag-pinned actions detected (${pinned} pinned across ${#yml_files[@]} files)"
+  echo "check-action-pins: no tag-pinned actions detected (${pinned} pinned, ${local_refs} local across ${#yml_files[@]} files)"
   exit 0
 fi
 

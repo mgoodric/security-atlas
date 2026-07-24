@@ -400,57 +400,17 @@ jobs:
             echo "ATLAS_COSIGN_KMS_LOCALSTACK=1"
             echo "ATLAS_COSIGN_KMS_LOCALSTACK_ENDPOINT=http://localhost:4566"
           } >> "$GITHUB_ENV"
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-          # Wait for readiness (up to ~60s).
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then
-              echo "minio ready"; break
-            fi
-            sleep 2
-          done
-          # Create the test bucket using a short-lived mc container. The
-          # MinIO admin client (`mc`) is the canonical bucket-bootstrap
-          # tool. We inject the alias via the MC_HOST_<alias> env var so
-          # the single `mc mb` invocation has the alias without needing a
-          # separate `mc alias set` call (which would write config to
-          # ~/.mc/ that doesn't persist across `docker run` invocations).
-          docker run --rm --network host \
-            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-            minio/mc mb -p local/atlas-artifacts-test
-      - name: Start NATS JetStream
-        run: |
-          docker run -d --name nats \
-            -p 4222:4222 \
-            -p 8222:8222 \
-            nats:2.10-alpine -js -sd /data --http_port 8222
-          # Wait for readiness via the monitoring endpoint (up to ~60s).
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8222/healthz; then
-              echo "nats ready"; break
-            fi
-            sleep 2
-          done
-      - name: Bootstrap roles
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-      - name: Set role passwords (CI-scoped)
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
-          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
-      - name: Apply forward migrations
-        run: |
-          for f in migrations/sql/*.sql; do
-            case "$f" in
-              *.down.sql) ;;
-              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
-            esac
-          done
+      # Slice 418 — shared bring-up, one canonical copy. `start-atlas:
+      # 'false'` is this call-site's genuine divergence: the Go
+      # integration shards drive the handlers in-process and never boot
+      # the HTTP server. Inputs are explicit (P0-2). Equivalence diff:
+      # docs/audit-log/418-composite-stack-up-decisions.md.
+      - name: Bring up the atlas CI stack (MinIO + NATS + Postgres)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "true"
+          start-atlas: "false"
+          minio-bucket: atlas-artifacts-test
       - name: Audit RLS coverage (slice 033)
         # Constitutional invariant 6: every tenant-scoped table must carry
         # an RLS policy + FORCE. Audit runs against atlas_migrate (DATABASE_URL)
@@ -1510,46 +1470,15 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then
-              echo "minio ready"; break
-            fi
-            sleep 2
-          done
-          docker run --rm --network host \
-            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-            minio/mc mb -p local/atlas-artifacts-test
-      - name: Start NATS JetStream
-        run: |
-          docker run -d --name nats \
-            -p 4222:4222 \
-            -p 8222:8222 \
-            nats:2.10-alpine -js -sd /data --http_port 8222
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8222/healthz; then
-              echo "nats ready"; break
-            fi
-            sleep 2
-          done
-      - name: Bootstrap Postgres roles + migrations
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
-          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
-          for f in migrations/sql/*.sql; do
-            case "$f" in
-              *.down.sql) ;;
-              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
-            esac
-          done
+      # Slice 418 — shared bring-up, one canonical copy. The atlas server
+      # is started by the SECOND call below (after the web build), which
+      # keeps the original step ordering byte-for-byte.
+      - name: Bring up the atlas CI stack (MinIO + NATS + Postgres)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "true"
+          start-atlas: "false"
+          minio-bucket: atlas-artifacts-test
       # Slice 695 — download the prebuilt atlas binary from build-atlas instead
       # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
       # Unix executable bit, so `install -m 0755` is REQUIRED to make the
@@ -1572,25 +1501,21 @@ jobs:
       - name: Install Playwright chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
-      - name: Start atlas server
-        # Slice 201: ATLAS_KEYSTORE_PATH + ATLAS_DATA_DIR point at /tmp (the
-        # CI runner cannot write to the default /var/lib/security-atlas/).
-        # Without these, fsstore.Open fails with EACCES, the OAuth keystore
-        # never wires, s.jwtSigner stays nil, and the /v1/test/issue-jwt
-        # endpoint returns 404 — breaking the Playwright global-setup.
-        env:
-          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
-          ATLAS_DATA_DIR: /tmp/atlas-ci
-        run: |
-          mkdir -p /tmp/atlas-ci/keys
-          atlas serve > /tmp/atlas.log 2>&1 &
-          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/health; then
-              echo "atlas ready"; break
-            fi
-            sleep 2
-          done
+      # Slice 418 — same action, services off / atlas on, sitting exactly
+      # where the inlined `Start atlas server` step did. atlas-test-mode
+      # mirrors this job's job-level env and is EXPLICIT (P0-2/P0-3): '1'
+      # mounts /v1/test/issue-jwt for the Playwright globalSetup mint
+      # (slice 201); atlas-issuer-url wires the signer it needs (187/190).
+      - name: Start the atlas server (test-mint path on)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "false"
+          start-atlas: "true"
+          atlas-test-mode: "1"
+          atlas-issuer-url: http://localhost:8080
+          keystore-path: /tmp/atlas-ci/keys
+          data-dir: /tmp/atlas-ci
+          atlas-health-url: http://localhost:8080/health
       - name: Start web server
         working-directory: web
         run: |
@@ -1757,46 +1682,15 @@ jobs:
         with:
           node-version: "22"
           cache: "npm"
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then
-              echo "minio ready"; break
-            fi
-            sleep 2
-          done
-          docker run --rm --network host \
-            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-            minio/mc mb -p local/atlas-artifacts-test
-      - name: Start NATS JetStream
-        run: |
-          docker run -d --name nats \
-            -p 4222:4222 \
-            -p 8222:8222 \
-            nats:2.10-alpine -js -sd /data --http_port 8222
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8222/healthz; then
-              echo "nats ready"; break
-            fi
-            sleep 2
-          done
-      - name: Bootstrap Postgres roles + migrations
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
-          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
-          for f in migrations/sql/*.sql; do
-            case "$f" in
-              *.down.sql) ;;
-              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
-            esac
-          done
+      # Slice 418 — shared bring-up, one canonical copy; same stack as the
+      # dev-server Playwright leg. The atlas server is started by the
+      # SECOND call below, after the standalone web build.
+      - name: Bring up the atlas CI stack (MinIO + NATS + Postgres)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "true"
+          start-atlas: "false"
+          minio-bucket: atlas-artifacts-test
       # Slice 695 — download the prebuilt atlas binary from build-atlas instead
       # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
       # Unix executable bit, so `install -m 0755` is REQUIRED. The web
@@ -1826,20 +1720,20 @@ jobs:
       - name: Install Playwright chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
-      - name: Start atlas server
-        env:
-          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
-          ATLAS_DATA_DIR: /tmp/atlas-ci
-        run: |
-          mkdir -p /tmp/atlas-ci/keys
-          atlas serve > /tmp/atlas.log 2>&1 &
-          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/health; then
-              echo "atlas ready"; break
-            fi
-            sleep 2
-          done
+      # Slice 418 — same action, services off / atlas on, sitting exactly
+      # where the inlined `Start atlas server` step did. atlas-test-mode /
+      # atlas-issuer-url mirror this job's job-level env, EXPLICIT per
+      # P0-2/P0-3.
+      - name: Start the atlas server (test-mint path on)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "false"
+          start-atlas: "true"
+          atlas-test-mode: "1"
+          atlas-issuer-url: http://localhost:8080
+          keystore-path: /tmp/atlas-ci/keys
+          data-dir: /tmp/atlas-ci
+          atlas-health-url: http://localhost:8080/health
       - name: Start web server (production-build standalone)
         # Slice 387 — boot the standalone Node server, NOT `npm start`.
         # The standalone entrypoint is `.next/standalone/web/server.js`
@@ -1985,46 +1879,14 @@ jobs:
         # mockup file, before the expensive bring-up below.
         working-directory: web
         run: npx vitest run e2e-audit/lib/manifest.test.ts
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then
-              echo "minio ready"; break
-            fi
-            sleep 2
-          done
-          docker run --rm --network host \
-            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-            minio/mc mb -p local/atlas-artifacts-test
-      - name: Start NATS JetStream
-        run: |
-          docker run -d --name nats \
-            -p 4222:4222 \
-            -p 8222:8222 \
-            nats:2.10-alpine -js -sd /data --http_port 8222
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8222/healthz; then
-              echo "nats ready"; break
-            fi
-            sleep 2
-          done
-      - name: Bootstrap Postgres roles + migrations
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
-          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
-          for f in migrations/sql/*.sql; do
-            case "$f" in
-              *.down.sql) ;;
-              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
-            esac
-          done
+      # Slice 418 — shared bring-up, one canonical copy. The atlas server
+      # is started by the SECOND call below, after the web build.
+      - name: Bring up the atlas CI stack (MinIO + NATS + Postgres)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "true"
+          start-atlas: "false"
+          minio-bucket: atlas-artifacts-test
       # Slice 695 — download the prebuilt atlas binary from build-atlas instead
       # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
       # Unix executable bit, so `install -m 0755` is REQUIRED.
@@ -2043,25 +1905,22 @@ jobs:
       - name: Install Playwright chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
-      - name: Start atlas server
-        # Slice 201: ATLAS_KEYSTORE_PATH + ATLAS_DATA_DIR point at /tmp (the
-        # CI runner cannot write to the default /var/lib/security-atlas/).
-        # Without these, fsstore.Open fails with EACCES, the OAuth keystore
-        # never wires, s.jwtSigner stays nil, and the /v1/test/issue-jwt
-        # endpoint returns 404 — breaking the Playwright global-setup.
-        env:
-          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
-          ATLAS_DATA_DIR: /tmp/atlas-ci
-        run: |
-          mkdir -p /tmp/atlas-ci/keys
-          atlas serve > /tmp/atlas.log 2>&1 &
-          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/health; then
-              echo "atlas ready"; break
-            fi
-            sleep 2
-          done
+      # Slice 418 — same action, services off / atlas on, sitting exactly
+      # where the inlined `Start atlas server` step did. atlas-test-mode /
+      # atlas-issuer-url are EXPLICITLY EMPTY (P0-2/P0-3) — this job's
+      # genuine divergence: the honesty harness authenticates with the
+      # static slice-069/178 TEST_BEARER, never the slice-201 runtime
+      # mint, so it never had these set and must NOT gain them.
+      - name: Start the atlas server (test-mint path OFF)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "false"
+          start-atlas: "true"
+          atlas-test-mode: ""
+          atlas-issuer-url: ""
+          keystore-path: /tmp/atlas-ci/keys
+          data-dir: /tmp/atlas-ci
+          atlas-health-url: http://localhost:8080/health
       - name: Start web server
         working-directory: web
         run: |
