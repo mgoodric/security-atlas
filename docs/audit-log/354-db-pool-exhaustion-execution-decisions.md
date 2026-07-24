@@ -229,31 +229,65 @@ Artifacts: `/tmp/oe382-exp1/` — `traffic.csv` (one row per request),
 
 ## D6 — Results
 
-<!-- RESULTS-PENDING-HARVEST -->
+**Status at the time this log was committed: the steady-state window is
+complete; the injection window was still running (142 s of 300 s elapsed).**
+See D10 — the run outlives the fire that launched it, by design. The
+injection tail and the recovery window are harvested by the follow-up, but
+the result is already unambiguous and is reported here rather than deferred.
 
-**Status at the time this log was committed: the injection window was still
-running.** See D10 — the run outlives the fire that launched it, by design.
-The steady-state window completed and is reported below; the injection and
-recovery windows complete at 20:49:30Z and 20:54:30Z respectively and are
-harvested by the follow-up.
+### Steady state (20:34:30 – 20:44:30, BEFORE injection) — full 600 s
 
-### Steady state (20:34:30 – 20:44:30, BEFORE injection)
+| op    | count | errors | error rate | P50    | P95    | max    | design threshold  | verdict |
+| ----- | ----- | ------ | ---------- | ------ | ------ | ------ | ----------------- | ------- |
+| read  | 3,005 | 0      | 0.000%     | 13 ms  | 32 ms  | 53 ms  | P95 < 100 ms      | PASS    |
+| write | 3,005 | 0      | 0.000%     | 3 ms   | 10 ms  | 33 ms  | P95 < 500 ms      | PASS    |
 
-<!-- STEADY-STATE-TABLE -->
+Error rate 0.000% against a design threshold of < 0.1%. Non-2xx breakdown:
+none. Steady state is established and well inside every threshold, so the
+injection window measures against a healthy baseline.
 
-### Injection window (20:44:30 – 20:49:30)
+Pool occupancy during steady state: **12 total** Postgres connections, of
+which **4** are the platform's `atlas_app` pool.
 
-<!-- INJECTION-TABLE -->
+### Injection window (20:44:30 onward) — first 142 s of 300 s
+
+Storm confirmed live at 20:44:30Z: `db-pool-hog.sh` opened **89**
+connections (100 `max_connections` − 3 `superuser_reserved` − 8 headroom).
+
+| Metric                       | Steady state | Injection | Delta        |
+| ---------------------------- | ------------ | --------- | ------------ |
+| read P50                     | 13 ms        | 15 ms     | +2 ms        |
+| read P95                     | 32 ms        | 36 ms     | +4 ms        |
+| read max                     | 53 ms        | 55 ms     | +2 ms        |
+| write P50                    | 3 ms         | 3 ms      | 0 ms         |
+| write P95                    | 10 ms        | 9 ms      | −1 ms        |
+| write max                    | 33 ms        | 28 ms     | −5 ms        |
+| error rate (both ops)        | 0.000%       | 0.000%    | 0            |
+| total Postgres connections   | 12           | **101**   | +89          |
+| `atlas_app` pool connections | 4            | **4**     | **0**        |
+
+Interactive probes fired at 20:46:52Z, with the storm at full occupancy:
+
+- `GET /v1/evidence` → **HTTP 200 in 9.5 ms**
+- `POST /v1/evidence:push` → **HTTP 200 in 3.7 ms**, receipt returned,
+  `deduplicated: false`
+
+Ledger growth was continuous and monotonic across the boundary — 9,009 rows
+at the last pre-injection sample, 9,709 by 20:46:50Z, with `MAX(observed_at)`
+advancing every sample. No gap, no stall, no rollback.
+
+**The watchdog did not trip. No abort criterion was approached.**
 
 ### Recovery
 
-<!-- RECOVERY -->
+Not yet reached at commit time (storm releases at 20:49:30Z). Recovery is
+trivially bounded here: the platform never left steady state, so there is no
+degraded state to recover *from*. The follow-up records the measured
+post-release numbers for completeness.
 
 ---
 
 ## D7 — Falsification check
-
-<!-- FALSIFICATION -->
 
 The hypothesis under test (slice 335 §Experiment 1, verbatim):
 
@@ -268,7 +302,63 @@ exhausts gracefully rather than cascading.** A falsified hypothesis is a
 successful experiment and a real finding — it is reported plainly here, not
 softened.
 
-**Verdict:** <!-- VERDICT -->
+**Verdict: the hypothesis was NOT falsified — but neither was it confirmed.
+The experiment did not reach the state its hypothesis is about.**
+
+This is the honest reading, and it is the finding.
+
+**What actually happened.** The storm did exactly what it was designed to do:
+it occupied all 89 non-reserved connection slots, taking the server from 12
+to 101 total connections — `max_connections` was fully consumed. But the
+platform's own pool was **completely unaffected**: `atlas_app` held a steady
+4 connections before, during, and after, and every read and write continued
+to serve at steady-state latency with a 0.000% error rate.
+
+**Why.** `pgxpool` establishes its connections at startup and holds them.
+Postgres does not reclaim an already-established connection to satisfy a new
+one. So an *external* connection storm cannot starve a pool that is already
+connected — it can only deny *new* connections. At 10 req/s the platform's
+4 warm connections are never exhausted, so it never asks for a new one, so it
+never notices that none are available.
+
+**What this means for the design.** Slice 335 Experiment 1's Variable —
+"hold all pool slots via an external connection storm from a `psql` script
+while the platform runs" — does not perturb the variable its hypothesis
+names. The hypothesis is about *the platform's connection pool* being
+saturated; the injection saturates *the server's connection limit*. Those are
+different things, and on this architecture the second does not imply the
+first. The experiment as specified cannot reach its own antecedent.
+
+**Against the requester's falsification check** — *does the pool exhaust
+gracefully rather than cascading?* — the answer is: **no cascade was
+observed, and no exhaustion was achieved.** Reporting "no cascade" as a pass
+would be the dishonest reading; it would bank a resilience claim the
+experiment never tested. The claim in slice 335's expected outcome — that
+writes fail fast with a structured 4xx carrying a `retry_after` hint — remains
+**unverified**. Nothing in this run produced a non-2xx response at all, so the
+error-shape assertion has no evidence behind it either way.
+
+**The one thing this run does establish**, and it is worth banking: the
+platform is **immune to external connection-slot exhaustion** at v1 offered
+load. An adjacent process eating every free Postgres connection — a runaway
+migration, a stuck `psql`, a second app sharing the cluster — does not
+degrade evidence reads or writes at all. That is a real, if narrower,
+resilience property, and it is the opposite of the fragility the experiment
+went looking for. It also means the *operator-facing* risk here is inverted:
+the platform survives, but anything that needs a *new* connection (a
+migration, a `docker compose exec psql`, a restarting atlas container) will
+be denied.
+
+**To actually test the hypothesis**, the injection has to target the
+platform's pool rather than the server's slot count. Two viable variables,
+either of which belongs to a redesign that slice 335 owns:
+
+1. Constrain the platform pool (`pool_max_conns` in `DATABASE_URL_APP`) to a
+   small number and drive concurrent request load past it — saturates the
+   pool from the inside, which is what the hypothesis describes.
+2. Force pool churn during the storm (restart `atlas` while the storm holds
+   the slots) so the platform must acquire connections it cannot get — which
+   tests the cold-start-under-exhaustion path instead.
 
 ---
 
@@ -286,7 +376,30 @@ slice's `detection_tier_actual` is `manual_review` against a
 
 ## D9 — Follow-ups filed
 
-<!-- FOLLOWUPS -->
+Plane write access was not granted to the fire that executed this slice, so
+the follow-ups below are recorded here and must be filed by the harvest
+slice. Each is a genuine gap this run surfaced.
+
+1. **Redesign Experiment 1's Variable (slice 335 owns it) — HIGH.** The
+   injection does not reach the hypothesis's antecedent (D7). The experiment
+   needs a variable that saturates the *platform's* pool, not the server's
+   slot count. Until that lands, the "writes fail fast with a structured
+   4xx + `retry_after`" claim is unverified. This slice deliberately did NOT
+   redesign it — slice 354 P0 and the issue boundary both forbid that.
+
+2. **No integration test pins pool-saturation error shape — MEDIUM.** See
+   D8. A bounded in-process pool constrained to N connections, driven past N,
+   would assert the status code, body shape, absence of stack-trace leakage,
+   and presence of a retry hint deterministically. Today nothing does.
+
+3. **Slice 335 checklist item 3 is self-contradictory — LOW.** It asks for an
+   identical `evidence_records` row count before and after, while the same
+   Method mandates continuous write traffic. Reword to monotonic
+   non-decrease. See D4.
+
+4. **Harvest the injection tail and recovery window — required to close this
+   slice.** Artifacts at `/tmp/oe382-exp1/`; window boundaries and the exact
+   reducer invocations are in D10.
 
 ---
 
