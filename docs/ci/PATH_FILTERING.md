@@ -79,6 +79,35 @@ Anything else is `code: false`. The big buckets are `*.md`,
 `Plans/**`, `docs/**`, `LICENSE`, `CHANGELOG.md`, `.gitignore`,
 `.editorconfig`.
 
+## The filter on `merge_group` events (slice 415)
+
+The workflow also runs on `merge_group` (GitHub's merge queue). That event
+has **no PR context**, so the filter cannot diff against a PR base — and a
+wrong `code=false` there is worse than on a PR: the stub-twin satisfies a
+required check and unbuilt code lands on `main`.
+
+The `changes` job handles it in two layers:
+
+1. **Explicit base.** `dorny/paths-filter` is given
+   `base: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || '' }}`.
+   On `pull_request`/`push` that is `''`, so nothing about the behaviour
+   documented above changes. On `merge_group` it is `refs/heads/main` —
+   the base the event itself carries — so the diff is the union of the
+   changes the queue entry is about to land.
+2. **Fail closed.** The job's `code` output comes from a `resolve` step,
+   not straight from the filter. On `merge_group` it forces `code=true`
+   whenever the event carried no `base_ref`, or the filter emitted no
+   value. The guard's failure mode is spent CI minutes, never shipped
+   untested code.
+
+The docs-only fast path is preserved in the queue: a docs-only entry still
+resolves `code=false` and its stub-twins post the required checks in under
+a minute.
+
+Full treatment — including why every required check needs a `merge_group:`
+trigger, and the `cancel-in-progress` rule — in
+[`MERGE_QUEUE.md`](MERGE_QUEUE.md).
+
 ## What always runs
 
 Three categories never gate on `code`:

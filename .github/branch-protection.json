@@ -29,6 +29,34 @@
     "frontend_vitest_and_playwright_not_required": "HISTORICAL — partially closed by slice 116 (2026-05-22). Slice 069 originally added `Frontend · vitest` and `Frontend · Playwright e2e` to this file as required-checks, but the contexts were never applied to the live GitHub branch-protection config — silent drift (file moved forward; the `gh api PUT` never ran). The drift caused real harm during the 2026-05-17/18 cascade-unblock session: four PRs (#234, #259, #262, #264) sat held for hours on a phantom-blocker rationale. Slice 127 reconciled via option (a) (file-to-live) — the file was the side that moved, but the practical constraint at the time was that 4 e2e specs were still broken (slice 123 territory: auth-open-redirect, first-time-login, logo-render, security-headers) and applying option (b) (file-to-restore) at that point would block every PR — including slice 127's own PR — on those known-failing specs. Slice 127 also shipped `scripts/check-branch-protection.sh` + a `branch-protection-drift` informational CI job so the next drift event surfaces as a sticky PR comment instead of waiting hours of debugging. **Slice 116 re-adds `Frontend · Playwright e2e` to the contexts list** after maintainer-verified soak (≥5 clean runs across slices 142/143/198/201/202). `Frontend · vitest` remains OUT of the contexts list — its promotion is filed as a separate follow-on (no slice number assigned yet) once vitest coverage stabilizes."
   },
 
+  "$merge_queue": {
+    "$slice": "415 — adopt GitHub's native merge queue on `main` so a green PR no longer needs a manual `gh pr update-branch` rebase that re-triggers the whole ~13-minute suite. Declared here because this file is the source of truth for the merge bar on `main`. See docs/ci/MERGE_QUEUE.md and docs/audit-log/415-merge-queue-decisions.md.",
+
+    "$why_this_key_is_dollar_prefixed": "The merge queue is NOT expressible through the classic branch-protection REST surface this file is PUT to. Verified 2026-07-24 against the live API: `GET /repos/mgoodric/security-atlas/branches/main/protection` returns no merge-queue field, and GraphQL introspection of `UpdateBranchProtectionRuleInput` returns no merge-queue input (the only match for /merge|queue/ is `lockAllowsFetchAndMerge`). Merge queue is configured through the branch-protection UI checkbox or a repository ruleset (`merge_queue` rule type). Following this file's `$`-prefix annotation convention therefore keeps `scripts/apply-branch-protection.sh` working unchanged — the script strips every `$`-prefixed top-level key before the PUT (slice 127), so this block is declared intent plus the apply ritual, not wire format. Teaching the apply script to reconcile the merge queue through the rulesets API is on the slice-415 revisit list.",
+
+    "enabled": true,
+    "branch": "main",
+
+    "configuration": {
+      "merge_method": "SQUASH",
+      "build_concurrency": 5,
+      "minimum_entries_to_merge": 1,
+      "minimum_entries_to_merge_wait_minutes": 5,
+      "maximum_entries_to_merge": 5,
+      "grouping_strategy": "ALLGREEN",
+      "check_response_timeout_minutes": 60,
+      "only_merge_non_failing_pull_requests": true
+    },
+
+    "$configuration_rationale": "Tuning defaults, each recorded with rationale + a revisit trigger in docs/audit-log/415-merge-queue-decisions.md (D3). SQUASH matches the repo's existing squash-merge-to-main convention (CLAUDE.md 'Branching') and is the only method compatible with `required_linear_history: true`. minimum_entries_to_merge=1 keeps a lone PR from waiting on a batch that will never form on a solo-maintainer repo; the 5-minute wait window lets a second PR join a batch when one is queued behind it. maximum_entries_to_merge=5 and build_concurrency=5 bound the speculative fan-out so a bad head cannot invalidate an unbounded amount of in-flight CI. ALLGREEN (every entry in the group must be green) over HEADGREEN because HEADGREEN merges the whole batch on the head entry's result — with the slice-061 path filter in play that is exactly the shape of threat T-1. check_response_timeout_minutes=60 exceeds the observed ~13-minute suite with headroom for the CodeQL leg.",
+
+    "$required_checks": "The queue gates on `required_status_checks.contexts` below, reused VERBATIM — slice 415 adds no check and removes none (P0-1).",
+
+    "$apply": "Not applied by `scripts/apply-branch-protection.sh` (see `$why_this_key_is_dollar_prefixed`). Maintainer apply: GitHub → Settings → Branches → the `main` protection rule → check 'Require merge queue' → set merge method SQUASH, 'Only merge non-failing pull requests', build concurrency 5, min entries 1 / wait 5 min, max entries to merge 5, grouping ALLGREEN, timeout 60 min → Save. Then re-run `bash scripts/apply-branch-protection.sh` so the contexts list stays reconciled, and confirm `required_linear_history` and `enforce_admins` are still on.",
+
+    "$strict_interaction": "`required_status_checks.strict` is RETAINED as `true` by slice 415 (AC-3): the queue subsumes the strict up-to-date requirement, but flipping the merge bar for every PR is the maintainer's call, not an agent's, and retaining it is the fail-safe direction (a PR can still not merge stale if the queue is never enabled). GitHub may itself disable 'Require branches to be up to date before merging' when the merge queue is turned on — the two are mutually exclusive in the UI. If it does, the live config will drift from this file's `strict: true` and `branch-protection-drift-live` will surface it; reconcile by setting `strict` to `false` here in a follow-up commit and noting that the queue now owns that guarantee. Tracked on the slice-415 revisit list."
+  },
+
   "required_status_checks": {
     "strict": true,
     "contexts": [

@@ -4,13 +4,39 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Slice 415 — GitHub native merge queue. The queue speculatively builds
+  # each queued PR on top of the latest `main` (and the PRs ahead of it)
+  # and dispatches a `merge_group` event against a temporary
+  # `refs/heads/gh-readonly-queue/main/pr-<n>-<sha>` ref. Every check in
+  # `.github/branch-protection.json`'s `required_status_checks.contexts`
+  # must therefore be able to report on THIS event too — a required check
+  # that never reports on `merge_group` leaves the entry pending until the
+  # queue's check-response timeout evicts it.
+  #
+  # No `branches:` filter: `main` is the only protected branch, and the
+  # filter would match the gh-readonly-queue ref rather than the target
+  # branch. Bare `merge_group:` is unambiguous.
+  #
+  # See docs/ci/MERGE_QUEUE.md and
+  # docs/audit-log/415-merge-queue-decisions.md.
+  merge_group:
 
+# Slice 415 P0-3: NOT widened for the `merge_group` trigger. The queue run
+# gets the same `contents: read` GITHUB_TOKEN scope as `push`/`pull_request`.
 permissions:
   contents: read
 
 concurrency:
+  # `github.ref` on a `merge_group` event is the unique per-entry
+  # gh-readonly-queue ref, so a queue run never shares a group with a PR
+  # run or a `main` push run. `cancel-in-progress` is nonetheless forced
+  # OFF for `merge_group` (slice 415 "sharp edge"): a cancelled queue run
+  # reports its required checks as `cancelled`, which the queue treats as
+  # a failure and evicts the entry on. Queue runs are short-lived and
+  # self-terminating — GitHub cancels them itself when the group is
+  # re-formed — so we never need `cancel-in-progress` to reclaim them.
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 # Slice 061 — path-based filtering for docs-only PRs.
 #
@@ -35,6 +61,11 @@ concurrency:
 # filtering is a cost optimization for build/test/lint, never a security
 # exemption.
 #
+# Slice 415 — the same pattern now also runs on `merge_group` (GitHub
+# merge queue) events. The `changes` job's `merge_group` correctness is
+# the load-bearing risk there: see the fail-closed `resolve` step below
+# and `docs/ci/MERGE_QUEUE.md`.
+#
 # Full docs: `docs/ci/PATH_FILTERING.md`.
 
 jobs:
@@ -43,7 +74,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      # Slice 415 (T-1 / P0-2): the `code` output is the RESOLVED value from
+      # the fail-closed `resolve` step below, NOT the raw paths-filter
+      # output. On a `merge_group` event a wrong `code=false` would let the
+      # slice-061 stub-twins satisfy the required checks and land untested
+      # code on `main`; `resolve` forces `code=true` whenever the queue diff
+      # base cannot be trusted.
+      code: ${{ steps.resolve.outputs.code }}
       # Slice 179 — narrow filter for the schema-removal-age check. The
       # check only runs when a PR touches the canonical
       # `internal/api/schemaregistry/schemas/` tree, so we gate the job
@@ -61,6 +98,29 @@ jobs:
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
         id: filter
         with:
+          # Slice 415 AC-4 — explicit diff base for `merge_group` events.
+          #
+          # On `pull_request` this stays empty, so paths-filter keeps its
+          # native PR-diff behaviour (the slice-061 semantics — unchanged).
+          # On `push` it stays empty too (paths-filter uses the push's
+          # `before` SHA).
+          #
+          # On `merge_group` there is no PR context: `github.ref` is the
+          # temporary `refs/heads/gh-readonly-queue/main/pr-<n>-<sha>` ref
+          # and paths-filter would fall back to the repository default
+          # branch — a base it infers rather than one the event states.
+          # We pass the base the event ITSELF carries,
+          # `merge_group.base_ref` (= `refs/heads/main`), so the diff is
+          # `merge-base(main, <queue head>)..<queue head>` — exactly the
+          # union of the changes the queue entry is about to land. A
+          # branch ref (not `base_sha`) is used deliberately: paths-filter
+          # resolves ref names through its normal fetch/merge-base path,
+          # which is the well-trodden code path.
+          #
+          # The union-not-just-this-PR framing is the SAFE direction: if
+          # any PR in the group touches code, `code=true` and the real
+          # jobs run for the whole group.
+          base: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || '' }}
           # `code: true` if ANY of these patterns match the PR diff (or the
           # push commit on main). Anything else — markdown, plan docs,
           # license, changelog — is `code: false` and the expensive jobs
@@ -115,6 +175,87 @@ jobs:
               - 'buf.yaml'
               - 'buf.gen.yaml'
               - 'scripts/**'
+
+      # ================================================================
+      # Slice 415 (threat T-1 / anti-criterion P0-2) — fail-closed
+      # resolution of the `code` output.
+      #
+      # THE THREAT. The slice-061 pattern fires a REAL job or a stub-twin
+      # under the SAME required-check name, gated on this boolean. A
+      # wrong `code=false` on a code-touching change means the stub posts
+      # a green required check in ~30 s and untested code lands on `main`.
+      # On `pull_request` the diff base is unambiguous (the PR base). On
+      # `merge_group` it is not — hence this guard.
+      #
+      # THE RULE. On `merge_group`, trust the filter ONLY when the event
+      # actually carried a base ref for it to diff against AND the filter
+      # produced a value. Otherwise force `code=true`: the real jobs run,
+      # the queue entry pays full CI, and NOTHING lands unvalidated. The
+      # failure mode of this guard is "spent CI minutes", never "shipped
+      # untested code".
+      #
+      # `push` / `pull_request` behaviour is unchanged — the filter's
+      # value passes straight through (the empty-value backstop at the
+      # end can only fire if paths-filter emitted no output at all, which
+      # is itself a fail-closed case).
+      # ================================================================
+      - name: Resolve the `code` output (slice 415 — merge_group fail-closed)
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          MQ_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          FILTER_CODE: ${{ steps.filter.outputs.code }}
+        run: |
+          set -euo pipefail
+          code="${FILTER_CODE:-}"
+          reason="paths-filter (${EVENT_NAME} diff)"
+
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            echo "merge_group head_ref: ${MQ_HEAD_REF:-<none>}"
+            echo "merge_group base_ref: ${MQ_BASE_REF:-<none>}"
+            if [ -z "${MQ_BASE_REF:-}" ]; then
+              code=true
+              reason="FAIL-CLOSED: merge_group payload carried no base_ref, so the path filter had no trustworthy diff base (slice 415 T-1/P0-2)"
+            elif [ -z "$code" ]; then
+              code=true
+              reason="FAIL-CLOSED: paths-filter produced no 'code' output on a merge_group event (slice 415 T-1/P0-2)"
+            else
+              reason="paths-filter diffed against ${MQ_BASE_REF} (slice 415 AC-4)"
+            fi
+          fi
+
+          # Universal backstop: an empty value is never a licence to run
+          # the stub-twins.
+          if [ -z "$code" ]; then
+            code=true
+            reason="FAIL-CLOSED: paths-filter emitted an empty 'code' output"
+          fi
+
+          echo "resolved code=${code} — ${reason}"
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+
+          # Job summary so the merge_group run's path-filter decision is
+          # inspectable without digging through step logs — this is the
+          # artifact slice 415 AC-5 / AC-6 are verified against.
+          {
+            echo "### Path filter — \`code=${code}\`"
+            echo
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| event | \`${EVENT_NAME}\` |"
+            echo "| merge_group base_ref | \`${MQ_BASE_REF:-n/a}\` |"
+            echo "| merge_group head_ref | \`${MQ_HEAD_REF:-n/a}\` |"
+            echo "| raw paths-filter \`code\` | \`${FILTER_CODE:-<empty>}\` |"
+            echo "| resolved \`code\` | \`${code}\` |"
+            echo "| basis | ${reason} |"
+            echo
+            if [ "$code" = "true" ]; then
+              echo "Real build/test/lint jobs run; the slice-061 stub-twins are skipped."
+            else
+              echo "Docs-only fast path: the slice-061 stub-twins post the required checks."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
   build-go:
     name: Go · build + test
