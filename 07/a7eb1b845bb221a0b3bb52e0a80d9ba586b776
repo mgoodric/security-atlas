@@ -1,0 +1,27 @@
+docs/audit-log/419-promote-advisory-checks-decisions.md
+  s_db098a4207aa11::t_ce401e31b51f65 1-16,21,23-46,48-60,68-99,101,103-118,120-135,137-143,147-149,158-169,171
+  s_db098a4207aa11::t_ca01c9cae0edb1 144-146
+  s_db098a4207aa11::t_e55b9bf1a075ac 17-20,22,47,61-67,100,102,119,136,150-157,170
+.github/branch-protection.json
+  s_db098a4207aa11::t_e2a3be006f8b20 58-60
+  s_db098a4207aa11::t_3c0753bd684c24 30,32-36,38-45
+  s_db098a4207aa11::t_21bf24478975be 29
+  s_db098a4207aa11::t_baeb080549da4c 37
+  s_db098a4207aa11::t_072a72f413aac2 31
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "07a7eb1b845bb221a0b3bb52e0a80d9ba586b776",
+  "prompts": {},
+  "sessions": {
+    "s_db098a4207aa11": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8cda126f-7f30-4c55-903e-6e05c21897c7",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
