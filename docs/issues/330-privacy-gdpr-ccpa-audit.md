@@ -3,7 +3,34 @@
 **Cluster:** Compliance
 **Estimate:** 1.5d
 **Type:** JUDGMENT
-**Status:** `merged` (status reconciled 2026-06-03 — backlog drained per \_STATUS.md SoR; loop terminated batch 184)
+**Status:** `merged` (2026-07-25 — actually executed via OE-394; see the
+status-correction note below)
+
+> **Status-correction note (2026-07-25).** This slice previously read
+> `Status: merged (status reconciled 2026-06-03 — backlog drained per _STATUS.md SoR; loop terminated batch 184)`.
+> **That was an administrative bulk-reconcile error, not a real completion.** The
+> audit had never been run. At the time of the 2026-06-03 reconcile:
+>
+> - no deliverable for slice 330 existed in `docs/audits/`, which held reports
+>   for every audit-cluster sibling (327, 328, 329, 331, 332, 333, 334, 335,
+>   337, 348, 351) but not this one;
+> - no decisions log existed at the path AC-2 names;
+> - AC-3's load-bearing erasure ADR did not exist — `docs/adr/` topped out at
+>   `0019`.
+>
+> A status reconcile that drains a backlog by editing Status lines cannot
+> manufacture deliverables. The error was load-bearing beyond this slice: slices
+> **504, 505 and 506** each cite "#330 — `merged`" as a satisfied dependency, and
+> slice 504's AC-7 and P0-504-4 gate on "slice 330 AC-3's ratified ADR" — which
+> did not exist. (The OE-394 work-order also named slice 507; verified, 507 does
+> **not** depend on this slice.)
+>
+> The slice was executed 2026-07-25 under OE-394. This Status line now reflects
+> real completion, evidenced by:
+>
+> - [`docs/audits/330-privacy-gdpr-ccpa-audit.md`](../audits/330-privacy-gdpr-ccpa-audit.md) — the report
+> - [`docs/audit-log/330-privacy-gdpr-ccpa-audit-decisions.md`](../audit-log/330-privacy-gdpr-ccpa-audit-decisions.md) — the decisions log (D0 records this error)
+> - [`docs/adr/0020-right-to-erasure-vs-append-only-ledger.md`](../adr/0020-right-to-erasure-vs-append-only-ledger.md) — AC-3's ratified ADR
 
 ## Narrative
 
@@ -86,34 +113,34 @@ Privacy-audit-only slice. STRIDE pass:
 
 ## Acceptance criteria
 
-- [ ] **AC-1.** The `voltagent-qa-sec:gdpr-ccpa-compliance` agent
+- [x] **AC-1.** The `voltagent-qa-sec:gdpr-ccpa-compliance` agent
       runs against the nine privacy surfaces in the narrative.
-- [ ] **AC-2.** Decisions log at
+- [x] **AC-2.** Decisions log at
       `docs/audit-log/330-privacy-gdpr-ccpa-audit-decisions.md`
       records per-surface findings: present / partial / absent ·
       evidence pointer · gap.
-- [ ] **AC-3.** **Load-bearing finding: right-to-erasure design.**
+- [x] **AC-3.** **Load-bearing finding: right-to-erasure design.**
       The decisions log MUST document the platform's current handling
       of erasure-vs-append-only and propose a default design
       (tombstone / pseudonymize / refuse-with-explanation). If the
       design is "we haven't decided yet", file a follow-up slice for
       the decision.
-- [ ] **AC-4.** **Load-bearing finding: RoPA.** If a Records of
+- [x] **AC-4.** **Load-bearing finding: RoPA.** If a Records of
       Processing Activities document does not exist, file a follow-up
       slice to create one.
-- [ ] **AC-5.** **Load-bearing finding: DSAR export workflow.** If
+- [x] **AC-5.** **Load-bearing finding: DSAR export workflow.** If
       there's no documented way to export all personal data held about
       a user, file a follow-up slice for the workflow.
-- [ ] **AC-6.** Cross-references with slice 329 noted (GDPR overlap;
+- [x] **AC-6.** Cross-references with slice 329 noted (GDPR overlap;
       329 is the meta-audit perspective, 330 is the design-implication
       perspective; same finding can show up in both — dedupe at
       follow-up-filing time).
-- [ ] **AC-7.** No code modified. Diff = doc files only.
-- [ ] **AC-8.** Open question #11 (breach-notification workflow shape)
+- [x] **AC-7.** No code modified. Diff = doc files only.
+- [x] **AC-8.** Open question #11 (breach-notification workflow shape)
       is NOT pre-decided by this slice. If the audit surfaces design
       pressure on it, document the pressure and the deferred decision
       stays deferred.
-- [ ] **AC-9.** `pre-commit run --files` passes at PR-time.
+- [x] **AC-9.** `pre-commit run --files` passes at PR-time.
 
 ## Constitutional invariants honored
 
@@ -178,6 +205,28 @@ Three credible designs:
 The agent should NOT pick one — surfacing the design space + the
 trade-offs is the deliverable. The actual decision is a follow-up
 slice's content.
+
+> **OVERRIDDEN 2026-07-25 (OE-394).** This survey-only instruction was
+> self-defeating and was not followed. Slice 504 was written afterwards citing
+> "slice 330 AC-3's **ratified ADR**" as a hard gate (`504:138` AC-7, `504:149`
+> P0-504-4). Had 330 only surveyed, the decision would have landed in a
+> follow-up slice that does not exist, leaving 504 blocked on an artifact that by
+> construction never arrives. The OE-394 work-order is explicit: "The ADR must
+> make a decision — an options survey does not unblock slice 504."
+>
+> **The decision made:** tombstone — field-level redaction-in-place plus an
+> appended erasure record — executed by a separately-credentialed `atlas_erase`
+> role, with a per-record refuse-as-deferral branch scoped by `sample_evidence`
+> membership plus a frozen owning period. Ratified as
+> [ADR-0020](../adr/0020-right-to-erasure-vs-append-only-ledger.md). Rationale
+> for the override at D3 of the decisions log.
+>
+> This confirms the design slice 504 already assumed (no pivot, `P0-504-1`
+> stands) but revises the **mechanism** in seven ways, four of which change
+> 504's migration — see ADR-0020 §7. Invariant #2 is not weakened: `atlas_app`'s
+> never-UPDATE/never-DELETE guarantee on `evidence_records` is untouched
+> verbatim; a narrower NOBYPASSRLS, GUC-gated, column-GRANT-limited capability is
+> added beside it.
 
 **RoPA shape suggestion.** Six columns: processing purpose · data
 categories · data subjects · recipients · retention period · transfer
