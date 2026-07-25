@@ -961,16 +961,17 @@ their own tracer-bullet and are not bundled):
 | PRIV-9  | 507 — breach-notification workflow | `not-ready`, gated on ADR-0017 + privacy-v0.                                                 |
 
 **Newly filed** — all six are documentation or mechanical-migration work that
-does **not** depend on the privacy-v0 greenlight, which is the point:
+does **not** depend on the privacy-v0 greenlight, which is the point. Filed
+2026-07-25 as OPENENGINE issues parented to OE-394:
 
-| #   | Finding         | Work                                                                                                                                                    |
-| --- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| F-1 | PRIV-2          | Correct `docs/governance/data-retention.md`'s inaccurate "per-record deletion" claim and state the honest current Art. 17 position                      |
-| F-2 | PRIV-4 + PRIV-1 | Publish `docs/governance/personal-data-inventory.md` from §3 and link it from `docs/SELF_HOSTING.md`; it becomes the shared spec for slices 504 and 505 |
-| F-3 | PRIV-3          | Author the project's own six-column RoPA as a governance document (distinct from slice 506's product primitive)                                         |
-| F-4 | PRIV-5          | Document the Chapter V transfer analysis for the three cloud LLM providers; add a residency lever or an explicit EU-operator guard                      |
-| F-5 | PRIV-7          | Resolve the `subject_module` drift — extend the column to the eleven post-180 tables, or narrow the pre-commitment in `CONTRIBUTING.md`                 |
-| F-6 | PRIV-8          | Set retention windows for `sessions`, `oauth_token_exchanges`, `oauth_revoked_tokens`; resolve the dormant `geo_*` columns                              |
+| #   | OE     | Finding         | Work                                                                                                                                                    |
+| --- | ------ | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| F-1 | OE-447 | PRIV-2          | Correct `docs/governance/data-retention.md`'s inaccurate "per-record deletion" claim and state the honest current Art. 17 position                      |
+| F-2 | OE-448 | PRIV-4 + PRIV-1 | Publish `docs/governance/personal-data-inventory.md` from §3 and link it from `docs/SELF_HOSTING.md`; it becomes the shared spec for slices 504 and 505 |
+| F-3 | OE-449 | PRIV-3          | Author the project's own six-column RoPA as a governance document (distinct from slice 506's product primitive)                                         |
+| F-4 | OE-450 | PRIV-5          | Document the Chapter V transfer analysis for the three cloud LLM providers; add a residency lever or an explicit EU-operator guard                      |
+| F-5 | OE-451 | PRIV-7          | Resolve the `subject_module` drift — extend the column to the eleven post-180 tables, or narrow the pre-commitment in `CONTRIBUTING.md`                 |
+| F-6 | OE-452 | PRIV-8          | Set retention windows for `sessions`, `oauth_token_exchanges`, `oauth_revoked_tokens`; resolve the dormant `geo_*` columns                              |
 
 Low findings (PRIV-10, PRIV-11) are **report-only** for maintainer triage,
 matching the slice-329 and slice-331 precedent.

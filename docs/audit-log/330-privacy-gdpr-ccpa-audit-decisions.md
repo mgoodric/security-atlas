@@ -234,14 +234,18 @@ demand gate. That split is the shape of the fan-out.
 separate tracer-bullets owned by slices 505, 504 and 506 respectively. The six
 new OEs are distinct artifacts with distinct audiences, not repackagings:
 
-| OE  | Finding         | Work                                                                                                       | Why not a re-file                                                          |
-| --- | --------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| F-1 | PRIV-2          | Correct `data-retention.md:109-110`; add §4.5b authorizing field-level redaction                           | Governance-document correction; slice 504 is product work                  |
-| F-2 | PRIV-4 + PRIV-1 | Publish `docs/governance/personal-data-inventory.md` from report §3; link from `SELF_HOSTING.md`           | The _registry_; slice 505 is the _export workflow_                         |
-| F-3 | PRIV-3          | The project's own six-column RoPA as a governance doc                                                      | The _project's_ RoPA; slice 506 is the _operator-facing product primitive_ |
-| F-4 | PRIV-5          | Chapter V transfer analysis for the three cloud LLM providers + residency lever or EU-operator guard       | No existing slice covers it; postdates 329                                 |
-| F-5 | PRIV-7          | Resolve `subject_module` drift — extend to the eleven, or narrow the pre-commitment                        | Slice 180 is merged; this is its drift                                     |
-| F-6 | PRIV-8          | Retention windows for `sessions`, `oauth_token_exchanges`, `oauth_revoked_tokens`; resolve dormant `geo_*` | Slice 375 covered project artifacts and explicitly excluded tenant data    |
+| #   | OE     | Finding         | Work                                                                                                       | Why not a re-file                                                          |
+| --- | ------ | --------------- | ---------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| F-1 | OE-447 | PRIV-2          | Correct `data-retention.md:109-110`; add §4.5b authorizing field-level redaction                           | Governance-document correction; slice 504 is product work                  |
+| F-2 | OE-448 | PRIV-4 + PRIV-1 | Publish `docs/governance/personal-data-inventory.md` from report §3; link from `SELF_HOSTING.md`           | The _registry_; slice 505 is the _export workflow_                         |
+| F-3 | OE-449 | PRIV-3          | The project's own six-column RoPA as a governance doc                                                      | The _project's_ RoPA; slice 506 is the _operator-facing product primitive_ |
+| F-4 | OE-450 | PRIV-5          | Chapter V transfer analysis for the three cloud LLM providers + residency lever or EU-operator guard       | No existing slice covers it; postdates 329                                 |
+| F-5 | OE-451 | PRIV-7          | Resolve `subject_module` drift — extend to the eleven, or narrow the pre-commitment                        | Slice 180 is merged; this is its drift                                     |
+| F-6 | OE-452 | PRIV-8          | Retention windows for `sessions`, `oauth_token_exchanges`, `oauth_revoked_tokens`; resolve dormant `geo_*` | Slice 375 covered project artifacts and explicitly excluded tenant data    |
+
+All six were filed 2026-07-25 as OPENENGINE issues parented to OE-394. They are
+verifiable, not merely proposed — the same failure mode this slice exists to
+correct.
 
 **Low findings are report-only.** PRIV-10 (DCO contributor identity) and PRIV-11
 (`vendors.owner_user`) get no follow-up, matching the slice-329 and slice-331
