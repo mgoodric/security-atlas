@@ -138,7 +138,14 @@ import packages summed to ~347s of test time. Slice 747:
    `case` in `scripts/run-integration-shard.sh`, and **both** ci.yml
    `matrix.leg` lists (the PR-time `tests-integration-shard` matrix and the
    `tests-integration-main-canary` matrix) — but **NOT** branch protection
-   (see "The required check is unchanged").
+   (see "The required check is unchanged"). Since slice 703 the canary's list
+   lives inside a `fromJSON(...)` conditional: the `code == 'false'` branch is
+   the single representative leg `["A"]` (docs/status-only `main` pushes), the
+   other branch is the full list. Extend the **full-list branch** when adding a
+   leg; leave the single-leg branch alone unless Leg A's assignment rule itself
+   changes. Why one leg is safe on a docs-only `main` SHA — and why it does not
+   reopen the slice-474 masking hole — is written out in
+   [`docs/audit-log/703-ci-main-canary-docs-only-single-leg-decisions.md`](../audit-log/703-ci-main-canary-docs-only-single-leg-decisions.md).
 
 A floor caveat: a leg cannot go below its irreducible overhead — for Leg A
 that is the ~47s seed/migration setup + the ~128s order-independence guard
