@@ -1,0 +1,53 @@
+# exp4-dex-config.yaml — containerized OIDC IdP fixture for slice 335
+# Experiment 4 ("OIDC IdP unavailable"), executed by slice 357a.
+#
+# The design's pre-execution checklist is explicit:
+#
+#   [ ] Use a containerized IdP (Dex). Do NOT target a real external
+#       IdP — the experiment's chaos must not affect any production
+#       identity surface.
+#
+# This file IS that containerized IdP. Everything in it is a local
+# throwaway fixture: the client secret and the static password below are
+# committed on purpose so the run is reproducible, and they are worthless
+# outside a docker-compose network that exists only while the experiment
+# runs. No value here is used by any other deployment.
+#
+# The issuer is the in-compose-network service name, NOT a routable host.
+# `dex` only resolves on the docker-compose project network, so nothing in
+# this file can reach — or be reached from — atlas-edge, a hosted tenant,
+# or any external IdP. That is the scope boundary, expressed as
+# configuration rather than as operator care.
+issuer: http://dex:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+# The experiment never drives a human through the consent screen — it
+# measures what the platform does when this container is unreachable —
+# but the approval screen is skipped anyway so a manual reproduction of
+# the login flow is one redirect shorter.
+oauth2:
+  skipApprovalScreen: true
+
+# The relying party. redirectURIs matches the atlas OIDC RP callback
+# (internal/api/auth/http.go OIDCCallback, mounted at
+# /auth/oidc/callback) as published on the host by the compose stack.
+staticClients:
+  - id: atlas-chaos-exp4
+    name: security-atlas (slice 357a chaos fixture)
+    secret: chaos-exp4-client-secret-local-only
+    redirectURIs:
+      - http://localhost:58080/auth/oidc/callback
+
+# A single static user so the fixture is a complete IdP rather than a
+# discovery-document stub. bcrypt of "chaos-exp4-local-only".
+enablePasswordDB: true
+staticPasswords:
+  - email: chaos-exp4@example.com
+    hash: "$2y$10$ITzGng.0LM16uvaTF3MzzeI6EAYcQB3k28mU5/cRePmMpZ2ftnJcK"
+    username: chaos-exp4
+    userID: 00000000-0000-4000-8000-0000000000e4
