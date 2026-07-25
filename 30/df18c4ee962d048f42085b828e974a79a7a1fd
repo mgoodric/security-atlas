@@ -1,0 +1,21 @@
+go.mod
+  s_f2f9f781fcc5dd::t_310a5104368e93 29,48,105
+go.sum
+  s_f2f9f781fcc5dd::t_86810ddb937fda 192-193,232-233,278-279,303-304
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "30df18c4ee962d048f42085b828e974a79a7a1fd",
+  "prompts": {},
+  "sessions": {
+    "s_f2f9f781fcc5dd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a1e88b7-3138-48ae-bc05-73d73fc2bc06",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
