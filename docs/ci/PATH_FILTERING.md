@@ -122,6 +122,27 @@ Three categories never gate on `code`:
 Cost optimization is fine for build/test/lint. Security scans and
 the auto-formatter are not on the optimization budget.
 
+### The one job that gates BREADTH, not existence
+
+`tests-integration-main-canary` (slice 631's mechanism (c), push-to-`main`
+only, `cancel-in-progress: false`) is a third shape. It ALWAYS runs on a `main`
+push — its `if:` carries `always()` so a failed or cancelled `changes` job
+cannot skip it — but since slice 703 the SIZE of its leg matrix reads
+`changes.code`: one representative leg (A) when the output is exactly
+`'false'`, the full leg list otherwise. There is no stub-twin, because the
+canary is not a required check and posts no check on a PR.
+
+The fail-safe direction is deliberate: the test is `== 'false'`, not
+`!= 'true'`, so a missing output (changes job failed/cancelled) yields the FULL
+matrix. Coverage narrows only on an affirmative docs-only signal, never on an
+unknown one. The argument that a single leg on a docs-only `main` SHA does not
+reopen the slice-474 masking hole is written out in
+[`docs/audit-log/703-ci-main-canary-docs-only-single-leg-decisions.md`](../audit-log/703-ci-main-canary-docs-only-single-leg-decisions.md)
+— in short: `scripts/**` and `.github/workflows/**` are both inside the `code`
+filter, so a docs-only SHA's integration inputs are byte-identical to its
+parent's, and induction over the `main` lineage anchors every docs-only SHA to
+the last code-touching SHA's full uncancellable matrix run.
+
 ## Adding a new workflow
 
 Most workflows don't need path-filtering. Add gating ONLY if both
