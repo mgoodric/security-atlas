@@ -1379,6 +1379,15 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
+      # TEMPORARY — slice 701a fail-closed proof (OE-370 step 5). Forces one
+      # real leg RED on a code PR so `CI · merge-gate` can be observed failing.
+      # `frontend-lint` is chosen because it is one of the legs this slice ADDS
+      # to merge-gate's `needs:` — so a RED gate here proves the completeness
+      # fix actually bites, not just that the pre-existing legs still work.
+      # REVERTED in the very next commit on this branch.
+      - name: PROOF (701a) — force this leg RED
+        run: exit 1
+
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
