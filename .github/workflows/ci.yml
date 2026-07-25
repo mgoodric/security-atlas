@@ -3613,10 +3613,37 @@ jobs:
   # It reuses scripts/run-integration-shard.sh — the SAME source-of-truth
   # the PR-time `tests-integration-shard` job uses — so there is no second
   # package list to drift (the slice-417 shard manifest stays canonical).
+  #
+  # Slice 703 — BREADTH of the canary is now gated on `changes.code`; its
+  # EXISTENCE is not. A code-touching `main` push still runs the FULL leg
+  # matrix; a docs/status-only `main` push runs ONE representative leg (A).
+  #
+  # Why that does not reopen the slice-474 hole: the hole is "an in-repo
+  # code change reached `main` without a COMPLETED shard run". A `main` SHA
+  # with `changes.code == 'false'` contains, by construction of the filter,
+  # no change to `**/*.go`, `internal/**`, `cmd/**`, `pkg/**`, `migrations/**`,
+  # `fixtures/**`, `scripts/**`, `go.*` or `.github/workflows/**` relative to
+  # its parent — so the integration suite, the code under test, the shard
+  # manifest and this job definition are all byte-identical to the parent's.
+  # Induct backwards over the `main` lineage and every docs-only SHA resolves
+  # to the most recent code-touching `main` SHA, which ran the FULL matrix
+  # uncancellably on its own push. The docs-only canary therefore carries
+  # ZERO marginal information about the code; it is a re-sample, and the
+  # breadth of a re-sample is a cost dial, not a correctness gate. The
+  # literal slice-631 guarantee ("a completed, uncancellable, `-race`,
+  # real-services shard run exists on this `main` SHA") still holds.
+  # Full analysis: docs/audit-log/703-ci-main-canary-docs-only-single-leg-decisions.md
   # ====================================================================
   tests-integration-main-canary:
     name: Go · integration canary (main, shard ${{ matrix.leg }})
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: changes
+    # `always()` preserves the pre-slice-703 property that this job is
+    # UNCONDITIONAL: adding `needs: changes` must not let a failed or
+    # cancelled `changes` job skip the canary (that would be a new flavour
+    # of the very masking mechanism the canary exists to close). With
+    # `always()` a missing `changes` output falls through to the fail-safe
+    # FULL matrix below.
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     # Own concurrency group with cancel-in-progress: false so a rapid
     # sequence of main merges cannot cancel an in-flight canary leg before
     # it completes — the exact masking mechanism (2) from slice 474. Keyed
@@ -3632,7 +3659,35 @@ jobs:
         # Slice 747: added B4 + B5 so the main-canary covers the same legs as
         # the PR-time tests-integration-shard matrix (one source of truth:
         # scripts/integration-shards.txt). Keep these two leg lists in lockstep.
-        leg: [A, B1, B2, B3, B4, B5]
+        #
+        # Slice 703: the leg list is now conditional on `changes.code`.
+        #
+        #   code == 'false'  → ["A"]                          (docs/status-only)
+        #   anything else    → ["A","B1","B2","B3","B4","B5"] (full matrix)
+        #
+        # The test is `== 'false'`, NOT `!= 'true'`, so the FULL matrix is the
+        # FAIL-SAFE default: dorny/paths-filter emits exactly the strings
+        # 'true' or 'false', so in every real run this is observably identical
+        # to the spec's `!= 'true'`, but a MISSING output (the `changes` job
+        # failed or was cancelled, reachable because of the `always()` above)
+        # yields '' and therefore the full matrix rather than a single leg.
+        # Coverage never silently narrows on an unknown signal.
+        #
+        # Leg A is the representative leg (coverage, not speed — it is not the
+        # cheapest leg). It is the ONLY leg that seeds the shared global SCF
+        # catalog (the P0-2 pinned cluster) and it owns internal/db (migrations
+        # + RLS core), internal/dbtest, internal/backup (ephemeral-DB create/
+        # drop + whole-DB dump), internal/evidence/ingest + streambuf (the
+        # append-only ledger over NATS JetStream), internal/eval + control +
+        # decision (the evaluation stage), the slice-461 order-independence
+        # guard and the migration round-trip. Every Phase B leg is one handler
+        # FAMILY sitting on top of that foundation; Leg A is the foundation,
+        # and it is the leg most exposed to the residual risk a docs-only
+        # canary is actually guarding — environmental drift in the pinned
+        # service images (postgres:16-alpine, nats:2.10-alpine, minio) and the
+        # runner/toolchain. Keep this in lockstep with the manifest if leg A's
+        # assignment rule ever changes.
+        leg: ${{ fromJSON(needs.changes.outputs.code == 'false' && '["A"]' || '["A","B1","B2","B3","B4","B5"]') }}
     services:
       postgres:
         image: postgres:16-alpine

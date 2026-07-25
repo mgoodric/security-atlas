@@ -686,6 +686,13 @@ npm run lint -w web
 
 **Re-upgrade path:** when `npm view eslint-plugin-react@latest peerDependencies` returns a value listing `^10` (or higher), [`docs/issues/095-eslint-10-re-upgrade.md`](./docs/issues/095-eslint-10-re-upgrade.md) becomes `ready` and flips the pin back. ~5-minute slice.
 
+**Last re-check: 2026-07-25 — still not ready, pin stays.** `eslint-plugin-react@latest` is still `7.37.5` capped at `^9.7` (ESLint `latest` is now `10.8.0`), and the `next` dist-tag is still the stale `7.8.0-rc.0`. Two things the original slice-078 write-up understated, both recorded with evidence in [095's re-check log](./docs/issues/095-eslint-10-re-upgrade.md#re-check-log):
+
+- **Three plugins gate the upgrade, not one.** `eslint-plugin-import` and `eslint-plugin-jsx-a11y` also cap at `^9`; only `eslint-plugin-react-hooks` has shipped `^10.0.0` support. Re-check all three before flipping the pin.
+- **npm will not stop you.** Under npm 11 the bump installs with exit 0 and no `ERESOLVE` — the unmet peers show up only as `npm ls eslint` reporting `invalid`, and then as the runtime `contextOrFilename.getFilename` crash. Always confirm with `npm ls eslint` rather than trusting a clean `npm install`.
+
+Dependabot PR [#1435](https://github.com/mgoodric/security-atlas/pull/1435) (eslint 9.39.4 to 10.6.0) is blocked by exactly this gate and must not be merged until the re-check passes.
+
 **CI gate:** the `Frontend · lint` job runs `npm run lint -w web` on every PR that touches code paths (slice-061 path-filter pattern). It's informational only — NOT in required-checks — because lint regressions on every dep bump would flake the merge queue. Promote-to-required is a future cadence-stability slice.
 
 ## Open-redirect prevention
