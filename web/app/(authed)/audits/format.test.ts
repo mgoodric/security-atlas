@@ -19,7 +19,7 @@ import {
   isInProgressUrgent,
   periodRangeLabel,
   statusDotClass,
-  statusPillClass,
+  statusPillVariant,
   statusTallyLabel,
 } from "./format";
 
@@ -38,37 +38,36 @@ function period(overrides: Partial<AuditPeriod> = {}): AuditPeriod {
   };
 }
 
-describe("statusPillClass (AC-8)", () => {
-  test("open → amber tokens", () => {
-    expect(statusPillClass("open")).toContain("amber");
+describe("statusPillVariant (AC-8)", () => {
+  test("open → progress", () => {
+    expect(statusPillVariant("open")).toBe("progress");
   });
 
-  test("in_progress → amber tokens (same active treatment as open)", () => {
-    expect(statusPillClass("in_progress")).toContain("amber");
+  test("in_progress → progress (same active treatment as open)", () => {
+    expect(statusPillVariant("in_progress")).toBe("progress");
   });
 
-  test("frozen → sky tokens", () => {
-    expect(statusPillClass("frozen")).toContain("sky");
+  test("frozen → info", () => {
+    expect(statusPillVariant("frozen")).toBe("info");
   });
 
-  test("closed → slate tokens", () => {
-    expect(statusPillClass("closed")).toContain("slate");
+  test("closed → secondary", () => {
+    expect(statusPillVariant("closed")).toBe("secondary");
   });
 
-  test("planned → slate tokens", () => {
-    expect(statusPillClass("planned")).toContain("slate");
+  test("planned → secondary", () => {
+    expect(statusPillVariant("planned")).toBe("secondary");
   });
 
-  test("unknown status falls through to slate (never crashes)", () => {
-    expect(statusPillClass("definitely_not_a_real_status")).toContain("slate");
+  test("unknown status falls through to outline (never crashes)", () => {
+    expect(statusPillVariant("definitely_not_a_real_status")).toBe("outline");
   });
 
-  test("status pills use neutral semantic tokens — never vendor-prefixed", () => {
-    // P0-A5: no `bg-[#...]` or other vendor-coupled tokens.
+  test("status pills use semantic badge variants", () => {
     for (const s of ["open", "frozen", "closed", "planned", "in_progress"]) {
-      const cls = statusPillClass(s);
-      expect(cls).not.toMatch(/#[0-9a-f]{3,8}/);
-      expect(cls).not.toMatch(/var\(--/);
+      expect(statusPillVariant(s)).toMatch(
+        /^(pass|info|warning|critical|progress|secondary|outline)$/,
+      );
     }
   });
 });
@@ -144,7 +143,7 @@ describe("daysUntilEnd (AC-8 formatting)", () => {
   });
 });
 
-describe("isInProgressUrgent (AC-6 amber-dot cue)", () => {
+describe("isInProgressUrgent (AC-6 warning-dot cue)", () => {
   const now = new Date("2026-05-01T00:00:00Z");
 
   test("non-frozen + within 30 days → urgent", () => {

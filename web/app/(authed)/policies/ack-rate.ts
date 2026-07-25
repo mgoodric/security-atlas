@@ -16,6 +16,7 @@
 // the page passes the joined cell here.
 
 import type { PolicyAckRate } from "@/lib/api/policies";
+import { ackRateStatusVariant } from "@/lib/status-variants";
 
 export type AckRateBand = "green" | "amber" | "red" | "none";
 
@@ -33,17 +34,17 @@ export function ackRateBand(percent: number | null): AckRateBand {
 
 /**
  * Tailwind class for the inner indicator fill of the <Progress> bar.
- * Centralised so the emerald/amber/rose palette stays consistent with
- * the policies.html mockup (lines 191-271).
+ * Centralised so the acknowledgment status tiers use semantic status
+ * tokens instead of hardcoded palette utilities.
  */
 export function ackRateColor(band: AckRateBand): string {
-  switch (band) {
-    case "green":
-      return "bg-emerald-500";
-    case "amber":
-      return "bg-amber-500";
-    case "red":
-      return "bg-rose-500";
+  switch (ackRateStatusVariant(band)) {
+    case "pass":
+      return "bg-pass";
+    case "warning":
+      return "bg-warning";
+    case "critical":
+      return "bg-critical";
     case "none":
     default:
       return "bg-muted-foreground/30";
@@ -52,15 +53,15 @@ export function ackRateColor(band: AckRateBand): string {
 
 /**
  * Tailwind class for the percent + numerator/denominator text caption
- * next to the bar. Mirrors the mockup (rose-700 for red band, slate-700
- * for green/amber, muted for the null placeholder).
+ * next to the bar. Only the failing band needs status-colored text; pass and
+ * warning remain foreground text beside the semantic bar.
  */
 export function ackRateTextColor(band: AckRateBand): string {
-  switch (band) {
-    case "red":
-      return "text-rose-700";
-    case "green":
-    case "amber":
+  switch (ackRateStatusVariant(band)) {
+    case "critical":
+      return "text-critical";
+    case "pass":
+    case "warning":
       return "text-foreground";
     case "none":
     default:

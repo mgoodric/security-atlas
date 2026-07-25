@@ -7,9 +7,10 @@
 // Constitutional commitment: no React, no DOM. Pure data → strings.
 
 import type { AuditPeriod } from "@/lib/api/audit-periods";
+import { auditStatusDotClass, auditStatusVariant } from "@/lib/status-variants";
 
 /**
- * Threshold (in days) for the "amber dot" in-progress cue per AC-6.
+ * Threshold (in days) for the warning-dot in-progress cue per AC-6.
  * A non-frozen period whose `period_end` is within this many days of
  * `now` shows the cue so the security leader has an early signal to
  * start fieldwork.
@@ -25,52 +26,31 @@ export const IN_PROGRESS_URGENT_DAYS = 30;
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
- * Tailwind class set for the status pill background + text.
+ * Semantic badge variant for the status pill background + text.
  *
  * The platform's audit_periods.status CHECK constraint allows
  * {'open','frozen'} in v1. The slice text also mentions
  * `in_progress`, `closed`, and `planned` as forward-looking statuses.
  * We render whatever status the backend returns; unknown statuses fall
- * through to the neutral slate token so we never crash on a new value
+ * through to the neutral outline variant so we never crash on a new value
  * the platform adds later.
  *
- * Color mapping mirrors the slice 093 audits.html mockup:
- *   open / in_progress  → amber  (active, watch it)
- *   frozen              → sky    (locked, deterministic replay)
- *   closed / planned    → slate  (terminal / future)
+ * Status-token mapping:
+ *   open / in_progress  → progress  (active workflow)
+ *   frozen              → info      (locked, deterministic replay)
+ *   closed / planned    → secondary (terminal / future)
+ *   unknown             → outline   (unmapped backend extension)
  */
-export function statusPillClass(status: string): string {
-  switch (status) {
-    case "open":
-    case "in_progress":
-      return "bg-amber-50 text-amber-700";
-    case "frozen":
-      return "bg-sky-50 text-sky-700";
-    case "closed":
-    case "planned":
-      return "bg-slate-100 text-slate-600";
-    default:
-      return "bg-slate-100 text-slate-600";
-  }
+export function statusPillVariant(status: string) {
+  return auditStatusVariant(status);
 }
 
 /**
  * Tailwind class for the small status-dot inside the pill. Matches
- * `statusPillClass` semantically; pulses for in-progress periods.
+ * `statusPillVariant` semantically; pulses for in-progress periods.
  */
 export function statusDotClass(status: string): string {
-  switch (status) {
-    case "open":
-    case "in_progress":
-      return "bg-amber-500 animate-pulse";
-    case "frozen":
-      return "bg-sky-500";
-    case "closed":
-    case "planned":
-      return "bg-slate-400";
-    default:
-      return "bg-slate-400";
-  }
+  return auditStatusDotClass(status);
 }
 
 /**
@@ -84,7 +64,7 @@ export function isFrozen(period: AuditPeriod): boolean {
 
 /**
  * Whole days from `now` to `period_end`. Negative if `period_end` is
- * in the past. Used for the "in-progress within 30 days" amber cue and
+ * in the past. Used for the "in-progress within 30 days" warning cue and
  * for the row-end "Xd left" display.
  *
  * Both inputs are parsed as Dates; `now` defaults to the current wall

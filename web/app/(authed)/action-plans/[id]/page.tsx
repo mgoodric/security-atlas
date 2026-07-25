@@ -11,13 +11,14 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
   fetchActionPlan,
   type ActionPlanDetailResponse,
 } from "@/lib/api/action-plans";
 
-import { dateLabel, statusLabel, statusPillClass } from "../status";
+import { dateLabel, statusLabel, statusPillVariant } from "../status";
 
 export default function ActionPlanDetailPage() {
   const params = useParams<{ id: string }>();
@@ -55,15 +56,12 @@ export default function ActionPlanDetailPage() {
             {plan.title}
           </h1>
           <div className="mt-1 flex items-center gap-2">
-            <span
-              className={
-                "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-                statusPillClass(plan.status)
-              }
+            <Badge
+              variant={statusPillVariant(plan.status)}
               data-testid="action-plan-detail-status"
             >
               {statusLabel(plan.status)}
-            </span>
+            </Badge>
             <span className="text-xs text-muted-foreground">
               Due {dateLabel(plan.due_date)}
             </span>

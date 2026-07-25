@@ -9,32 +9,19 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
+import { Badge } from "@/components/ui/badge";
 import {
   fetchActionPlansForControl,
   fetchActionPlansForRisk,
   type ActionPlanRef,
   type ActionPlansRefListResponse,
 } from "@/lib/api/action-plans";
+import { actionPlanStatusVariant } from "@/lib/status-variants";
 
 type Props = {
   target: "risk" | "control";
   targetId: string;
 };
-
-function pillClass(status: string): string {
-  switch (status) {
-    case "verified":
-      return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
-    case "completed":
-      return "bg-sky-50 text-sky-700 dark:bg-sky-950 dark:text-sky-300";
-    case "in_progress":
-      return "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
-    case "blocked":
-      return "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300";
-    default:
-      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
-  }
-}
 
 export function LinkedActionPlans({ target, targetId }: Props) {
   const q = useQuery<ActionPlansRefListResponse>({
@@ -77,14 +64,9 @@ export function LinkedActionPlans({ target, targetId }: Props) {
               >
                 {p.title}
               </Link>
-              <span
-                className={
-                  "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-                  pillClass(p.status)
-                }
-              >
+              <Badge variant={actionPlanStatusVariant(p.status)}>
                 {p.status}
-              </span>
+              </Badge>
               {p.due_date ? (
                 <span className="text-xs text-muted-foreground">
                   due {p.due_date}

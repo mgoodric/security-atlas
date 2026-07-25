@@ -27,6 +27,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
   ACTION_PLAN_STATUSES,
@@ -35,7 +36,7 @@ import {
   type ActionPlansListResponse,
 } from "@/lib/api/action-plans";
 
-import { dateLabel, statusLabel, statusPillClass } from "./status";
+import { dateLabel, statusLabel, statusPillVariant } from "./status";
 
 const ALL = "__all__";
 
@@ -102,15 +103,12 @@ function ActionPlansPageInner() {
       id: "status",
       header: "Status",
       cell: (row) => (
-        <span
-          className={
-            "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-            statusPillClass(row.status)
-          }
+        <Badge
+          variant={statusPillVariant(row.status)}
           data-testid="action-plans-row-status"
         >
           {statusLabel(row.status)}
-        </span>
+        </Badge>
       ),
     },
     {

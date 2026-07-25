@@ -19,14 +19,14 @@
 //   - TEST_BEARER carries a credential in a tenant with at least:
 //     * 1 frozen audit period (drives AC-6 lock-icon check)
 //     * 1 non-frozen audit period whose period_end is within 30 days
-//       of now (drives the amber-cue check)
+//       of now (drives the warning-cue check)
 //     * 1 non-frozen audit period whose period_end is well beyond 30
 //       days (drives the no-cue check)
 //
 // AC-9 coverage targets: list renders, filter narrows results,
 // empty-state visible on no-match, row click navigates,
 // frozen periods show the lock icon, in-progress urgent periods show
-// the amber cue.
+// the warning cue.
 
 import { test } from "@playwright/test";
 
@@ -85,7 +85,7 @@ test.describe("/audits list view", () => {
     //    expect(title).toMatch(/^frozen( at \d{4}-\d{2}-\d{2})?( by .+)?$/);
   });
 
-  test("AC-6: in-progress periods within 30 days of period_end show the amber cue", async () => {
+  test("AC-6: in-progress periods within 30 days of period_end show the warning cue", async () => {
     //    await page.goto("/audits");
     //    const urgent = page.getByTestId("audits-row-urgent-cue");
     //    await expect(urgent.first()).toBeVisible();

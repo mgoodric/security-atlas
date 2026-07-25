@@ -15,14 +15,13 @@ const badgeVariants = cva(
         destructive:
           "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
         // Semantic status family (PR #1427 tokens). Soft same-hue tint over
-        // transparent + deep same-hue text — every pairing measured >=4.5:1
-        // (WCAG AA). Light 15%, dark 24%, mirroring the `destructive` idiom
-        // above. See web/.claude-design/components/badge/index.html.
-        pass: "bg-pass/15 text-pass dark:bg-pass/24",
-        info: "bg-info/15 text-info dark:bg-info/24",
-        warning: "bg-warning/15 text-warning dark:bg-warning/24",
-        critical: "bg-critical/15 text-critical dark:bg-critical/24",
-        progress: "bg-progress/15 text-progress dark:bg-progress/24",
+        // transparent + deep same-hue text — measured >=4.5:1 (WCAG AA) in
+        // both themes after alpha compositing over card/background surfaces.
+        pass: "bg-pass/[0.03] text-pass dark:bg-pass/20",
+        info: "bg-info/[0.03] text-info dark:bg-info/20",
+        warning: "bg-warning/[0.03] text-warning dark:bg-warning/20",
+        critical: "bg-critical/[0.03] text-critical dark:bg-critical/20",
+        progress: "bg-progress/[0.03] text-progress dark:bg-progress/20",
         outline:
           "border-border text-foreground [a]:hover:bg-muted [a]:hover:text-muted-foreground",
         ghost:

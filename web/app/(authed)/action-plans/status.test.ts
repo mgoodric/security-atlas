@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 
-import { dateLabel, statusLabel, statusPillClass } from "./status";
+import { dateLabel, statusLabel, statusPillVariant } from "./status";
 
 describe("statusLabel", () => {
   it("maps known statuses to human labels", () => {
@@ -17,17 +17,17 @@ describe("statusLabel", () => {
   });
 });
 
-describe("statusPillClass", () => {
-  it("returns a distinct class per status", () => {
-    const classes = new Set(
+describe("statusPillVariant", () => {
+  it("returns a distinct variant per status", () => {
+    const variants = new Set(
       ["draft", "in_progress", "blocked", "completed", "verified"].map(
-        statusPillClass,
+        statusPillVariant,
       ),
     );
-    expect(classes.size).toBe(5);
+    expect(variants.size).toBe(5);
   });
-  it("returns a muted fallback for unknown statuses", () => {
-    expect(statusPillClass("bogus")).toContain("muted");
+  it("returns an outline fallback for unknown statuses", () => {
+    expect(statusPillVariant("bogus")).toBe("outline");
   });
 });
 

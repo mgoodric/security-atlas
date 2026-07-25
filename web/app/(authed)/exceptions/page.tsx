@@ -47,6 +47,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import {
   fetchExceptionsList,
@@ -58,6 +59,7 @@ import {
   EXCEPTIONS_EXPORT_FORMAT_LABELS,
   buildExceptionsExportURL,
 } from "@/lib/api/exceptions-export";
+import { exceptionStatusVariant } from "@/lib/status-variants";
 
 import {
   ALL,
@@ -84,22 +86,6 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "denied", label: "denied" },
   { value: "expired", label: "expired" },
 ];
-
-function statusPillClass(status: string): string {
-  switch (status) {
-    case "active":
-      return "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300";
-    case "requested":
-    case "approved":
-      return "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-300";
-    case "denied":
-      return "bg-rose-50 text-rose-700 dark:bg-rose-950 dark:text-rose-300";
-    case "expired":
-      return "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300";
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
 
 /**
  * Truncate a justification string to a single-line preview. Sensitive
@@ -258,15 +244,12 @@ function ExceptionsPageInner() {
       id: "status",
       header: "Status",
       cell: (row) => (
-        <span
-          className={
-            "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-            statusPillClass(row.status)
-          }
+        <Badge
+          variant={exceptionStatusVariant(row.status)}
           data-testid="exceptions-row-status"
         >
           {row.status}
-        </span>
+        </Badge>
       ),
     },
     {

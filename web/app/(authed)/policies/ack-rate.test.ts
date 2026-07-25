@@ -3,7 +3,7 @@
 // Per AC-9 the unit tests cover:
 //   * formatAckRate "98% · 142/145" caption shape
 //   * ackRateBand thresholds: green >=95, amber 70-94, red <70
-//   * ackRateColor returns the right Tailwind class per band
+//   * ackRateColor returns the right semantic Tailwind class per band
 //   * null / undefined / NaN inputs all return em-dash + `none` band
 //
 // All test data is neutral (no vendor tokens). The thresholds asserted
@@ -49,9 +49,9 @@ describe("ackRateBand", () => {
 
 describe("ackRateColor", () => {
   const cases: { band: AckRateBand; want: string }[] = [
-    { band: "green", want: "bg-emerald-500" },
-    { band: "amber", want: "bg-amber-500" },
-    { band: "red", want: "bg-rose-500" },
+    { band: "green", want: "bg-pass" },
+    { band: "amber", want: "bg-warning" },
+    { band: "red", want: "bg-critical" },
     { band: "none", want: "bg-muted-foreground/30" },
   ];
   for (const c of cases) {
@@ -62,8 +62,8 @@ describe("ackRateColor", () => {
 });
 
 describe("ackRateTextColor", () => {
-  test("red band gets rose-700 (matches mockup line 271)", () => {
-    expect(ackRateTextColor("red")).toBe("text-rose-700");
+  test("red band gets critical text", () => {
+    expect(ackRateTextColor("red")).toBe("text-critical");
   });
   test("green band gets foreground", () => {
     expect(ackRateTextColor("green")).toBe("text-foreground");

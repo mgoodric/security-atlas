@@ -65,6 +65,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -108,6 +109,7 @@ import {
   POLICIES_SCAFFOLD_FUTURE_BODY,
   POLICIES_SCAFFOLD_FUTURE_TESTID,
 } from "./scaffold-future";
+import { statusPillVariant } from "./status";
 
 const FILTER_KEYS: (keyof PolicyFilters)[] = [
   "status",
@@ -156,21 +158,6 @@ const ACK_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ACK_STATUS_LT_95, label: "< 95% acknowledged" },
   { value: ACK_STATUS_LT_50, label: "< 50% acknowledged" },
 ];
-
-function statusPillClass(status: string): string {
-  switch (status) {
-    case "published":
-      return "bg-emerald-50 text-emerald-700";
-    case "under_review":
-    case "approved":
-      return "bg-amber-50 text-amber-700";
-    case "retired":
-      return "bg-rose-50 text-rose-700";
-    case "draft":
-    default:
-      return "bg-muted text-muted-foreground";
-  }
-}
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -360,15 +347,12 @@ function PoliciesPageInner() {
       id: "status",
       header: "Status",
       cell: (row) => (
-        <span
+        <Badge
           data-testid="policies-row-status"
-          className={
-            "inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md " +
-            statusPillClass(row.status)
-          }
+          variant={statusPillVariant(row.status)}
         >
           {row.status}
-        </span>
+        </Badge>
       ),
     },
     {

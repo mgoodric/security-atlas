@@ -34,18 +34,7 @@ import { APIError } from "@/lib/api/base";
 import { fetchPolicyDetail } from "@/lib/api/policies";
 import { renderMarkdown } from "@/lib/markdown";
 
-function statusPillVariant(
-  status: string,
-): "default" | "secondary" | "destructive" | "outline" {
-  switch (status) {
-    case "published":
-      return "default";
-    case "retired":
-      return "destructive";
-    default:
-      return "secondary";
-  }
-}
+import { statusPillVariant } from "../status";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";

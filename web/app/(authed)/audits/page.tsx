@@ -25,7 +25,7 @@
 //     the bearer cookie to /v1/audit-periods; the platform enforces
 //     tenant isolation via RLS. The UI does not pass tenant_id.
 //   - Invariant 10 (audit-period freezing): frozen periods are visually
-//     distinct (lock icon + sky pill + tooltip). The list itself is
+//     distinct (lock icon + info pill + tooltip). The list itself is
 //     read-only — editing frozen periods requires the period-detail
 //     page's unfreeze workflow (out of scope per P0-A2).
 //
@@ -60,6 +60,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
   fetchAuditPeriods,
@@ -95,7 +96,7 @@ import {
   isInProgressUrgent,
   periodRangeLabel,
   statusDotClass,
-  statusPillClass,
+  statusPillVariant,
   statusTallyLabel,
 } from "./format";
 
@@ -314,10 +315,9 @@ function AuditsPageInner() {
             className="inline-flex items-center gap-1.5"
             data-testid="audits-row-status-cell"
           >
-            <span
-              className={`inline-flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium rounded-md ${statusPillClass(
-                p.status,
-              )}`}
+            <Badge
+              variant={statusPillVariant(p.status)}
+              className="gap-1.5"
               data-testid="audits-row-status-pill"
             >
               <span
@@ -326,11 +326,11 @@ function AuditsPageInner() {
                 )}`}
               />
               {p.status}
-            </span>
+            </Badge>
             {isFrozen(p) ? (
               <span
                 title={frozenTooltip(p)}
-                className="text-sky-700"
+                className="text-info"
                 data-testid="audits-row-lock"
               >
                 <LockIcon className="w-3.5 h-3.5" />
@@ -342,8 +342,8 @@ function AuditsPageInner() {
                 className="inline-flex items-center"
                 data-testid="audits-row-urgent-cue"
               >
-                <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-                <span className="ml-1 text-[11px] text-amber-700">
+                <span className="w-1.5 h-1.5 rounded-full bg-warning animate-pulse" />
+                <span className="ml-1 text-[11px] text-warning">
                   {daysUntilEndLabel(days)}
                 </span>
               </span>
