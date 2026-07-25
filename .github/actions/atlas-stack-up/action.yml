@@ -1,0 +1,242 @@
+# =====================================================================
+# Slice 418 — the ONE canonical CI stack bring-up.
+#
+# Before this action, the MinIO + NATS JetStream + Postgres role
+# bootstrap + forward-migrations (+ optional atlas-server start) sequence
+# was copy-pasted across four jobs in .github/workflows/ci.yml:
+#
+#   - tests-integration-shard       (the slice-417 matrix; MinIO/NATS/PG only)
+#   - frontend-playwright           (+ atlas server)
+#   - frontend-playwright-prod-build(+ atlas server)
+#   - frontend-ui-honesty           (+ atlas server)
+#
+# ~400 duplicated lines. The duplication was a latent correctness risk,
+# not just noise: the slice-200 `pg_isready -d security_atlas` fix, the
+# slice-201 `ATLAS_KEYSTORE_PATH=/tmp/...` EACCES workaround, and the
+# slice-202 staged-bring-up ordering fix each had to be applied in
+# multiple places, and history shows such fixes routinely miss a copy.
+# One canonical bring-up means one place to fix.
+#
+# WHY A COMPOSITE ACTION AND NOT A REUSABLE WORKFLOW: a composite action
+# inlines its steps into the CALLING job, so it shares the job's runner,
+# `services:` containers, and — load-bearing — its `$GITHUB_ENV`. The
+# bring-up exports `DATABASE_URL_APP` and `ATLAS_PID` into `$GITHUB_ENV`
+# for later steps in the same job to read. A `workflow_call` reusable
+# workflow runs in a SEPARATE job and would break that env sharing.
+#
+# BEHAVIOR-PRESERVING (slice 418 P0-1). Every step below reproduces its
+# inlined predecessor's commands, ordering, readiness budget, and
+# `$GITHUB_ENV` writes exactly. The step-by-step equivalence diff is
+# recorded in docs/audit-log/418-composite-stack-up-decisions.md.
+#
+# SECRET HYGIENE (slice 418 P0-4 / AC-7): `$ATLAS_APP_PASSWORD` is read
+# from the caller's job env and interpolated into a psql `-c` argument
+# and a `$GITHUB_ENV` line. It is NEVER echoed. The `Apply forward
+# migrations` loop echoes only file NAMES. No `set -x` anywhere.
+#
+# THE TEST-MINT GATE (slice 418 P0-3): `atlas-test-mode` is what mounts
+# `POST /v1/test/issue-jwt` on the atlas server (slice 201). It is
+# applied as STEP-scoped env on the `atlas serve` step ONLY, and every
+# call-site passes it EXPLICITLY (slice 418 P0-2) so no default can
+# silently enable the runtime-mint path in a job that did not have it.
+# =====================================================================
+name: atlas stack up
+description: >-
+  Bring up the shared security-atlas CI stack — MinIO (+ bucket), NATS
+  JetStream, the Postgres atlas_app/atlas_migrate role bootstrap, and the
+  forward migrations — plus, when input-gated on, the atlas HTTP server
+  with the OAuth keystore + test JWT signer wired.
+
+inputs:
+  start-services:
+    description: >-
+      Start MinIO (+ create the bucket), start NATS JetStream, bootstrap
+      the Postgres roles, set the CI-scoped role password, and apply the
+      forward migrations. Set to 'false' when a job calls this action a
+      second time purely to start the atlas server after its own
+      job-specific steps (the Playwright jobs do exactly that).
+    required: false
+    default: "true"
+  start-atlas:
+    description: >-
+      Start the atlas HTTP server (`atlas serve`) in the background and
+      wait for `atlas-health-url` to answer. Defaults to 'false' because
+      the Go integration shards run their tests in-process and never
+      need an HTTP server; the three Playwright jobs pass 'true'. The
+      caller is responsible for having put an `atlas` binary on PATH
+      (slice 695 downloads the prebuilt one from the build-atlas job).
+    required: false
+    default: "false"
+  minio-bucket:
+    description: >-
+      Name of the S3 bucket `mc mb -p` creates on the freshly started
+      MinIO. Must match the job-level `MINIO_BUCKET` env the tests read.
+    required: false
+    default: atlas-artifacts-test
+  atlas-test-mode:
+    description: >-
+      Value of `ATLAS_TEST_MODE` for the `atlas serve` process. '1'
+      mounts `POST /v1/test/issue-jwt` (slice 201), the endpoint the
+      Playwright `globalSetup` calls to mint the test JWT at runtime.
+      Empty (the default) leaves the test-mint path OFF — the atlas
+      server treats empty and unset identically (the handler gates on
+      `ATLAS_TEST_MODE == "1"`, internal/api/testissuejwt.go).
+    required: false
+    default: ""
+  atlas-issuer-url:
+    description: >-
+      Value of `ATLAS_ISSUER_URL` for the `atlas serve` process. When
+      non-empty the OAuth keystore + tokensign.Signer are wired
+      (cmd/atlas/main.go gates on `issuer != ""`), which the
+      `/v1/test/issue-jwt` endpoint needs in order to exist at all.
+      Empty (the default) is the un-wired posture.
+    required: false
+    default: ""
+  keystore-path:
+    description: >-
+      `ATLAS_KEYSTORE_PATH` for the `atlas serve` process. Slice 201: the
+      CI runner cannot write to the default /var/lib/security-atlas/, so
+      this points at /tmp. Without it `fsstore.Open` fails with EACCES,
+      the keystore never wires, `s.jwtSigner` stays nil, and
+      `/v1/test/issue-jwt` returns 404.
+    required: false
+    default: /tmp/atlas-ci/keys
+  data-dir:
+    description: >-
+      `ATLAS_DATA_DIR` for the `atlas serve` process. Same slice-201
+      EACCES rationale as `keystore-path`. This directory (and
+      `keystore-path` under it) is created with `mkdir -p` before boot.
+    required: false
+    default: /tmp/atlas-ci
+  atlas-health-url:
+    description: >-
+      URL the post-boot readiness loop polls with `curl -sf`, up to 30
+      attempts at 2s intervals (~60s budget).
+    required: false
+    default: http://localhost:8080/health
+
+runs:
+  using: composite
+  steps:
+    - name: Start MinIO
+      # Slice 036 — MinIO is started with `docker run` rather than as a
+      # `services:` entry because GitHub Actions service containers do
+      # not support a `command` / args override, and the official
+      # `minio/minio` image needs `server /data` passed explicitly.
+      if: inputs.start-services == 'true'
+      shell: bash
+      env:
+        ATLAS_MINIO_BUCKET: ${{ inputs.minio-bucket }}
+      run: |
+        docker run -d --name minio \
+          -p 9000:9000 \
+          -e MINIO_ROOT_USER=minioadmin \
+          -e MINIO_ROOT_PASSWORD=minioadmin \
+          minio/minio server /data
+        # Wait for readiness (up to ~60s).
+        for i in $(seq 1 30); do
+          if curl -sf http://localhost:9000/minio/health/live; then
+            echo "minio ready"; break
+          fi
+          sleep 2
+        done
+        # Create the test bucket using a short-lived mc container. The
+        # MinIO admin client (`mc`) is the canonical bucket-bootstrap
+        # tool. We inject the alias via the MC_HOST_<alias> env var so
+        # the single `mc mb` invocation has the alias without needing a
+        # separate `mc alias set` call (which would write config to
+        # ~/.mc/ that doesn't persist across `docker run` invocations).
+        docker run --rm --network host \
+          -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
+          minio/mc mb -p "local/${ATLAS_MINIO_BUCKET}"
+
+    - name: Start NATS JetStream
+      # Slice 015 — same non-default-CMD rationale as MinIO: the `nats`
+      # image needs `-js -sd /data` passed explicitly, which a
+      # `services:` entry cannot do.
+      if: inputs.start-services == 'true'
+      shell: bash
+      run: |
+        docker run -d --name nats \
+          -p 4222:4222 \
+          -p 8222:8222 \
+          nats:2.10-alpine -js -sd /data --http_port 8222
+        # Wait for readiness via the monitoring endpoint (up to ~60s).
+        for i in $(seq 1 30); do
+          if curl -sf http://localhost:8222/healthz; then
+            echo "nats ready"; break
+          fi
+          sleep 2
+        done
+
+    - name: Bootstrap roles
+      # Constitutional invariant 6 rests on this file: it creates
+      # atlas_app (RLS-subject) and atlas_migrate (BYPASSRLS) with their
+      # grants. Slice 418 P0-5 — moved, never modified.
+      if: inputs.start-services == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+
+    - name: Set role passwords (CI-scoped)
+      # P0-4 / AC-7: the password is interpolated, never echoed. The
+      # `echo` below writes the composed DSN to $GITHUB_ENV, which
+      # GitHub does not print back to the log.
+      if: inputs.start-services == 'true'
+      shell: bash
+      run: |
+        psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+          -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+        echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+
+    - name: Apply forward migrations
+      # Lexical `migrations/sql/*.sql` order with the `.down.sql`
+      # siblings skipped — the project's forward-migration order.
+      # Slice 418 P0-1: reproduced exactly; do not reorder or `sort`.
+      if: inputs.start-services == 'true'
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        for f in migrations/sql/*.sql; do
+          case "$f" in
+            *.down.sql) ;;
+            *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+          esac
+        done
+
+    - name: Start atlas server
+      # Slice 201: ATLAS_KEYSTORE_PATH + ATLAS_DATA_DIR point at /tmp (the
+      # CI runner cannot write to the default /var/lib/security-atlas/).
+      # Without these, fsstore.Open fails with EACCES, the OAuth keystore
+      # never wires, s.jwtSigner stays nil, and the /v1/test/issue-jwt
+      # endpoint returns 404 — breaking the Playwright global-setup.
+      #
+      # ATLAS_TEST_MODE / ATLAS_ISSUER_URL are applied HERE, step-scoped,
+      # from explicit call-site inputs (P0-2/P0-3). The calling jobs that
+      # need them ALSO declare them at job level because the Next.js web
+      # server process reads ATLAS_TEST_MODE too
+      # (web/app/(authed)/dashboard/dashboard-prefetch.ts); this step-env
+      # assertion is the atlas-server half of that same value.
+      if: inputs.start-atlas == 'true'
+      shell: bash
+      env:
+        ATLAS_KEYSTORE_PATH: ${{ inputs.keystore-path }}
+        ATLAS_DATA_DIR: ${{ inputs.data-dir }}
+        ATLAS_TEST_MODE: ${{ inputs.atlas-test-mode }}
+        ATLAS_ISSUER_URL: ${{ inputs.atlas-issuer-url }}
+        ATLAS_HEALTH_URL: ${{ inputs.atlas-health-url }}
+      run: |
+        # Reproduces the inlined `mkdir -p /tmp/atlas-ci/keys`: with the
+        # default inputs these two paths ARE /tmp/atlas-ci and
+        # /tmp/atlas-ci/keys, so the created set is identical. Naming
+        # both keeps it correct if a call-site ever points the keystore
+        # outside the data dir.
+        mkdir -p "$ATLAS_DATA_DIR" "$ATLAS_KEYSTORE_PATH"
+        atlas serve > /tmp/atlas.log 2>&1 &
+        echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
+        for i in $(seq 1 30); do
+          if curl -sf "$ATLAS_HEALTH_URL"; then
+            echo "atlas ready"; break
+          fi
+          sleep 2
+        done
