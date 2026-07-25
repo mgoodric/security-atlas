@@ -152,6 +152,65 @@ test.describe("topbar header chrome (slice 223)", () => {
     );
   });
 
+  // Slice 272 (OE-398) — the Enter-navigate assertion above covers the
+  // keyboard path; this covers the pointer path. Both matter: the
+  // spillover's acceptance bar is "opens on the shortcut AND on click,
+  // and navigates to a real result", and a `<Link>`-based row can
+  // regress on click alone (an intercepting overlay, a
+  // preventDefault-ing onRowClick, or a stale href) while the keyboard
+  // path still passes because Enter routes via router.push() instead of
+  // the anchor. Asserting only one path would leave the other unpinned.
+  test("slice 272 — clicking a result row navigates to its detail page", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/search**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          hits: [
+            {
+              id: "00000000-0000-0000-0000-000000000001",
+              type: "controls",
+              title: "Encryption at rest",
+              snippet: "Encryption at rest — prod object stores",
+              relevance_score: 1.0,
+            },
+            {
+              id: "00000000-0000-0000-0000-000000000002",
+              type: "risks",
+              title: "Data exfiltration",
+              snippet: "Data exfiltration via misconfigured IAM",
+              relevance_score: 0.75,
+            },
+          ],
+          count: 2,
+          partial_types: [],
+        }),
+      });
+    });
+
+    await page.goto("/controls");
+    // Open by click (not the ⌘K shortcut) — the input's onFocus opens
+    // the popover, so a pointer user reaches the same surface.
+    const input = page.getByTestId("global-search-input");
+    await input.click();
+    await input.fill("iam");
+    await expect(page.getByTestId("global-search-popover")).toBeVisible();
+
+    // Click the controls row. Its href is /controls/<id> (hrefForHit),
+    // so a real navigation must land on the control detail page.
+    await page.getByTestId("global-search-row-controls").first().click();
+    await expect(page).toHaveURL(
+      /\/controls\/00000000-0000-0000-0000-000000000001$/,
+    );
+    // The popover closes and the query resets on row click (onRowClick),
+    // so the operator does not land on a detail page with a stale
+    // result list still open over it.
+    await expect(page.getByTestId("global-search-popover")).not.toBeVisible();
+    await expect(input).toHaveValue("");
+  });
+
   test("AC-4: Escape closes the popover", async ({ authedPage: page }) => {
     await page.route("**/api/search**", async (route) => {
       await route.fulfill({
