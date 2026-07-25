@@ -6,9 +6,35 @@
 **Type:** JUDGMENT (the conflict-surfacing heuristics + the approve/reject UX
 are subjective product calls)
 
-**Status:** `deferred` (read+visualize landed in slice 482; the editing surface
-waits until a maintainer wants to curate the `community_draft` crosswalks
-in-product rather than by editing the YAML fixtures)
+**Status:** `in-progress` (revived 2026-07-25; read+visualize landed in slice
+482, and slice 483 subsequently absorbed the approval half — see the scope
+reconciliation below)
+
+> **Scope shrink, 2026-07-25.** Slice 483 (crosswalk-mapping verified-tier
+> governance, merged `d8a926ec`) shipped the approval workflow this slice
+> originally imagined: the tier state machine, the admin-gated
+> `POST /v1/admin/crosswalk-edges/{id}/tier` transition endpoint, and the
+> append-only tier audit trail. **This slice no longer defines any approval
+> semantics.** Two consequences for the text below:
+>
+> 1. The `source_attribution` promotion ladder described in the Narrative
+>    (`community_draft → reviewed → authoritative`) is **superseded by ADR
+>    0018**, which split provenance (`source_attribution`, immutable) from trust
+>    (`mapping_tier`, mutable). This slice touches neither field's semantics; it
+>    calls 483's transition endpoint for approve/reject.
+> 2. The threat-model S/E `mapping-curator` role is **not introduced** — ADR
+>    0018 §3 chose "any admin/maintainer role" and 483 implemented `cred.IsAdmin`.
+>    Adding a second capability for the same act would be the parallel approval
+>    path this slice's boundaries forbid.
+>
+> What remains in scope: the review-queue read API, in-product **editing** of
+> `relationship_type` / `strength` / `rationale` (483's column grant explicitly
+> cannot touch these), an append-only trail for those content edits, the
+> conflict-detection heuristics, an HTTP read for the transition history, and
+> the UI + its two test tiers.
+>
+> Full reconciliation and the heuristic rationale:
+> [`docs/audit-log/536-crosswalk-review-editing-decisions.md`](../audit-log/536-crosswalk-review-editing-decisions.md).
 
 > Filed 2026-06-07 as a spillover of slice 482 (coverage-strength rollup +
 > visualization). Parent: slice 482. Slice 482 was explicitly the **read +
@@ -40,8 +66,17 @@ where two conflicting mappings get reconciled.
   audit-binding until a human one-click approves it (CLAUDE.md AI-assist
   boundary; the `ai_assisted=true ↔ human_approver` schema invariant).
 - **Surfaces conflicts** — e.g. two edges from the same requirement to anchors
-  in the same SCF family with contradictory strengths, or an edge whose
-  relationship-type disagrees with the reverse direction.
+  in the same SCF family with contradictory strengths.
+
+  > The originally-floated "an edge whose relationship-type disagrees with the
+  > reverse direction" heuristic is **undetectable against the shipped model**
+  > and is dropped: `fw_to_scf_edges` is directed requirement → anchor and
+  > `UNIQUE (framework_requirement_id, scf_anchor_id)` permits exactly one row
+  > per pair (migration `_013`, citing NIST IR 8477 §4), so there is no reverse
+  > edge to disagree with. The five heuristics actually shipped —
+  > `duplicate_equal`, `family_strength_divergence`, `type_strength_incoherent`,
+  > `orphaned_requirement`, `no_relationship_only` — are specified with their
+  > rationale in the decisions log.
 
 **Scope discipline.** This is the _editing/approving_ tool. It does NOT change
 the read-side rollup (slice 482) or the importer (slice 438). It does NOT ship
