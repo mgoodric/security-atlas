@@ -24,14 +24,18 @@ import (
 // /v1/requirements/{id}/coverage runs), mirroring slice 635's
 // TestTHRAnchor_DetectionCrosswalkEdgesExist.
 //
-// Coverage note: THR-05 (Insider Threat Program), THR-06 (Insider Threat
-// Awareness), and THR-07 (Vulnerability Disclosure Program) intentionally
-// carry NO edges — none of the five bundled framework crosswalks has a
-// dedicated insider-threat or coordinated-disclosure requirement, and mapping
-// general security-awareness or internal vuln-management requirements onto
-// them would over-state the relationship. See slice 646 decisions-log D5 and
-// the spillover slice for a finer pass when a framework with those concepts
-// lands.
+// Coverage note: THR-05 (Insider Threat Program) and THR-06 (Insider Threat
+// Awareness) intentionally carry NO edges — none of the five bundled framework
+// crosswalks has a dedicated insider-threat requirement, and mapping general
+// security-awareness or personnel-monitoring requirements onto them would
+// over-state the relationship. See slice 646 decisions-log D2 and slice 651's
+// recorded per-framework search (docs/audit-log/651-thr-insider-vdp-crosswalk-
+// decisions.md D2) for the evidence.
+//
+// THR-07 (Vulnerability Disclosure Program) DID gain an edge in slice 651:
+// NIST CSF 2.0 ID.RA-08 is a dedicated coordinated-disclosure Subcategory that
+// slice 646 overlooked. Its assertions live in
+// thr_vdp_crosswalk_integration_test.go.
 
 // TestTHRFinerCrosswalk_EdgesResolve proves every finer-THR edge slice 646
 // authors resolves to its target anchor through a real fw_to_scf_edges row,
