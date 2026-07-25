@@ -35,9 +35,10 @@ Grandparent: slice 641 (imported `THR-02..THR-10` as `scf_anchors` rows).
 
 The five bundled crosswalks were swept programmatically over every requirement's
 `title` + `body`, once for insider-threat vocabulary
-(`insider|sabotage|misuse|abuse|disgruntl|trusted user|workforce|screening|
-background|disciplin|sanction|personnel activ|user behavio(u)r|behaviour
-analytics|separation of duties|whistle`) and once for coordinated-disclosure
+(`insider|sabotag|misuse|abuse|disgruntl|trusted (user|insider)|workforce|
+screen|background check|disciplin|sanction|personnel activ|user behavio|
+behavio(u)?r analytic|separation of duties|segregation of duties|privileged
+user|whistle|malicious.*(employee|user|personnel)`) and once for coordinated-disclosure
 vocabulary (`disclos|unsolicit|bug bount|research(er)|external report|report.*
 vulnerab|vulnerab|coordinat|29147|intake`). Every hit was then read against the
 SCF anchor text before accept/reject. Requirement counts are the shipped file
@@ -46,8 +47,8 @@ totals.
 | Framework             | Reqs | Insider-threat hits (all rejected)                                                                                                                                          | Coordinated-disclosure hits                                                                                       |
 | --------------------- | ---: | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `soc2-tsc-2017`       |   43 | none                                                                                                                                                                        | CC2.3 (external communication), CC7.1 (new-vulnerability detection) — both rejected                               |
-| `iso27001-2022`       |   93 | A.5.3 (segregation of duties), A.6.1 (screening), A.6.4 (disciplinary process)                                                                                              | A.5.14 (information transfer), A.6.6 (NDAs), A.8.8 (technical vulnerability management) — all rejected            |
-| `nist-csf-2.0`        |  106 | PR.AA-05 (least privilege / SoD), DE.CM-03 (personnel activity monitored)                                                                                                   | ID.RA-01/04/05 (internal vuln identification + risk), GV.SC-02, RS.MA-01 — rejected; **ID.RA-08 — ACCEPTED (D2)** |
+| `iso27001-2022`       |   93 | A.5.3 (segregation of duties), A.6.1 (screening), A.6.4 (disciplinary process), A.7.7 (clear desk / clear screen)                                                           | A.5.14 (information transfer), A.6.6 (NDAs), A.8.8 (technical vulnerability management) — all rejected            |
+| `nist-csf-2.0`        |  106 | PR.AA-05 (least privilege / SoD), PR.AT-02 (role-based training for privileged users), DE.CM-03 (personnel activity monitored)                                              | ID.RA-01/04/05 (internal vuln identification + risk), GV.SC-02, RS.MA-01 — rejected; **ID.RA-08 — ACCEPTED (D2)** |
 | `pci-dss-4.0`         |   31 | 3.6.1 (key misuse), 8.5.1 (MFA misuse) — lexical false positives                                                                                                            | 2.2.1, 6.3.1, 6.3.3, 11.3.1 — all internal vuln management, rejected                                              |
 | `hipaa-security-rule` |   67 | 164.308(a)(1)(ii)(C) sanction policy, (a)(3)(i) workforce security, (a)(3)(ii)(A) authorization/supervision, (a)(3)(ii)(B) workforce clearance, (a)(5)(i)+(ii)(A) awareness | 164.308(a)(1)(ii)(B) risk management, 164.314(b)(1) group health plan — rejected                                  |
 
@@ -121,9 +122,9 @@ named cross-functional team. The candidates and why each fails:
 - **CSF GV.RR-04** ("Cybersecurity is included in human resources practices") —
   HR-practice integration, correctly anchored to HRS-01. Not a program.
 - **ISO A.6.1 (screening) / A.6.4 (disciplinary) / A.5.3 (segregation of
-  duties)** — personnel-security and SoD controls that REDUCE insider risk but
-  do not constitute an insider-threat program. Correctly anchored to HRS-01 /
-  IAC-05.
+  duties) / A.7.7 (clear desk, clear screen)** — personnel-security, SoD, and
+  physical-hygiene controls that REDUCE insider risk but do not constitute an
+  insider-threat program. Correctly anchored to HRS-01 / IAC-05 / DCH-01.
 - **HIPAA 164.308(a)(1)(ii)(C) / (a)(3)(i) / (a)(3)(ii)(A) / (a)(3)(ii)(B)** —
   sanction policy, workforce security, authorization/supervision, workforce
   clearance. Same reading: workforce-security controls, not a program.
@@ -138,6 +139,16 @@ awareness training, already correctly anchored to HRS-04 (Security Awareness
 Training). General awareness does not carry the insider-indicator curriculum;
 mapping it to THR-06 would over-state the relationship. This confirms slice
 646's call on independent re-examination.
+
+CSF **PR.AT-02** ("Individuals in specialized roles are provided with role-based
+awareness and training") is the one THR-06 candidate that is not merely general
+awareness, and it is still a reject. Role-BASED training means the curriculum is
+cut by job role — privileged administrator, developer, OT operator — whereas
+THR-06 is cut by TOPIC: recognizing and reporting insider-threat indicators,
+which is training every employee needs and no specialized role uniquely owns.
+The two partition the training space along different axes, so neither contains
+the other. PR.AT-02 already anchors to `HRS-04 subset_of/0.8`, which is the
+correct home for a role-based slice of the awareness program.
 
 **THR-07 — the other four frameworks stay unmapped.** SOC 2 CC2.3 (external
 communication about internal control) is corporate communication, not a
