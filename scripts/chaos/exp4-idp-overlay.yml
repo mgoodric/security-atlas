@@ -1,0 +1,59 @@
+# exp4-idp-overlay.yml — docker-compose overlay for slice 335
+# Experiment 4 ("OIDC IdP unavailable"), executed by slice 357a.
+#
+# The design's Method step 1 reads:
+#
+#   1. Start docker-compose with a containerized IdP (e.g., Dex /
+#      Keycloak) on the same network.
+#
+# The shipped bundle (deploy/docker/docker-compose.yml) carries no IdP —
+# it is a local-mode deployment where the default user signs in with
+# email + password. Rather than edit the shipped bundle, this overlay adds
+# the IdP for the duration of the experiment and is removed afterwards:
+#
+#   docker compose -f deploy/docker/docker-compose.yml \
+#                  -f scripts/chaos/exp4-idp-overlay.yml \
+#                  --env-file deploy/docker/.env up -d
+#
+# `dex` joins the project's default network, so it is on the same network
+# as atlas — which is what makes `docker network disconnect` a meaningful
+# injection. It is reachable ONLY there.
+#
+# NOTHING in this overlay names a hosted or edge endpoint, and the overlay
+# cannot be applied to one: it composes onto the local bundle by file
+# path, and the run script refuses to proceed unless the atlas HTTP
+# endpoint it probes is a loopback literal.
+
+services:
+  # ------------------------------------------------------------------
+  # dex — the containerized OIDC IdP under test. Config is passed as an
+  # ABSOLUTE host path via EXP4_DEX_CONFIG (set by run-exp4-oidc-idp.sh)
+  # because relative paths in an overlay resolve against the project
+  # directory of the FIRST -f file, not against this file's directory.
+  # ------------------------------------------------------------------
+  dex:
+    image: ghcr.io/dexidp/dex:v2.44.0
+    container_name: security-atlas-exp4-dex
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ${EXP4_DEX_CONFIG:?EXP4_DEX_CONFIG must be an absolute path to exp4-dex-config.yaml}:/etc/dex/config.yaml:ro
+    # Bound to loopback only. The IdP fixture is not reachable from
+    # outside this machine even while it is up.
+    ports:
+      - "127.0.0.1:${EXP4_DEX_PORT:-55556}:5556"
+    # No restart policy: the injection detaches this container from the
+    # network, and a restart policy would fight the experiment.
+    restart: "no"
+
+  # ------------------------------------------------------------------
+  # atlas — env-only override. The shipped default key-rotation cadence
+  # is ANNUAL (cmd/atlas/main.go defaultKeyRotationInterval), so on an
+  # unmodified stack the rotation cron would not tick once during the
+  # experiment window and the design's "key-rotation cron: continues, no
+  # error log" check would pass vacuously. ATLAS_KEY_ROTATION_INTERVAL is
+  # a shipped operator knob (keyRotationInterval()); shortening it in the
+  # experiment env makes the check real. Nothing else about atlas changes.
+  # ------------------------------------------------------------------
+  atlas:
+    environment:
+      ATLAS_KEY_ROTATION_INTERVAL: ${ATLAS_KEY_ROTATION_INTERVAL:-60s}
