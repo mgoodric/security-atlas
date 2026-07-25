@@ -649,6 +649,11 @@ mappings:
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Receiving/analyzing/responding to vulnerability disclosures is part of the SCF Vulnerability Remediation Process."
+  - requirement_code: "ID.RA-08"
+    scf_anchor: "THR-07"
+    relationship_type: "equal"
+    strength: 0.9
+    rationale: "ID.RA-08 'processes for receiving, analyzing, and responding to vulnerability disclosures are established' is the direct STRM match for the Vulnerability Disclosure Program (slice 641 THR-07), whose SCF text is 'establish a Vulnerability Disclosure Program (VDP) ... that receives unsolicited reports about potential security vulnerabilities'. Both name the same control concept: an established intake process for externally-reported vulnerabilities. 0.9 rather than 1.0 because ID.RA-08 also spans the downstream 'analyzing and responding' half (carried by the VPM-04 edge above, which stays as the remediation-side secondary) and THR-07 scopes the VDP to products and services. This is the ONLY dedicated coordinated-disclosure requirement across the five bundled crosswalks. Added by slice 651."
   - requirement_code: "ID.RA-09"
     scf_anchor: "TDA-01"
     relationship_type: "subset_of"
