@@ -53,3 +53,48 @@ The maintainer (or continuous-batch loop) flips this slice's status from `not-re
 - **First action** is the `npm view eslint-plugin-react@latest peerDependencies` check. If the value still caps at `^9.x`, this slice is still `not-ready` — exit immediately without making any edits.
 - **The slice is 5 lines of code change** (one in `web/package.json`, the rest is `package-lock.json` churn from `npm install`). Should land in under 15 minutes once upstream is ready.
 - **Don't bump `eslint-config-next`** or other deps in this slice unless absolutely necessary. Surgical re-upgrade only.
+
+## Re-check log
+
+Each entry records a pre-flight run of the AC-1 verification command. The slice stays `not-ready` until an entry shows a compatible major.
+
+### 2026-07-25 — NOT READY (no dependency change made)
+
+```
+$ npm view eslint-plugin-react@latest peerDependencies
+{ eslint: '^3 || ^4 || ^5 || ^6 || ^7 || ^8 || ^9.7' }
+
+$ npm view eslint-plugin-react@latest version
+7.37.5
+
+$ npm view eslint-plugin-react dist-tags
+{ next: '7.8.0-rc.0', latest: '7.37.5' }
+
+$ npm view eslint@latest version
+10.8.0
+```
+
+Unchanged from slice 078's 2026-05-16 reading: `latest` is still `7.37.5`, still capped at `^9.7`, and the `next` dist-tag is still the same stale `7.8.0-rc.0` prerelease. `7.37.5` remains the highest version published on the 7.x line — every `7.37.x` declares the identical `^9.7` cap, so there is no untagged newer release to reach for either.
+
+**The gate is wider than this slice assumed.** `eslint-plugin-react` is not the only ESLint-9-capped plugin `eslint-config-next@16.2.9` pulls in. Current `latest` peerDeps:
+
+| Plugin                      | peerDeps `eslint` range                                          | ESLint 10 OK? |
+| --------------------------- | ---------------------------------------------------------------- | ------------- |
+| `eslint-plugin-react`       | `^3 \|\| ^4 \|\| ^5 \|\| ^6 \|\| ^7 \|\| ^8 \|\| ^9.7`           | No            |
+| `eslint-plugin-import`      | `^2 \|\| ^3 \|\| ^4 \|\| ^5 \|\| ^6 \|\| ^7.2.0 \|\| ^8 \|\| ^9` | No            |
+| `eslint-plugin-jsx-a11y`    | `^3 \|\| ^4 \|\| ^5 \|\| ^6 \|\| ^7 \|\| ^8 \|\| ^9`             | No            |
+| `eslint-plugin-react-hooks` | `^3.0.0 \|\| ... \|\| ^9.0.0 \|\| ^10.0.0`                       | Yes           |
+
+Three of the four must ship ESLint 10 support before the pin comes out, not just `eslint-plugin-react`. AC-1's verification command should be read as necessary-but-not-sufficient; re-check all three.
+
+**Failure mode is silent, not loud.** npm 11.14.0 does _not_ hard-fail this upgrade with `ERESOLVE`. An isolated install of `eslint@10.6.0` + `eslint-config-next@16.2.9` exits 0 and produces a tree that `npm ls` then reports as invalid:
+
+```
+npm error invalid: eslint@10.6.0 /private/tmp/.../node_modules/eslint
+```
+
+...with `eslint@10.6.0 deduped invalid` against all three plugin peer ranges above. So a green `npm install` is not evidence the upgrade is safe — the unmet peers surface as the slice 078 runtime crash (`contextOrFilename.getFilename is not a function`), not as an install error. Verify with `npm ls eslint` after any future attempt.
+
+**Disposition of Dependabot PR #1435** (`deps(deps-dev): bump eslint from 9.39.4 to 10.6.0`, branch `dependabot/npm_and_yarn/eslint-10.6.0`, open): **not superseded — must stay unmerged.** It proposes exactly the bump this slice's pre-flight just rejected, and it carries no companion plugin bump (none exists to carry). Merging it would reproduce the slice 078 crash. It stays open as the standing tracker for the upgrade, or the maintainer closes it with `@dependabot ignore this major version`; either way it does not merge until this slice's re-check passes. That call is the maintainer's triage decision, consistent with slice 078 P0-A5.
+
+No `--legacy-peer-deps`, no `overrides` entry, and no peer-warning suppression was used or added. `web/package.json` and `package-lock.json` are unchanged by this re-check.
