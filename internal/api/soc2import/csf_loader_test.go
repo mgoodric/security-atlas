@@ -102,12 +102,12 @@ func TestLoad_CSFFullSubcategoryCoverage(t *testing.T) {
 	}
 	// Every Subcategory carries at least one STRM edge, and a small set of
 	// threat-related Subcategories carry a SECOND edge to a finer SCF
-	// Threat-Management anchor (slice 646). The base is one edge per
+	// Threat-Management anchor (slices 646, 651). The base is one edge per
 	// Subcategory (1:1); the THR finer-crosswalk pass adds extra anchors to
-	// the requirements that have a genuine STRM relationship to THR-01/03/09/10
-	// (invariant #1 — N anchors per requirement). The exact total is asserted
-	// so a row added or dropped fails loudly.
-	const wantTHRExtraEdges = 4 // ID.RA-02->THR-03, ID.RA-03->THR-09, ID.RA-03->THR-10, DE.AE-07->THR-01 (slice 646)
+	// the requirements that have a genuine STRM relationship to
+	// THR-01/03/07/09/10 (invariant #1 — N anchors per requirement). The exact
+	// total is asserted so a row added or dropped fails loudly.
+	const wantTHRExtraEdges = 5 // ID.RA-02->THR-03, ID.RA-03->THR-09, ID.RA-03->THR-10, DE.AE-07->THR-01 (slice 646); ID.RA-08->THR-07 (slice 651)
 	if n := len(cw.Mappings); n != wantSubcategories+wantTHRExtraEdges {
 		t.Fatalf("CSF mappings = %d; want %d (one base edge per Subcategory + %d finer-THR edges)",
 			n, wantSubcategories+wantTHRExtraEdges, wantTHRExtraEdges)
@@ -142,7 +142,8 @@ func TestLoad_CSFFullSubcategoryCoverage(t *testing.T) {
 		}
 		// A Subcategory MAY now be mapped more than once (invariant #1 — N
 		// anchors per requirement); the finer-THR pass (slice 646) adds second
-		// anchors to ID.RA-02/ID.RA-03/DE.AE-07. We assert full coverage (every
+		// anchors to ID.RA-02/ID.RA-03/DE.AE-07 and slice 651 adds ID.RA-08.
+		// We assert full coverage (every
 		// Subcategory mapped at least once) rather than exactly-once.
 		mapped[m.RequirementCode] = struct{}{}
 	}
