@@ -20,9 +20,10 @@ import (
 //
 // The ONE structural difference from *Store is the corpus: it resolves a FILTERED
 // control SET (by control-family or by framework, reusing the existing
-// control-filter query paths), caps it to MaxControlsPerSummary controls, then
-// reads each control's MaxRecordsPerControl most-recent CURRENT LIVE records — the
-// TWO-LEVEL bound (AC-1, P0-750-2). It reuses the slice-502 ListEvidenceRecordsByControl
+// control-filter query paths), relevance-ranks and caps it to
+// MaxControlsPerSummary controls, then reads each control's
+// MaxRecordsPerControl most-recent CURRENT LIVE records — the TWO-LEVEL bound
+// (AC-1, P0-750-2). It reuses the slice-502 ListEvidenceRecordsByControl
 // / CountEvidenceRecordsByControl per-control reads (no new evidence query) plus
 // ONE new control-set resolver query (ListActiveControlsForPortfolio).
 //
@@ -88,11 +89,11 @@ func (s *PortfolioStore) inTx(ctx context.Context, fn func(context.Context, *dbx
 
 // PortfolioSet assembles the deterministic TWO-LEVEL bounded cross-control
 // evidence set for a filtered control set (AC-1) under the caller's RLS context.
-// It resolves the control set (capped at MaxControlsPerSummary + 1 so the
-// "K of N" total is honest when the filter matched more), then for each
-// in-summary control reads the MaxRecordsPerControl most-recent CURRENT LIVE
-// records + the full live count (for the deterministic rollup + per-control
-// honesty). Every field is read, never computed by a model.
+// It resolves the control set with deterministic relevance ordering, capped at
+// MaxControlsPerSummary, then for each in-summary control reads the
+// MaxRecordsPerControl most-recent CURRENT LIVE records + the full live count
+// (for the deterministic rollup + per-control honesty). Every field is read,
+// never computed by a model.
 //
 // All reads run in ONE transaction under the tenant GUC, so cross-tenant rows are
 // invisible at every level of the corpus (AC-4).
@@ -129,12 +130,11 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 			family = &f
 		}
 
-		// Cap at MaxControlsPerSummary + 1: the +1 row tells us the filter matched
-		// MORE than the cap so the "K of N" total is honest, without a second COUNT
-		// round-trip. We keep only the first MaxControlsPerSummary for the corpus.
+		// The resolver ranks all matched controls, returns the exact matched count
+		// via a window column, and caps to MaxControlsPerSummary for the corpus.
 		rows, err := q.ListActiveControlsForPortfolio(ctx, dbx.ListActiveControlsForPortfolioParams{
 			TenantID:  pgUUID(tenantID),
-			Limit:     int32(MaxControlsPerSummary + 1),
+			Limit:     int32(MaxControlsPerSummary),
 			Family:    family,
 			AnchorIds: anchorIDs,
 		})
@@ -142,15 +142,18 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 			return fmt.Errorf("evidencesummary: list portfolio controls: %w", err)
 		}
 
-		out.TotalControls = len(rows)
-		if len(rows) > MaxControlsPerSummary {
-			rows = rows[:MaxControlsPerSummary]
+		if len(rows) > 0 {
+			out.TotalControls = int(rows[0].TotalMatched)
 		}
 
 		out.Controls = make([]ControlEvidence, 0, len(rows))
 		for _, row := range rows {
 			ctrlID := uuid.UUID(row.ID.Bytes)
-			ce := ControlEvidence{ControlID: ctrlID, ControlTitle: row.Title}
+			ce := ControlEvidence{
+				ControlID:      ctrlID,
+				ControlTitle:   row.Title,
+				RelevanceScore: row.RelevanceScore,
+			}
 
 			total, err := q.CountEvidenceRecordsByControl(ctx, dbx.CountEvidenceRecordsByControlParams{
 				TenantID:   pgUUID(tenantID),
@@ -193,9 +196,6 @@ func (s *PortfolioStore) PortfolioSet(ctx context.Context, filter PortfolioFilte
 	if err != nil {
 		return PortfolioSet{}, err
 	}
-	// Belt-and-suspenders: the query already orders by bundle_id, id; keep the
-	// corpus stable for the prompt + rollup regardless of any future read order.
-	sortControlsForDeterminism(out.Controls)
 	return out, nil
 }
 
