@@ -3,7 +3,10 @@
 **Cluster:** CI / Security
 **Estimate:** S
 **Type:** JUDGMENT
-**Status:** `ready`
+**Status:** `wontfix` — decided 2026-07-24. `trivy-image` stays on the PR path; no
+workflow file changed. Measured post-694: 2.38 of 99.9 runner-min per code PR (2.4%),
+entirely inside the ~9.6-min integration-shard critical path. Evidence + reversal
+criteria: [`docs/audit-log/700-trivy-scheduling-decisions.md`](../audit-log/700-trivy-scheduling-decisions.md).
 **Priority:** P3
 **Spillover from:** slice 693 (pipeline-efficiency audit, Tier 2 — conservative).
 
