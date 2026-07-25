@@ -45,6 +45,14 @@
     "fix_first_revisit": "Fix-first, then promote (P0-419-1 — a candidate with a dirty soak gets a fix-first note, never a forced promotion). Ordered: (1) harden `deploy/docker/test-self-host-bundle.sh` against registry flakiness (retry-with-backoff on image pull, and/or a GHCR pull-through mirror for the base images) so a Docker Hub blip stops reading as a bundle regression; (2) add the four matrix-named slice-061 stub-twins (`Self-host bundle · end-to-end (bundled|external|proxy|migrate)`); (3) verify both directions — one docs-only PR resolving the four stub contexts green AND one code PR resolving the four real contexts green; (4) re-soak ≥5 clean runs per leg post-hardening; (5) promote all four expanded contexts in ONE change (a partial promotion leaves the same hole). Tracked in `docs/audit-log/419-promote-advisory-checks-decisions.md` §Revisit list."
   },
 
+  "$additions_from_slice_701a": {
+    "ci_merge_gate_required": "PROMOTED. Exact `ci.yml` `name:` — `CI · merge-gate` (ci.yml job `merge-gate`). Added by slice 631 as the fail-closed aggregator that closes the slice-474 masking hole, and advisory-only ever since (the slice-631 header comment carried the maintainer hand-off note asking for exactly this promotion). Slice 701a performs the promotion together with the `needs:`-completeness fix that makes it trustworthy — the two are one change, because promoting an INCOMPLETE gate is worse than leaving it advisory (it reads as a single trustworthy signal while silently omitting legs).",
+    "needs_completeness": "The gate's `needs:` grew from 10 entries to 20. Contexts-driven additions (each backs a name already in `contexts`): `frontend-vitest`, `frontend-playwright-prod-build`, `helm-lint`, `precommit`, `actions-pin-check`, `openapi-drift-check`. Slice-701-mandated additions (real legs with no required context of their own, covered here so the stub collapse cannot drop them): `oscal-bridge`, `fuzz`, `frontend-lint`, `govulncheck`. The full contexts-vs-needs diff is tabulated in `docs/audit-log/701a-merge-gate-completeness-decisions.md`.",
+    "four_contexts_out_of_reach": "`Analyze (go)`, `Analyze (javascript-typescript)`, `GitGuardian Security Checks` and `DCO` CANNOT appear in merge-gate's `needs:`. The first two are jobs in `.github/workflows/codeql.yml` and GitHub Actions `needs:` is workflow-scoped; the last two are GitHub Apps with no workflow job at all. All four report today (verified against live branch protection), so none is a brick — they are simply out of the aggregator's reach and MUST remain independent required contexts. The slice-701 child that prunes per-job names from `contexts` must keep these four plus `CI · merge-gate`.",
+    "no_contexts_removed": "This slice REMOVES NOTHING from `contexts` and DELETES NO `-stub` job. Slice 701's AC-4 (drop the per-job names) and AC-5 (delete the 21 stubs) are the child slice's work and are gated on a real soak of the promoted gate. Promoting first and pruning later is the safe order; doing both at once would swap an enforced 18-name list for an unsoaked 1-name list in a single step.",
+    "maintainer_apply": "`bash scripts/apply-branch-protection.sh` is run as part of this slice (issue OE-370 step 7). Reversal, if needed, is `git revert` of this file's change followed by a re-run of the same script — the PUT is a full-replace and idempotent."
+  },
+
   "required_status_checks": {
     "strict": true,
     "contexts": [
@@ -65,6 +73,7 @@
       "GitGuardian Security Checks",
       "actions-pin-check",
       "openapi-drift-check",
+      "CI · merge-gate",
       "DCO"
     ]
   },
