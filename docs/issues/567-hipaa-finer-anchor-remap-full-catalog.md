@@ -3,7 +3,17 @@
 **Cluster:** Catalog
 **Estimate:** S (<1d)
 **Type:** JUDGMENT (crosswalk-mapping accuracy is a subjective control call)
-**Status:** `blocked` (depends on a test path that seeds the operator's FULL SCF catalog, not the 53-anchor sample fixture)
+**Status:** `blocked` behind **#754** (the catalog-seed path). The original Status
+said "depends on a test path that seeds the operator's FULL SCF catalog, not the
+53-anchor sample fixture" — scoping that path sharpened the diagnosis: the
+dependency is a **catalog-content governance decision**, not a test-harness gap.
+The shared integration suite seeds one catalog and the importer rolls back on an
+unresolvable anchor, so a re-pointed row breaks all five frameworks' suites, not
+just its own assertion. Split out as slice 754
+(`docs/issues/754-full-scf-catalog-test-path.md`); the per-row control judgement
+for all 21 residual rows is already done and recorded in
+`docs/audit-log/567-hipaa-finer-anchor-remap-decisions.md` (D5), so this slice
+becomes a mechanical application once 754 lands.
 
 ## Narrative
 
@@ -46,8 +56,11 @@ Pure data + decisions-log update; no loader change.
 ## Dependencies
 
 - **#516** (full HIPAA coverage) — merged first (this slice's parent).
-- A full-SCF-catalog test-seed path (does not yet exist for the soc2import
-  integration suite, which seeds the 53-anchor sample fixture).
+- **#754** (a catalog-seed path carrying the finer anchors) — BLOCKING. The
+  soc2import integration suite seeds one catalog via `scfseed.EnsureSCFCatalog`
+  (`migrations/fixtures/scf-sample.json`, now 62 anchors, not the 53 recorded in
+  slice 516). 754 must answer which catalog source backs the finer anchors before
+  a single row here can move.
 
 ## Anti-criteria (P0)
 
