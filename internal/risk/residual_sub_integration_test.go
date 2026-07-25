@@ -30,6 +30,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
@@ -100,15 +101,13 @@ func publishEvidenceRecord(t *testing.T, conn *streambuf.Conn, tenant string, co
 // ===== AC-5 / ISC-32..36: residual recomputes on evidence ingest =====
 
 func TestResidualSubscriber_RecomputesOnEvidenceIngest(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 5, 5) // inherent 25
-	ctrlID := seedEvalControl(t, admin, tenant)
+	riskID := seedNistRisk(t, migrate, tenant, 5, 5) // inherent 25
+	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 	// Link with weights isolating operational so the ingested pass evidence
 	// visibly moves residual.
@@ -128,7 +127,7 @@ func TestResidualSubscriber_RecomputesOnEvidenceIngest(t *testing.T) {
 	// Seed a passing evidence record so EvaluateControl (run by the
 	// subscriber's race fix) rolls the control up to pass -> operational 1.0
 	// -> residual drops from inherent 25 toward 0.
-	seedEvidence(t, admin, tenant, ctrlID, "pass", time.Now().UTC().Add(-1*time.Hour))
+	seedEvidence(t, migrate, tenant, ctrlID, "pass", time.Now().UTC().Add(-1*time.Hour))
 
 	conn := openStream(t)
 	subscriber := risk.NewResidualSubscriber(conn.Stream(), conn.Cfg().Subject, app, nil)
@@ -173,15 +172,13 @@ func TestResidualSubscriber_RecomputesOnEvidenceIngest(t *testing.T) {
 // ===== ISC-36: redelivery is idempotent (no residual corruption) =====
 
 func TestResidualSubscriber_RedeliveryIsIdempotent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctx := ctxFor(t, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
-	riskID := seedNistRisk(t, admin, tenant, 4, 4) // inherent 16
-	ctrlID := seedEvalControl(t, admin, tenant)
+	riskID := seedNistRisk(t, migrate, tenant, 4, 4) // inherent 16
+	ctrlID := seedEvalControl(t, migrate, tenant)
 	store := risk.NewStore(app)
 	if err := store.LinkControl(ctx, risk.LinkControlInput{
 		RiskID:          riskID,
@@ -195,7 +192,7 @@ func TestResidualSubscriber_RedeliveryIsIdempotent(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("LinkControl: %v", err)
 	}
-	seedEvidence(t, admin, tenant, ctrlID, "pass", time.Now().UTC().Add(-1*time.Hour))
+	seedEvidence(t, migrate, tenant, ctrlID, "pass", time.Now().UTC().Add(-1*time.Hour))
 
 	conn := openStream(t)
 	subscriber := risk.NewResidualSubscriber(conn.Stream(), conn.Cfg().Subject, app, nil)

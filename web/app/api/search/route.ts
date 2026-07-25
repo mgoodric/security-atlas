@@ -12,6 +12,14 @@
 // controls + evidence + risks via existing sqlc query paths; RLS
 // enforces tenant isolation at the database layer."
 //
+// Slice 661: the upstream `anchors` result type landed (the empty-tenant
+// SCF-anchor search fix). This BFF is a thin proxy with NO type
+// whitelist of its own — it forwards the `types` param (including
+// `anchors`) verbatim and lets the upstream own validation. The anchor
+// branch upstream reads the tenant-AGNOSTIC scf_anchors catalog (no RLS
+// — invariant #6 preserved, no tenant column to leak); the three tenant
+// types stay RLS-scoped. See internal/api/search/search.go.
+//
 // The upstream is slice 268's `GET /v1/search` (merged on main at
 // d9d8e69b). Wire shape:
 //   IN:  ?q=<query>&types=controls,risks,evidence&limit=N

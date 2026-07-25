@@ -100,7 +100,7 @@ trap 'rm -f "$tmp_manifest" "$tmp_tagged" "$tmp_dupes" "$tmp_manifest.files"' EX
 # 1. Manifest union: column 2 of every non-comment, non-blank line,
 #    normalized to `internal/<pkg>` (strip leading `./` and trailing
 #    `/...`) so it lines up with the tagged-package extraction below.
-#    The manifest's column 1 is the leg label (A | B1 | B2 | B3).
+#    The manifest's column 1 is the leg label (A | B1 | B2 | B3 | B4 | B5).
 # --------------------------------------------------------------------
 grep -vE '^[[:space:]]*#|^[[:space:]]*$' "$MANIFEST" \
   | awk '{print $2}' | sed -E 's|^\./||; s|/\.\.\.$||' | sort > "$tmp_manifest"

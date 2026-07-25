@@ -30,6 +30,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/audit/notes"
 	"github.com/mgoodric/security-atlas/internal/audit/notifications"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -40,10 +41,8 @@ import (
 // finding × {auditor_only, shared}. period scope is covered by slice
 // 025's TestNotes_RejectsEmptyBody (period scope still allowed).
 func TestSlice029_CreateOnEachScope_WithVisibility(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-1 029",
@@ -93,10 +92,8 @@ func TestSlice029_CreateOnEachScope_WithVisibility(t *testing.T) {
 // TestSlice029_RejectsInvalidVisibility: the Store rejects unknown
 // visibility before hitting the DB CHECK constraint.
 func TestSlice029_RejectsInvalidVisibility(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "bad-visibility",
@@ -119,10 +116,8 @@ func TestSlice029_RejectsInvalidVisibility(t *testing.T) {
 
 // TestSlice029_WalkthroughScopeAllowed: new scope_type from slice 029.
 func TestSlice029_WalkthroughScopeAllowed(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "walkthrough",
@@ -152,10 +147,8 @@ func TestSlice029_WalkthroughScopeAllowed(t *testing.T) {
 // TestSlice029_RepliesThreadToParent: a root note + 2 replies are
 // retrievable as a 3-row thread in tree order.
 func TestSlice029_RepliesThreadToParent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-2 thread",
@@ -228,10 +221,8 @@ func TestSlice029_RepliesThreadToParent(t *testing.T) {
 // TestSlice029_ReplyToWrongScopeRejected: parent_note_id pointing to
 // a note in a different scope_id is rejected at create time.
 func TestSlice029_ReplyToWrongScopeRejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-2 mismatch",
@@ -274,10 +265,8 @@ func TestSlice029_ReplyToWrongScopeRejected(t *testing.T) {
 // an in-app notification on the parent author. The dispatch payload
 // includes the new note's id + scope.
 func TestSlice029_NotificationDispatchedOnReply(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-3 notif",
@@ -373,10 +362,8 @@ func TestSlice029_NotificationDispatchedOnReply(t *testing.T) {
 // TestSlice029_NotificationNotDispatchedForSelfReply: replying to your
 // own thread does not trigger a notification on yourself.
 func TestSlice029_NotificationNotDispatchedForSelfReply(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-3 self",
@@ -415,10 +402,8 @@ func TestSlice029_NotificationNotDispatchedForSelfReply(t *testing.T) {
 // TestSlice029_VisibilityRespected: auditee cannot see auditor_only
 // rows in a thread; auditee CAN see shared rows. Auditor sees both.
 func TestSlice029_VisibilityRespected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-4 visibility",
@@ -479,10 +464,8 @@ func TestSlice029_VisibilityRespected(t *testing.T) {
 // parent is auditor_only and the caller is not its author, the parent
 // is "invisible" and CreateV2 rejects the reply with ErrNotFound.
 func TestSlice029_AuditeeCannotReplyToPrivateNote(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "P0-2",
@@ -525,10 +508,8 @@ func TestSlice029_AuditeeCannotReplyToPrivateNote(t *testing.T) {
 // tenant_update policy. atlas_app has no UPDATE policy and was
 // REVOKED UPDATE privilege; the row stays immutable.
 func TestSlice029_AppendOnlyAtDBLayer(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-6 append",
@@ -591,10 +572,8 @@ func TestSlice029_AppendOnlyAtDBLayer(t *testing.T) {
 // TestSlice029_DeleteRejectedAtDBLayer: same append-only property for
 // DELETE. atlas_app has no DELETE policy + REVOKEd DELETE privilege.
 func TestSlice029_DeleteRejectedAtDBLayer(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-6 delete",
@@ -647,10 +626,8 @@ func TestSlice029_DeleteRejectedAtDBLayer(t *testing.T) {
 // thread row. This test will fail loudly if a future refactor drops
 // a field that slice 030 depends on.
 func TestSlice029_ListThreadForScope_ProducesOSCALReadShape(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-5 OSCAL",

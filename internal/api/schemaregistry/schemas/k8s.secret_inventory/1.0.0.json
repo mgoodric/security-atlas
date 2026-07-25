@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/k8s.secret_inventory/1.0.0.json",
+  "x-evidence-kind": "k8s.secret_inventory.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CRY-01", "CRY-09"],
+  "title": "Kubernetes Secret-inventory (metadata-only)",
+  "description": "Per-Secret METADATA inventory captured read-only from the Kubernetes API (get/list on core secrets — the ONE grant the base connector intentionally withholds, added by the OPT-IN secret-inventory mode; slice 525). The auditable question is 'how many TLS secrets / service-account tokens exist, where, and how old' (rotation + sprawl signals), NEVER the secret contents. METADATA ONLY: the Secret type (Opaque / kubernetes.io/tls / kubernetes.io/service-account-token / ...), namespace, name, creation timestamp + derived age in days, and the NAMES of the keys under .data (the MAP KEYS only, e.g. 'tls.crt' / 'tls.key' / 'token'). There is deliberately NO value field: the connector NEVER reads, base64-decodes, or records a Secret VALUE (.data or .stringData) — the collector struct physically cannot hold a value and the client decode reads only the .data map keys (a reflection guard + a fixture-with-real-data drop test fail the build / suite if a value-bearing field is ever added). The connector emits no pass/fail verdict (this is a descriptive inventory — INCONCLUSIVE); the platform evaluator owns any rotation / sprawl policy call. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9): CRY-01 (Use of Cryptographic Controls — TLS/key material inventory) and CRY-09 (Cryptographic Key Management — rotation/sprawl of secret material). The candidate IAC-22 from the slice spec is absent from the bundled SCF catalog; CRY-09 is the closest real anchor for secret-material lifecycle and is used instead (see docs/audit-log/525-k8s-secret-inventory-decisions.md).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "namespace",
+    "secret_name",
+    "secret_type",
+    "age_days",
+    "key_count"
+  ],
+  "properties": {
+    "namespace": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Namespace the Secret lives in."
+    },
+    "secret_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Secret object name (metadata.name). A name, not a value."
+    },
+    "secret_type": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The Secret's type string (Opaque / kubernetes.io/tls / kubernetes.io/service-account-token / kubernetes.io/dockerconfigjson / ...). A type with no explicit value is recorded as 'Opaque' (Kubernetes' default). Classification only — never a value."
+    },
+    "age_days": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Whole days between the Secret's creation timestamp and observation time, clamped at 0. The rotation / staleness signal."
+    },
+    "key_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of keys under .data. A count of key NAMES — never reveals a value."
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "The Secret's creation timestamp (metadata.creationTimestamp, RFC 3339 UTC). Omitted when the source object carries no creation timestamp."
+    },
+    "key_names": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "Sorted KEY NAMES under .data — the MAP KEYS ONLY (e.g. 'tls.crt', 'tls.key', 'token'). NEVER the base64 / plaintext values behind them. Omitted when the Secret has no .data keys."
+    }
+  }
+}

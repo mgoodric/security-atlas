@@ -17,6 +17,8 @@ package freshnessdrift_test
 import (
 	"net/http"
 	"testing"
+
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // TestDrift_EmptyTenant_Returns200EmptyEnvelope is the slice-150 reproducer
@@ -33,8 +35,8 @@ import (
 // response. The handler already initializes `flips` to a 0-cap make() —
 // but the asserted shape pins the contract.
 func TestDrift_EmptyTenant_Returns200EmptyEnvelope(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -61,8 +63,8 @@ func TestDrift_EmptyTenant_Returns200EmptyEnvelope(t *testing.T) {
 // companion for GET /v1/evidence/freshness on a fresh install. Same
 // contract: 200 with `buckets: []` + `total: 0` + `total_stale: 0`.
 func TestFreshness_EmptyTenant_Returns200EmptyEnvelope(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 

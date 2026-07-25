@@ -1,0 +1,70 @@
+{
+  "catalog": {
+    "uuid": "11111111-1111-4111-8111-111111111111",
+    "metadata": {
+      "title": "NIST SP 800-53 Test Base",
+      "last-modified": "2026-06-07T00:00:00+00:00",
+      "version": "rev5",
+      "oscal-version": "1.1.2"
+    },
+    "groups": [
+      {
+        "id": "ac",
+        "title": "Access Control",
+        "controls": [
+          {
+            "id": "ac-1",
+            "title": "Policy and Procedures",
+            "params": [{ "id": "ac-1_prm_1", "label": "review frequency" }],
+            "parts": [
+              {
+                "id": "ac-1_smt",
+                "name": "statement",
+                "prose": "Review the access control policy {{ insert: param, ac-1_prm_1 }}."
+              }
+            ]
+          },
+          {
+            "id": "ac-2",
+            "title": "Account Management",
+            "parts": [
+              {
+                "id": "ac-2_smt",
+                "name": "statement",
+                "prose": "Manage information system accounts."
+              }
+            ]
+          },
+          {
+            "id": "ac-3",
+            "title": "Access Enforcement",
+            "parts": [
+              {
+                "id": "ac-3_smt",
+                "name": "statement",
+                "prose": "Enforce approved authorizations for logical access."
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "ia",
+        "title": "Identification and Authentication",
+        "controls": [
+          {
+            "id": "IAC-06",
+            "title": "Multi-Factor Authentication",
+            "parts": [
+              {
+                "id": "IAC-06_smt",
+                "name": "statement",
+                "prose": "Enforce multi-factor authentication for privileged accounts."
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -20,62 +20,26 @@ package authz_test
 
 import (
 	"context"
-	"os"
 	"testing"
-	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
+// freshTenant returns a brand-new tenant id and registers cleanup that wipes
+// every row written under it. The cleanup is a pure FK-ordered tenant-scoped
+// DELETE returning a string, so it delegates to dbtest.SeedTenant (slice 435 /
+// 742 drain batch 22).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM decision_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM user_roles WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"decision_audit_log",
+		"user_roles",
+	)
 }
 
 // tenantTx opens a transaction on the RLS-enforced app pool and applies
@@ -277,10 +241,8 @@ func TestAuthzABAC_AuditorAuditPeriod(t *testing.T) {
 // Uses the real DB via app pool + tenant context.
 func TestAuthzAuditLog_BothOutcomesPersist(t *testing.T) {
 	t.Parallel()
-	appPool := openPool(t, appDSN(t))
-	defer appPool.Close()
-	adminPool := openPool(t, adminDSN(t))
-	defer adminPool.Close()
+	appPool := dbtest.NewAppPool(t)
+	adminPool := dbtest.NewMigratePool(t)
 
 	tenant := freshTenant(t, adminPool)
 	writer := authz.NewAuditWriter(appPool)
@@ -340,10 +302,8 @@ func TestAuthzAuditLog_BothOutcomesPersist(t *testing.T) {
 // installed for those commands under FORCE ROW LEVEL SECURITY.
 func TestAuthzAuditLog_AppendOnlyRLS(t *testing.T) {
 	t.Parallel()
-	appPool := openPool(t, appDSN(t))
-	defer appPool.Close()
-	adminPool := openPool(t, adminDSN(t))
-	defer adminPool.Close()
+	appPool := dbtest.NewAppPool(t)
+	adminPool := dbtest.NewMigratePool(t)
 
 	tenant := freshTenant(t, adminPool)
 	writer := authz.NewAuditWriter(appPool)
@@ -423,10 +383,8 @@ func TestAuthzAuditLog_AppendOnlyRLS(t *testing.T) {
 // DB through the app pool + tenant context.
 func TestAuthzDBRolesResolver(t *testing.T) {
 	t.Parallel()
-	appPool := openPool(t, appDSN(t))
-	defer appPool.Close()
-	adminPool := openPool(t, adminDSN(t))
-	defer adminPool.Close()
+	appPool := dbtest.NewAppPool(t)
+	adminPool := dbtest.NewMigratePool(t)
 
 	tenant := freshTenant(t, adminPool)
 

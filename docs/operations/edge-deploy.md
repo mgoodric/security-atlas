@@ -283,6 +283,60 @@ the edge Postgres on the next Watchtower pull. **This is by design**
 Edge is the cheap test channel; stable is the production channel.
 Never promote a commit to stable until edge has confirmed it green.
 
+## Upgrading: pull the compose, not just the image
+
+**The rule:** an edge upgrade means pulling the updated
+`docker-compose.edge.yml` (+ `.env.example` deltas) and re-running
+`up -d` — not relying on Watchtower alone.
+
+```sh
+cd ~/security-atlas && git pull        # refresh the compose template + .env.example
+docker compose \
+  -f deploy/docker/docker-compose.edge.yml \
+  --env-file deploy/docker/.env.edge \
+  -p security-atlas-edge \
+  up -d
+```
+
+**Why.** Watchtower advances the `atlas-edge`, `web-edge`, and
+`atlas-migrate-edge` container **images**; it never re-pulls the compose
+**file**. Services, labels, and gating are operator-managed. Slice 473
+added the always-run, backend-gating `atlas-migrate-edge` service (the
+`atlas-edge` backend is gated on it via `service_completed_successfully`),
+so a binary update always re-runs migrations before serving — **but only
+on a box whose compose file ships that service.** A box still on a pre-473
+compose lets Watchtower advance the binary while migrations only ever ran
+once at first boot. Every image bump with a new migration then drifts the
+schema (the confirmed 2026-06-05 and 2026-06-07 incidents).
+
+This is the slice-473 mechanism that
+[`docs/SELF_HOSTING.md`](../SELF_HOSTING.md#upgrading-pull-the-compose-not-just-the-image)
+documents for the stable channel; the edge channel works the same way.
+
+### Symptom of drift
+
+An HTTP 500 shortly after Watchtower bumps the edge image — where
+`docker compose -p security-atlas-edge logs atlas-edge` shows a
+CHECK-constraint violation (`..._action_check`, `SQLSTATE 23514`) or a
+missing relation/column (`SQLSTATE 42P01` / `42703`) — is migration
+drift: the binary is ahead of the schema.
+
+### Recovery
+
+- **Edge (disposable):** the fast path is usually
+  [wipe + recreate](#how-to-wipe--recreate-edge) (`down -v` then `up -d`),
+  which re-bootstraps a fresh schema. Edge data is not portable to stable,
+  so this is cheap.
+- **A box you want to keep (or to mirror the stable recovery):** pull the
+  compose and `up -d` as above — the now-present `atlas-migrate-edge`
+  applies the gap. If you genuinely cannot pull the compose, follow the
+  stop-gap hand-apply procedure documented in
+  [`docs/SELF_HOSTING.md`](../SELF_HOSTING.md#recovery): take a
+  [backup checkpoint](https://mgoodric.github.io/security-atlas/backup-restore/)
+  (slice 432) first, then apply pending `migrations/sql/*.sql` in filename
+  order and record each in the `schema_migrations` ledger. Do not omit the
+  backup or the ledger insert.
+
 ## Access control on `atlas-edge.home.gmoney.sh`
 
 Edge is operator-only by default. **Public exposure is not supported.**

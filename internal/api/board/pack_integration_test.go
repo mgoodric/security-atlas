@@ -37,6 +37,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- slice-032 harness extensions -----
@@ -114,8 +116,8 @@ func approveAllSections(t *testing.T, env testEnv, packID string) {
 // ===== AC-1: POST generates a DRAFT pack with all fixed sections =====
 
 func TestPackGenerate_DraftWithAllSections(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -152,8 +154,8 @@ func TestPackGenerate_DraftWithAllSections(t *testing.T) {
 
 // AC-1 edge cases: malformed period_end -> 400; missing bearer -> 401.
 func TestPackGenerate_BadInput(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -182,8 +184,8 @@ func TestPackGenerate_BadInput(t *testing.T) {
 // ===== AC-2: PUT a section overrides the templated narrative =====
 
 func TestPackUpdateSection_OverridesTemplatedText(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -210,8 +212,8 @@ func TestPackUpdateSection_OverridesTemplatedText(t *testing.T) {
 
 // PUT an unknown section key -> 404.
 func TestPackUpdateSection_UnknownKey(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -227,8 +229,8 @@ func TestPackUpdateSection_UnknownKey(t *testing.T) {
 // ===== AC-3: PUT the investment section accepts $ spend and recomputes =====
 
 func TestPackUpdateSection_InvestmentSpendRecomputes(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -273,8 +275,8 @@ func TestPackUpdateSection_InvestmentSpendRecomputes(t *testing.T) {
 // ===== AC-4: the asks section is freeform-editable =====
 
 func TestPackUpdateSection_AsksIsFreeform(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -294,8 +296,8 @@ func TestPackUpdateSection_AsksIsFreeform(t *testing.T) {
 // ===== AC-5 + D6: per-section approve -> publish -> frozen artifact =====
 
 func TestPackPublish_GatedOnEverySectionApproved(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -359,8 +361,8 @@ func TestPackPublish_GatedOnEverySectionApproved(t *testing.T) {
 // ===== AC-6: GET .md and /pdf =====
 
 func TestPackOutputs_MarkdownAndPDF(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -387,8 +389,8 @@ func TestPackOutputs_MarkdownAndPDF(t *testing.T) {
 // ===== AC-7: a published pack is immutable =====
 
 func TestPackPublished_IsImmutable(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -433,8 +435,8 @@ func TestPackPublished_IsImmutable(t *testing.T) {
 // ===== AC-8: open-findings section is populated from failing evaluations =====
 
 func TestPackOpenFindings_FromFailingEvaluations(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -468,8 +470,8 @@ func TestPackOpenFindings_FromFailingEvaluations(t *testing.T) {
 // ===== RLS: cross-tenant isolation =====
 
 func TestPackRLS_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshPackTenant(t, admin)
 	tenantB := freshPackTenant(t, admin)
 	envA := testServer(t, app, tenantA)
@@ -549,8 +551,8 @@ func freshPackVendorTenant(t *testing.T, admin *pgxpool.Pool) string {
 //   - all on time (zero past-due)        -> OnTime == Total, narrative "All N ... 100% on-time"
 //   - partial overdue                    -> mixed counts, narrative names the gap
 func TestPackVendorBurndown_PopulatedFromHighCriticalitySurface(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	t.Run("no_vendors_registered", func(t *testing.T) {
 		tenant := freshPackVendorTenant(t, admin)
@@ -664,8 +666,8 @@ func TestPackVendorBurndown_PopulatedFromHighCriticalitySurface(t *testing.T) {
 // vendor.Store.Burndown surface is tenant-RLS-scoped (slice 122); the new
 // adapter inherits that scoping through the tenant GUC on ctx.
 func TestPackVendorBurndown_RLSCrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshPackVendorTenant(t, admin)
 	tenantB := freshPackVendorTenant(t, admin)
 	envA := testServer(t, app, tenantA)

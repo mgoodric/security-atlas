@@ -41,6 +41,7 @@ jobs:
   changes:
     name: Detect changed paths
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     outputs:
       code: ${{ steps.filter.outputs.code }}
       # Slice 179 — narrow filter for the schema-removal-age check. The
@@ -56,7 +57,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
         id: filter
         with:
@@ -120,6 +121,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -127,8 +129,8 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
@@ -157,7 +159,7 @@ jobs:
       # profile is still uploaded as a workflow artifact so the merge
       # step in tests-integration can pull it.
       - name: Upload unit coverage to Codecov
-        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
@@ -179,6 +181,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -187,6 +190,49 @@ jobs:
           disable-sudo: true
 
       - run: echo "Docs-only change — skipped per dorny/paths-filter@v4 (slice 061)."
+
+  # Slice 695 — build the `atlas` binary ONCE and share it to the three
+  # playwright-family jobs (frontend-playwright / -prod-build / ui-honesty),
+  # which previously each recompiled the identical `./cmd/atlas` target on
+  # the identical ubuntu-latest runner (slice 693 Finding 1.2 / 2.1).
+  #
+  # Why a dedicated job and NOT a step in `build-go`: gating the playwright
+  # jobs on `build-go` (which runs `-race` unit tests, ~7.5 min) serialized
+  # them behind that whole job and made `Frontend · Playwright e2e` the PR
+  # critical path — a measured ~7-min wall-clock regression (slice 695
+  # decisions log D3, run 27581378713). This job does ONLY the atlas compile
+  # + upload (~1 min), so the `needs:` wait the playwright jobs inherit is
+  # ~1 min instead of ~7.5 min: the dedup's billing win is kept (one host
+  # compile shared 3×) WITHOUT the wall-clock regression. It is NOT a
+  # required check (absent from branch-protection) and needs no stub twin —
+  # it is `if: code == 'true'` like `build-go`, so on docs-only PRs it skips
+  # alongside the real playwright jobs (whose stubs then post the checks).
+  build-atlas:
+    name: Go · build atlas binary (shared)
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Build atlas binary
+        run: go build -o atlas ./cmd/atlas
+      - name: Upload atlas binary as workflow artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: atlas-binary
+          path: atlas
+          if-no-files-found: error
 
   # ====================================================================
   # Slice 417 — sharded integration matrix (Phase A serial + Phase B fan-out).
@@ -238,10 +284,18 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        leg: [A, B1, B2, B3]
+        # Slice 747: added B4 + B5. The leg labels here MUST match column 1 of
+        # scripts/integration-shards.txt; run-integration-shard.sh reads each
+        # leg's packages from that manifest. Adding a leg here is a new MATRIX
+        # job, NOT a new required-status-checks context — the required check is
+        # the aggregate `Go · integration (Postgres RLS)` fan-in below (which
+        # `needs:` this whole matrix), so no branch-protection change is needed
+        # (slice 417 AC-11 / slice 747 AC-3).
+        leg: [A, B1, B2, B3, B4, B5]
     services:
       postgres:
         image: postgres:16-alpine
@@ -284,8 +338,8 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
@@ -301,6 +355,51 @@ jobs:
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
           cosign-release: "v3.0.6"
+      - name: Start LocalStack KMS (slice 425 — OPTIONAL, leg B3 only)
+        # Slice 425: the internal/oscal/cosign LocalStack round-trip test
+        # (cosign_kms_localstack_integration_test.go) drives the REAL
+        # `cosign sign-blob --key awskms://...` -> `verify-blob` path
+        # (signblob.go) against a hermetic LocalStack KMS sandbox — the
+        # path the slice-413 local-key stand-in cannot reach. LocalStack is
+        # an OPTIONAL dependency: only leg B3 (which owns
+        # ./internal/oscal/cosign/... per scripts/integration-shards.txt)
+        # starts it, and the test is opt-in behind
+        # ATLAS_COSIGN_KMS_LOCALSTACK (set below for this leg only). When
+        # this step is absent (the other legs) the test t.Skips — the
+        # `Go · integration` job stays green either way (P0-425-1).
+        #
+        # Started via `docker run` (NOT a `services:` block) following the
+        # project's non-default-CMD optional-service convention (MinIO /
+        # NATS): we pin a community-edition tag and scope SERVICES=kms so
+        # the image needs no LocalStack license. The aws CLI used to create
+        # the ephemeral signing key is preinstalled on the GitHub-hosted
+        # ubuntu runner.
+        if: matrix.leg == 'B3'
+        run: |
+          docker run -d --name localstack \
+            -p 4566:4566 \
+            -e SERVICES=kms \
+            -e EAGER_SERVICE_LOADING=1 \
+            localstack/localstack:3.8
+          # Wait for the KMS service to report available (up to ~60s).
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:4566/_localstack/health | grep -q '"kms": "\(available\|running\)"'; then
+              echo "localstack kms ready"; break
+            fi
+            sleep 2
+          done
+      - name: Enable LocalStack KMS round-trip test (slice 425 — leg B3 only)
+        # Gate the opt-in env so the LocalStack-backed test runs ONLY on the
+        # leg where LocalStack is up. On every other leg these are unset and
+        # the test t.Skips. Credentials are LocalStack dummy values (the
+        # access key is "test"; LocalStack accepts any non-empty secret) —
+        # no real key material, GitGuardian-safe (P0-425-3 / AC-7).
+        if: matrix.leg == 'B3'
+        run: |
+          {
+            echo "ATLAS_COSIGN_KMS_LOCALSTACK=1"
+            echo "ATLAS_COSIGN_KMS_LOCALSTACK_ENDPOINT=http://localhost:4566"
+          } >> "$GITHUB_ENV"
       - name: Start MinIO
         run: |
           docker run -d --name minio \
@@ -409,7 +508,7 @@ jobs:
         if: matrix.leg == 'A'
         run: bash scripts/check-integration-shard-coverage.sh
       - name: Upload integration coverage to Codecov
-        uses: codecov/codecov-action@e79a6962e0d4c0c17b229090214935d2e33f8354 # v6
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v6
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.txt
@@ -526,6 +625,7 @@ jobs:
     needs: [changes, build-go, tests-integration-shard]
     if: always() && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -543,8 +643,8 @@ jobs:
           echo "The required check 'Go · integration (Postgres RLS)' is RED because a shard leg failed." >&2
           exit 1
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
@@ -609,6 +709,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -623,6 +724,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -630,8 +732,8 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
@@ -672,6 +774,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -693,6 +796,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -700,8 +804,8 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
@@ -739,6 +843,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -753,6 +858,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -760,7 +866,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: bufbuild/buf-action@fd21066df7214747548607aaa45548ba2b9bc1ff # v1
         with:
           setup_only: true
@@ -776,6 +882,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -790,6 +897,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -797,13 +905,13 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build web workspace
         run: npm run build --workspace @security-atlas/web --if-present
       - name: Build sdk-typescript workspace
@@ -814,6 +922,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -828,6 +937,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -835,19 +945,26 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # Slice 697 — run ruff via `uv tool run` (the pattern the oscal-bridge
+      # job already uses) so setup-uv's enable-cache keys the ruff install on
+      # the runner. A bare `cache: pip` on setup-python would no-op here:
+      # there is no requirements file for it to hash. Ruff stays pinned to
+      # 0.7.0 and the check/format-check commands keep their whole-repo `.`
+      # scope.
+      - name: Install uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
-          python-version: "3.11"
-      - run: pip install ruff==0.7.0
-      - run: ruff check .
-      - run: ruff format --check .
+          enable-cache: true
+      - run: uv tool run ruff@0.7.0 check .
+      - run: uv tool run ruff@0.7.0 format --check .
 
   lint-python-stub:
     name: Python · ruff
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -863,6 +980,7 @@ jobs:
   precommit:
     name: pre-commit · all hooks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -870,16 +988,29 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+          cache: true
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
+          cache: "npm"
+      # Slice 693 — cache the pre-commit hook environments (the dominant
+      # cost of this job: pre-commit creates a venv/node_env per hook repo
+      # on a cold run). Keyed on the config hash so a hook-rev bump busts
+      # it; restore-keys lets an unchanged-config run reuse the prior env.
+      - name: Cache pre-commit hook environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-
       - run: pip install pre-commit==3.8.0
       # Slice 158: install actionlint so the slice-158 pre-commit hook
       # has its binary on PATH. Pinned to a tag (not a SHA) because the
@@ -904,6 +1035,23 @@ jobs:
       - name: Validate config
         run: pre-commit validate-config
       - name: Run all hooks against all files
+        # Slice 698 — skip the language-format hooks that DEDICATED jobs already
+        # enforce, so this job owns only the hooks no other job covers
+        # (trailing-whitespace, end-of-file-fixer, check-yaml/json/toml,
+        # detect-private-key, detect-aws-credentials, mixed-line-ending,
+        # actionlint, cache-path-guard, prettier). Verified coverage:
+        #   gofmt       → `Go · lint` golangci-lint v2 enforces the gofmt +
+        #                 goimports formatters (.golangci.yml formatters block).
+        #   ruff        → `Python · ruff` runs `ruff check .` (whole-repo lint).
+        #   ruff-format → `Python · ruff` runs `ruff format --check .` (whole-repo).
+        # prettier is NOT skipped: no dedicated job runs prettier over the
+        # precommit hook's file set (root markdown/YAML/JSON + web TS/TSX
+        # formatting). `Frontend · lint` is web-scoped and runs eslint only.
+        # Secret-detection + structural hooks are NEVER skipped (GitGuardian is
+        # a backstop, not a replacement). The LOCAL .pre-commit-config.yaml is
+        # unchanged — full enforcement on developer machines. (Slice 693 Finding 6A.)
+        env:
+          SKIP: gofmt,ruff,ruff-format
         run: pre-commit run --all-files --show-diff-on-failure
       # Slice 158 AC-17: smoke test asserts actionlint actually flags
       # the invalid `administration: read` scope. Runs AFTER the
@@ -925,6 +1073,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -932,9 +1081,12 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: oscal-bridge/uv.lock
       - name: Set up Python
         run: uv python install 3.11
       - name: Sync oscal-bridge env
@@ -953,6 +1105,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -991,6 +1144,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -1014,7 +1168,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Run self-host bundle smoke test (${{ matrix.mode }})
         run: deploy/docker/test-self-host-bundle.sh ${{ matrix.mode }}
       - name: Dump compose logs on failure
@@ -1069,6 +1223,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1101,6 +1256,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1108,8 +1264,8 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: azure/setup-helm@dda3372f752e03dde6b3237bc9431cdc2f7a02a2 # v5
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
         with:
           version: v3.16.2
       - name: helm lint (default values)
@@ -1126,6 +1282,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1154,6 +1311,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
@@ -1164,14 +1322,14 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces
         working-directory: .
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Run vitest (with coverage)
         run: npm run test:coverage
       - name: Upload coverage summary as workflow artifact
@@ -1187,6 +1345,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1209,6 +1368,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: web
@@ -1219,14 +1379,14 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces
         working-directory: .
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Run eslint
         run: npm run lint
 
@@ -1235,6 +1395,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1265,9 +1426,14 @@ jobs:
   # ====================================================================
   frontend-playwright:
     name: Frontend · Playwright e2e
-    needs: changes
+    # Slice 695 — also depends on build-atlas, the lightweight job that
+    # builds + uploads the shared atlas binary this job downloads (instead
+    # of recompiling). NOT build-go: gating on build-go's ~7.5-min -race
+    # unit run regressed wall-clock; build-atlas is ~1 min (decisions D3).
+    needs: [changes, build-atlas]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Slice 082 — un-quarantined. Slice 079's `continue-on-error: true`
     # is removed; the job again fails the PR on red. The seed-data
     # harness (`web/e2e/seed.ts`, `fixtures/e2e/*.sql`) supplies the
@@ -1335,14 +1501,14 @@ jobs:
           # decision D5 for the rationale.
           disable-sudo: false
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Start MinIO
         run: |
@@ -1384,11 +1550,22 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
-      - name: Build atlas server
-        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      # Slice 695 — download the prebuilt atlas binary from build-atlas instead
+      # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
+      # Unix executable bit, so `install -m 0755` is REQUIRED to make the
+      # downloaded file runnable at /usr/local/bin/atlas.
+      - name: Download prebuilt atlas binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: atlas-binary
+          path: /tmp/atlas-bin
+      - name: Install prebuilt atlas binary
+        run: |
+          install -m 0755 /tmp/atlas-bin/atlas /usr/local/bin/atlas
+          atlas --version || true
       - name: Install web workspace
         working-directory: .
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build web workspace
         working-directory: web
         run: npm run build
@@ -1450,6 +1627,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1499,9 +1677,12 @@ jobs:
   # ====================================================================
   frontend-playwright-prod-build:
     name: Frontend · Playwright e2e (prod-build standalone)
-    needs: changes
+    # Slice 695 — also depends on build-atlas (the lightweight shared-binary
+    # job), NOT build-go (its slow -race run regressed wall-clock; decisions D3).
+    needs: [changes, build-atlas]
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     # Slice 399 — BLOCKING. This leg builds + boots the Next.js
     # `output: "standalone"` server (slice 387 harness) and runs BOTH
     # prod-build-only regression specs against it with ATLAS_PROD_BUILD=1:
@@ -1567,14 +1748,14 @@ jobs:
           # permitted on this one job.
           disable-sudo: false
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Start MinIO
         run: |
@@ -1616,11 +1797,22 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
-      - name: Build atlas server
-        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      # Slice 695 — download the prebuilt atlas binary from build-atlas instead
+      # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
+      # Unix executable bit, so `install -m 0755` is REQUIRED. The web
+      # standalone build below is unrelated and stays.
+      - name: Download prebuilt atlas binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: atlas-binary
+          path: /tmp/atlas-bin
+      - name: Install prebuilt atlas binary
+        run: |
+          install -m 0755 /tmp/atlas-bin/atlas /usr/local/bin/atlas
+          atlas --version || true
       - name: Install web workspace
         working-directory: .
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Build web workspace (standalone output)
         # Slice 387 — `build:standalone` = `next build && cp -r public
         # .next/standalone/web/public`. The bare `next build` does NOT
@@ -1702,6 +1894,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -1726,9 +1919,12 @@ jobs:
   # ====================================================================
   frontend-ui-honesty:
     name: Frontend · UI honesty (advisory)
-    needs: changes
+    # Slice 695 — also depends on build-atlas (the lightweight shared-binary
+    # job), NOT build-go (its slow -race run regressed wall-clock; decisions D3).
+    needs: [changes, build-atlas]
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     continue-on-error: true
     permissions:
       contents: read
@@ -1771,17 +1967,17 @@ jobs:
           # system libs. Same exception as slice 069 / 117 D5.
           disable-sudo: false
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
       - name: Validate mockup-spec manifest (schema + file-existence)
         # AC-10a / P0-178-11. Runs the manifest validator's vitest
         # smoke test which calls `loadManifest()` end-to-end. Fails
@@ -1829,8 +2025,18 @@ jobs:
               *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
             esac
           done
-      - name: Build atlas server
-        run: go build -o /usr/local/bin/atlas ./cmd/atlas
+      # Slice 695 — download the prebuilt atlas binary from build-atlas instead
+      # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
+      # Unix executable bit, so `install -m 0755` is REQUIRED.
+      - name: Download prebuilt atlas binary
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+        with:
+          name: atlas-binary
+          path: /tmp/atlas-bin
+      - name: Install prebuilt atlas binary
+        run: |
+          install -m 0755 /tmp/atlas-bin/atlas /usr/local/bin/atlas
+          atlas --version || true
       - name: Build web workspace
         working-directory: web
         run: npm run build
@@ -1887,14 +2093,44 @@ jobs:
           echo "report_md=$report_md" >> "$GITHUB_OUTPUT"
           echo "report_json=$report_json" >> "$GITHUB_OUTPUT"
           exit 0
+      - name: Compare finding count against committed baseline
+        id: count
+        # Slice 699 (AC-2): the standing finding count is identical PR-to-PR,
+        # so refreshing the sticky on every run is pure noise. Post/update only
+        # when THIS run's total differs from the baseline committed on main.
+        # When equal (or the report is missing), skip the comment and rely on
+        # the advisory CHECK + the uploaded artifact (both UNCHANGED — AC-4).
+        run: |
+          baseline_file="web/e2e-audit/.ui-honesty-baseline-count"
+          baseline="$(grep -v '^#' "$baseline_file" 2>/dev/null | tr -dc '0-9' || true)"
+          baseline="${baseline:-}"
+          total=""
+          if [ -n "${{ steps.audit.outputs.report_json }}" ] && [ -f "web/${{ steps.audit.outputs.report_json }}" ]; then
+            total=$(jq -r '.summary.total' "web/${{ steps.audit.outputs.report_json }}")
+          fi
+          echo "baseline=${baseline:-<none>}; this run total=${total:-<none>}"
+          # Decide whether to surface the comment.
+          changed=true
+          if [ -n "$total" ] && [ -n "$baseline" ] && [ "$total" = "$baseline" ]; then
+            changed=false
+          fi
+          echo "changed=${changed}" >> "$GITHUB_OUTPUT"
+          echo "baseline=${baseline}" >> "$GITHUB_OUTPUT"
+          if [ "$changed" = "false" ]; then
+            echo "UI-honesty count unchanged vs baseline (${baseline}); skipping comment refresh (slice 699)."
+          fi
       - name: Build sticky comment body
         # Slice 089 / 120 sticky-comment shape. Hidden HTML marker
         # makes the comment idempotent — re-running the workflow
         # updates the same comment instead of stacking.
+        # Slice 699 (AC-2): only built when the count differs from baseline.
+        if: steps.count.outputs.changed == 'true'
         run: |
           {
             echo "<!-- atlas-ui-honesty-marker -->"
             echo "## Frontend · UI honesty (advisory) — slice 178"
+            echo
+            echo "_Finding count changed vs. base (\`${{ steps.count.outputs.baseline }}\` baseline) — refreshing this advisory. Update \`web/e2e-audit/.ui-honesty-baseline-count\` once the new standing count is intentional (slice 699)._"
             echo
             if [ -n "${{ steps.audit.outputs.report_json }}" ] && [ -f "web/${{ steps.audit.outputs.report_json }}" ]; then
               total=$(jq -r '.summary.total' "web/${{ steps.audit.outputs.report_json }}")
@@ -1931,6 +2167,9 @@ jobs:
             echo "_Informational only — never blocks merge. Reproduce locally: see [\`web/e2e-audit/README.md\`](../blob/main/web/e2e-audit/README.md). Slice 178 · ${{ github.run_id }}._"
           } > comment-body.md
       - name: Post or update sticky PR comment
+        # Slice 699 (AC-2): post/update only when the finding count differs
+        # from the committed baseline; otherwise rely on the advisory check.
+        if: steps.count.outputs.changed == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -1968,6 +2207,7 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2006,6 +2246,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2013,8 +2254,8 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
@@ -2060,6 +2301,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2094,6 +2336,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2101,8 +2344,8 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
@@ -2133,6 +2376,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2169,12 +2413,13 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Install ripgrep
         # Required by scripts/audit-deps.sh — the ubuntu-latest runner
         # doesn't pre-bundle ripgrep as of 2026-05; install explicitly.
@@ -2184,6 +2429,8 @@ jobs:
       - name: Run audit-deps.sh
         id: audit
         run: |
+          # AC-4: the audit CHECK is UNCHANGED — it still runs over all four
+          # manifests and still exits with the script's own rc.
           set +e
           bash scripts/audit-deps.sh > audit-deps.tsv 2> audit-deps.stderr
           rc=$?
@@ -2193,31 +2440,61 @@ jobs:
           echo "phantom_count=$phantom_count" >> "$GITHUB_OUTPUT"
           echo "Phantom-dep findings: $phantom_count"
           exit "$rc"
+      - name: Diff PHANTOM set against committed baseline
+        id: diff
+        run: |
+          # Slice 699 (AC-3): only NEW phantoms (introduced by THIS PR) should
+          # trigger a comment. The baseline file captures the phantom set that
+          # already exists on main (the known false-positives). We post only
+          # when the current run surfaces a phantom NOT in the baseline.
+          baseline="scripts/audit-deps-phantom-baseline.tsv"
+          # Current PHANTOM set, normalized to "ecosystem<TAB>package", sorted.
+          awk -F'\t' '$3=="PHANTOM" { print $1"\t"$2 }' audit-deps.tsv \
+            | sort -u > phantom-current.txt
+          # Baseline set (header-skipped, comment-skipped), same normalization.
+          if [ -f "$baseline" ]; then
+            grep -v '^#' "$baseline" | awk -F'\t' 'NF>=2 && $1!="ecosystem" { print $1"\t"$2 }' \
+              | sort -u > phantom-baseline.txt
+          else
+            : > phantom-baseline.txt
+          fi
+          # NEW = current minus baseline.
+          comm -23 phantom-current.txt phantom-baseline.txt > phantom-new.txt || true
+          new_count=$(grep -c . phantom-new.txt || true)
+          new_count=${new_count:-0}
+          echo "new_count=${new_count}" >> "$GITHUB_OUTPUT"
+          echo "NEW phantom(s) vs baseline: ${new_count}"
       - name: Build comment body
+        # Only assemble + post when this PR introduces a NEW phantom (AC-3).
+        if: steps.diff.outputs.new_count != '0'
         id: body
         run: |
           {
             echo "<!-- atlas-phantom-deps-marker -->"
             echo "## Deps · phantom audit (slice 120)"
             echo
-            phantom_count="${{ steps.audit.outputs.phantom_count }}"
-            if [ "$phantom_count" -eq 0 ]; then
-              echo "No PHANTOM direct dependencies detected across the four manifests. "
-              echo "(\`web/package.json\`, \`go.mod\`, \`oscal-bridge/pyproject.toml\`, \`docs-site/requirements.txt\`)"
-            else
-              echo "$phantom_count direct dep(s) classified PHANTOM — declared in a manifest but not referenced in any source file, allowlisted config, or build script:"
-              echo
-              echo '| ecosystem | package | evidence |'
-              echo '|---|---|---|'
-              awk -F'\t' '$3=="PHANTOM" { printf "| %s | `%s` | (no consumer found) |\n", $1, $2 }' audit-deps.tsv
-              echo
-              echo "Known KEEP cases (peer-detected by their consumer; not actually phantom) are tracked in [\`docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md\`](../blob/main/docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md) D5. If your PR adds a NEW dep that surfaces here, drop the dep (or extend the decisions-log KEEP table with rationale)."
-            fi
+            new_count="${{ steps.diff.outputs.new_count }}"
+            echo "${new_count} **new** direct dep(s) classified PHANTOM by this PR — declared in a manifest but not referenced in any source file, allowlisted config, or build script:"
+            echo
+            echo '| ecosystem | package | evidence |'
+            echo '|---|---|---|'
+            while IFS= read -r line; do
+              [ -n "$line" ] || continue
+              eco=$(printf '%s' "$line" | cut -f1)
+              pkg=$(printf '%s' "$line" | cut -f2)
+              [ -n "$pkg" ] || continue
+              echo "| ${eco} | \`${pkg}\` | (no consumer found) |"
+            done < phantom-new.txt
+            echo
+            echo "Known KEEP cases (peer-detected by their consumer; not actually phantom) are tracked in [\`docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md\`](../blob/main/docs/audit-log/120-audit-and-remove-phantom-dependencies-decisions.md) D5. Drop the dep, or — if it is a genuine peer-detected KEEP — add it to \`scripts/audit-deps-phantom-baseline.tsv\` with rationale."
             echo
             echo "---"
             echo "_Informational only. Reproduce locally: \`bash scripts/audit-deps.sh\`. Slice 120 · ${{ github.run_id }}._"
           } > comment-body.md
       - name: Post or update sticky PR comment
+        # Slice 699: post ONLY on a NEW phantom. The baseline phantoms (known
+        # false-positives that exist on main) no longer re-trigger a comment.
+        if: steps.diff.outputs.new_count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -2242,6 +2519,8 @@ jobs:
           path: |
             audit-deps.tsv
             audit-deps.stderr
+            phantom-current.txt
+            phantom-new.txt
             comment-body.md
           if-no-files-found: warn
 
@@ -2250,6 +2529,7 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - run: echo "Non-PR push OR docs-only change — phantom audit skipped (slice 120)."
 
@@ -2290,6 +2570,7 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.schemas == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: read
       pull-requests: read
@@ -2300,7 +2581,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # Need full main history so `git log --diff-filter=A` can
           # resolve the introduction commit for every removed file.
@@ -2377,6 +2658,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2384,10 +2666,10 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
         with:
-          node-version: "20"
+          node-version: "22"
           cache: "npm"
       - name: Install workspaces (production dependency tree only)
         # Use the lockfile-faithful install so audit sees the same
@@ -2426,6 +2708,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2487,6 +2770,7 @@ jobs:
   branch-protection-drift-validate:
     name: Infra · branch-protection (PR-time validate)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'pull_request'
     continue-on-error: true
     permissions:
@@ -2499,7 +2783,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Validate .github/branch-protection.json shape
         id: validate
@@ -2591,6 +2875,7 @@ jobs:
   branch-protection-drift-live:
     name: Infra · branch-protection (live drift)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     continue-on-error: true
     permissions:
@@ -2602,7 +2887,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       # The elevated PAT is `env:`-scoped to ONLY this step. No other
       # step in the job sees `BRANCH_PROTECTION_READ_TOKEN`. If the
@@ -2665,6 +2950,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2672,18 +2958,32 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      # Slice 694: build via buildx + GitHub Actions layer cache so the
+      # atlas multi-stage build (a full Go compile) is reused across runs.
+      # `load: true` loads the built image into the local Docker daemon so
+      # Trivy's `image-ref: atlas:trivy-scan` resolves it (a buildx build
+      # without `load` leaves no local image). No `push` — this is the scan
+      # image, never published. Caching changes build speed only, not the
+      # scan inputs, so the security posture is identical (slice 693 Tier-2
+      # Finding 1.1; SHA pins reused verbatim from container-publish.yml per
+      # the slice 128 pin discipline).
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
       # Build the atlas image locally so Trivy has a target without
       # needing to push to a registry. The Dockerfile is the same one
       # release.yml uses; if a slice changes the Dockerfile, this job
       # picks the change up via the `changes.code` filter (which
       # includes deploy/**, Dockerfile*, and **/Dockerfile).
       - name: Build atlas image (local tag)
-        run: |
-          docker build \
-            --file deploy/docker/atlas.Dockerfile \
-            --tag atlas:trivy-scan \
-            .
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        with:
+          context: .
+          file: deploy/docker/atlas.Dockerfile
+          tags: atlas:trivy-scan
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
       # Pinned action version (not @latest) for reproducibility. The
       # action wraps Trivy CLI; see decisions log D3 for the upgrade
       # cadence. severity HIGH,CRITICAL + exit-code 1 implements the
@@ -2712,6 +3012,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2751,6 +3052,7 @@ jobs:
   actions-pin-check:
     name: actions-pin-check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2758,7 +3060,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Run check-action-pins.sh
         run: bash scripts/check-action-pins.sh
@@ -2801,6 +3103,7 @@ jobs:
   cache-path-guard:
     name: cache-path-guard
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2808,7 +3111,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Run check-staged-cache-paths.sh against the tracked tree
         run: bash scripts/check-staged-cache-paths.sh --all-tracked
@@ -2842,6 +3145,7 @@ jobs:
   openapi-drift-check:
     name: openapi-drift-check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2849,9 +3153,9 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: "1.26"
           cache: true
@@ -2896,6 +3200,7 @@ jobs:
   integration-enrolment-check:
     name: integration-enrolment-check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2903,7 +3208,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Run audit-integration-enrolment self-test
         run: bash scripts/audit-integration-enrolment_test.sh
@@ -2945,6 +3250,7 @@ jobs:
   coverage-excludes-check:
     name: coverage-excludes-check
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -2952,7 +3258,7 @@ jobs:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Run check-coverage-excludes self-test
         run: bash scripts/check-coverage-excludes_test.sh
@@ -2986,12 +3292,19 @@ jobs:
     needs: changes
     if: github.event_name == 'pull_request' && needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Slice 699: full history so `git diff origin/main...HEAD` can scope
+          # the sticky comment to the test files THIS PR changed (the underlying
+          # whole-repo check below still scans every file — only the comment is
+          # diff-scoped).
+          fetch-depth: 0
 
       - name: Run assertion-density self-test
         run: bash scripts/assertion-density_test.sh
@@ -3001,18 +3314,45 @@ jobs:
         run: |
           # Advisory by design: the script always exits 0 (warnings go to
           # stderr). Capture both streams for the sticky PR comment.
+          # AC-4: this whole-repo scan is the CHECK and is UNCHANGED — it still
+          # runs over every *_test.go and reports the same below-threshold count.
           set +e
           bash scripts/assertion-density.sh > density.txt 2> density.warn
           rc=$?
           set -e
           # Count below-threshold files from the JSON view (deterministic).
-          below=$(DENSITY_FORMAT=json bash scripts/assertion-density.sh \
-            | jq -r '.below_threshold')
+          # Also persist the JSON so the comment step can diff-scope its rows.
+          DENSITY_FORMAT=json bash scripts/assertion-density.sh > density.json
+          below=$(jq -r '.below_threshold' density.json)
           echo "below=$below" >> "$GITHUB_OUTPUT"
           echo "assertion-density below-threshold file(s): $below"
           cat density.txt
           cat density.warn || true
           exit "$rc"
+
+      - name: Scope below-threshold findings to PR-changed files
+        id: scope
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: |
+          # Slice 699 (AC-1): render only the below-threshold test files that
+          # THIS PR touched. `git diff --name-only origin/<base>...HEAD` yields
+          # repo-relative paths (no leading ./); the density JSON keys files as
+          # ./<path>, so we strip the ./ before matching.
+          git fetch --no-tags --depth=0 origin "${BASE_REF}" >/dev/null 2>&1 || \
+            git fetch --no-tags origin "${BASE_REF}" >/dev/null 2>&1 || true
+          git diff --name-only "origin/${BASE_REF}...HEAD" -- '*_test.go' \
+            | sort -u > changed-tests.txt || true
+          changed_count=$(wc -l < changed-tests.txt | tr -d ' ')
+          echo "changed test file(s): ${changed_count}"
+          # Filter the below-threshold rows to the changed set.
+          jq -r '.rows[] | select(.below_threshold == true) | .file | ltrimstr("./")' \
+            density.json | sort -u > below-all.txt
+          # Intersection: below-threshold AND changed-in-this-PR.
+          comm -12 below-all.txt changed-tests.txt > below-changed.txt || true
+          scoped_count=$(wc -l < below-changed.txt | tr -d ' ')
+          echo "scoped=${scoped_count}" >> "$GITHUB_OUTPUT"
+          echo "below-threshold findings in changed files: ${scoped_count}"
 
       - name: Build comment body
         run: |
@@ -3020,18 +3360,30 @@ jobs:
             echo "<!-- atlas-assertion-density-marker -->"
             echo "## QA · assertion density (slice 353 Q-6)"
             echo
+            scoped="${{ steps.scope.outputs.scoped }}"
             below="${{ steps.density.outputs.below }}"
-            if [ "$below" -eq 0 ]; then
-              echo "Every scanned Go test file meets the assertion-density threshold "
-              echo "(1 assertion per 20 LOC)."
+            if [ "$scoped" -eq 0 ]; then
+              echo "No assertion-density findings in the test files this PR changed."
+              echo
+              echo "(Whole-repo scan still reports ${below} file(s) below the "
+              echo "1-assertion-per-20-LOC threshold; the full census is the status "
+              echo "check + the \`assertion-density-report\` artifact, scoped out of "
+              echo "this comment per slice 699.)"
             else
-              echo "$below test file(s) fall below the assertion-density threshold "
-              echo "(fewer than 1 assertion per 20 LOC). Low density often means a test "
-              echo "exercises code for coverage without asserting on the result:"
+              echo "${scoped} test file(s) **changed in this PR** fall below the "
+              echo "assertion-density threshold (fewer than 1 assertion per 20 LOC). "
+              echo "Low density often means a test exercises code for coverage "
+              echo "without asserting on the result:"
               echo
               echo '```'
-              cat density.warn
+              # Render only the warn lines for the changed-and-below files.
+              while IFS= read -r f; do
+                grep -F -- "./${f}:" density.warn || true
+              done < below-changed.txt
               echo '```'
+              echo
+              echo "(Whole-repo scan reports ${below} file(s) below threshold; the "
+              echo "full census is the \`assertion-density-report\` artifact.)"
             fi
             echo
             echo "---"
@@ -3063,6 +3415,8 @@ jobs:
           path: |
             density.txt
             density.warn
+            density.json
+            below-changed.txt
             density-comment.md
           if-no-files-found: warn
 
@@ -3071,5 +3425,351 @@ jobs:
     needs: changes
     if: github.event_name != 'pull_request' || needs.changes.outputs.code != 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - run: echo "Non-PR push OR docs-only change — assertion-density advisory skipped (slice 393)."
+
+  # ====================================================================
+  # Slice 631 — fail-closed merge-gate aggregator (mechanism (a)).
+  #
+  # THE HOLE THIS CLOSES (slice 474 / parent slice 633 D6): a required
+  # check can be RED — or, worse, *never actually run* (path-filter
+  # skipped, or concurrency-cancelled mid-flight) — at merge time and the
+  # merge still completes. Branch protection's "require status checks to
+  # pass" reliably blocks a check that ran and reported RED, but it treats
+  # a required check that ended `skipped`/`cancelled`/`neutral`
+  # inconsistently across the skipped-vs-pending distinction. Slice 474
+  # merged with `Go · integration (shard A)` a real 10m21s FAIL; the
+  # regression then hid on `main` for ~3 weeks because every subsequent
+  # `main` commit either (1) path-filter-SKIPPED the shard legs
+  # (docs/status-only commits don't touch Go paths) or (2) had its `main`
+  # run CONCURRENCY-CANCELLED by the next merge before the shard leg
+  # completed. So no *completed* shard-A run on `main` re-caught it. This
+  # is the `CI path-filter as gap-multiplier` pattern (project memory):
+  # the first PR to exercise a filtered path to completion surfaces the
+  # accumulated breakage.
+  #
+  # FAIL-CLOSED LOGIC (the load-bearing part — read carefully):
+  #
+  #   * This job runs with `if: always()` and `needs:` every required,
+  #     path-filterable leg + the `changes` job. `always()` guarantees it
+  #     runs EVEN WHEN an upstream leg failed/was-cancelled/was-skipped —
+  #     without it, a failed `needs:` would SKIP this job, and a skipped
+  #     required check is exactly the hole we are closing.
+  #
+  #   * It distinguishes the two legitimate worlds via the path-filter
+  #     output `needs.changes.outputs.code`:
+  #       - code == 'false' (docs/status-only PR): the real legs are
+  #         legitimately `skipped` (their stub-twins post the green named
+  #         checks). The gate PASSES — we do NOT make docs-only PRs pay
+  #         the full matrix (preserves the slice-061 cost optimization).
+  #       - code == 'true' (Go-affecting PR — this very PR touches
+  #         `.github/workflows/**`, which is in the `code` filter): EVERY
+  #         required leg below MUST be `success`. Any leg that is
+  #         `failure`, `cancelled`, OR `skipped` fails this gate CLOSED.
+  #         `skipped`-while-needed is the exact slice-474 hole: a Go PR
+  #         whose shard leg never ran must NOT be mergeable.
+  #
+  #   * `tests-integration-shard` is a matrix (legs A/B1/B2/B3/B4). A matrix
+  #     job's `result` in `needs` is the AGGREGATE: `success` only if every
+  #     leg succeeded; `failure` if any leg failed; `cancelled` if any was
+  #     cancelled. So one RED shard ⇒ aggregate `failure` ⇒ gate RED. This
+  #     is the precise signal slice 474 lacked at the branch-protection
+  #     layer (the per-leg `Go · integration (shard ...)` checks are NOT in
+  #     the required-contexts list; only the roll-up name was, and the
+  #     roll-up could be cancelled/skipped without blocking).
+  #
+  # WHY AN AGGREGATOR (mechanism a) RATHER THAN (b) PATHS-FILTER FIX OR
+  # (c) POST-MERGE CANARY ALONE: (b) cannot fix GitHub's skipped-vs-pending
+  # required-check treatment from inside a workflow; (c) only detects
+  # AFTER merge. The aggregator BLOCKS before merge and is the single name
+  # branch protection can require, collapsing the skipped/cancelled/failed
+  # ambiguity into one deterministic `success`-or-RED signal. See
+  # docs/audit-log/631-ci-red-shard-merge-guard-decisions.md.
+  #
+  # CONSERVATIVE-BY-DESIGN: a normal GREEN Go PR has every leg `success`,
+  # so the gate is GREEN. A docs-only PR has `code == 'false'`, so the
+  # gate short-circuits GREEN. The ONLY way this gate is RED is a real
+  # failed/cancelled/skipped-but-needed leg — which is exactly when the
+  # merge SHOULD be blocked. It adds no new failure mode for a clean PR.
+  #
+  # MAINTAINER HAND-OFF (cannot be done from a PR): add the check name
+  # `CI · merge-gate` to `.github/branch-protection.json`'s
+  # `required_status_checks.contexts` and apply it to live branch
+  # protection via `bash scripts/apply-branch-protection.sh`. Until that
+  # is done, this gate runs and reports but does NOT block — it is
+  # advisory. See the decisions log "branch-protection hand-off" section.
+  # ====================================================================
+  merge-gate:
+    name: CI · merge-gate
+    needs:
+      - changes
+      - build-go
+      - tests-integration-shard
+      - tests-integration
+      - lint-go
+      - sqlc-drift
+      - proto
+      - build-frontend
+      - frontend-playwright
+      - lint-python
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Evaluate fail-closed merge-gate
+        env:
+          # Whether this PR/push touches Go-affecting paths (dorny/paths-filter).
+          CODE: ${{ needs.changes.outputs.code }}
+          # Per-leg results. For the matrix `tests-integration-shard`, this
+          # is the AGGREGATE result across legs A/B1/B2/B3 (failure if any
+          # leg failed, cancelled if any was cancelled, success only if all
+          # legs succeeded).
+          R_BUILD_GO: ${{ needs.build-go.result }}
+          R_SHARDS: ${{ needs.tests-integration-shard.result }}
+          R_INTEGRATION: ${{ needs.tests-integration.result }}
+          R_LINT_GO: ${{ needs.lint-go.result }}
+          R_SQLC: ${{ needs.sqlc-drift.result }}
+          R_PROTO: ${{ needs.proto.result }}
+          R_FRONTEND_BUILD: ${{ needs.build-frontend.result }}
+          R_PLAYWRIGHT: ${{ needs.frontend-playwright.result }}
+          R_PYTHON: ${{ needs.lint-python.result }}
+        run: |
+          set -euo pipefail
+
+          # Docs/status-only PR: the real legs are legitimately `skipped`
+          # (their slice-061 stub-twins post the green named checks). Pass —
+          # we do NOT make a no-Go PR pay the full matrix (AC-2). This is
+          # the ONLY branch where a `skipped` leg is acceptable.
+          if [ "${CODE:-}" != "true" ]; then
+            echo "code='${CODE:-}' (no Go-affecting changes) — required legs legitimately skipped; merge-gate PASSES."
+            exit 0
+          fi
+
+          echo "code='true' (Go-affecting PR) — every required leg MUST be 'success'."
+          echo "A leg that is failure/cancelled/skipped fails this gate CLOSED (slice 474 hole)."
+          echo
+
+          fail=0
+          # require <leg-display-name> <result>
+          # PASS only on exactly 'success'. Anything else — failure,
+          # cancelled, or skipped-while-Go-changes-present — is fail-closed.
+          require() {
+            local name="$1" result="$2"
+            if [ "$result" = "success" ]; then
+              echo "  OK    ${name}: ${result}"
+            else
+              echo "  BLOCK ${name}: ${result}  <-- not 'success' on a Go-affecting PR" >&2
+              fail=1
+            fi
+          }
+
+          require "Go · build + test"                 "$R_BUILD_GO"
+          require "Go · integration (shard matrix)"    "$R_SHARDS"
+          require "Go · integration (Postgres RLS)"    "$R_INTEGRATION"
+          require "Go · lint"                          "$R_LINT_GO"
+          require "Go · sqlc generate diff"            "$R_SQLC"
+          require "Proto · lint + generate diff"       "$R_PROTO"
+          require "Frontend · install + build"         "$R_FRONTEND_BUILD"
+          require "Frontend · Playwright e2e"          "$R_PLAYWRIGHT"
+          require "Python · ruff"                      "$R_PYTHON"
+
+          if [ "$fail" -ne 0 ]; then
+            echo >&2
+            echo "merge-gate is RED: a required leg did not succeed on a Go-affecting PR." >&2
+            echo "This blocks the merge by design (slice 631). A RED/cancelled/skipped" >&2
+            echo "required integration shard cannot slip through (the slice 474 regression)." >&2
+            exit 1
+          fi
+          echo
+          echo "merge-gate PASSES: every required leg succeeded on this Go-affecting PR."
+
+  # ====================================================================
+  # Slice 631 — post-merge main-branch shard CANARY (mechanism (c),
+  # defense-in-depth alongside the merge-gate above).
+  #
+  # The merge-gate blocks BEFORE merge. This canary is the orthogonal
+  # AFTER-merge safety net for the second masking mechanism slice 474 fell
+  # through: a `main` run cancelled by the next merge's concurrency group
+  # before the shard leg completed. It re-runs the FULL shard matrix on
+  # `main` UNCANCELLABLY (its own concurrency group with
+  # cancel-in-progress: false) and UNCONDITIONALLY (no `changes.code` path
+  # filter), so a regression that somehow slipped past the gate — or a
+  # docs-only `main` push that would otherwise skip the shards — still gets
+  # a completed shard run on the next `main` push rather than weeks later.
+  #
+  # Scope discipline: this job runs ONLY on push-to-main (never on a PR),
+  # so it never sits on the merge-blocking critical path and never slows a
+  # PR. It is NOT a required check (it cannot be — it only exists on
+  # `main` pushes). A RED canary surfaces as a red `main` build + the next
+  # PR's branch (strict: true rebases onto main) inheriting the signal.
+  #
+  # It reuses scripts/run-integration-shard.sh — the SAME source-of-truth
+  # the PR-time `tests-integration-shard` job uses — so there is no second
+  # package list to drift (the slice-417 shard manifest stays canonical).
+  #
+  # Slice 703 — BREADTH of the canary is now gated on `changes.code`; its
+  # EXISTENCE is not. A code-touching `main` push still runs the FULL leg
+  # matrix; a docs/status-only `main` push runs ONE representative leg (A).
+  #
+  # Why that does not reopen the slice-474 hole: the hole is "an in-repo
+  # code change reached `main` without a COMPLETED shard run". A `main` SHA
+  # with `changes.code == 'false'` contains, by construction of the filter,
+  # no change to `**/*.go`, `internal/**`, `cmd/**`, `pkg/**`, `migrations/**`,
+  # `fixtures/**`, `scripts/**`, `go.*` or `.github/workflows/**` relative to
+  # its parent — so the integration suite, the code under test, the shard
+  # manifest and this job definition are all byte-identical to the parent's.
+  # Induct backwards over the `main` lineage and every docs-only SHA resolves
+  # to the most recent code-touching `main` SHA, which ran the FULL matrix
+  # uncancellably on its own push. The docs-only canary therefore carries
+  # ZERO marginal information about the code; it is a re-sample, and the
+  # breadth of a re-sample is a cost dial, not a correctness gate. The
+  # literal slice-631 guarantee ("a completed, uncancellable, `-race`,
+  # real-services shard run exists on this `main` SHA") still holds.
+  # Full analysis: docs/audit-log/703-ci-main-canary-docs-only-single-leg-decisions.md
+  # ====================================================================
+  tests-integration-main-canary:
+    name: Go · integration canary (main, shard ${{ matrix.leg }})
+    needs: changes
+    # `always()` preserves the pre-slice-703 property that this job is
+    # UNCONDITIONAL: adding `needs: changes` must not let a failed or
+    # cancelled `changes` job skip the canary (that would be a new flavour
+    # of the very masking mechanism the canary exists to close). With
+    # `always()` a missing `changes` output falls through to the fail-safe
+    # FULL matrix below.
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    # Own concurrency group with cancel-in-progress: false so a rapid
+    # sequence of main merges cannot cancel an in-flight canary leg before
+    # it completes — the exact masking mechanism (2) from slice 474. Keyed
+    # off the leg too so the legs of one push don't cancel each other.
+    concurrency:
+      group: ci-main-canary-${{ github.sha }}-${{ matrix.leg }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Slice 747: added B4 + B5 so the main-canary covers the same legs as
+        # the PR-time tests-integration-shard matrix (one source of truth:
+        # scripts/integration-shards.txt). Keep these two leg lists in lockstep.
+        #
+        # Slice 703: the leg list is now conditional on `changes.code`.
+        #
+        #   code == 'false'  → ["A"]                          (docs/status-only)
+        #   anything else    → ["A","B1","B2","B3","B4","B5"] (full matrix)
+        #
+        # The test is `== 'false'`, NOT `!= 'true'`, so the FULL matrix is the
+        # FAIL-SAFE default: dorny/paths-filter emits exactly the strings
+        # 'true' or 'false', so in every real run this is observably identical
+        # to the spec's `!= 'true'`, but a MISSING output (the `changes` job
+        # failed or was cancelled, reachable because of the `always()` above)
+        # yields '' and therefore the full matrix rather than a single leg.
+        # Coverage never silently narrows on an unknown signal.
+        #
+        # Leg A is the representative leg (coverage, not speed — it is not the
+        # cheapest leg). It is the ONLY leg that seeds the shared global SCF
+        # catalog (the P0-2 pinned cluster) and it owns internal/db (migrations
+        # + RLS core), internal/dbtest, internal/backup (ephemeral-DB create/
+        # drop + whole-DB dump), internal/evidence/ingest + streambuf (the
+        # append-only ledger over NATS JetStream), internal/eval + control +
+        # decision (the evaluation stage), the slice-461 order-independence
+        # guard and the migration round-trip. Every Phase B leg is one handler
+        # FAMILY sitting on top of that foundation; Leg A is the foundation,
+        # and it is the leg most exposed to the residual risk a docs-only
+        # canary is actually guarding — environmental drift in the pinned
+        # service images (postgres:16-alpine, nats:2.10-alpine, minio) and the
+        # runner/toolchain. Keep this in lockstep with the manifest if leg A's
+        # assignment rule ever changes.
+        leg: ${{ fromJSON(needs.changes.outputs.code == 'false' && '["A"]' || '["A","B1","B2","B3","B4","B5"]') }}
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: security_atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+      MINIO_ENDPOINT: http://localhost:9000
+      MINIO_BUCKET: atlas-artifacts-test
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      NATS_URL: nats://localhost:4222
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.26"
+          cache: true
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: "v3.0.6"
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=minioadmin \
+            -e MINIO_ROOT_PASSWORD=minioadmin \
+            minio/minio server /data
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:9000/minio/health/live; then
+              echo "minio ready"; break
+            fi
+            sleep 2
+          done
+          docker run --rm --network host \
+            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
+            minio/mc mb -p local/atlas-artifacts-test
+      - name: Start NATS JetStream
+        run: |
+          docker run -d --name nats \
+            -p 4222:4222 \
+            -p 8222:8222 \
+            nats:2.10-alpine -js -sd /data --http_port 8222
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8222/healthz; then
+              echo "nats ready"; break
+            fi
+            sleep 2
+          done
+      - name: Bootstrap roles
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+      - name: Set role passwords (CI-scoped)
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+      - name: Apply forward migrations
+        run: |
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
+      - name: Run integration shard (-p 1 within the leg)
+        run: |
+          GO_TEST_EXTRA="-race" \
+            bash scripts/run-integration-shard.sh "${{ matrix.leg }}" coverage.txt

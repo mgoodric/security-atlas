@@ -11,7 +11,6 @@ package risk_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 	"time"
 
@@ -19,57 +18,28 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/risk"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// ---- harness helpers (same shape as scope/integration_test.go) ----
+// ---- harness helpers ----
+//
+// Slice 435: the pool/DSN/tenant-seed/context boilerplate this file (and
+// scope/integration_test.go, which it was copied from) used to re-derive
+// now lives in the shared internal/dbtest harness. The two-pool open is
+// dbtest.NewMigratePool / NewAppPool; the tenant-context tag is
+// dbtest.WithTenantCtx; freshTenant delegates to dbtest.SeedTenant with the
+// slice-019 cleanup tables.
 
-func appDSN(t *testing.T) string {
+// freshTenant seeds a fresh tenant and cleans risk's tables (children before
+// parents) through the privileged (migrate) pool after the test.
+func freshTenant(t *testing.T, migrate *pgxpool.Pool) string {
 	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
-func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
-	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM risk_control_links WHERE tenant_id = $1`,
-			`DELETE FROM risks WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, migrate,
+		"risk_control_links",
+		"risks",
+		"controls",
+	)
 }
 
 // seedControl creates a control row directly via the admin pool (BYPASSRLS) so
@@ -93,25 +63,14 @@ func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 	return ctrlID
 }
 
-func ctxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
-}
-
 // ---- AC-1: methodology defaults to nist_800_30 ----
 
 func TestCreate_DefaultsMethodologyToNist80030(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := risk.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:         "Unauthorized PHI access",
@@ -131,13 +90,11 @@ func TestCreate_DefaultsMethodologyToNist80030(t *testing.T) {
 // ---- AC-2: inherent_score validated against methodology ----
 
 func TestCreate_RejectsInvalidNistScore(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := risk.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
 		Title:         "Bad score",
@@ -152,13 +109,11 @@ func TestCreate_RejectsInvalidNistScore(t *testing.T) {
 }
 
 func TestCreate_RejectsFairMissingLM(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := risk.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
 		Title:         "FAIR-style risk",
@@ -175,13 +130,11 @@ func TestCreate_RejectsFairMissingLM(t *testing.T) {
 // ---- AC-3: treatment=mitigate requires linked controls ----
 
 func TestCreate_MitigateRequiresLinkedControl(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := risk.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
 		Title:         "Needs mitigation",
@@ -196,14 +149,12 @@ func TestCreate_MitigateRequiresLinkedControl(t *testing.T) {
 }
 
 func TestCreate_MitigateWithLinkedControlSucceeds(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
-	ctrl := seedControl(t, admin, tenant)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	ctrl := seedControl(t, migrate, tenant)
 	store := risk.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	created, err := store.Create(ctx, risk.CreateInput{
 		Title:            "Mitigated",
@@ -232,13 +183,11 @@ func TestCreate_MitigateWithLinkedControlSucceeds(t *testing.T) {
 // ---- AC-4: treatment=accept requires accepted_until + accepter ----
 
 func TestCreate_AcceptRequiresBothFields(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := risk.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	// Missing accepted_until.
 	_, err := store.Create(ctx, risk.CreateInput{
@@ -288,13 +237,11 @@ func TestCreate_AcceptRequiresBothFields(t *testing.T) {
 // ---- AC-5: treatment=transfer requires instrument_reference ----
 
 func TestCreate_TransferRequiresInstrumentReference(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := risk.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	_, err := store.Create(ctx, risk.CreateInput{
 		Title:         "Insured",
@@ -326,13 +273,11 @@ func TestCreate_TransferRequiresInstrumentReference(t *testing.T) {
 // ---- AC-6: filters work ----
 
 func TestList_Filters(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := risk.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	until := time.Now().AddDate(0, 6, 0)
 	// One nist_800_30 + accept
@@ -392,13 +337,11 @@ func TestList_Filters(t *testing.T) {
 // ---- AC-7: heatmap ----
 
 func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 	store := risk.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	// Two nist_800_30 risks in the same bucket (3,4).
 	for i := 0; i < 2; i++ {
@@ -455,17 +398,15 @@ func TestHeatmap_CountsBy5x5Methodology(t *testing.T) {
 // ---- Invariant 6: cross-tenant isolation ----
 
 func TestCrossTenant_RisksAreIsolated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
-	tenantA := freshTenant(t, admin)
-	tenantB := freshTenant(t, admin)
+	tenantA := freshTenant(t, migrate)
+	tenantB := freshTenant(t, migrate)
 	store := risk.NewStore(app)
 
-	ctxA := ctxFor(t, tenantA)
-	ctxB := ctxFor(t, tenantB)
+	ctxA := dbtest.WithTenantCtx(t, tenantA)
+	ctxB := dbtest.WithTenantCtx(t, tenantB)
 
 	created, err := store.Create(ctxA, risk.CreateInput{
 		Title:         "A's risk",

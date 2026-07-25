@@ -6,35 +6,12 @@ import (
 	"context"
 	"os"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
-
-// adminDSN is the DSN with write access on scf_anchors. Tests skip when it
-// is not set so the suite still runs locally without a DB.
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return dsn
-}
-
-func openPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, adminDSN(t))
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 // truncateCatalog wipes any prior SCF rows so each test starts clean. The
 // fixture sample uses a deterministic release_version, so reruns would
@@ -77,7 +54,7 @@ func loadFixture(t *testing.T) *scfimport.Catalog {
 }
 
 func TestImport_FirstRunCreatesFrameworkVersionAndAnchors(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	truncateCatalog(t, pool)
 	cat := loadFixture(t)
 
@@ -100,7 +77,7 @@ func TestImport_FirstRunCreatesFrameworkVersionAndAnchors(t *testing.T) {
 }
 
 func TestImport_SecondRunSameReleaseIsIdempotent(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	truncateCatalog(t, pool)
 	cat := loadFixture(t)
 
@@ -123,7 +100,7 @@ func TestImport_SecondRunSameReleaseIsIdempotent(t *testing.T) {
 }
 
 func TestImport_NewReleaseCreatesNewFrameworkVersion(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	truncateCatalog(t, pool)
 
 	v1 := loadFixture(t)
@@ -180,7 +157,7 @@ func TestImport_NewReleaseCreatesNewFrameworkVersion(t *testing.T) {
 }
 
 func TestImport_DetectsContentUpdates(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	truncateCatalog(t, pool)
 
 	cat := loadFixture(t)

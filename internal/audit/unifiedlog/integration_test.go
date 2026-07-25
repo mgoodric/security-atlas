@@ -37,8 +37,6 @@ package unifiedlog_test
 
 import (
 	"context"
-	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -47,69 +45,49 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ---------- harness ----------
+//
+// Slice 435 / 742: the pool/DSN/tenant-seed boilerplate this file used to
+// re-derive (appDSN / adminDSN / openPool / the inline freshTenant cleanup
+// loop) now lives in the shared internal/dbtest harness. dbtest.NewAppPool
+// opens the RLS-enforcing atlas_app pool (the default — the Query path and the
+// tenant-isolation assertion run through it); dbtest.NewMigratePool opens the
+// privileged BYPASSRLS pool used ONLY for the append-only audit-log cleanup the
+// app role cannot DELETE.
+//
+// freshTenant remains suite-local: it returns a uuid.UUID (the seedOneRow /
+// queryUnderTenant call sites compare against Entry.TenantID, a uuid.UUID) and
+// its cleanup deletes a fixed nine-table audit-log set in FK-safe order — a
+// shape dbtest.SeedTenant expresses via its cleanupTables list, so freshTenant
+// now delegates the seed + cleanup to dbtest.SeedTenant and parses the returned
+// id back to a UUID. seedOneRow / queryUnderTenant keep their explicit
+// tenancy.WithTenant + tenancy.ApplyTenant tx wiring (the in-tx GUC path
+// dbtest.WithTenantCtx does not replace) unchanged.
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
-// freshTenant returns a unique tenant UUID and registers an admin-role
-// cleanup hook to purge seeded audit-log rows post-test. Cleanup uses the
-// BYPASSRLS migrate role — never the app role — so the constitutional
-// append-only invariant (RLS forbids the app role from UPDATE / DELETE)
-// is never traversed by the test.
+// freshTenant returns a unique tenant UUID and registers a migrate-role
+// (BYPASSRLS) cleanup hook to purge seeded audit-log rows post-test — never the
+// app role — so the constitutional append-only invariant (RLS forbids the app
+// role from UPDATE / DELETE) is never traversed by the test. Order matters:
+// aggregation_rule_audit_log has FK to aggregation_rules, so the audit rows are
+// deleted before the parents.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 	t.Helper()
-	tenant := uuid.New()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		// Order matters: aggregation_rule_audit_log has FK to
-		// aggregation_rules — delete the audit rows before the parents.
-		for _, tbl := range []string{
-			"decision_audit_log",
-			"evidence_audit_log",
-			"exception_audit_log",
-			"sample_audit_log",
-			"audit_period_audit_log",
-			"feature_flag_audit_log",
-			"me_audit_log",
-			"walkthrough_audit_log",
-			"aggregation_rule_audit_log",
-			"aggregation_rules",
-		} {
-			_, _ = admin.Exec(ctx,
-				fmt.Sprintf("DELETE FROM %s WHERE tenant_id = $1", tbl), tenant)
-		}
-	})
-	return tenant
+	return uuid.MustParse(dbtest.SeedTenant(t, admin,
+		"decision_audit_log",
+		"evidence_audit_log",
+		"exception_audit_log",
+		"sample_audit_log",
+		"audit_period_audit_log",
+		"feature_flag_audit_log",
+		"me_audit_log",
+		"walkthrough_audit_log",
+		"aggregation_rule_audit_log",
+		"aggregation_rules",
+	))
 }
 
 // seedOneRow inserts ONE row into the named audit-log table under the
@@ -205,10 +183,8 @@ func queryUnderTenant(t *testing.T, app *pgxpool.Pool, tenantID uuid.UUID, param
 // 8-column Entry shape, including the slice-180 subject_module field
 // (defaulted to "core" by the schema).
 func TestIntegration_Query_HappyPathReturnsCanonicalShape(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID := freshTenant(t, admin)
 
 	when := seedOneRow(t, app, tenantID, "me_audit_log")
@@ -248,10 +224,8 @@ func TestIntegration_Query_HappyPathReturnsCanonicalShape(t *testing.T) {
 // Two tenants seed rows; running Query under tenant A's GUC must return
 // ONLY tenant A's rows, never tenant B's.
 func TestIntegration_Query_TenantIsolationViaRLS(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -288,10 +262,8 @@ func TestIntegration_Query_TenantIsolationViaRLS(t *testing.T) {
 // param narrows the UNION ALL to the matching kind subset. Seed two
 // different kinds; ask for just one; assert the other is absent.
 func TestIntegration_Query_KindFilterNarrowsBranches(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID := freshTenant(t, admin)
 
 	whenMe := seedOneRow(t, app, tenantID, "me_audit_log")
@@ -314,10 +286,8 @@ func TestIntegration_Query_KindFilterNarrowsBranches(t *testing.T) {
 // "no matching rows" branch — Query returns (nil-or-empty, nil, nil)
 // rather than an error.
 func TestIntegration_Query_EmptyRangeReturnsZeroRows(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID := freshTenant(t, admin)
 
 	// Window far in the past — nothing to find.
@@ -336,10 +306,8 @@ func TestIntegration_Query_EmptyRangeReturnsZeroRows(t *testing.T) {
 // TestIntegration_Query_ActorFilterMatchesExact asserts the ActorFilter
 // param requires an exact actor_id match — the slice 124 contract.
 func TestIntegration_Query_ActorFilterMatchesExact(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID := freshTenant(t, admin)
 
 	when := seedOneRow(t, app, tenantID, "sample_audit_log")

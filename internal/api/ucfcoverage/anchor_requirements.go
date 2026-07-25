@@ -75,12 +75,15 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 		}
 		out = mapPinnedRequirements(got)
 	} else {
-		got, err := h.q.ListRequirementsForAnchor(ctx, anchor.ID)
+		// slice 484 (AC-5 / ADR 0019 §4): absent a pin, default to each
+		// framework's CURRENT version — never bleed a legacy/superseded
+		// version's requirements (P0-484-5).
+		got, err := h.q.ListRequirementsForAnchorCurrentVersions(ctx, anchor.ID)
 		if err != nil {
-			httperr.WriteInternal(w, r, "list requirements for anchor", err)
+			httperr.WriteInternal(w, r, "list requirements for anchor (current)", err)
 			return
 		}
-		out = mapRequirements(got)
+		out = mapCurrentVersionRequirements(got)
 	}
 
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
@@ -126,7 +129,11 @@ func anchorWireFromRow(a dbx.ScfAnchor) anchorWire {
 	}
 }
 
-func mapRequirements(rows []dbx.ListRequirementsForAnchorRow) []requirementForAnchorWire {
+// mapCurrentVersionRequirements maps the slice-484 default (current-version-only)
+// reverse-traversal rows. The row shape mirrors ListRequirementsForAnchorRow
+// field-for-field; sqlc emits a distinct named type per query, so this is a thin
+// structural copy rather than a shared mapper.
+func mapCurrentVersionRequirements(rows []dbx.ListRequirementsForAnchorCurrentVersionsRow) []requirementForAnchorWire {
 	out := make([]requirementForAnchorWire, 0, len(rows))
 	for _, x := range rows {
 		out = append(out, requirementForAnchorWire{
@@ -143,6 +150,7 @@ func mapRequirements(rows []dbx.ListRequirementsForAnchorRow) []requirementForAn
 			RelationshipType:       string(x.RelationshipType),
 			Strength:               x.Strength,
 			SourceAttribution:      string(x.SourceAttribution),
+			MappingTier:            string(x.MappingTier),
 			Rationale:              x.Rationale,
 		})
 	}
@@ -166,6 +174,7 @@ func mapPinnedRequirements(rows []dbx.ListRequirementsForAnchorByFrameworkVersio
 			RelationshipType:       string(x.RelationshipType),
 			Strength:               x.Strength,
 			SourceAttribution:      string(x.SourceAttribution),
+			MappingTier:            string(x.MappingTier),
 			Rationale:              x.Rationale,
 		})
 	}

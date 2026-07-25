@@ -1,25 +1,25 @@
 {
-  "$comment": "Slice 347 — per-file vitest coverage floors enforced by vitest's built-in coverage.thresholds. Mirrors the Go-side cmd/scripts/coverage-thresholds.json shape (slice 069 + the 17-slice retroactive enrolment trail). Closes the TS-side gap identified by slice 334 V-1 (HIGH).",
+  "$comment": "Slice 347 — per-file vitest coverage floors enforced by vitest's built-in coverage.thresholds. Mirrors the Go-side cmd/scripts/coverage-thresholds.json shape (slice 069 + the 17-slice retroactive enrolment trail). Closes the TS-side gap identified by slice 334 V-1 (HIGH). Slice 450/740 (2026-06-12, maintainer-approved): 68 per-file floors across 48 files were RE-BASELINED DOWNWARD to honest coverage-v8-4 numbers when the vitest 2->4 + @vitest/coverage-v8 2->4 bump switched the provider to the AST-aware remapper (ast-v8-to-istanbul, now the only mode). That remapper eliminates 'phantom coverage' (statement/line credit a module got merely for being transitively module-loaded by a test that never calls its functions) — the SAME slice-396 barrel-retire phenomenon, now global. The lowered floors are NOT a quality regression: the identical suite (184 files / 1760 tests) stayed green; only the measurement ruler changed. Floors re-seeded at the standard max(0, floor(measured-2pp)). The phantom-coverage files that now measure true 0% (lib/api/{risks,policies,audit,audit-periods}.ts, components/control/strm.ts, components/dashboards-metrics/format.ts) keep a 0 floor here rather than moving to the $omitted_zero_pct set, so the explicit row documents the deliberate drop. Real coverage for those fetch-wrapper modules is the slice-349/392 contract-tier rollout's job. See docs/audit-log/450-*.md D3 + docs/issues/740-*.md.",
   "$methodology": "Floors are derived from a measured `npm run test:coverage` run on the slice 347 baseline. Each floor is set at `max(0, floor(measured - 2pp))` — the floor RATCHETS the current actual minus a 2-pp noise band, never reaches above it (slice 069 P0-A4 mirror via P0-347-3).",
   "$how_to_raise": "Raise a per-file floor in a follow-up slice that (a) writes the additional tests to actually hit the new bar, (b) lifts the number here in the same PR. Do NOT raise floors in a slice that does not also write the tests. The ratchet contract is monotonic ↑ — never lower a floor (P0-347-1).",
   "$how_to_extend": "When a new test file lands and brings new measured coverage on a previously-uncovered module, add a row here in the same PR. Default floor is `floor(measured - 2pp)`. 0% files are intentionally omitted — they have no floor signal until a first test brings non-zero coverage; the omission is documented and not a regression.",
-  "$omitted_zero_pct_count": 74,
+  "$omitted_zero_pct_count": 76,
   "$omitted_zero_pct_rationale": "74 files in the coverage `include` set measured 0% statements (no tests reach their executable bodies yet). They are intentionally omitted from the threshold map — the ratchet starts at truth, not aspiration (P0-347-3). When a future slice adds the first test for one of these files, it lifts the file into the map with floor = floor(measured - 2pp). Until then, they contribute no enforcement signal, which is the correct shape for a monotonic ratchet. Slice 370 note: the api.ts god-file split (slice 328 H-2) replaced the single `lib/api.ts` floor with per-domain floors; the four split-out modules that measured 0% statements (attest.ts, framework-scopes.ts, me.ts, vendors.ts) are omitted under this same rationale — their coverage lived under the god-file's 16% aggregate, which carried no per-function signal. Slice 396 note: the `lib/api.ts` barrel was retired (Phase 3 of the 370 split — all import sites migrated to per-domain paths by slice 395), so its floor was removed; `apiBaseURL`'s URL-resolution test moved to `lib/api/base.test.ts` and `lib/api/base.ts` keeps its floor 98. Retiring the barrel also exposed that four domain modules (board.ts 17%, risk-hierarchy.ts 8%, exceptions.ts 2%, evidence.ts 1% — all functions:0) had no DIRECT test importer; their nonzero statement/line floors were a measurement artifact of the barrel's `export *` transitively module-loading them during the single `apiBaseURL` barrel test. With the barrel gone they measure their true 0% (no test calls their functions), so per P0-347-3 (start at truth) their phantom floors were removed into this omitted-zero set — NOT a real-coverage regression. Real coverage for these fetch-wrapper modules is the job of the slice-349/392 contract-tier rollout, not the barrel-retire.",
   "$schema_version": 1,
   "thresholds": {
     "app/(authed)/audits/filters.ts": {
       "statements": 98,
-      "branches": 98,
+      "branches": 90,
       "functions": 98,
       "lines": 98
     },
     "app/(authed)/audits/format.ts": {
-      "statements": 97,
+      "statements": 94,
       "branches": 94,
       "functions": 98,
       "lines": 97
     },
-    "app/(authed)/audits/oscal-export-future.ts": {
+    "app/(authed)/audits/oscal-export.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -32,6 +32,18 @@
       "lines": 98
     },
     "app/(authed)/controls/[id]/tabs.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/vendors/[id]/detail-view.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/controls/count-label.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -87,7 +99,7 @@
     },
     "app/(authed)/exceptions/filters.ts": {
       "statements": 98,
-      "branches": 98,
+      "branches": 91,
       "functions": 98,
       "lines": 98
     },
@@ -127,13 +139,31 @@
       "functions": 98,
       "lines": 98
     },
-    "app/(authed)/risks/filters.ts": {
+    "app/(authed)/risks/count-label.ts": {
       "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/risks/filters.ts": {
+      "statements": 94,
       "branches": 95,
       "functions": 98,
       "lines": 98
     },
     "app/(authed)/risks/new/validate.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/risks/sort.ts": {
+      "statements": 92,
+      "branches": 87,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/board-packs/validate.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -154,6 +184,12 @@
     "app/(authed)/settings/credential-bearer.ts": {
       "statements": 98,
       "branches": 82,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/(authed)/settings/gate-mode.ts": {
+      "statements": 98,
+      "branches": 98,
       "functions": 98,
       "lines": 98
     },
@@ -195,27 +231,33 @@
     },
     "app/api/admin/audit-periods/export/route.ts": {
       "statements": 98,
-      "branches": 88,
+      "branches": 85,
       "functions": 98,
       "lines": 98
     },
     "app/api/admin/demo/status/route.ts": {
       "statements": 98,
-      "branches": 69,
+      "branches": 64,
       "functions": 98,
       "lines": 98
     },
     "app/api/admin/evidence/export/route.ts": {
       "statements": 98,
-      "branches": 88,
+      "branches": 85,
       "functions": 98,
       "lines": 98
     },
     "app/api/admin/exceptions/export/route.ts": {
       "statements": 98,
-      "branches": 88,
+      "branches": 85,
       "functions": 98,
       "lines": 98
+    },
+    "app/api/admin/llm-routing/route.ts": {
+      "statements": 83,
+      "branches": 98,
+      "functions": 98,
+      "lines": 83
     },
     "app/api/admin/me/route.ts": {
       "statements": 98,
@@ -225,13 +267,13 @@
     },
     "app/api/admin/policies/export/route.ts": {
       "statements": 98,
-      "branches": 88,
+      "branches": 85,
       "functions": 98,
       "lines": 98
     },
     "app/api/admin/samples/export/route.ts": {
       "statements": 98,
-      "branches": 88,
+      "branches": 85,
       "functions": 98,
       "lines": 98
     },
@@ -241,9 +283,27 @@
       "functions": 98,
       "lines": 94
     },
+    "app/api/admin/users/route.ts": {
+      "statements": 95,
+      "branches": 78,
+      "functions": 98,
+      "lines": 95
+    },
+    "app/api/admin/users/revoke/route.ts": {
+      "statements": 93,
+      "branches": 74,
+      "functions": 98,
+      "lines": 93
+    },
     "app/api/admin/vendors/export/route.ts": {
       "statements": 98,
-      "branches": 88,
+      "branches": 85,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/anchors/[id]/requirements/route.ts": {
+      "statements": 98,
+      "branches": 78,
       "functions": 98,
       "lines": 98
     },
@@ -255,7 +315,7 @@
     },
     "app/api/audit-log/export/route.ts": {
       "statements": 98,
-      "branches": 88,
+      "branches": 85,
       "functions": 98,
       "lines": 98
     },
@@ -264,6 +324,12 @@
       "branches": 64,
       "functions": 98,
       "lines": 88
+    },
+    "app/api/audits/[id]/oscal-export/route.ts": {
+      "statements": 98,
+      "branches": 73,
+      "functions": 98,
+      "lines": 98
     },
     "app/api/audits/route.ts": {
       "statements": 93,
@@ -279,31 +345,31 @@
     },
     "app/api/calendar/subscription/route.ts": {
       "statements": 64,
-      "branches": 73,
+      "branches": 31,
       "functions": 98,
       "lines": 64
     },
     "app/api/controls-list/route.ts": {
       "statements": 98,
-      "branches": 73,
+      "branches": 64,
       "functions": 98,
       "lines": 98
     },
     "app/api/controls/[id]/history/route.ts": {
       "statements": 98,
-      "branches": 73,
+      "branches": 64,
       "functions": 98,
       "lines": 98
     },
     "app/api/controls/[id]/policies/route.ts": {
       "statements": 98,
-      "branches": 73,
+      "branches": 64,
       "functions": 98,
       "lines": 98
     },
     "app/api/controls/[id]/risks/route.ts": {
       "statements": 98,
-      "branches": 73,
+      "branches": 64,
       "functions": 98,
       "lines": 98
     },
@@ -325,6 +391,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/api/csf/gap/route.ts": {
+      "statements": 98,
+      "branches": 75,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/dashboard/activity/route.ts": {
       "statements": 98,
       "branches": 98,
@@ -339,7 +411,7 @@
     },
     "app/api/dashboard/proxy.ts": {
       "statements": 98,
-      "branches": 73,
+      "branches": 64,
       "functions": 98,
       "lines": 98
     },
@@ -367,6 +439,12 @@
       "functions": 98,
       "lines": 98
     },
+    "app/api/features/enabled/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/install-state/route.ts": {
       "statements": 98,
       "branches": 98,
@@ -378,6 +456,24 @@
       "branches": 82,
       "functions": 98,
       "lines": 95
+    },
+    "app/api/me/email-channel/route.ts": {
+      "statements": 93,
+      "branches": 78,
+      "functions": 98,
+      "lines": 93
+    },
+    "app/api/me/slack-channel/route.ts": {
+      "statements": 93,
+      "branches": 78,
+      "functions": 98,
+      "lines": 93
+    },
+    "app/api/me/webhook-channel/route.ts": {
+      "statements": 93,
+      "branches": 78,
+      "functions": 98,
+      "lines": 93
     },
     "app/api/me/route.ts": {
       "statements": 93,
@@ -392,32 +488,44 @@
       "lines": 98
     },
     "app/api/me/sessions/[id]/route.ts": {
-      "statements": 85,
-      "branches": 64,
+      "statements": 67,
+      "branches": 48,
       "functions": 98,
-      "lines": 85
+      "lines": 67
     },
     "app/api/me/sessions/route.ts": {
       "statements": 88,
-      "branches": 79,
+      "branches": 73,
       "functions": 98,
       "lines": 88
     },
-    "app/api/policies/route.ts": {
+    "app/api/oscal/component-claims/[id]/scf-anchor/route.ts": {
       "statements": 98,
-      "branches": 69,
+      "branches": 68,
       "functions": 98,
       "lines": 98
     },
+    "app/api/policies/route.ts": {
+      "statements": 98,
+      "branches": 64,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/policies/[id]/route.ts": {
+      "statements": 84,
+      "branches": 64,
+      "functions": 98,
+      "lines": 84
+    },
     "app/api/questionnaires/[id]/answers/[qid]/route.ts": {
-      "statements": 92,
+      "statements": 88,
       "branches": 81,
       "functions": 98,
-      "lines": 92
+      "lines": 88
     },
     "app/api/questionnaires/[id]/export-pdf/route.ts": {
       "statements": 98,
-      "branches": 81,
+      "branches": 73,
       "functions": 98,
       "lines": 98
     },
@@ -445,6 +553,18 @@
       "functions": 98,
       "lines": 93
     },
+    "app/api/requirements/[id]/coverage/route.ts": {
+      "statements": 98,
+      "branches": 64,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/risks/[id]/route.ts": {
+      "statements": 83,
+      "branches": 58,
+      "functions": 98,
+      "lines": 83
+    },
     "app/api/risks/export/route.ts": {
       "statements": 98,
       "branches": 88,
@@ -471,7 +591,13 @@
     },
     "app/api/version/route.ts": {
       "statements": 98,
-      "branches": 73,
+      "branches": 48,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/audit/period-evidence-summary-view.ts": {
+      "statements": 98,
+      "branches": 98,
       "functions": 98,
       "lines": 98
     },
@@ -493,7 +619,19 @@
       "functions": 98,
       "lines": 98
     },
+    "components/calendar/is-today.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "components/calendar/link-for.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/control/confidence-band.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -505,16 +643,34 @@
       "functions": 98,
       "lines": 98
     },
+    "components/control/evidence-summary-view.ts": {
+      "statements": 98,
+      "branches": 90,
+      "functions": 98,
+      "lines": 98
+    },
+    "components/control/gap-explanation-view.ts": {
+      "statements": 98,
+      "branches": 90,
+      "functions": 98,
+      "lines": 98
+    },
     "components/control/strm.ts": {
       "statements": 0,
-      "branches": 98,
-      "functions": 98,
+      "branches": 0,
+      "functions": 0,
       "lines": 0
+    },
+    "components/dashboard/portfolio-summary-view.ts": {
+      "statements": 98,
+      "branches": 93,
+      "functions": 98,
+      "lines": 98
     },
     "components/dashboards-metrics/format.ts": {
       "statements": 0,
-      "branches": 98,
-      "functions": 98,
+      "branches": 0,
+      "functions": 0,
       "lines": 0
     },
     "components/questionnaire/types.ts": {
@@ -529,15 +685,27 @@
       "functions": 98,
       "lines": 98
     },
-    "lib/api/_shared.ts": {
-      "statements": 48,
+    "lib/admin/assign-options.ts": {
+      "statements": 98,
+      "branches": 85,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/anchors/version-options.ts": {
+      "statements": 98,
       "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/_shared.ts": {
+      "statements": 28,
+      "branches": 31,
       "functions": 48,
-      "lines": 48
+      "lines": 31
     },
     "lib/api/admin.ts": {
       "statements": 15,
-      "branches": 70,
+      "branches": 37,
       "functions": 16,
       "lines": 15
     },
@@ -548,10 +716,10 @@
       "lines": 40
     },
     "lib/api/audit-periods.ts": {
-      "statements": 5,
-      "branches": 98,
+      "statements": 0,
+      "branches": 0,
       "functions": 0,
-      "lines": 5
+      "lines": 0
     },
     "lib/api/base.ts": {
       "statements": 98,
@@ -560,10 +728,10 @@
       "lines": 98
     },
     "lib/api/calendar.ts": {
-      "statements": 52,
-      "branches": 86,
+      "statements": 40,
+      "branches": 41,
       "functions": 48,
-      "lines": 52
+      "lines": 40
     },
     "lib/api/control-detail.ts": {
       "statements": 28,
@@ -572,26 +740,26 @@
       "lines": 28
     },
     "lib/api/controls-list.ts": {
-      "statements": 11,
-      "branches": 64,
+      "statements": 5,
+      "branches": 2,
       "functions": 18,
-      "lines": 11
+      "lines": 6
     },
     "lib/api/dashboard.ts": {
       "statements": 42,
-      "branches": 98,
+      "branches": 48,
       "functions": 28,
       "lines": 42
     },
     "lib/api/policies.ts": {
-      "statements": 29,
-      "branches": 98,
-      "functions": 48,
-      "lines": 29
+      "statements": 33,
+      "branches": 0,
+      "functions": 58,
+      "lines": 36
     },
     "lib/api/risks.ts": {
       "statements": 11,
-      "branches": 98,
+      "branches": 0,
       "functions": 31,
       "lines": 11
     },
@@ -603,19 +771,19 @@
     },
     "lib/api/audit-log.ts": {
       "statements": 71,
-      "branches": 93,
+      "branches": 84,
       "functions": 81,
       "lines": 71
     },
     "lib/api/audit.ts": {
       "statements": 0,
-      "branches": 98,
-      "functions": 98,
+      "branches": 0,
+      "functions": 0,
       "lines": 0
     },
     "lib/api/bff.ts": {
       "statements": 56,
-      "branches": 98,
+      "branches": 73,
       "functions": 48,
       "lines": 56
     },
@@ -631,7 +799,19 @@
       "functions": 98,
       "lines": 98
     },
+    "lib/api/csf.ts": {
+      "statements": 34,
+      "branches": 98,
+      "functions": 48,
+      "lines": 34
+    },
     "lib/api/exceptions-export.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/freshness-consistency.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -639,11 +819,17 @@
     },
     "lib/api/metrics.ts": {
       "statements": 21,
-      "branches": 93,
+      "branches": 49,
       "functions": 13,
       "lines": 21
     },
     "lib/api/risks-export.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/vendor-burndown-format.ts": {
       "statements": 98,
       "branches": 98,
       "functions": 98,
@@ -655,9 +841,15 @@
       "functions": 98,
       "lines": 98
     },
+    "lib/auth/current-tenant.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/auth/oauth-client.ts": {
       "statements": 52,
-      "branches": 85,
+      "branches": 8,
       "functions": 83,
       "lines": 52
     },
@@ -673,15 +865,57 @@
       "functions": 81,
       "lines": 92
     },
-    "lib/display-name.ts": {
+    "lib/board/narrative-ai.ts": {
       "statements": 98,
-      "branches": 91,
+      "branches": 86,
       "functions": 98,
       "lines": 98
     },
-    "lib/page-names.ts": {
+    "lib/checklist/checklist-view.ts": {
       "statements": 98,
+      "branches": 92,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/display-name.ts": {
+      "statements": 98,
+      "branches": 85,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/email.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/feature-nav.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/llm-routing/routing.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/markdown.ts": {
+      "statements": 93,
       "branches": 86,
+      "functions": 98,
+      "lines": 93
+    },
+    "lib/page-names.ts": {
+      "statements": 91,
+      "branches": 86,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/questionnaire/ai-suggest.ts": {
+      "statements": 98,
+      "branches": 88,
       "functions": 98,
       "lines": 98
     },
@@ -692,14 +926,14 @@
       "lines": 98
     },
     "lib/safe-redirect.ts": {
-      "statements": 98,
+      "statements": 86,
       "branches": 86,
       "functions": 98,
       "lines": 98
     },
     "lib/secure-cookie.ts": {
       "statements": 98,
-      "branches": 98,
+      "branches": 81,
       "functions": 98,
       "lines": 98
     },
@@ -724,6 +958,12 @@
     "proxy.ts": {
       "statements": 98,
       "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/api/staleness-notification.ts": {
+      "statements": 98,
+      "branches": 92,
       "functions": 98,
       "lines": 98
     }

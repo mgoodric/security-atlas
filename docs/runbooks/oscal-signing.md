@@ -189,6 +189,56 @@ digest; verification is fully in-process.
 
 ---
 
+## Testing the KMS path locally (LocalStack round-trip)
+
+The slice-413 integration test exercises the cosign exec boundary with a
+**local-key stand-in** — it proves the argv and offline flags are correct,
+but never drives the real `awskms://` provider path against a KMS. Slice
+425 adds an **opt-in** integration test
+(`internal/oscal/cosign/cosign_kms_localstack_integration_test.go`) that
+drives the REAL `Client.SignBlob` / `Client.VerifyBlob` (`awskms:///alias/...`)
+against a hermetic **LocalStack KMS** sandbox — no real cloud KMS, no real
+key material.
+
+It is **off by default** (so the standard `Go · integration` job stays
+green without LocalStack) and runs only when its env gate is set AND
+`cosign` + the `aws` CLI are on PATH AND LocalStack is reachable; otherwise
+it `t.Skip`s with a note.
+
+To run it locally:
+
+```bash
+# 1. Start a community-edition LocalStack with KMS only (no license needed).
+docker run -d --name localstack -p 4566:4566 \
+  -e SERVICES=kms localstack/localstack:3.8
+# wait until http://localhost:4566/_localstack/health reports kms available
+
+# 2. cosign + the aws CLI must be installed (brew install cosign awscli).
+
+# 3. Opt in via the env gate and run the cosign integration tests.
+export ATLAS_COSIGN_KMS_LOCALSTACK=1
+export ATLAS_COSIGN_KMS_LOCALSTACK_ENDPOINT=http://localhost:4566   # default
+go test -tags=integration -run TestIntegration_LocalStackKMS -v \
+  ./internal/oscal/cosign/...
+```
+
+The test creates an ephemeral `ECC_NIST_P256` / `SIGN_VERIFY` key in
+LocalStack, signs a blob through the real provider path, asserts
+`verify-blob` succeeds for the unmodified blob and **fails** for a mutated
+one, and asserts no credential material leaks into cosign's output. It uses
+LocalStack dummy credentials (`AWS_ACCESS_KEY_ID=test`); no real key
+material is involved. In CI, LocalStack is wired into the integration
+harness as an **optional** dependency on the shard that owns
+`internal/oscal/cosign` (`.github/workflows/ci.yml`, leg B3); other legs —
+and any environment without the gate — skip it.
+
+> Why the test forwards `AWS_ENDPOINT_URL*` via `WithExtraEnvKeys`: the
+> sandbox endpoint redirects the cosign awskms provider to LocalStack
+> instead of real AWS. This uses the documented env-allowlist extension
+> seam — it is **not** a change to the signing code.
+
+---
+
 ## Migration / backward compatibility
 
 A bundle signed by the **pre-slice-413** ed25519 path has **no `mode`

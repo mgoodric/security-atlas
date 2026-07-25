@@ -29,7 +29,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -37,12 +36,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	anchorsapi "github.com/mgoodric/security-atlas/internal/api/anchors"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/export"
 )
 
@@ -58,7 +57,7 @@ func newAnchorsExportRouter(t *testing.T, tenantID uuid.UUID) http.Handler {
 
 func newAnchorsExportRouterWithLimiter(t *testing.T, tenantID uuid.UUID, lim *export.Limiter) http.Handler {
 	t.Helper()
-	app := openPool174(t, appDSN174(t))
+	app := dbtest.NewAppPool(t)
 	h := anchorsapi.NewExportHandler(app)
 	if lim != nil {
 		h = h.WithLimiter(lim)
@@ -79,38 +78,6 @@ func newAnchorsExportRouterWithLimiter(t *testing.T, tenantID uuid.UUID, lim *ex
 	return r
 }
 
-// ----- DSN + pool helpers (separate from the slice 006
-// integration_test.go to avoid cross-package symbol conflict; same
-// shape as the slice 137 helpers). -----
-
-func appDSN174(t *testing.T) string {
-	t.Helper()
-	v := getEnv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping slice 174 integration test")
-	}
-	return v
-}
-
-func adminDSN174(t *testing.T) string {
-	t.Helper()
-	v := getEnv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping slice 174 integration test")
-	}
-	return v
-}
-
-func openPool174(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
 // ----- seeding -----
 
 // ensureSCFAnchorsSeed makes sure there is at least one current-SCF
@@ -123,7 +90,7 @@ func openPool174(t *testing.T, dsn string) *pgxpool.Pool {
 func ensureSCFAnchorsSeed(t *testing.T) (anchorID uuid.UUID, requirementID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	admin := openPool174(t, adminDSN174(t))
+	admin := dbtest.NewMigratePool(t)
 
 	// SCF framework + current version
 	var scfFwID uuid.UUID
@@ -227,11 +194,20 @@ func ensureSCFAnchorsSeed(t *testing.T) (anchorID uuid.UUID, requirementID uuid.
 // me_audit_log rows on test exit. Catalog rows (anchors, edges,
 // frameworks) are NOT cleaned because they're global and shared
 // across tests.
+//
+// Kept inline rather than delegated to dbtest.SeedTenant: this suite's
+// tenant is a uuid.UUID (consumed by newAnchorsExportRouter +
+// countAnchorsExportMetaAuditRows) and the cleanup is scoped to a
+// specific action (`anchors_export`), neither of which dbtest.SeedTenant
+// (string tenant, plain `WHERE tenant_id = $1`) expresses. Only the pool
+// is migrated to the slice-435 harness; the migrate pool opened here
+// outlives the DELETE cleanup (dbtest registers its own pool-close
+// cleanup first, so it runs last under t.Cleanup's LIFO order).
 func freshAnchorsTenant(t *testing.T) uuid.UUID {
 	t.Helper()
 	tenant := uuid.New()
+	admin := dbtest.NewMigratePool(t)
 	t.Cleanup(func() {
-		admin := openPool174(t, adminDSN174(t))
 		if _, err := admin.Exec(context.Background(),
 			`DELETE FROM me_audit_log WHERE tenant_id = $1 AND action = 'anchors_export'`,
 			tenant,
@@ -245,7 +221,7 @@ func freshAnchorsTenant(t *testing.T) uuid.UUID {
 // countAnchorsExportMetaAuditRows runs under the tenant GUC.
 func countAnchorsExportMetaAuditRows(t *testing.T, tenant uuid.UUID) int {
 	t.Helper()
-	app := openPool174(t, appDSN174(t))
+	app := dbtest.NewAppPool(t)
 	ctx := context.Background()
 	tx, err := app.Begin(ctx)
 	if err != nil {
@@ -263,10 +239,6 @@ func countAnchorsExportMetaAuditRows(t *testing.T, tenant uuid.UUID) int {
 		t.Fatalf("count: %v", err)
 	}
 	return n
-}
-
-func getEnv(name string) string {
-	return os.Getenv(name)
 }
 
 // ----- tests -----

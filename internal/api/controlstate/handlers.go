@@ -25,13 +25,45 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-// Handler bundles the slice-012 read routes over a single eval.Engine.
-type Handler struct {
-	engine *eval.Engine
+// controlEvaluator is the two-method read seam the State + Effectiveness
+// (GET /v1/controls/{id}/{state,effectiveness}) paths read through (slice
+// 412, contract-tier tail rollout — mirrors the slice-411 auditperiods
+// list-only / controldetail per-route seam). It carries JUST the two read
+// methods those routes need — deliberately narrow (slice 409 D1 / slice 411
+// D2: the seam is sized to the routes it serves, not the wider engine
+// surface). The contract-tier recorder (handler_contract_test.go) injects a
+// fixed-row stub satisfying this seam so the two wire shapes record on the
+// plain `go test ./...` unit surface with no Postgres pool (ADR-0007 /
+// P0-409-1). The production *eval.Engine satisfies it verbatim; the seam is
+// unexported and New(*eval.Engine) is unchanged (P0-409-2).
+type controlEvaluator interface {
+	ControlState(ctx context.Context, controlID uuid.UUID, scopePredicate string, asOf time.Time) ([]eval.State, error)
+	Effectiveness(ctx context.Context, controlID uuid.UUID) (eval.Effectiveness, error)
 }
 
-// New constructs a Handler.
-func New(engine *eval.Engine) *Handler { return &Handler{engine: engine} }
+// Handler bundles the slice-012 read routes over a single eval.Engine.
+//
+// evaluator is the slice-412 two-method read seam the State/Effectiveness
+// paths read through; New points it at the engine, so production behavior is
+// identical. Both routes in this package read through the seam, so the
+// concrete *eval.Engine is not retained on the struct — unlike the
+// auditperiods/controldetail handlers (slice 411), whose other routes keep the
+// concrete store.
+type Handler struct {
+	evaluator controlEvaluator
+}
+
+// New constructs a Handler. The slice-412 read seam (evaluator) is wired to
+// the engine — the public signature is unchanged (P0-409-2).
+func New(engine *eval.Engine) *Handler { return &Handler{evaluator: engine} }
+
+// newHandlerWithEvaluator constructs a Handler whose State/Effectiveness paths
+// read through an arbitrary read seam. It exists ONLY for the slice-412
+// contract recorder, which injects a fixed-row stub so the two wire shapes
+// record with no Postgres pool. Unexported — not part of the public surface.
+func newHandlerWithEvaluator(evaluator controlEvaluator) *Handler {
+	return &Handler{evaluator: evaluator}
+}
 
 // ----- wire shapes -----
 
@@ -100,7 +132,7 @@ func (h *Handler) State(w http.ResponseWriter, r *http.Request) {
 		asOf = ts.UTC()
 	}
 
-	states, err := h.engine.ControlState(ctx, controlID, scopePredicate, asOf)
+	states, err := h.evaluator.ControlState(ctx, controlID, scopePredicate, asOf)
 	if err != nil {
 		writeStateErr(w, r, err)
 		return
@@ -143,7 +175,7 @@ func (h *Handler) Effectiveness(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	eff, err := h.engine.Effectiveness(ctx, controlID)
+	eff, err := h.evaluator.Effectiveness(ctx, controlID)
 	if err != nil {
 		writeStateErr(w, r, err)
 		return

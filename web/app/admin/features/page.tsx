@@ -77,8 +77,9 @@ export default function FeaturesPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Features</h1>
         <p className="text-sm text-muted-foreground">
-          Per-tenant feature flags. Disabling a module hides its routes; data is
-          preserved and re-enable any time.
+          Per-tenant feature flags. Disabling a gated module hides its nav entry
+          and makes its routes unreachable; data is preserved and you can
+          re-enable at any time.
         </p>
       </div>
 

@@ -85,6 +85,15 @@ describe("contract: GET /api/audits <-> atlas GET /v1/audit-periods", () => {
           expect(typeof p.frozen_hash, `${name}.frozen_hash`).toBe("string");
           expect(typeof p.frozen_by, `${name}.frozen_by`).toBe("string");
         }
+        // Slice 680 / ATLAS-033: framework_label is optional (omitempty —
+        // absent when the framework version no longer resolves); a string
+        // when present (e.g. "SCF 2025.2"). The /audits view renders it in
+        // place of a truncated framework_version_id UUID.
+        if (p.framework_label !== undefined) {
+          expect(typeof p.framework_label, `${name}.framework_label`).toBe(
+            "string",
+          );
+        }
       }
     }
   });

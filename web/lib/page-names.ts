@@ -36,6 +36,7 @@ const PAGE_NAMES: Record<string, string> = {
   vendors: "Vendors",
   // Reference + ops
   "board-packs": "Board Packs",
+  oscal: "Vendor Claims", // /oscal/component-definitions
   catalog: "Catalog",
   settings: "Settings",
   admin: "Admin",

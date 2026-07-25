@@ -87,6 +87,33 @@ export function countHighSeverityRisks(risks: Risk[]): number {
 }
 
 /**
+ * Slice 681 / ATLAS-036 — the badge's accessible + visible label text.
+ *
+ * The audit found the rose "10" reads as a TOTAL risk count (the
+ * register had 20+ rows). It is actually the count of HIGH-SEVERITY
+ * risks — the `aria-label` already said so, but nothing visual or
+ * on-hover conveyed it, so a sighted operator misread it.
+ *
+ * The fix (presentation only — the threshold is unchanged, slice 681
+ * anti-criterion):
+ *   - `marker`: a small "▲" glyph rendered BEFORE the count. A triangle
+ *     reads as "elevated / attention" rather than "total", so the badge
+ *     no longer looks like a neutral tally. It is `aria-hidden` in the
+ *     component (the label already carries the meaning).
+ *   - `ariaLabel` / `title`: "N high-severity risks" — the same string
+ *     for screen-reader (`aria-label`) and sighted-hover (`title`), so
+ *     the disambiguation is reachable by both. Singular/plural correct.
+ *
+ * Pure + unit-tested here so the wording is pinned without a React tree.
+ */
+export const HIGH_SEVERITY_BADGE_MARKER = "▲";
+
+export function highSeverityBadgeLabel(count: number): string {
+  const noun = count === 1 ? "high-severity risk" : "high-severity risks";
+  return `${count} ${noun}`;
+}
+
+/**
  * Common Tailwind class set for the count badge. Right-aligned via
  * `ml-auto` (sits inside the sidebar Link, which is a flex row).
  * Mono + tight tracking matches the mockup's `mono text-[10px]`.
@@ -145,14 +172,25 @@ export function RisksCountBadge() {
   const count = countHighSeverityRisks(q.data.risks ?? []);
   if (count === 0) return null;
 
+  // Slice 681 / ATLAS-036 — the rose count is disambiguated as
+  // high-severity (not a total) by a leading "▲" marker glyph + an
+  // accessible/hover label. The count is LIVE: TanStack Query refetches
+  // every 60s (refetchInterval above), so adding a high-severity risk
+  // surfaces in the badge within one refresh tick (documented cadence,
+  // decisions log D3).
+  const label = highSeverityBadgeLabel(count);
   return (
     <span
       data-testid="sidebar-risks-count"
-      className={`${BADGE_BASE} text-rose-600 dark:text-rose-400 ${pulseClass(
+      className={`${BADGE_BASE} gap-0.5 text-rose-600 dark:text-rose-400 ${pulseClass(
         q.isFetching,
       )}`}
-      aria-label={`${count} high-severity risks`}
+      aria-label={label}
+      title={label}
     >
+      <span aria-hidden className="text-[8px] leading-none">
+        {HIGH_SEVERITY_BADGE_MARKER}
+      </span>
       {count}
     </span>
   );

@@ -1,0 +1,37 @@
+{
+  "_comment": "Slice 689 contract-tier golden. PROVIDER: internal/api/audit/contractrecord_test.go (GetPopulation, real handler over an injected fixed-row two-method sampleReader stub — Option A seam, no Postgres; routed through chi for the {id} path param). Regenerate: `go test ./internal/api/audit/ -run TestContract_PopulationGet -update`. CONSUMER: web/lib/contracts/population-get.contract.test.ts asserts the BFF at web/app/api/audit/populations/[id]/route.ts — VERBATIM passthrough (toEqual). frozen_at is omitempty (present only on a frozen population, invariant 10); scope_predicate is opaque JSON and defaults to {\"op\":\"true\"} when empty.",
+  "endpoint": "GET /v1/populations/{id}",
+  "variants": {
+    "frozen": {
+      "population": {
+        "control_id": "11111111-1111-4111-8111-111111111111",
+        "created_at": "2026-02-01T00:00:00Z",
+        "created_by": "key_contract_689",
+        "frozen_at": "2026-02-02T12:00:00Z",
+        "id": "22222222-2222-4222-8222-222222222222",
+        "row_count": 42,
+        "scope_predicate": {
+          "op": "true"
+        },
+        "time_window_end": "2026-01-31T00:00:00Z",
+        "time_window_start": "2026-01-01T00:00:00Z"
+      }
+    },
+    "open": {
+      "population": {
+        "control_id": "11111111-1111-4111-8111-111111111111",
+        "created_at": "2026-02-01T00:00:00Z",
+        "created_by": "key_contract_689",
+        "id": "22222222-2222-4222-8222-222222222222",
+        "row_count": 42,
+        "scope_predicate": {
+          "field": "env",
+          "op": "eq",
+          "value": "prod"
+        },
+        "time_window_end": "2026-01-31T00:00:00Z",
+        "time_window_start": "2026-01-01T00:00:00Z"
+      }
+    }
+  }
+}

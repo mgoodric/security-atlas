@@ -3,7 +3,7 @@
 **Cluster:** Oscal
 **Estimate:** 5d (re-scoped into 368a ~3d + 368b ~2d — see "Re-scoped by ADR-0010")
 **Type:** JUDGMENT
-**Status:** `in-progress` (tracking parent — ADR-0010 approved; split into 413 Phase 1 in-progress + 414 Phase 2 gated)
+**Status:** `merged` (tracking parent — ADR-0010 Accepted 2026-06-15; both phases shipped: 413 Phase 1 `cosign-kms`+`embedded-ed25519` merged, 414 Phase 2 `cosign-keyless` merged after ADR-0016/455 resolved the OIDC-identity decision. No further work on this parent.)
 **Gated by:** [ADR-0010](../adr/0010-oscal-cosign-signing.md) (slice 400 decision spike)
 
 ## Re-scoped by ADR-0010 (slice 400 decision spike)
@@ -39,16 +39,22 @@ Day 4 (CLI + runbook) · most of Day 5 (Mode-A/B integration tests + decisions
 log). **No Fulcio/Rekor/OIDC.** Covers AC-1, AC-2 (kms + embedded values),
 AC-3, AC-4, AC-5, AC-7, AC-10, and AC-6 for Modes A & B.
 
-### 368b — Phase 2 (cosign-keyless + Fulcio + Rekor), ~2d — `not-ready` (gated)
+### 368b — Phase 2 (cosign-keyless + Fulcio + Rekor), ~2d — `ready` (OIDC-identity resolved by ADR-0016; tracked as slice 414)
 
 `cosign-keyless` mode plus Fulcio cert issuance plus Rekor transparency-log
-handling, keyless verification dispatch, keyless integration tests, and the SaaS
-keyless-default flip. Maps to Day 2 (keyless + Fulcio) plus the keyless slice of
-Day 5. **Blocked-by:** a separate, short OIDC-identity-strategy decision
+handling, keyless verification dispatch, keyless integration tests, and the
+opt-in keyless availability. Maps to Day 2 (keyless + Fulcio) plus the keyless
+slice of Day 5. **Was blocked-by** a separate OIDC-identity-strategy decision
 (public IdP vs private Sigstore vs Sigstore-root onboarding) — see ADR-0010
-"the single decision … secondary decision." This is canvas §9's "Full Sigstore
-transparency-log in v3" line. Covers the `cosign-keyless` portion of AC-2, AC-3,
-AC-6, and the revised AC-9 SaaS default.
+"the single decision … secondary decision." **That decision is now made:**
+[ADR-0016](../adr/0016-oidc-identity-for-keyless-signing.md) (slice 455) adopts
+the opt-in private-Sigstore path (atlas's scoped `client:oscal-signer` identity
+federated into an operator-run Fulcio + Rekor; options a/d rejected), with
+`cosign-kms` + `embedded-ed25519` remaining the default for all primary
+deployment shapes. The keyless leg is canvas §9's "Full Sigstore transparency-log
+in v3" line. Covers the `cosign-keyless` portion of AC-2, AC-3, AC-6; **AC-9 is
+opt-in keyless availability, NOT a SaaS default flip** (ADR-0016 preserves the
+ADR-0010 default table).
 
 ### AC-9 revision (per ADR-0010 default-mode table)
 

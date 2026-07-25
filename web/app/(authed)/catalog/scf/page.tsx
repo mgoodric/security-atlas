@@ -89,8 +89,8 @@ export default function SCFCatalogPage() {
           <CardHeader>
             <CardTitle>{data.length} anchors</CardTitle>
             <CardDescription>
-              Subset bundled with slice 005; full SCF catalog imports with slice
-              006.
+              A starter subset of the Secure Controls Framework. The full SCF
+              catalog loads when you run the catalog import.
             </CardDescription>
           </CardHeader>
           <CardContent>

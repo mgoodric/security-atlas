@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/slack.workspace_member/1.0.0.json",
+  "x-evidence-kind": "slack.workspace_member.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IAC-01", "IAC-06"],
+  "title": "Slack workspace member access state",
+  "description": "Per-member access METADATA from the Slack admin users API — one record per workspace member per run. Membership/role/2FA metadata ONLY; the connector never reads message content, DMs, or channel history (slice 443 threat-model I). Feeds access-control evidence (who has workspace access, who is admin/owner) plus 2FA-enforcement coverage.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["user_id", "handle"],
+  "properties": {
+    "user_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Slack-assigned stable user id (e.g. U012AB3CD)."
+    },
+    "handle": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Public display name / handle. Never a private profile field or any message content."
+    },
+    "is_admin": { "type": "boolean" },
+    "is_owner": { "type": "boolean" },
+    "is_bot": { "type": "boolean" },
+    "deleted": {
+      "type": "boolean",
+      "description": "True for a deactivated/deprovisioned account — the correct end state."
+    },
+    "has_2fa": {
+      "type": "boolean",
+      "description": "True if the member has two-factor authentication enabled."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable reason when the access verdict is fail/inconclusive."
+    }
+  }
+}

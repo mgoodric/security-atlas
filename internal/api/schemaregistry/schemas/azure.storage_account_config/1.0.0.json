@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/azure.storage_account_config/1.0.0.json",
+  "x-evidence-kind": "azure.storage_account_config.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CRY-04", "NET-04"],
+  "title": "Azure Storage account configuration",
+  "description": "Per-storage-account hardening posture captured read-only from Azure Resource Manager (ARM Reader role): encryption-at-rest, secure-transfer (HTTPS-only) / minimum TLS version, and public-blob-access state. Account configuration only — never blob/object contents, access keys, or SAS tokens.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "account_id",
+    "account_name",
+    "subscription_id",
+    "encryption_enabled",
+    "https_traffic_only",
+    "allow_blob_public_access"
+  ],
+  "properties": {
+    "account_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ARM resource id of the storage account."
+    },
+    "account_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Storage account name."
+    },
+    "subscription_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Subscription the storage account lives in."
+    },
+    "resource_group": {
+      "type": "string",
+      "description": "Resource group containing the storage account."
+    },
+    "location": {
+      "type": "string",
+      "description": "Azure region of the storage account."
+    },
+    "encryption_enabled": {
+      "type": "boolean",
+      "description": "Encryption-at-rest is configured for the account."
+    },
+    "encryption_key_source": {
+      "type": "string",
+      "description": "Key source for encryption at rest (Microsoft.Storage | Microsoft.Keyvault)."
+    },
+    "https_traffic_only": {
+      "type": "boolean",
+      "description": "Secure-transfer-required: only HTTPS traffic is accepted."
+    },
+    "minimum_tls_version": {
+      "type": "string",
+      "description": "Minimum TLS version the account accepts (e.g. TLS1_2)."
+    },
+    "allow_blob_public_access": {
+      "type": "boolean",
+      "description": "Whether anonymous public blob access is permitted on the account."
+    }
+  }
+}

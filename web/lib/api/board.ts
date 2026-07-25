@@ -45,6 +45,13 @@ export type BoardPackSectionData = {
     freshness_status: string;
   }[];
   findings_count?: number;
+  // vendor_burndown (generated — slice 273). Mirrors the
+  // internal/board/pack.go SectionData `vendor_burndown_*` JSON tags.
+  vendor_burndown_total?: number;
+  vendor_burndown_on_time?: number;
+  vendor_burndown_past_due?: number;
+  vendor_burndown_on_time_pct?: number;
+  vendor_burndown_on_time_fraction?: number;
   // operational_metrics (operator-entered)
   phishing_pass_rate_pct?: number | null;
   p1_patch_median_days?: number | null;
@@ -106,6 +113,32 @@ export const BOARD_PACK_SECTION_KEYS: string[] = [
   "investment",
   "asks",
 ];
+
+// SECTION_TITLES maps each fixed section key to its board-facing human
+// label. Mirrors internal/board/pack.go `sectionTitles` (all eight keys).
+// This is the FE source of truth for a section's display name so the UI
+// NEVER shows a raw internal key (slice 662 AC-2) — not even when the
+// served section is missing or carries an empty `title` (an incomplete
+// stored pack, e.g. an older demo-seed row). Resolution order is
+// SECTION_TITLES[key] -> served section.title -> key (the last is a
+// defensive floor for an unknown key, which the fixed set never contains).
+export const SECTION_TITLES: Record<string, string> = {
+  posture: "Posture summary",
+  top_risks: "Top risks aging",
+  coverage_trend: "Coverage trend",
+  open_findings: "Open findings",
+  vendor_burndown: "Vendor risk burndown",
+  operational_metrics: "Operational metrics",
+  investment: "Investment vs coverage",
+  asks: "Asks of the board",
+};
+
+// sectionLabel resolves the human-readable label for a section key. It
+// prefers the canonical FE label, then the served title, then the raw key
+// as a last-resort floor (slice 662 AC-2 — a label always renders).
+export function sectionLabel(key: string, section?: BoardPackSection): string {
+  return SECTION_TITLES[key] ?? (section?.title || key);
+}
 
 // Operator-entered structured inputs for the PUT section endpoint
 // (decisions D3 + D5). All fields optional — only populated ones apply.

@@ -6,6 +6,13 @@
 -- surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
 
 -- name: InsertEvidenceRecord :one
+-- Slice 474: scope_canonical persists the canonical (sorted) wire scope the
+-- content-hash was computed over, so `atlas evidence verify` can reconstruct
+-- the exact record and recompute an identical hash.
+-- Slice 633: observed_at_nanos persists the LOSSLESS Unix-nanosecond value of
+-- the wire observed_at (the observed_at TIMESTAMPTZ column is microsecond
+-- precision and truncates sub-us nanos), so the verify walk reconstructs the
+-- exact nanosecond timestamp the hash covered.
 INSERT INTO evidence_records (
     id, tenant_id,
     control_id, control_ref, scope_id,
@@ -13,7 +20,8 @@ INSERT INTO evidence_records (
     payload, payload_uri,
     hash, freshness_class, valid_until,
     idempotency_key, evidence_kind, schema_version,
-    credential_id, ingestion_path, source_attribution
+    credential_id, ingestion_path, source_attribution,
+    scope_canonical, observed_at_nanos
 ) VALUES (
     $1, $2,
     $3, $4, $5,
@@ -21,7 +29,8 @@ INSERT INTO evidence_records (
     $9, $10,
     $11, $12, $13,
     $14, $15, $16,
-    $17, $18, $19
+    $17, $18, $19,
+    $20, $21
 )
 RETURNING *;
 
@@ -54,6 +63,51 @@ LIMIT $4 OFFSET $5;
 
 -- name: CountEvidenceRecordsByTenant :one
 SELECT count(*) FROM evidence_records WHERE tenant_id = $1;
+
+-- name: CountEvidenceRecordsByControl :one
+-- Slice 502: total CURRENT LIVE evidence count for one control, used by the
+-- evidence-summary surface to render a "showing N of M" bound (the summary is
+-- over the bounded top-N, never the full history — P0-502-8). Resolution
+-- mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
+SELECT count(*)
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3);
+
+-- name: ListEvidenceRecordsByControlBeforeHorizon :many
+-- Slice 749: the FROZEN-population variant of ListEvidenceRecordsByControl.
+-- Returns the top-N most-recent evidence records for one control bounded by an
+-- audit-period freeze horizon: observed_at <= frozen_at (invariant #10). The
+-- bound is the period's audit_periods.frozen_at, passed by the caller after it
+-- has resolved the period; this query NEVER reads the period row itself, it only
+-- applies the horizon it is given. Mirrors ListEvidenceRecordsByControl's
+-- (control_id = $2 OR control_ref = $3) resolution and observed_at DESC order so
+-- the bounded top-N is the N most-recent records WITHIN the frozen population —
+-- never a post-freeze (live) record (P0-749-1). The COALESCE-to-infinity on a
+-- NULL horizon mirrors the slice-026/028 frozen-sample read path: an open period
+-- (frozen_at NULL) falls through to live state, but the slice-749 surface only
+-- summarizes FROZEN periods, so in practice the horizon is always set.
+SELECT *
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3)
+  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                              'infinity'::timestamptz)
+ORDER BY observed_at DESC
+LIMIT $4 OFFSET $5;
+
+-- name: CountEvidenceRecordsByControlBeforeHorizon :one
+-- Slice 749: total FROZEN-population evidence count for one control bounded by
+-- the audit-period freeze horizon (observed_at <= frozen_at), for the
+-- "showing N of M" UI label. Mirrors CountEvidenceRecordsByControl's resolution
+-- and the ListEvidenceRecordsByControlBeforeHorizon horizon predicate so the
+-- count and the bounded list agree on the frozen population (P0-749-1).
+SELECT count(*)
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3)
+  AND observed_at <= COALESCE(sqlc.narg('frozen_at')::timestamptz,
+                              'infinity'::timestamptz);
 
 -- name: WalkEvidenceRecordsForVerify :many
 -- Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.

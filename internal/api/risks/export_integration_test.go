@@ -38,6 +38,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	risksapi "github.com/mgoodric/security-atlas/internal/api/risks"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/export"
 )
 
@@ -53,8 +54,8 @@ func newRiskExportRouter(t *testing.T, tenantID uuid.UUID, isAdmin bool, ownerRo
 
 func newRiskExportRouterWithLimiter(t *testing.T, tenantID uuid.UUID, isAdmin bool, ownerRoles []string, lim *export.Limiter) http.Handler {
 	t.Helper()
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	_ = admin // reserved for test seed helpers
 	h := risksapi.NewExportHandler(app)
 	if lim != nil {
@@ -83,7 +84,7 @@ func newRiskExportRouterWithLimiter(t *testing.T, tenantID uuid.UUID, isAdmin bo
 // expected fields.
 func seedRiskForExport(t *testing.T, tenant uuid.UUID, title, category string) uuid.UUID {
 	t.Helper()
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	id := uuid.New()
 	inherent, _ := json.Marshal(map[string]int{"likelihood": 3, "impact": 4})
 	if _, err := admin.Exec(context.Background(), `
@@ -109,7 +110,7 @@ func seedRiskForExport(t *testing.T, tenant uuid.UUID, title, category string) u
 // slice 136 action under the given tenant's GUC.
 func countRiskExportMetaAuditRows(t *testing.T, tenant uuid.UUID) int {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	ctx := context.Background()
 	tx, err := app.Begin(ctx)
 	if err != nil {

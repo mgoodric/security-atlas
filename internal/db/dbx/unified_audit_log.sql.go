@@ -218,29 +218,42 @@ WHERE unified.occurred_at >= $1::timestamptz
           AND (unified.kind <> 'me' OR unified.actor_id = $6::text)
       )
   )
+  -- Slice 669 — view-only read-telemetry deny predicate. When
+  -- ` + "`" + `exclude_read_telemetry = true` + "`" + ` (the Activity-feed default), drop the
+  -- high-volume ` + "`" + `decision` + "`" + `/` + "`" + `read` + "`" + ` rows so human-meaningful business events
+  -- surface. When false (admin endpoint default + ` + "`" + `?include_reads=true` + "`" + `
+  -- opt-in) the predicate short-circuits and every row is returned. The
+  -- underlying ledger is untouched — this is presentation only (canvas
+  -- invariant #2). Security-relevant mutations (auth/role/tenant/exception
+  -- writes) are NOT ` + "`" + `decision` + "`" + `/` + "`" + `read` + "`" + ` rows and are never hidden.
+  AND (
+      $7::boolean = false
+      OR NOT (unified.kind = 'decision' AND unified.action = 'read')
+  )
   -- Cursor: occurred_at strictly less, OR same occurred_at and a strictly-greater
   -- (kind, row_id) tuple. row_id is the underlying audit-log row's UUID PK and
   -- is GUARANTEED unique per row across the UNION (because each base table's PK
   -- is independently unique and the kind discriminator separates branches).
-  AND ($7::timestamptz IS NULL
-       OR unified.occurred_at < $7::timestamptz
-       OR (unified.occurred_at = $7::timestamptz
-           AND (unified.kind, unified.row_id::text) > ($8::text, $9::text)))
+  AND ($8::timestamptz IS NULL
+       OR unified.occurred_at < $8::timestamptz
+       OR (unified.occurred_at = $8::timestamptz
+           AND (unified.kind, unified.row_id::text) > ($9::text, $10::text)))
 ORDER BY unified.occurred_at DESC, unified.kind ASC, unified.row_id ASC
-LIMIT $10::integer
+LIMIT $11::integer
 `
 
 type ListUnifiedAuditLogParams struct {
-	FromTs             pgtype.Timestamptz `json:"from_ts"`
-	ToTs               pgtype.Timestamptz `json:"to_ts"`
-	ActorFilter        string             `json:"actor_filter"`
-	KindFilterCsv      string             `json:"kind_filter_csv"`
-	CallerIsPrivileged bool               `json:"caller_is_privileged"`
-	CallerUserID       string             `json:"caller_user_id"`
-	CursorTs           pgtype.Timestamptz `json:"cursor_ts"`
-	CursorKind         string             `json:"cursor_kind"`
-	CursorRowID        string             `json:"cursor_row_id"`
-	LimitN             int32              `json:"limit_n"`
+	FromTs               pgtype.Timestamptz `json:"from_ts"`
+	ToTs                 pgtype.Timestamptz `json:"to_ts"`
+	ActorFilter          string             `json:"actor_filter"`
+	KindFilterCsv        string             `json:"kind_filter_csv"`
+	CallerIsPrivileged   bool               `json:"caller_is_privileged"`
+	CallerUserID         string             `json:"caller_user_id"`
+	ExcludeReadTelemetry bool               `json:"exclude_read_telemetry"`
+	CursorTs             pgtype.Timestamptz `json:"cursor_ts"`
+	CursorKind           string             `json:"cursor_kind"`
+	CursorRowID          string             `json:"cursor_row_id"`
+	LimitN               int32              `json:"limit_n"`
 }
 
 type ListUnifiedAuditLogRow struct {
@@ -275,6 +288,21 @@ type ListUnifiedAuditLogRow struct {
 // nine source tables, the canonical Kind enum, or the cursor pagination
 // contract; the only wire-shape change is one additional column on every
 // returned row.
+//
+// Slice 669 (2026-06-10): one new optional parameter
+// (`exclude_read_telemetry BOOLEAN`) gates a view-only deny predicate that
+// drops `decision`-kind rows whose `action = 'read'` — the high-volume
+// internal authz read-telemetry the app emits auditing its own GET reads
+// (`internal/authz/input.go` maps GET/HEAD/OPTIONS to action='read'). When
+// `true` (the slice 270 `/v1/activity/unified` default), the Activity feed
+// defaults to mutating/business events and the read-telemetry is hidden;
+// when `false` (the slice 124 admin endpoint default + the activity
+// endpoint's `?include_reads=true` opt-in) every row is returned and the
+// result set is identical to the pre-slice-669 shape. This is a VIEW
+// concern only — the underlying decision_audit_log ledger is unchanged
+// (canvas invariant #2: the append-only ledger stays complete; filtering
+// never deletes or stops recording). The predicate is conjunctive with all
+// other filters; it never widens visibility.
 //
 // Slice 270 (2026-05-23): two new optional parameters
 // (`caller_is_privileged BOOLEAN` + `caller_user_id TEXT`) gate one extra
@@ -341,6 +369,7 @@ func (q *Queries) ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditL
 		arg.KindFilterCsv,
 		arg.CallerIsPrivileged,
 		arg.CallerUserID,
+		arg.ExcludeReadTelemetry,
 		arg.CursorTs,
 		arg.CursorKind,
 		arg.CursorRowID,

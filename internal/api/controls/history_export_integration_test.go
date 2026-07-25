@@ -32,12 +32,12 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/export"
 )
 
@@ -54,7 +54,7 @@ func newControlsHistoryExportRouter(t *testing.T, tenantID uuid.UUID, isAdmin bo
 
 func newControlsHistoryExportRouterWithLimiter(t *testing.T, tenantID uuid.UUID, isAdmin bool, ownerRoles []string, lim *export.Limiter) http.Handler {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	h := controlsapi.NewHistoryExportHandler(app)
 	if lim != nil {
 		h = h.WithLimiter(lim)
@@ -85,10 +85,15 @@ func newControlsHistoryExportRouterWithLimiter(t *testing.T, tenantID uuid.UUID,
 // `controls_history_export` meta-audit rows).
 func freshHistoryExportTenant(t *testing.T) uuid.UUID {
 	t.Helper()
+	// Hoist the migrate-pool acquisition OUT of the t.Cleanup closure (a
+	// dbtest pool registers its own t.Cleanup, which cannot be done from
+	// inside a running cleanup). This stays a carve-out: the cleanup
+	// interleaves an UPDATE and an action-scoped DELETE that SeedTenant
+	// cannot express.
+	admin := dbtest.NewMigratePool(t)
 	tenant := uuid.New()
 	t.Cleanup(func() {
 		ctx := context.Background()
-		admin := openPool(t, adminDSN(t))
 		for _, stmt := range []string{
 			`DELETE FROM me_audit_log WHERE tenant_id = $1 AND action = 'controls_history_export'`,
 			`UPDATE controls SET superseded_by = NULL WHERE tenant_id = $1`, // break FK chains before delete
@@ -110,7 +115,7 @@ func freshHistoryExportTenant(t *testing.T) uuid.UUID {
 func seedControlPairForHistory(t *testing.T, tenant uuid.UUID, bundleID, baseTitle string) (v1ID, v2ID, anchorID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 
 	anchorID = ensureTestSCFAnchor(t)
 
@@ -170,7 +175,7 @@ func seedControlPairForHistory(t *testing.T, tenant uuid.UUID, bundleID, baseTit
 // slice 175 action under the given tenant's GUC.
 func countHistoryExportMetaAuditRows(t *testing.T, tenant uuid.UUID) int {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	ctx := context.Background()
 	tx, err := app.Begin(ctx)
 	if err != nil {
@@ -236,10 +241,6 @@ func extractHistorySearchableText(t *testing.T, format string, body []byte) stri
 		return ""
 	}
 }
-
-// silence the pool import if a later refactor drops one of the
-// helpers above. The pool reference itself is used through openPool().
-var _ = (*pgxpool.Pool)(nil)
 
 // ===== Tests =====
 

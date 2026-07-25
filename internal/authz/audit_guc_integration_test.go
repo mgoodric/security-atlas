@@ -24,6 +24,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -47,10 +48,8 @@ import (
 //     not just an artifact of a permissive table.
 func TestAuditWriter_TenantGUCApplied(t *testing.T) {
 	t.Parallel()
-	appPool := openPool(t, appDSN(t))
-	defer appPool.Close()
-	adminPool := openPool(t, adminDSN(t))
-	defer adminPool.Close()
+	appPool := dbtest.NewAppPool(t)
+	adminPool := dbtest.NewMigratePool(t)
 
 	tenant := freshTenant(t, adminPool)
 	writer := authz.NewAuditWriter(appPool)

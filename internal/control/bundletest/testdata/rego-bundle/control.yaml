@@ -1,0 +1,22 @@
+bundle_schema_version: "1"
+bundle_id: rego_all_pass_test
+title: "All evidence records must pass (Rego)"
+description: "A Rego evidence query asserting every in-window record passed."
+scf_anchor_id: IAC-06
+implementation_type: automated
+control_family: IAC
+owner_role: security-engineering
+lifecycle_state: proposed
+freshness_class: daily
+
+evidence_queries:
+  - id: all_records_pass
+    language: rego
+    description: "Control passes only when every in-window record has result==pass."
+    expression: |
+      package evidence.query
+      default result := "fail"
+      result := "pass" if {
+        count(input.records) > 0
+        every r in input.records { r.result == "pass" }
+      }

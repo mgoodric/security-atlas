@@ -25,6 +25,28 @@ type BridgeClient interface {
 	// RoundTripValidate parses an OSCAL document back through
 	// compliance-trestle, returning whether it is structurally valid.
 	RoundTripValidate(ctx context.Context, modelType string, oscalJSON []byte) (valid bool, errs []string, err error)
+	// ImportCatalog deserializes + validates an inbound OSCAL catalog JSON
+	// document, returning a normalized projection (or a structured
+	// validation error in the response). The ingest direction of
+	// invariant #8 (slice 492). The bridge never dereferences any href the
+	// document references.
+	ImportCatalog(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportCatalogResponse, error)
+	// ImportProfile resolves an inbound OSCAL profile JSON document against
+	// the SUPPLIED catalog documents and (slice 578) the SUPPLIED intermediate
+	// profile documents — a bounded profile-over-profile chain — returning the
+	// resolved control projection (or a structured error in the response). The
+	// resolve direction of invariant #8 (slice 511). The bridge resolves
+	// import.href references ONLY against the supplied documents and NEVER
+	// dereferences an external href (P0-511-1 / P0-578-1).
+	ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, profiles [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error)
+	// ImportComponentDefinition deserializes + validates an inbound OSCAL
+	// component-definition JSON document, returning a normalized projection of
+	// the defined components + their implemented-requirements (the vendor's
+	// control-implementation CLAIMS) — or a structured validation error in the
+	// response. The vendor-claim ingest direction of invariant #8 (slice 512).
+	// The bridge never dereferences any href the document references
+	// (P0-512-2) and asserts nothing about whether a claim is true.
+	ImportComponentDefinition(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportComponentDefinitionResponse, error)
 	// Close releases the underlying gRPC connection.
 	Close() error
 }
@@ -95,6 +117,55 @@ func (b *grpcBridge) RoundTripValidate(ctx context.Context, modelType string, os
 		return false, nil, err
 	}
 	return resp.GetValid(), resp.GetErrors(), nil
+}
+
+func (b *grpcBridge) ImportCatalog(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportCatalogResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, bridgeRPCTimeout)
+	defer cancel()
+	resp, err := b.client.ImportCatalog(ctx, &oscalv1.ImportCatalogRequest{
+		OscalJson:   oscalJSON,
+		SourceLabel: sourceLabel,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (b *grpcBridge) ImportProfile(ctx context.Context, profileJSON []byte, catalogs [][]byte, profiles [][]byte, sourceLabel string) (*oscalv1.ImportProfileResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, bridgeRPCTimeout)
+	defer cancel()
+	supplied := make([]*oscalv1.SuppliedCatalog, 0, len(catalogs))
+	for _, c := range catalogs {
+		supplied = append(supplied, &oscalv1.SuppliedCatalog{OscalJson: c})
+	}
+	suppliedProfiles := make([]*oscalv1.SuppliedProfile, 0, len(profiles))
+	for _, p := range profiles {
+		suppliedProfiles = append(suppliedProfiles, &oscalv1.SuppliedProfile{OscalJson: p})
+	}
+	resp, err := b.client.ImportProfile(ctx, &oscalv1.ImportProfileRequest{
+		ProfileJson: profileJSON,
+		Catalogs:    supplied,
+		Profiles:    suppliedProfiles,
+		SourceLabel: sourceLabel,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+func (b *grpcBridge) ImportComponentDefinition(ctx context.Context, oscalJSON []byte, sourceLabel string) (*oscalv1.ImportComponentDefinitionResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, bridgeRPCTimeout)
+	defer cancel()
+	resp, err := b.client.ImportComponentDefinition(ctx, &oscalv1.ImportComponentDefinitionRequest{
+		OscalJson:   oscalJSON,
+		SourceLabel: sourceLabel,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 func (b *grpcBridge) Close() error {

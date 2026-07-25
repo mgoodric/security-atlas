@@ -11,7 +11,6 @@ package decision_test
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -19,43 +18,22 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ---- harness helpers ----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant returns a fresh tenant UUID and registers cleanup that wipes
 // every decisions-related row for it (and the seed risks/controls/exceptions).
+//
+// Carve-out (742 drain batch 13): this cleanup is NOT a pure ordered set of
+// per-table DELETEs — it interleaves an `UPDATE decisions SET superseded_by =
+// NULL` step before deleting the decisions rows (to break the self-referential
+// superseded_by FK before the delete). dbtest.SeedTenant only expresses
+// ordered DELETEs, so freshTenant stays inline; only its pool is sourced from
+// the dbtest harness (dbtest.NewMigratePool) at the call sites.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
@@ -152,10 +130,8 @@ func validCreate(maker string) decision.CreateInput {
 // ---- AC-1 / AC-8: create with required fields + DL-id format ----
 
 func TestCreate_HappyPath_GeneratesDecisionID(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -186,10 +162,8 @@ func TestCreate_HappyPath_GeneratesDecisionID(t *testing.T) {
 }
 
 func TestCreate_DecisionIDSequenceIncrements(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -211,10 +185,8 @@ func TestCreate_DecisionIDSequenceIncrements(t *testing.T) {
 }
 
 func TestCreate_RejectsMissingRequiredFields(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -240,10 +212,8 @@ func TestCreate_RejectsMissingRequiredFields(t *testing.T) {
 // ---- AC-2: get with linkage + list filters ----
 
 func TestList_FilterByStatus(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -279,10 +249,8 @@ func TestList_FilterByStatus(t *testing.T) {
 }
 
 func TestList_FilterByRevisitWindow(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -314,10 +282,8 @@ func TestList_FilterByRevisitWindow(t *testing.T) {
 // ---- AC-8: create-with-links, GET returns all linkage, supersede chain ----
 
 func TestIntegration_CreateLinkSupersede(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -420,10 +386,8 @@ func TestIntegration_CreateLinkSupersede(t *testing.T) {
 // ---- AC-4: supersede on a non-active decision is a 409-equivalent ----
 
 func TestSupersede_RejectsNonActive(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -452,10 +416,8 @@ func TestSupersede_RejectsNonActive(t *testing.T) {
 // ---- AC-3: PATCH writes an append-only audit row ----
 
 func TestUpdate_WritesAuditRow(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -490,10 +452,8 @@ func TestUpdate_WritesAuditRow(t *testing.T) {
 // ---- AC-9: cross-tenant linkage returns ErrCrossTenantLink + audit row ----
 
 func TestAddLink_CrossTenantDenied(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	store := decision.NewStore(app)
@@ -552,10 +512,8 @@ func TestAddLink_CrossTenantDenied(t *testing.T) {
 // ---- AC-9: a decision in another tenant is invisible (404-equivalent) ----
 
 func TestGet_CrossTenantInvisible(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	store := decision.NewStore(app)
@@ -573,12 +531,9 @@ func TestGet_CrossTenantInvisible(t *testing.T) {
 // ---- AC-6: overdue surface + daily notifier emits once, never repeats ----
 
 func TestOverdue_NotifierEmitsOncePerDecision(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
-	migrate := openPool(t, adminDSN(t))
-	defer migrate.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	migrate := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)
@@ -656,10 +611,8 @@ func mustAudit(t *testing.T, store *decision.Store, ctx context.Context, id uuid
 // ---- AC-7: OSCAL audit-narrative emission ----
 
 func TestNarrative_EmitRemarksFormatAndOptOut(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	store := decision.NewStore(app)
 	ctx := ctxFor(t, tenant)

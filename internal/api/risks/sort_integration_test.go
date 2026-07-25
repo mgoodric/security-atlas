@@ -27,6 +27,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // seedRiskWithResidual inserts a risk with an explicit residual_score JSONB
@@ -54,8 +56,8 @@ func seedRiskWithResidual(t *testing.T, admin *pgxpool.Pool, tenant, title strin
 // ===== ISC-20: ?sort=residual,age orders by residual desc then age asc =====
 
 func TestListRisks_SortResidualAge(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -94,8 +96,8 @@ func TestListRisks_SortResidualAge(t *testing.T) {
 // order (created_at DESC). An unrecognized ?sort= is a 400.
 
 func TestListRisks_SortIsAdditive(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 

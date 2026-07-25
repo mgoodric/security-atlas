@@ -4,7 +4,7 @@
   "x-evidence-kind": "sast.scan_result.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["VPM-04", "TDA-09"],
+  "x-default-scf-anchors": ["VPM-04", "TDA-01"],
   "title": "SAST scan result",
   "description": "One static-analysis run from a CI pipeline, summarized.",
   "type": "object",

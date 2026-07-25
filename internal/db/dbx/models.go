@@ -100,6 +100,50 @@ func (ns NullControlLifecycleState) Value() (driver.Value, error) {
 	return string(ns.ControlLifecycleState), nil
 }
 
+type CrosswalkMappingTier string
+
+const (
+	CrosswalkMappingTierDraft       CrosswalkMappingTier = "draft"
+	CrosswalkMappingTierUnderReview CrosswalkMappingTier = "under_review"
+	CrosswalkMappingTierVerified    CrosswalkMappingTier = "verified"
+	CrosswalkMappingTierRejected    CrosswalkMappingTier = "rejected"
+)
+
+func (e *CrosswalkMappingTier) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CrosswalkMappingTier(s)
+	case string:
+		*e = CrosswalkMappingTier(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CrosswalkMappingTier: %T", src)
+	}
+	return nil
+}
+
+type NullCrosswalkMappingTier struct {
+	CrosswalkMappingTier CrosswalkMappingTier `json:"crosswalk_mapping_tier"`
+	Valid                bool                 `json:"valid"` // Valid is true if CrosswalkMappingTier is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCrosswalkMappingTier) Scan(value interface{}) error {
+	if value == nil {
+		ns.CrosswalkMappingTier, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CrosswalkMappingTier.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCrosswalkMappingTier) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CrosswalkMappingTier), nil
+}
+
 type CrosswalkSourceAttribution string
 
 const (
@@ -141,6 +185,92 @@ func (ns NullCrosswalkSourceAttribution) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.CrosswalkSourceAttribution), nil
+}
+
+type CsfProfileKind string
+
+const (
+	CsfProfileKindCurrent CsfProfileKind = "current"
+	CsfProfileKindTarget  CsfProfileKind = "target"
+)
+
+func (e *CsfProfileKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CsfProfileKind(s)
+	case string:
+		*e = CsfProfileKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CsfProfileKind: %T", src)
+	}
+	return nil
+}
+
+type NullCsfProfileKind struct {
+	CsfProfileKind CsfProfileKind `json:"csf_profile_kind"`
+	Valid          bool           `json:"valid"` // Valid is true if CsfProfileKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCsfProfileKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.CsfProfileKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CsfProfileKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCsfProfileKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CsfProfileKind), nil
+}
+
+type CsfTier string
+
+const (
+	CsfTierTier1Partial      CsfTier = "tier1_partial"
+	CsfTierTier2RiskInformed CsfTier = "tier2_risk_informed"
+	CsfTierTier3Repeatable   CsfTier = "tier3_repeatable"
+	CsfTierTier4Adaptive     CsfTier = "tier4_adaptive"
+)
+
+func (e *CsfTier) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = CsfTier(s)
+	case string:
+		*e = CsfTier(s)
+	default:
+		return fmt.Errorf("unsupported scan type for CsfTier: %T", src)
+	}
+	return nil
+}
+
+type NullCsfTier struct {
+	CsfTier CsfTier `json:"csf_tier"`
+	Valid   bool    `json:"valid"` // Valid is true if CsfTier is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullCsfTier) Scan(value interface{}) error {
+	if value == nil {
+		ns.CsfTier, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.CsfTier.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullCsfTier) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.CsfTier), nil
 }
 
 type DecisionStatus string
@@ -275,6 +405,136 @@ func (ns NullEvidenceResult) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.EvidenceResult), nil
+}
+
+type FrameworkVersionAuditAction string
+
+const (
+	FrameworkVersionAuditActionPromote          FrameworkVersionAuditAction = "promote"
+	FrameworkVersionAuditActionRevert           FrameworkVersionAuditAction = "revert"
+	FrameworkVersionAuditActionMigrationApprove FrameworkVersionAuditAction = "migration_approve"
+	FrameworkVersionAuditActionMigrationReject  FrameworkVersionAuditAction = "migration_reject"
+)
+
+func (e *FrameworkVersionAuditAction) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FrameworkVersionAuditAction(s)
+	case string:
+		*e = FrameworkVersionAuditAction(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FrameworkVersionAuditAction: %T", src)
+	}
+	return nil
+}
+
+type NullFrameworkVersionAuditAction struct {
+	FrameworkVersionAuditAction FrameworkVersionAuditAction `json:"framework_version_audit_action"`
+	Valid                       bool                        `json:"valid"` // Valid is true if FrameworkVersionAuditAction is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFrameworkVersionAuditAction) Scan(value interface{}) error {
+	if value == nil {
+		ns.FrameworkVersionAuditAction, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FrameworkVersionAuditAction.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFrameworkVersionAuditAction) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FrameworkVersionAuditAction), nil
+}
+
+type FrameworkVersionMigrationMatchKind string
+
+const (
+	FrameworkVersionMigrationMatchKindExactCode FrameworkVersionMigrationMatchKind = "exact_code"
+	FrameworkVersionMigrationMatchKindAdded     FrameworkVersionMigrationMatchKind = "added"
+	FrameworkVersionMigrationMatchKindRemoved   FrameworkVersionMigrationMatchKind = "removed"
+)
+
+func (e *FrameworkVersionMigrationMatchKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FrameworkVersionMigrationMatchKind(s)
+	case string:
+		*e = FrameworkVersionMigrationMatchKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FrameworkVersionMigrationMatchKind: %T", src)
+	}
+	return nil
+}
+
+type NullFrameworkVersionMigrationMatchKind struct {
+	FrameworkVersionMigrationMatchKind FrameworkVersionMigrationMatchKind `json:"framework_version_migration_match_kind"`
+	Valid                              bool                               `json:"valid"` // Valid is true if FrameworkVersionMigrationMatchKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFrameworkVersionMigrationMatchKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.FrameworkVersionMigrationMatchKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FrameworkVersionMigrationMatchKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFrameworkVersionMigrationMatchKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FrameworkVersionMigrationMatchKind), nil
+}
+
+type FrameworkVersionMigrationStatus string
+
+const (
+	FrameworkVersionMigrationStatusPending  FrameworkVersionMigrationStatus = "pending"
+	FrameworkVersionMigrationStatusApproved FrameworkVersionMigrationStatus = "approved"
+	FrameworkVersionMigrationStatusRejected FrameworkVersionMigrationStatus = "rejected"
+)
+
+func (e *FrameworkVersionMigrationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = FrameworkVersionMigrationStatus(s)
+	case string:
+		*e = FrameworkVersionMigrationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for FrameworkVersionMigrationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullFrameworkVersionMigrationStatus struct {
+	FrameworkVersionMigrationStatus FrameworkVersionMigrationStatus `json:"framework_version_migration_status"`
+	Valid                           bool                            `json:"valid"` // Valid is true if FrameworkVersionMigrationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullFrameworkVersionMigrationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.FrameworkVersionMigrationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.FrameworkVersionMigrationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullFrameworkVersionMigrationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.FrameworkVersionMigrationStatus), nil
 }
 
 type FrameworkVersionStatus string
@@ -764,6 +1024,92 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
+type VendorReviewOutcome string
+
+const (
+	VendorReviewOutcomePass             VendorReviewOutcome = "pass"
+	VendorReviewOutcomePassWithFindings VendorReviewOutcome = "pass_with_findings"
+	VendorReviewOutcomeFail             VendorReviewOutcome = "fail"
+	VendorReviewOutcomeWaived           VendorReviewOutcome = "waived"
+)
+
+func (e *VendorReviewOutcome) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VendorReviewOutcome(s)
+	case string:
+		*e = VendorReviewOutcome(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VendorReviewOutcome: %T", src)
+	}
+	return nil
+}
+
+type NullVendorReviewOutcome struct {
+	VendorReviewOutcome VendorReviewOutcome `json:"vendor_review_outcome"`
+	Valid               bool                `json:"valid"` // Valid is true if VendorReviewOutcome is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVendorReviewOutcome) Scan(value interface{}) error {
+	if value == nil {
+		ns.VendorReviewOutcome, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VendorReviewOutcome.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVendorReviewOutcome) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VendorReviewOutcome), nil
+}
+
+type ActionPlan struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	Title           string             `json:"title"`
+	Description     *string            `json:"description"`
+	TriggeringEvent *string            `json:"triggering_event"`
+	OwnerID         pgtype.UUID        `json:"owner_id"`
+	DueDate         pgtype.Date        `json:"due_date"`
+	Status          string             `json:"status"`
+	AuditPeriodID   pgtype.UUID        `json:"audit_period_id"`
+	TombstonedAt    pgtype.Timestamptz `json:"tombstoned_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ActionPlanAuditLog struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ActionPlanID pgtype.UUID        `json:"action_plan_id"`
+	ActorID      pgtype.UUID        `json:"actor_id"`
+	ActionType   string             `json:"action_type"`
+	BeforeState  []byte             `json:"before_state"`
+	AfterState   []byte             `json:"after_state"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ActionPlanControl struct {
+	ActionPlanID pgtype.UUID        `json:"action_plan_id"`
+	ControlID    pgtype.UUID        `json:"control_id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	LinkedAt     pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy     pgtype.UUID        `json:"linked_by"`
+}
+
+type ActionPlanRisk struct {
+	ActionPlanID pgtype.UUID        `json:"action_plan_id"`
+	RiskID       pgtype.UUID        `json:"risk_id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	LinkedAt     pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy     pgtype.UUID        `json:"linked_by"`
+}
+
 type AdminAuditLogV struct {
 	TenantID     pgtype.UUID        `json:"tenant_id"`
 	Ts           pgtype.Timestamptz `json:"ts"`
@@ -817,6 +1163,21 @@ type AggregationRuleEvaluation struct {
 	WindowStart pgtype.Timestamptz `json:"window_start"`
 	MetaRiskID  pgtype.UUID        `json:"meta_risk_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type AiGeneration struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Surface        string             `json:"surface"`
+	PromptVersion  string             `json:"prompt_version"`
+	ModelName      string             `json:"model_name"`
+	ModelVersion   string             `json:"model_version"`
+	ModelProvider  string             `json:"model_provider"`
+	SystemPrompt   string             `json:"system_prompt"`
+	ContextInputs  []byte             `json:"context_inputs"`
+	RawDraft       string             `json:"raw_draft"`
+	SurfaceSubject string             `json:"surface_subject"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type AnswerLibrary struct {
@@ -932,6 +1293,19 @@ type AuditorAssignment struct {
 	GrantedBy     string             `json:"granted_by"`
 }
 
+type BackupRun struct {
+	ID           pgtype.UUID        `json:"id"`
+	Kind         string             `json:"kind"`
+	TargetKind   *string            `json:"target_kind"`
+	ArtifactName *string            `json:"artifact_name"`
+	Outcome      string             `json:"outcome"`
+	SizeBytes    int64              `json:"size_bytes"`
+	ContentHash  string             `json:"content_hash"`
+	Detail       string             `json:"detail"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+}
+
 type BoardBrief struct {
 	ID          pgtype.UUID        `json:"id"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`
@@ -940,6 +1314,27 @@ type BoardBrief struct {
 	Content     []byte             `json:"content"`
 	NarrativeMd string             `json:"narrative_md"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type BoardNarrativeSection struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	SectionKey    string             `json:"section_key"`
+	PeriodEnd     string             `json:"period_end"`
+	RawDraft      string             `json:"raw_draft"`
+	OperatorEdit  string             `json:"operator_edit"`
+	FinalText     string             `json:"final_text"`
+	Citations     []byte             `json:"citations"`
+	AuthoredBy    string             `json:"authored_by"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+	PromptVersion string             `json:"prompt_version"`
+	ModelName     string             `json:"model_name"`
+	ModelVersion  string             `json:"model_version"`
+	ModelProvider string             `json:"model_provider"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type BoardPack struct {
@@ -953,6 +1348,47 @@ type BoardPack struct {
 	PublishedAt pgtype.Timestamptz `json:"published_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChannelDeliveryLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	Channel         string             `json:"channel"`
+	RecipientUserID string             `json:"recipient_user_id"`
+	DigestKey       string             `json:"digest_key"`
+	Outcome         string             `json:"outcome"`
+	Attempts        int32              `json:"attempts"`
+	LastError       string             `json:"last_error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	SentAt          pgtype.Timestamptz `json:"sent_at"`
+}
+
+type ChecklistItem struct {
+	ID         pgtype.UUID        `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	SectionID  pgtype.UUID        `json:"section_id"`
+	ControlID  pgtype.UUID        `json:"control_id"`
+	TaskText   string             `json:"task_text"`
+	Citations  []byte             `json:"citations"`
+	NoEvidence bool               `json:"no_evidence"`
+	SortOrder  int32              `json:"sort_order"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChecklistSection struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	GenerationID  pgtype.UUID        `json:"generation_id"`
+	Role          string             `json:"role"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+	PromptVersion string             `json:"prompt_version"`
+	ModelName     string             `json:"model_name"`
+	ModelVersion  string             `json:"model_version"`
+	ModelProvider string             `json:"model_provider"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Control struct {
@@ -1007,6 +1443,71 @@ type ControlEvaluation struct {
 	FreshnessClass        *string            `json:"freshness_class"`
 	Trigger               string             `json:"trigger"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+}
+
+type ControlOwnerAssignment struct {
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	ControlID   pgtype.UUID        `json:"control_id"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
+	AssignedBy  pgtype.UUID        `json:"assigned_by"`
+	AssignedAt  pgtype.Timestamptz `json:"assigned_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ControlOwnerAssignmentAuditLog struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	OccurredAt  pgtype.Timestamptz `json:"occurred_at"`
+	ActorUserID pgtype.UUID        `json:"actor_user_id"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
+	ControlIds  []pgtype.UUID      `json:"control_ids"`
+	IsBulk      bool               `json:"is_bulk"`
+}
+
+type CsfAssessmentAudit struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	SubjectKind        string             `json:"subject_kind"`
+	SubjectID          pgtype.UUID        `json:"subject_id"`
+	Action             string             `json:"action"`
+	Actor              string             `json:"actor"`
+	Detail             string             `json:"detail"`
+	OccurredAt         pgtype.Timestamptz `json:"occurred_at"`
+}
+
+type CsfProfile struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	Kind               CsfProfileKind     `json:"kind"`
+	Name               string             `json:"name"`
+	CreatedBy          string             `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CsfProfileSelection struct {
+	ID                     pgtype.UUID        `json:"id"`
+	TenantID               pgtype.UUID        `json:"tenant_id"`
+	CsfProfileID           pgtype.UUID        `json:"csf_profile_id"`
+	FrameworkRequirementID pgtype.UUID        `json:"framework_requirement_id"`
+	TargetOutcome          string             `json:"target_outcome"`
+	Note                   string             `json:"note"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CsfTierRating struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	Tier               CsfTier            `json:"tier"`
+	Rationale          string             `json:"rationale"`
+	RatedBy            string             `json:"rated_by"`
+	RatedAt            pgtype.Timestamptz `json:"rated_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Decision struct {
@@ -1082,6 +1583,25 @@ type DecisionsAudit struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type EmailChannelOptin struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Enabled   bool               `json:"enabled"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type EmailDeliveryLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	RecipientUserID string             `json:"recipient_user_id"`
+	DigestKey       string             `json:"digest_key"`
+	Outcome         string             `json:"outcome"`
+	Attempts        int32              `json:"attempts"`
+	LastError       string             `json:"last_error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	SentAt          pgtype.Timestamptz `json:"sent_at"`
+}
+
 type EvidenceAuditLog struct {
 	ID             pgtype.UUID        `json:"id"`
 	TenantID       pgtype.UUID        `json:"tenant_id"`
@@ -1150,6 +1670,10 @@ type EvidenceRecord struct {
 	IngestionPath     string                 `json:"ingestion_path"`
 	SourceAttribution []byte                 `json:"source_attribution"`
 	ControlRef        string                 `json:"control_ref"`
+	// Slice 474: canonical (sorted) wire scope the ingest content-hash was computed over, so the `atlas evidence verify` walk can reconstruct the exact record and recompute an identical hash. NULL = pre-slice-474 legacy row (verify reconstructs scope-free). Append-only; never mutated post-insert.
+	ScopeCanonical []byte `json:"scope_canonical"`
+	// Slice 633: lossless Unix-nanosecond value of the wire observed_at the ingest content-hash was computed over, so the `atlas evidence verify` walk can reconstruct the exact nanosecond timestamp (the observed_at TIMESTAMPTZ column is microsecond-precision and truncates sub-us nanos). NULL = pre-slice-633 legacy row (verify reconstructs from the lossy TIMESTAMPTZ column). Append-only; never mutated post-insert.
+	ObservedAtNanos *int64 `json:"observed_at_nanos"`
 }
 
 type Exception struct {
@@ -1265,6 +1789,35 @@ type FrameworkVersion struct {
 	CreatedAt        pgtype.Timestamptz     `json:"created_at"`
 }
 
+type FrameworkVersionAudit struct {
+	ID                 pgtype.UUID                 `json:"id"`
+	FrameworkID        pgtype.UUID                 `json:"framework_id"`
+	FrameworkVersionID pgtype.UUID                 `json:"framework_version_id"`
+	MigrationID        pgtype.UUID                 `json:"migration_id"`
+	Action             FrameworkVersionAuditAction `json:"action"`
+	FromStatus         *FrameworkVersionStatus     `json:"from_status"`
+	ToStatus           *FrameworkVersionStatus     `json:"to_status"`
+	ActorID            pgtype.UUID                 `json:"actor_id"`
+	Note               string                      `json:"note"`
+	CreatedAt          pgtype.Timestamptz          `json:"created_at"`
+}
+
+type FrameworkVersionMigration struct {
+	ID                pgtype.UUID                        `json:"id"`
+	FrameworkID       pgtype.UUID                        `json:"framework_id"`
+	FromVersionID     pgtype.UUID                        `json:"from_version_id"`
+	ToVersionID       pgtype.UUID                        `json:"to_version_id"`
+	FromRequirementID pgtype.UUID                        `json:"from_requirement_id"`
+	ToRequirementID   pgtype.UUID                        `json:"to_requirement_id"`
+	RequirementCode   string                             `json:"requirement_code"`
+	MatchKind         FrameworkVersionMigrationMatchKind `json:"match_kind"`
+	Status            FrameworkVersionMigrationStatus    `json:"status"`
+	ReviewerID        pgtype.UUID                        `json:"reviewer_id"`
+	Note              string                             `json:"note"`
+	CreatedAt         pgtype.Timestamptz                 `json:"created_at"`
+	DecidedAt         pgtype.Timestamptz                 `json:"decided_at"`
+}
+
 type FwToScfEdge struct {
 	ID                     pgtype.UUID                `json:"id"`
 	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`
@@ -1275,6 +1828,111 @@ type FwToScfEdge struct {
 	Rationale              string                     `json:"rationale"`
 	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+}
+
+type FwToScfEdgeTierTransition struct {
+	ID         pgtype.UUID          `json:"id"`
+	EdgeID     pgtype.UUID          `json:"edge_id"`
+	ReviewerID pgtype.UUID          `json:"reviewer_id"`
+	FromTier   CrosswalkMappingTier `json:"from_tier"`
+	ToTier     CrosswalkMappingTier `json:"to_tier"`
+	Note       string               `json:"note"`
+	CreatedAt  pgtype.Timestamptz   `json:"created_at"`
+}
+
+type GroupRoleAuditLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	OccurredAt      pgtype.Timestamptz `json:"occurred_at"`
+	UserID          string             `json:"user_id"`
+	Role            string             `json:"role"`
+	Change          string             `json:"change"`
+	Source          string             `json:"source"`
+	IdpConfigID     pgtype.UUID        `json:"idp_config_id"`
+	TriggeringGroup string             `json:"triggering_group"`
+	Detail          []byte             `json:"detail"`
+}
+
+type ImportedCatalog struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	Source       string             `json:"source"`
+	ImportedBy   string             `json:"imported_by"`
+	SourceSha256 string             `json:"source_sha256"`
+	SourceLabel  string             `json:"source_label"`
+	OscalVersion string             `json:"oscal_version"`
+	CatalogTitle string             `json:"catalog_title"`
+	ControlCount int32              `json:"control_count"`
+	ImportedAt   pgtype.Timestamptz `json:"imported_at"`
+	Kind         string             `json:"kind"`
+	ProfileTitle string             `json:"profile_title"`
+}
+
+type ImportedCatalogAuditLog struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	CatalogID    pgtype.UUID        `json:"catalog_id"`
+	Action       string             `json:"action"`
+	Actor        string             `json:"actor"`
+	SourceSha256 string             `json:"source_sha256"`
+	SourceLabel  string             `json:"source_label"`
+	ControlCount int32              `json:"control_count"`
+	Detail       []byte             `json:"detail"`
+	OccurredAt   pgtype.Timestamptz `json:"occurred_at"`
+}
+
+type ImportedCatalogControl struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	ImportedCatalogID pgtype.UUID        `json:"imported_catalog_id"`
+	SourceControlID   string             `json:"source_control_id"`
+	Title             string             `json:"title"`
+	Statement         string             `json:"statement"`
+	GroupPath         string             `json:"group_path"`
+	ScfAnchorID       *string            `json:"scf_anchor_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type ImportedComponent struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	ImportedCatalogID pgtype.UUID        `json:"imported_catalog_id"`
+	ComponentUuid     string             `json:"component_uuid"`
+	ComponentType     string             `json:"component_type"`
+	Title             string             `json:"title"`
+	Description       string             `json:"description"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type ImportedComponentClaim struct {
+	ID                  pgtype.UUID        `json:"id"`
+	TenantID            pgtype.UUID        `json:"tenant_id"`
+	ImportedComponentID pgtype.UUID        `json:"imported_component_id"`
+	ControlID           string             `json:"control_id"`
+	Statement           string             `json:"statement"`
+	RequirementUuid     string             `json:"requirement_uuid"`
+	ScfAnchorID         *string            `json:"scf_anchor_id"`
+	IsVendorClaim       bool               `json:"is_vendor_claim"`
+	ClaimStatus         string             `json:"claim_status"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	DispositionedBy     *string            `json:"dispositioned_by"`
+	DispositionedAt     pgtype.Timestamptz `json:"dispositioned_at"`
+	DispositionNote     string             `json:"disposition_note"`
+}
+
+type ImportedComponentClaimDisposition struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	ClaimID         pgtype.UUID        `json:"claim_id"`
+	FromStatus      string             `json:"from_status"`
+	ToStatus        string             `json:"to_status"`
+	Actor           string             `json:"actor"`
+	Note            string             `json:"note"`
+	OccurredAt      pgtype.Timestamptz `json:"occurred_at"`
+	EventKind       string             `json:"event_kind"`
+	FromScfAnchorID *string            `json:"from_scf_anchor_id"`
+	ToScfAnchorID   *string            `json:"to_scf_anchor_id"`
 }
 
 type LocalCredential struct {
@@ -1383,6 +2041,16 @@ type OidcIdpConfig struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OidcIdpGroupMapping struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	IdpConfigID pgtype.UUID        `json:"idp_config_id"`
+	GroupRef    string             `json:"group_ref"`
+	Role        string             `json:"role"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+}
+
 type OrgTheme struct {
 	ID          pgtype.UUID        `json:"id"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`
@@ -1469,15 +2137,22 @@ type Questionnaire struct {
 }
 
 type QuestionnaireAnswer struct {
-	ID          pgtype.UUID        `json:"id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	QuestionID  pgtype.UUID        `json:"question_id"`
-	AnswerValue string             `json:"answer_value"`
-	Narrative   string             `json:"narrative"`
-	Citations   []byte             `json:"citations"`
-	AuthoredBy  string             `json:"authored_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	QuestionID    pgtype.UUID        `json:"question_id"`
+	AnswerValue   string             `json:"answer_value"`
+	Narrative     string             `json:"narrative"`
+	Citations     []byte             `json:"citations"`
+	AuthoredBy    string             `json:"authored_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+	PromptVersion string             `json:"prompt_version"`
+	ModelName     string             `json:"model_name"`
+	ModelVersion  string             `json:"model_version"`
+	ModelProvider string             `json:"model_provider"`
 }
 
 type QuestionnaireQuestion struct {
@@ -1578,6 +2253,17 @@ type SampleEvidence struct {
 	Ordinal          int32       `json:"ordinal"`
 }
 
+type SavedView struct {
+	ID        pgtype.UUID        `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Surface   string             `json:"surface"`
+	Name      string             `json:"name"`
+	Filters   []byte             `json:"filters"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ScfAnchor struct {
 	ID                 pgtype.UUID        `json:"id"`
 	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
@@ -1588,6 +2274,47 @@ type ScfAnchor struct {
 	Subtopics          []byte             `json:"subtopics"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ScimAuditLog struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	OccurredAt        pgtype.Timestamptz `json:"occurred_at"`
+	ActorCredentialID pgtype.UUID        `json:"actor_credential_id"`
+	TargetUserID      pgtype.UUID        `json:"target_user_id"`
+	Action            string             `json:"action"`
+	Detail            []byte             `json:"detail"`
+}
+
+type ScimCredential struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	TokenHash   []byte             `json:"token_hash"`
+	Description string             `json:"description"`
+	IssuedBy    pgtype.UUID        `json:"issued_by"`
+	IssuedAt    pgtype.Timestamptz `json:"issued_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	Last4       string             `json:"last4"`
+}
+
+type ScimGroup struct {
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	DisplayName    string             `json:"display_name"`
+	ScimExternalID *string            `json:"scim_external_id"`
+	Active         bool               `json:"active"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ScimGroupMember struct {
+	ID        pgtype.UUID        `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	GroupID   pgtype.UUID        `json:"group_id"`
+	UserID    string             `json:"user_id"`
+	GroupRef  string             `json:"group_ref"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Scope struct {
@@ -1645,6 +2372,23 @@ type Session struct {
 	GeoCity *string `json:"geo_city"`
 }
 
+type SlackChannelOptin struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Enabled   bool               `json:"enabled"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type StalenessRollupLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	RecipientUserID string             `json:"recipient_user_id"`
+	Kind            string             `json:"kind"`
+	DedupKey        string             `json:"dedup_key"`
+	NotificationID  pgtype.UUID        `json:"notification_id"`
+	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+}
+
 // Slice 144: canonical tenant identity row. Adopted late — through v1, tenant_id was a bare UUID with no parent. The slice-192 `GET /v1/me/tenants` handler reads `name` from here; `PATCH /v1/tenants/{id}` (slice 144) mutates it under per-tenant admin or super_admin authority.
 type Tenant struct {
 	ID pgtype.UUID `json:"id"`
@@ -1654,19 +2398,33 @@ type Tenant struct {
 	IsBootstrapTenant bool               `json:"is_bootstrap_tenant"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	// Slice 608: per-tenant control-bundle upload test-gate policy. strict (default, = slice-574 global behaviour) | advisory (red tests warn, not block) | mandatory_tests (a bundle with no tests/ is rejected). Set via PATCH /v1/tenants/{id}.
+	BundleGateMode string `json:"bundle_gate_mode"`
+}
+
+// Slice 499 per-tenant cloud-LLM opt-in routing. Absence of a row => local-ollama (the off-by-default posture). provider is a closed enum (no free-text URL). api_key_ciphertext is AES-256-GCM, never plaintext, never returned/logged.
+type TenantLlmRouting struct {
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	Provider         string             `json:"provider"`
+	ApiKeyCiphertext *string            `json:"api_key_ciphertext"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type User struct {
-	ID          pgtype.UUID        `json:"id"`
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	Email       string             `json:"email"`
-	DisplayName string             `json:"display_name"`
-	Status      string             `json:"status"`
-	IdpIssuer   string             `json:"idp_issuer"`
-	IdpSubject  string             `json:"idp_subject"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	TimeZone    string             `json:"time_zone"`
+	ID             pgtype.UUID        `json:"id"`
+	TenantID       pgtype.UUID        `json:"tenant_id"`
+	Email          string             `json:"email"`
+	DisplayName    string             `json:"display_name"`
+	Status         string             `json:"status"`
+	IdpIssuer      string             `json:"idp_issuer"`
+	IdpSubject     string             `json:"idp_subject"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	TimeZone       string             `json:"time_zone"`
+	Active         bool               `json:"active"`
+	ScimExternalID *string            `json:"scim_external_id"`
+	ScimManaged    bool               `json:"scim_managed"`
 }
 
 type UserNotificationPreference struct {
@@ -1684,6 +2442,7 @@ type UserRole struct {
 	Role      string             `json:"role"`
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 	GrantedBy string             `json:"granted_by"`
+	Origin    string             `json:"origin"`
 }
 
 type Vendor struct {
@@ -1703,6 +2462,17 @@ type Vendor struct {
 	Notes          string              `json:"notes"`
 	CreatedAt      pgtype.Timestamptz  `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz  `json:"updated_at"`
+}
+
+type VendorReview struct {
+	ID         pgtype.UUID         `json:"id"`
+	TenantID   pgtype.UUID         `json:"tenant_id"`
+	VendorID   pgtype.UUID         `json:"vendor_id"`
+	ReviewedAt pgtype.Date         `json:"reviewed_at"`
+	Reviewer   string              `json:"reviewer"`
+	Outcome    VendorReviewOutcome `json:"outcome"`
+	Notes      string              `json:"notes"`
+	CreatedAt  pgtype.Timestamptz  `json:"created_at"`
 }
 
 type VendorScopeCell struct {
@@ -1748,4 +2518,11 @@ type WalkthroughAuditLog struct {
 	Detail        []byte             `json:"detail"`
 	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
 	SubjectModule string             `json:"subject_module"`
+}
+
+type WebhookChannelOptin struct {
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	UserID    pgtype.UUID        `json:"user_id"`
+	Enabled   bool               `json:"enabled"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }

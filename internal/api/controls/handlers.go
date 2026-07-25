@@ -20,6 +20,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/control/bundletest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -74,6 +75,23 @@ type uploadResp struct {
 	Version      int32  `json:"version"`
 	SupersededID string `json:"superseded_id,omitempty"`
 	IsNewBundle  bool   `json:"is_new_bundle"`
+	// GateWarning carries a non-fatal note from the slice-574 upload test-gate
+	// — e.g. "the bundle declares no tests". Empty (dropped) when the gate had
+	// nothing to say.
+	GateWarning string `json:"gate_warning,omitempty"`
+	// GateTestReport carries the per-case report when a RED bundle was accepted
+	// under the slice-608 advisory gate policy (the upload was NOT blocked, but
+	// the uploader still sees which cases are red). Nil (dropped) otherwise.
+	GateTestReport *bundletest.Report `json:"gate_test_report,omitempty"`
+}
+
+// gateRejectionResp is the 400 body returned when the slice-574 upload test-
+// gate blocks a bundle: a human message plus the full per-case report so the
+// uploader (and the CLI) sees exactly which fixture failed (AC-2 / AC-5).
+type gateRejectionResp struct {
+	Error  string             `json:"error"`
+	Reason string             `json:"reason"`
+	Report *bundletest.Report `json:"test_report,omitempty"`
 }
 
 // UploadBundle is the POST /v1/controls:upload-bundle handler.
@@ -140,6 +158,49 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Slice-574 upload test-gate: run the bundle's declared tests/ cases through
+	// the slice-496 runner and BLOCK the upload (strict policy) if any case
+	// fails or errors. A bundle with no tests is allowed with a warning. The
+	// gate is read-only (invariant #2): it evaluates, it never writes.
+	//
+	// h.store is the tenant-tx runner SQL fixtures need; when nil (unit servers
+	// with no pool) pass an explicit nil so the gate degrades gracefully (SQL
+	// fixtures then surface as a per-case error rather than panicking on a
+	// typed-nil pointer).
+	var gateRunner txRunner
+	if h.store != nil {
+		gateRunner = h.store
+	}
+	// Slice 608: resolve the per-tenant gate policy. A nil store (unit servers)
+	// or any tenant without an explicit value resolves to the strict default,
+	// preserving slice 574's global behaviour. An unrecognised stored value
+	// (only reachable if the DB CHECK were bypassed) also falls back to strict
+	// — never a looser posture than the default.
+	mode := GateModeStrict
+	if h.store != nil {
+		raw, merr := h.store.BundleGateMode(ctx)
+		if merr != nil {
+			httperr.WriteInternal(w, r, "resolve gate policy", merr)
+			return
+		}
+		if parsed, ok := ParseGateMode(raw); ok {
+			mode = parsed
+		}
+	}
+	verdict, err := runGate(ctx, gateRunner, bundle, mode)
+	if err != nil {
+		httperr.WriteInternal(w, r, "bundle test gate", err)
+		return
+	}
+	if verdict.blocked {
+		httpresp.WriteJSON(w, http.StatusBadRequest, gateRejectionResp{
+			Error:  "control bundle rejected: its declared tests do not pass",
+			Reason: "the upload test-gate runs a bundle's tests/ cases before persisting; this bundle has a failing or errored case",
+			Report: verdict.report,
+		})
+		return
+	}
+
 	result, err := h.store.Upload(ctx, bundle, cred.ID)
 	if err != nil {
 		switch {
@@ -158,10 +219,12 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		status = http.StatusCreated
 	}
 	resp := uploadResp{
-		ControlID:   result.ControlID.String(),
-		BundleID:    result.BundleID,
-		Version:     result.Version,
-		IsNewBundle: result.IsNewBundle,
+		ControlID:      result.ControlID.String(),
+		BundleID:       result.BundleID,
+		Version:        result.Version,
+		IsNewBundle:    result.IsNewBundle,
+		GateWarning:    verdict.warning,
+		GateTestReport: verdict.advisoryReport,
 	}
 	// SupersededID is set only when this upload actually superseded a
 	// predecessor. It is the zero UUID for an initial upload AND for a

@@ -39,7 +39,7 @@
 //   - P0-A4: real placeholder data — no Lorem Ipsum.
 //   - P0-A5: neutral test tokens only in tests.
 
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
@@ -56,6 +56,7 @@ import {
   type ListColumn,
 } from "@/components/list";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { type AnchorWithState } from "@/lib/api/anchors";
@@ -65,6 +66,15 @@ import {
   type ControlsListResponse,
   type ScopeCellsListResponse,
 } from "@/lib/api/controls-list";
+import {
+  createSavedView,
+  deleteSavedView,
+  listSavedViews,
+  type ServerSavedView,
+} from "@/lib/api/saved-views";
+import { bulkAssignOwner } from "@/lib/api/controls-bulk";
+import { getMe } from "@/lib/api/me";
+import { APIError } from "@/lib/api/base";
 import {
   CONTROLS_EXPORT_FORMATS,
   CONTROLS_EXPORT_FORMAT_LABELS,
@@ -88,11 +98,16 @@ import {
   type AnchorRow,
   type ControlFilters,
 } from "./filters";
+import { controlsCountLabel } from "./count-label";
 import {
   NEW_CONTROL_FUTURE_REASON,
   NEW_CONTROL_FUTURE_TESTID,
 } from "./new-control-future";
-import { SavedViewsBar, SelectionBar } from "./controls-toolbar";
+import {
+  BulkAssignMessage,
+  SavedViewsBar,
+  SelectionBar,
+} from "./controls-toolbar";
 import {
   isOverCap,
   pruneSelection,
@@ -101,11 +116,9 @@ import {
   toggleSelection,
 } from "./selection";
 import {
-  addView,
   findView,
-  readViews,
-  removeView,
-  writeViews,
+  migrateLocalViewsToServer,
+  sanitizeFilters,
   type SavedView,
 } from "./saved-views";
 
@@ -139,6 +152,17 @@ const SCOPE_CELL_CAP = 50;
 // it.
 const CONTROLS_PAGE_SIZE = 50;
 
+// Slice 745 — how long the bulk-assign confirmation stays on screen
+// before auto-dismissing, in milliseconds. The message renders in a
+// persistent region above the table (independent of the selection bar)
+// so the operator actually sees it after a successful bulk-assign clears
+// the selection; it then auto-dismisses so a stale confirmation does not
+// linger across unrelated actions. The next bulk-assign attempt also
+// clears it eagerly (onAssignToMe nulls it before the request), so a
+// fresh attempt never shows the previous result. Greppable at module
+// scope per the slice-227 CONTROLS_PAGE_SIZE precedent.
+const BULK_ASSIGN_MESSAGE_TTL_MS = 6000;
+
 // Slice 227 — URL query-string key for the 1-indexed page index. The
 // `page` key is sibling to the filter keys above; the filter-change
 // handlers below explicitly DROP it on every filter mutation (AC-8 —
@@ -153,6 +177,40 @@ const RESULT_OPTIONS: { value: string; label: string }[] = [
   { value: "insufficient_evidence", label: "insufficient_evidence" },
   { value: "not_applicable", label: "not_applicable" },
 ];
+
+// Slice <NNN> — map the control evaluation `result` enum (the real wire
+// values from `AnchorState.result`, enumerated by RESULT_OPTIONS above)
+// onto the semantic Badge variants introduced with the PR-#1427 tokens.
+// The design canvas's table card (web/.claude-design/components/table/)
+// uses example labels (Compliant / In review / Gap); the REAL enum is
+// pass / fail / insufficient_evidence / not_applicable, so the mapping
+// is by semantic intent, not by the card's display strings:
+//   pass                  -> pass     (green  — control passing)
+//   fail                  -> critical (red    — the card's "Gap")
+//   insufficient_evidence -> warning  (amber  — needs attention, not a hard fail)
+//   not_applicable        -> secondary (neutral — out of scope, no signal hue)
+// `info` and `progress` from the badge family have no member in the
+// control-result enum, so they are intentionally unused here (they exist
+// for other surfaces and the design preview).
+type StatusBadgeVariant =
+  | "pass"
+  | "critical"
+  | "warning"
+  | "secondary"
+  | "outline";
+
+const RESULT_BADGE_VARIANT: Record<string, StatusBadgeVariant> = {
+  pass: "pass",
+  fail: "critical",
+  insufficient_evidence: "warning",
+  not_applicable: "secondary",
+};
+
+function resultBadgeVariant(result: string): StatusBadgeVariant {
+  // Unknown / future result values fall back to a neutral outline pill
+  // rather than mis-signalling a semantic color.
+  return RESULT_BADGE_VARIANT[result] ?? "outline";
+}
 
 const FRESHNESS_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All" },
@@ -170,6 +228,26 @@ const FRAMEWORK_OPTIONS: { value: string; label: string }[] = [
   { value: "hipaa", label: "HIPAA" },
   { value: "gdpr", label: "GDPR" },
 ];
+
+// Slice 468 — convert a server saved-view (flat string-map filters) to the
+// page's typed SavedView. sanitizeFilters narrows the map to the slice-224
+// ControlFilters shape (unknown keys dropped, missing keys -> ALL) so a row
+// hand-edited or written under a future key-set degrades gracefully.
+function toSavedView(v: ServerSavedView): SavedView {
+  return { id: v.id, name: v.name, filters: sanitizeFilters(v.filters) };
+}
+
+// serializeFilters projects the typed ControlFilters to the flat string map
+// the server persists, dropping ALL-valued (inactive) keys so the stored
+// payload is just the active criteria (matches the server's own
+// sanitizeControlFilters allow-list + empty-value drop).
+function serializeFilters(filters: ControlFilters): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of FILTER_KEYS) {
+    if (filters[k] !== ALL) out[k] = filters[k];
+  }
+  return out;
+}
 
 function ControlsPageInner() {
   const router = useRouter();
@@ -352,28 +430,108 @@ function ControlsPageInner() {
     setSelected(new Set<string>());
   }, []);
 
-  // Slice 448 — saved filter-views. Persisted client-side per user
-  // (decisions log D1). Hydrated from localStorage on mount; the page
-  // is the only place that touches `window` (the module is pure).
-  const [savedViews, setSavedViews] = useState<SavedView[]>([]);
-  const [activeViewId, setActiveViewId] = useState<string>("");
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    // Post-mount hydration from localStorage. Reading in an effect (not
-    // a lazy initializer) keeps the server-render + first client-render
-    // deterministic (empty list) so there is no hydration mismatch; the
-    // browser-only store is read after mount. Same disciplined disable
-    // as the slice 170 theme hydration (settings/page.tsx line 838).
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSavedViews(readViews(window.localStorage));
-  }, []);
+  // Slice 468 — WORKING bulk-assign-owner action. v1 assigns the selected
+  // set to the CURRENT USER ("assign to me" — the dominant triage case the
+  // slice-448 narrative names; a richer assign-to-any-user picker is a
+  // follow-on, decisions log 468 D4). The owner id is resolved from
+  // `/v1/me`; the upstream re-checks role + tenant PER ITEM (AC-11) and
+  // caps the set server-side. On success the selection clears; the message
+  // surfaces inline.
+  const [assignMessage, setAssignMessage] = useState<{
+    kind: "ok" | "error";
+    text: string;
+  } | null>(null);
+  const bulkAssignMutation = useMutation({
+    mutationFn: async (controlIds: string[]) => {
+      const me = await getMe();
+      return bulkAssignOwner(controlIds, me.user_id);
+    },
+    onSuccess: (res) => {
+      setAssignMessage({
+        kind: "ok",
+        text: `Assigned ${res.assigned} control${
+          res.assigned === 1 ? "" : "s"
+        } to you.`,
+      });
+      setSelected(new Set<string>());
+    },
+    onError: (err) => {
+      const text =
+        err instanceof APIError
+          ? err.message
+          : "Could not assign the selected controls. Try again.";
+      setAssignMessage({ kind: "error", text });
+    },
+  });
+  const onAssignToMe = useCallback(() => {
+    setAssignMessage(null);
+    bulkAssignMutation.mutate(Array.from(selected));
+  }, [bulkAssignMutation, selected]);
 
-  const persistViews = useCallback((next: SavedView[]) => {
-    setSavedViews(next);
-    if (typeof window !== "undefined") {
-      writeViews(window.localStorage, next);
-    }
-  }, []);
+  // Slice 745 — auto-dismiss the bulk-assign confirmation after a delay so
+  // a stale "Assigned N controls to you." does not linger across unrelated
+  // actions. The message lives in the persistent `BulkAssignMessage` region
+  // (above the table, independent of `selected.size`), so unlike the old
+  // inline span it survives the selection-clear and is actually observable;
+  // this timer is the natural counterpart that retires it. Re-armed each
+  // time a new message is set; cleared on unmount or before the next
+  // message. A null message (the initial / just-cleared state) schedules
+  // nothing.
+  useEffect(() => {
+    if (!assignMessage) return;
+    const handle = window.setTimeout(
+      () => setAssignMessage(null),
+      BULK_ASSIGN_MESSAGE_TTL_MS,
+    );
+    return () => window.clearTimeout(handle);
+  }, [assignMessage]);
+
+  // Slice 468 — saved filter-views are now SERVER-BACKED (was client-side
+  // localStorage in slice 448). Persistence moved to the (tenant, user)-
+  // scoped `/v1/saved-views` store via the BFF; the SavedViewStore seam
+  // slice 448 built made this a one-place swap. The server returns a flat
+  // filter map; `toSavedView` narrows it back to the typed ControlFilters
+  // via the slice-448 `sanitizeFilters` (defense-in-depth on read).
+  const queryClient = useQueryClient();
+  const [activeViewId, setActiveViewId] = useState<string>("");
+
+  const savedViewsQ = useQuery<SavedView[]>({
+    queryKey: ["saved-views", "controls"],
+    queryFn: async () => {
+      // AC-467-3 — one-time migration of any views a user saved CLIENT-SIDE
+      // during the slice-448 interim. On first server-backed load we upload
+      // each local view (best-effort; duplicate-name 409s are swallowed),
+      // then clear the localStorage key so the migration runs once. The
+      // server is the source of truth thereafter (decisions log 468 D5).
+      if (typeof window !== "undefined") {
+        await migrateLocalViewsToServer(window.localStorage, createSavedView);
+      }
+      const server = await listSavedViews();
+      return server.map(toSavedView);
+    },
+  });
+  const savedViews = useMemo(() => savedViewsQ.data ?? [], [savedViewsQ.data]);
+
+  const saveViewMutation = useMutation({
+    mutationFn: (name: string) =>
+      createSavedView(name, serializeFilters(filters)),
+    onSuccess: (created) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["saved-views", "controls"],
+      });
+      setActiveViewId(created.id);
+    },
+  });
+
+  const deleteViewMutation = useMutation({
+    mutationFn: (id: string) => deleteSavedView(id),
+    onSuccess: (_void, id) => {
+      void queryClient.invalidateQueries({
+        queryKey: ["saved-views", "controls"],
+      });
+      if (activeViewId === id) setActiveViewId("");
+    },
+  });
 
   // Apply a saved view's filter state to the URL (the URL is the source
   // of truth for filters — slice 224/227). Drops the page param so the
@@ -400,34 +558,35 @@ function ControlsPageInner() {
   );
 
   const onSaveView = useCallback(
-    (name: string): { ok: true } | { ok: false; message: string } => {
-      const id =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `view-${Date.now()}`;
-      const result = addView(savedViews, id, name, filters);
-      if (!result.ok) {
+    async (
+      name: string,
+    ): Promise<{ ok: true } | { ok: false; message: string }> => {
+      const trimmed = name.trim();
+      if (trimmed.length === 0) {
+        return { ok: false, message: "Enter a name for this view." };
+      }
+      try {
+        await saveViewMutation.mutateAsync(trimmed);
+        return { ok: true };
+      } catch (err) {
+        // Map the upstream status to the slice-448 inline messages.
         const message =
-          result.reason === "empty-name"
-            ? "Enter a name for this view."
-            : result.reason === "duplicate-name"
-              ? "A view with that name already exists."
-              : "Saved-view limit reached — delete one before saving another.";
+          err instanceof APIError && err.status === 409
+            ? "A view with that name already exists."
+            : err instanceof APIError && err.status === 422
+              ? "Saved-view limit reached — delete one before saving another."
+              : "Could not save the view. Try again.";
         return { ok: false, message };
       }
-      persistViews(result.views);
-      setActiveViewId(id);
-      return { ok: true };
     },
-    [savedViews, filters, persistViews],
+    [saveViewMutation],
   );
 
   const onDeleteView = useCallback(
     (id: string) => {
-      persistViews(removeView(savedViews, id));
-      if (activeViewId === id) setActiveViewId("");
+      deleteViewMutation.mutate(id);
     },
-    [savedViews, activeViewId, persistViews],
+    [deleteViewMutation],
   );
 
   const familyOptions: { value: string; label: string }[] = useMemo(() => {
@@ -498,11 +657,34 @@ function ControlsPageInner() {
     },
   ];
 
+  // Slice 666 — header count label. The header is a COUNT of the
+  // filtered catalog ("42 of 53 SCF anchors" / "53 SCF anchors"), NOT a
+  // "Showing M–N" range. The verb "Showing" belongs exclusively to the
+  // pagination footer (`<ListPagination>`); sharing it produced the
+  // ATLAS-007 contradiction (header "Showing 53 of 53" vs footer
+  // "Showing 1–50 of 53"). The filtered total drives the header (AC-3)
+  // and is the same number the footer paginates over, so the two now
+  // read consistently. Copy/semantics only — page size + counts are
+  // unchanged (anti-criterion). See
+  // `docs/audit-log/666-controls-count-semantics-decisions.md`.
+  const countLabel = controlsCountLabel(visible.length, rows.length);
   const meta = (
-    <span>
-      Showing{" "}
-      <span className="text-foreground font-medium">{visible.length}</span> of{" "}
-      <span className="font-mono">{rows.length}</span> SCF anchors
+    <span data-testid="controls-count-label">
+      {countLabel.isFiltered ? (
+        <>
+          <span className="text-foreground font-medium">
+            {countLabel.filtered}
+          </span>{" "}
+          of <span className="font-mono">{countLabel.total}</span> SCF anchors
+        </>
+      ) : (
+        <>
+          <span className="text-foreground font-medium">
+            {countLabel.total}
+          </span>{" "}
+          SCF anchors
+        </>
+      )}
     </span>
   );
 
@@ -578,9 +760,27 @@ function ControlsPageInner() {
     {
       id: "result",
       header: "State",
+      // Slice <NNN> — semantic status pill using the Badge variants wired
+      // from the PR-#1427 tokens. The variant is chosen by the real
+      // evaluation `result` enum (see resultBadgeVariant); a 6px LED dot
+      // (inheriting the deep same-hue text via bg-current) mirrors the
+      // design canvas's table card. The variant text color is the deep
+      // token on its soft tint — >=4.5:1 (WCAG AA). The raw enum value
+      // remains the visible text, so screen readers and existing filters
+      // read the same token.
       cell: (row) =>
         row.state ? (
-          <span className="font-mono text-xs">{row.state.result}</span>
+          <Badge
+            variant={resultBadgeVariant(row.state.result)}
+            data-testid="controls-row-state"
+            data-result={row.state.result}
+          >
+            <span
+              aria-hidden="true"
+              className="size-1.5 shrink-0 rounded-full bg-current"
+            />
+            {row.state.result}
+          </Badge>
         ) : (
           <span className="text-muted-foreground">—</span>
         ),
@@ -794,8 +994,20 @@ function ControlsPageInner() {
           selectedCount={selected.size}
           overCap={selectionOverCap}
           onClear={onClearSelection}
+          onAssignToMe={onAssignToMe}
+          assigning={bulkAssignMutation.isPending}
         />
       ) : null}
+      {/* Slice 745 — bulk-assign confirmation in a PERSISTENT region,
+          independent of `selected.size`. The success handler clears the
+          selection in the same batched update that sets the message; when
+          the message lived inside the selection bar (gated on
+          `selected.size > 0`) it unmounted in the same render it was set,
+          so the operator never saw it. Rendering it here, outside the
+          gated bar, lets the confirmation survive the selection-clear and
+          be observable (re-enables slice 743's quarantined message
+          assertion). Auto-dismisses via BULK_ASSIGN_MESSAGE_TTL_MS. */}
+      <BulkAssignMessage message={assignMessage} />
       {cellsCapped ? (
         <Alert data-testid="controls-scope-cells-capped" className="mb-3">
           <AlertTitle>Scope filter capped at {SCOPE_CELL_CAP} cells</AlertTitle>

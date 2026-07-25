@@ -30,13 +30,11 @@
       "upcoming-row-title",
       "upcoming-row-category",
       "activity-feed-empty",
-      "activity-feed-filters",
       "activity-feed-row",
       "activity-feed-row-event-type",
-      "activity-feed-row-ts",
-      "activity-filter-chip"
+      "activity-feed-row-ts"
     ],
-    "notes": "Slice 040 program dashboard. Six bound panels; slice 147 + 157 closed the placeholder loop."
+    "notes": "Slice 040 program dashboard. Six bound panels; slice 147 + 157 closed the placeholder loop. Slice 667 removed the inert activity filter chips (no endpoint filter to bind to)."
   },
   {
     "route": "/controls",

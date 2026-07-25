@@ -39,10 +39,27 @@ var Events = []string{
 	"policy_ack_due",
 	"risk_review_overdue",
 	"control_drift",
+	// Slice 566: the two slice-445 digest kinds that previously had no
+	// slice-108 event row (so no per-kind email opt-out). Added here AND to
+	// the migration CHECK constraint in the same slice (whitelist-move-
+	// together discipline). The notify-side mapping lives in
+	// internal/notify/email/kindfilter.go (kindToEvent).
+	"audit_note_reply",
+	"evidence_staleness",
 }
 
 // Channels is the canonical channel whitelist. Mirrors the migration's CHECK constraint.
-var Channels = []string{"in_app", "email"}
+var Channels = []string{
+	"in_app",
+	"email",
+	// Slice 583: the slice-543 Slack + webhook delivery channels gain per-kind
+	// opt-out. Added here AND to the migration's channel CHECK constraint
+	// (20260608020000_userprefs_slack_webhook_channels.sql) in the same slice
+	// (whitelist-move-together discipline). The notify-side filter that consumes
+	// these per-channel prefs lives in internal/notify/kindfilter.go.
+	"slack",
+	"webhook",
+}
 
 // Preferences is the matrix shape returned by Get + accepted (partially) by Upsert.
 // Outer key = event; inner key = channel; bool = enabled. Missing keys are treated as

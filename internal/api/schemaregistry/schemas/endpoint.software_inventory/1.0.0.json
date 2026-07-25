@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/endpoint.software_inventory/1.0.0.json",
+  "x-evidence-kind": "endpoint.software_inventory.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["VPM-04", "AST-03"],
+  "title": "Managed-device installed-software inventory summary",
+  "description": "One record per managed device across an MDM (Jamf Pro managed Mac, Microsoft Intune managed device): the bounded list of installed software/applications on the device — application name, version, optional bundle/package identifier, and optional install date. This evidence answers the patch-/vulnerability-management and asset-inventory control question ('are managed endpoints running patched, authorized software?'), which is a DIFFERENT control question than endpoint.device_posture.v1; it is therefore a SEPARATE evidence kind, not an extension of the posture summary. Slice 490 deliberately EXCLUDED installed-software inventory from the posture summary as an over-collection guard; slice 555 adds it as this scoped sibling kind. Pulled read-only from the MDM API (Jamf computers-inventory APPLICATIONS section only; Intune managedDevices/{id}/detectedApps). The per-app field set is bounded to name + version + optional identifier + optional install date ONLY — NEVER file paths, per-user app-usage telemetry, license keys, device contents, browsing data, or owner personal contact detail. The connector reports a descriptive inventory; the platform evaluator owns the final pass/fail per (control, scope). Shared across the Jamf + Intune connectors because the two MDMs' installed-software field set is identical at the inventory-summary altitude; the source_mdm field preserves provenance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source_mdm", "device_id", "software_count", "software"],
+  "properties": {
+    "source_mdm": {
+      "type": "string",
+      "enum": ["jamf", "intune"],
+      "description": "MDM the record was collected from."
+    },
+    "device_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "MDM-native stable identifier of the managed device (opaque, non-secret). Joins to the device's endpoint.device_posture.v1 record."
+    },
+    "software_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of installed-software items emitted for this device (length of the software array, after the per-device bound is applied)."
+    },
+    "software": {
+      "type": "array",
+      "description": "Bounded list of installed software/applications on the device. Per-item fields are limited to name + version + optional identifier + optional install date.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Application / package display name (e.g. 'Google Chrome', 'openssl')."
+          },
+          "version": {
+            "type": "string",
+            "description": "Optional installed version string (e.g. '125.0.6422.142'). The load-bearing field for known-vulnerable-version detection."
+          },
+          "identifier": {
+            "type": "string",
+            "description": "Optional bundle id (macOS, e.g. 'com.google.Chrome') or package id (Windows). Stable cross-device identifier. NEVER a file path."
+          },
+          "install_date": {
+            "type": "string",
+            "description": "Optional install/first-seen date the MDM reports (RFC3339 or the source's own date form). Descriptive."
+          }
+        }
+      }
+    }
+  }
+}

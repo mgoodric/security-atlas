@@ -2,32 +2,43 @@
 
 // Slice 094 — event-type filter sidebar.
 //
-// Four checkboxes — audit / exception / policy / control. State lives
-// in the parent (URL query string). Clicking a checkbox toggles its
+// Five checkboxes — audit / exception / policy / vendor / control. State
+// lives in the parent (URL query string). Clicking a checkbox toggles its
 // type in the selection.
+//
+// Slice 675 added the "Vendor reviews" entry so the legend includes every
+// type the agenda surfaces (it previously lacked vendor, even though the
+// dashboard "Upcoming" widget listed vendor reviews).
 
-const TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  audit: {
-    label: "Audit periods",
-    color: "bg-blue-500",
-  },
-  exception: {
-    label: "Exception expirations",
-    color: "bg-amber-500",
-  },
-  policy: {
-    label: "Policy reviews",
-    color: "bg-purple-500",
-  },
-  control: {
-    label: "Control reviews",
-    color: "bg-emerald-500",
-  },
-};
+import type { CalendarEventType } from "@/lib/api/calendar";
+
+const TYPE_LABELS: Record<CalendarEventType, { label: string; color: string }> =
+  {
+    audit: {
+      label: "Audit periods",
+      color: "bg-blue-500",
+    },
+    exception: {
+      label: "Exception expirations",
+      color: "bg-amber-500",
+    },
+    policy: {
+      label: "Policy reviews",
+      color: "bg-purple-500",
+    },
+    vendor: {
+      label: "Vendor reviews",
+      color: "bg-rose-500",
+    },
+    control: {
+      label: "Control reviews",
+      color: "bg-emerald-500",
+    },
+  };
 
 type Props = {
   selected: readonly string[];
-  onToggle: (t: "audit" | "exception" | "policy" | "control") => void;
+  onToggle: (t: CalendarEventType) => void;
 };
 
 export function TypeFilter({ selected, onToggle }: Props) {
@@ -41,9 +52,7 @@ export function TypeFilter({ selected, onToggle }: Props) {
               type="checkbox"
               id={`type-${key}`}
               checked={selected.includes(key)}
-              onChange={() =>
-                onToggle(key as "audit" | "exception" | "policy" | "control")
-              }
+              onChange={() => onToggle(key as CalendarEventType)}
               className="h-4 w-4 rounded border-input"
             />
             <span

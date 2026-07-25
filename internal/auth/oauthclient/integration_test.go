@@ -29,32 +29,20 @@ package oauthclient_test
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-func openPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL_APP")
-	if dsn == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
+// Slice 435 / 742: the inline atlas_app pool boilerplate (openPool /
+// DATABASE_URL_APP / pgxpool dial) this file used to re-derive now lives in
+// the shared internal/dbtest harness. dbtest.NewAppPool opens the
+// RLS-enforcing application-role pool — oauth_clients is not tenant-scoped,
+// so no tenant context is applied (production path exercised exactly).
 
 // uniqueName returns a fresh client name so concurrent runs don't
 // collide on the UNIQUE constraint.
@@ -66,7 +54,7 @@ func uniqueName(prefix string) string {
 // the supplied name, a non-empty UUID-shaped ClientID, and a 43-char
 // base64url-shaped plaintext.
 func TestIssueHappyPath(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -98,7 +86,7 @@ func TestIssueHappyPath(t *testing.T) {
 // TestIssueDuplicateNameReturnsSentinel: the UNIQUE (name) collision
 // surfaces as ErrDuplicateName.
 func TestIssueDuplicateNameReturnsSentinel(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -115,7 +103,7 @@ func TestIssueDuplicateNameReturnsSentinel(t *testing.T) {
 // TestIssueRejectsEmptyName covers the application-layer guard
 // (empty name → error before DB call).
 func TestIssueRejectsEmptyName(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -127,7 +115,7 @@ func TestIssueRejectsEmptyName(t *testing.T) {
 // TestVerifyHappyPath: Issue then Verify round-trips with the correct
 // plaintext.
 func TestVerifyHappyPath(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -148,7 +136,7 @@ func TestVerifyHappyPath(t *testing.T) {
 // client_id and a wrong-secret BOTH collapse to ErrUnknownClient. We
 // verify both branches return the same sentinel.
 func TestVerifyUnknownClientCollapses(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -172,7 +160,7 @@ func TestVerifyUnknownClientCollapses(t *testing.T) {
 // TestVerifyDisabledClientReturnsUnknown: a soft-disabled client is
 // indistinguishable from a typo via the Verify path.
 func TestVerifyDisabledClientReturnsUnknown(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -198,7 +186,7 @@ func TestVerifyDisabledClientReturnsUnknown(t *testing.T) {
 // empty client_id / empty plaintext — both collapse to
 // ErrUnknownClient without touching the DB.
 func TestVerifyEmptyArgsReturnsUnknown(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -223,7 +211,7 @@ func TestVerifyEmptyArgsReturnsUnknown(t *testing.T) {
 // TestLookupHappyPath: a secret-less lookup returns the registered
 // row.
 func TestLookupHappyPath(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -243,7 +231,7 @@ func TestLookupHappyPath(t *testing.T) {
 // TestLookupUnknownReturnsSentinel: a never-registered client_id
 // returns ErrUnknownClient.
 func TestLookupUnknownReturnsSentinel(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -256,7 +244,7 @@ func TestLookupUnknownReturnsSentinel(t *testing.T) {
 // TestLookupDisabledReturnsSentinel: a soft-disabled client is
 // indistinguishable from "unknown" via Lookup, matching Verify.
 func TestLookupDisabledReturnsSentinel(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -279,7 +267,7 @@ func TestLookupDisabledReturnsSentinel(t *testing.T) {
 // TestLookupEmptyClientIDReturnsSentinel: the application-layer guard
 // fires before the DB query.
 func TestLookupEmptyClientIDReturnsSentinel(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 
@@ -303,7 +291,7 @@ func TestSecretByteLenConstant(t *testing.T) {
 // ErrUnknownClient — confirms the joint (client_id, secret) check is
 // the security boundary (RFC 6749 §5.2).
 func TestVerifyConsistencyMultipleClients(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewAppPool(t)
 	s := oauthclient.New(pool)
 	ctx := context.Background()
 

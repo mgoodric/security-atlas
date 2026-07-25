@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/azure.nsg_rules/1.0.0.json",
+  "x-evidence-kind": "azure.nsg_rules.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["NET-04", "NET-01"],
+  "title": "Azure Network Security Group (NSG) firewall-rule posture",
+  "description": "Per-NSG network security-rule posture captured read-only from Azure Resource Manager (ARM Reader role): the inbound/outbound security rules (name, direction, access allow/deny, protocol, source/destination address-prefix, source/destination port range, priority) and a summary count of subnet / network-interface associations. The minimum that demonstrates the network-segmentation control (e.g. no NSG allows 0.0.0.0/0 inbound on management ports 22/3389). RULE configuration only — NEVER flow logs, packet captures, traffic contents, secrets, or PII; the connector never mutates a network resource (read-only list). The platform evaluator decides pass/fail per (control, NSG); the connector emits a descriptive default verdict. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["nsg_id", "nsg_name", "subscription_id", "rules"],
+  "properties": {
+    "nsg_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ARM resource id of the network security group."
+    },
+    "nsg_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Network-security-group name."
+    },
+    "subscription_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Subscription the NSG lives in."
+    },
+    "resource_group": {
+      "type": "string",
+      "description": "Resource group containing the NSG."
+    },
+    "location": {
+      "type": "string",
+      "description": "Azure region of the NSG."
+    },
+    "associated_subnets": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of subnet associations (summary, not topology)."
+    },
+    "associated_nics": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Count of network-interface associations (summary, not topology)."
+    },
+    "rules": {
+      "type": "array",
+      "description": "The NSG's operator-authored inbound/outbound security rules (platform default rules excluded). RULE metadata only.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "direction", "access"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "Security-rule name."
+          },
+          "direction": {
+            "type": "string",
+            "enum": ["inbound", "outbound"],
+            "description": "Traffic direction the rule applies to."
+          },
+          "access": {
+            "type": "string",
+            "enum": ["allow", "deny"],
+            "description": "Whether the rule allows or denies the matched traffic."
+          },
+          "protocol": {
+            "type": "string",
+            "description": "Protocol the rule matches (tcp | udp | icmp | * )."
+          },
+          "priority": {
+            "type": "integer",
+            "description": "Rule priority (lower evaluates first)."
+          },
+          "source_address_prefix": {
+            "type": "string",
+            "description": "Source address prefix / tag the rule matches (e.g. 203.0.113.0/24, Internet, *)."
+          },
+          "destination_address_prefix": {
+            "type": "string",
+            "description": "Destination address prefix / tag the rule matches."
+          },
+          "source_port_range": {
+            "type": "string",
+            "description": "Source port range the rule matches."
+          },
+          "destination_port_range": {
+            "type": "string",
+            "description": "Destination port range the rule matches (e.g. 22, 0-65535, *)."
+          }
+        }
+      }
+    }
+  }
+}

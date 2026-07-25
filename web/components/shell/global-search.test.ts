@@ -31,7 +31,7 @@ import {
 
 interface Hit {
   id: string;
-  type: "controls" | "risks" | "evidence";
+  type: "anchors" | "controls" | "risks" | "evidence";
   title: string;
   snippet: string;
   relevance_score: number;
@@ -49,22 +49,25 @@ function mkHit(overrides: Partial<Hit> = {}): Hit {
 }
 
 describe("groupByType", () => {
-  test("partitions an empty list to three empty buckets", () => {
+  test("partitions an empty list to four empty buckets", () => {
     expect(groupByType([])).toEqual({
+      anchors: [],
       controls: [],
       risks: [],
       evidence: [],
     });
   });
 
-  test("partitions a mixed-type list into the three render buckets", () => {
+  test("partitions a mixed-type list into the four render buckets", () => {
     const hits = [
       mkHit({ id: "c1", type: "controls" }),
       mkHit({ id: "r1", type: "risks" }),
       mkHit({ id: "e1", type: "evidence" }),
       mkHit({ id: "c2", type: "controls" }),
+      mkHit({ id: "a1", type: "anchors" }),
     ];
     const out = groupByType(hits);
+    expect(out.anchors.map((h) => h.id)).toEqual(["a1"]);
     expect(out.controls.map((h) => h.id)).toEqual(["c1", "c2"]);
     expect(out.risks.map((h) => h.id)).toEqual(["r1"]);
     expect(out.evidence.map((h) => h.id)).toEqual(["e1"]);
@@ -85,6 +88,18 @@ describe("groupByType", () => {
 });
 
 describe("hrefForHit", () => {
+  test("anchors hit routes to the SCF catalog detail page (slice 661)", () => {
+    expect(hrefForHit(mkHit({ id: "anchor-uuid-1", type: "anchors" }))).toBe(
+      "/catalog/scf/anchor-uuid-1",
+    );
+  });
+
+  test("encodes special characters in the id (anchors)", () => {
+    expect(hrefForHit(mkHit({ id: "CRY 04", type: "anchors" }))).toBe(
+      "/catalog/scf/CRY%2004",
+    );
+  });
+
   test("controls hit routes to per-id detail page", () => {
     expect(hrefForHit(mkHit({ id: "abc-123", type: "controls" }))).toBe(
       "/controls/abc-123",
@@ -157,6 +172,12 @@ describe("isShortcutTrigger", () => {
 // logic can be regression-pinned without standing up the full
 // component.
 describe("optionIdFor (slice 361)", () => {
+  test("anchors row id encodes the type prefix + the upstream id (slice 661)", () => {
+    expect(optionIdFor("anchors", "cry-04-uuid")).toBe(
+      "global-search-option-anchors-cry-04-uuid",
+    );
+  });
+
   test("controls row id encodes the type prefix + the upstream id", () => {
     expect(optionIdFor("controls", "cc-1-2-3")).toBe(
       "global-search-option-controls-cc-1-2-3",
@@ -175,14 +196,15 @@ describe("optionIdFor (slice 361)", () => {
     );
   });
 
-  test("type-prefix isolates collisions across the three render buckets", () => {
-    // Two upstream rows with the same id but different types must
-    // resolve to distinct DOM ids (the input's `aria-activedescendant`
-    // must name exactly one row).
+  test("type-prefix isolates collisions across the four render buckets", () => {
+    // Rows with the same id but different types must resolve to
+    // distinct DOM ids (the input's `aria-activedescendant` must name
+    // exactly one row). Slice 661 adds the `anchors` bucket.
+    const anchorsId = optionIdFor("anchors", "shared");
     const controlsId = optionIdFor("controls", "shared");
     const risksId = optionIdFor("risks", "shared");
     const evidenceId = optionIdFor("evidence", "shared");
-    expect(new Set([controlsId, risksId, evidenceId]).size).toBe(3);
+    expect(new Set([anchorsId, controlsId, risksId, evidenceId]).size).toBe(4);
   });
 });
 

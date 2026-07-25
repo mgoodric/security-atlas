@@ -1,0 +1,94 @@
+<!-- @dsCard group="Forms" name="Input" subtitle="default · focus · disabled · invalid · with label" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Input — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Input — translated from web/components/ui/input.tsx (base-nova / neutral).
+     h-8 (32px) rounded-lg border-input bg-transparent px-2.5 py-1, md:text-sm.
+     Focus, disabled and invalid states are drawn statically so the card
+     shows all of them without interaction. Dark mode uses a translucent
+     bg-input/30 fill. */
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field__label { font-size: 0.8rem; font-weight: 500; color: var(--foreground); }
+  .inp {
+    display: block; width: 240px; min-width: 0;
+    height: 32px; padding: 4px 10px;
+    border: 1px solid var(--input); border-radius: var(--radius-lg);
+    background: transparent; color: var(--foreground);
+    font-family: var(--font-sans); font-size: 0.875rem; line-height: 1.25;
+    outline: none;
+    transition: color .15s ease, border-color .15s ease, box-shadow .15s ease;
+  }
+  .inp::placeholder { color: var(--muted-foreground); }
+  .dark .inp { background: color-mix(in oklab, var(--input) 30%, transparent); }
+
+  /* focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 */
+  .inp--focus { border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
+
+  /* disabled:opacity-50 disabled:bg-input/50 (dark:bg-input/80) */
+  .inp--disabled { opacity: .5; cursor: not-allowed;
+    background: color-mix(in oklab, var(--input) 50%, transparent); }
+  .dark .inp--disabled { background: color-mix(in oklab, var(--input) 80%, transparent); }
+
+  /* aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 */
+  .inp--invalid { border-color: var(--destructive);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--destructive) 20%, transparent); }
+  .dark .inp--invalid {
+    border-color: color-mix(in oklab, var(--destructive) 50%, transparent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--destructive) 40%, transparent); }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">States — Light</p>
+    <div class="ds-col">
+      <div class="field">
+        <label class="field__label" for="i1">Control owner email</label>
+        <input class="inp" id="i1" type="text" placeholder="owner@acme.com" />
+      </div>
+      <div class="field">
+        <span class="ds-label">Focus</span>
+        <input class="inp inp--focus" type="text" value="owner@acme.com" />
+      </div>
+      <div class="field">
+        <span class="ds-label">Disabled</span>
+        <input class="inp inp--disabled" type="text" value="SCF:IAC-06" disabled />
+      </div>
+      <div class="field">
+        <span class="ds-label">Invalid</span>
+        <input class="inp inp--invalid" type="text" value="not-an-email" aria-invalid="true" aria-describedby="i-err" />
+        <span id="i-err" style="font-size:0.75rem;color:var(--destructive)">Enter a valid email address.</span>
+      </div>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">States — Dark</p>
+    <div class="ds-col">
+      <div class="field">
+        <label class="field__label" for="i2">Control owner email</label>
+        <input class="inp" id="i2" type="text" placeholder="owner@acme.com" />
+      </div>
+      <div class="field">
+        <span class="ds-label">Focus</span>
+        <input class="inp inp--focus" type="text" value="owner@acme.com" />
+      </div>
+      <div class="field">
+        <span class="ds-label">Disabled</span>
+        <input class="inp inp--disabled" type="text" value="SCF:IAC-06" disabled />
+      </div>
+      <div class="field">
+        <span class="ds-label">Invalid</span>
+        <input class="inp inp--invalid" type="text" value="not-an-email" aria-invalid="true" aria-describedby="i-err-d" />
+        <span id="i-err-d" style="font-size:0.75rem;color:var(--destructive)">Enter a valid email address.</span>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

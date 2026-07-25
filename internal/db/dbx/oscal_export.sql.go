@@ -11,6 +11,98 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const listAcceptedVendorClaimsForExport = `-- name: ListAcceptedVendorClaimsForExport :many
+
+SELECT
+    cc.id                    AS claim_id,
+    cmp.component_uuid       AS component_uuid,
+    cmp.title                AS component_title,
+    cmp.component_type       AS component_type,
+    cc.control_id            AS control_id,
+    cc.statement             AS statement,
+    cc.requirement_uuid      AS requirement_uuid,
+    cc.scf_anchor_id         AS scf_anchor_id,
+    cc.dispositioned_by      AS dispositioned_by,
+    cc.dispositioned_at      AS dispositioned_at,
+    cc.disposition_note      AS disposition_note
+FROM imported_component_claims cc
+JOIN imported_components cmp
+    ON cmp.id = cc.imported_component_id
+   AND cmp.tenant_id = cc.tenant_id
+WHERE cc.tenant_id = $1
+  AND cc.claim_status = 'accepted'
+  AND cc.is_vendor_claim = TRUE
+ORDER BY cmp.title ASC, cmp.component_uuid ASC, cc.control_id ASC, cc.requirement_uuid ASC
+`
+
+type ListAcceptedVendorClaimsForExportRow struct {
+	ClaimID         pgtype.UUID        `json:"claim_id"`
+	ComponentUuid   string             `json:"component_uuid"`
+	ComponentTitle  string             `json:"component_title"`
+	ComponentType   string             `json:"component_type"`
+	ControlID       string             `json:"control_id"`
+	Statement       string             `json:"statement"`
+	RequirementUuid string             `json:"requirement_uuid"`
+	ScfAnchorID     *string            `json:"scf_anchor_id"`
+	DispositionedBy *string            `json:"dispositioned_by"`
+	DispositionedAt pgtype.Timestamptz `json:"dispositioned_at"`
+	DispositionNote string             `json:"disposition_note"`
+}
+
+// ===== slice 619: accepted vendor claims -> SSP vendor-attested statements =====
+// Every operator-ACCEPTED vendor claim across every imported
+// component-definition for the tenant, joined to the owning component for
+// attribution. The SSP export surfaces these as VENDOR-ATTESTED
+// control-implementation statements (by-component), NEVER as platform-verified
+// evidence (P0-619 / inherits P0-512-1 / invariant #2).
+//
+// HARD BOUNDARY: this is a READ over imported_component_claims. An accepted
+// claim is a vendor ASSERTION the operator chose to credit; it is NOT a
+// control_evaluations row and does not satisfy a control. The export renders
+// it attributed to the vendor component with explicit accept-provenance
+// (dispositioned_by / dispositioned_at) so an auditor reads "the vendor says X
+// and the operator credited it", never "the platform verified X". Nothing in
+// this query (or its caller) writes control_evaluations.
+//
+// claim_status = 'accepted' filters to the credited claims only — 'asserted'
+// (undispositioned), 'rejected', and 'needs_info' claims are excluded from the
+// export entirely. is_vendor_claim is constant TRUE (the slice-512 CHECK), so
+// the predicate is documentary, not load-bearing — but it asserts intent.
+//
+// RLS scopes both tables to the caller's tenant; the leading $1 tenant_id
+// predicate is defense-in-depth behind RLS (the slice-030 pattern).
+func (q *Queries) ListAcceptedVendorClaimsForExport(ctx context.Context, tenantID pgtype.UUID) ([]ListAcceptedVendorClaimsForExportRow, error) {
+	rows, err := q.db.Query(ctx, listAcceptedVendorClaimsForExport, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAcceptedVendorClaimsForExportRow
+	for rows.Next() {
+		var i ListAcceptedVendorClaimsForExportRow
+		if err := rows.Scan(
+			&i.ClaimID,
+			&i.ComponentUuid,
+			&i.ComponentTitle,
+			&i.ComponentType,
+			&i.ControlID,
+			&i.Statement,
+			&i.RequirementUuid,
+			&i.ScfAnchorID,
+			&i.DispositionedBy,
+			&i.DispositionedAt,
+			&i.DispositionNote,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditNotesForPeriod = `-- name: ListAuditNotesForPeriod :many
 SELECT id, tenant_id, audit_period_id, author_user_id, scope_type,
        scope_id, body, visibility, created_at
@@ -203,6 +295,142 @@ func (q *Queries) ListPopulationsForPeriod(ctx context.Context, arg ListPopulati
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.AuditPeriodID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSampledEvidenceForPeriod = `-- name: ListSampledEvidenceForPeriod :many
+SELECT
+    latest.population_id,
+    se.evidence_record_id,
+    se.ordinal
+FROM (
+    SELECT DISTINCT ON (s.population_id)
+        s.id           AS sample_id,
+        s.population_id AS population_id
+    FROM samples s
+    JOIN populations p
+        ON p.tenant_id = s.tenant_id AND p.id = s.population_id
+    WHERE s.tenant_id = $1
+      AND p.audit_period_id = $2
+    ORDER BY s.population_id, s.created_at DESC, s.id DESC
+) latest
+JOIN sample_evidence se
+    ON se.tenant_id = $1 AND se.sample_id = latest.sample_id
+ORDER BY latest.population_id ASC, se.ordinal ASC
+`
+
+type ListSampledEvidenceForPeriodParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+}
+
+type ListSampledEvidenceForPeriodRow struct {
+	PopulationID     pgtype.UUID `json:"population_id"`
+	EvidenceRecordID pgtype.UUID `json:"evidence_record_id"`
+	Ordinal          int32       `json:"ordinal"`
+}
+
+// Slice 494 (AC-1/AC-2): the DRAWN sample evidence ids for every population
+// pinned to one audit period. Joins populations -> samples -> sample_evidence.
+//
+// Invariant #10 by construction (AC-2/AC-7): the rows in sample_evidence were
+// materialized at draw-time over the FROZEN population (slice 026's
+// ListPopulationEvidenceIDs filters `observed_at <= frozen_at`), so a record
+// observed after the period's frozen_at was never in the draw and cannot
+// appear here. This query carries the already-frozen-correct draw forward; it
+// never re-samples live data.
+//
+// When a population has multiple samples (re-draws), only the MOST-RECENT
+// sample's draw is carried (the operative sample). The DISTINCT ON collapses
+// to one sample per population by created_at DESC; the full re-draw history
+// stays in sample_audit_log (slice 026), not in the AR.
+//
+// Ordered by population then ordinal (the deterministic Fisher-Yates shuffle
+// position) so the AR's sampled_evidence_ids preserve the auditor's sample
+// order (AC-9 reproducibility).
+func (q *Queries) ListSampledEvidenceForPeriod(ctx context.Context, arg ListSampledEvidenceForPeriodParams) ([]ListSampledEvidenceForPeriodRow, error) {
+	rows, err := q.db.Query(ctx, listSampledEvidenceForPeriod, arg.TenantID, arg.AuditPeriodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSampledEvidenceForPeriodRow
+	for rows.Next() {
+		var i ListSampledEvidenceForPeriodRow
+		if err := rows.Scan(&i.PopulationID, &i.EvidenceRecordID, &i.Ordinal); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWalkthroughAttachmentsForPeriod = `-- name: ListWalkthroughAttachmentsForPeriod :many
+SELECT
+    wa.walkthrough_id,
+    wa.id,
+    wa.storage_key,
+    wa.content_type,
+    wa.sha256_hash,
+    wa.annotations
+FROM walkthrough_attachments wa
+JOIN walkthroughs w
+    ON w.tenant_id = wa.tenant_id AND w.id = wa.walkthrough_id
+WHERE wa.tenant_id = $1
+  AND w.audit_period_id = $2
+ORDER BY wa.walkthrough_id ASC, wa.uploaded_at ASC, wa.id ASC
+`
+
+type ListWalkthroughAttachmentsForPeriodParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	AuditPeriodID pgtype.UUID `json:"audit_period_id"`
+}
+
+type ListWalkthroughAttachmentsForPeriodRow struct {
+	WalkthroughID pgtype.UUID `json:"walkthrough_id"`
+	ID            pgtype.UUID `json:"id"`
+	StorageKey    string      `json:"storage_key"`
+	ContentType   string      `json:"content_type"`
+	Sha256Hash    string      `json:"sha256_hash"`
+	Annotations   []byte      `json:"annotations"`
+}
+
+// Slice 494 (AC-4/AC-5): attachment references for every walkthrough pinned
+// to one audit period. Carries metadata only (id, filename, content hash,
+// content type, annotation jsonb, storage_key) — the attachment BYTES live in
+// the slice-036 object store and are NEVER read here (P0-494-2). The export
+// references them by hash + storage_key.
+//
+// Ordered by (walkthrough, uploaded_at, id) so the per-walkthrough attachment
+// order is stable and the exporter's cap (slice 494 D3) selects a
+// deterministic prefix.
+func (q *Queries) ListWalkthroughAttachmentsForPeriod(ctx context.Context, arg ListWalkthroughAttachmentsForPeriodParams) ([]ListWalkthroughAttachmentsForPeriodRow, error) {
+	rows, err := q.db.Query(ctx, listWalkthroughAttachmentsForPeriod, arg.TenantID, arg.AuditPeriodID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWalkthroughAttachmentsForPeriodRow
+	for rows.Next() {
+		var i ListWalkthroughAttachmentsForPeriodRow
+		if err := rows.Scan(
+			&i.WalkthroughID,
+			&i.ID,
+			&i.StorageKey,
+			&i.ContentType,
+			&i.Sha256Hash,
+			&i.Annotations,
 		); err != nil {
 			return nil, err
 		}

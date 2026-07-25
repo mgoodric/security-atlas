@@ -24,68 +24,40 @@ package freshnessdrift_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/freshnessdrift"
 )
 
 // ----- harness -----
+//
+// Slice 435: the pool/DSN/tenant-seed boilerplate this file used to
+// re-derive (appDSN/adminDSN/openPool/freshTenant) now lives in the shared
+// internal/dbtest harness. dbtest.NewAppPool / NewMigratePool replace the
+// two-pool open; dbtest.SeedTenant replaces freshTenant, taking the
+// slice-016 cleanup tables (children before parents) so the append-only
+// control_drift_snapshots + evidence_records are removed through the
+// privileged pool exactly as before.
 
-func appDSN(t *testing.T) string {
+// freshTenant seeds a fresh tenant and registers cleanup of every slice-016
+// + dependency table through the privileged (migrate) pool. The order is
+// FK-safe (children before parents); control_drift_snapshots and
+// evidence_records are append-only under RLS, so the migrate pool is what
+// can DELETE them.
+func freshTenant(t *testing.T, migrate *pgxpool.Pool) string {
 	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
-// freshTenant cleans every slice-016 + dependency table for the tenant after
-// the test.
-func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
-	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM evidence_freshness WHERE tenant_id = $1`,
-			`DELETE FROM control_drift_snapshots WHERE tenant_id = $1`,
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, migrate,
+		"evidence_freshness",
+		"control_drift_snapshots",
+		"control_evaluations",
+		"evidence_records",
+		"controls",
+	)
 }
 
 func seedControl(t *testing.T, admin *pgxpool.Pool, tenant, freshnessClass string) uuid.UUID {
@@ -164,25 +136,25 @@ func countDriftSnapshots(t *testing.T, admin *pgxpool.Pool, tenant string) int {
 // AND captures a drift snapshot, for every tenant =====
 
 func TestSchedulerSweep_RefreshesFreshnessAndCapturesDrift(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 
-	ctrlID := seedControl(t, admin, tenant, "weekly")
-	seedEvidence(t, admin, tenant, ctrlID, time.Now().UTC().Add(-2*24*time.Hour))
-	seedEvaluation(t, admin, tenant, ctrlID, "pass", "fresh", time.Now().UTC().Add(-1*time.Hour))
+	ctrlID := seedControl(t, migrate, tenant, "weekly")
+	seedEvidence(t, migrate, tenant, ctrlID, time.Now().UTC().Add(-2*24*time.Hour))
+	seedEvaluation(t, migrate, tenant, ctrlID, "pass", "fresh", time.Now().UTC().Add(-1*time.Hour))
 
 	// Before the sweep: no read-model rows.
-	if n := countFreshnessRows(t, admin, tenant); n != 0 {
+	if n := countFreshnessRows(t, migrate, tenant); n != 0 {
 		t.Fatalf("pre-sweep freshness rows = %d, want 0", n)
 	}
-	if n := countDriftSnapshots(t, admin, tenant); n != 0 {
+	if n := countDriftSnapshots(t, migrate, tenant); n != 0 {
 		t.Fatalf("pre-sweep drift snapshots = %d, want 0", n)
 	}
 
 	// The scheduler runs as the migrator role (it enumerates tenants); each
 	// tenant's refresh runs through an app-role Refresher.
-	scheduler := freshnessdrift.NewScheduler(admin, freshnessdrift.NewRefresherFactory(app), nil)
+	scheduler := freshnessdrift.NewScheduler(migrate, freshnessdrift.NewRefresherFactory(app), nil)
 	swept, err := scheduler.SweepOnce(context.Background())
 	if err != nil {
 		t.Fatalf("SweepOnce: %v", err)
@@ -193,10 +165,10 @@ func TestSchedulerSweep_RefreshesFreshnessAndCapturesDrift(t *testing.T) {
 
 	// After the sweep: the freshness read model is populated and a drift
 	// snapshot was captured for our tenant.
-	if n := countFreshnessRows(t, admin, tenant); n != 1 {
+	if n := countFreshnessRows(t, migrate, tenant); n != 1 {
 		t.Errorf("post-sweep freshness rows = %d, want 1", n)
 	}
-	if n := countDriftSnapshots(t, admin, tenant); n != 1 {
+	if n := countDriftSnapshots(t, migrate, tenant); n != 1 {
 		t.Errorf("post-sweep drift snapshots = %d, want 1", n)
 	}
 }
@@ -205,15 +177,15 @@ func TestSchedulerSweep_RefreshesFreshnessAndCapturesDrift(t *testing.T) {
 // APPENDS another drift snapshot (the append-only ledger keeps history) =====
 
 func TestSchedulerSweep_IsRepeatable(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
-	tenant := freshTenant(t, admin)
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
 
-	ctrlID := seedControl(t, admin, tenant, "monthly")
-	seedEvidence(t, admin, tenant, ctrlID, time.Now().UTC().Add(-1*24*time.Hour))
-	seedEvaluation(t, admin, tenant, ctrlID, "pass", "fresh", time.Now().UTC().Add(-1*time.Hour))
+	ctrlID := seedControl(t, migrate, tenant, "monthly")
+	seedEvidence(t, migrate, tenant, ctrlID, time.Now().UTC().Add(-1*24*time.Hour))
+	seedEvaluation(t, migrate, tenant, ctrlID, "pass", "fresh", time.Now().UTC().Add(-1*time.Hour))
 
-	scheduler := freshnessdrift.NewScheduler(admin, freshnessdrift.NewRefresherFactory(app), nil)
+	scheduler := freshnessdrift.NewScheduler(migrate, freshnessdrift.NewRefresherFactory(app), nil)
 	if _, err := scheduler.SweepOnce(context.Background()); err != nil {
 		t.Fatalf("SweepOnce #1: %v", err)
 	}
@@ -222,13 +194,13 @@ func TestSchedulerSweep_IsRepeatable(t *testing.T) {
 	}
 
 	// freshness is an UPSERTed current-state table -> still one row.
-	if n := countFreshnessRows(t, admin, tenant); n != 1 {
+	if n := countFreshnessRows(t, migrate, tenant); n != 1 {
 		t.Errorf("freshness rows after two sweeps = %d, want 1 (UPSERT, not duplicate)", n)
 	}
 	// drift snapshots are an append-only ledger -> two rows (latest-wins on
 	// read). This is what makes the day-over-day diff and the audit trail
 	// possible.
-	if n := countDriftSnapshots(t, admin, tenant); n != 2 {
+	if n := countDriftSnapshots(t, migrate, tenant); n != 2 {
 		t.Errorf("drift snapshots after two sweeps = %d, want 2 (append-only ledger)", n)
 	}
 }

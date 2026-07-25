@@ -1,19 +1,28 @@
 // Package search serves the slice-268 unified `/v1/search` endpoint —
 // a single GET that aggregates lexical matches across controls,
-// risks, and evidence and returns them sorted by relevance.
+// risks, evidence, and (slice 661) the bundled SCF anchor catalog, and
+// returns them sorted by relevance.
 //
-// Wire shape (slice 268):
+// Wire shape (slice 268; slice 661 adds the `anchors` type):
 //
-//	GET /v1/search?q=<query>&types=controls,risks,evidence&limit=N
+//	GET /v1/search?q=<query>&types=anchors,controls,risks,evidence&limit=N
 //
 //	{
 //	  "hits": [
-//	    {"id":"<uuid>", "type":"controls"|"risks"|"evidence",
+//	    {"id":"<uuid>", "type":"anchors"|"controls"|"risks"|"evidence",
 //	     "title":"...", "snippet":"...", "relevance_score":0.0..1.0}
 //	  ],
 //	  "count":  N,
 //	  "partial_types": ["risks"]    // types filtered out by OPA
 //	}
+//
+// Slice 661 — the `anchors` type fixes the empty-tenant gap (ATLAS-002):
+// on a fresh tenant with zero instantiated controls, the ~53 bundled SCF
+// anchors (CRY-04, etc.) were unindexed, so the operator's most natural
+// query ("find CRY-04" / "encryption") returned nothing. The anchor
+// branch reads the tenant-AGNOSTIC scf_anchors catalog directly (no RLS
+// — invariant #6 is preserved because there is no tenant column to leak
+// across; the three tenant types keep their RLS-bound path unchanged).
 //
 // Design (slice 268 narrative + decisions):
 //
@@ -93,12 +102,19 @@ const (
 	TypeControls = "controls"
 	TypeRisks    = "risks"
 	TypeEvidence = "evidence"
+	// TypeAnchors is the slice-661 SCF-anchor catalog result type. Unlike
+	// the other three, anchors are platform-bundled, tenant-AGNOSTIC
+	// reference data (scf_anchors carries no tenant_id and no RLS — see
+	// migration 20260511000001_scf_anchors.sql line 24). The anchor branch
+	// therefore reads the catalog directly, NOT through the tenant-GUC
+	// path. controls/risks/evidence stay RLS-scoped exactly as before.
+	TypeAnchors = "anchors"
 )
 
 // allTypes is the default `types` set when the caller omits the param
 // (declared in canonical sort order so the response's partial_types
-// array reads deterministically).
-var allTypes = []string{TypeControls, TypeEvidence, TypeRisks}
+// array reads deterministically). `anchors` sorts first alphabetically.
+var allTypes = []string{TypeAnchors, TypeControls, TypeEvidence, TypeRisks}
 
 // Handler bundles the slice-268 routes. It owns:
 //
@@ -277,6 +293,8 @@ func (h *Handler) searchType(ctx context.Context, t, q string, tokens []string) 
 		return h.searchRisks(ctx, q, tokens)
 	case TypeEvidence:
 		return h.searchEvidence(ctx, q, tokens)
+	case TypeAnchors:
+		return h.searchAnchors(ctx, q, tokens)
 	default:
 		// Unreachable — parseTypes already validated the set.
 		return nil, fmt.Errorf("unknown search type %q", t)
@@ -378,6 +396,56 @@ func (h *Handler) searchEvidence(ctx context.Context, q string, tokens []string)
 	return out, nil
 }
 
+// searchAnchors queries the bundled `scf_anchors` SCF catalog (slice
+// 661). Unlike the three tenant-scoped branches above, this is the ONE
+// tenant-AGNOSTIC search surface: scf_anchors has no tenant_id and no
+// RLS — it is platform-bundled reference data (migration
+// 20260511000001_scf_anchors.sql line 24). The query therefore runs on
+// the plain pool (queryCatalog), NOT queryInTenantTx, and carries no
+// tenant predicate. This is invariant-#6-safe BY CONSTRUCTION: there is
+// no tenant column to leak across, and the controls/risks/evidence
+// branches keep their RLS-bound tenant path untouched.
+//
+// Latest-version dedup: an anchor (scf_id) exists once per SCF
+// framework_version, so a multi-version catalog would otherwise return
+// the same anchor N times. We mirror ListSCFAnchorsLatest
+// (internal/db/queries/scf_anchors.sql) — join framework_versions +
+// frameworks and filter `slug='scf' AND status='current' AND
+// tenant_id IS NULL`, so only the current version participates and each
+// scf_id appears at most once.
+//
+// Matched columns: scf_id (so `CRY-04` matches by code) + title +
+// description (so `encryption` matches by name). The synthesized title
+// is "<scf_id> — <title>" so the FE renders a stable, code-prefixed
+// label. The hit ID is the anchor UUID, which the FE links to
+// /catalog/scf/<id> (the existing anchor-detail page accepts the UUID).
+func (h *Handler) searchAnchors(ctx context.Context, q string, tokens []string) ([]SearchHit, error) {
+	stmt, args := buildTokenizedQuery(`
+		SELECT a.id::text, a.scf_id, a.title, a.description
+		FROM scf_anchors a
+		JOIN framework_versions fv ON fv.id = a.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+		  AND `, []string{"a.scf_id", "a.title", "a.description"}, tokens, q, "ORDER BY a.scf_id ASC")
+	rows, err := h.queryCatalog(ctx, stmt, args...)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SearchHit, 0, len(rows))
+	for _, r := range rows {
+		haystack := r["scf_id"] + " " + r["title"] + " " + r["description"]
+		title := r["scf_id"] + " — " + r["title"]
+		out = append(out, SearchHit{
+			ID:             r["id"],
+			Type:           TypeAnchors,
+			Title:          title,
+			Snippet:        snippet(haystack, q),
+			RelevanceScore: relevance(tokens, haystack),
+		})
+	}
+	return out, nil
+}
+
 // buildTokenizedQuery composes the WHERE clause + parameter list for
 // a per-token ILIKE query against the supplied columns. A row matches
 // when ANY token appears in ANY column — the lexical OR shape
@@ -467,6 +535,49 @@ func (h *Handler) queryInTenantTx(ctx context.Context, stmt string, args ...any)
 	return out, nil
 }
 
+// queryCatalog runs `stmt` directly on the pool with NO tenant GUC
+// applied — the slice-661 anchor path. It is deliberately distinct from
+// queryInTenantTx: scf_anchors is platform-bundled, tenant-AGNOSTIC
+// catalog data (no tenant_id, no RLS), so there is nothing to scope and
+// applying a tenant GUC would be meaningless. Every authenticated
+// caller reads the same anchor rows (the OPA `anchors` catalog-read
+// admit already gates the endpoint-level access; see
+// policies/authz/defaults.rego catalog_resources).
+//
+// CRITICAL invariant-#6 boundary: this helper is used ONLY by
+// searchAnchors. The controls/risks/evidence branches MUST continue to
+// use queryInTenantTx so their RLS tenant isolation is preserved.
+func (h *Handler) queryCatalog(ctx context.Context, stmt string, args ...any) ([]map[string]string, error) {
+	rows, err := h.pool.Query(ctx, stmt, args...)
+	if err != nil {
+		return nil, fmt.Errorf("catalog query: %w", err)
+	}
+	defer rows.Close()
+
+	cols := rows.FieldDescriptions()
+	colNames := make([]string, len(cols))
+	for i, c := range cols {
+		colNames[i] = string(c.Name)
+	}
+
+	var out []map[string]string
+	for rows.Next() {
+		values, err := rows.Values()
+		if err != nil {
+			return nil, fmt.Errorf("catalog scan: %w", err)
+		}
+		row := make(map[string]string, len(values))
+		for i, v := range values {
+			row[colNames[i]] = stringifyValue(v)
+		}
+		out = append(out, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("catalog rows: %w", err)
+	}
+	return out, nil
+}
+
 // stringifyValue coerces pgx-returned values (strings, []byte, etc.)
 // into the string shape the search helpers expect. The three queries
 // here only project text columns, so the coercion stays simple.
@@ -519,6 +630,7 @@ func parseTypes(raw string) ([]string, error) {
 		TypeControls: true,
 		TypeRisks:    true,
 		TypeEvidence: true,
+		TypeAnchors:  true,
 	}
 	seen := map[string]bool{}
 	for _, part := range strings.Split(raw, ",") {
@@ -527,7 +639,7 @@ func parseTypes(raw string) ([]string, error) {
 			continue
 		}
 		if !known[t] {
-			return nil, fmt.Errorf("unknown type %q (allowed: controls,risks,evidence)", t)
+			return nil, fmt.Errorf("unknown type %q (allowed: anchors,controls,risks,evidence)", t)
 		}
 		seen[t] = true
 	}

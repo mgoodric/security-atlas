@@ -79,9 +79,19 @@ const (
 // the dependencies as concrete types so unit tests can pass nils for
 // branches that exit before the dependency is consulted (401/400 cases).
 type AttestHandler struct {
-	pool    *pgxpool.Pool
 	ingest  *ingest.Service
 	uploads ArtifactUploader
+
+	// reader is the slice-692 per-route read seam the AttestForm + Submit
+	// paths read the control row through (contract-tier rollout, Option-A
+	// per-route seam — slice 411/689 precedent). It carries JUST the single
+	// control-by-id read those routes need. In production it is a pool-backed
+	// adapter (poolControlReader) wired by NewAttestHandler; the contract
+	// recorder (attest_contract_test.go) injects a fixed-row stub satisfying
+	// this seam so the attest-form wire shape records on the plain
+	// `go test ./...` unit surface with no Postgres pool (ADR-0007 /
+	// P0-409-1). NewAttestHandler's signature is unchanged (P0-409-2).
+	reader controlByIDReader
 
 	// maxBodyBytes caps the JSON request body. Attestation payloads are
 	// schema-validated and small; the cap is just a belt against a
@@ -89,6 +99,51 @@ type AttestHandler struct {
 	// the client uploads to /v1/artifacts:upload first and posts the
 	// returned artifact_id here.
 	maxBodyBytes int64
+}
+
+// controlByIDReader is the slice-692 per-route read seam: the single
+// control-by-id read the attestation routes depend on. Kept deliberately
+// narrow (one method) — the recorder satisfies it with a fixed
+// dbx.GetControlByIDRow fixture and no Postgres. The production
+// poolControlReader runs the slice-009 GetControlByID query inside a
+// tenant-GUC read tx so RLS hides cross-tenant rows.
+type controlByIDReader interface {
+	ControlByID(ctx context.Context, tenantID string, id uuid.UUID) (dbx.GetControlByIDRow, error)
+}
+
+// poolControlReader is the production controlByIDReader: it reads the control
+// row from Postgres inside a tenant-GUC read tx. It carries the pgx pool the
+// handler previously held directly; the read logic is unchanged from the
+// former h.loadControl method.
+type poolControlReader struct {
+	pool *pgxpool.Pool
+}
+
+// ControlByID runs the GetControlByID query inside a tenant-GUC read tx so
+// RLS hides cross-tenant rows. Returns pgx.ErrNoRows when the control isn't
+// visible to the calling tenant.
+func (p poolControlReader) ControlByID(ctx context.Context, tenantID string, id uuid.UUID) (dbx.GetControlByIDRow, error) {
+	var out dbx.GetControlByIDRow
+	tenantUUID, err := uuid.Parse(tenantID)
+	if err != nil {
+		return out, fmt.Errorf("parse tenant: %w", err)
+	}
+	err = pgx.BeginTxFunc(ctx, p.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		if terr := tenancy.ApplyTenant(ctx, tx); terr != nil {
+			return terr
+		}
+		q := dbx.New(tx)
+		row, gerr := q.GetControlByID(ctx, dbx.GetControlByIDParams{
+			TenantID: pgtype.UUID{Bytes: tenantUUID, Valid: true},
+			ID:       pgtype.UUID{Bytes: id, Valid: true},
+		})
+		if gerr != nil {
+			return gerr
+		}
+		out = row
+		return nil
+	})
+	return out, err
 }
 
 // ArtifactUploader is the slice-036 surface this handler depends on. The
@@ -105,11 +160,34 @@ type ArtifactUploader interface {
 // that exercise pre-DB branches (401/400). ingester may be nil for the
 // same reason. uploader may be nil — the artifact_id field is optional.
 func NewAttestHandler(pool *pgxpool.Pool, ingester *ingest.Service, uploader ArtifactUploader) *AttestHandler {
+	// reader is the slice-692 per-route read seam. In production pool is
+	// non-nil and we wire the pool-backed adapter. When pool is nil (the
+	// unit-only servers that exercise the pre-read 401/400 branches) we leave
+	// reader nil so the read-path gate returns a clean 503 rather than
+	// dereferencing a nil pool inside pgx — preserving the prior
+	// `h.pool == nil -> 503` contract verbatim.
+	var reader controlByIDReader
+	if pool != nil {
+		reader = poolControlReader{pool: pool}
+	}
 	return &AttestHandler{
-		pool:         pool,
 		ingest:       ingester,
 		uploads:      uploader,
+		reader:       reader,
 		maxBodyBytes: 2 << 20, // 2 MiB
+	}
+}
+
+// newAttestHandlerWithReader constructs an AttestHandler whose control-by-id
+// read goes through an arbitrary seam. It exists ONLY for the slice-692
+// contract recorder, which injects a fixed-row stub so the attest-form wire
+// shape records with no Postgres pool. Unexported — not part of the public
+// surface (P0-409-2). The handler keeps a nil pool so the per-route gates
+// behave identically to a recorder server; the reader carries the read.
+func newAttestHandlerWithReader(reader controlByIDReader) *AttestHandler {
+	return &AttestHandler{
+		reader:       reader,
+		maxBodyBytes: 2 << 20,
 	}
 }
 
@@ -174,9 +252,12 @@ func (h *AttestHandler) AttestForm(w http.ResponseWriter, r *http.Request) {
 		writeAttestError(w, http.StatusBadRequest, "control id must be a uuid")
 		return
 	}
-	if h.pool == nil {
-		// Belt-and-braces: unit-only servers that don't wire a pool
-		// can't serve this route; 503 is more honest than 500.
+	if h.reader == nil {
+		// Belt-and-braces: unit-only servers that don't wire a read path
+		// can't serve this route; 503 is more honest than 500. In
+		// production NewAttestHandler always wires a poolControlReader, so
+		// a nil reader means the server was constructed without a control
+		// store (the recorder injects a stub reader instead).
 		writeAttestError(w, http.StatusServiceUnavailable, "control store not configured")
 		return
 	}
@@ -188,7 +269,7 @@ func (h *AttestHandler) AttestForm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := h.loadControl(ctx, cred.TenantID, id)
+	row, err := h.reader.ControlByID(ctx, cred.TenantID, id)
 	if err != nil {
 		h.writeControlLookupError(w, err)
 		return
@@ -251,9 +332,9 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Pre-DB path: short-circuit for the unit-test branches that don't
-	// configure a pool. The handler shouldn't 500 just because tests
+	// configure a read path. The handler shouldn't 500 just because tests
 	// pass nil; tests above this gate verify input validation.
-	if h.pool == nil {
+	if h.reader == nil {
 		writeAttestError(w, http.StatusServiceUnavailable, "control store not configured")
 		return
 	}
@@ -266,7 +347,7 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := h.loadControl(ctx, cred.TenantID, id)
+	row, err := h.reader.ControlByID(ctx, cred.TenantID, id)
 	if err != nil {
 		h.writeControlLookupError(w, err)
 		return
@@ -415,33 +496,6 @@ func (h *AttestHandler) Submit(w http.ResponseWriter, r *http.Request) {
 // endpoint — their evidence flows through connectors / push.
 func isManualImplementation(impl string) bool {
 	return impl == "manual_attested" || impl == "manual_periodic"
-}
-
-// loadControl runs the GetControlByID query inside a tenant-GUC tx so
-// RLS hides cross-tenant rows. Returns pgx.ErrNoRows when the control
-// isn't visible to the calling tenant.
-func (h *AttestHandler) loadControl(ctx context.Context, tenantID string, id uuid.UUID) (dbx.GetControlByIDRow, error) {
-	var out dbx.GetControlByIDRow
-	tenantUUID, err := uuid.Parse(tenantID)
-	if err != nil {
-		return out, fmt.Errorf("parse tenant: %w", err)
-	}
-	err = pgx.BeginTxFunc(ctx, h.pool, pgx.TxOptions{AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
-		if terr := tenancy.ApplyTenant(ctx, tx); terr != nil {
-			return terr
-		}
-		q := dbx.New(tx)
-		row, gerr := q.GetControlByID(ctx, dbx.GetControlByIDParams{
-			TenantID: pgtype.UUID{Bytes: tenantUUID, Valid: true},
-			ID:       pgtype.UUID{Bytes: id, Valid: true},
-		})
-		if gerr != nil {
-			return gerr
-		}
-		out = row
-		return nil
-	})
-	return out, err
 }
 
 func (h *AttestHandler) writeControlLookupError(w http.ResponseWriter, err error) {

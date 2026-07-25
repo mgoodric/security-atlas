@@ -4,37 +4,15 @@ package soc2import_test
 
 import (
 	"context"
-	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return dsn
-}
-
-func openPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, adminDSN(t))
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 // resetCatalog wipes every slice-007-owned catalog table so each test
 // starts with a clean SOC 2 mapping graph. We DO NOT wipe scf_anchors or
@@ -92,7 +70,7 @@ func loadCrosswalk(t *testing.T) *soc2import.Crosswalk {
 // AC-1 + ISC-15 — first import creates rows and reports them; second
 // import with the same crosswalk is a no-op (idempotent).
 func TestImport_FirstRunCreatesRequirementsAndEdges(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)
@@ -116,7 +94,7 @@ func TestImport_FirstRunCreatesRequirementsAndEdges(t *testing.T) {
 }
 
 func TestImport_SecondRunSameCrosswalkIsIdempotent(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)
@@ -143,7 +121,7 @@ func TestImport_SecondRunSameCrosswalkIsIdempotent(t *testing.T) {
 // and the agent-authored crosswalk uses 'community_draft' on every row
 // pending HITL approval.
 func TestImport_EveryDraftedEdgeIsCommunityDraft(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)
@@ -175,7 +153,7 @@ func TestImport_EveryDraftedEdgeIsCommunityDraft(t *testing.T) {
 // The DB CHECK and ENUM enforce this; the test confirms the importer
 // faithfully writes the values from the crosswalk.
 func TestImport_EveryEdgeHasValidSTRMTypeAndStrength(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)
@@ -220,7 +198,7 @@ func TestImport_EveryEdgeHasValidSTRMTypeAndStrength(t *testing.T) {
 // If a future schema slice adds a fw_to_fw_edges table, this test fails
 // and the constitutional violation is caught at CI time.
 func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 
 	var n int
@@ -235,9 +213,45 @@ func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
 		t.Fatalf("invariant 1 violated: %d req-to-req table(s) exist; all framework-to-framework relationships must traverse SCF anchors", n)
 	}
 
-	// And no edge table that references framework_requirements twice.
-	// fw_to_scf_edges should reference framework_requirements ONCE and
-	// scf_anchors ONCE.
+	// And no second CROSSWALK-style bridge that references
+	// framework_requirements. The invariant the guard protects is "no
+	// framework-to-framework MAPPING that bypasses SCF anchors" — i.e. no
+	// second catalog/crosswalk edge into framework_requirements beyond the
+	// one legitimate fw_to_scf_edges.framework_requirement_id.
+	//
+	// Refinement (slice 515, decisions-log D7): the original heuristic
+	// counted EVERY FK into framework_requirements and allowed exactly 1.
+	// That was correct only while the crosswalk edge was the sole
+	// referencer. It is over-broad: a TENANT-SCOPED assessment-state table
+	// may legitimately reference the shared Subcategory row for referential
+	// integrity WITHOUT being a crosswalk (slice 515's
+	// csf_profile_selections records a tenant's per-Subcategory target
+	// outcome — assessment-state -> reference-data, not requirement ->
+	// requirement mapping, and it never bypasses the crosswalk). The
+	// distinguishing property: a crosswalk/edge table is CATALOG data (no
+	// tenant_id — shared reference data, like fw_to_scf_edges), whereas
+	// assessment-state is TENANT-SCOPED (carries tenant_id). So the count is
+	// restricted to FKs ORIGINATING from catalog tables (no tenant_id
+	// column). A genuine fw_to_fw_edges crosswalk would be catalog data (no
+	// tenant_id, exactly like fw_to_scf_edges), so it is still counted and
+	// still caught here — AND independently by the %req%req%-name check
+	// above. A tenant-scoped table cannot launder a crosswalk through this
+	// exclusion because a crosswalk is shared (tenant-agnostic) catalog data
+	// by construction (invariant #1/#3.5).
+	//
+	// Refinement (slice 484, decisions-log D5): the version-migration review
+	// queue `framework_version_migrations` is a CATALOG table (no tenant_id)
+	// that carries two FKs into framework_requirements
+	// (from_requirement_id, to_requirement_id) — but it is NOT a
+	// framework-to-framework crosswalk. Its rows are INTRA-framework
+	// version-carryover SUGGESTIONS between two adjacent versions of the SAME
+	// framework (e.g. SOC 2:2017 CC6.1 -> SOC 2:2017-rev CC6.1), human-reviewed
+	// and never auto-applied (ADR 0019 §3 / P0-484-4 / invariant #7). It never
+	// maps one framework's requirement to a DIFFERENT framework's requirement,
+	// so it does not bypass the SCF-anchor graph that invariant #1 protects. It
+	// is excluded by name here exactly as fw_to_scf_edges is the one allowed
+	// crosswalk referencer; a genuinely-new cross-framework bridge with a
+	// different table name is still counted and still caught.
 	var refCount int
 	if err := pool.QueryRow(context.Background(), `
 		SELECT count(*)
@@ -245,12 +259,66 @@ func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
 		JOIN information_schema.referential_constraints rc ON rc.constraint_name = kcu.constraint_name
 		JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = kcu.constraint_name
 		WHERE kcu.table_schema = 'public'
-		  AND ccu.table_name = 'framework_requirements'`).Scan(&refCount); err != nil {
+		  AND ccu.table_name = 'framework_requirements'
+		  AND kcu.table_name <> 'framework_version_migrations'
+		  AND NOT EXISTS (
+		      SELECT 1
+		      FROM information_schema.columns c
+		      WHERE c.table_schema = 'public'
+		        AND c.table_name = kcu.table_name
+		        AND c.column_name = 'tenant_id'
+		  )`).Scan(&refCount); err != nil {
 		t.Fatalf("fk inspection query: %v", err)
 	}
 	if refCount > 1 {
-		// Allowed exactly one: fw_to_scf_edges.framework_requirement_id
-		t.Fatalf("invariant 1 violated: %d FKs point at framework_requirements; expected exactly 1 (fw_to_scf_edges.framework_requirement_id)", refCount)
+		// Allowed exactly one CATALOG referencer:
+		// fw_to_scf_edges.framework_requirement_id. A second catalog-table
+		// FK into framework_requirements is a framework-to-framework
+		// crosswalk that bypasses SCF anchors — the constitutional
+		// violation. (Tenant-scoped assessment-state FKs are excluded by the
+		// tenant_id filter and are NOT crosswalks; see the comment above.)
+		t.Fatalf("invariant 1 violated: %d catalog FKs point at framework_requirements; expected exactly 1 (fw_to_scf_edges.framework_requirement_id) — a second crosswalk bridge bypasses SCF anchors", refCount)
+	}
+
+	// Positive guard: prove the refinement still catches a real
+	// requirement->requirement crosswalk. We create a CATALOG (no tenant_id)
+	// edge table that references framework_requirements a second time, in a
+	// rolled-back transaction, and assert the count query trips to > 1. This
+	// keeps the guard honest — it must fail on a genuine second crosswalk,
+	// not merely tolerate the one we know about. The tx is always rolled
+	// back so no schema change persists.
+	tx, err := pool.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if _, err := tx.Exec(context.Background(), `
+		CREATE TABLE fw_to_fw_edges_probe (
+			id UUID PRIMARY KEY,
+			src_requirement_id UUID NOT NULL REFERENCES framework_requirements(id),
+			dst_requirement_id UUID NOT NULL REFERENCES framework_requirements(id)
+		)`); err != nil {
+		t.Fatalf("create probe crosswalk table: %v", err)
+	}
+	var probeCount int
+	if err := tx.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM information_schema.key_column_usage kcu
+		JOIN information_schema.referential_constraints rc ON rc.constraint_name = kcu.constraint_name
+		JOIN information_schema.constraint_column_usage ccu ON ccu.constraint_name = kcu.constraint_name
+		WHERE kcu.table_schema = 'public'
+		  AND ccu.table_name = 'framework_requirements'
+		  AND NOT EXISTS (
+		      SELECT 1
+		      FROM information_schema.columns c
+		      WHERE c.table_schema = 'public'
+		        AND c.table_name = kcu.table_name
+		        AND c.column_name = 'tenant_id'
+		  )`).Scan(&probeCount); err != nil {
+		t.Fatalf("probe fk inspection query: %v", err)
+	}
+	if probeCount <= 1 {
+		t.Fatalf("refined guard is broken: a genuine catalog req->req crosswalk probe yielded count=%d, want >1 (the guard would NOT catch a real crosswalk)", probeCount)
 	}
 }
 
@@ -258,7 +326,7 @@ func TestImport_NoDirectRequirementToRequirementTableExists(t *testing.T) {
 // suspenders proof that even if the loader is bypassed, Postgres
 // refuses to store an out-of-range edge.
 func TestSchema_StrengthCheckConstraintRejectsOutOfRange(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadCrosswalk(t)

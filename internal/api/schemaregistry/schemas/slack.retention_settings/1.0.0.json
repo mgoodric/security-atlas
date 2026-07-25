@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/slack.retention_settings/1.0.0.json",
+  "x-evidence-kind": "slack.retention_settings.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["DCH-01", "DCH-03"],
+  "title": "Slack workspace message-retention settings",
+  "description": "Workspace message- and file-retention posture from the Slack team-preferences API. SETTINGS only — the retention durations and policy flags, never any retained message or file (slice 443 threat-model I). One record per workspace per run. Feeds data-retention / data-handling evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["retention_enabled"],
+  "properties": {
+    "team_id": { "type": "string" },
+    "messages_retention_days": {
+      "type": "integer",
+      "description": "Message-retention duration in days; 0 means retain forever."
+    },
+    "files_retention_days": {
+      "type": "integer",
+      "description": "File-retention duration in days; 0 means retain forever."
+    },
+    "retention_enabled": {
+      "type": "boolean",
+      "description": "True when a non-default retention policy is in force."
+    },
+    "reason": {
+      "type": "string",
+      "description": "Human-readable reason when the retention verdict is fail/inconclusive."
+    }
+  }
+}

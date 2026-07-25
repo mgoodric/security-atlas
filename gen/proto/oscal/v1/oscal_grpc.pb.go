@@ -36,10 +36,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	OscalBridgeService_SerializeSSP_FullMethodName        = "/oscal.v1.OscalBridgeService/SerializeSSP"
-	OscalBridgeService_SerializeAssessment_FullMethodName = "/oscal.v1.OscalBridgeService/SerializeAssessment"
-	OscalBridgeService_SerializePOAM_FullMethodName       = "/oscal.v1.OscalBridgeService/SerializePOAM"
-	OscalBridgeService_RoundTripValidate_FullMethodName   = "/oscal.v1.OscalBridgeService/RoundTripValidate"
+	OscalBridgeService_SerializeSSP_FullMethodName              = "/oscal.v1.OscalBridgeService/SerializeSSP"
+	OscalBridgeService_SerializeAssessment_FullMethodName       = "/oscal.v1.OscalBridgeService/SerializeAssessment"
+	OscalBridgeService_SerializePOAM_FullMethodName             = "/oscal.v1.OscalBridgeService/SerializePOAM"
+	OscalBridgeService_RoundTripValidate_FullMethodName         = "/oscal.v1.OscalBridgeService/RoundTripValidate"
+	OscalBridgeService_ImportCatalog_FullMethodName             = "/oscal.v1.OscalBridgeService/ImportCatalog"
+	OscalBridgeService_ImportProfile_FullMethodName             = "/oscal.v1.OscalBridgeService/ImportProfile"
+	OscalBridgeService_ImportComponentDefinition_FullMethodName = "/oscal.v1.OscalBridgeService/ImportComponentDefinition"
 )
 
 // OscalBridgeServiceClient is the client API for OscalBridgeService service.
@@ -64,6 +67,53 @@ type OscalBridgeServiceClient interface {
 	// validity. AC-6 / AC-7. The export pipeline calls this on every
 	// bundle member before the bundle is finalized.
 	RoundTripValidate(ctx context.Context, in *RoundTripValidateRequest, opts ...grpc.CallOption) (*RoundTripValidateResponse, error)
+	// ImportCatalog deserializes an inbound OSCAL `catalog` JSON document
+	// via compliance-trestle, validates it against OSCAL v1.1.x, and
+	// returns a normalized catalog projection (controls + group structure)
+	// OR a structured validation error. This is the INGEST direction of
+	// invariant #8 (slice 492). The bridge NEVER dereferences any `href`
+	// / external resource the document references (back-matter resources
+	// are opaque metadata). A document-size cap + parse timeout bound the
+	// expansion-attack surface (threat-model D/I).
+	ImportCatalog(ctx context.Context, in *ImportCatalogRequest, opts ...grpc.CallOption) (*ImportCatalogResponse, error)
+	// ImportProfile resolves an inbound OSCAL `profile` JSON document against
+	// one or more SUPPLIED catalog documents and returns the resolved control
+	// projection (slice 511). The bridge applies the profile's import / merge /
+	// modify directives via compliance-trestle's profile-resolver inside an
+	// ISOLATED, ephemeral trestle workspace whose only catalogs are the ones
+	// the caller supplied. It NEVER dereferences an external `import.href`:
+	// every href is rewritten to point at a supplied catalog, and an href that
+	// names no supplied catalog is a structured error, not a fetch (P0-511-1 /
+	// threat-model I — the load-bearing difference from ImportCatalog). The
+	// resolved output is re-validated against OSCAL v1.1.x before it is
+	// returned. Caps (document size, resolved-control count, import-chain
+	// depth) bound the expansion-attack surface (threat-model D / AC-3).
+	//
+	// Slice 578 extends ImportProfile to CHAINED profile-over-profile
+	// resolution: a profile whose `import.href` names another SUPPLIED profile
+	// (not only a catalog) is resolved recursively until the chain bottoms out
+	// at a supplied catalog. The chain is bounded by a maximum depth and is
+	// rejected on a cycle (a profile that imports itself directly or
+	// transitively) — never an infinite loop / fetch. Every link's href is
+	// still rewritten to a sandboxed `trestle://` path pointing at a supplied
+	// document; an href that names no supplied document is a structured error,
+	// not a fetch (P0-578-1, carrying forward P0-511-1).
+	ImportProfile(ctx context.Context, in *ImportProfileRequest, opts ...grpc.CallOption) (*ImportProfileResponse, error)
+	// ImportComponentDefinition deserializes an inbound OSCAL
+	// `component-definition` JSON document via compliance-trestle, validates it
+	// against OSCAL v1.1.x, and returns a normalized projection of the defined
+	// components + their implemented-requirements — the VENDOR'S
+	// control-implementation CLAIMS (slice 512). A component-definition is the
+	// vendor-side artifact: a product vendor ships it to assert "this product
+	// implements control X this way". The Go side persists each
+	// implemented-requirement as a vendor-attributed CLAIM (NOT
+	// platform-verified evidence; never auto-satisfies a control — the
+	// load-bearing P0-512-1). Like ImportCatalog the bridge NEVER dereferences
+	// any `href` / external resource the document references (P0-512-2 /
+	// threat-model I): links / back-matter resources are opaque metadata. A
+	// document-size cap + component-count + requirement-count cap bound the
+	// expansion-attack surface (threat-model D / AC-3).
+	ImportComponentDefinition(ctx context.Context, in *ImportComponentDefinitionRequest, opts ...grpc.CallOption) (*ImportComponentDefinitionResponse, error)
 }
 
 type oscalBridgeServiceClient struct {
@@ -114,6 +164,36 @@ func (c *oscalBridgeServiceClient) RoundTripValidate(ctx context.Context, in *Ro
 	return out, nil
 }
 
+func (c *oscalBridgeServiceClient) ImportCatalog(ctx context.Context, in *ImportCatalogRequest, opts ...grpc.CallOption) (*ImportCatalogResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportCatalogResponse)
+	err := c.cc.Invoke(ctx, OscalBridgeService_ImportCatalog_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *oscalBridgeServiceClient) ImportProfile(ctx context.Context, in *ImportProfileRequest, opts ...grpc.CallOption) (*ImportProfileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportProfileResponse)
+	err := c.cc.Invoke(ctx, OscalBridgeService_ImportProfile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *oscalBridgeServiceClient) ImportComponentDefinition(ctx context.Context, in *ImportComponentDefinitionRequest, opts ...grpc.CallOption) (*ImportComponentDefinitionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ImportComponentDefinitionResponse)
+	err := c.cc.Invoke(ctx, OscalBridgeService_ImportComponentDefinition_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // OscalBridgeServiceServer is the server API for OscalBridgeService service.
 // All implementations must embed UnimplementedOscalBridgeServiceServer
 // for forward compatibility.
@@ -136,6 +216,53 @@ type OscalBridgeServiceServer interface {
 	// validity. AC-6 / AC-7. The export pipeline calls this on every
 	// bundle member before the bundle is finalized.
 	RoundTripValidate(context.Context, *RoundTripValidateRequest) (*RoundTripValidateResponse, error)
+	// ImportCatalog deserializes an inbound OSCAL `catalog` JSON document
+	// via compliance-trestle, validates it against OSCAL v1.1.x, and
+	// returns a normalized catalog projection (controls + group structure)
+	// OR a structured validation error. This is the INGEST direction of
+	// invariant #8 (slice 492). The bridge NEVER dereferences any `href`
+	// / external resource the document references (back-matter resources
+	// are opaque metadata). A document-size cap + parse timeout bound the
+	// expansion-attack surface (threat-model D/I).
+	ImportCatalog(context.Context, *ImportCatalogRequest) (*ImportCatalogResponse, error)
+	// ImportProfile resolves an inbound OSCAL `profile` JSON document against
+	// one or more SUPPLIED catalog documents and returns the resolved control
+	// projection (slice 511). The bridge applies the profile's import / merge /
+	// modify directives via compliance-trestle's profile-resolver inside an
+	// ISOLATED, ephemeral trestle workspace whose only catalogs are the ones
+	// the caller supplied. It NEVER dereferences an external `import.href`:
+	// every href is rewritten to point at a supplied catalog, and an href that
+	// names no supplied catalog is a structured error, not a fetch (P0-511-1 /
+	// threat-model I — the load-bearing difference from ImportCatalog). The
+	// resolved output is re-validated against OSCAL v1.1.x before it is
+	// returned. Caps (document size, resolved-control count, import-chain
+	// depth) bound the expansion-attack surface (threat-model D / AC-3).
+	//
+	// Slice 578 extends ImportProfile to CHAINED profile-over-profile
+	// resolution: a profile whose `import.href` names another SUPPLIED profile
+	// (not only a catalog) is resolved recursively until the chain bottoms out
+	// at a supplied catalog. The chain is bounded by a maximum depth and is
+	// rejected on a cycle (a profile that imports itself directly or
+	// transitively) — never an infinite loop / fetch. Every link's href is
+	// still rewritten to a sandboxed `trestle://` path pointing at a supplied
+	// document; an href that names no supplied document is a structured error,
+	// not a fetch (P0-578-1, carrying forward P0-511-1).
+	ImportProfile(context.Context, *ImportProfileRequest) (*ImportProfileResponse, error)
+	// ImportComponentDefinition deserializes an inbound OSCAL
+	// `component-definition` JSON document via compliance-trestle, validates it
+	// against OSCAL v1.1.x, and returns a normalized projection of the defined
+	// components + their implemented-requirements — the VENDOR'S
+	// control-implementation CLAIMS (slice 512). A component-definition is the
+	// vendor-side artifact: a product vendor ships it to assert "this product
+	// implements control X this way". The Go side persists each
+	// implemented-requirement as a vendor-attributed CLAIM (NOT
+	// platform-verified evidence; never auto-satisfies a control — the
+	// load-bearing P0-512-1). Like ImportCatalog the bridge NEVER dereferences
+	// any `href` / external resource the document references (P0-512-2 /
+	// threat-model I): links / back-matter resources are opaque metadata. A
+	// document-size cap + component-count + requirement-count cap bound the
+	// expansion-attack surface (threat-model D / AC-3).
+	ImportComponentDefinition(context.Context, *ImportComponentDefinitionRequest) (*ImportComponentDefinitionResponse, error)
 	mustEmbedUnimplementedOscalBridgeServiceServer()
 }
 
@@ -157,6 +284,15 @@ func (UnimplementedOscalBridgeServiceServer) SerializePOAM(context.Context, *Ser
 }
 func (UnimplementedOscalBridgeServiceServer) RoundTripValidate(context.Context, *RoundTripValidateRequest) (*RoundTripValidateResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RoundTripValidate not implemented")
+}
+func (UnimplementedOscalBridgeServiceServer) ImportCatalog(context.Context, *ImportCatalogRequest) (*ImportCatalogResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ImportCatalog not implemented")
+}
+func (UnimplementedOscalBridgeServiceServer) ImportProfile(context.Context, *ImportProfileRequest) (*ImportProfileResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ImportProfile not implemented")
+}
+func (UnimplementedOscalBridgeServiceServer) ImportComponentDefinition(context.Context, *ImportComponentDefinitionRequest) (*ImportComponentDefinitionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ImportComponentDefinition not implemented")
 }
 func (UnimplementedOscalBridgeServiceServer) mustEmbedUnimplementedOscalBridgeServiceServer() {}
 func (UnimplementedOscalBridgeServiceServer) testEmbeddedByValue()                            {}
@@ -251,6 +387,60 @@ func _OscalBridgeService_RoundTripValidate_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _OscalBridgeService_ImportCatalog_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportCatalogRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OscalBridgeServiceServer).ImportCatalog(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OscalBridgeService_ImportCatalog_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OscalBridgeServiceServer).ImportCatalog(ctx, req.(*ImportCatalogRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OscalBridgeService_ImportProfile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportProfileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OscalBridgeServiceServer).ImportProfile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OscalBridgeService_ImportProfile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OscalBridgeServiceServer).ImportProfile(ctx, req.(*ImportProfileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _OscalBridgeService_ImportComponentDefinition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ImportComponentDefinitionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(OscalBridgeServiceServer).ImportComponentDefinition(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: OscalBridgeService_ImportComponentDefinition_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(OscalBridgeServiceServer).ImportComponentDefinition(ctx, req.(*ImportComponentDefinitionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // OscalBridgeService_ServiceDesc is the grpc.ServiceDesc for OscalBridgeService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -273,6 +463,18 @@ var OscalBridgeService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RoundTripValidate",
 			Handler:    _OscalBridgeService_RoundTripValidate_Handler,
+		},
+		{
+			MethodName: "ImportCatalog",
+			Handler:    _OscalBridgeService_ImportCatalog_Handler,
+		},
+		{
+			MethodName: "ImportProfile",
+			Handler:    _OscalBridgeService_ImportProfile_Handler,
+		},
+		{
+			MethodName: "ImportComponentDefinition",
+			Handler:    _OscalBridgeService_ImportComponentDefinition_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -197,7 +197,7 @@ This is the highest-risk feature in the entire platform. Practitioner research i
 | AI suggests SCF mapping for an unmapped question; human approves once, mapping is canonical thereafter.         | AI auto-approves its own mappings.                                     |
 | AI summarizes prior responses for similarity matching.                                                          | AI uses Tenant A's confidential prior answer to seed Tenant B's draft. |
 
-Provenance is enforced at the schema level: `QuestionnaireAnswer.ai_assisted=true` answers cannot have `human_approved=true` without `human_approver` set, and the audit log shows model name + version + timestamp + diff between AI draft and final.
+Provenance is enforced at the schema level: an `ai_assisted=true` record cannot have `human_approved=true` without `human_approver` set, and the audit log shows model name + version + timestamp + diff between AI draft and final. The canonical shipped adopter of this column set + approval guard is `mcp_write_proposals` (slice 173, migration `20260520030000_mcp_write_proposals.sql`); slice 498 extracted its predicate into the shared reusable `ai_assist_human_approver_guard` IMMUTABLE function + CHECK template (`internal/llm` + `migrations/sql/20260607000000_ai_generations.sql`) that new AI-assist surfaces adopt verbatim. The `QuestionnaireAnswer` columns above describe the designed shape; `questionnaire_answers` does NOT yet carry them on `main` and gains them — adopting the same shared guard — when slice 440 lands the answer-suggestion surface. See slice 498's decisions-log D5 (`docs/audit-log/498-llm-foundation-decisions.md`).
 
 **Inference backend is pluggable:**
 

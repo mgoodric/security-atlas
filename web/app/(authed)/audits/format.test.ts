@@ -12,6 +12,7 @@ import {
   TALLY_STATUS_ORDER,
   daysUntilEnd,
   daysUntilEndLabel,
+  frameworkVersionLabel,
   frozenMetaLabel,
   frozenTooltip,
   isFrozen,
@@ -394,5 +395,43 @@ describe("statusTallyLabel (slice 215 AC-4)", () => {
     expect(statusTallyLabel(periods)).toBe(
       "2 in_progress · 100 frozen · 5 closed · 50 open",
     );
+  });
+});
+
+describe("frameworkVersionLabel (slice 680 / ATLAS-033)", () => {
+  test("renders the readable label when framework_label is present", () => {
+    const got = frameworkVersionLabel(
+      period({ framework_label: "SCF 2025.2" }),
+    );
+    expect(got).toEqual({ text: "SCF 2025.2", readable: true });
+  });
+
+  test("falls back to the truncated UUID when framework_label is absent", () => {
+    const got = frameworkVersionLabel(
+      period({
+        framework_version_id: "e443f4b1-0000-0000-0000-000000000000",
+        framework_label: undefined,
+      }),
+    );
+    expect(got.readable).toBe(false);
+    expect(got.text).toBe("e443f4b1…");
+  });
+
+  test("treats a whitespace-only label as absent (fallback to UUID)", () => {
+    const got = frameworkVersionLabel(
+      period({
+        framework_version_id: "abcdef12-0000-0000-0000-000000000000",
+        framework_label: "   ",
+      }),
+    );
+    expect(got.readable).toBe(false);
+    expect(got.text).toBe("abcdef12…");
+  });
+
+  test("trims surrounding whitespace from a real label", () => {
+    const got = frameworkVersionLabel(
+      period({ framework_label: "  ISO 27001 2022 " }),
+    );
+    expect(got).toEqual({ text: "ISO 27001 2022", readable: true });
   });
 });

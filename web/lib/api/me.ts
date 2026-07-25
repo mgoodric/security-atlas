@@ -95,6 +95,113 @@ export async function getMyPreferences(): Promise<MePreferences> {
   return body.preferences;
 }
 
+// ===== Slice 445 — /v1/me/email-channel (master email opt-in) =====
+
+// EmailChannelOptIn is the wire shape for the per-user master email
+// opt-in toggle (AC-9). Default is opted-OUT server-side (P0-445-7).
+//
+// Slice 585: `configured` reports whether the OPERATOR has configured the
+// channel's delivery target (SMTP env present). It is a boolean PRESENCE
+// signal only — the SMTP host/credentials are NEVER carried on this wire
+// (P0-585). Optional for backward tolerance; the settings toggle treats a
+// missing/undefined value as configured (the prior always-enabled behavior).
+export type EmailChannelOptIn = { enabled: boolean; configured?: boolean };
+
+export async function getEmailChannelOptIn(): Promise<EmailChannelOptIn> {
+  const res = await fetch(`/api/me/email-channel`, { cache: "no-store" });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as EmailChannelOptIn;
+}
+
+export async function setEmailChannelOptIn(
+  enabled: boolean,
+): Promise<EmailChannelOptIn> {
+  const res = await fetch(`/api/me/email-channel`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as EmailChannelOptIn;
+}
+
+// ===== Slice 584 — /v1/me/{slack,webhook}-channel (master opt-ins) =====
+
+// ChannelOptIn is the wire shape for a per-user master channel opt-in
+// toggle. Identical to EmailChannelOptIn; the slice-543 Slack + webhook
+// routes return {enabled} just like the slice-445 email route. Default is
+// opted-OUT server-side (P0-543-3). The channel target (Slack URL /
+// webhook URL / tokens) is OPERATOR-configured env and is NEVER carried
+// on this wire (P0-543-2 / SSRF) — only the boolean opt-in flips.
+//
+// Slice 585: `configured` reports whether the OPERATOR has configured this
+// channel's delivery target (Slack/webhook env present + SSRF-valid). It is
+// a boolean PRESENCE signal only — the URL/token is NEVER carried on this
+// wire (P0-585 / P0-543-2). Optional for backward tolerance; a
+// missing/undefined value is treated as configured (prior behavior).
+export type ChannelOptIn = { enabled: boolean; configured?: boolean };
+
+async function getChannelOptIn(path: string): Promise<ChannelOptIn> {
+  const res = await fetch(path, { cache: "no-store" });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as ChannelOptIn;
+}
+
+async function setChannelOptIn(
+  path: string,
+  enabled: boolean,
+): Promise<ChannelOptIn> {
+  const res = await fetch(path, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as ChannelOptIn;
+}
+
+export async function getSlackChannelOptIn(): Promise<ChannelOptIn> {
+  return getChannelOptIn(`/api/me/slack-channel`);
+}
+
+export async function setSlackChannelOptIn(
+  enabled: boolean,
+): Promise<ChannelOptIn> {
+  return setChannelOptIn(`/api/me/slack-channel`, enabled);
+}
+
+export async function getWebhookChannelOptIn(): Promise<ChannelOptIn> {
+  return getChannelOptIn(`/api/me/webhook-channel`);
+}
+
+export async function setWebhookChannelOptIn(
+  enabled: boolean,
+): Promise<ChannelOptIn> {
+  return setChannelOptIn(`/api/me/webhook-channel`, enabled);
+}
+
 export async function patchMyPreferences(
   partial: MePreferences,
 ): Promise<MePreferences> {

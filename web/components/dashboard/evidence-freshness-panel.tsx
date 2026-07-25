@@ -6,6 +6,19 @@
 // 016 freshness read model). Renders the per-freshness-class
 // distribution as fresh/stale bars and the tenant-wide total-stale
 // count. Fully bound — no gap.
+//
+// Slice 677 / ATLAS-021 — count semantics labeling. The freshness read
+// model has ONE row per (tenant, control) — `report.total` is therefore
+// a count of CONTROLS, not of evidence records. The evidence ledger
+// (`/evidence`) counts all append-only evidence rows (e.g. 200), a
+// genuinely different population (invariant #2: many evidence rows roll
+// up to one latest-per-control freshness verdict). The two are NOT a
+// contradiction — they count different things — but the prior copy said
+// "evidence records", which read as the same population as the ledger's
+// total. This panel now labels its unit as "controls" so the dashboard
+// "50 controls" and the ledger "200 records" no longer read as a 4x
+// discrepancy. (Anti-criterion honored: the ledger and freshness
+// definitions are unchanged — this is a labeling fix only.)
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import type { FreshnessReport } from "@/lib/api/dashboard";
@@ -33,7 +46,7 @@ export function EvidenceFreshnessPanel({
   return (
     <PanelCard
       title="Evidence freshness"
-      description="Fresh vs stale evidence by freshness class"
+      description="Per-control freshness verdict (latest evidence per control) by freshness class"
       state={state}
       skeletonClassName="h-48 w-full"
       testid="evidence-freshness-panel"
@@ -56,7 +69,7 @@ export function EvidenceFreshnessPanel({
                     {bucket.freshness_class}
                   </span>
                   <span className="font-mono text-muted-foreground">
-                    {bucket.fresh}/{bucket.total} fresh
+                    {bucket.fresh}/{bucket.total} controls fresh
                   </span>
                 </div>
                 <div className="h-1.5 overflow-hidden rounded-full bg-muted">
@@ -75,7 +88,9 @@ export function EvidenceFreshnessPanel({
           <span className="font-medium text-destructive">
             {report.total_stale}
           </span>{" "}
-          of {report.total} evidence records are past their freshness window.
+          of {report.total} controls have their latest evidence past its
+          freshness window. (Controls, not ledger records — the evidence ledger
+          counts every append-only record.)
         </p>
       ) : null}
     </PanelCard>

@@ -1,0 +1,45 @@
+cases:
+  # AC-6 / AC-7: a correct query returns pass for an all-pass fixture; the
+  # author asserts expected_state: pass and the test PASSES.
+  - name: all-records-pass
+    description: "Every in-window record passed -> control passes."
+    expected_state: pass
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-06-01T00:00:00Z
+      - result: pass
+        observed_at: 2026-06-01T06:00:00Z
+
+  # AC-7: an expected-FAIL case. The query correctly returns fail (one record
+  # failed); the author asserts expected_state: fail; the test PASSES (an
+  # expected-fail is a pass for the runner).
+  - name: one-record-fails
+    description: "One in-window record failed -> control fails (expected)."
+    expected_state: fail
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-06-01T00:00:00Z
+      - result: fail
+        observed_at: 2026-06-01T06:00:00Z
+
+  # AC-2 / no_evidence override: zero records -> no evidence at all ->
+  # inconclusive ("absence of evidence is not failure").
+  - name: no-evidence-inconclusive
+    description: "No evidence records at all -> inconclusive."
+    expected_state: inconclusive
+    evaluated_at: 2026-06-01T12:00:00Z
+    records: []
+
+  # Freshness-faithful semantics: a record that EXISTS but aged out of the daily
+  # window is `stale`, so the no_evidence override does NOT fire; the Rego query
+  # runs over an empty in-window set and returns its default ("fail"). The
+  # runner reproduces the live engine exactly rather than "fixing" this.
+  - name: stale-evidence-query-default
+    description: "Evidence exists but aged out of window -> query default (fail)."
+    expected_state: fail
+    evaluated_at: 2026-06-01T12:00:00Z
+    records:
+      - result: pass
+        observed_at: 2026-01-01T00:00:00Z

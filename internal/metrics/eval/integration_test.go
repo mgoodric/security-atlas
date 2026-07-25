@@ -39,43 +39,24 @@ package eval_test
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/metrics/eval"
 )
 
 // ----- harness -----
 
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping slice 294 integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
 // freshTenant returns a brand-new tenant UUID and registers a cleanup
 // that drops every row this slice's seed helpers introduce. Mirrors the
-// scheduler integration harness.
+// scheduler integration harness. Carve-out from the slice-435 dbtest harness:
+// this suite's seeders key off a uuid.UUID tenant (not the string that
+// dbtest.SeedTenant returns), so the helper stays inline; only its pool is
+// re-routed to dbtest.NewMigratePool at the call sites (742 drain batch 17).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	tenant := uuid.New()
@@ -302,7 +283,7 @@ func seedVendor(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) {
 // and populated (at least one passing eval → Value > 0).
 
 func TestProgramEffectiveness_EmptyAndPopulated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	r := eval.NewRegistry(admin)
@@ -344,7 +325,7 @@ func TestProgramEffectiveness_EmptyAndPopulated(t *testing.T) {
 // ===== evidenceFreshnessPctEvaluator =====
 
 func TestEvidenceFreshnessPct_EmptyAndPopulated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	r := eval.NewRegistry(admin)
@@ -390,7 +371,7 @@ func TestEvidenceFreshnessPct_EmptyAndPopulated(t *testing.T) {
 // is that the query is broken.
 
 func TestAuditReadinessScore_ErrorsOnMissingColumn(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 
 	r := eval.NewRegistry(admin)
 	e, ok := r.Get("audit_readiness_score")
@@ -413,7 +394,7 @@ func TestAuditReadinessScore_ErrorsOnMissingColumn(t *testing.T) {
 // ===== openRiskFinancialExposureEvaluator =====
 
 func TestOpenRiskFinancialExposure_EmptyAndPopulated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	r := eval.NewRegistry(admin)
@@ -452,7 +433,7 @@ func TestOpenRiskFinancialExposure_EmptyAndPopulated(t *testing.T) {
 // real assertions"; the error path is a real branch.
 
 func TestPolicyAttestationRate_ErrorsOnMissingTable(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 
 	r := eval.NewRegistry(admin)
 	e, ok := r.Get("policy_attestation_rate")
@@ -475,7 +456,7 @@ func TestPolicyAttestationRate_ErrorsOnMissingTable(t *testing.T) {
 // ===== vendorRiskConcentrationEvaluator =====
 
 func TestVendorRiskConcentration_EmptyAndPopulated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	r := eval.NewRegistry(admin)
@@ -505,7 +486,7 @@ func TestVendorRiskConcentration_EmptyAndPopulated(t *testing.T) {
 // ===== exceptionExpirationRunwayEvaluator =====
 
 func TestExceptionExpirationRunway_EmptyAndPopulated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	r := eval.NewRegistry(admin)
@@ -535,7 +516,7 @@ func TestExceptionExpirationRunway_EmptyAndPopulated(t *testing.T) {
 // ===== criticalFindingsSLAEvaluator =====
 
 func TestCriticalFindingsSLA_EmptyAndPopulated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	r := eval.NewRegistry(admin)

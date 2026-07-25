@@ -1,0 +1,35 @@
+{
+  "catalog": {
+    "uuid": "ed08a1db-1e27-40f8-9e20-de00880bbf1a",
+    "metadata": {
+      "title": "Href-Bearing Catalog",
+      "last-modified": "2026-06-07T06:13:34.653892+00:00",
+      "version": "1.0",
+      "oscal-version": "1.1.2"
+    },
+    "controls": [
+      {
+        "id": "hr-1",
+        "title": "Has Href",
+        "parts": [
+          {
+            "name": "statement",
+            "prose": "This control's catalog references an external href that must never be dereferenced."
+          }
+        ]
+      }
+    ],
+    "back-matter": {
+      "resources": [
+        {
+          "uuid": "af9cc9f2-5c8a-428a-8dda-b6e01fc53092",
+          "title": "External reference",
+          "rlinks": [
+            { "href": "file:///etc/passwd" },
+            { "href": "https://example.invalid/should-never-be-fetched.json" }
+          ]
+        }
+      ]
+    }
+  }
+}

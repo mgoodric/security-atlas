@@ -32,48 +32,18 @@ package scheduler_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	metricseval "github.com/mgoodric/security-atlas/internal/metrics/eval"
 	"github.com/mgoodric/security-atlas/internal/metrics/scheduler"
 )
 
 // ----- harness -----
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping slice 295 integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping slice 295 integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // seedCatalog ensures every starter evaluator's metric_id row exists in
 // metrics_catalog so the InsertMetricObservation FK resolves. Uses a
@@ -107,7 +77,10 @@ func seedCatalog(t *testing.T, admin *pgxpool.Pool, app *pgxpool.Pool) {
 
 // freshTenant returns a brand-new tenant UUID and registers a cleanup
 // that drops every row this slice's tests can introduce. Mirrors the
-// freshnessdrift integration harness.
+// freshnessdrift integration harness. Carve-out from the slice-435 dbtest
+// harness: this suite's seeders key off a uuid.UUID tenant (not the string
+// dbtest.SeedTenant returns), so the helper stays inline; only its pool is
+// re-routed to dbtest.NewMigratePool at the call sites (742 drain batch 17).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	tenant := uuid.New()
@@ -172,8 +145,8 @@ func countObservations(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) int 
 // =====
 
 func TestSweepOnce_WritesObservationsForOurTenant(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	seedCatalog(t, admin, app)
 
@@ -221,8 +194,8 @@ func TestSweepOnce_WritesObservationsForOurTenant(t *testing.T) {
 // post-one-sweep count. =====
 
 func TestSweepOnce_AppendsOnRepeatedRuns(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	seedCatalog(t, admin, app)
 	tenant := freshTenant(t, admin)
 	seedAnchorControl(t, admin, tenant)
@@ -343,8 +316,8 @@ func runInlineSweepOnce(t *testing.T, admin, app *pgxpool.Pool, registry *metric
 }
 
 func TestRun_FiresInlineSweepAndExitsOnCancel(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	seedCatalog(t, admin, app)
 	tenant := freshTenant(t, admin)
 	seedAnchorControl(t, admin, tenant)
@@ -386,8 +359,8 @@ func TestRun_FiresInlineSweepAndExitsOnCancel(t *testing.T) {
 // iteration whose COMMIT lost to a deadline would report 0 written, or this
 // tenant's count would fail to grow.
 func TestRun_InlineSweepStress(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	seedCatalog(t, admin, app)
 	tenant := freshTenant(t, admin)
 	seedAnchorControl(t, admin, tenant)

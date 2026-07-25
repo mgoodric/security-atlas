@@ -422,6 +422,178 @@ func (q *Queries) ListActiveControlsForExport(ctx context.Context, arg ListActiv
 	return items, nil
 }
 
+const listActiveControlsForPortfolio = `-- name: ListActiveControlsForPortfolio :many
+SELECT id, scf_anchor_id, title, control_family
+FROM controls
+WHERE tenant_id = $1
+  AND superseded_by IS NULL
+  AND ($3::text IS NULL OR control_family = $3::text)
+  AND (
+        $4::uuid[] IS NULL
+        OR scf_anchor_id = ANY($4::uuid[])
+      )
+ORDER BY bundle_id ASC, id ASC
+LIMIT $2
+`
+
+type ListActiveControlsForPortfolioParams struct {
+	TenantID  pgtype.UUID   `json:"tenant_id"`
+	Limit     int32         `json:"limit"`
+	Family    *string       `json:"family"`
+	AnchorIds []pgtype.UUID `json:"anchor_ids"`
+}
+
+type ListActiveControlsForPortfolioRow struct {
+	ID            pgtype.UUID `json:"id"`
+	ScfAnchorID   pgtype.UUID `json:"scf_anchor_id"`
+	Title         string      `json:"title"`
+	ControlFamily string      `json:"control_family"`
+}
+
+// Slice 750 — portfolio / multi-control evidence-summary control-set resolver.
+//
+// Returns the ACTIVE (non-superseded) controls in the caller's tenant that match
+// an OPTIONAL filter, ordered deterministically and capped at $limit (the
+// controls-per-summary bound — the headline P0-750-2 leg). The summary is over
+// this bounded control set, never the full catalog.
+//
+// Filter modes (any ONE of the three AC-1 dimensions, all OPTIONAL via
+// sqlc.narg so a single query serves every filter the handler accepts; a request
+// with no filter is the whole-program rollup):
+//
+//   - control-family: control_family = sqlc.narg('family')
+//   - framework:      scf_anchor_id = ANY(sqlc.narg('anchor_ids')) — the handler
+//     resolves a framework_version_id to its SCF anchors via the
+//     existing UCF traversal (ListSCFAnchorsForVersion) and passes
+//     the anchor-id array here; this reuses the existing
+//     framework->anchor->control path rather than inventing a new
+//     control-by-framework mechanism.
+//     (scope-cell intersection — applicability_expr ∩ framework_scope.predicate —
+//     is heavier graph work; deferred to a documented follow-on, not built here.)
+//
+// A NULL narg disables that filter clause, so the three modes compose to "AND
+// of the supplied filters"; in v1 the handler supplies at most one.
+//
+// Ordering is bundle_id ASC, id ASC — deterministic, matching ListActiveControls,
+// so the controls-per-summary cap selects a STABLE subset (not a random one).
+//
+// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders alongside
+// the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant upstream pins the
+// GUC so the read is tenant-scoped (invariant #6).
+func (q *Queries) ListActiveControlsForPortfolio(ctx context.Context, arg ListActiveControlsForPortfolioParams) ([]ListActiveControlsForPortfolioRow, error) {
+	rows, err := q.db.Query(ctx, listActiveControlsForPortfolio,
+		arg.TenantID,
+		arg.Limit,
+		arg.Family,
+		arg.AnchorIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveControlsForPortfolioRow
+	for rows.Next() {
+		var i ListActiveControlsForPortfolioRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ScfAnchorID,
+			&i.Title,
+			&i.ControlFamily,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveControlsWithDescription = `-- name: ListActiveControlsWithDescription :many
+SELECT id, tenant_id, bundle_id, version, scf_id, scf_anchor_id, title,
+       description, control_family, implementation_type, owner_role,
+       lifecycle_state, applicability_expr, freshness_class,
+       bundle_manifest_hash, created_at
+FROM controls
+WHERE tenant_id = $1 AND superseded_by IS NULL
+ORDER BY bundle_id ASC
+`
+
+type ListActiveControlsWithDescriptionRow struct {
+	ID                 pgtype.UUID               `json:"id"`
+	TenantID           pgtype.UUID               `json:"tenant_id"`
+	BundleID           string                    `json:"bundle_id"`
+	Version            int32                     `json:"version"`
+	ScfID              *string                   `json:"scf_id"`
+	ScfAnchorID        pgtype.UUID               `json:"scf_anchor_id"`
+	Title              string                    `json:"title"`
+	Description        string                    `json:"description"`
+	ControlFamily      string                    `json:"control_family"`
+	ImplementationType ControlImplementationType `json:"implementation_type"`
+	OwnerRole          string                    `json:"owner_role"`
+	LifecycleState     ControlLifecycleState     `json:"lifecycle_state"`
+	ApplicabilityExpr  string                    `json:"applicability_expr"`
+	FreshnessClass     *string                   `json:"freshness_class"`
+	BundleManifestHash string                    `json:"bundle_manifest_hash"`
+	CreatedAt          pgtype.Timestamptz        `json:"created_at"`
+}
+
+// Slice 493 — SSP control-implementation-narrative projection.
+//
+// Identical row set to ListActiveControls (every active, non-superseded
+// control for the active tenant, ordered by bundle_id) but the projection
+// ADDS the human-authored `description` column — the control bundle's
+// narrative (slice 009) that explains HOW the control is implemented. The
+// SSP exporter fills ControlImplementation.Statement from this column
+// (canvas §8.2; resolves slice 030's D-narrative stopgap).
+//
+// Why a SEPARATE query (slice 493 D-query, pattern-matched to slice 137 D2
+// and slice 175 D2): the project convention is a purpose-built export
+// projection, never widening the shared ListActiveControls row consumed by
+// non-export callers. ListActiveControls stays unchanged for its existing
+// consumers; this query is the SSP exporter's dedicated read.
+//
+// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders
+// alongside the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant
+// upstream pins the GUC so the read is tenant-scoped (invariant #6).
+func (q *Queries) ListActiveControlsWithDescription(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsWithDescriptionRow, error) {
+	rows, err := q.db.Query(ctx, listActiveControlsWithDescription, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveControlsWithDescriptionRow
+	for rows.Next() {
+		var i ListActiveControlsWithDescriptionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.BundleID,
+			&i.Version,
+			&i.ScfID,
+			&i.ScfAnchorID,
+			&i.Title,
+			&i.Description,
+			&i.ControlFamily,
+			&i.ImplementationType,
+			&i.OwnerRole,
+			&i.LifecycleState,
+			&i.ApplicabilityExpr,
+			&i.FreshnessClass,
+			&i.BundleManifestHash,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listControlVersionsByBundle = `-- name: ListControlVersionsByBundle :many
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        title, lifecycle_state, bundle_manifest_hash, created_at

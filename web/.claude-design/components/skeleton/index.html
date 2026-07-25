@@ -1,0 +1,89 @@
+<!-- @dsCard group="Feedback" name="Skeleton" subtitle="Loading placeholders · pulse" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Skeleton — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Skeleton — translated from web/components/ui/skeleton.tsx (base-nova /
+     neutral): <div class="animate-pulse rounded-md bg-muted" />.
+     Base fill is var(--muted); corners var(--radius-md); the pulse mirrors
+     Tailwind's animate-pulse (opacity 1 -> .5 -> 1, eased, infinite). */
+  .skel { background: var(--muted); border-radius: var(--radius-md);
+    animation: skel-pulse 1.6s ease-in-out infinite; }
+  @keyframes skel-pulse { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+
+  .skel-media { display: flex; align-items: center; gap: 12px; }
+  .skel-avatar { width: 40px; height: 40px; border-radius: 9999px; flex-shrink: 0; }
+  .skel-lines { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
+  .skel-line { height: 10px; }
+  .skel-line--60 { width: 60%; }
+  .skel-line--40 { width: 40%; }
+  .skel-line--70 { width: 70%; }
+  .skel-line--50 { width: 50%; }
+
+  .skel-card { width: 280px; display: flex; flex-direction: column; gap: 10px;
+    padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg);
+    background: var(--card); }
+  .skel-block { height: 120px; border-radius: var(--radius-md); }
+
+  /* table-row skeleton — mirrors a controls list loading state */
+  .skel-table { width: 100%; max-width: 360px; display: flex; flex-direction: column; gap: 12px; }
+  .skel-trow { display: flex; align-items: center; gap: 12px; }
+  .skel-pill { height: 18px; width: 64px; border-radius: var(--radius-4xl); }
+  .skel-flex { flex: 1; height: 12px; }
+
+  .skel-group { display: flex; flex-direction: column; gap: 22px; max-width: 360px; }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">Loading state — Light</p>
+    <div class="skel-group">
+      <div class="skel-media">
+        <div class="skel skel-avatar"></div>
+        <div class="skel-lines">
+          <div class="skel skel-line skel-line--60"></div>
+          <div class="skel skel-line skel-line--40"></div>
+        </div>
+      </div>
+      <div class="skel-card">
+        <div class="skel skel-block"></div>
+        <div class="skel skel-line skel-line--70"></div>
+        <div class="skel skel-line skel-line--50"></div>
+      </div>
+      <div class="skel-table">
+        <div class="skel-trow"><div class="skel skel-flex"></div><div class="skel skel-pill"></div></div>
+        <div class="skel-trow"><div class="skel skel-flex"></div><div class="skel skel-pill"></div></div>
+        <div class="skel-trow"><div class="skel skel-flex"></div><div class="skel skel-pill"></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">Loading state — Dark</p>
+    <div class="skel-group">
+      <div class="skel-media">
+        <div class="skel skel-avatar"></div>
+        <div class="skel-lines">
+          <div class="skel skel-line skel-line--60"></div>
+          <div class="skel skel-line skel-line--40"></div>
+        </div>
+      </div>
+      <div class="skel-card">
+        <div class="skel skel-block"></div>
+        <div class="skel skel-line skel-line--70"></div>
+        <div class="skel skel-line skel-line--50"></div>
+      </div>
+      <div class="skel-table">
+        <div class="skel-trow"><div class="skel skel-flex"></div><div class="skel skel-pill"></div></div>
+        <div class="skel-trow"><div class="skel skel-flex"></div><div class="skel skel-pill"></div></div>
+        <div class="skel-trow"><div class="skel skel-flex"></div><div class="skel skel-pill"></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

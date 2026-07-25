@@ -69,10 +69,8 @@ import { cn } from "@/lib/utils";
 // inlined here as constants so the same string drives `title`,
 // `aria-label`, and the test assertion — the slice 183 / slice 184
 // pattern (visible copy + tooltip + aria-label all read the same line).
-const RUN_QUERY_TOOLTIP =
-  "Rule-DSL execution lands in a follow-up slice (canvas §4.5 — control-as-code)";
-const EDIT_YAML_TOOLTIP =
-  "Control-text editor lands in a follow-up slice (canvas §4.5 — control-as-code)";
+const RUN_QUERY_TOOLTIP = "Rule-based control evaluation is not available yet";
+const EDIT_YAML_TOOLTIP = "In-app control-text editing is not available yet";
 
 // mostRecentObservedAt picks the freshest `last_observed_at` across all
 // scope-cell entries — the same reduce-to-newest rule the freshness

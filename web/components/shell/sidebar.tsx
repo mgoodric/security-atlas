@@ -9,6 +9,8 @@ import {
 } from "@/components/shell/sidebar-counts";
 import { shouldShowAdminEntry } from "@/lib/admin-nav";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { gateNavItems } from "@/lib/feature-nav";
+import { fetchEnabledModules } from "@/lib/feature-nav.server";
 import { cn } from "@/lib/utils";
 
 // Canonical order per Plans/canvas/12-ui-fill-in-design-decisions.md §1:
@@ -80,6 +82,7 @@ const NAV_BASE: NavItem[] = [
   { href: "/controls", label: "Controls", slot: <ControlsCountBadge /> },
   { href: "/evidence", label: "Evidence" },
   { href: "/risks", label: "Risks", slot: <RisksCountBadge /> },
+  { href: "/action-plans", label: "Action Plans" },
   { href: "/audits", label: "Audits" },
   { href: "/policies", label: "Policies" },
   { href: "/vendors", label: "Vendors" },
@@ -88,6 +91,11 @@ const NAV_BASE: NavItem[] = [
   // write authz is enforced at the API layer (slice 155).
   { href: "/questionnaires", label: "Questionnaires" },
   { href: "/board-packs", label: "Board Packs" },
+  // Slice 589 — operator review of imported vendor component-definition
+  // CLAIMS (OSCAL component-definition import, slice 512). A vendor claim is
+  // an assertion, not platform-verified evidence; the operator accepts /
+  // rejects / parks each claim. Read + disposition authz enforced at the API.
+  { href: "/oscal/component-definitions", label: "Vendor Claims" },
   { href: "/catalog/scf", label: "Catalog · SCF" },
   { href: "/settings", label: "Settings" },
 ];
@@ -133,9 +141,20 @@ async function fetchAdminMe(): Promise<{
  * logic are unchanged from slice 186.
  */
 export async function getAuthedNav(): Promise<NavItem[]> {
-  const meBody = await fetchAdminMe();
+  // Slice 660 — resolve the admin gate (186) and the feature-flag gate
+  // (660) server-side, once per request. The two probes are independent;
+  // fetch them in parallel. `gateNavItems` then drops the nav entries
+  // whose gating flag is off (Vendor Claims when `oscal.export` is off;
+  // Board Packs when `board.reporting` is off) for ALL users — the mobile
+  // drawer consumes this same gated list via the authed layout, so there
+  // is a single source of truth for which items hide.
+  const [meBody, modules] = await Promise.all([
+    fetchAdminMe(),
+    fetchEnabledModules(),
+  ]);
   const showAdmin = shouldShowAdminEntry(meBody);
-  return showAdmin ? [...NAV_BASE, ADMIN_NAV_ITEM] : NAV_BASE;
+  const base = gateNavItems(NAV_BASE, modules);
+  return showAdmin ? [...base, ADMIN_NAV_ITEM] : base;
 }
 
 export async function Sidebar({ active }: { active?: string }) {

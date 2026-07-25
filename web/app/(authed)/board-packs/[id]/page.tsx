@@ -23,6 +23,7 @@ import {
   RiskAgingRow,
   TopRisksTable,
 } from "@/components/board-pack/top-risks-table";
+import { VendorBurndownPanel } from "@/components/board-pack/vendor-burndown-panel";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
@@ -32,6 +33,7 @@ import {
   BoardPackSection,
   getBoardPack,
   getSessionMe,
+  sectionLabel,
 } from "@/lib/api/board";
 
 // Slice 043 — quarterly board pack preview/export view.
@@ -134,13 +136,20 @@ export default function BoardPackDetailPage({
 
         {BOARD_PACK_SECTION_KEYS.map((key, i) => {
           const section = pack.content.sections[key];
-          if (!section) return null;
+          // AC-3: never silently drop a slot. A missing section (an
+          // incomplete stored pack) renders a clear "not generated" state
+          // under its human label rather than a blank gap in the numbering.
+          if (!section) {
+            return <MissingSection key={key} index={i + 1} sectionKey={key} />;
+          }
           return (
             <SectionCard
               key={key}
               index={i + 1}
               packID={id}
-              section={section}
+              // A section served with an empty title still gets a human
+              // label (AC-2) — resolve it before handing to the card.
+              section={{ ...section, title: sectionLabel(key, section) }}
               isPublished={isPublished}
               canApprove={canApprove}
               onMutated={onMutated}
@@ -206,6 +215,15 @@ function SectionStructured({ section }: { section: BoardPackSection }) {
           count={data.findings_count ?? 0}
         />
       );
+    case "vendor_burndown":
+      return (
+        <VendorBurndownPanel
+          total={data.vendor_burndown_total}
+          onTime={data.vendor_burndown_on_time}
+          pastDue={data.vendor_burndown_past_due}
+          onTimePct={data.vendor_burndown_on_time_pct}
+        />
+      );
     case "operational_metrics":
       return (
         <OperationalTiles
@@ -231,9 +249,44 @@ function SectionStructured({ section }: { section: BoardPackSection }) {
   }
 }
 
+// MissingSection renders the AC-3 graceful state for a fixed section key
+// that the stored pack does not carry: the §NN header + the human label +
+// a muted "not generated" note. It keeps the section numbering contiguous
+// (no §04 -> §06 jump) and never surfaces the raw key.
+function MissingSection({
+  index,
+  sectionKey,
+}: {
+  index: number;
+  sectionKey: string;
+}) {
+  return (
+    <section
+      className="mb-6 rounded-2xl border border-dashed border-slate-300 bg-white p-7"
+      data-testid={`section-missing-${sectionKey}`}
+    >
+      <header className="mb-3 flex items-baseline gap-2">
+        <span className="font-mono text-xs text-slate-400">
+          § {String(index).padStart(2, "0")}
+        </span>
+        <h2 className="text-xl font-semibold tracking-tight">
+          {sectionLabel(sectionKey)}
+        </h2>
+      </header>
+      <p className="text-sm italic text-slate-400">
+        This section was not generated for this pack. Regenerate the pack to
+        populate it before publishing.
+      </p>
+    </section>
+  );
+}
+
 // approvalState computes whether every fixed section is approved (the
 // publish gate) and the human-readable titles of the unapproved ones
-// (for the "not ready to publish" alert).
+// (for the "not ready to publish" alert). A section that is missing or
+// carries an empty title still surfaces a human label, never the raw key
+// (AC-2 + AC-3) — and a missing section counts as unapproved (the page
+// cannot publish a pack with an ungenerated section).
 function approvalState(pack: BoardPack): {
   allApproved: boolean;
   unapprovedTitles: string[];
@@ -241,11 +294,9 @@ function approvalState(pack: BoardPack): {
   const unapproved: string[] = [];
   for (const key of BOARD_PACK_SECTION_KEYS) {
     const section = pack.content.sections[key];
-    if (!section) {
-      unapproved.push(key);
-      continue;
+    if (!section || !section.approved) {
+      unapproved.push(sectionLabel(key, section));
     }
-    if (!section.approved) unapproved.push(section.title || key);
   }
   return { allApproved: unapproved.length === 0, unapprovedTitles: unapproved };
 }

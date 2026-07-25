@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/azure.aks_cluster_config/1.0.0.json",
+  "x-evidence-kind": "azure.aks_cluster_config.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CFG-02", "NET-04"],
+  "title": "Azure Kubernetes Service (AKS) managed-cluster configuration",
+  "description": "Per-AKS-managed-cluster hardening posture captured read-only from Azure Resource Manager (ARM Reader role): Kubernetes RBAC enabled, network-policy plugin, private-cluster / authorized-IP-range API-server isolation, managed-identity vs service-principal, local-accounts-disabled, OIDC issuer, node-pool count, and Kubernetes version. Management-plane CLUSTER configuration only — NEVER admin kubeconfig / cluster-admin credentials (listClusterAdminCredential is not called), service-principal secrets, workload/pod manifests, container images, or container contents. The platform evaluator decides pass/fail per (control, cluster); the connector emits a descriptive default verdict. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cluster_id",
+    "cluster_name",
+    "subscription_id",
+    "rbac_enabled",
+    "private_cluster",
+    "authorized_ip_ranges"
+  ],
+  "properties": {
+    "cluster_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "ARM resource id of the AKS managed cluster."
+    },
+    "cluster_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Managed-cluster name."
+    },
+    "subscription_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Subscription the managed cluster lives in."
+    },
+    "resource_group": {
+      "type": "string",
+      "description": "Resource group containing the managed cluster."
+    },
+    "location": {
+      "type": "string",
+      "description": "Azure region of the managed cluster."
+    },
+    "kubernetes_version": {
+      "type": "string",
+      "description": "Kubernetes control-plane version the cluster runs."
+    },
+    "rbac_enabled": {
+      "type": "boolean",
+      "description": "Kubernetes RBAC is enabled on the cluster."
+    },
+    "network_policy": {
+      "type": "string",
+      "description": "Network-policy plugin configured (e.g. calico | azure); empty means none."
+    },
+    "private_cluster": {
+      "type": "boolean",
+      "description": "API server is provisioned as a private cluster (no public API endpoint)."
+    },
+    "authorized_ip_ranges": {
+      "type": "boolean",
+      "description": "API-server access is restricted to authorized IP ranges."
+    },
+    "managed_identity": {
+      "type": "boolean",
+      "description": "Cluster uses a managed identity rather than a service principal."
+    },
+    "local_accounts_disabled": {
+      "type": "boolean",
+      "description": "Local (static cluster-admin) accounts are disabled on the cluster."
+    },
+    "oidc_issuer_enabled": {
+      "type": "boolean",
+      "description": "The cluster's OIDC issuer (workload-identity federation) is enabled."
+    },
+    "node_pool_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of agent (node) pools configured on the cluster."
+    }
+  }
+}

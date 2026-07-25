@@ -1,0 +1,56 @@
+{
+  "_comment": "Slice 692 contract-tier golden. PROVIDER: internal/api/controls/attest_contract_test.go (AttestForm, real handler over an injected fixed-row controlByIDReader stub — Option A per-route seam, no Postgres; routed through chi for the {id} path param). Regenerate: `go test ./internal/api/controls/ -run TestContract_AttestForm -update`. CONSUMER: web/lib/contracts/control-attest-form.contract.test.ts asserts the BFF at web/app/api/controls/[id]/attest-form/route.ts — VERBATIM passthrough (toEqual). manual_evidence_schema is an opaque JSON object; caller_can_attest is a bool (true when the credential holds the control's owner_role); platform_schema_requires is a string array; freshness_class is string-or-null (omitempty). The non-manual implementation 400 branch is pinned by the sibling unit test TestAttestForm_NonManual400.",
+  "endpoint": "GET /v1/controls/{id}/attest-form",
+  "variants": {
+    "owner": {
+      "bundle_id": "soc2-access-review",
+      "caller_can_attest": true,
+      "control_id": "11111111-1111-4111-8111-111111111111",
+      "freshness_class": "quarterly",
+      "implementation_type": "manual_attested",
+      "manual_evidence_schema": {
+        "properties": {
+          "completed_on": {
+            "format": "date",
+            "type": "string"
+          },
+          "reviewer": {
+            "type": "string"
+          }
+        },
+        "required": ["reviewer", "completed_on"],
+        "type": "object"
+      },
+      "owner_role": "control_owner",
+      "platform_schema_kind": "manual.attestation.v1",
+      "platform_schema_requires": ["attestor", "statement"],
+      "platform_schema_version": "1.1.0",
+      "title": "Quarterly Access Review"
+    },
+    "viewer": {
+      "bundle_id": "soc2-access-review",
+      "caller_can_attest": false,
+      "control_id": "11111111-1111-4111-8111-111111111111",
+      "freshness_class": "quarterly",
+      "implementation_type": "manual_attested",
+      "manual_evidence_schema": {
+        "properties": {
+          "completed_on": {
+            "format": "date",
+            "type": "string"
+          },
+          "reviewer": {
+            "type": "string"
+          }
+        },
+        "required": ["reviewer", "completed_on"],
+        "type": "object"
+      },
+      "owner_role": "control_owner",
+      "platform_schema_kind": "manual.attestation.v1",
+      "platform_schema_requires": ["attestor", "statement"],
+      "platform_schema_version": "1.1.0",
+      "title": "Quarterly Access Review"
+    }
+  }
+}

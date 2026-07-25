@@ -236,6 +236,24 @@ func FromContext(ctx context.Context) *jwt.AtlasClaims {
 	return v
 }
 
+// SubjectUserID strips the "user:" prefix the auth substrate places on the
+// atlas JWT Subject before it can be parsed as a users.id UUID. The login
+// mint (internal/api/auth/http.go), PKCE and device-grant token endpoints all
+// emit Subject = "user:<uuid>", and Middleware bridges that same value into the
+// credential's UserID (see line ~215 above) — so BOTH the claims.Subject and
+// the cred.UserID forms carry the prefix and must be run through this helper
+// before uuid.Parse. A bare UUID (no prefix) survives TrimPrefix unchanged, so
+// this is safe for the legacy bare-UUID credential and test subjects too.
+//
+// Handlers that resolve the actor user_id for audit-log tagging (adminusers,
+// admintenants, adminsuperadmins, adminauthzbundle) MUST use this — parsing the
+// raw Subject silently yields uuid.Nil under the real auth path (the bug fixed
+// alongside this helper; previously masked because the admin integration tests
+// minted bare-UUID subjects).
+func SubjectUserID(s string) string {
+	return strings.TrimPrefix(s, "user:")
+}
+
 // WithClaimsForTest injects an AtlasClaims into ctx so tests can
 // exercise handlers that read FromContext without standing up the
 // full middleware chain. Test-only by convention — production code

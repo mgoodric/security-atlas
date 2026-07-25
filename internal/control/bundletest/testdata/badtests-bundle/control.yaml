@@ -1,0 +1,17 @@
+bundle_schema_version: "1"
+bundle_id: badtests_bundle_test
+title: "Bundle with an invalid test case"
+scf_anchor_id: IAC-06
+implementation_type: automated
+freshness_class: daily
+
+evidence_queries:
+  - id: all_records_pass
+    language: rego
+    expression: |
+      package evidence.query
+      default result := "fail"
+      result := "pass" if {
+        count(input.records) > 0
+        every r in input.records { r.result == "pass" }
+      }

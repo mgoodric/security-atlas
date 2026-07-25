@@ -70,6 +70,18 @@ export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
 // enrichment resolves, plus a known risk in tenant A only. The
 // real-RLS cross-tenant-leak spec (tenant-switch-rls.spec.ts) asserts
 // the tenant-A risk is invisible from tenant B through PostgreSQL RLS.
+//
+// Slice 743 added "controls-list" — un-quarantines
+// controls-list.spec.ts. The /controls list renders SCF *anchors*
+// (GET /v1/anchors), which are EMPTY in the CI e2e database (no SCF
+// import step runs there). The fixture seeds a current-SCF spine + 3
+// anchors with varied families, mirrors each anchor id into a matching
+// `controls` row (so the slice-468 bulk-assign-owner round-trip
+// resolves a real control per selected row), seeds the demo user as the
+// assign target, and resets the demo (tenant,user)'s saved_views +
+// owner-assignments so the save/load/delete/assign assertions are
+// deterministic. See fixtures/e2e/controls-list.sql for the full
+// rationale.
 export type FixtureName =
   | "dashboard"
   | "control-detail"
@@ -80,6 +92,7 @@ export type FixtureName =
   | "settings"
   | "audits-header"
   | "controls-top-bar"
+  | "controls-list"
   | "tenant-switch";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");

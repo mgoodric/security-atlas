@@ -1,0 +1,17 @@
+bundle_schema_version: "1"
+bundle_id: jsonpath_encrypted_test
+title: "Every bucket payload reports encrypted=true (JSON-path)"
+description: "A JSON-path evidence query over each record's payload."
+scf_anchor_id: IAC-06
+implementation_type: automated
+control_family: IAC
+owner_role: security-engineering
+lifecycle_state: proposed
+freshness_class: daily
+
+evidence_queries:
+  - id: payload_encrypted
+    language: jsonpath
+    evidence_kind: aws.s3.bucket_encryption_state
+    description: "Each record's payload must report encrypted: true."
+    expression: "$.encrypted"

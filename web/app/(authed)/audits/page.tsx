@@ -78,12 +78,17 @@ import {
   type AuditFilters,
 } from "./filters";
 import {
-  OSCAL_EXPORT_FUTURE_REASON,
-  OSCAL_EXPORT_FUTURE_TESTID,
-} from "./oscal-export-future";
+  OSCAL_EXPORT_DOWNLOAD_LABEL,
+  OSCAL_EXPORT_DOWNLOAD_TESTID,
+  OSCAL_EXPORT_TOOLBAR_NOTE,
+  OSCAL_EXPORT_TOOLBAR_TESTID,
+  oscalExportDownloadFilename,
+  oscalExportDownloadURL,
+} from "./oscal-export";
 import {
   daysUntilEnd,
   daysUntilEndLabel,
+  frameworkVersionLabel,
   frozenMetaLabel,
   frozenTooltip,
   isFrozen,
@@ -264,19 +269,27 @@ function AuditsPageInner() {
     {
       id: "framework_version",
       header: "Framework version",
-      cell: (p) => (
-        // Framework label endpoint does not exist yet. Render the UUID
-        // verbatim in mono so the user can copy it (e.g. for support
-        // tickets). A spillover slice will file the dedicated label
-        // endpoint and this cell will render a friendly name then.
-        <span
-          className="font-mono text-xs text-muted-foreground"
-          title={p.framework_version_id}
-          data-testid="audits-row-framework-version"
-        >
-          {p.framework_version_id.slice(0, 8)}…
-        </span>
-      ),
+      cell: (p) => {
+        // Slice 680 / ATLAS-033: render the readable catalog label
+        // ("SCF 2025.2") when the LIST path resolved one; otherwise fall
+        // back to the truncated framework_version_id UUID in mono so the
+        // user can still copy the identifier for a support ticket. The
+        // title attribute always carries the full UUID for copy.
+        const fw = frameworkVersionLabel(p);
+        return (
+          <span
+            className={
+              fw.readable
+                ? "text-xs text-muted-foreground"
+                : "font-mono text-xs text-muted-foreground"
+            }
+            title={p.framework_version_id}
+            data-testid="audits-row-framework-version"
+          >
+            {fw.text}
+          </span>
+        );
+      },
     },
     {
       id: "period",
@@ -344,11 +357,39 @@ function AuditsPageInner() {
       header: "Frozen",
       cell: (p) =>
         isFrozen(p) ? (
-          <span
-            className="font-mono text-xs text-muted-foreground"
-            data-testid="audits-row-frozen-meta"
-          >
-            {frozenMetaLabel(p)}
+          <span className="inline-flex flex-col gap-1">
+            <span
+              className="font-mono text-xs text-muted-foreground"
+              data-testid="audits-row-frozen-meta"
+            >
+              {frozenMetaLabel(p)}
+            </span>
+            {/* Slice 457 — per-frozen-period OSCAL signed-bundle download.
+                Only frozen periods are exportable (invariant #10), so the
+                link renders only on frozen rows. A native `<a download>`
+                GET so the browser's file-save dialog handles the save and
+                a Playwright `waitForEvent("download")` fires (AC-3). The
+                BFF forwards the bearer to the platform :download verb,
+                which serves the bundle tenant-scoped via RLS (invariant
+                #6).
+
+                The `download` attribute carries the deterministic
+                filename VALUE (not a bare attribute): for a same-origin
+                download the anchor's `download` value takes precedence
+                over the server `Content-Disposition` filename, and a BARE
+                `download` would make the browser derive the name from the
+                URL last segment (`oscal-export` → `oscal-export.txt`).
+                Pinning the value keeps the suggested filename
+                deterministic and in lock-step with the BFF header
+                (AC-2/AC-3). */}
+            <a
+              href={oscalExportDownloadURL(p.id)}
+              download={oscalExportDownloadFilename(p.id, p.frozen_at)}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+              data-testid={OSCAL_EXPORT_DOWNLOAD_TESTID}
+            >
+              {OSCAL_EXPORT_DOWNLOAD_LABEL}
+            </a>
           </span>
         ) : (
           <span
@@ -376,26 +417,24 @@ function AuditsPageInner() {
 
   const actions = (
     <>
-      {/* Slice 217 — formerly a `<Button disabled>Export OSCAL bundle`,
-          which was a permanently-disabled action with no signposting
-          (slice 178 honesty audit F-178-217). Replaced with a non-
-          button `<span>` carrying `title` + `aria-label` + a stable
-          test-id, mirroring the slice 183 calendar pattern (see
-          `web/components/calendar/agenda-view.tsx` lines 173-179).
-          Visible copy + tooltip + aria-label all read the same line;
-          the disclosure IS the affordance. The capability itself
-          (per-period OSCAL SSP/AP/AR/POA&M export) is the per-period
-          detail view's responsibility — see slice 030 for the
-          underlying export and slice 184's decisions log for the
-          per-period framing. When that detail page ships, this
-          surface either points to it or is removed entirely. */}
+      {/* Slice 457 — supersedes the slice-217 future-state disclosure.
+          The disclosure `<span>` ("OSCAL bundle export ships with the
+          per-period detail view") signposted a capability that did not
+          exist as a download surface. Slice 457 ships it: every FROZEN
+          period row carries a working "Export OSCAL bundle" download link
+          (see the Frozen column below) pointing at the BFF download route
+          (`/api/audits/{id}/oscal-export`), which streams the signed
+          bundle as a `Content-Disposition: attachment` artifact. This
+          toolbar note tells the operator where the now-working action
+          lives — the honesty property migrates from the disclosure to the
+          live affordance (AC-5). */}
       <span
-        title={OSCAL_EXPORT_FUTURE_REASON}
-        aria-label={OSCAL_EXPORT_FUTURE_REASON}
-        data-testid={OSCAL_EXPORT_FUTURE_TESTID}
-        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic cursor-help"
+        title={OSCAL_EXPORT_TOOLBAR_NOTE}
+        aria-label={OSCAL_EXPORT_TOOLBAR_NOTE}
+        data-testid={OSCAL_EXPORT_TOOLBAR_TESTID}
+        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic"
       >
-        {OSCAL_EXPORT_FUTURE_REASON}
+        {OSCAL_EXPORT_TOOLBAR_NOTE}
       </span>
       {/* Slice 139 — audit-periods data export (CSV / JSON / XLSX).
           Distinct from the slice 030 OSCAL bundle (which is the
@@ -542,9 +581,7 @@ function AuditsPageInner() {
           When the detail page lands, this banner is deleted and the
           onRowClick is restored. */}
       <Alert data-testid="audits-detail-coming-soon-banner" className="mb-3">
-        <AlertTitle>
-          Per-period detail view is coming in a future slice
-        </AlertTitle>
+        <AlertTitle>Per-period detail view is not available yet</AlertTitle>
         <AlertDescription>
           Rows in this table are not clickable yet. The per-audit-period detail
           page (frozen-status meta, sample-population summary, OSCAL export

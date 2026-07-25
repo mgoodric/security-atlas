@@ -35,48 +35,20 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
-func ctxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool/ctxFor pool/DSN/tenant-context
+// boilerplate this file used to re-derive now lives in the shared
+// internal/dbtest harness. dbtest.NewAppPool opens the RLS-enforcing atlas_app
+// pool (the default for every RLS-bound assertion); dbtest.NewMigratePool opens
+// the privileged BYPASSRLS pool used only for cross-tenant seeding and the
+// freshTenant cleanup the app role cannot perform; dbtest.WithTenantCtx tags the
+// tenant GUC context. freshTenant stays suite-local because it carries a
+// load-bearing `UPDATE populations SET audit_period_id = NULL, frozen_at = NULL`
+// FK-detach step that dbtest.SeedTenant's pure-DELETE loop cannot express; it
+// routes through the migrate pool exactly as before.
 
 // freshTenant returns a tenant id and registers cleanup of every table
 // slice 030 reads from.
@@ -208,8 +180,8 @@ func startBridge(t *testing.T) (addr string, stop func()) {
 // ===== Invariant 10: refuse a non-frozen period (no bridge needed) =====
 
 func TestExport_RefusesNonFrozenPeriod(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwVersion := seedFrameworkVersion(t, admin)
 	periodID, _ := seedPeriod(t, admin, tenant, fwVersion, false /* not frozen */)
@@ -218,7 +190,7 @@ func TestExport_RefusesNonFrozenPeriod(t *testing.T) {
 	// A nil bridge is fine — Aggregate must reject the period BEFORE any
 	// bridge call. This is the constitutional invariant-10 enforcement.
 	e := oscal.NewExporter(app, nil, signer)
-	_, err := e.Export(ctxFor(t, tenant), oscal.ExportInput{
+	_, err := e.Export(dbtest.WithTenantCtx(t, tenant), oscal.ExportInput{
 		AuditPeriodID: periodID,
 		SystemName:    "Test System",
 	})
@@ -228,13 +200,13 @@ func TestExport_RefusesNonFrozenPeriod(t *testing.T) {
 }
 
 func TestExport_RejectsUnknownPeriod(t *testing.T) {
-	app := openPool(t, appDSN(t))
-	admin := openPool(t, adminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	signer, _ := oscal.NewEphemeralSigner()
 	e := oscal.NewExporter(app, nil, signer)
-	_, err := e.Export(ctxFor(t, tenant), oscal.ExportInput{
+	_, err := e.Export(dbtest.WithTenantCtx(t, tenant), oscal.ExportInput{
 		AuditPeriodID: uuid.New(),
 		SystemName:    "Test System",
 	})
@@ -243,11 +215,71 @@ func TestExport_RejectsUnknownPeriod(t *testing.T) {
 	}
 }
 
+// ===== Slice 457: cross-tenant download isolation (invariant #6) =====
+//
+// The slice-457 browser download surface
+// (POST /v1/audit-periods/{id}/oscal-export:download) serves the signed
+// bundle as a downloadable artifact. Its headline threat is
+// information-disclosure across tenants: a Tenant-B operator must NOT be
+// able to download Tenant-A's bundle. The download handler adds no
+// cross-tenant reach — it reuses this exact Exporter, whose RLS-gated
+// Aggregate stage reads under the request's tenant context. This test
+// pins the property at the
+// authoritative RLS boundary: a frozen period seeded for tenant A,
+// resolved under tenant B's context, must return ErrPeriodNotFound (the
+// same denial the download serves as a 404).
+//
+// The test exercises the RLS-gated Aggregate stage directly, NOT the full
+// Export. This is deliberate: RLS denial happens in Aggregate, BEFORE any
+// bridge call, so the isolation property lives entirely in the
+// tenant-scoped read — and asserting at Aggregate keeps the test
+// bridge-free (no Python oscal-bridge, no nil-bridge deref). Aggregate
+// returns ErrPeriodNotFound for a missing/cross-tenant period
+// (aggregate.go:109) and succeeds when the period resolves, so both the
+// sanity pre-check (tenant A resolves its own period) and the isolation
+// assertion (tenant B is denied) are clean error/nil comparisons with no
+// bridge dependency.
+func TestExport_CrossTenantPeriodIsNotExportable(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+	fwVersion := seedFrameworkVersion(t, admin)
+
+	// A FROZEN period that genuinely exists — under tenant A.
+	periodID, _ := seedPeriod(t, admin, tenantA, fwVersion, true /* frozen */)
+
+	signer, _ := oscal.NewEphemeralSigner()
+	// A nil bridge is fine: Aggregate never touches the bridge (the bridge
+	// is only used in the later serialize stage of Export, which this test
+	// does not reach).
+	e := oscal.NewExporter(app, nil, signer)
+
+	in := oscal.ExportInput{AuditPeriodID: periodID, SystemName: "isolation-probe"}
+
+	// Sanity: tenant A CAN resolve its OWN frozen period through the
+	// RLS-gated Aggregate stage. This proves the period genuinely exists
+	// for its owner, so the cross-tenant denial below is real isolation,
+	// not a not-found that would fire for anyone.
+	if _, ownErr := e.Aggregate(dbtest.WithTenantCtx(t, tenantA), in); ownErr != nil {
+		t.Fatalf("tenant A could not aggregate its OWN frozen period; isolation test is invalid: %v", ownErr)
+	}
+
+	// The isolation assertion: tenant B asks to resolve tenant A's period.
+	// RLS scopes the read to tenant B, which has no such period -> Aggregate
+	// returns ErrPeriodNotFound. Tenant B never sees a byte of tenant A's
+	// bundle (the read is denied before any data is assembled).
+	if _, err := e.Aggregate(dbtest.WithTenantCtx(t, tenantB), in); !errors.Is(err, oscal.ErrPeriodNotFound) {
+		t.Fatalf("cross-tenant aggregate of tenant A's period under tenant B should be ErrPeriodNotFound, got %v", err)
+	}
+}
+
 // ===== Full pipeline against the real Python bridge =====
 
 func TestExport_FrozenPeriodProducesSignedBundle(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwVersion := seedFrameworkVersion(t, admin)
 	periodID, frozenAt := seedPeriod(t, admin, tenant, fwVersion, true /* frozen */)
@@ -304,7 +336,7 @@ func TestExport_FrozenPeriodProducesSignedBundle(t *testing.T) {
 	signer, _ := oscal.NewEphemeralSigner()
 	e := oscal.NewExporter(app, bridge, signer)
 
-	bundle, err := e.Export(ctxFor(t, tenant), oscal.ExportInput{
+	bundle, err := e.Export(dbtest.WithTenantCtx(t, tenant), oscal.ExportInput{
 		AuditPeriodID:     periodID,
 		OrganizationName:  "Acme Security Inc.",
 		SystemName:        "Acme Compliance Platform",

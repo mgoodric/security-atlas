@@ -11,6 +11,7 @@
         {
           "created_at": "2025-12-15T00:00:00Z",
           "created_by": "key_contract_411",
+          "framework_label": "SCF 2025.2",
           "framework_version_id": "22222222-2222-4222-8222-222222222222",
           "id": "11111111-1111-4111-8111-111111111111",
           "name": "SOC 2 Type II — H1 2026",

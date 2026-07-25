@@ -82,10 +82,25 @@ func TestParseTypes_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTypes(\"\"): %v", err)
 	}
-	// Default is the canonical-sorted set of all three.
-	wantSlice := []string{TypeControls, TypeEvidence, TypeRisks}
+	// Default is the canonical-sorted set of all four (slice 661 added
+	// `anchors`, which sorts first alphabetically).
+	wantSlice := []string{TypeAnchors, TypeControls, TypeEvidence, TypeRisks}
 	if !equalStringSlices(got, wantSlice) {
 		t.Errorf("parseTypes(\"\") = %v, want %v", got, wantSlice)
+	}
+}
+
+// TestParseTypes_AnchorsAdmitted pins the slice-661 admit-map addition:
+// `anchors` is a valid `types` value and survives the canonical sort
+// (it sorts first, ahead of controls).
+func TestParseTypes_AnchorsAdmitted(t *testing.T) {
+	got, err := parseTypes("controls,anchors")
+	if err != nil {
+		t.Fatalf("parseTypes(\"controls,anchors\"): %v", err)
+	}
+	want := []string{TypeAnchors, TypeControls}
+	if !equalStringSlices(got, want) {
+		t.Errorf("parseTypes(\"controls,anchors\") = %v, want %v", got, want)
 	}
 }
 

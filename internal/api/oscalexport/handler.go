@@ -22,7 +22,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -86,19 +88,67 @@ type exportResponse struct {
 }
 
 // Export handles POST /v1/audit-periods/{id}/oscal-export. The route is
-// registered with the {id} URL param by the caller (httpserver.go).
+// registered with the {id} URL param by the caller (httpserver.go). It
+// returns the signed bundle as an inline JSON object — the wire contract
+// the UI's TanStack/fetch consumers read.
 func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
+	resp, ok := h.runExport(w, r)
+	if !ok {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// Download handles POST /v1/audit-periods/{id}/oscal-export:download
+// (slice 457). It runs the SAME tenant-scoped export the Export handler
+// does — same Exporter, same RLS-bound reads under the request's tenant
+// context, same error mapping — and serializes the identical signed
+// envelope, but as a downloadable artifact: it sets a
+// `Content-Disposition: attachment` header with a deterministic filename
+// so the browser raises a `download` event and drops a self-contained
+// `.json` bundle (the four OSCAL members + the slice-413 signing
+// manifest, all in one verifiable file).
+//
+// Tenant isolation (invariant #6): the export runs under the requesting
+// tenant's `app.current_tenant`; a Tenant-B request for Tenant-A's period
+// resolves to ErrPeriodNotFound (404). This download verb adds NO
+// cross-tenant reach — it is a serialization choice over the exact same
+// tenant-scoped read. The headline cross-tenant denial is pinned at the
+// internal/oscal integration tier (the authoritative RLS boundary).
+func (h *Handler) Download(w http.ResponseWriter, r *http.Request) {
+	resp, ok := h.runExport(w, r)
+	if !ok {
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition",
+		fmt.Sprintf(`attachment; filename=%q`, downloadFilename(resp)))
+	// nosniff: the browser must honor the declared content-type + the
+	// attachment disposition and not MIME-sniff the bundle bytes.
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// runExport parses the request, runs the tenant-scoped export, and maps
+// the result to an exportResponse. The bool is false when it has already
+// written an error response (the caller must return immediately). Shared
+// by Export (inline JSON) and Download (attachment) so the two verbs
+// never drift in tenant scoping, body shape, or error mapping.
+func (h *Handler) runExport(w http.ResponseWriter, r *http.Request) (exportResponse, bool) {
 	periodID, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "audit period id must be a UUID")
-		return
+		return exportResponse{}, false
 	}
 
 	var req exportRequest
 	if r.Body != nil && r.ContentLength != 0 {
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
-			return
+			return exportResponse{}, false
 		}
 	}
 
@@ -120,7 +170,7 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		writeExportError(w, err)
-		return
+		return exportResponse{}, false
 	}
 
 	resp := exportResponse{
@@ -140,10 +190,39 @@ func (h *Handler) Export(w http.ResponseWriter, r *http.Request) {
 			OSCAL:     json.RawMessage(m.JSON),
 		})
 	}
+	return resp, true
+}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+// downloadFilename builds the deterministic attachment filename for the
+// downloaded bundle: `oscal-bundle-<period-id>-<frozen-date>.json`. The
+// frozen date is the leading YYYY-MM-DD of the period's RFC-3339
+// FrozenAt; if FrozenAt is malformed or empty it is omitted rather than
+// guessed. The audit-period id grounds the name to a specific period so
+// an operator saving several bundles does not collide them.
+func downloadFilename(resp exportResponse) string {
+	const prefix = "oscal-bundle-"
+	if d := frozenDate(resp.FrozenAt); d != "" {
+		return prefix + resp.AuditPeriodID + "-" + d + ".json"
+	}
+	return prefix + resp.AuditPeriodID + ".json"
+}
+
+// frozenDate extracts the leading YYYY-MM-DD from an RFC-3339 timestamp.
+// Returns "" when the input is empty or does not start with a 10-char
+// date — the caller then omits the date segment.
+func frozenDate(frozenAt string) string {
+	if len(frozenAt) < 10 {
+		return ""
+	}
+	date := frozenAt[:10]
+	// A YYYY-MM-DD prefix: digits with hyphens at positions 4 and 7.
+	if date[4] != '-' || date[7] != '-' {
+		return ""
+	}
+	if strings.ContainsAny(date, " :TZ") {
+		return ""
+	}
+	return date
 }
 
 // writeExportError maps an internal/oscal error to the right HTTP status.

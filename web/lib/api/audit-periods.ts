@@ -29,6 +29,12 @@ export type AuditPeriod = {
   id: string;
   name: string;
   framework_version_id: string;
+  // Slice 680 / ATLAS-033: readable "<name> <version>" catalog label
+  // (e.g. "SCF 2025.2"), present on the LIST path. Optional (omitempty
+  // on the Go wire): absent when the framework version no longer
+  // resolves. The /audits view renders this in place of a truncated
+  // framework_version_id UUID, falling back to the UUID when absent.
+  framework_label?: string;
   period_start: string;
   period_end: string;
   status: string;

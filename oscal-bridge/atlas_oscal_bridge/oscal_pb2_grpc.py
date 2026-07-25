@@ -56,6 +56,21 @@ class OscalBridgeServiceStub(object):
                 request_serializer=oscal__pb2.RoundTripValidateRequest.SerializeToString,
                 response_deserializer=oscal__pb2.RoundTripValidateResponse.FromString,
                 _registered_method=True)
+        self.ImportCatalog = channel.unary_unary(
+                '/oscal.v1.OscalBridgeService/ImportCatalog',
+                request_serializer=oscal__pb2.ImportCatalogRequest.SerializeToString,
+                response_deserializer=oscal__pb2.ImportCatalogResponse.FromString,
+                _registered_method=True)
+        self.ImportProfile = channel.unary_unary(
+                '/oscal.v1.OscalBridgeService/ImportProfile',
+                request_serializer=oscal__pb2.ImportProfileRequest.SerializeToString,
+                response_deserializer=oscal__pb2.ImportProfileResponse.FromString,
+                _registered_method=True)
+        self.ImportComponentDefinition = channel.unary_unary(
+                '/oscal.v1.OscalBridgeService/ImportComponentDefinition',
+                request_serializer=oscal__pb2.ImportComponentDefinitionRequest.SerializeToString,
+                response_deserializer=oscal__pb2.ImportComponentDefinitionResponse.FromString,
+                _registered_method=True)
 
 
 class OscalBridgeServiceServicer(object):
@@ -98,6 +113,68 @@ class OscalBridgeServiceServicer(object):
         context.set_details('Method not implemented!')
         raise NotImplementedError('Method not implemented!')
 
+    def ImportCatalog(self, request, context):
+        """ImportCatalog deserializes an inbound OSCAL `catalog` JSON document
+        via compliance-trestle, validates it against OSCAL v1.1.x, and
+        returns a normalized catalog projection (controls + group structure)
+        OR a structured validation error. This is the INGEST direction of
+        invariant #8 (slice 492). The bridge NEVER dereferences any `href`
+        / external resource the document references (back-matter resources
+        are opaque metadata). A document-size cap + parse timeout bound the
+        expansion-attack surface (threat-model D/I).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ImportProfile(self, request, context):
+        """ImportProfile resolves an inbound OSCAL `profile` JSON document against
+        one or more SUPPLIED catalog documents and returns the resolved control
+        projection (slice 511). The bridge applies the profile's import / merge /
+        modify directives via compliance-trestle's profile-resolver inside an
+        ISOLATED, ephemeral trestle workspace whose only catalogs are the ones
+        the caller supplied. It NEVER dereferences an external `import.href`:
+        every href is rewritten to point at a supplied catalog, and an href that
+        names no supplied catalog is a structured error, not a fetch (P0-511-1 /
+        threat-model I — the load-bearing difference from ImportCatalog). The
+        resolved output is re-validated against OSCAL v1.1.x before it is
+        returned. Caps (document size, resolved-control count, import-chain
+        depth) bound the expansion-attack surface (threat-model D / AC-3).
+
+        Slice 578 extends ImportProfile to CHAINED profile-over-profile
+        resolution: a profile whose `import.href` names another SUPPLIED profile
+        (not only a catalog) is resolved recursively until the chain bottoms out
+        at a supplied catalog. The chain is bounded by a maximum depth and is
+        rejected on a cycle (a profile that imports itself directly or
+        transitively) — never an infinite loop / fetch. Every link's href is
+        still rewritten to a sandboxed `trestle://` path pointing at a supplied
+        document; an href that names no supplied document is a structured error,
+        not a fetch (P0-578-1, carrying forward P0-511-1).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
+    def ImportComponentDefinition(self, request, context):
+        """ImportComponentDefinition deserializes an inbound OSCAL
+        `component-definition` JSON document via compliance-trestle, validates it
+        against OSCAL v1.1.x, and returns a normalized projection of the defined
+        components + their implemented-requirements — the VENDOR'S
+        control-implementation CLAIMS (slice 512). A component-definition is the
+        vendor-side artifact: a product vendor ships it to assert "this product
+        implements control X this way". The Go side persists each
+        implemented-requirement as a vendor-attributed CLAIM (NOT
+        platform-verified evidence; never auto-satisfies a control — the
+        load-bearing P0-512-1). Like ImportCatalog the bridge NEVER dereferences
+        any `href` / external resource the document references (P0-512-2 /
+        threat-model I): links / back-matter resources are opaque metadata. A
+        document-size cap + component-count + requirement-count cap bound the
+        expansion-attack surface (threat-model D / AC-3).
+        """
+        context.set_code(grpc.StatusCode.UNIMPLEMENTED)
+        context.set_details('Method not implemented!')
+        raise NotImplementedError('Method not implemented!')
+
 
 def add_OscalBridgeServiceServicer_to_server(servicer, server):
     rpc_method_handlers = {
@@ -120,6 +197,21 @@ def add_OscalBridgeServiceServicer_to_server(servicer, server):
                     servicer.RoundTripValidate,
                     request_deserializer=oscal__pb2.RoundTripValidateRequest.FromString,
                     response_serializer=oscal__pb2.RoundTripValidateResponse.SerializeToString,
+            ),
+            'ImportCatalog': grpc.unary_unary_rpc_method_handler(
+                    servicer.ImportCatalog,
+                    request_deserializer=oscal__pb2.ImportCatalogRequest.FromString,
+                    response_serializer=oscal__pb2.ImportCatalogResponse.SerializeToString,
+            ),
+            'ImportProfile': grpc.unary_unary_rpc_method_handler(
+                    servicer.ImportProfile,
+                    request_deserializer=oscal__pb2.ImportProfileRequest.FromString,
+                    response_serializer=oscal__pb2.ImportProfileResponse.SerializeToString,
+            ),
+            'ImportComponentDefinition': grpc.unary_unary_rpc_method_handler(
+                    servicer.ImportComponentDefinition,
+                    request_deserializer=oscal__pb2.ImportComponentDefinitionRequest.FromString,
+                    response_serializer=oscal__pb2.ImportComponentDefinitionResponse.SerializeToString,
             ),
     }
     generic_handler = grpc.method_handlers_generic_handler(
@@ -232,6 +324,87 @@ class OscalBridgeService(object):
             '/oscal.v1.OscalBridgeService/RoundTripValidate',
             oscal__pb2.RoundTripValidateRequest.SerializeToString,
             oscal__pb2.RoundTripValidateResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ImportCatalog(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/oscal.v1.OscalBridgeService/ImportCatalog',
+            oscal__pb2.ImportCatalogRequest.SerializeToString,
+            oscal__pb2.ImportCatalogResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ImportProfile(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/oscal.v1.OscalBridgeService/ImportProfile',
+            oscal__pb2.ImportProfileRequest.SerializeToString,
+            oscal__pb2.ImportProfileResponse.FromString,
+            options,
+            channel_credentials,
+            insecure,
+            call_credentials,
+            compression,
+            wait_for_ready,
+            timeout,
+            metadata,
+            _registered_method=True)
+
+    @staticmethod
+    def ImportComponentDefinition(request,
+            target,
+            options=(),
+            channel_credentials=None,
+            call_credentials=None,
+            insecure=False,
+            compression=None,
+            wait_for_ready=None,
+            timeout=None,
+            metadata=None):
+        return grpc.experimental.unary_unary(
+            request,
+            target,
+            '/oscal.v1.OscalBridgeService/ImportComponentDefinition',
+            oscal__pb2.ImportComponentDefinitionRequest.SerializeToString,
+            oscal__pb2.ImportComponentDefinitionResponse.FromString,
             options,
             channel_credentials,
             insecure,

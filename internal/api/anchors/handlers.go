@@ -345,6 +345,7 @@ func (h *Handler) anchorsForRequirement(w http.ResponseWriter, r *http.Request) 
 			RelationshipType:  string(row.RelationshipType),
 			Strength:          row.Strength,
 			SourceAttribution: string(row.SourceAttribution),
+			MappingTier:       string(row.MappingTier),
 			Rationale:         row.Rationale,
 		})
 	}
@@ -487,7 +488,11 @@ type requirementEdgeWire struct {
 	RelationshipType  string  `json:"relationship_type"`
 	Strength          float64 `json:"strength"`
 	SourceAttribution string  `json:"source_attribution"`
-	Rationale         string  `json:"rationale,omitempty"`
+	// MappingTier is the slice-483 trust tier (draft | under_review |
+	// verified | rejected) — additive, orthogonal to source_attribution.
+	// Reviewer identity is NOT exposed here (P0-483-6).
+	MappingTier string `json:"mapping_tier"`
+	Rationale   string `json:"rationale,omitempty"`
 }
 
 func rowsToWire[R anchorRow](rows []R) []anchorWire {

@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   type MetricTarget,
   type ThresholdColor,
+  neutralBadgeLabel,
   thresholdBadgeColor,
 } from "@/lib/api/metrics";
 
@@ -43,14 +44,17 @@ export function ThresholdBadge({
   target: MetricTarget | null;
   testid?: string;
 }) {
-  const color = thresholdBadgeColor(parseValue(value), target);
+  const parsed = parseValue(value);
+  const color = thresholdBadgeColor(parsed, target);
+  const label =
+    color === "neutral" ? neutralBadgeLabel(parsed, target) : LABEL[color];
   return (
     <Badge
       variant={VARIANT[color]}
       data-testid={testid}
       data-threshold-color={color}
     >
-      {LABEL[color]}
+      {label}
     </Badge>
   );
 }

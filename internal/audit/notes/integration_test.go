@@ -19,7 +19,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sort"
 	"testing"
 	"time"
@@ -29,42 +28,17 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	"github.com/mgoodric/security-atlas/internal/audit/notes"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness helpers (mirrored from slice 028's integration_test.go) -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant cleans up the slice-025 + slice-028 tables for this tenant
-// after the test, so reruns don't accumulate.
+// after the test, so reruns don't accumulate. This is a slice 435 / 742 drain
+// batch 20 CARVE-OUT: it interleaves an `UPDATE populations` among the
+// tenant-scoped DELETEs, which dbtest.SeedTenant (DELETE-only) cannot express,
+// so the body stays inline and only its pool is re-routed to dbtest.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
@@ -142,10 +116,8 @@ func ctxFor(t *testing.T, tenant string) context.Context {
 // TestNotes_AuthorCreatesAndReads: happy path -- auditor A creates a
 // note, reads it back, and lists it.
 func TestNotes_AuthorCreatesAndReads(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "AC-4 period A",
@@ -193,10 +165,8 @@ func TestNotes_AuthorCreatesAndReads(t *testing.T) {
 // Auditor B looks up auditor A's note id -> ErrNotFound; lists for B
 // returns empty.
 func TestNotes_SecondAuditorCannotReadFirstAuditorsNote(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "P0-2 period",
@@ -245,10 +215,8 @@ func TestNotes_SecondAuditorCannotReadFirstAuditorsNote(t *testing.T) {
 // TestNotes_RejectsInvalidScopeType: defense-in-depth -- the Store
 // rejects unknown scope_types before hitting the DB CHECK constraint.
 func TestNotes_RejectsInvalidScopeType(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "invalid scope",
@@ -272,10 +240,8 @@ func TestNotes_RejectsInvalidScopeType(t *testing.T) {
 // TestNotes_RejectsEmptyBody: defense-in-depth -- empty body is
 // rejected at the Store layer before the DB CHECK fires.
 func TestNotes_RejectsEmptyBody(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	periodID := seedPeriod(t, admin, tenant, fwID, "empty body",
@@ -301,10 +267,8 @@ func TestNotes_RejectsEmptyBody(t *testing.T) {
 // TestAuditor_ListAssignmentsAfterAssign: auditor A assigned to P1 ->
 // ListAssignmentsFor returns P1.
 func TestAuditor_ListAssignmentsAfterAssign(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	p1 := seedPeriod(t, admin, tenant, fwID, "AC-5 Q2",
@@ -336,10 +300,8 @@ func TestAuditor_ListAssignmentsAfterAssign(t *testing.T) {
 // TestAuditor_MultiplePeriodAssignments: AC-6 -- A is assigned to two
 // historical periods; both come back in ListAssignmentsFor.
 func TestAuditor_MultiplePeriodAssignments(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	p1 := seedPeriod(t, admin, tenant, fwID, "AC-6 Q1",
@@ -378,10 +340,8 @@ func TestAuditor_MultiplePeriodAssignments(t *testing.T) {
 // TestAuditor_AssignIsIdempotent: re-assigning the same (user, period)
 // is a no-op (ON CONFLICT DO NOTHING).
 func TestAuditor_AssignIsIdempotent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	p1 := seedPeriod(t, admin, tenant, fwID, "idempotent",
@@ -409,10 +369,8 @@ func TestAuditor_AssignIsIdempotent(t *testing.T) {
 // AttrsResolver hot path. Returns the auditor's period UUIDs as the
 // OPA `audit_period_ids` attribute.
 func TestAuditor_PeriodIDsForUserDrivesAttrsResolver(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	p1 := seedPeriod(t, admin, tenant, fwID, "attrs A",
@@ -452,10 +410,8 @@ func TestAuditor_PeriodIDsForUserDrivesAttrsResolver(t *testing.T) {
 // gets an empty slice from AuditPeriodIDsFor -- which the OPA layer
 // then uses to deny period-scoped reads (P0-3).
 func TestAuditor_NoAssignmentReturnsEmpty(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	_ = seedFrameworkVersion(t, admin)
 
@@ -475,10 +431,8 @@ func TestAuditor_NoAssignmentReturnsEmpty(t *testing.T) {
 // a map with audit_period_ids as a slice of strings (the rego layer
 // reads strings, not UUIDs).
 func TestAttrsResolver_PopulatesAuditPeriodIDs(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	p1 := seedPeriod(t, admin, tenant, fwID, "attrs resolver",

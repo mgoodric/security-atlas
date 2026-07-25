@@ -83,6 +83,16 @@ func CanonicalMatrix() []MatrixCase {
 		{RoleAuditor, "read", "dashboard", true, "slice 269: auditor admitted to dashboard export"},
 		{RoleControlOwner, "read", "dashboard", false, "slice 269: control_owner NOT admitted"},
 		{RoleViewer, "read", "dashboard", false, "slice 269: viewer NOT admitted"},
+
+		// slice 468 — per-user saved filter-views are a self-service
+		// surface: EVERY authenticated role may read + write their OWN
+		// views (per-user isolation is at the query layer, not rego).
+		// Note viewer WRITE is admitted here (unlike controls write) —
+		// this is deliberate: a viewer owns their own saved views.
+		{RoleViewer, "write", "saved-views", true, "slice 468: viewer manages own saved views"},
+		{RoleAuditor, "write", "saved-views", true, "slice 468: auditor manages own saved views"},
+		{RoleControlOwner, "read", "saved-views", true, "slice 468: control_owner reads own saved views"},
+		{RoleAdmin, "write", "saved-views", true, "slice 468: admin manages own saved views"},
 	}
 }
 

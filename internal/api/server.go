@@ -39,6 +39,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/scim"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
 
@@ -64,6 +65,12 @@ type Server struct {
 	// in-memory credstore. Admin-credential HTTP routes (POST/GET/rotate/
 	// revoke under /v1/admin/credentials) only mount when this is set.
 	apikeyStore *apikeystore.Store
+	// Slice 508: DB-backed SCIM provisioning credential store. When wired,
+	// the inbound SCIM endpoints (/scim/v2/*) mount behind the SCIM auth
+	// middleware, and the admin SCIM-credential routes
+	// (/v1/admin/scim-credentials) mount. cmd/atlas wires it once at
+	// startup with a BEARER_HASH_KEY-backed bearer.Hasher.
+	scimCredStore *scim.CredentialStore
 	// Slice 034: user-facing auth routes (OIDC login/callback, local
 	// login, logout). Only mounted when set.
 	authHandler *authapi.Handler
@@ -365,6 +372,15 @@ func (s *Server) AttachArtifactStore(store *artifact.Store) {
 // backed bearer.Hasher.
 func (s *Server) AttachAPIKeyStore(store *apikeystore.Store) {
 	s.apikeyStore = store
+}
+
+// AttachSCIM wires the slice-508 SCIM provisioning credential store. When set,
+// the inbound /scim/v2/* endpoints mount behind the SCIM auth middleware and
+// the admin /v1/admin/scim-credentials issuance/revocation routes mount.
+// cmd/atlas wires it once at startup with a BEARER_HASH_KEY-backed
+// bearer.Hasher + the BYPASSRLS authPool (for the lookup-by-hash auth path).
+func (s *Server) AttachSCIM(store *scim.CredentialStore) {
+	s.scimCredStore = store
 }
 
 // AttachAuthHandler wires the slice-034 user-facing auth routes. The

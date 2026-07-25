@@ -40,6 +40,7 @@ import (
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/export"
 )
 
@@ -57,7 +58,7 @@ func newControlsExportRouter(t *testing.T, tenantID uuid.UUID, isAdmin bool, own
 
 func newControlsExportRouterWithLimiter(t *testing.T, tenantID uuid.UUID, isAdmin bool, ownerRoles []string, lim *export.Limiter) http.Handler {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	h := controlsapi.NewExportHandler(app)
 	if lim != nil {
 		h = h.WithLimiter(lim)
@@ -92,7 +93,7 @@ func newControlsExportRouterWithLimiter(t *testing.T, tenantID uuid.UUID, isAdmi
 func seedControlForExport(t *testing.T, tenant uuid.UUID, bundleID, title string) (controlID uuid.UUID, anchorID uuid.UUID) {
 	t.Helper()
 	ctx := context.Background()
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 
 	// Re-use or insert the test SCF anchor.
 	anchorID = ensureTestSCFAnchor(t)
@@ -134,7 +135,7 @@ func seedControlForExport(t *testing.T, tenant uuid.UUID, bundleID, title string
 func ensureTestSCFAnchor(t *testing.T) uuid.UUID {
 	t.Helper()
 	ctx := context.Background()
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 
 	// Try to read an existing anchor first — most tests share the
 	// catalog, so don't re-INSERT every time.
@@ -172,10 +173,15 @@ func ensureTestSCFAnchor(t *testing.T) uuid.UUID {
 // the slice 137 action).
 func freshExportTenant(t *testing.T) uuid.UUID {
 	t.Helper()
+	// Hoist the migrate-pool acquisition OUT of the t.Cleanup closure: a
+	// dbtest pool registers its own t.Cleanup, which cannot be done from
+	// inside a running cleanup. Acquiring here (and capturing it in the
+	// closure) preserves the action-scoped cleanup as a carve-out
+	// (SeedTenant cannot express the `AND action = ...` predicate).
+	admin := dbtest.NewMigratePool(t)
 	tenant := uuid.New()
 	t.Cleanup(func() {
 		ctx := context.Background()
-		admin := openPool(t, adminDSN(t))
 		for _, stmt := range []string{
 			`DELETE FROM me_audit_log WHERE tenant_id = $1 AND action = 'controls_export'`,
 			`DELETE FROM evidence_records WHERE tenant_id = $1`,
@@ -193,7 +199,7 @@ func freshExportTenant(t *testing.T) uuid.UUID {
 // slice 137 action under the given tenant's GUC.
 func countControlsExportMetaAuditRows(t *testing.T, tenant uuid.UUID) int {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	ctx := context.Background()
 	tx, err := app.Begin(ctx)
 	if err != nil {

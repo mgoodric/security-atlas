@@ -165,6 +165,40 @@ export function periodRangeLabel(period: AuditPeriod): string {
 }
 
 /**
+ * Slice 680 / ATLAS-033 — framework-version column text.
+ *
+ * The /audits list previously rendered `framework_version_id.slice(0, 8)`
+ * — a truncated UUID that reads as an opaque content hash (the auditor
+ * saw "e443f4b1…"). The LIST path now resolves a readable
+ * `framework_label` ("SCF 2025.2") from the catalog.
+ *
+ * Returns:
+ *   - `{ text, readable: true }` when a non-empty `framework_label` is
+ *     present — render it as a normal (non-mono) string.
+ *   - `{ text, readable: false }` falling back to the truncated UUID
+ *     ("<first 8>…") when the label is absent (the framework version no
+ *     longer resolves) — render it in mono so the user can still copy
+ *     the identifier for a support ticket.
+ *
+ * The caller chooses the styling from `readable`; this function owns the
+ * text + the present-vs-fallback decision so it's vitest-testable
+ * without React.
+ */
+export function frameworkVersionLabel(period: AuditPeriod): {
+  text: string;
+  readable: boolean;
+} {
+  const label = period.framework_label?.trim();
+  if (label) {
+    return { text: label, readable: true };
+  }
+  return {
+    text: `${period.framework_version_id.slice(0, 8)}…`,
+    readable: false,
+  };
+}
+
+/**
  * Frozen-meta column text: "2026-04-03 · <actor>". Empty string for
  * periods that are not frozen — the cell renders an em-dash instead.
  */

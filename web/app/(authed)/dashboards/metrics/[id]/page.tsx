@@ -232,8 +232,9 @@ export default function MetricDetailPage({
               </>
             ) : (
               <p className="text-muted-foreground">
-                No target set. The threshold badge defaults to green until a
-                target is configured.
+                No target set. The threshold badge stays neutral (&quot;no
+                target&quot;) until a target is configured — it is never shown
+                green without a target to measure against.
               </p>
             )}
           </CardContent>

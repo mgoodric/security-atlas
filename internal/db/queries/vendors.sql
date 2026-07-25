@@ -101,6 +101,16 @@ WHERE tenant_id = @tenant_id
        OR criticality = sqlc.narg('criticality'))
 GROUP BY criticality;
 
+-- name: SetVendorLastReviewDate :exec
+-- Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
+-- ledger (AC-2, decisions log D2). Called after recording a review when the
+-- new review's reviewed_at is the most-recent on file. updated_at is bumped so
+-- the detail page's "last updated" reflects the change. RLS scopes the write.
+UPDATE vendors SET
+    last_review_date = $3,
+    updated_at       = now()
+WHERE tenant_id = $1 AND id = $2;
+
 -- name: ListVendorScopeCells :many
 -- Cells attached to one vendor.
 SELECT scope_cell_id FROM vendor_scope_cells

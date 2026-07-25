@@ -87,13 +87,20 @@ export async function listAnchorsWithState(
   return body.anchors;
 }
 
+// Slice 484 — `frameworkVersion` pins the reverse traversal to one framework
+// version, forwarded upstream as `?framework_version=slug:version` (e.g.
+// `soc2:2017`). When omitted, the upstream defaults to each framework's CURRENT
+// version (ADR 0019 §4) — a legacy/superseded version is returned ONLY when
+// explicitly pinned, never bled into the default.
 export async function getAnchorRequirements(
   bearer: string,
   id: string,
+  frameworkVersion?: string,
 ): Promise<AnchorDetail> {
-  const res = await apiFetch(
-    `/v1/anchors/${encodeURIComponent(id)}/requirements`,
-    bearer,
-  );
+  let path = `/v1/anchors/${encodeURIComponent(id)}/requirements`;
+  if (frameworkVersion) {
+    path += `?framework_version=${encodeURIComponent(frameworkVersion)}`;
+  }
+  const res = await apiFetch(path, bearer);
   return (await res.json()) as AnchorDetail;
 }

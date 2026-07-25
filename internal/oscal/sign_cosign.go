@@ -102,7 +102,16 @@ func VerifyBundleWithCosign(ctx context.Context, b *Bundle, verifier CosignVerif
 	case ModeCosignKMS:
 		return verifyCosignKMS(ctx, b, verifier)
 	case ModeCosignKeyless:
-		return fmt.Errorf("oscal: signing mode %q is not supported in this build (slice 414)", ModeCosignKeyless)
+		// The keyless path needs the keyless verification surface. The
+		// production cosign.Client satisfies both CosignVerifier and
+		// CosignKeylessVerifier, so the same argument works; a verifier that
+		// only implements the kms surface fails closed with
+		// ErrCosignVerifierRequired rather than silently passing.
+		kv, ok := verifier.(CosignKeylessVerifier)
+		if !ok {
+			return ErrCosignVerifierRequired
+		}
+		return verifyCosignKeyless(ctx, b, kv)
 	default:
 		return fmt.Errorf("oscal: unknown signing mode %q", b.Signature.Mode)
 	}

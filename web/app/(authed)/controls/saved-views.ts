@@ -196,3 +196,67 @@ export function removeView(existing: SavedView[], id: string): SavedView[] {
 export function findView(views: SavedView[], id: string): SavedView | null {
   return views.find((v) => v.id === id) ?? null;
 }
+
+// Slice 468 — AC-467-3: one-time migration of views saved CLIENT-SIDE during
+// the slice-448 interim into the server-backed store. The slice-448
+// localStorage store is the OLD persistence; slice 468 moves the store to
+// the (tenant, user)-scoped server table. This uploads each local view ONCE
+// (best-effort — a duplicate-name 409 or any other failure is swallowed so a
+// single bad view never blocks the rest or the page), then CLEARS the
+// localStorage key so the migration is idempotent: a second call finds no
+// local views and is a no-op. Decision (decisions log 468 D5): silent
+// one-time upload, NOT "start fresh" — a user who curated views in the
+// interim keeps them. The server's own name-uniqueness + filter validation
+// are the source of truth on the upload.
+
+/** Storage interface extended with removeItem for the migration clear step. */
+export interface MigratableStore extends SavedViewStore {
+  removeItem(key: string): void;
+}
+
+/**
+ * Upload-shaped callback the page supplies (its server `createSavedView`).
+ * Returns/throws are both tolerated — the migration swallows failures.
+ */
+export type CreateViewFn = (
+  name: string,
+  filters: Record<string, string>,
+) => Promise<unknown>;
+
+/**
+ * Migrate any localStorage-persisted views to the server, once. Reads +
+ * validates the local list (readViews already drops corrupt entries),
+ * uploads each (best-effort), then removes the storage key. Safe to call on
+ * every server-backed load: after the first call the key is gone, so it is a
+ * no-op. Returns the number of views attempted (for logging/tests).
+ */
+export async function migrateLocalViewsToServer(
+  store: MigratableStore,
+  create: CreateViewFn,
+): Promise<number> {
+  const local = readViews(store);
+  if (local.length === 0) {
+    // Nothing to migrate. Still clear the (possibly-empty/corrupt) key so a
+    // corrupt blob doesn't get re-parsed every load.
+    store.removeItem(SAVED_VIEWS_STORAGE_KEY);
+    return 0;
+  }
+  for (const v of local) {
+    // Project the typed ControlFilters back to the flat string map the
+    // server takes, dropping the ALL sentinel (inactive) keys.
+    const flat: Record<string, string> = {};
+    for (const key of SAVED_VIEW_FILTER_KEYS) {
+      const value = v.filters[key];
+      if (value && value !== ALL) flat[key] = value;
+    }
+    try {
+      await create(v.name, flat);
+    } catch {
+      // Best-effort: a duplicate name (already migrated in a prior partial
+      // run) or any transient failure must not block the rest or the page.
+    }
+  }
+  // Migration done — clear the local key so this never runs again.
+  store.removeItem(SAVED_VIEWS_STORAGE_KEY);
+  return local.length;
+}

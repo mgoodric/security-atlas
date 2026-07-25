@@ -36,6 +36,8 @@ describe("buildUnifiedQuery", () => {
     expect(q).not.toContain("actor");
     expect(q).not.toContain("kind=");
     expect(q).not.toContain("cursor");
+    // Slice 669: include_reads omitted by default (business-events view).
+    expect(q).not.toContain("include_reads");
   });
 
   test("joins kinds with commas (matches backend csv parser)", () => {
@@ -63,6 +65,22 @@ describe("buildUnifiedQuery", () => {
       cursor: "opaquebase64token",
     });
     expect(q).toContain("cursor=opaquebase64token");
+  });
+
+  // Slice 669 — read-telemetry opt-in is emitted ONLY when includeReads
+  // is true (the Activity feed default excludes read-telemetry server-side).
+  test("emits include_reads=true only when includeReads is set", () => {
+    const base = {
+      from: "2026-05-11T00:00:00.000Z",
+      to: "2026-05-18T00:00:00.000Z",
+    };
+    expect(buildUnifiedQuery({ ...base, includeReads: true })).toContain(
+      "include_reads=true",
+    );
+    expect(buildUnifiedQuery({ ...base, includeReads: false })).not.toContain(
+      "include_reads",
+    );
+    expect(buildUnifiedQuery(base)).not.toContain("include_reads");
   });
 });
 

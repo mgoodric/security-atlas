@@ -4,7 +4,7 @@
   "x-evidence-kind": "github.repo_protection.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["TDA-06", "CHG-02"],
+  "x-default-scf-anchors": ["CHG-02"],
   "title": "GitHub repository branch-protection state",
   "description": "Default-branch protection configuration for one repository.",
   "type": "object",

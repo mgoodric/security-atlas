@@ -1,6 +1,6 @@
 # ADR 0010 — OSCAL export-bundle signing: cosign/Sigstore vs status-quo ed25519
 
-**Status:** Proposed — **ADOPT-DEFERRED** (recommendation pending maintainer sign-off; this ADR is the slice-400 decision gate for slice 368).
+**Status:** Accepted (maintainer-approved 2026-06-15 — ADOPT-DEFERRED). Phase 1 (`cosign-kms` + retained `embedded-ed25519`) shipped as slice 413; Phase 2 (`cosign-keyless`) shipped as slice 414 after the OIDC-identity decision landed in [ADR-0016](0016-oidc-identity-for-keyless-signing.md) (slice 455). The per-deployment default table (SaaS = `cosign-kms` at GA, not keyless) is in force.
 
 **Date:** 2026-06-03
 

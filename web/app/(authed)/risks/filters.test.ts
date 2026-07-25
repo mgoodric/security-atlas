@@ -19,6 +19,8 @@ import {
   formatResidualScore,
   isDefault,
   residualClass,
+  residualState,
+  reviewDuePending,
   setFilter,
   severityBand,
   severityClasses,
@@ -426,5 +428,43 @@ describe("severityClasses + residualClass", () => {
     expect(residualClass("0.45")).toContain("amber");
     expect(residualClass("0.15")).toContain("emerald");
     expect(residualClass("—")).toContain("muted");
+  });
+});
+
+describe("residualState (slice 680 / ATLAS-029)", () => {
+  test("a brand-new risk (empty {} residual) is pending, not scored", () => {
+    // internal/risk/store.go defaultResidual stores `{}` when the create
+    // path omits residual_score — this is the dominant new-risk case.
+    expect(residualState({})).toBe("pending");
+  });
+
+  test("null / undefined / non-object residual is pending", () => {
+    expect(residualState(null)).toBe("pending");
+    expect(residualState(undefined)).toBe("pending");
+    expect(residualState("not an object")).toBe("pending");
+    expect(residualState(42)).toBe("pending");
+  });
+
+  test("a partial residual (missing a component) is pending", () => {
+    expect(residualState({ likelihood: 3 })).toBe("pending");
+    expect(residualState({ impact: 3 })).toBe("pending");
+    expect(residualState({ likelihood: "three", impact: 4 })).toBe("pending");
+  });
+
+  test("a valid {likelihood, impact} residual is scored", () => {
+    expect(residualState({ likelihood: 2, impact: 3 })).toBe("scored");
+    expect(residualState({ likelihood: 4, impact: 5 })).toBe("scored");
+  });
+});
+
+describe("reviewDuePending (slice 680 / ATLAS-029)", () => {
+  test("absent or empty review_due_at is pending", () => {
+    expect(reviewDuePending(undefined)).toBe(true);
+    expect(reviewDuePending("")).toBe(true);
+    expect(reviewDuePending("   ")).toBe(true);
+  });
+
+  test("a real ISO date is not pending", () => {
+    expect(reviewDuePending("2026-09-30T00:00:00Z")).toBe(false);
   });
 });

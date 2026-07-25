@@ -49,9 +49,42 @@ export async function forwardJSON(
     cache: "no-store",
   });
   const text = await upstream.text();
-  return new NextResponse(text, {
+  // Null-body statuses (204/205/304) reject any body in the Response
+  // constructor — the saved-views DELETE upstream returns 204 with an empty
+  // body, so forwarding the `""` text verbatim would throw. Pass null for
+  // those statuses; the body is empty by definition either way. This is a
+  // correctness guard, not a caching change.
+  const hasNullBody =
+    upstream.status === 204 ||
+    upstream.status === 205 ||
+    upstream.status === 304;
+  return new NextResponse(hasNullBody ? null : text, {
     status: upstream.status,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+// noStore returns a copy of `res` with `Cache-Control: no-store` (and a
+// legacy `Pragma: no-cache`) set, preserving the status, statusText, body,
+// and every existing header. It is an OPT-IN wrapper a route handler
+// applies to its own response — it does NOT change `forwardJSON`'s default
+// behavior, so cache-friendly GET routes are unaffected (slice 746). Use it
+// for per-user mutable resources that must never be browser-cached (e.g.
+// saved views: a stale GET after a DELETE leaves the deleted row in place).
+export function noStore(res: Response): Response {
+  const headers = new Headers(res.headers);
+  headers.set("Cache-Control", "no-store");
+  headers.set("Pragma", "no-cache");
+  // Null-body statuses (204/205/304) reject any body in the Response
+  // constructor, so re-wrapping must pass `null` for them. The saved-views
+  // DELETE upstream returns 204 — without this guard the wrapper (and the
+  // body re-wrap) would throw. Other statuses carry `res.body` through.
+  const nullBody =
+    res.status === 204 || res.status === 205 || res.status === 304;
+  return new Response(nullBody ? null : res.body, {
+    status: res.status,
+    statusText: res.statusText,
+    headers,
   });
 }
 

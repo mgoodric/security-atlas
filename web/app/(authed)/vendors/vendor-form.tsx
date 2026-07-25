@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { isEmail, VENDOR_OWNER_EMAIL_ERROR } from "@/lib/email";
 import { Vendor, VendorWrite } from "@/lib/api/vendors";
 
 // Slice-024 vendor create/edit form. Intentionally simple — the AC says
@@ -66,13 +67,26 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
   const [body, setBody] = useState<VendorWrite>(fromVendor(initial));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [ownerError, setOwnerError] = useState<string | null>(null);
 
   function update<K extends keyof VendorWrite>(key: K, value: VendorWrite[K]) {
     setBody((b) => ({ ...b, [key]: value }));
+    if (key === "owner_user") setOwnerError(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // ATLAS-032 (slice 679): the owner field is contractually an email.
+    // Reject a non-email (e.g. a role string) before the network call so
+    // the invalid value never reaches the store or the export's masker.
+    // An empty owner stays allowed — the field is optional, only a
+    // present-but-malformed value is rejected.
+    const owner = body.owner_user.trim();
+    if (owner !== "" && !isEmail(owner)) {
+      setOwnerError(VENDOR_OWNER_EMAIL_ERROR);
+      return;
+    }
+    setOwnerError(null);
     setSubmitting(true);
     setError(null);
     try {
@@ -114,10 +128,24 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
           </Field>
           <Field label="Owner (email)">
             <Input
+              type="email"
               value={body.owner_user}
               onChange={(e) => update("owner_user", e.target.value)}
-              placeholder="alice@example.com"
+              placeholder="alice@demo.example"
+              aria-invalid={ownerError ? true : undefined}
+              aria-describedby={ownerError ? "owner-error" : undefined}
+              data-testid="vendor-owner-input"
             />
+            {ownerError ? (
+              <p
+                id="owner-error"
+                role="alert"
+                className="text-xs text-destructive"
+                data-testid="vendor-owner-error"
+              >
+                {ownerError}
+              </p>
+            ) : null}
           </Field>
           <Field label="Criticality" required>
             <Select

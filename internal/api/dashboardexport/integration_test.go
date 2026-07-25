@@ -29,7 +29,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -37,49 +36,17 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/dashboard"
 	"github.com/mgoodric/security-atlas/internal/api/dashboardexport"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/risk"
 )
-
-// ----- env helpers (mirror slice 175 / slice 066) -----
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // ----- router wiring -----
 
@@ -91,7 +58,7 @@ func openPool(t *testing.T, dsn string) *pgxpool.Pool {
 // dashboardexport.Handler runs the export.
 func newExportRouter(t *testing.T, tenantID uuid.UUID, isAdmin, isApprover bool) http.Handler {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	dashStore := dashboard.NewStore(app)
 	riskStore := risk.NewStore(app)
 	freshStore := freshness.NewStore(app)
@@ -126,9 +93,15 @@ func newExportRouter(t *testing.T, tenantID uuid.UUID, isAdmin, isApprover bool)
 func freshExportTenant(t *testing.T) uuid.UUID {
 	t.Helper()
 	tenant := uuid.New()
+	// Carve-out (742 drain batch 11): this helper returns uuid.UUID (not the
+	// string dbtest.SeedTenant yields) and the cleanup scopes one row to
+	// action = 'dashboard_export' on me_audit_log — neither shape SeedTenant
+	// can express — so it stays inline; only its pool is re-routed onto the
+	// shared dbtest.NewMigratePool. The pool is acquired here (not inside the
+	// closure) so dbtest registers its own t.Cleanup before teardown runs.
+	admin := dbtest.NewMigratePool(t)
 	t.Cleanup(func() {
 		ctx := context.Background()
-		admin := openPool(t, adminDSN(t))
 		for _, stmt := range []string{
 			`DELETE FROM me_audit_log WHERE tenant_id = $1 AND action = 'dashboard_export'`,
 			`DELETE FROM evidence_audit_log WHERE tenant_id = $1`,
@@ -152,7 +125,7 @@ func freshExportTenant(t *testing.T) uuid.UUID {
 // has a row. Returns its id + title so callers can assert presence.
 func seedRisk(t *testing.T, tenant uuid.UUID, titleHint string) (uuid.UUID, string) {
 	t.Helper()
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	ctx := context.Background()
 	id := uuid.New()
 	title := titleHint + "-" + uuid.NewString()[:8]
@@ -181,7 +154,7 @@ func seedRisk(t *testing.T, tenant uuid.UUID, titleHint string) (uuid.UUID, stri
 // the slice 269 action under the given tenant's GUC.
 func countDashboardExportMetaAuditRows(t *testing.T, tenant uuid.UUID) int {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	ctx := context.Background()
 	tx, err := app.Begin(ctx)
 	if err != nil {

@@ -1,0 +1,860 @@
+// Seam tests for doRun. All Kubernetes reads + the sdk client constructor are
+// swapped for fakes so doRun is exercised end-to-end without touching a live
+// cluster or a real platform. Seams are restored via t.Cleanup.
+//
+// No real cluster tokens in fixtures — neutral "test-*" strings only.
+package main
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
+	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
+
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/admission"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/netpol"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/pss"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/rbac"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/secretmeta"
+	"github.com/mgoodric/security-atlas/connectors/k8s/internal/workload"
+)
+
+// fakeSDKClient is a minimal sdkPushClient.
+type fakeSDKClient struct {
+	pushErr     error
+	pushed      int
+	closeCalled bool
+}
+
+func (f *fakeSDKClient) Push(_ context.Context, _ *evidencev1.EvidenceRecord) (*evidencev1.EvidenceReceipt, error) {
+	if f.pushErr != nil {
+		return nil, f.pushErr
+	}
+	f.pushed++
+	return &evidencev1.EvidenceReceipt{}, nil
+}
+
+func (f *fakeSDKClient) Close() error { f.closeCalled = true; return nil }
+
+type seamOverrides struct {
+	rbacPull             func(ctx context.Context, api rbac.API, now func() time.Time) ([]rbac.Binding, error)
+	workloadScan         func(ctx context.Context, api workload.API, now func() time.Time) ([]workload.SecurityContext, error)
+	netpolScan           func(ctx context.Context, api netpol.API, now func() time.Time) ([]netpol.Coverage, error)
+	pssScan              func(ctx context.Context, api pss.API, now func() time.Time) ([]pss.Admission, error)
+	secretMetaScan       func(ctx context.Context, api secretmeta.API, now func() time.Time) ([]secretmeta.Inventory, error)
+	admissionWebhookScan func(ctx context.Context, api admission.WebhookAPI, now func() time.Time) ([]admission.Webhook, error)
+	admissionPolicyScan  func(ctx context.Context, api admission.PolicyAPI, now func() time.Time) ([]admission.Policy, error)
+	newClient            func(endpoint, bearer string, opts ...sdk.Option) (sdkPushClient, error)
+}
+
+func installSeams(t *testing.T, o seamOverrides) {
+	t.Helper()
+	if o.rbacPull != nil {
+		prev := rbacPull
+		rbacPull = o.rbacPull
+		t.Cleanup(func() { rbacPull = prev })
+	}
+	if o.workloadScan != nil {
+		prev := workloadScan
+		workloadScan = o.workloadScan
+		t.Cleanup(func() { workloadScan = prev })
+	}
+	if o.netpolScan != nil {
+		prev := netpolScan
+		netpolScan = o.netpolScan
+		t.Cleanup(func() { netpolScan = prev })
+	}
+	if o.pssScan != nil {
+		prev := pssScan
+		pssScan = o.pssScan
+		t.Cleanup(func() { pssScan = prev })
+	}
+	if o.secretMetaScan != nil {
+		prev := secretMetaScan
+		secretMetaScan = o.secretMetaScan
+		t.Cleanup(func() { secretMetaScan = prev })
+	}
+	if o.admissionWebhookScan != nil {
+		prev := admissionWebhookScan
+		admissionWebhookScan = o.admissionWebhookScan
+		t.Cleanup(func() { admissionWebhookScan = prev })
+	}
+	if o.admissionPolicyScan != nil {
+		prev := admissionPolicyScan
+		admissionPolicyScan = o.admissionPolicyScan
+		t.Cleanup(func() { admissionPolicyScan = prev })
+	}
+	if o.newClient != nil {
+		prev := newSDKClient
+		newSDKClient = o.newClient
+		t.Cleanup(func() { newSDKClient = prev })
+	}
+}
+
+func okEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("KUBERNETES_API_SERVER", "https://kube:6443")
+	t.Setenv("KUBECONFIG_TOKEN", "test-k8s-token")
+}
+
+func okFlags() runFlags {
+	return runFlags{
+		cluster:         "cluster-1",
+		environment:     "prod",
+		authMode:        "kubeconfig-token",
+		rbacControl:     "scf:IAC-21",
+		workloadControl: "scf:CFG-02",
+		netpolControl:   "scf:NET-04",
+		pssControl:      "scf:CFG-02",
+		webhookControl:  "scf:CFG-02",
+		policyControl:   "scf:CFG-02",
+		// Admission-webhook + policy-engine kinds default-skipped in the base
+		// fixture so existing per-kind tests keep their push counts; the dedicated
+		// admission tests enable them explicitly.
+		skipAdmissionWH:  true,
+		skipAdmissionPol: true,
+	}
+}
+
+func oneWebhook() []admission.Webhook {
+	return []admission.Webhook{{
+		Kind: admission.KindValidating, ConfigName: "vcfg", WebhookName: "v.example.com",
+		FailurePolicy: admission.FailurePolicyFail, FailClosed: true, ObservedAt: time.Now().UTC(),
+	}}
+}
+
+func onePolicy() []admission.Policy {
+	return []admission.Policy{{
+		Engine: admission.EngineKyverno, Name: "require-labels", Scope: admission.ScopeCluster,
+		PolicyKind: "ClusterPolicy", EnforcementAction: "enforce", Enforcing: true, ObservedAt: time.Now().UTC(),
+	}}
+}
+
+func oneBinding() []rbac.Binding {
+	return []rbac.Binding{{
+		BindingName: "admins", BindingScope: rbac.ScopeCluster,
+		RoleKind: rbac.RoleKindClusterRole, RoleName: "cluster-admin",
+		ObservedAt: time.Now().UTC(),
+	}}
+}
+
+func oneWorkload() []workload.SecurityContext {
+	return []workload.SecurityContext{{
+		WorkloadKind: workload.KindDeployment, WorkloadName: "api", Namespace: "prod",
+		RunAsNonRoot: true, ReadOnlyRootFilesystem: true, Result: workload.ResultPass,
+		ObservedAt: time.Now().UTC(),
+	}}
+}
+
+func oneCoverage() []netpol.Coverage {
+	return []netpol.Coverage{{
+		Namespace: "prod", PolicyCount: 1, DefaultDenyIngress: true,
+		Result: netpol.ResultPass, ObservedAt: time.Now().UTC(),
+	}}
+}
+
+func oneAdmission() []pss.Admission {
+	return []pss.Admission{{
+		Namespace: "prod", EnforceLevel: pss.LevelRestricted, Configured: true,
+		Result: pss.ResultPass, ObservedAt: time.Now().UTC(),
+	}}
+}
+
+func oneInventory() []secretmeta.Inventory {
+	return []secretmeta.Inventory{{
+		Namespace: "prod", Name: "web-tls", Type: "kubernetes.io/tls",
+		AgeDays: 30, KeyNames: []string{"tls.crt", "tls.key"}, ObservedAt: time.Now().UTC(),
+	}}
+}
+
+func TestDoRun_PushSuccessAllKinds(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		rbacPull: func(_ context.Context, _ rbac.API, _ func() time.Time) ([]rbac.Binding, error) {
+			return oneBinding(), nil
+		},
+		workloadScan: func(_ context.Context, _ workload.API, _ func() time.Time) ([]workload.SecurityContext, error) {
+			return oneWorkload(), nil
+		},
+		netpolScan: func(_ context.Context, _ netpol.API, _ func() time.Time) ([]netpol.Coverage, error) {
+			return oneCoverage(), nil
+		},
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			return oneAdmission(), nil
+		},
+		admissionWebhookScan: func(_ context.Context, _ admission.WebhookAPI, _ func() time.Time) ([]admission.Webhook, error) {
+			return oneWebhook(), nil
+		},
+		admissionPolicyScan: func(_ context.Context, _ admission.PolicyAPI, _ func() time.Time) ([]admission.Policy, error) {
+			return onePolicy(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+
+	f := okFlags()
+	f.skipAdmissionWH = false
+	f.skipAdmissionPol = false
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 6 {
+		t.Errorf("pushed = %d; want 6 (rbac + workload + netpol + pss + admission-webhook + admission-policy)", fake.pushed)
+	}
+	if !fake.closeCalled {
+		t.Error("Close not called")
+	}
+}
+
+// TestDoRun_AdmissionWebhookOnly proves the admission-webhook block runs and
+// pushes one record per webhook entry.
+func TestDoRun_AdmissionWebhookOnly(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		admissionWebhookScan: func(_ context.Context, _ admission.WebhookAPI, _ func() time.Time) ([]admission.Webhook, error) {
+			return oneWebhook(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC, f.skipWorkload, f.skipNetpol, f.skipPSS = true, true, true, true
+	f.skipAdmissionWH = false
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (admission-webhook only)", fake.pushed)
+	}
+}
+
+func TestDoRun_AdmissionWebhookCollectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("k8s 403 webhooks")
+	installSeams(t, seamOverrides{
+		admissionWebhookScan: func(_ context.Context, _ admission.WebhookAPI, _ func() time.Time) ([]admission.Webhook, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipRBAC, f.skipWorkload, f.skipNetpol, f.skipPSS = true, true, true, true
+	f.skipAdmissionWH = false
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "admission-webhook collect: ") {
+		t.Fatalf("want wrapped admission-webhook collect error; got %v", err)
+	}
+}
+
+func TestDoRun_AdmissionWebhookPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		admissionWebhookScan: func(_ context.Context, _ admission.WebhookAPI, _ func() time.Time) ([]admission.Webhook, error) {
+			return oneWebhook(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC, f.skipWorkload, f.skipNetpol, f.skipPSS = true, true, true, true
+	f.skipAdmissionWH = false
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push admission-webhook ") {
+		t.Fatalf("want wrapped push admission-webhook error; got %v", err)
+	}
+}
+
+// TestDoRun_AdmissionPolicyOnly proves the policy-engine block runs and pushes
+// one record per policy.
+func TestDoRun_AdmissionPolicyOnly(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		admissionPolicyScan: func(_ context.Context, _ admission.PolicyAPI, _ func() time.Time) ([]admission.Policy, error) {
+			return onePolicy(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC, f.skipWorkload, f.skipNetpol, f.skipPSS = true, true, true, true
+	f.skipAdmissionPol = false
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (admission-policy only)", fake.pushed)
+	}
+}
+
+func TestDoRun_AdmissionPolicyCollectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("k8s 500 crd")
+	installSeams(t, seamOverrides{
+		admissionPolicyScan: func(_ context.Context, _ admission.PolicyAPI, _ func() time.Time) ([]admission.Policy, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipRBAC, f.skipWorkload, f.skipNetpol, f.skipPSS = true, true, true, true
+	f.skipAdmissionPol = false
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "admission-policy collect: ") {
+		t.Fatalf("want wrapped admission-policy collect error; got %v", err)
+	}
+}
+
+func TestDoRun_AdmissionPolicyPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		admissionPolicyScan: func(_ context.Context, _ admission.PolicyAPI, _ func() time.Time) ([]admission.Policy, error) {
+			return onePolicy(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC, f.skipWorkload, f.skipNetpol, f.skipPSS = true, true, true, true
+	f.skipAdmissionPol = false
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push admission-policy ") {
+		t.Fatalf("want wrapped push admission-policy error; got %v", err)
+	}
+}
+
+// TestDoRun_SecretInventoryOptIn proves the OPT-IN secret-inventory block runs
+// only when --collect-secret-inventory is set, and pushes one record per Secret.
+func TestDoRun_SecretInventoryOptIn(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		secretMetaScan: func(_ context.Context, _ secretmeta.API, _ func() time.Time) ([]secretmeta.Inventory, error) {
+			return oneInventory(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	f.collectSecretInventory = true
+	f.secretControl = "scf:CRY-01"
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (secret-inventory only)", fake.pushed)
+	}
+}
+
+// TestDoRun_SecretInventoryOptOutByDefault proves the block is SKIPPED when the
+// opt-in flag is false — the base connector never touches secrets unless asked.
+func TestDoRun_SecretInventoryOptOutByDefault(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		secretMetaScan: func(_ context.Context, _ secretmeta.API, _ func() time.Time) ([]secretmeta.Inventory, error) {
+			t.Fatal("secretMetaScan must NOT run unless --collect-secret-inventory is set")
+			return nil, nil
+		},
+		rbacPull: func(_ context.Context, _ rbac.API, _ func() time.Time) ([]rbac.Binding, error) {
+			return oneBinding(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	// collectSecretInventory defaults false.
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (rbac only — secret-inventory off)", fake.pushed)
+	}
+}
+
+func TestDoRun_SecretInventoryCollectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("k8s 403 secrets")
+	installSeams(t, seamOverrides{
+		secretMetaScan: func(_ context.Context, _ secretmeta.API, _ func() time.Time) ([]secretmeta.Inventory, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	f.collectSecretInventory = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "secret-inventory collect: ") {
+		t.Fatalf("want wrapped secret-inventory collect error; got %v", err)
+	}
+}
+
+func TestDoRun_SecretInventoryPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		secretMetaScan: func(_ context.Context, _ secretmeta.API, _ func() time.Time) ([]secretmeta.Inventory, error) {
+			return oneInventory(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	f.collectSecretInventory = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push secret-inventory ") {
+		t.Fatalf("want wrapped push secret-inventory error; got %v", err)
+	}
+}
+
+func TestDoRun_PSSOnly(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			return oneAdmission(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (pss only)", fake.pushed)
+	}
+}
+
+func TestDoRun_SkipPSS(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			t.Fatal("pssScan should not be called when --skip-pss is set")
+			return nil, nil
+		},
+		rbacPull: func(_ context.Context, _ rbac.API, _ func() time.Time) ([]rbac.Binding, error) {
+			return oneBinding(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (rbac only)", fake.pushed)
+	}
+}
+
+func TestDoRun_PSSAssessError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("k8s 403")
+	installSeams(t, seamOverrides{
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "pss assess: ") {
+		t.Fatalf("want wrapped pss assess error; got %v", err)
+	}
+}
+
+func TestDoRun_PSSPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		pssScan: func(_ context.Context, _ pss.API, _ func() time.Time) ([]pss.Admission, error) {
+			return oneAdmission(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipNetpol = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push pss ") {
+		t.Fatalf("want wrapped push pss error; got %v", err)
+	}
+}
+
+func TestDoRun_SkipNetpol(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		netpolScan: func(_ context.Context, _ netpol.API, _ func() time.Time) ([]netpol.Coverage, error) {
+			t.Fatal("netpolScan should not be called when --skip-netpol is set")
+			return nil, nil
+		},
+		rbacPull: func(_ context.Context, _ rbac.API, _ func() time.Time) ([]rbac.Binding, error) {
+			return oneBinding(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (rbac only)", fake.pushed)
+	}
+}
+
+func TestDoRun_NetpolOnly(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		netpolScan: func(_ context.Context, _ netpol.API, _ func() time.Time) ([]netpol.Coverage, error) {
+			return oneCoverage(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	f.skipPSS = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1 (netpol only)", fake.pushed)
+	}
+}
+
+func TestDoRun_NetpolAssessError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("k8s 403")
+	installSeams(t, seamOverrides{
+		netpolScan: func(_ context.Context, _ netpol.API, _ func() time.Time) ([]netpol.Coverage, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "netpol assess: ") {
+		t.Fatalf("want wrapped netpol assess error; got %v", err)
+	}
+}
+
+func TestDoRun_NetpolPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		netpolScan: func(_ context.Context, _ netpol.API, _ func() time.Time) ([]netpol.Coverage, error) {
+			return oneCoverage(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipWorkload = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push netpol ") {
+		t.Fatalf("want wrapped push netpol error; got %v", err)
+	}
+}
+
+func TestDoRun_SkipRBAC(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		workloadScan: func(_ context.Context, _ workload.API, _ func() time.Time) ([]workload.SecurityContext, error) {
+			return oneWorkload(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1", fake.pushed)
+	}
+}
+
+func TestDoRun_SkipWorkload(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	fake := &fakeSDKClient{}
+	installSeams(t, seamOverrides{
+		rbacPull: func(_ context.Context, _ rbac.API, _ func() time.Time) ([]rbac.Binding, error) {
+			return oneBinding(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipWorkload = true
+	f.skipNetpol = true
+	f.skipPSS = true
+	if err := doRun(context.Background(), f); err != nil {
+		t.Fatalf("doRun: %v", err)
+	}
+	if fake.pushed != 1 {
+		t.Errorf("pushed = %d; want 1", fake.pushed)
+	}
+}
+
+func TestDoRun_SDKClientError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("bad endpoint")
+	installSeams(t, seamOverrides{
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return nil, sentinel },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "sdk client: ") {
+		t.Fatalf("want wrapped sdk client error; got %v", err)
+	}
+}
+
+func TestDoRun_RBACPullError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("k8s 403")
+	installSeams(t, seamOverrides{
+		rbacPull: func(_ context.Context, _ rbac.API, _ func() time.Time) ([]rbac.Binding, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	err := doRun(context.Background(), okFlags())
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "rbac pull: ") {
+		t.Fatalf("want wrapped rbac pull error; got %v", err)
+	}
+}
+
+func TestDoRun_WorkloadInspectError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("k8s 403")
+	installSeams(t, seamOverrides{
+		workloadScan: func(_ context.Context, _ workload.API, _ func() time.Time) ([]workload.SecurityContext, error) {
+			return nil, sentinel
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return &fakeSDKClient{}, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "workload inspect: ") {
+		t.Fatalf("want wrapped workload inspect error; got %v", err)
+	}
+}
+
+func TestDoRun_WorkloadPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		workloadScan: func(_ context.Context, _ workload.API, _ func() time.Time) ([]workload.SecurityContext, error) {
+			return oneWorkload(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipRBAC = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push workload ") {
+		t.Fatalf("want wrapped push workload error; got %v", err)
+	}
+}
+
+func TestDoRun_RBACPushError(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	sentinel := errors.New("push rejected")
+	fake := &fakeSDKClient{pushErr: sentinel}
+	installSeams(t, seamOverrides{
+		rbacPull: func(_ context.Context, _ rbac.API, _ func() time.Time) ([]rbac.Binding, error) {
+			return oneBinding(), nil
+		},
+		newClient: func(_, _ string, _ ...sdk.Option) (sdkPushClient, error) { return fake, nil },
+	})
+	f := okFlags()
+	f.skipWorkload = true
+	err := doRun(context.Background(), f)
+	if !errors.Is(err, sentinel) || !strings.HasPrefix(err.Error(), "push rbac ") {
+		t.Fatalf("want wrapped push rbac error; got %v", err)
+	}
+}
+
+func TestDoRun_BadAuthModeRejected(t *testing.T) {
+	resetCommon(t)
+	common.endpoint = "127.0.0.1:1"
+	common.token = "test-bearer"
+	common.insecure = true
+	okEnv(t)
+	f := okFlags()
+	f.authMode = "bogus"
+	if err := doRun(context.Background(), f); err == nil {
+		t.Fatal("expected bad auth-mode error")
+	}
+}
+
+func TestNewRBACAPIAndWorkloadAPI_Constructors(t *testing.T) {
+	// Exercise the live constructors (seam defaults) so they aren't dead code.
+	if newRBACAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
+		t.Error("newRBACAPI returned nil")
+	}
+	if newWorkloadAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
+		t.Error("newWorkloadAPI returned nil")
+	}
+	if newNetpolAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
+		t.Error("newNetpolAPI returned nil")
+	}
+	if newPSSAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
+		t.Error("newPSSAPI returned nil")
+	}
+	if newSecretMetaAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
+		t.Error("newSecretMetaAPI returned nil")
+	}
+	if newAdmissionWebhookAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
+		t.Error("newAdmissionWebhookAPI returned nil")
+	}
+	if newAdmissionPolicyAPI(http.DefaultClient, "https://k", "test-k8s-token") == nil {
+		t.Error("newAdmissionPolicyAPI returned nil")
+	}
+}

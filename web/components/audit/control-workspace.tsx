@@ -23,6 +23,7 @@ import type { AuditPeriod } from "@/lib/api/audit";
 import { SamplePanel } from "@/components/audit/sample-panel";
 import { WalkthroughRecorder } from "@/components/audit/walkthrough-recorder";
 import { CommentThread } from "@/components/audit/comment-thread";
+import { PeriodEvidenceSummaryCard } from "@/components/audit/period-evidence-summary";
 
 type TabKey = "sampling" | "walkthrough" | "comments";
 
@@ -51,6 +52,22 @@ export function ControlWorkspace({
         </h1>
         <code className="text-xs text-muted-foreground">{controlId}</code>
       </div>
+
+      {/*
+        Slice 749 — period-scoped (frozen) AI evidence summary. A NON-BINDING
+        comprehension aid OVER the frozen audit-period sample population
+        (observed_at <= frozen_at — invariant #10). Rendered only when the period
+        is FROZEN: an open period has no frozen population, and the backend would
+        409 (P0-749-1: never mix live + frozen). It sits above the activity tabs
+        so the auditor sees the plain-language read of the frozen evidence before
+        diving into sampling/walkthrough/comments.
+      */}
+      {period.status === "frozen" ? (
+        <PeriodEvidenceSummaryCard
+          auditPeriodId={period.audit_period_id}
+          controlId={controlId}
+        />
+      ) : null}
 
       <div
         role="tablist"

@@ -68,6 +68,64 @@ export async function fetchRisksList(): Promise<RisksListResponse> {
   return (await res.json()) as RisksListResponse;
 }
 
+// ----- Slice 681: per-risk read-only detail -----
+//
+// The platform already serves `GET /v1/risks/{id}` (`GetRisk` in
+// `internal/api/risks/handlers.go`), RLS-tenant-scoped via the store
+// (`h.store.Get(ctx, id)` runs under the cookie session's tenant
+// context — invariant #6). The BFF at `/api/risks/{id}` carries the
+// bearer cookie and forwards it; no tenant_id is ever passed by the
+// client. The detail page is READ-ONLY (slice 681 anti-criterion).
+//
+// The single-risk response carries the same `risk` wire shape as a list
+// row plus, when the platform's residual deriver is wired, a `residual`
+// breakdown block (slice 020). The breakdown is OPTIONAL — the page
+// degrades to the row's stored `residual_score` when it is absent — so
+// the detail page never breaks if the deriver is not configured.
+
+export type RiskResidualBreakdown = {
+  magnitude?: number | null;
+  effectiveness?: number | null;
+  // The platform's residualWireFrom shape is intentionally opaque here —
+  // the page reads only the documented numeric fields and renders the
+  // rest defensively. Kept loose so a deriver-shape change upstream does
+  // not break the BFF type contract.
+  [k: string]: unknown;
+};
+
+export type RiskDetailResponse = {
+  risk: Risk;
+  residual?: RiskResidualBreakdown | null;
+};
+
+// Server-side single-risk fetcher used by the slice-681 detail BFF.
+// Mirrors `getPolicy` (slice 672): hit the platform with the bearer,
+// decode `{ risk, residual? }`.
+export async function getRisk(
+  bearer: string,
+  id: string,
+): Promise<RiskDetailResponse> {
+  const res = await apiFetch(`/v1/risks/${encodeURIComponent(id)}`, bearer);
+  return (await res.json()) as RiskDetailResponse;
+}
+
+// Browser-side single-risk fetcher used by the slice-681 detail page.
+// Hits the BFF at `/api/risks/{id}`. Mirrors `fetchPolicyDetail`.
+export async function fetchRiskDetail(id: string): Promise<RiskDetailResponse> {
+  const res = await fetch(`/api/risks/${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as RiskDetailResponse;
+}
+
 // ----- Slice 105: risk-create wire shape -----
 //
 // `RiskCreateInput` mirrors `createReq` in

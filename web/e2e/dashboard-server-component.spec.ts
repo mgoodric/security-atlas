@@ -54,19 +54,59 @@ test.describe("dashboard Server Component fan-out (slice 380)", () => {
     await expect(page.getByTestId("evidence-freshness-panel")).toBeVisible();
     await expect(page.getByTestId("upcoming-panel")).toBeVisible();
 
+    // Slice 750: the portfolio AI-summary panel is OPERATOR-TRIGGERED — it
+    // renders an idle state with a "Generate summary" button and fires NO BFF
+    // request on first paint (an expensive LLM generation must not auto-run on a
+    // passive dashboard view, and it must not violate the zero-BFF invariant).
+    await expect(page.getByTestId("portfolio-summary-section")).toBeVisible();
+    await expect(page.getByTestId("portfolio-summary-idle")).toBeVisible();
+
     // Give any (incorrect) client-side fetch a chance to fire before
     // asserting it did NOT. TanStack Query with hydrated initialData +
     // the 60s staleTime (lib/queryClient.tsx) must NOT refetch on mount.
     await page.waitForLoadState("networkidle");
 
     // The load-bearing assertion: no client-side BFF request on first
-    // load. The data came inline via HydrationBoundary (AC-4/AC-8).
+    // load. The data came inline via HydrationBoundary (AC-4/AC-8); the
+    // portfolio panel fired nothing because it is operator-triggered (slice 750).
     expect(
       bffRequests,
       `expected no /api/dashboard/* BFF requests on first load, got:\n${bffRequests.join(
         "\n",
       )}`,
     ).toHaveLength(0);
+  });
+
+  test("slice 750: the portfolio summary panel is operator-triggered (no fetch on mount; fetches on click)", async ({
+    authedPage: page,
+  }) => {
+    const portfolioRequests: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/dashboard/portfolio-summary")) {
+        portfolioRequests.push(r.url());
+      }
+    });
+
+    await page.goto("/dashboard");
+
+    // Idle on first paint — the trigger is visible, no fetch has fired.
+    await expect(page.getByTestId("portfolio-summary-idle")).toBeVisible();
+    await page.waitForLoadState("networkidle");
+    expect(
+      portfolioRequests,
+      `portfolio summary must NOT fetch on mount, got:\n${portfolioRequests.join(
+        "\n",
+      )}`,
+    ).toHaveLength(0);
+
+    // Clicking the trigger fires the BFF request (the operator opted in).
+    await page.getByTestId("portfolio-summary-generate").click();
+    await expect
+      .poll(() => portfolioRequests.length, {
+        message:
+          "clicking Generate must fire the portfolio-summary BFF request",
+      })
+      .toBeGreaterThan(0);
   });
 
   test("AC-8: all panels render their initial content WITHOUT a client fetch", async ({

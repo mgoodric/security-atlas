@@ -275,3 +275,33 @@ func TestSha256Of_Length(t *testing.T) {
 		t.Error("sha256Of returned identical output for different inputs")
 	}
 }
+
+// TestDemoSCFAnchors_Invariants verifies the slice-682 posture-spine anchor
+// fixture honors invariant #7 (anchor to REAL SCF codes, never a parallel
+// taxonomy): every entry has a non-empty SCF code + family + title, the codes
+// match the SCF FAM-NN shape, and there are no duplicate codes (the
+// scf_anchors (framework_version_id, scf_id) UNIQUE would reject duplicates
+// at the DB layer; this catches it before the round-trip). At least 3 anchors
+// must exist so the demo spine produces a legible, partially-covered tile.
+func TestDemoSCFAnchors_Invariants(t *testing.T) {
+	if len(demoSCFAnchors) < 3 {
+		t.Fatalf("demoSCFAnchors has %d entries; want >= 3 for a legible posture tile", len(demoSCFAnchors))
+	}
+	seen := make(map[string]bool, len(demoSCFAnchors))
+	for i, a := range demoSCFAnchors {
+		if a.SCFID == "" || a.Family == "" || a.Title == "" {
+			t.Errorf("demoSCFAnchors[%d] has an empty field: %+v", i, a)
+		}
+		// SCF codes are FAM-NN (e.g. IAC-06): a 3-letter family, a hyphen,
+		// then digits. We assert the hyphen + a digit tail rather than a full
+		// regex to stay dependency-free.
+		dash := strings.IndexByte(a.SCFID, '-')
+		if dash <= 0 || dash == len(a.SCFID)-1 {
+			t.Errorf("demoSCFAnchors[%d] scf_id %q is not FAM-NN shaped", i, a.SCFID)
+		}
+		if seen[a.SCFID] {
+			t.Errorf("demoSCFAnchors has duplicate scf_id %q; the (fv, scf_id) UNIQUE would reject it", a.SCFID)
+		}
+		seen[a.SCFID] = true
+	}
+}

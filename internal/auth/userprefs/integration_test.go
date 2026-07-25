@@ -28,40 +28,29 @@ package userprefs_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/userprefs"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// openPools opens both the atlas_app (RLS-enforced) pool and the
-// admin (BYPASSRLS) pool. Skips when either env var is unset.
-func openPools(t *testing.T) (app, admin *pgxpool.Pool) {
-	t.Helper()
-	appDSN := os.Getenv("DATABASE_URL_APP")
-	adminDSN := os.Getenv("DATABASE_URL")
-	if appDSN == "" || adminDSN == "" {
-		t.Skip("DATABASE_URL_APP or DATABASE_URL not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	a, err := pgxpool.New(ctx, appDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(app): %v", err)
-	}
-	t.Cleanup(a.Close)
-	b, err := pgxpool.New(ctx, adminDSN)
-	if err != nil {
-		t.Fatalf("pgxpool.New(admin): %v", err)
-	}
-	t.Cleanup(b.Close)
-	return a, b
-}
+// Slice 435 / 742: the pool/DSN/tenant-context boilerplate this file used to
+// re-derive (openPools / DATABASE_URL_APP+DATABASE_URL dial / inline
+// tenancy.WithTenant) now lives in the shared internal/dbtest harness.
+// dbtest.NewAppPool opens the RLS-enforcing atlas_app pool (the default —
+// every store read/write and the RLS-isolation assertion run through it);
+// dbtest.NewMigratePool opens the privileged BYPASSRLS pool used ONLY to seed
+// the users FK fixture and to read-verify the no-partial-write count.
+// dbtest.WithTenantCtx tags the tenant GUC context.
+//
+// user_notification_preferences IS tenant-scoped (slice 108 migration ENABLEs
+// and FORCEs RLS with the canonical four-policy pattern). seedUser remains
+// suite-local because it inserts the parent `users` row (an FK the
+// preferences table requires) — a fixture dbtest.SeedTenant does not provide;
+// it now routes that insert + cleanup through the migrate (BYPASSRLS) pool.
 
 // seedUser inserts a fresh (tenant_id, user_id) pair via the admin
 // pool (RLS-bypass) so the test scope is deterministic. Returns the
@@ -91,25 +80,15 @@ func seedUser(t *testing.T, admin *pgxpool.Pool) (uuid.UUID, uuid.UUID) {
 	return tenantID, userID
 }
 
-// tenantCtx wraps ctx with the tenant GUC binding the store's
-// transactions need.
-func tenantCtx(t *testing.T, ctx context.Context, tenantID uuid.UUID) context.Context {
-	t.Helper()
-	out, err := tenancy.WithTenant(ctx, tenantID.String())
-	if err != nil {
-		t.Fatalf("tenancy.WithTenant: %v", err)
-	}
-	return out
-}
-
 // TestGetEmptyReturnsDefaultMatrix: a fresh user with zero
 // preference rows reads as all-events × all-channels = enabled.
 func TestGetEmptyReturnsDefaultMatrix(t *testing.T) {
-	app, admin := openPools(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	s := userprefs.NewStore(app)
 
 	tenantID, userID := seedUser(t, admin)
-	ctx := tenantCtx(t, context.Background(), tenantID)
+	ctx := dbtest.WithTenantCtx(t, tenantID.String())
 
 	got, err := s.Get(ctx, tenantID, userID)
 	if err != nil {
@@ -131,11 +110,12 @@ func TestGetEmptyReturnsDefaultMatrix(t *testing.T) {
 // TestUpsertPersistsAndGetRoundTrips: an Upsert with a non-default
 // cell is reflected on the subsequent Get.
 func TestUpsertPersistsAndGetRoundTrips(t *testing.T) {
-	app, admin := openPools(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	s := userprefs.NewStore(app)
 
 	tenantID, userID := seedUser(t, admin)
-	ctx := tenantCtx(t, context.Background(), tenantID)
+	ctx := dbtest.WithTenantCtx(t, tenantID.String())
 
 	// Disable the policy_ack_due / email cell only.
 	patch := userprefs.Preferences{
@@ -164,11 +144,12 @@ func TestUpsertPersistsAndGetRoundTrips(t *testing.T) {
 // TestUpsertFullMatrix: applying the DefaultMatrix as a patch results
 // in N writes (one per cell) and the Get reads back the same shape.
 func TestUpsertFullMatrix(t *testing.T) {
-	app, admin := openPools(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	s := userprefs.NewStore(app)
 
 	tenantID, userID := seedUser(t, admin)
-	ctx := tenantCtx(t, context.Background(), tenantID)
+	ctx := dbtest.WithTenantCtx(t, tenantID.String())
 
 	// Make a non-trivial full matrix (alternating true/false) to
 	// exercise both enabled values through the upsert path.
@@ -200,11 +181,12 @@ func TestUpsertFullMatrix(t *testing.T) {
 // CONFLICT DO UPDATE); a second call to the same cell with the
 // opposite enabled value persists.
 func TestUpsertOverwritesPriorValue(t *testing.T) {
-	app, admin := openPools(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	s := userprefs.NewStore(app)
 
 	tenantID, userID := seedUser(t, admin)
-	ctx := tenantCtx(t, context.Background(), tenantID)
+	ctx := dbtest.WithTenantCtx(t, tenantID.String())
 
 	if err := s.Upsert(ctx, tenantID, userID, userprefs.Preferences{
 		"control_drift": {"in_app": false},
@@ -228,11 +210,12 @@ func TestUpsertOverwritesPriorValue(t *testing.T) {
 // TestUpsertRejectsUnknownEvent: a non-whitelisted event key returns
 // ErrUnknownEvent without touching the DB.
 func TestUpsertRejectsUnknownEvent(t *testing.T) {
-	app, admin := openPools(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	s := userprefs.NewStore(app)
 
 	tenantID, userID := seedUser(t, admin)
-	ctx := tenantCtx(t, context.Background(), tenantID)
+	ctx := dbtest.WithTenantCtx(t, tenantID.String())
 
 	patch := userprefs.Preferences{
 		"unknown_event_key": {"email": false},
@@ -246,11 +229,12 @@ func TestUpsertRejectsUnknownEvent(t *testing.T) {
 // TestUpsertRejectsUnknownChannel: a non-whitelisted channel key
 // returns ErrUnknownChannel.
 func TestUpsertRejectsUnknownChannel(t *testing.T) {
-	app, admin := openPools(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	s := userprefs.NewStore(app)
 
 	tenantID, userID := seedUser(t, admin)
-	ctx := tenantCtx(t, context.Background(), tenantID)
+	ctx := dbtest.WithTenantCtx(t, tenantID.String())
 
 	patch := userprefs.Preferences{
 		"policy_ack_due": {"sms": false},
@@ -265,11 +249,12 @@ func TestUpsertRejectsUnknownChannel(t *testing.T) {
 // one valid cell + one invalid cell must NOT write the valid cell —
 // the validation runs before any DB write.
 func TestUpsertPreFlightValidationDoesNotPartiallyWrite(t *testing.T) {
-	app, admin := openPools(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	s := userprefs.NewStore(app)
 
 	tenantID, userID := seedUser(t, admin)
-	ctx := tenantCtx(t, context.Background(), tenantID)
+	ctx := dbtest.WithTenantCtx(t, tenantID.String())
 
 	patch := userprefs.Preferences{
 		"policy_ack_due":   {"email": false}, // valid
@@ -296,14 +281,15 @@ func TestUpsertPreFlightValidationDoesNotPartiallyWrite(t *testing.T) {
 // see Tenant B's preferences. Tenant B reads as DefaultMatrix even
 // after Tenant A writes a non-default cell.
 func TestRLSIsolationBetweenTenants(t *testing.T) {
-	app, admin := openPools(t)
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	s := userprefs.NewStore(app)
 
 	tenantA, userA := seedUser(t, admin)
 	tenantB, userB := seedUser(t, admin)
 
-	ctxA := tenantCtx(t, context.Background(), tenantA)
-	ctxB := tenantCtx(t, context.Background(), tenantB)
+	ctxA := dbtest.WithTenantCtx(t, tenantA.String())
+	ctxB := dbtest.WithTenantCtx(t, tenantB.String())
 
 	// Tenant A writes a non-default cell.
 	if err := s.Upsert(ctxA, tenantA, userA, userprefs.Preferences{

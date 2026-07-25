@@ -46,20 +46,56 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
+// threadReader is the per-route read seam the two GET read paths —
+// GET /v1/audit-notes/thread (ListThreadForScope) and the legacy
+// GET /v1/audit-notes author-scoped list (ListForAuthorAndPeriod) — read
+// through (slice 689 added the thread read; slice 690's contract-tier rollout
+// adds the legacy list read). It carries JUST the read methods those routes
+// need — deliberately narrow (slice 409 D1 / slice 411 D2 / slice 412 D2
+// sizing rule: a two-method seam over the wider notes.Store, NOT a mirror of
+// its create surface). The /thread route has a real verbatim-passthrough BFF
+// (web/app/api/audit/audit-notes/thread/route.ts); the legacy list has NO GET
+// BFF today (the workspace reads /thread), so its consumer half is a
+// field-contract pin (slice 687 D3). The contract-tier recorder
+// (contractrecord_test.go) injects a fixed-row stub satisfying this seam so the
+// wire shapes record on the plain `go test ./...` unit surface with no Postgres
+// pool (ADR-0007 / P0-409-1). The production *notes.Store satisfies it
+// verbatim; the seam is unexported and New(*notes.Store, *notifications.Store,
+// *slog.Logger) is unchanged (P0-409-2). The Create handler keeps using the
+// concrete h.store directly.
+type threadReader interface {
+	ListThreadForScope(ctx context.Context, periodID uuid.UUID, scopeType, scopeID, callerUserID string) ([]notes.Note, error)
+	ListForAuthorAndPeriod(ctx context.Context, periodID uuid.UUID, authorUserID string) ([]notes.Note, error)
+}
+
 // Handler bundles the routes over notes.Store + notifications.Store.
+//
+// reader is the slice-689 per-route read seam the Thread path reads through;
+// New points it at store, so production behavior is identical.
 type Handler struct {
 	store         *notes.Store
 	notifications *notifications.Store
 	logger        *slog.Logger
+	reader        threadReader
 }
 
 // New constructs a Handler. notifs may be nil during early bring-up;
 // when nil, Create writes the audit_note but skips notification dispatch.
+// The slice-689 per-route read seam (reader) is wired to the same store —
+// the public signature is unchanged (P0-409-2).
 func New(store *notes.Store, notifs *notifications.Store, logger *slog.Logger) *Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Handler{store: store, notifications: notifs, logger: logger}
+	return &Handler{store: store, notifications: notifs, logger: logger, reader: store}
+}
+
+// newHandlerWithReader constructs a Handler whose Thread path reads through an
+// arbitrary read seam. It exists ONLY for the slice-689 contract recorder,
+// which injects a fixed-row stub so the thread wire shape records with no
+// Postgres pool. Unexported — not part of the public surface.
+func newHandlerWithReader(reader threadReader) *Handler {
+	return &Handler{reader: reader}
 }
 
 // ----- wire shapes -----
@@ -225,7 +261,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.store.ListForAuthorAndPeriod(ctx, periodID, authorID)
+	rows, err := h.reader.ListForAuthorAndPeriod(ctx, periodID, authorID)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list audit notes", err)
 		return
@@ -282,7 +318,7 @@ func (h *Handler) Thread(w http.ResponseWriter, r *http.Request) {
 	}
 	scopeID := q.Get("scope_id")
 
-	rows, err := h.store.ListThreadForScope(ctx, periodID, scopeType, scopeID, callerID)
+	rows, err := h.reader.ListThreadForScope(ctx, periodID, scopeType, scopeID, callerID)
 	if err != nil {
 		if errors.Is(err, notes.ErrInvalidScopeType) {
 			httpresp.WriteError(w, http.StatusBadRequest, "scope_type must be one of control|finding|sample|period|walkthrough")

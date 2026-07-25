@@ -34,50 +34,27 @@ package seed_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"testing/fstest"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/policy/seed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ---- harness helpers ----
 
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
+// freshTenant CARVE-OUT (742 drain batch 15): kept inline for TWO reasons
+// dbtest.SeedTenant cannot express — (1) it returns uuid.UUID (callers pass
+// the typed id to seed.Seed / seedControlWithSCFID), not the string SeedTenant
+// yields; (2) the first cleanup statement is column-scoped
+// (`predecessor_id IS NOT NULL`) to drop self-FK successors first. Only its
+// pool is re-routed to the slice-435 dbtest harness by the callers
+// (admin := dbtest.NewMigratePool(t)). (batch-13 self-FK + batch-14 uuid.UUID
+// precedents.)
 func freshTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 	t.Helper()
 	tenant := uuid.New()
@@ -146,8 +123,8 @@ func stockPolicyMD(title string, codes []string) string {
 // resolves missing, every inserted policy is orphan, and the report
 // captures both the missing-anchor list and the orphan-warning list.
 func TestSeed_NoopResolver_AllInsertedAllOrphan(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	policies := validStockPolicies(t, []string{"GOV-01", "GOV-04", "RSK-01"})
 
@@ -190,8 +167,8 @@ func TestSeed_NoopResolver_AllInsertedAllOrphan(t *testing.T) {
 // and the resulting report must look identical to passing
 // NoopAnchorResolver{} explicitly.
 func TestSeed_NilResolver_FallsBackToNoop(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	policies := validStockPolicies(t, []string{"GOV-01"})
 
@@ -213,8 +190,8 @@ func TestSeed_NilResolver_FallsBackToNoop(t *testing.T) {
 // inside Seed. Passing 4 policies (one short) must return an error
 // and NOT insert any rows.
 func TestSeed_WrongCount_Errors(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	tooFew := validStockPolicies(t, []string{"GOV-01"})[:4]
@@ -237,8 +214,8 @@ func TestSeed_WrongCount_Errors(t *testing.T) {
 // top of Seed. A non-UUID tenant id must be rejected before any DB
 // call.
 func TestSeed_InvalidTenantID(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	_ = freshTenant(t, admin) // ensure cleanup runs even though we use a synthetic uuid
 	policies := validStockPolicies(t, []string{"GOV-01"})
 
@@ -267,8 +244,8 @@ func TestSeed_InvalidTenantID(t *testing.T) {
 // non-empty linked-control UUIDs. Asserts that the inserted policy
 // row's linked_control_ids array matches what the resolver returned.
 func TestSeed_SQLResolver_ResolvedLinksMaterialize(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	// Seed three controls with known scf_ids.
@@ -328,8 +305,8 @@ func TestSeed_SQLResolver_ResolvedLinksMaterialize(t *testing.T) {
 // Seed. The frontmatter omits source_attribution; the loader must
 // fall back to community_draft.
 func TestSeed_DefaultSourceAttribution(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	// Build a fixture with no source_attribution field in any
@@ -417,7 +394,7 @@ func TestSQLResolver_EmptyInput_NoDBCall(t *testing.T) {
 // TestSQLResolver_AllMissing exercises the path where no scf_ids are
 // found in the controls table — every code returned as missing.
 func TestSQLResolver_AllMissing(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	_ = freshTenant(t, admin) // ensures we have a cleanup hook even though no rows exist
 
 	r := seed.NewSQLAnchorResolver(admin)
@@ -443,7 +420,7 @@ func TestSQLResolver_AllMissing(t *testing.T) {
 // TestSQLResolver_MixedHitAndMiss exercises the split branch: some
 // codes resolve to control UUIDs, others return as missing.
 func TestSQLResolver_MixedHitAndMiss(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 
 	ctrlA := seedControlWithSCFID(t, admin, tenant, "MIX-A")
@@ -479,7 +456,7 @@ func TestSQLResolver_MixedHitAndMiss(t *testing.T) {
 // output (resolved or missing) so the caller's downstream accounting
 // stays consistent.
 func TestSQLResolver_DuplicateInputCode(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ctrlA := seedControlWithSCFID(t, admin, tenant, "DUP-A")
 

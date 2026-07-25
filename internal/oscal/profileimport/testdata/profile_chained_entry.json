@@ -1,0 +1,18 @@
+{
+  "profile": {
+    "uuid": "55555555-5555-4555-8555-555555555555",
+    "metadata": {
+      "title": "Chained Entry Profile",
+      "last-modified": "2026-06-07T00:00:00+00:00",
+      "version": "1.0",
+      "oscal-version": "1.1.2"
+    },
+    "imports": [
+      {
+        "href": "#44444444-4444-4444-8444-444444444444",
+        "include-controls": [{ "with-ids": ["ac-1", "ac-2", "IAC-06"] }]
+      }
+    ],
+    "merge": { "as-is": true }
+  }
+}

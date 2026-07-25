@@ -18,68 +18,31 @@ package drift_test
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant cleans every slice-016 + dependency table for the tenant after
-// the test. control_drift_snapshots + control_evaluations drop before
-// controls (FK order).
+// the test. Pure tenant-scoped DELETE in FK order (control_drift_snapshots +
+// control_evaluations + scope_cells drop before controls), so it delegates to
+// dbtest.SeedTenant (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM control_drift_snapshots WHERE tenant_id = $1`,
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM scope_cells WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"control_drift_snapshots",
+		"control_evaluations",
+		"scope_cells",
+		"controls",
+	)
 }
 
 func ctxFor(t *testing.T, tenant string) context.Context {
@@ -161,10 +124,8 @@ func containsControl(rows []drift.DriftRow, id uuid.UUID) bool {
 // ===== tracer bullet: CaptureSnapshot records the worst-cell passing set =====
 
 func TestCaptureSnapshot_RecordsPassingControls(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -197,10 +158,8 @@ func TestCaptureSnapshot_RecordsPassingControls(t *testing.T) {
 // fresh-fail cell is NOT passing =====
 
 func TestCaptureSnapshot_WorstCellRollup(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -253,10 +212,8 @@ func seedEvaluationWithCell(t *testing.T, admin *pgxpool.Pool, tenant string, ct
 // ===== AC-3: Report computes the signed delta + the flipped-to-fail set =====
 
 func TestReport_ComputesSignedDeltaAndFlips(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -307,10 +264,8 @@ func TestReport_ComputesSignedDeltaAndFlips(t *testing.T) {
 // snapshot a prior Store captured (persists across "restart") =====
 
 func TestCaptureSnapshot_PersistsAcrossStoreInstances(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -344,10 +299,8 @@ func TestCaptureSnapshot_PersistsAcrossStoreInstances(t *testing.T) {
 // tenant B's snapshots =====
 
 func TestReport_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 

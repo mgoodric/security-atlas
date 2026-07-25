@@ -101,18 +101,18 @@ a deployment vulnerability, not a convenience.
 The stack refuses to start until each of these is set. Every
 secret-typed entry must be a fresh `openssl rand -hex 32` value.
 
-| Variable                      | Default                                                                       | Required? | Scope             | Description                                                                                                                                                                                                              |
-| ----------------------------- | ----------------------------------------------------------------------------- | --------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `POSTGRES_PASSWORD`           | `CHANGE_ME`                                                                   | yes       | server            | Postgres superuser password; used by the postgres container only. Secret — supply via `openssl rand -hex 32`.                                                                                                            |
-| `ATLAS_APP_PASSWORD`          | `CHANGE_ME`                                                                   | yes       | server, bootstrap | Password for the `atlas_app` role the server connects with. The bootstrap container sets it on the role via `ALTER ROLE`; must match the password segment of `DATABASE_URL_APP`. Secret.                                 |
-| `MINIO_ROOT_USER`             | `CHANGE_ME`                                                                   | yes       | server            | MinIO root user; doubles as the S3 access key the server uses for the artifacts bucket.                                                                                                                                  |
-| `MINIO_ROOT_PASSWORD`         | `CHANGE_ME`                                                                   | yes       | server            | MinIO root password; doubles as the S3 secret key. Secret — supply via `openssl rand -hex 32`.                                                                                                                           |
-| `BEARER_HASH_KEY`             | `CHANGE_ME`                                                                   | yes       | server            | HMAC key for `api_keys.token_hash` (slice 034). The server refuses to boot without it; must be ≥ 32 bytes. Rotating it invalidates every issued API key. Secret.                                                         |
-| `ATLAS_BOOTSTRAP_TOKEN`       | `CHANGE_ME`                                                                   | yes       | bootstrap         | Pre-shared admin bearer the one-shot bootstrap container uses to upload control bundles. A convenience credential — **rotate or revoke it after first boot** once a real operator credential exists. Secret.             |
-| `ATLAS_DEFAULT_USER_EMAIL`    | `admin@example.com`                                                           | yes       | bootstrap         | Email of the default local-mode account created on first boot (no external IdP required).                                                                                                                                |
-| `ATLAS_DEFAULT_USER_PASSWORD` | `CHANGE_ME`                                                                   | yes       | bootstrap         | Password for the default local-mode account. **Change it immediately after first sign-in.** Secret.                                                                                                                      |
-| `DATABASE_URL_APP`            | `postgres://atlas_app:CHANGE_ME@postgres:5432/security_atlas?sslmode=disable` | yes       | server, bootstrap | Connection string for the runtime `atlas_app` role (RLS-enforced — constitutional invariant #6). Replace the `CHANGE_ME` password segment with the same value as `ATLAS_APP_PASSWORD`. The password segment is a secret. |
-| `DATABASE_URL_MIGRATE`        | `postgres://atlas_migrate@postgres:5432/security_atlas?sslmode=disable`       | yes       | bootstrap         | Connection string for the `atlas_migrate` role used to apply migrations. It authenticates via `trust` on the container network and **carries no password** — do not add a password segment.                              |
+| Variable                      | Default                                                                       | Required? | Scope             | Description                                                                                                                                                                                                                                                                                                      |
+| ----------------------------- | ----------------------------------------------------------------------------- | --------- | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POSTGRES_PASSWORD`           | `CHANGE_ME`                                                                   | yes       | server            | Postgres superuser password; used by the postgres container only. Secret — supply via `openssl rand -hex 32`.                                                                                                                                                                                                    |
+| `ATLAS_APP_PASSWORD`          | `CHANGE_ME`                                                                   | yes       | server, bootstrap | Password for the `atlas_app` role the server connects with. The bootstrap container sets it on the role via `ALTER ROLE`; must match the password segment of `DATABASE_URL_APP`. Secret.                                                                                                                         |
+| `MINIO_ROOT_USER`             | `CHANGE_ME`                                                                   | yes       | server            | MinIO root user; doubles as the S3 access key the server uses for the artifacts bucket.                                                                                                                                                                                                                          |
+| `MINIO_ROOT_PASSWORD`         | `CHANGE_ME`                                                                   | yes       | server            | MinIO root password; doubles as the S3 secret key. Secret — supply via `openssl rand -hex 32`.                                                                                                                                                                                                                   |
+| `BEARER_HASH_KEY`             | `CHANGE_ME`                                                                   | yes       | server            | HMAC key for legacy `api_keys.token_hash` (slice 034, retired by slices 197/201 in favor of OAuth 2.0 JWT access tokens). Kept for backward compatibility during the migration window; the server refuses to boot without it; must be ≥ 32 bytes. Rotating it invalidates any remaining legacy API keys. Secret. |
+| `ATLAS_BOOTSTRAP_TOKEN`       | `CHANGE_ME`                                                                   | yes       | bootstrap         | Pre-shared admin bearer the one-shot bootstrap container uses to upload control bundles. A convenience credential — **rotate or revoke it after first boot** once a real operator credential exists. Secret.                                                                                                     |
+| `ATLAS_DEFAULT_USER_EMAIL`    | `admin@example.com`                                                           | yes       | bootstrap         | Email of the default local-mode account created on first boot (no external IdP required).                                                                                                                                                                                                                        |
+| `ATLAS_DEFAULT_USER_PASSWORD` | `CHANGE_ME`                                                                   | yes       | bootstrap         | Password for the default local-mode account. **Change it immediately after first sign-in.** Secret.                                                                                                                                                                                                              |
+| `DATABASE_URL_APP`            | `postgres://atlas_app:CHANGE_ME@postgres:5432/security_atlas?sslmode=disable` | yes       | server, bootstrap | Connection string for the runtime `atlas_app` role (RLS-enforced — constitutional invariant #6). Replace the `CHANGE_ME` password segment with the same value as `ATLAS_APP_PASSWORD`. The password segment is a secret.                                                                                         |
+| `DATABASE_URL_MIGRATE`        | `postgres://atlas_migrate@postgres:5432/security_atlas?sslmode=disable`       | yes       | bootstrap         | Connection string for the `atlas_migrate` role used to apply migrations. It authenticates via `trust` on the container network and **carries no password** — do not add a password segment.                                                                                                                      |
 
 ## Database
 
@@ -165,6 +165,66 @@ none of its own.
 | Variable                   | Default   | Required? | Scope | Description                                                                                                                                                                                                                                                                                                              |
 | -------------------------- | --------- | --------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `NEXT_PUBLIC_API_BASE_URL` | _(empty)_ | no        | web   | The API base URL the **browser** uses to reach the atlas HTTP API. Leave empty when a reverse proxy fronts both `web` and `atlas` under one hostname (the browser uses same-origin relative URLs). Set an absolute URL only when the browser must reach atlas at a different origin (e.g. dev: `http://localhost:8080`). |
+
+## Email / SMTP notification channel
+
+The email delivery channel (slice 445) sends a daily digest of a user's unread
+in-app notifications to their account email — but **only** if that user has
+opted in (Settings → Notifications → Email delivery; default **off**) and the
+deployment has SMTP configured. The digest carries summary counts + a deep-link
+back into the authenticated app — never the notification details. When
+`ATLAS_SMTP_HOST` is unset (the default) the channel is **inert**: no mail is
+ever sent. The channel sends only; it never receives mail. `ATLAS_SMTP_PASSWORD`
+is read from the environment only and is never logged.
+
+| Variable                | Default   | Required? | Scope  | Description                                                                                                                                                                    |
+| ----------------------- | --------- | --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ATLAS_SMTP_HOST`       | _(unset)_ | no        | server | SMTP relay host. When unset the email channel is inert (no mail sent). Set host + sender to enable email delivery.                                                             |
+| `ATLAS_SMTP_PORT`       | `587`     | no        | server | SMTP submission port. STARTTLS is used opportunistically when the server advertises it.                                                                                        |
+| `ATLAS_SMTP_SENDER`     | _(unset)_ | no        | server | The `From:` address the digest is sent from. Required (together with host) to enable delivery.                                                                                 |
+| `ATLAS_SMTP_USERNAME`   | _(unset)_ | no        | server | SMTP auth username. When set, the channel authenticates with PLAIN auth (over STARTTLS) before sending.                                                                        |
+| `ATLAS_SMTP_PASSWORD`   | _(unset)_ | no        | server | SMTP auth password. **Secret** — supply a dedicated, least-privilege send-only credential; never logged. Generate/scope per your provider (e.g. `openssl rand -hex 32`).       |
+| `ATLAS_SMTP_TIMEOUT`    | `10s`     | no        | server | Wall-clock cap on a single SMTP dial+send (Go duration string). A slow/unreachable relay fails fast; failures are recorded and re-attempted on the next tick (no hot retry).   |
+| `ATLAS_PUBLIC_BASE_URL` | _(unset)_ | no        | server | Public base URL of the authenticated app, used to build the digest's "Open your notifications" deep-link. When unset, the link falls back to a relative `/notifications` path. |
+
+## Slack notification channel
+
+A second delivery channel (slice 543) for the same daily unread-notification
+digest, posted to an operator-configured Slack incoming-webhook. Per-user
+opt-in (Settings → Notifications → Slack delivery; default **off**). The Slack
+message carries summary counts + a deep-link only — never notification details
+(minimum disclosure, same discipline as email). When `ATLAS_SLACK_WEBHOOK_URL`
+is unset the channel is **inert**. The webhook URL is operator-configured (never
+user-controlled, never derived from notification content) and carries a secret
+token in its path; it is read from the environment only and is never logged.
+
+| Variable                  | Default   | Required? | Scope  | Description                                                                                                                                                  |
+| ------------------------- | --------- | --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ATLAS_SLACK_WEBHOOK_URL` | _(unset)_ | no        | server | Slack incoming-webhook URL. **Secret** (carries a token in its path) — never logged. When unset the Slack channel is inert (nothing is posted).              |
+| `ATLAS_SLACK_TIMEOUT`     | `10s`     | no        | server | Wall-clock cap on a single Slack POST (Go duration string). A slow/unreachable endpoint fails fast; failures are recorded and re-attempted on the next tick. |
+
+## Generic webhook notification channel
+
+A third delivery channel (slice 543) posting the same minimum-disclosure digest
+as a flat JSON payload to an operator-configured endpoint (PagerDuty, a SIEM, an
+internal bot). Per-user opt-in (default **off**). Payload = summary counts + a
+deep-link only; never notification details. When `ATLAS_WEBHOOK_URL` is unset
+the channel is **inert**.
+
+**SSRF safety:** the target URL is operator-configured (not user free-text, not
+notification-derived) **and** validated at startup — it must be `https` and must
+not resolve to an internal address (loopback, RFC1918, link-local incl. the
+`169.254.169.254` cloud-metadata IP, ULA, or CGNAT). A URL pointing at an
+internal service is rejected and the channel stays disabled. The optional bearer
+token + HMAC signing secret are read from the environment only and are never
+logged.
+
+| Variable                    | Default   | Required? | Scope  | Description                                                                                                                                                           |
+| --------------------------- | --------- | --------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATLAS_WEBHOOK_URL`         | _(unset)_ | no        | server | Target webhook URL. Must be `https` and must not resolve to an internal address (SSRF guard, validated at startup). When unset the channel is inert.                  |
+| `ATLAS_WEBHOOK_BEARER`      | _(unset)_ | no        | server | Optional `Authorization: Bearer` token sent with each POST. **Secret** — never logged.                                                                                |
+| `ATLAS_WEBHOOK_HMAC_SECRET` | _(unset)_ | no        | server | Optional HMAC-SHA256 signing key. When set, each POST carries an `X-Atlas-Signature` hex digest of the body so the receiver can verify it. **Secret** — never logged. |
+| `ATLAS_WEBHOOK_TIMEOUT`     | `10s`     | no        | server | Wall-clock cap on a single webhook POST (Go duration string). A slow/unreachable endpoint fails fast; failures are recorded and re-attempted on the next tick.        |
 
 ## Test-mode
 

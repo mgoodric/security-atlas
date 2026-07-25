@@ -11,6 +11,63 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countEvidenceRecordsByControl = `-- name: CountEvidenceRecordsByControl :one
+SELECT count(*)
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3)
+`
+
+type CountEvidenceRecordsByControlParams struct {
+	TenantID   pgtype.UUID `json:"tenant_id"`
+	ControlID  pgtype.UUID `json:"control_id"`
+	ControlRef string      `json:"control_ref"`
+}
+
+// Slice 502: total CURRENT LIVE evidence count for one control, used by the
+// evidence-summary surface to render a "showing N of M" bound (the summary is
+// over the bounded top-N, never the full history — P0-502-8). Resolution
+// mirrors ListEvidenceRecordsByControl: (control_id = $2 OR control_ref = $3).
+func (q *Queries) CountEvidenceRecordsByControl(ctx context.Context, arg CountEvidenceRecordsByControlParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countEvidenceRecordsByControl, arg.TenantID, arg.ControlID, arg.ControlRef)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countEvidenceRecordsByControlBeforeHorizon = `-- name: CountEvidenceRecordsByControlBeforeHorizon :one
+SELECT count(*)
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3)
+  AND observed_at <= COALESCE($4::timestamptz,
+                              'infinity'::timestamptz)
+`
+
+type CountEvidenceRecordsByControlBeforeHorizonParams struct {
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	ControlID  pgtype.UUID        `json:"control_id"`
+	ControlRef string             `json:"control_ref"`
+	FrozenAt   pgtype.Timestamptz `json:"frozen_at"`
+}
+
+// Slice 749: total FROZEN-population evidence count for one control bounded by
+// the audit-period freeze horizon (observed_at <= frozen_at), for the
+// "showing N of M" UI label. Mirrors CountEvidenceRecordsByControl's resolution
+// and the ListEvidenceRecordsByControlBeforeHorizon horizon predicate so the
+// count and the bounded list agree on the frozen population (P0-749-1).
+func (q *Queries) CountEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg CountEvidenceRecordsByControlBeforeHorizonParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countEvidenceRecordsByControlBeforeHorizon,
+		arg.TenantID,
+		arg.ControlID,
+		arg.ControlRef,
+		arg.FrozenAt,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countEvidenceRecordsByTenant = `-- name: CountEvidenceRecordsByTenant :one
 SELECT count(*) FROM evidence_records WHERE tenant_id = $1
 `
@@ -23,7 +80,7 @@ func (q *Queries) CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgt
 }
 
 const getEvidenceRecordByID = `-- name: GetEvidenceRecordByID :one
-SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
 WHERE id = $1
   AND tenant_id = $2
@@ -60,12 +117,14 @@ func (q *Queries) GetEvidenceRecordByID(ctx context.Context, arg GetEvidenceReco
 		&i.IngestionPath,
 		&i.SourceAttribution,
 		&i.ControlRef,
+		&i.ScopeCanonical,
+		&i.ObservedAtNanos,
 	)
 	return i, err
 }
 
 const getEvidenceRecordByIdempotency = `-- name: GetEvidenceRecordByIdempotency :one
-SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
 WHERE tenant_id = $1
   AND idempotency_key = $2
@@ -106,6 +165,8 @@ func (q *Queries) GetEvidenceRecordByIdempotency(ctx context.Context, arg GetEvi
 		&i.IngestionPath,
 		&i.SourceAttribution,
 		&i.ControlRef,
+		&i.ScopeCanonical,
+		&i.ObservedAtNanos,
 	)
 	return i, err
 }
@@ -175,7 +236,8 @@ INSERT INTO evidence_records (
     payload, payload_uri,
     hash, freshness_class, valid_until,
     idempotency_key, evidence_kind, schema_version,
-    credential_id, ingestion_path, source_attribution
+    credential_id, ingestion_path, source_attribution,
+    scope_canonical, observed_at_nanos
 ) VALUES (
     $1, $2,
     $3, $4, $5,
@@ -183,9 +245,10 @@ INSERT INTO evidence_records (
     $9, $10,
     $11, $12, $13,
     $14, $15, $16,
-    $17, $18, $19
+    $17, $18, $19,
+    $20, $21
 )
-RETURNING id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+RETURNING id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 `
 
 type InsertEvidenceRecordParams struct {
@@ -208,6 +271,8 @@ type InsertEvidenceRecordParams struct {
 	CredentialID      *string                `json:"credential_id"`
 	IngestionPath     string                 `json:"ingestion_path"`
 	SourceAttribution []byte                 `json:"source_attribution"`
+	ScopeCanonical    []byte                 `json:"scope_canonical"`
+	ObservedAtNanos   *int64                 `json:"observed_at_nanos"`
 }
 
 // evidence_records + evidence_audit_log queries for slice 013.
@@ -216,6 +281,13 @@ type InsertEvidenceRecordParams struct {
 // no DELETE. The schema enforces this at the RLS layer (no UPDATE /
 // DELETE policy on the table); these queries enforce it at the sqlc
 // surface (no UpdateEvidenceRecord, no DeleteEvidenceRecord exists).
+// Slice 474: scope_canonical persists the canonical (sorted) wire scope the
+// content-hash was computed over, so `atlas evidence verify` can reconstruct
+// the exact record and recompute an identical hash.
+// Slice 633: observed_at_nanos persists the LOSSLESS Unix-nanosecond value of
+// the wire observed_at (the observed_at TIMESTAMPTZ column is microsecond
+// precision and truncates sub-us nanos), so the verify walk reconstructs the
+// exact nanosecond timestamp the hash covered.
 func (q *Queries) InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error) {
 	row := q.db.QueryRow(ctx, insertEvidenceRecord,
 		arg.ID,
@@ -237,6 +309,8 @@ func (q *Queries) InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRe
 		arg.CredentialID,
 		arg.IngestionPath,
 		arg.SourceAttribution,
+		arg.ScopeCanonical,
+		arg.ObservedAtNanos,
 	)
 	var i EvidenceRecord
 	err := row.Scan(
@@ -262,6 +336,8 @@ func (q *Queries) InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRe
 		&i.IngestionPath,
 		&i.SourceAttribution,
 		&i.ControlRef,
+		&i.ScopeCanonical,
+		&i.ObservedAtNanos,
 	)
 	return i, err
 }
@@ -318,7 +394,7 @@ func (q *Queries) ListEvidenceAuditEntriesByCredential(ctx context.Context, arg 
 }
 
 const listEvidenceRecordsByControl = `-- name: ListEvidenceRecordsByControl :many
-SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
 WHERE tenant_id = $1
   AND (control_id = $2 OR control_ref = $3)
@@ -375,6 +451,92 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 			&i.IngestionPath,
 			&i.SourceAttribution,
 			&i.ControlRef,
+			&i.ScopeCanonical,
+			&i.ObservedAtNanos,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEvidenceRecordsByControlBeforeHorizon = `-- name: ListEvidenceRecordsByControlBeforeHorizon :many
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
+FROM evidence_records
+WHERE tenant_id = $1
+  AND (control_id = $2 OR control_ref = $3)
+  AND observed_at <= COALESCE($6::timestamptz,
+                              'infinity'::timestamptz)
+ORDER BY observed_at DESC
+LIMIT $4 OFFSET $5
+`
+
+type ListEvidenceRecordsByControlBeforeHorizonParams struct {
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	ControlID  pgtype.UUID        `json:"control_id"`
+	ControlRef string             `json:"control_ref"`
+	Limit      int32              `json:"limit"`
+	Offset     int32              `json:"offset"`
+	FrozenAt   pgtype.Timestamptz `json:"frozen_at"`
+}
+
+// Slice 749: the FROZEN-population variant of ListEvidenceRecordsByControl.
+// Returns the top-N most-recent evidence records for one control bounded by an
+// audit-period freeze horizon: observed_at <= frozen_at (invariant #10). The
+// bound is the period's audit_periods.frozen_at, passed by the caller after it
+// has resolved the period; this query NEVER reads the period row itself, it only
+// applies the horizon it is given. Mirrors ListEvidenceRecordsByControl's
+// (control_id = $2 OR control_ref = $3) resolution and observed_at DESC order so
+// the bounded top-N is the N most-recent records WITHIN the frozen population —
+// never a post-freeze (live) record (P0-749-1). The COALESCE-to-infinity on a
+// NULL horizon mirrors the slice-026/028 frozen-sample read path: an open period
+// (frozen_at NULL) falls through to live state, but the slice-749 surface only
+// summarizes FROZEN periods, so in practice the horizon is always set.
+func (q *Queries) ListEvidenceRecordsByControlBeforeHorizon(ctx context.Context, arg ListEvidenceRecordsByControlBeforeHorizonParams) ([]EvidenceRecord, error) {
+	rows, err := q.db.Query(ctx, listEvidenceRecordsByControlBeforeHorizon,
+		arg.TenantID,
+		arg.ControlID,
+		arg.ControlRef,
+		arg.Limit,
+		arg.Offset,
+		arg.FrozenAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []EvidenceRecord
+	for rows.Next() {
+		var i EvidenceRecord
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EvidenceQueryID,
+			&i.ControlID,
+			&i.ScopeID,
+			&i.ObservedAt,
+			&i.IngestedAt,
+			&i.Provenance,
+			&i.Result,
+			&i.Payload,
+			&i.PayloadUri,
+			&i.Hash,
+			&i.FreshnessClass,
+			&i.ValidUntil,
+			&i.CreatedAt,
+			&i.IdempotencyKey,
+			&i.EvidenceKind,
+			&i.SchemaVersion,
+			&i.CredentialID,
+			&i.IngestionPath,
+			&i.SourceAttribution,
+			&i.ControlRef,
+			&i.ScopeCanonical,
+			&i.ObservedAtNanos,
 		); err != nil {
 			return nil, err
 		}
@@ -387,7 +549,7 @@ func (q *Queries) ListEvidenceRecordsByControl(ctx context.Context, arg ListEvid
 }
 
 const walkEvidenceRecordsForVerify = `-- name: WalkEvidenceRecordsForVerify :many
-SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref
+SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records
 WHERE tenant_id = $1
   AND id > $2
@@ -440,6 +602,8 @@ func (q *Queries) WalkEvidenceRecordsForVerify(ctx context.Context, arg WalkEvid
 			&i.IngestionPath,
 			&i.SourceAttribution,
 			&i.ControlRef,
+			&i.ScopeCanonical,
+			&i.ObservedAtNanos,
 		); err != nil {
 			return nil, err
 		}

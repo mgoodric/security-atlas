@@ -1,0 +1,159 @@
+<!-- @dsCard group="Overview" name="security-atlas Design System" subtitle="12 components · neutral · light + dark" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>security-atlas Design System</title>
+<link rel="stylesheet" href="./_tokens.css" />
+<style>
+  body { background: var(--background); color: var(--foreground); }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 48px 28px 64px; }
+  h1 { font-size: 1.6rem; font-weight: 600; margin: 0 0 6px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted-foreground); margin: 0 0 36px; font-size: 0.95rem; line-height: 1.5; }
+  h2 { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+       color: var(--muted-foreground); margin: 28px 0 12px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+  a.card { display: block; text-decoration: none; color: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    padding: 14px 16px; background: var(--card); transition: border-color .15s ease; }
+  a.card:hover { border-color: var(--ring); }
+  a.card .n { font-weight: 500; font-size: 0.95rem; }
+  a.card .d { color: var(--muted-foreground); font-size: 0.8rem; margin-top: 3px; }
+
+  /* token swatch grid */
+  .swatch-stage { border: 1px solid var(--border); border-radius: var(--radius-lg);
+    overflow: hidden; margin-bottom: 12px; }
+  .swatch-pane { background: var(--background); color: var(--foreground); padding: 16px; }
+  .swatch-pane + .swatch-pane { border-top: 1px solid var(--border); }
+  .swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
+  .sw { display: flex; flex-direction: column; gap: 6px; }
+  .sw .chip { height: 40px; border-radius: var(--radius-md); border: 1px solid color-mix(in oklab, var(--foreground) 12%, transparent); }
+  .sw .lbl { font-size: 0.72rem; color: var(--muted-foreground); font-family: var(--font-mono); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>security-atlas Design System</h1>
+  <p class="sub">Live mirror of <code>web/components/ui</code> (shadcn &middot; base-nova &middot; <strong>neutral</strong>). Surfaces stay neutral and primary stays near-black, with a <strong>muted-pastel accent layer</strong> on top: a semantic status family, a recolored chart ramp, and soft surface washes. Every colored text/icon is the deep same-hue tone, measured &ge;4.5:1 (WCAG&nbsp;AA). Every card renders in both light and dark. Edit on the canvas, then pull changes back into the codebase one component at a time.</p>
+
+  <h2>Core tokens</h2>
+  <div class="swatch-stage">
+    <div class="swatch-pane">
+      <p class="ds-label" style="margin-bottom:10px">Light</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:var(--background)"></div><span class="lbl">background</span></div>
+        <div class="sw"><div class="chip" style="background:var(--foreground)"></div><span class="lbl">foreground</span></div>
+        <div class="sw"><div class="chip" style="background:var(--primary)"></div><span class="lbl">primary</span></div>
+        <div class="sw"><div class="chip" style="background:var(--secondary)"></div><span class="lbl">secondary</span></div>
+        <div class="sw"><div class="chip" style="background:var(--muted)"></div><span class="lbl">muted</span></div>
+        <div class="sw"><div class="chip" style="background:var(--accent)"></div><span class="lbl">accent</span></div>
+        <div class="sw"><div class="chip" style="background:var(--destructive)"></div><span class="lbl">destructive</span></div>
+        <div class="sw"><div class="chip" style="background:var(--border)"></div><span class="lbl">border</span></div>
+        <div class="sw"><div class="chip" style="background:var(--ring)"></div><span class="lbl">ring</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-1)"></div><span class="lbl">chart-1</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-2)"></div><span class="lbl">chart-2</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-3)"></div><span class="lbl">chart-3</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-4)"></div><span class="lbl">chart-4</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-5)"></div><span class="lbl">chart-5</span></div>
+      </div>
+    </div>
+    <div class="swatch-pane dark">
+      <p class="ds-label" style="margin-bottom:10px">Dark</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:var(--background)"></div><span class="lbl">background</span></div>
+        <div class="sw"><div class="chip" style="background:var(--foreground)"></div><span class="lbl">foreground</span></div>
+        <div class="sw"><div class="chip" style="background:var(--primary)"></div><span class="lbl">primary</span></div>
+        <div class="sw"><div class="chip" style="background:var(--secondary)"></div><span class="lbl">secondary</span></div>
+        <div class="sw"><div class="chip" style="background:var(--muted)"></div><span class="lbl">muted</span></div>
+        <div class="sw"><div class="chip" style="background:var(--accent)"></div><span class="lbl">accent</span></div>
+        <div class="sw"><div class="chip" style="background:var(--destructive)"></div><span class="lbl">destructive</span></div>
+        <div class="sw"><div class="chip" style="background:var(--border)"></div><span class="lbl">border</span></div>
+        <div class="sw"><div class="chip" style="background:var(--ring)"></div><span class="lbl">ring</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-1)"></div><span class="lbl">chart-1</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-2)"></div><span class="lbl">chart-2</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-3)"></div><span class="lbl">chart-3</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-4)"></div><span class="lbl">chart-4</span></div>
+        <div class="sw"><div class="chip" style="background:var(--chart-5)"></div><span class="lbl">chart-5</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Semantic status family</h2>
+  <div class="swatch-stage">
+    <div class="swatch-pane">
+      <p class="ds-label" style="margin-bottom:10px">Light &middot; deep tones (text/icon) &middot; all &ge;4.5:1 on their tint</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:var(--pass)"></div><span class="lbl">pass</span></div>
+        <div class="sw"><div class="chip" style="background:var(--info)"></div><span class="lbl">info</span></div>
+        <div class="sw"><div class="chip" style="background:var(--warning)"></div><span class="lbl">warning</span></div>
+        <div class="sw"><div class="chip" style="background:var(--critical)"></div><span class="lbl">critical</span></div>
+        <div class="sw"><div class="chip" style="background:var(--progress)"></div><span class="lbl">progress</span></div>
+        <div class="sw"><div class="chip" style="background:var(--brand)"></div><span class="lbl">brand</span></div>
+      </div>
+      <p class="ds-label" style="margin:14px 0 10px">Soft tints &middot; fills</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--pass) 15%, var(--background))"></div><span class="lbl">pass/15</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--info) 15%, var(--background))"></div><span class="lbl">info/15</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--warning) 15%, var(--background))"></div><span class="lbl">warning/15</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--critical) 15%, var(--background))"></div><span class="lbl">critical/15</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--progress) 15%, var(--background))"></div><span class="lbl">progress/15</span></div>
+        <div class="sw"><div class="chip" style="background:var(--surface-1)"></div><span class="lbl">surface-1</span></div>
+      </div>
+    </div>
+    <div class="swatch-pane dark">
+      <p class="ds-label" style="margin-bottom:10px">Dark &middot; deep tones (text/icon)</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:var(--pass)"></div><span class="lbl">pass</span></div>
+        <div class="sw"><div class="chip" style="background:var(--info)"></div><span class="lbl">info</span></div>
+        <div class="sw"><div class="chip" style="background:var(--warning)"></div><span class="lbl">warning</span></div>
+        <div class="sw"><div class="chip" style="background:var(--critical)"></div><span class="lbl">critical</span></div>
+        <div class="sw"><div class="chip" style="background:var(--progress)"></div><span class="lbl">progress</span></div>
+        <div class="sw"><div class="chip" style="background:var(--brand)"></div><span class="lbl">brand</span></div>
+      </div>
+      <p class="ds-label" style="margin:14px 0 10px">Soft tints &middot; fills</p>
+      <div class="swatch-grid">
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--pass) 24%, var(--card))"></div><span class="lbl">pass/24</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--info) 24%, var(--card))"></div><span class="lbl">info/24</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--warning) 24%, var(--card))"></div><span class="lbl">warning/24</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--critical) 24%, var(--card))"></div><span class="lbl">critical/24</span></div>
+        <div class="sw"><div class="chip" style="background:color-mix(in oklab, var(--progress) 24%, var(--card))"></div><span class="lbl">progress/24</span></div>
+        <div class="sw"><div class="chip" style="background:var(--surface-1)"></div><span class="lbl">surface-1</span></div>
+      </div>
+    </div>
+  </div>
+
+  <h2>Actions</h2>
+  <div class="grid">
+    <a class="card" href="./components/button/index.html"><div class="n">Button</div><div class="d">6 variants &middot; 4 sizes + icon sizes</div></a>
+  </div>
+
+  <h2>Forms</h2>
+  <div class="grid">
+    <a class="card" href="./components/input/index.html"><div class="n">Input</div><div class="d">Default &middot; focus &middot; disabled &middot; invalid</div></a>
+    <a class="card" href="./components/select/index.html"><div class="n">Select</div><div class="d">Native select + open list</div></a>
+    <a class="card" href="./components/checkbox/index.html"><div class="n">Checkbox</div><div class="d">Unchecked &middot; checked &middot; disabled</div></a>
+  </div>
+
+  <h2>Layout</h2>
+  <div class="grid">
+    <a class="card" href="./components/card/index.html"><div class="n">Card</div><div class="d">Header &middot; content &middot; footer &middot; action</div></a>
+    <a class="card" href="./components/table/index.html"><div class="n">Table</div><div class="d">Header + rows (controls list)</div></a>
+  </div>
+
+  <h2>Overlays</h2>
+  <div class="grid">
+    <a class="card" href="./components/dialog/index.html"><div class="n">Dialog</div><div class="d">Modal (open)</div></a>
+    <a class="card" href="./components/sheet/index.html"><div class="n">Sheet</div><div class="d">Slide-out drawer (open)</div></a>
+  </div>
+
+  <h2>Feedback</h2>
+  <div class="grid">
+    <a class="card" href="./components/alert/index.html"><div class="n">Alert</div><div class="d">Default &middot; destructive</div></a>
+    <a class="card" href="./components/badge/index.html"><div class="n">Badge</div><div class="d">6 variants &middot; pill</div></a>
+    <a class="card" href="./components/progress/index.html"><div class="n">Progress</div><div class="d">Acknowledgment bar</div></a>
+    <a class="card" href="./components/skeleton/index.html"><div class="n">Skeleton</div><div class="d">Loading placeholders</div></a>
+  </div>
+</div>
+</body>
+</html>

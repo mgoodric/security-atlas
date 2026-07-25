@@ -179,6 +179,66 @@ type Burndown struct {
 	Total BurndownBand // criticality=="" sentinel; aggregates every row
 }
 
+// ----- vendor_reviews ledger (slice 688) -----
+
+// ReviewOutcome is the disposition of a completed vendor review. Four
+// buckets mirror the vendor_review_outcome enum (slice 688 migration).
+type ReviewOutcome string
+
+const (
+	// OutcomePass — clean review, no findings.
+	OutcomePass ReviewOutcome = "pass"
+	// OutcomePassWithFindings — passed, but findings are tracked.
+	OutcomePassWithFindings ReviewOutcome = "pass_with_findings"
+	// OutcomeFail — failed; relationship at risk / remediation required.
+	OutcomeFail ReviewOutcome = "fail"
+	// OutcomeWaived — review waived (risk-accepted for the cycle), recorded
+	// so the cadence trail is honest about the gap.
+	OutcomeWaived ReviewOutcome = "waived"
+)
+
+// AllReviewOutcomes is the public set; the API layer validates inbound
+// strings against it without a separate switch.
+var AllReviewOutcomes = []ReviewOutcome{
+	OutcomePass, OutcomePassWithFindings, OutcomeFail, OutcomeWaived,
+}
+
+// Valid reports whether the outcome string matches a known enum value.
+// Used at the HTTP boundary to reject typos before they reach Postgres.
+func (o ReviewOutcome) Valid() bool {
+	for _, x := range AllReviewOutcomes {
+		if x == o {
+			return true
+		}
+	}
+	return false
+}
+
+// Review is one row in the append-only vendor_reviews ledger — a single
+// completed review of a vendor at a point in time. Rows are immutable
+// once recorded (canvas Invariant 2 — append-only spirit); there is no
+// Update path.
+type Review struct {
+	ID         uuid.UUID
+	VendorID   uuid.UUID
+	ReviewedAt time.Time
+	Reviewer   string
+	Outcome    ReviewOutcome
+	Notes      string
+	CreatedAt  time.Time
+}
+
+// RecordReviewInput is the payload to append a completed review. ReviewedAt
+// is required; Reviewer/Notes are optional (empty-string defaults); Outcome
+// must be one of the four enum values.
+type RecordReviewInput struct {
+	VendorID   uuid.UUID
+	ReviewedAt time.Time
+	Reviewer   string
+	Outcome    ReviewOutcome
+	Notes      string
+}
+
 // ErrVendorNotFound is returned when the requested vendor does not exist
 // for the active tenant (RLS-isolated). 404-shaped.
 var ErrVendorNotFound = errors.New("vendor: not found")

@@ -41,7 +41,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -53,65 +52,34 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
 // ----- env helpers (mirrors slice 023 harness) -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant returns a new random tenant id and registers cleanup for
-// every table the slice-107 path touches. Mirrors slice 023's pattern.
+// every table the slice-107 path touches. Pure-DELETE cleanup scoped by
+// tenant_id (FK-dependents first), so it delegates to dbtest.SeedTenant
+// (slice 435 / 742 drain). The original helper deleted policies in two
+// phases (predecessor_id IS NOT NULL first, then the unconstrained sweep);
+// that ordering was defensive only — the policies self-FK is ON DELETE SET
+// NULL (migration 20260511000016), so a single tenant-scoped policies DELETE
+// removes the whole version chain without any constraint violation. Behavior
+// is therefore identical with one collapsed policies entry.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM policy_acknowledgments WHERE tenant_id = $1`,
-			`DELETE FROM evidence_audit_log WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM api_keys WHERE tenant_id = $1`,
-			`DELETE FROM policies WHERE tenant_id = $1 AND predecessor_id IS NOT NULL`,
-			`DELETE FROM policies WHERE tenant_id = $1`,
-			`DELETE FROM local_credentials WHERE tenant_id = $1`,
-			`DELETE FROM sessions WHERE tenant_id = $1`,
-			`DELETE FROM users WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"policy_acknowledgments",
+		"evidence_audit_log",
+		"evidence_records",
+		"api_keys",
+		"policies",
+		"local_credentials",
+		"sessions",
+		"users",
+		"controls",
+	)
 }
 
 // seedSCFAnchor mirrors slice 023's helper so the schema registry's
@@ -274,8 +242,8 @@ type setupResult struct {
 
 func setup(t *testing.T) setupResult {
 	t.Helper()
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
 	seedSCFAnchor(t, admin, "GOV-04", "GOV")
 	tenant := freshTenant(t, admin)
@@ -302,11 +270,9 @@ func setup(t *testing.T) setupResult {
 		t.Fatal("HTTPHandlerForTests nil")
 	}
 	ts := httptest.NewServer(h)
-	t.Cleanup(func() {
-		ts.Close()
-		app.Close()
-		admin.Close()
-	})
+	// dbtest pools (app + admin) self-close via their own t.Cleanup; only the
+	// httptest server needs an explicit close here.
+	t.Cleanup(ts.Close)
 	return setupResult{
 		server:    ts,
 		app:       app,

@@ -47,7 +47,7 @@ func makeAggregate(
 	t *testing.T,
 	in ExportInput,
 	scopeCells []dbx.ScopeCell,
-	controls []dbx.ListActiveControlsRow,
+	controls []dbx.ListActiveControlsWithDescriptionRow,
 	policies []dbx.Policy,
 	populations []dbx.ListPopulationsForPeriodRow,
 	walkthroughs []dbx.Walkthrough,
@@ -66,17 +66,19 @@ func makeAggregate(
 			Status:   "frozen",
 			FrozenAt: pgtype.Timestamptz{Time: frozenAt, Valid: true},
 		},
-		frozenAt:     frozenAt,
-		scopeCells:   scopeCells,
-		controls:     controls,
-		policies:     policies,
-		populations:  populations,
-		walkthroughs: walkthroughs,
-		auditNotes:   auditNotes,
-		failingEvals: failing,
-		in:           in,
-		controlOwner: map[uuid.UUID]string{},
-		controlTitle: map[uuid.UUID]string{},
+		frozenAt:               frozenAt,
+		scopeCells:             scopeCells,
+		controls:               controls,
+		policies:               policies,
+		populations:            populations,
+		walkthroughs:           walkthroughs,
+		auditNotes:             auditNotes,
+		failingEvals:           failing,
+		in:                     in,
+		controlOwner:           map[uuid.UUID]string{},
+		controlTitle:           map[uuid.UUID]string{},
+		sampledEvidence:        map[uuid.UUID][]uuid.UUID{},
+		walkthroughAttachments: map[uuid.UUID][]dbx.ListWalkthroughAttachmentsForPeriodRow{},
 	}
 	for _, c := range controls {
 		cid := uuid.UUID(c.ID.Bytes)
@@ -128,11 +130,12 @@ func TestSSPInput_PopulatesScopeCellsControlsAndPolicies(t *testing.T) {
 			Dimensions: []byte(`{"env":"prod","cloud":"aws"}`),
 		},
 	}
-	controls := []dbx.ListActiveControlsRow{
+	controls := []dbx.ListActiveControlsWithDescriptionRow{
 		{
 			ID:                pgUUID(ctrlIDWithSCF),
 			ScfID:             &scfA,
 			Title:             "Encrypt customer data at rest",
+			Description:       "All customer data at rest is encrypted using AES-256 via KMS-managed keys; key rotation is enforced every 90 days.",
 			ControlFamily:     "IAC",
 			OwnerRole:         "infra_security",
 			ApplicabilityExpr: "env == 'prod'",
@@ -141,6 +144,7 @@ func TestSSPInput_PopulatesScopeCellsControlsAndPolicies(t *testing.T) {
 			ID:                pgUUID(ctrlIDNoSCF),
 			ScfID:             nil,
 			Title:             "Quarterly access review",
+			Description:       "", // no authored narrative -> labeled fallback
 			ControlFamily:     "IAM",
 			OwnerRole:         "grc_engineer",
 			ApplicabilityExpr: "true",
@@ -201,25 +205,39 @@ func TestSSPInput_PopulatesScopeCellsControlsAndPolicies(t *testing.T) {
 	if withSCF.ControlId != ctrlIDWithSCF.String() {
 		t.Errorf("control[0].ControlId mismatch")
 	}
-	// Statement template renders the control bundle's human-authored
-	// summary — Title + ControlFamily + OwnerRole — never anything
-	// AI-generated (CLAUDE.md product-runtime AI-assist boundary).
-	if withSCF.Statement == "" {
-		t.Error("control[0].Statement must be populated")
+	// AC-2: when the control has an authored description, the SSP
+	// implementation Statement IS that description, verbatim — never
+	// AI-generated (CLAUDE.md product-runtime AI-assist boundary), never
+	// the synthesized template.
+	wantDesc := "All customer data at rest is encrypted using AES-256 via KMS-managed keys; key rotation is enforced every 90 days."
+	if withSCF.Statement != wantDesc {
+		t.Errorf("control[0].Statement = %q, want the authored description verbatim %q", withSCF.Statement, wantDesc)
 	}
-	if !contains(withSCF.Statement, "Encrypt customer data at rest") {
-		t.Errorf("control[0].Statement %q does not include the Title", withSCF.Statement)
-	}
-	if !contains(withSCF.Statement, "IAC") {
-		t.Errorf("control[0].Statement %q does not include the control family", withSCF.Statement)
-	}
-	if !contains(withSCF.Statement, "infra_security") {
-		t.Errorf("control[0].Statement %q does not include the owner role", withSCF.Statement)
+	// AC-4: the authored-description path carries ONLY the description —
+	// no leftover synthesized boilerplate concatenated in.
+	if contains(withSCF.Statement, "control family") {
+		t.Errorf("control[0].Statement %q leaked the synthesized template into an authored description", withSCF.Statement)
 	}
 
 	noSCF := out.ControlImplementations[1]
 	if noSCF.ScfId != "" {
 		t.Errorf("control[1].ScfId = %q, want empty (nil ScfID branch)", noSCF.ScfId)
+	}
+	// AC-3: a control with no authored description falls back to a
+	// CLEARLY-LABELED synthesized summary — never empty (P0-493-1). The
+	// label must make it unmistakable to an auditor that the text is
+	// auto-generated, not authored.
+	if noSCF.Statement == "" {
+		t.Error("control[1].Statement must never be empty (P0-493-1)")
+	}
+	if !contains(noSCF.Statement, "Auto-generated") {
+		t.Errorf("control[1].Statement %q must be clearly labeled as auto-generated (AC-3)", noSCF.Statement)
+	}
+	if !contains(noSCF.Statement, "Quarterly access review") {
+		t.Errorf("control[1].Statement %q fallback should include the control title", noSCF.Statement)
+	}
+	if !contains(noSCF.Statement, "grc_engineer") {
+		t.Errorf("control[1].Statement %q fallback should include the owner role", noSCF.Statement)
 	}
 
 	if len(out.Policies) != 1 {
@@ -256,6 +274,111 @@ func TestSSPInput_EmptySlicesProduceEmptyOutput(t *testing.T) {
 	}
 	if out.Metadata == nil {
 		t.Error("Metadata must always be populated, even on an empty SSP")
+	}
+}
+
+// TestSSPInput_AcceptedVendorClaims_AreSeparateAndNeverControlImplementations
+// is the slice-619 hard-boundary unit test (no DB, no bridge).
+//
+// An operator-ACCEPTED vendor claim must map to the SEPARATE
+// VendorAttestedImplementations field — carrying the vendor attribution +
+// accept-provenance — and must NEVER appear in ControlImplementations (where
+// it could be counted as platform control-satisfaction). This proves the
+// boundary at the proto-conversion layer, which is the only place a vendor
+// claim could leak into the platform's control-implementation surface.
+func TestSSPInput_AcceptedVendorClaims_AreSeparateAndNeverControlImplementations(t *testing.T) {
+	claimID := uuid.New()
+	acceptedAt := time.Date(2026, 5, 2, 9, 0, 0, 0, time.UTC)
+	scf := "IAC-07"
+	by := "operator@acme.com"
+
+	// One platform control (real coverage) + one accepted vendor claim.
+	ctrlID := uuid.New()
+	controls := []dbx.ListActiveControlsWithDescriptionRow{
+		{
+			ID:            pgUUID(ctrlID),
+			ScfID:         nil,
+			Title:         "Platform-owned control",
+			Description:   "Platform implementation narrative.",
+			ControlFamily: "IAC",
+			OwnerRole:     "infra_security",
+		},
+	}
+
+	agg := makeAggregate(t, ExportInput{}, nil, controls, nil, nil, nil, nil, nil)
+	agg.acceptedVendorClaims = []dbx.ListAcceptedVendorClaimsForExportRow{
+		{
+			ClaimID:         pgUUID(claimID),
+			ComponentUuid:   "vendor-uuid-1",
+			ComponentTitle:  "AcmeVault",
+			ComponentType:   "service",
+			ControlID:       "AC-2",
+			Statement:       "AcmeVault encrypts secrets at rest.",
+			RequirementUuid: "req-1",
+			ScfAnchorID:     &scf,
+			DispositionedBy: &by,
+			DispositionedAt: pgtype.Timestamptz{Time: acceptedAt, Valid: true},
+			DispositionNote: "Reviewed vendor SOC 2.",
+		},
+	}
+
+	out := agg.sspInput()
+
+	// 1. The accepted claim does NOT appear in ControlImplementations: that
+	//    list contains ONLY the platform control. (The boundary.)
+	if len(out.ControlImplementations) != 1 {
+		t.Fatalf("ControlImplementations len = %d, want 1 (platform control only)", len(out.ControlImplementations))
+	}
+	if out.ControlImplementations[0].ControlId != ctrlID.String() {
+		t.Errorf("ControlImplementations[0] = %q, want the platform control id %q", out.ControlImplementations[0].ControlId, ctrlID.String())
+	}
+	for _, ci := range out.ControlImplementations {
+		if ci.ControlId == "AC-2" {
+			t.Fatal("vendor claim AC-2 leaked into ControlImplementations — constitutional boundary violated")
+		}
+	}
+
+	// 2. The accepted claim DOES appear in the separate vendor-attested field,
+	//    with the vendor attribution + accept-provenance.
+	if len(out.VendorAttestedImplementations) != 1 {
+		t.Fatalf("VendorAttestedImplementations len = %d, want 1", len(out.VendorAttestedImplementations))
+	}
+	v := out.VendorAttestedImplementations[0]
+	if v.ClaimId != claimID.String() {
+		t.Errorf("ClaimId = %q, want %q", v.ClaimId, claimID.String())
+	}
+	if v.ControlId != "AC-2" {
+		t.Errorf("ControlId = %q, want AC-2", v.ControlId)
+	}
+	if v.ScfId != "IAC-07" {
+		t.Errorf("ScfId = %q, want IAC-07", v.ScfId)
+	}
+	if v.ComponentUuid != "vendor-uuid-1" || v.ComponentTitle != "AcmeVault" || v.ComponentType != "service" {
+		t.Errorf("vendor attribution mismatch: %+v", v)
+	}
+	if v.Statement != "AcmeVault encrypts secrets at rest." {
+		t.Errorf("Statement = %q", v.Statement)
+	}
+	if v.AcceptedBy != "operator@acme.com" {
+		t.Errorf("AcceptedBy = %q, want operator@acme.com", v.AcceptedBy)
+	}
+	if v.AcceptedAt != acceptedAt.UTC().Format(time.RFC3339) {
+		t.Errorf("AcceptedAt = %q, want %q", v.AcceptedAt, acceptedAt.UTC().Format(time.RFC3339))
+	}
+	if v.DispositionNote != "Reviewed vendor SOC 2." {
+		t.Errorf("DispositionNote = %q", v.DispositionNote)
+	}
+}
+
+// TestSSPInput_NoAcceptedVendorClaims_ProducesEmptyVendorField proves the
+// vendor field is empty (never nil-panicking) when nothing was accepted —
+// the rejected / needs_info / asserted case never reaches the export because
+// the aggregate query filters on claim_status = 'accepted'.
+func TestSSPInput_NoAcceptedVendorClaims_ProducesEmptyVendorField(t *testing.T) {
+	agg := makeAggregate(t, ExportInput{}, nil, nil, nil, nil, nil, nil, nil)
+	out := agg.sspInput()
+	if len(out.VendorAttestedImplementations) != 0 {
+		t.Errorf("VendorAttestedImplementations = %d, want 0", len(out.VendorAttestedImplementations))
 	}
 }
 
@@ -385,6 +508,140 @@ func TestAssessmentInput_PopulatesPopulationsWalkthroughsAndNotes(t *testing.T) 
 	}
 }
 
+// TestAssessmentInput_CarriesDrawnSampleAndAttachmentRefs (slice 494) exercises
+// the new proto-conversion branches: sampled_evidence_ids per population (AC-1),
+// walkthrough attachment refs (AC-4/AC-5), the empty-draw branch, and a
+// walkthrough with no attachments. Pure in-memory — no DB.
+func TestAssessmentInput_CarriesDrawnSampleAndAttachmentRefs(t *testing.T) {
+	popDrawn := uuid.New()
+	popEmpty := uuid.New()
+	ctrlID := uuid.New()
+	wtWithAtt := uuid.New()
+	wtNoAtt := uuid.New()
+	ev1, ev2 := uuid.New(), uuid.New()
+	att1 := uuid.New()
+
+	populations := []dbx.ListPopulationsForPeriodRow{
+		{ID: pgUUID(popDrawn), ControlID: pgUUID(ctrlID), RowCount: 10},
+		{ID: pgUUID(popEmpty), ControlID: pgUUID(ctrlID), RowCount: 3},
+	}
+	walkthroughs := []dbx.Walkthrough{
+		{ID: pgUUID(wtWithAtt), ControlID: pgUUID(ctrlID), Narrative: "n", Status: "finalized", CanonicalHash: []byte{0x01}},
+		{ID: pgUUID(wtNoAtt), ControlID: pgUUID(ctrlID), Narrative: "n2", Status: "draft", CanonicalHash: []byte{0x02}},
+	}
+
+	agg := makeAggregate(t, ExportInput{}, nil, nil, nil, populations, walkthroughs, nil, nil)
+	// popDrawn has a draw (shuffle order ev2, ev1); popEmpty has none.
+	agg.sampledEvidence[popDrawn] = []uuid.UUID{ev2, ev1}
+	// wtWithAtt has one attachment; wtNoAtt has none.
+	agg.walkthroughAttachments[wtWithAtt] = []dbx.ListWalkthroughAttachmentsForPeriodRow{
+		{
+			ID:          pgUUID(att1),
+			StorageKey:  "tenant-abc/" + att1.String(),
+			ContentType: "image/png",
+			Sha256Hash:  "aa11",
+			Annotations: []byte(`{"regions":[{"x":1}]}`),
+		},
+	}
+
+	out := agg.assessmentInput()
+
+	// AC-1: drawn ids carried in shuffle order.
+	gotDrawn := out.Populations[0].SampledEvidenceIds
+	if len(gotDrawn) != 2 || gotDrawn[0] != ev2.String() || gotDrawn[1] != ev1.String() {
+		t.Errorf("popDrawn sampled ids = %v, want [%s %s] in shuffle order", gotDrawn, ev2, ev1)
+	}
+	// Empty-draw branch: a never-sampled population carries an empty (non-nil
+	// here, but proto-empty) slice — no crash, no leak of other pops' draws.
+	if len(out.Populations[1].SampledEvidenceIds) != 0 {
+		t.Errorf("popEmpty sampled ids = %v, want empty", out.Populations[1].SampledEvidenceIds)
+	}
+
+	// AC-4/AC-5: attachment ref carries metadata + storage URI, no bytes.
+	wt0 := out.Walkthroughs[0]
+	if len(wt0.Attachments) != 1 {
+		t.Fatalf("wtWithAtt attachments = %d, want 1", len(wt0.Attachments))
+	}
+	a := wt0.Attachments[0]
+	if a.Id != att1.String() {
+		t.Errorf("attachment id = %q, want %q", a.Id, att1)
+	}
+	if a.ContentHash != "aa11" || a.ContentType != "image/png" {
+		t.Errorf("attachment hash/type = %q/%q", a.ContentHash, a.ContentType)
+	}
+	if a.StorageUri != "tenant-abc/"+att1.String() {
+		t.Errorf("attachment storage uri = %q", a.StorageUri)
+	}
+	if a.Filename != att1.String() {
+		t.Errorf("attachment filename = %q, want basename %q", a.Filename, att1)
+	}
+	if a.AnnotationRef != `{"regions":[{"x":1}]}` {
+		t.Errorf("attachment annotation ref = %q", a.AnnotationRef)
+	}
+	// A walkthrough with no attachments carries none (nil, not a panic).
+	if len(out.Walkthroughs[1].Attachments) != 0 {
+		t.Errorf("wtNoAtt attachments = %d, want 0", len(out.Walkthroughs[1].Attachments))
+	}
+}
+
+// TestWalkthroughAttachmentCap (slice 494 D3) verifies the per-walkthrough cap
+// + overflow note: 52 attachments -> 50 real refs + 1 overflow note ref.
+func TestWalkthroughAttachmentCap(t *testing.T) {
+	wtID := uuid.New()
+	agg := makeAggregate(t, ExportInput{}, nil, nil, nil, nil,
+		[]dbx.Walkthrough{{ID: pgUUID(wtID), ControlID: pgUUID(uuid.New()), Narrative: "n", Status: "finalized", CanonicalHash: []byte{0x01}}},
+		nil, nil)
+
+	rows := make([]dbx.ListWalkthroughAttachmentsForPeriodRow, 0, 52)
+	for i := 0; i < 52; i++ {
+		id := uuid.New()
+		rows = append(rows, dbx.ListWalkthroughAttachmentsForPeriodRow{
+			ID: pgUUID(id), StorageKey: "k/" + id.String(), ContentType: "image/png", Sha256Hash: "h", Annotations: []byte("{}"),
+		})
+	}
+	agg.walkthroughAttachments[wtID] = rows
+
+	out := agg.assessmentInput()
+	atts := out.Walkthroughs[0].Attachments
+	// 50 capped + 1 overflow note = 51.
+	if len(atts) != maxAttachmentRefsPerWalkthrough+1 {
+		t.Fatalf("attachments len = %d, want %d (cap + overflow note)", len(atts), maxAttachmentRefsPerWalkthrough+1)
+	}
+	overflow := atts[len(atts)-1]
+	if overflow.StorageUri != "" {
+		t.Errorf("overflow note should have no storage uri, got %q", overflow.StorageUri)
+	}
+	if overflow.Filename == "" || !strings.Contains(overflow.Filename, "not shown") {
+		t.Errorf("overflow note filename = %q, want an overflow message", overflow.Filename)
+	}
+}
+
+// TestAttachmentFilenameAndAnnotationRef exercises the small pure helpers.
+func TestAttachmentFilenameAndAnnotationRef(t *testing.T) {
+	cases := []struct{ key, want string }{
+		{"tenant-abc/file-id", "file-id"},
+		{"no-separator", "no-separator"},
+		{"trailing/", "trailing/"}, // trailing slash -> whole key (no basename)
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := attachmentFilename(c.key); got != c.want {
+			t.Errorf("attachmentFilename(%q) = %q, want %q", c.key, got, c.want)
+		}
+	}
+	annCases := []struct{ in, want string }{
+		{"", ""},
+		{"{}", ""},
+		{"  {}  ", ""},
+		{`{"regions":[]}`, `{"regions":[]}`},
+	}
+	for _, c := range annCases {
+		if got := annotationRef([]byte(c.in)); got != c.want {
+			t.Errorf("annotationRef(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 // TestPOAMInput_FailingControlsBecomePOAMItems exercises EVERY branch in
 // poamInput: severity (moderate vs high), due-date base (LastObservedAt
 // > EvaluatedAt > now), owner / title fallbacks (present + missing),
@@ -395,10 +652,11 @@ func TestPOAMInput_FailingControlsBecomePOAMItems(t *testing.T) {
 	lastObserved := time.Date(2026, 4, 1, 10, 0, 0, 0, time.UTC)
 	evaluatedAt := time.Date(2026, 4, 2, 10, 0, 0, 0, time.UTC)
 
-	controls := []dbx.ListActiveControlsRow{
+	controls := []dbx.ListActiveControlsWithDescriptionRow{
 		{
 			ID:                pgUUID(ctrlID),
 			Title:             "Encrypt customer data at rest",
+			Description:       "AES-256 at rest.",
 			ControlFamily:     "IAC",
 			OwnerRole:         "infra_security",
 			ApplicabilityExpr: "true",

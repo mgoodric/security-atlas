@@ -25,7 +25,33 @@
 // events, month-grid view renders, day-popover opens on click, ICS-copy
 // button puts a URL on the clipboard.
 
-import { test } from "@playwright/test";
+import { expect, test } from "./fixtures";
+
+test.describe("compliance calendar — today highlight (slice 668)", () => {
+  // AC-3: the month grid marks the ACTUAL current day (not a hardcoded
+  // value). This spec needs no seed data — the today affordance renders
+  // for any signed-in user — so it runs live (not quarantined). The
+  // expected day number is derived from the same wall-clock the renderer
+  // reads, so the assertion is deterministic regardless of run date.
+  test("AC-668: month grid marks today with aria-current='date' and an emphasized day number", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/calendar?view=month");
+
+    // Exactly one cell is the current day.
+    const todayCell = page.locator('button[aria-current="date"]');
+    await expect(todayCell).toHaveCount(1);
+    await expect(todayCell).toBeVisible();
+
+    // AC-1 / AC-3: that cell shows the real current day-of-month. The grid
+    // keys cells on LOCAL dates, so compare against the local day number.
+    const expectedDay = String(new Date().getDate());
+    await expect(todayCell).toContainText(expectedDay);
+
+    // The today affordance is also tagged for the unit/e2e contract.
+    await expect(todayCell).toHaveAttribute("data-today", "true");
+  });
+});
 
 test.describe("compliance calendar", () => {
   test("AC-9: /calendar renders the calendar view for any signed-in user", async () => {
@@ -91,6 +117,26 @@ test.describe("compliance calendar", () => {
     //    const tooltip = await policyRow.locator("span").first().getAttribute("title");
     //    expect(tooltip).toMatch(/policy/i);
     //    expect(tooltip).toMatch(/future slice/i);
+  });
+
+  test("AC-675-1: legend lists 'Vendor reviews' and the agenda surfaces vendor events", async () => {
+    // Slice 675. The calendar previously sourced a narrower set than the
+    // dashboard "Upcoming" widget — it lacked vendor reviews entirely, and
+    // the legend had no "Vendor reviews" entry. When the seed harness
+    // (slice 082) lands and the test tenant carries at least one vendor
+    // with last_review_date + cadence whose next review falls in the
+    // default 90-day window, assert both that the legend lists vendor
+    // reviews AND that a vendor row renders in the agenda linking to the
+    // real /vendors/<id> detail page.
+    //
+    //    await page.goto("/calendar");
+    // Legend includes the vendor entry (AC-2).
+    //    await expect(page.getByLabel("Vendor reviews")).toBeVisible();
+    // Agenda surfaces at least one vendor row (AC-1 / AC-5).
+    //    const vendorRow = page.locator("li", { hasText: "Vendor review" }).first();
+    //    await expect(vendorRow).toBeVisible();
+    // Vendor rows link to the real per-vendor detail page (not a dead anchor).
+    //    await expect(vendorRow.locator('a[href^="/vendors/"]')).toHaveCount(1);
   });
 
   test("AC-12: filter checkbox hides events of that type", async () => {

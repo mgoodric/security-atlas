@@ -216,8 +216,8 @@ function ScopeTable({
   if (scopes.length === 0) {
     return (
       <p className="py-12 text-center text-sm text-muted-foreground">
-        No scopes yet. Create one via POST /v1/framework-scopes (the new-scope
-        UI lands in slice 020).
+        No scopes yet. Create one via the platform API (POST
+        /v1/framework-scopes); the in-app create form is not available yet.
       </p>
     );
   }

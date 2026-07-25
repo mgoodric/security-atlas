@@ -203,6 +203,51 @@ test.describe("control detail view", () => {
     //    ).toBeVisible();
   });
 
+  test("slice 482: each coverage row shows a confidence band badge", async () => {
+    // Slice 482 — the coverage table gains a Confidence column: one
+    // band badge per requirement row, derived from the per-row
+    // `coverage` value with the same thresholds the backend rollup
+    // uses (strong ≥ 0.80, partial 0.50–0.79, weak < 0.50, uncovered
+    // when out of scope / no data). The badge carries `data-band` so
+    // the assertion is value-driven, not text-fragile. Assertions are
+    // commented pending the slice-082 seed harness (same convention as
+    // the surrounding tests); the body is the reviewable contract.
+    //    await page.goto(`/controls/${KNOWN_CONTROL_ID}`);
+    //    await expect(page.getByTestId("coverage-table")).toBeVisible();
+    //    // Every row carries a confidence-band badge.
+    //    const bands = page.getByTestId("confidence-band");
+    //    await expect(bands.first()).toBeVisible();
+    //    // The band value is one of the four documented buckets.
+    //    await expect(bands.first()).toHaveAttribute(
+    //      "data-band",
+    //      /^(strong|partial|weak|uncovered)$/,
+    //    );
+    //    // An in-scope numeric row's band agrees with its coverage value:
+    //    // a coverage-cell with data-coverage-state="numeric" sits in a
+    //    // row whose band is strong | partial | weak (never uncovered).
+    //    const numericRow = page
+    //      .locator('[data-testid="coverage-row"]')
+    //      .filter({
+    //        has: page.locator(
+    //          '[data-testid="coverage-cell"][data-coverage-state="numeric"]',
+    //        ),
+    //      });
+    //    await expect(
+    //      numericRow.first().getByTestId("confidence-band"),
+    //    ).toHaveAttribute("data-band", /^(strong|partial|weak)$/);
+    //    // An out-of-scope row's band is uncovered (no in-scope evidence).
+    //    const oosRow = page.locator(
+    //      '[data-testid="coverage-row"][data-out-of-scope="true"]',
+    //    );
+    //    await expect(
+    //      oosRow.first().getByTestId("confidence-band"),
+    //    ).toHaveAttribute("data-band", "uncovered");
+    //    // The footer documents the band thresholds.
+    //    await expect(page.getByTestId("coverage-footer")).toContainText(
+    //      "confidence band",
+    //    );
+  });
+
   test("slice 255: header action buttons + last-evaluated timestamp", async () => {
     // Slice 255 — the control header's top-right well carries three
     // action buttons (Run query · Edit YAML · Request exception) and a

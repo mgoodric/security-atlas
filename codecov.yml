@@ -1,0 +1,24 @@
+# Codecov configuration — slice 693.
+#
+# Before this file existed Codecov ran on defaults: it posted a PR comment
+# on every PR and could fire a `patch`/`project` status before BOTH upload
+# flags (unittests + integration) had arrived. The merged-coverage MERGE
+# GATE is enforced independently by `cmd/scripts/coverage-gate` (CI job
+# `Go · build + test`), NOT by Codecov — so the statuses below are
+# `informational` and remove zero enforcement. This file only quiets the
+# noise: wait for both flags, and only comment when coverage actually moves.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment:
+  layout: "condensed_header, condensed_files, condensed_footer"
+  behavior: default # update the existing sticky comment in place
+  require_changes: true # skip the comment on PRs that do not move coverage
+  after_n_builds: 2 # wait for both the unittests + integration uploads
+  hide_project_coverage: true

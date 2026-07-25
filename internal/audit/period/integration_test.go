@@ -19,7 +19,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"os"
 	"testing"
 	"time"
 
@@ -28,42 +27,28 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/audit/period"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// ----- harness helpers (mirrored from internal/audit/integration_test.go) -----
+// Slice 435 / 742: the pool/DSN/tenant-seed/tenant-context boilerplate this
+// file used to re-derive (appDSN / adminDSN / openPool / freshTenant / inline
+// tenancy.WithTenant) now lives in the shared internal/dbtest harness.
+// dbtest.NewAppPool opens the RLS-enforcing atlas_app pool (the default — the
+// period.Store / audit.Store and every RLS-bound assertion run through it);
+// dbtest.NewMigratePool opens the privileged BYPASSRLS pool used ONLY for
+// cross-tenant fixture seeding, the append-only audit_period_audit_log /
+// sample_audit_log / evidence_records cleanup, the AC-7 admin rollback, and the
+// information_schema anti-criterion probe — none of which the app role can
+// perform. dbtest.WithTenantCtx tags the tenant GUC context. seedFrameworkVersion
+// / seedControl / seedEvidence remain suite-local (FK-parent + ledger fixtures
+// dbtest does not provide); they route through the migrate pool exactly as before.
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
-// freshTenant cleans up every slice-028 + slice-026 table for this tenant
-// after the test, so reruns don't accumulate.
+// freshTenant returns a fresh tenant id and registers cleanup of the slice-028 +
+// slice-026 tables (children before parents, with the populations FK detach
+// kept as a leading statement) via the privileged migrate pool. The
+// freshTenant body retains the populations.audit_period_id detach UPDATE that
+// dbtest.SeedTenant's table-DELETE loop does not express, so the cleanup
+// ordering is byte-for-byte preserved.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
@@ -146,27 +131,16 @@ func seedEvidence(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.
 	return out
 }
 
-func ctxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
-}
-
 // ===== AC-1: POST /v1/audit-periods creates open period =====
 
 func TestCreate_ReturnsOpenPeriod(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 
 	store := period.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	p, err := store.Create(ctx, period.CreateInput{
 		Name:               "SOC 2 2026 Q2",
@@ -201,17 +175,15 @@ func TestCreate_ReturnsOpenPeriod(t *testing.T) {
 // ===== AC-2: POST /v1/audit-periods/:id/freeze stamps frozen_at + hash =====
 
 func TestFreeze_SetsFrozenAtAndHash(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
 	_ = seedEvidence(t, admin, tenant, ctrlID, 5, time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC))
 
 	store := period.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	p, err := store.Create(ctx, period.CreateInput{
 		Name:               "AC-2 period",
@@ -245,10 +217,8 @@ func TestFreeze_SetsFrozenAtAndHash(t *testing.T) {
 // ===== AC-3: control-state query honors frozen_at horizon =====
 
 func TestControlState_HonorsFrozenAtHorizon(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
@@ -257,7 +227,7 @@ func TestControlState_HonorsFrozenAtHorizon(t *testing.T) {
 	_ = seedEvidence(t, admin, tenant, ctrlID, 24, windowStart)
 
 	store := period.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	p, err := store.Create(ctx, period.CreateInput{
 		Name:               "AC-3 period",
@@ -295,10 +265,8 @@ func TestControlState_HonorsFrozenAtHorizon(t *testing.T) {
 // ===== AC-4: population attached to frozen period excludes post-freeze records =====
 
 func TestAttachPopulation_FrozenPeriodExcludesPostFreezeEvidence(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
@@ -307,7 +275,7 @@ func TestAttachPopulation_FrozenPeriodExcludesPostFreezeEvidence(t *testing.T) {
 
 	periodStore := period.NewStore(app)
 	auditStore := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	p, err := periodStore.Create(ctx, period.CreateInput{
 		Name:               "AC-4 period",
@@ -373,10 +341,8 @@ func TestAttachPopulation_FrozenPeriodExcludesPostFreezeEvidence(t *testing.T) {
 // live state.
 
 func TestLiveEvaluation_UnaffectedByFreeze(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
@@ -385,7 +351,7 @@ func TestLiveEvaluation_UnaffectedByFreeze(t *testing.T) {
 
 	periodStore := period.NewStore(app)
 	auditStore := audit.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	p, err := periodStore.Create(ctx, period.CreateInput{
 		Name:               "AC-5 period",
@@ -426,15 +392,13 @@ func TestLiveEvaluation_UnaffectedByFreeze(t *testing.T) {
 // ===== AC-6: re-freezing a frozen period rejected =====
 
 func TestFreeze_RejectsRefreeze(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 
 	store := period.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	p, err := store.Create(ctx, period.CreateInput{
 		Name:               "AC-6 period",
@@ -481,10 +445,8 @@ func TestFreeze_RejectsRefreeze(t *testing.T) {
 // resulting hash bytes are byte-identical.
 
 func TestFreeze_HashIsIdempotentForUnchangedContent(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 	ctrlID := seedControl(t, admin, tenant)
@@ -492,7 +454,7 @@ func TestFreeze_HashIsIdempotentForUnchangedContent(t *testing.T) {
 	_ = seedEvidence(t, admin, tenant, ctrlID, 7, windowStart)
 
 	store := period.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	p, err := store.Create(ctx, period.CreateInput{
 		Name:               "AC-7 period",
@@ -557,17 +519,15 @@ func TestFreeze_HashIsIdempotentForUnchangedContent(t *testing.T) {
 // ===== RLS: cross-tenant invisibility =====
 
 func TestPeriod_CrossTenantInvisible(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 
 	store := period.NewStore(app)
-	ctxA := ctxFor(t, tenantA)
-	ctxB := ctxFor(t, tenantB)
+	ctxA := dbtest.WithTenantCtx(t, tenantA)
+	ctxB := dbtest.WithTenantCtx(t, tenantB)
 
 	pA, err := store.Create(ctxA, period.CreateInput{
 		Name:               "tenant A period",
@@ -592,8 +552,7 @@ func TestPeriod_CrossTenantInvisible(t *testing.T) {
 // one without removing it before this test runs, the test fails.
 
 func TestAntiCriterion_NoEvidenceSnapshotTable(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	row := admin.QueryRow(context.Background(),
 		`SELECT count(*) FROM information_schema.tables
 		 WHERE table_schema = 'public'
@@ -610,15 +569,13 @@ func TestAntiCriterion_NoEvidenceSnapshotTable(t *testing.T) {
 // ===== Audit log: period_created + period_frozen rows recorded =====
 
 func TestAuditLog_RecordsCreateAndFreeze(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	fwID := seedFrameworkVersion(t, admin)
 
 	store := period.NewStore(app)
-	ctx := ctxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	p, err := store.Create(ctx, period.CreateInput{
 		Name:               "audit-log period",

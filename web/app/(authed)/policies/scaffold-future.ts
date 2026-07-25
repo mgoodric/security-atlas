@@ -96,7 +96,7 @@
  *     Playwright spec asserts on it.
  */
 export const POLICIES_SCAFFOLD_FUTURE_BODY =
-  "The in-app policy scaffold wizard ships with a future slice — until then, drafts can be created via the platform API (POST /v1/policies).";
+  "The in-app policy scaffold wizard is not available yet — until then, drafts can be created via the platform API (POST /v1/policies).";
 
 /**
  * Test-id token surfaced on the empty-state body wrapper so the

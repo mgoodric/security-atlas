@@ -29,67 +29,30 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
+// freshTenant returns a brand-new tenant id and registers cleanup. The
+// cleanup is a pure FK-ordered tenant-scoped DELETE returning a string, so
+// it delegates to dbtest.SeedTenant (slice 435 / 742 drain batch 23).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM risk_control_links WHERE tenant_id = $1`,
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM risks WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"risk_control_links",
+		"control_evaluations",
+		"evidence_records",
+		"risks",
+		"controls",
+	)
 }
 
 func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
@@ -186,8 +149,8 @@ func post(t *testing.T, env testEnv, path string, payload any, bearer string) (*
 // ===== AC-1 / ISC-16, ISC-17: link a control, it appears on the risk =====
 
 func TestLinkControl_LinksAndAppearsInLinkedControlIDs(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -224,8 +187,8 @@ func TestLinkControl_LinksAndAppearsInLinkedControlIDs(t *testing.T) {
 // ===== ISC-21: link endpoint requires tenant context =====
 
 func TestLinkControl_RequiresAuth(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -243,8 +206,8 @@ func TestLinkControl_RequiresAuth(t *testing.T) {
 // ===== ISC-19: linking an unknown control -> 404 =====
 
 func TestLinkControl_UnknownControl404(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -259,8 +222,8 @@ func TestLinkControl_UnknownControl404(t *testing.T) {
 // ===== ISC-20: linking on an unknown risk -> 404 =====
 
 func TestLinkControl_UnknownRisk404(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -275,8 +238,8 @@ func TestLinkControl_UnknownRisk404(t *testing.T) {
 // ===== AC-2 / ISC-22..26: GET risk returns residual + breakdown =====
 
 func TestGetRisk_ReturnsResidualAndBreakdown(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -325,8 +288,8 @@ func TestGetRisk_ReturnsResidualAndBreakdown(t *testing.T) {
 // ===== AC-7 / ISC-39, ISC-40: GET risk with no controls warns =====
 
 func TestGetRisk_NoControlsWarns(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 

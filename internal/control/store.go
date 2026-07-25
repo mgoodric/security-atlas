@@ -343,6 +343,75 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 	return nil
 }
 
+// WithReadOnlyTenantTx runs fn inside a READ-ONLY, tenant-scoped transaction
+// that is ALWAYS rolled back. It exists so the slice-574 upload gate can
+// evaluate a bundle's SQL-language test fixtures (which need a real Postgres
+// subtransaction — see internal/eval/sql.go) without ever writing: the tx is
+// opened `READ ONLY`, the tenant RLS context is applied, fn runs, and the tx is
+// discarded. This upholds constitutional invariant #2 — the gate evaluates, it
+// never mutates evidence or any source-of-truth row. fn receives the live
+// pgx.Tx; it must NOT attempt a write (the READ ONLY mode would reject one
+// anyway).
+func (s *Store) WithReadOnlyTenantTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		return err
+	}
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return fmt.Errorf("control: begin read-only tx: %w", err)
+	}
+	// Always roll back — this path never commits (gate is read-only).
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		return err
+	}
+	return fn(tx)
+}
+
+// DefaultBundleGateMode is the policy returned when a tenant has no explicit
+// value (no tenants row, or a row predating the slice-608 column). It is
+// "strict" so a tenant that has done nothing keeps the safe slice-574 default.
+// The api/controls package validates the returned string into its GateMode type.
+const DefaultBundleGateMode = "strict"
+
+// BundleGateMode returns the caller-tenant's control-bundle upload gate policy
+// (slice 608) as the raw column string. RLS scopes the read to the caller's own
+// tenant row. A missing tenants row (pgx.ErrNoRows) resolves to
+// DefaultBundleGateMode — existing/bare-UUID tenants keep the slice-574
+// behaviour with no backfill. The read runs in a READ-ONLY tenant tx (the gate
+// is read-only; invariant #2).
+func (s *Store) BundleGateMode(ctx context.Context) (string, error) {
+	tenantStr, err := tenancy.TenantFromContext(ctx)
+	if err != nil {
+		return "", err
+	}
+	tenantID, err := uuid.Parse(tenantStr)
+	if err != nil {
+		return "", fmt.Errorf("control: parse tenant id: %w", err)
+	}
+	mode := DefaultBundleGateMode
+	rerr := s.WithReadOnlyTenantTx(ctx, func(tx pgx.Tx) error {
+		q := dbx.New(tx)
+		got, qerr := q.GetTenantBundleGateMode(ctx, pgUUID(tenantID))
+		if qerr != nil {
+			if errors.Is(qerr, pgx.ErrNoRows) {
+				// No tenants row for this caller — keep the default.
+				return nil
+			}
+			return fmt.Errorf("read bundle gate mode: %w", qerr)
+		}
+		if got != "" {
+			mode = got
+		}
+		return nil
+	})
+	if rerr != nil {
+		return "", rerr
+	}
+	return mode, nil
+}
+
 func pgUUID(u uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: u, Valid: true}
 }

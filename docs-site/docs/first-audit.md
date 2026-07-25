@@ -131,6 +131,18 @@ Four artifacts come out of an audit cycle. Each is OSCAL JSON v1.1.x:
 | Assessment Results | Sampled evidence + auditor pass/fail/finding annotations                               |
 | POA&M              | Open findings with milestones, owners, due dates                                       |
 
+The Assessment Results now carries, for each sample population, the
+**specific evidence record IDs that were drawn** (not just the population
+size) — in the deterministic sample order, so the draw is reproducible from
+the persisted seed and frozen horizon. Each walkthrough carries its
+**attachment references** (the annotated screen captures and transcripts) as
+OSCAL `observation` `relevant-evidence`: every attachment is referenced by its
+content hash and object-storage URI. The attachment bytes are **not** embedded
+in the AR JSON — the object store is the source of truth and the signed bundle
+is the integrity layer. An auditor importing the AR into their own OSCAL tooling
+can trace from an observation to the exact evidence record or captured artifact
+without leaving the bundle.
+
 Export the full bundle:
 
 ```sh

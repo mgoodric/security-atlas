@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/k8s.admission_webhook/1.0.0.json",
+  "x-evidence-kind": "k8s.admission_webhook.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CFG-02"],
+  "title": "Kubernetes admission-webhook configuration (metadata-only)",
+  "description": "Per-webhook CONFIGURATION metadata captured read-only from the Kubernetes API (get/list on admissionregistration.k8s.io/v1 validatingwebhookconfigurations + mutatingwebhookconfigurations — the NEW base ClusterRole rule this connector mode adds; slice 652, the #524 PSS follow-on). The auditable question is 'is admission-time policy enforcement WIRED IN beyond namespace PSS labels, and is it fail-closed?' — proving a validating/mutating webhook intercepts the right resources/operations, whether it fails open or closed when unreachable, and how it scopes its interception — WITHOUT reading the webhook's TLS material or any intercepted object. CONFIGURATION metadata ONLY: the webhook kind (validating / mutating), the *WebhookConfiguration object name and the individual webhook entry name, the failurePolicy (Fail / Ignore) + a derived fail_closed flag, the declared sideEffects class, whether the webhook scopes by a namespace/object selector (the PRESENCE of a selector, never its match expressions), the dispatch service ref (namespace/name), and the sets of resource TYPES + operation VERBS it intercepts. There is deliberately NO field for the webhook's .clientConfig.caBundle / TLS client key, the dispatch URL, or an intercepted-object payload: the connector NEVER reads, models, or records any of them — the collector struct physically cannot hold them and the client decode does not model the caBundle / url / TLS fields at all (a reflection guard + a fixture-with-real-caBundle drop test fail the build / suite if a value-bearing field is ever added). The connector emits no pass/fail verdict (this is descriptive configuration evidence — INCONCLUSIVE); the platform evaluator owns any fail-open / scope policy call. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9): CFG-02 (Configuration Management / System Hardening — the same anchor the PSS admission kind k8s.pod_security_admission.v1 uses, since admission webhooks are the enforced-hardening surface alongside PSS labels).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "webhook_kind",
+    "config_name",
+    "webhook_name",
+    "fail_closed",
+    "has_namespace_selector",
+    "has_object_selector"
+  ],
+  "properties": {
+    "webhook_kind": {
+      "type": "string",
+      "enum": ["validating", "mutating"],
+      "description": "Which admission-webhook configuration this entry came from: validating (admits/rejects) or mutating (patches the object)."
+    },
+    "config_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The *WebhookConfiguration object name (metadata.name) — the resource the new ClusterRole rule gates."
+    },
+    "webhook_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The individual webhook entry name within the configuration (.webhooks[].name, an FQDN-style id)."
+    },
+    "fail_closed": {
+      "type": "boolean",
+      "description": "True when the webhook REJECTS the request on an unreachable endpoint (failurePolicy=Fail — the hardened, fail-closed posture). False when it admits (Ignore) or the policy is unset."
+    },
+    "failure_policy": {
+      "type": "string",
+      "enum": ["Fail", "Ignore"],
+      "description": "The webhook's failurePolicy as the configuration reports it. Omitted when the configuration set no explicit failurePolicy (recorded honestly rather than asserting the Kubernetes default)."
+    },
+    "side_effects": {
+      "type": "string",
+      "description": "The declared sideEffects class (None / NoneOnDryRun / Some / Unknown). Classification metadata — never the effect itself. Omitted when unset."
+    },
+    "has_namespace_selector": {
+      "type": "boolean",
+      "description": "Whether the webhook scopes its interception by a namespaceSelector. The PRESENCE of a selector (the scope-narrowing signal) — never the selector's match expressions."
+    },
+    "has_object_selector": {
+      "type": "boolean",
+      "description": "Whether the webhook scopes its interception by an objectSelector. The PRESENCE of a selector — never its match expressions."
+    },
+    "target_service": {
+      "type": "string",
+      "description": "The dispatch target 'namespace/name' the webhook calls (.clientConfig.service ref). Omitted when the webhook dispatches to a raw URL — the URL is never recorded."
+    },
+    "intercepted_resources": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "The set of resource TYPES the webhook intercepts (the .rules[].resources union, e.g. ['pods','deployments']). Resource TYPES, never an instance's contents. Omitted when the webhook declares no rules."
+    },
+    "intercepted_operations": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true,
+      "description": "The set of operations the webhook intercepts (the .rules[].operations union, e.g. ['CREATE','UPDATE']). Omitted when the webhook declares no rules."
+    }
+  }
+}

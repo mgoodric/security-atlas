@@ -183,3 +183,56 @@ CREATE TYPE decision_status AS ENUM (
     'superseded',
     'expired'
 );
+
+-- ===== From migrations/sql/20260608080000_csf_tier_profile.sql (slice 515) =====
+
+CREATE TYPE csf_tier AS ENUM (
+    'tier1_partial',
+    'tier2_risk_informed',
+    'tier3_repeatable',
+    'tier4_adaptive'
+);
+
+CREATE TYPE csf_profile_kind AS ENUM (
+    'current',
+    'target'
+);
+
+-- ===== From migrations/sql/20260611000000_vendor_reviews_ledger.sql (slice 688) =====
+
+CREATE TYPE vendor_review_outcome AS ENUM (
+    'pass',
+    'pass_with_findings',
+    'fail',
+    'waived'
+);
+
+-- ===== From migrations/sql/20260612080000_crosswalk_mapping_tier.sql (slice 483) =====
+
+CREATE TYPE crosswalk_mapping_tier AS ENUM (
+    'draft',
+    'under_review',
+    'verified',
+    'rejected'
+);
+
+-- ===== From migrations/sql/20260612090000_framework_versioning.sql (slice 484) =====
+
+CREATE TYPE framework_version_migration_status AS ENUM (
+    'pending',
+    'approved',
+    'rejected'
+);
+
+CREATE TYPE framework_version_migration_match_kind AS ENUM (
+    'exact_code',
+    'added',
+    'removed'
+);
+
+CREATE TYPE framework_version_audit_action AS ENUM (
+    'promote',
+    'revert',
+    'migration_approve',
+    'migration_reject'
+);

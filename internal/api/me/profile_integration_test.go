@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -34,39 +33,10 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
-
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // seedTenantAndUser inserts a fresh tenant + users row and returns the
 // (tenantID, userID) pair. Test cleanup deletes both.
@@ -179,8 +149,8 @@ func do(t *testing.T, env testEnv, method, path string, body any) (*http.Respons
 // ===== ISC-26: GET /v1/me returns the caller's profile =====
 
 func TestGetMe_HappyPath(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "alice@example.com", "Alice Example")
 	env := testServerForUser(t, app, tenantID, userID, false)
 
@@ -205,8 +175,8 @@ func TestGetMe_HappyPath(t *testing.T) {
 // ===== ISC-27: PATCH /v1/me validates time_zone =====
 
 func TestPatchMe_BadTimeZoneRejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "bob@example.com", "Bob")
 	env := testServerForUser(t, app, tenantID, userID, false)
 
@@ -221,8 +191,8 @@ func TestPatchMe_BadTimeZoneRejected(t *testing.T) {
 // ===== ISC-28: PATCH /v1/me with valid diff updates + audit =====
 
 func TestPatchMe_UpdatesDisplayNameAndTimeZone(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "carol@example.com", "Carol Old")
 	env := testServerForUser(t, app, tenantID, userID, false)
 
@@ -254,8 +224,8 @@ func TestPatchMe_UpdatesDisplayNameAndTimeZone(t *testing.T) {
 // ===== ISC-A5: empty-diff PATCH skips audit-log write =====
 
 func TestPatchMe_EmptyDiffSkipsAudit(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "dave@example.com", "Dave")
 	env := testServerForUser(t, app, tenantID, userID, false)
 
@@ -278,8 +248,8 @@ func TestPatchMe_EmptyDiffSkipsAudit(t *testing.T) {
 // ===== ISC-4 / ISC-30: preferences default to all-enabled + 400 on unknown event =====
 
 func TestGetPreferences_DefaultsAllEnabled(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "ed@example.com", "Ed")
 	env := testServerForUser(t, app, tenantID, userID, false)
 
@@ -306,8 +276,8 @@ func TestGetPreferences_DefaultsAllEnabled(t *testing.T) {
 }
 
 func TestPatchPreferences_UnknownEvent400(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "fay@example.com", "Fay")
 	env := testServerForUser(t, app, tenantID, userID, false)
 
@@ -320,8 +290,8 @@ func TestPatchPreferences_UnknownEvent400(t *testing.T) {
 }
 
 func TestPatchPreferences_MergeSemantic(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "gigi@example.com", "Gigi")
 	env := testServerForUser(t, app, tenantID, userID, false)
 
@@ -350,8 +320,8 @@ func TestPatchPreferences_MergeSemantic(t *testing.T) {
 // ===== ISC-32: GET /v1/me/sessions returns the caller's sessions =====
 
 func TestListSessions_OwnSessionsOnly(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "hank@example.com", "Hank")
 	env := testServerForUser(t, app, tenantID, userID, false)
 
@@ -388,8 +358,8 @@ func TestListSessions_OwnSessionsOnly(t *testing.T) {
 // ===== ISC-33: DELETE /v1/me/sessions/{id} cross-user => 404 =====
 
 func TestRevokeSession_CrossUser404(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "kara@example.com", "Kara")
 	env := testServerForUser(t, app, tenantID, userID, false)
 
@@ -419,8 +389,8 @@ func TestRevokeSession_CrossUser404(t *testing.T) {
 // ===== ISC-38 / ISC-39: RLS cross-tenant isolation =====
 
 func TestRLS_TenantACannotSeeTenantBPreferences(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA, userA := seedTenantAndUser(t, admin, "tenantA-user@example.com", "TA User")
 	envA := testServerForUser(t, app, tenantA, userA, false)
@@ -449,8 +419,8 @@ func TestRLS_TenantACannotSeeTenantBPreferences(t *testing.T) {
 }
 
 func TestRLS_TenantACannotListTenantBSessions(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA, userA := seedTenantAndUser(t, admin, "rls-a@example.com", "A")
 	envA := testServerForUser(t, app, tenantA, userA, false)
@@ -503,8 +473,8 @@ func seedUserRoles(t *testing.T, admin *pgxpool.Pool, tenantID, userID string, r
 // auditor + grc_engineer; both roles flow through to the wire response.
 // The existing `is_admin` field continues to render (P0-A2 additive).
 func TestGetMe_ReturnsRolesList(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "auditor130@example.com", "Auditor 130")
 	seedUserRoles(t, admin, tenantID, userID, "auditor", "grc_engineer")
 
@@ -536,8 +506,8 @@ func TestGetMe_ReturnsRolesList(t *testing.T) {
 // sees an empty `roles: []` (not null, not missing). Fail-closed posture
 // (P0-A3): the BFF + frontend can rely on the field always being present.
 func TestGetMe_EmptyRolesForNoUserRolesRow(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "no-roles130@example.com", "No Roles")
 	// Deliberately NO seedUserRoles call.
 	env := testServerForUser(t, app, tenantID, userID, false)
@@ -561,8 +531,8 @@ func TestGetMe_EmptyRolesForNoUserRolesRow(t *testing.T) {
 // ("auditor") under DIFFERENT user_ids so the test catches both
 // (i) bleed via the tenant GUC and (ii) bleed via shared user_id collision.
 func TestGetMe_RolesCrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA, userA := seedTenantAndUser(t, admin, "tenA130@example.com", "TA")
 	seedUserRoles(t, admin, tenantA, userA, "auditor")
@@ -610,8 +580,8 @@ func TestGetMe_RolesCrossTenantIsolation(t *testing.T) {
 // roles list. The two are independent surfaces — admin via credential flag,
 // roles via user_roles table.
 func TestGetMe_AdminCallerAlsoCarriesRoles(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "admin130@example.com", "Admin 130")
 	seedUserRoles(t, admin, tenantID, userID, "admin", "auditor")
 	env := testServerForUser(t, app, tenantID, userID, true)
@@ -644,8 +614,8 @@ func TestGetMe_AdminCallerAlsoCarriesRoles(t *testing.T) {
 // TestListSessions_AugmentedFieldsOnWire — a session row that was created with
 // UA/IP/geo populated surfaces all four fields on the JSON response.
 func TestListSessions_AugmentedFieldsOnWire(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantID, userID := seedTenantAndUser(t, admin, "ua162@example.com", "UA Tester")
 	env := testServerForUser(t, app, tenantID, userID, false)
 

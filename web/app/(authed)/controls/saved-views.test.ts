@@ -11,12 +11,14 @@ import {
   findView,
   MAX_SAVED_VIEWS,
   MAX_VIEW_NAME_LENGTH,
+  migrateLocalViewsToServer,
   parseView,
   readViews,
   removeView,
   sanitizeFilters,
   SAVED_VIEWS_STORAGE_KEY,
   writeViews,
+  type MigratableStore,
   type SavedView,
   type SavedViewStore,
 } from "./saved-views";
@@ -220,5 +222,85 @@ describe("removeView / findView", () => {
   it("finds by id, null when absent", () => {
     expect(findView(views, "2")?.name).toBe("B");
     expect(findView(views, "nope")).toBeNull();
+  });
+});
+
+// Slice 468 — AC-467-3: one-time localStorage -> server migration.
+describe("migrateLocalViewsToServer", () => {
+  function migratableStore(initial?: Record<string, string>): {
+    store: MigratableStore;
+    removed: () => boolean;
+  } {
+    const map = new Map<string, string>(Object.entries(initial ?? {}));
+    let didRemove = false;
+    return {
+      store: {
+        getItem: (k) => map.get(k) ?? null,
+        setItem: (k, v) => {
+          map.set(k, v);
+        },
+        removeItem: (k) => {
+          map.delete(k);
+          if (k === SAVED_VIEWS_STORAGE_KEY) didRemove = true;
+        },
+      },
+      removed: () => didRemove,
+    };
+  }
+
+  it("uploads each local view, then clears the storage key", async () => {
+    const local: SavedView[] = [
+      { id: "1", name: "Weekly", filters: sanitizeFilters(FRESH_VIEW_FILTERS) },
+      {
+        id: "2",
+        name: "Audit",
+        filters: sanitizeFilters({ ...FRESH_VIEW_FILTERS, family: ALL }),
+      },
+    ];
+    const { store, removed } = migratableStore({
+      [SAVED_VIEWS_STORAGE_KEY]: JSON.stringify(local),
+    });
+    const calls: { name: string; filters: Record<string, string> }[] = [];
+    const create = async (name: string, filters: Record<string, string>) => {
+      calls.push({ name, filters });
+    };
+
+    const n = await migrateLocalViewsToServer(store, create);
+
+    expect(n).toBe(2);
+    expect(calls.map((c) => c.name)).toEqual(["Weekly", "Audit"]);
+    // ALL-valued (inactive) keys are dropped from the uploaded payload.
+    expect(calls[0].filters).not.toHaveProperty("family", ALL);
+    expect(calls[0].filters.family).toBe("IAC");
+    expect(calls[1].filters).not.toHaveProperty("family");
+    // The local key is cleared so the migration is idempotent.
+    expect(removed()).toBe(true);
+  });
+
+  it("swallows per-view upload failures (best-effort)", async () => {
+    const local: SavedView[] = [
+      { id: "1", name: "Dup", filters: sanitizeFilters(FRESH_VIEW_FILTERS) },
+    ];
+    const { store, removed } = migratableStore({
+      [SAVED_VIEWS_STORAGE_KEY]: JSON.stringify(local),
+    });
+    const create = async () => {
+      throw new Error("409 duplicate");
+    };
+    // Must not throw; key still cleared.
+    await expect(migrateLocalViewsToServer(store, create)).resolves.toBe(1);
+    expect(removed()).toBe(true);
+  });
+
+  it("is a no-op when no local views exist (clears any corrupt key)", async () => {
+    const { store, removed } = migratableStore();
+    let createCalls = 0;
+    const create = async () => {
+      createCalls += 1;
+    };
+    const n = await migrateLocalViewsToServer(store, create);
+    expect(n).toBe(0);
+    expect(createCalls).toBe(0);
+    expect(removed()).toBe(true);
   });
 });

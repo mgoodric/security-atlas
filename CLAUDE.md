@@ -2,7 +2,7 @@
 
 > Read this first when starting any session in this repo.
 
-**Status:** v1 backlog fully merged on `main` (69/69 v1 slices; v2 follow-ons in progress). The system of record for design intent is still the canvas under `Plans/`; the system of record for implementation is `main` plus the merge trail in `docs/issues/_STATUS.md`.
+**Status:** v1 backlog fully merged on `main` (69/69 v1 slices; v2 follow-ons in progress). The system of record for design intent is still the canvas under `Plans/`; the system of record for implementation is `main` plus the merge trail in `docs/issues/_STATUS.md`. `_STATUS.md` is a **generated** file (`scripts/gen-status.sh` / `just status`); it is no longer reconciled via a per-merge `chore(status)` PR (slice 741). The in-repo copy is **regenerated on demand** (`just status`) and **may lag** — it is non-gating. A CI auto-push of the regenerated file is NOT active: on this personal repo a `GITHUB_TOKEN` cannot push to the protected `main` (see slice 744). Treat git history + `_events.jsonl` as ground truth; run `just status` when you need a fresh browsable copy.
 
 ---
 
@@ -89,7 +89,7 @@ The platform does NOT:
 - Auto-approve its own mappings
 - Use Tenant A's confidential data to seed Tenant B's draft
 
-Schema-level enforcement: `ai_assisted=true` records cannot have `human_approved=true` without `human_approver` set. Audit log shows model name + version + diff between AI draft and final. (canvas §4.6.5)
+Schema-level enforcement: `ai_assisted=true` records cannot have `human_approved=true` without `human_approver` set. The canonical shipped adopter of this column set + approval guard is `mcp_write_proposals` (slice 173, migration `20260520030000_mcp_write_proposals.sql`), whose inline `mcp_wp_ai_assist_invariant` CHECK is the reference shape. Slice 498 extracted that predicate into the shared reusable `ai_assist_human_approver_guard` IMMUTABLE function + CHECK template (`internal/llm` + `migrations/sql/20260607000000_ai_generations.sql`); new AI-assist surfaces adopt the function rather than re-authoring the predicate. `questionnaire_answers` does NOT yet carry these columns on `main` — it gains them (adopting the same shared guard) when slice 440 lands the questionnaire answer-suggestion surface. See slice 498's decisions-log D5 (`docs/audit-log/498-llm-foundation-decisions.md`). Audit log shows model name + version + diff between AI draft and final. (canvas §4.6.5)
 
 **Inference backend:** local Ollama is the default (no data leaves deployment). Cloud LLMs (Anthropic / OpenAI / Bedrock) are opt-in per-tenant with a visible banner indicating routing.
 
@@ -291,6 +291,12 @@ The v1 spine was built in this order — preserved here so future contributors u
 - **Cite sources** when making factual claims (versions, license terms, vendor behavior). Sources live in `Plans/canvas/sources.md`.
 - **Conventional Commits** when code commits begin (`feat:`, `fix:`, `docs:`, `chore:`, etc.).
 - **Co-authored-by** trailer on AI-assisted commits.
+- **DCO sign-off (required).** Every commit MUST carry a `Signed-off-by:` trailer matching the commit author (`git commit -s`); the project enforces the [Developer Certificate of Origin](https://developercertificate.org/) via the DCO check (see `CONTRIBUTING.md` §DCO). The sign-off email MUST match the author email, so the repo's git identity must be the human contributor (`Matt Goodrich <matt@mattgoodrich.com>`), never a bot — do NOT set a local `user.name`/`user.email` override. AI-assisted commits carry BOTH trailers, e.g.:
+
+  ```
+  Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>
+  Signed-off-by: Matt Goodrich <matt@mattgoodrich.com>
+  ```
 
 ### Branching
 

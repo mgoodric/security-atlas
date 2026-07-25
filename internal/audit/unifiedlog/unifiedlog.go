@@ -196,6 +196,17 @@ type QueryParams struct {
 	// CallerIsPrivileged is false; ignored otherwise. Empty string is
 	// acceptable when privileged.
 	CallerUserID string
+
+	// ExcludeReadTelemetry (slice 669) is the view-only deny flag. When
+	// true, the SQL drops `decision`-kind rows whose `action = 'read'`
+	// (the high-volume internal authz read-telemetry the app emits while
+	// auditing its own GET reads) so the Activity feed defaults to
+	// mutating/business events. When false, every row is returned —
+	// the pre-slice-669 shape. This is a presentation concern only; the
+	// underlying append-only ledger is unchanged (canvas invariant #2).
+	// It never hides security-relevant mutations: auth/role/tenant/
+	// exception writes are NOT `decision`/`read` rows.
+	ExcludeReadTelemetry bool
 }
 
 // Query executes the unified UNION ALL against the nine audit-log tables.
@@ -226,13 +237,14 @@ func Query(ctx context.Context, q *dbx.Queries, params QueryParams) ([]Entry, *C
 	}
 
 	arg := dbx.ListUnifiedAuditLogParams{
-		FromTs:             pgtype.Timestamptz{Time: params.From, Valid: true},
-		ToTs:               pgtype.Timestamptz{Time: params.To, Valid: true},
-		ActorFilter:        params.ActorFilter,
-		KindFilterCsv:      joinKinds(params.KindFilter),
-		CallerIsPrivileged: params.CallerIsPrivileged,
-		CallerUserID:       params.CallerUserID,
-		LimitN:             int32(params.Limit),
+		FromTs:               pgtype.Timestamptz{Time: params.From, Valid: true},
+		ToTs:                 pgtype.Timestamptz{Time: params.To, Valid: true},
+		ActorFilter:          params.ActorFilter,
+		KindFilterCsv:        joinKinds(params.KindFilter),
+		CallerIsPrivileged:   params.CallerIsPrivileged,
+		CallerUserID:         params.CallerUserID,
+		ExcludeReadTelemetry: params.ExcludeReadTelemetry,
+		LimitN:               int32(params.Limit),
 	}
 	if params.Cursor != nil {
 		arg.CursorTs = pgtype.Timestamptz{Time: params.Cursor.OccurredAt, Valid: true}

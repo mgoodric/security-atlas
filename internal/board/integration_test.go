@@ -33,7 +33,6 @@ package board_test
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -42,6 +41,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/board"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/drift"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -49,59 +49,22 @@ import (
 
 // ---------------- harness ----------------
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
 // freshTenant returns a tenant UUID and registers cleanup that wipes every
 // board-related row + dependencies so reruns do not accumulate. The order
 // matters: board_briefs / board_packs FK nothing else, but the rest of the
 // graph (control_evaluations -> controls -> frameworks; risks; etc.) must
-// drop FK-children first.
+// drop FK-children first. Pure tenant-scoped DELETE in FK order, so it
+// delegates to dbtest.SeedTenant (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM board_packs WHERE tenant_id = $1`,
-			`DELETE FROM board_briefs WHERE tenant_id = $1`,
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM risks WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-			`DELETE FROM frameworks WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"board_packs",
+		"board_briefs",
+		"control_evaluations",
+		"risks",
+		"controls",
+		"frameworks",
+	)
 }
 
 func ctxFor(t *testing.T, tenant string) context.Context {
@@ -131,11 +94,21 @@ func seedFramework(t *testing.T, admin *pgxpool.Pool, tenant, slug, name string)
 
 // seedRisk inserts one open risk with the given residual + inherent scores
 // (raw JSONB strings — the Generator extracts the severity scalar in Go).
-// updatedDaysAgo controls the age-since-touch the ranking uses.
-func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant, title string, residualJSON, inherentJSON string, updatedDaysAgo int) uuid.UUID {
+// updatedDaysAgo controls the age-since-touch the ranking uses, counted back
+// from anchor.
+//
+// anchor MUST be the same clock the test reads the risk back with. Callers that
+// query via a Generator built with WithClock(fixed) MUST pass that same fixed
+// instant — NOT time.Now(). ListRisksForBoardBrief filters `created_at <= $2`,
+// so a now-relative seed measured against a hardcoded clock silently ages out:
+// the row is visible only while time.Now()-updatedDaysAgo is still <= the fixed
+// clock, and the test then starts failing on a date nothing in the diff explains.
+// That is exactly what happened on 2026-06-29, when a 60-day seed drifted past a
+// 2026-04-30 clock and reddened `main` with no code change involved.
+func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant, title string, residualJSON, inherentJSON string, anchor time.Time, updatedDaysAgo int) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
-	updated := time.Now().UTC().Add(-time.Duration(updatedDaysAgo) * 24 * time.Hour)
+	updated := anchor.UTC().Add(-time.Duration(updatedDaysAgo) * 24 * time.Hour)
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO risks (
 			id, tenant_id, title, description, category, treatment,
@@ -227,10 +200,8 @@ func (f fixedVendorBurndown) ReadHighCriticalityBurndown(_ context.Context, _ ti
 // brief.Insert returns the stored row with the frozen content + narrative
 // verbatim; brief.Get re-reads byte-identical content (AC-5 round trip).
 func TestBoardStore_InsertGetList_RoundTrip(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -293,10 +264,8 @@ func TestBoardStore_InsertGetList_RoundTrip(t *testing.T) {
 
 // brief.Get with a random UUID returns ErrNotFound (RLS / no-row path).
 func TestBoardStore_Get_NotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -309,10 +278,8 @@ func TestBoardStore_Get_NotFound(t *testing.T) {
 // brief.Get with a cross-tenant id ALSO returns ErrNotFound — RLS makes the
 // foreign row invisible.
 func TestBoardStore_Get_CrossTenantInvisible(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	ctxA := ctxFor(t, tenantA)
@@ -340,10 +307,8 @@ func TestBoardStore_Get_CrossTenantInvisible(t *testing.T) {
 
 // brief.ListFrameworks honors `tenant_id IS NULL OR tenant_id = $1`.
 func TestBoardStore_ListFrameworks(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -369,21 +334,21 @@ func TestBoardStore_ListFrameworks(t *testing.T) {
 
 // brief.ListRisksAsOf returns risks created on or before asOf, oldest first.
 func TestBoardStore_ListRisksAsOf(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
-	// Two risks; the inserted-at horizon is now; both fall inside.
+	// Two risks; the inserted-at horizon is now; both fall inside. This test
+	// reads back with a now-relative asOf, so the seed anchor is now too.
+	seedAnchor := time.Now().UTC()
 	old := seedRisk(t, admin, tenant, "older risk",
-		`{"score": 9}`, `{"likelihood": 3, "impact": 3}`, 30)
+		`{"score": 9}`, `{"likelihood": 3, "impact": 3}`, seedAnchor, 30)
 	recent := seedRisk(t, admin, tenant, "newer risk",
-		`{"score": 16}`, `{"likelihood": 4, "impact": 4}`, 5)
+		`{"score": 16}`, `{"likelihood": 4, "impact": 4}`, seedAnchor, 5)
 
 	store := board.NewStore(app)
-	rows, err := store.ListRisksAsOf(ctx, time.Now().UTC().Add(time.Hour))
+	rows, err := store.ListRisksAsOf(ctx, seedAnchor.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("ListRisksAsOf: %v", err)
 	}
@@ -401,16 +366,18 @@ func TestBoardStore_ListRisksAsOf(t *testing.T) {
 // =========================================================================
 
 func TestGenerator_Generate_EndToEnd(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
+	// genClock is the single source of truth for this test's "now": the
+	// Generator reads risks as-of it, so the risk must be seeded relative to it.
+	genClock := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
+
 	seedFramework(t, admin, tenant, "test-soc2-gen", "SOC 2 (gen)")
 	seedRisk(t, admin, tenant, "Critical CVE backlog",
-		`{"score": 20}`, `{"likelihood": 5, "impact": 4}`, 60)
+		`{"score": 20}`, `{"likelihood": 5, "impact": 4}`, genClock, 60)
 
 	store := board.NewStore(app)
 	gen := board.NewGenerator(store, fixedFreshness{rows: []freshness.ControlFreshness{
@@ -422,9 +389,7 @@ func TestGenerator_Generate_EndToEnd(t *testing.T) {
 		ThroughDate:  time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC),
 		Delta:        2,
 		FlippedToOut: nil,
-	}}).WithClock(func() time.Time {
-		return time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
-	})
+	}}).WithClock(func() time.Time { return genClock })
 
 	stored, err := gen.Generate(ctx, "2026-04-30")
 	if err != nil {
@@ -462,10 +427,8 @@ func TestGenerator_Generate_EndToEnd(t *testing.T) {
 
 // Generate rejects a malformed period_end with ErrBadPeriodEnd.
 func TestGenerator_Generate_BadPeriodEndRejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -482,10 +445,8 @@ func TestGenerator_Generate_BadPeriodEndRejected(t *testing.T) {
 
 // Pack.Insert appends a draft; Get re-reads it; List returns it.
 func TestPackStore_InsertGetList_DraftRoundTrip(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -524,10 +485,8 @@ func TestPackStore_InsertGetList_DraftRoundTrip(t *testing.T) {
 
 // PackStore.Get returns ErrPackNotFound for an unknown id.
 func TestPackStore_Get_NotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -540,10 +499,8 @@ func TestPackStore_Get_NotFound(t *testing.T) {
 // PackStore.UpdateSection mutates a draft section + re-renders the templated
 // narrative; the override text round-trips through the JSONB content.
 func TestPackStore_UpdateSection_DraftMutation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -601,10 +558,8 @@ func TestPackStore_UpdateSection_DraftMutation(t *testing.T) {
 
 // PackStore.UpdateSection rejects an unknown section key.
 func TestPackStore_UpdateSection_UnknownSection(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -626,10 +581,8 @@ func TestPackStore_UpdateSection_UnknownSection(t *testing.T) {
 
 // PackStore.UpdateSection on an unknown pack id returns ErrPackNotFound.
 func TestPackStore_UpdateSection_PackNotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -647,10 +600,8 @@ func TestPackStore_UpdateSection_PackNotFound(t *testing.T) {
 // PackStore.Publish flips status to published when every section is
 // approved; re-publish returns ErrPackNotDraft.
 func TestPackStore_Publish_Lifecycle(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -710,10 +661,8 @@ func TestPackStore_Publish_Lifecycle(t *testing.T) {
 
 // PackStore.Publish on an unknown id returns ErrPackNotFound.
 func TestPackStore_Publish_NotFound(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -726,15 +675,15 @@ func TestPackStore_Publish_NotFound(t *testing.T) {
 // PackStore.ListFrameworks / ListRisksAsOf / ListFailingEvaluations cover
 // the pack-store reads.
 func TestPackStore_ReadSurfaces(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
 	seedFramework(t, admin, tenant, "test-fw-283-pack", "Test FW (pack)")
-	seedRisk(t, admin, tenant, "Pack risk", `{"score": 8}`, `{"likelihood": 2, "impact": 4}`, 10)
+	// This test reads risks back with a now-relative asOf, so seed from now.
+	seedAnchor := time.Now().UTC()
+	seedRisk(t, admin, tenant, "Pack risk", `{"score": 8}`, `{"likelihood": 2, "impact": 4}`, seedAnchor, 10)
 	ctrlID := seedControl(t, admin, tenant)
 	// Failing evaluation stamped 6h before period_end -> surfaced by the read.
 	periodEnd := time.Date(2026, 6, 30, 23, 59, 59, 0, time.UTC)
@@ -749,7 +698,7 @@ func TestPackStore_ReadSurfaces(t *testing.T) {
 		t.Error("ListFrameworks returned zero results")
 	}
 
-	risks, err := store.ListRisksAsOf(ctx, time.Now().UTC().Add(time.Hour))
+	risks, err := store.ListRisksAsOf(ctx, seedAnchor.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("ListRisksAsOf: %v", err)
 	}
@@ -781,15 +730,20 @@ func TestPackStore_ReadSurfaces(t *testing.T) {
 // Exercises the slice-273 vendor-burndown path; also covers the operator-
 // entered sections being seeded with placeholders (decision D3).
 func TestPackGenerator_Generate_EndToEnd_WithVendorReader(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
+	// genClock is the single source of truth for this test's "now": the
+	// PackGenerator reads risks as-of it, so the risk must be seeded relative
+	// to it. Seeding from time.Now() here made the risk invisible to the
+	// generator from 2026-07-20 onward — silently, because no assertion below
+	// covers the risk section.
+	genClock := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+
 	seedFramework(t, admin, tenant, "test-fw-pack-gen", "Test FW (pack gen)")
-	seedRisk(t, admin, tenant, "Pack-gen risk", `{"score": 12}`, `{"likelihood": 3, "impact": 4}`, 20)
+	seedRisk(t, admin, tenant, "Pack-gen risk", `{"score": 12}`, `{"likelihood": 3, "impact": 4}`, genClock, 20)
 
 	store := board.NewPackStore(app)
 	gen := board.NewPackGenerator(
@@ -804,9 +758,7 @@ func TestPackGenerator_Generate_EndToEnd_WithVendorReader(t *testing.T) {
 			Delta:       1,
 		}},
 		fixedVendorBurndown{out: board.VendorBurndownReadout{Total: 4, OnTime: 3, PastDue: 1}},
-	).WithClock(func() time.Time {
-		return time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
-	})
+	).WithClock(func() time.Time { return genClock })
 
 	stored, err := gen.Generate(ctx, "2026-06-30")
 	if err != nil {
@@ -817,6 +769,13 @@ func TestPackGenerator_Generate_EndToEnd_WithVendorReader(t *testing.T) {
 	}
 	if len(stored.Content.Sections) != len(board.SectionKeys) {
 		t.Errorf("Generate produced %d sections, want %d", len(stored.Content.Sections), len(board.SectionKeys))
+	}
+	// The seeded risk must actually reach the top-risks section. Without this
+	// assertion the seed was silently invisible to the generator for four days
+	// before anyone noticed (see seedRisk's anchor contract).
+	tr := stored.Content.Sections[board.SectionTopRisks].Data.TopRisks
+	if len(tr) == 0 || !strings.Contains(tr[0].Title, "Pack-gen risk") {
+		t.Errorf("seeded risk not surfaced in top_risks section; got %v", tr)
 	}
 	// Vendor-burndown section populated from the reader.
 	vb := stored.Content.Sections[board.SectionVendorBurndown].Data
@@ -846,10 +805,8 @@ func TestPackGenerator_Generate_EndToEnd_WithVendorReader(t *testing.T) {
 // vendor_burndown section with zero scalars and renders the "no
 // high-criticality vendors registered" narrative.
 func TestPackGenerator_Generate_NilVendorReader(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
@@ -879,10 +836,8 @@ func TestPackGenerator_Generate_NilVendorReader(t *testing.T) {
 // PackGenerator.Generate rejects a malformed period_end with
 // ErrPackBadPeriodEnd.
 func TestPackGenerator_Generate_BadPeriodEndRejected(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
-	app := openPool(t, appDSN(t))
-	defer app.Close()
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 

@@ -58,6 +58,7 @@
 //   AC-10 Roles tail badge renders when slice-130 roles array is non-empty (slice 154)
 //   AC-11 Rotate-twice-in-a-row chains predecessors + fresh secret per rotate (slice 163)
 //   AC-13 Page <title> is route-specific via per-route layout metadata (slice 248)
+//   AC-15 Slack + webhook master toggles render opted-out by default (slice 584)
 //   (AC-12 lives in the AppearanceSection block alongside AC-2; the slice
 //   203 author elected to keep the numbering inline rather than renumber.)
 
@@ -225,13 +226,18 @@ test.describe("/settings user-facing page", () => {
     await expect(page.getByTestId("settings-admin-cross-link")).toBeVisible();
   });
 
-  test("AC-7: notifications section renders four event rows with 8 toggles", async ({
+  test("AC-7: notifications section renders six event rows with per-channel toggles", async ({
     authedPage: page,
   }) => {
-    // Slice 154: section coverage parity with the mockup. The four
-    // NOTIF_EVENTS keys hard-coded in page.tsx must each render a row
-    // with one in-app + one email toggle (8 inputs total). The toggle
-    // states reflect the GET /v1/me/preferences response.
+    // Slice 154: section coverage parity with the mockup. Each
+    // NOTIF_EVENTS key hard-coded in page.tsx must render a row with a
+    // per-channel toggle. The toggle states reflect the GET
+    // /v1/me/preferences response.
+    //
+    // Slice 594: the per-event matrix gains a `slack` + `webhook` column
+    // alongside `in_app` + `email`, mirroring the slice-583 widened
+    // channel whitelist. Every event row now carries four channel
+    // checkboxes (in-app, email, Slack, webhook).
     await page.goto("/settings");
     await expect(
       page.getByTestId("settings-section-notifications"),
@@ -241,6 +247,9 @@ test.describe("/settings user-facing page", () => {
       "policy_ack_due",
       "risk_review_overdue",
       "control_drift",
+      // Slice 566: per-kind opt-out for the two formerly-unmapped digest kinds.
+      "audit_note_reply",
+      "evidence_staleness",
     ]) {
       await expect(page.getByTestId(`settings-notif-row-${key}`)).toBeVisible();
       await expect(
@@ -249,11 +258,203 @@ test.describe("/settings user-facing page", () => {
       await expect(
         page.getByTestId(`settings-notif-${key}-email`),
       ).toBeVisible();
+      // Slice 594: slack + webhook per-kind columns.
+      await expect(
+        page.getByTestId(`settings-notif-${key}-slack`),
+      ).toBeVisible();
+      await expect(
+        page.getByTestId(`settings-notif-${key}-webhook`),
+      ).toBeVisible();
     }
     // Mockup F5 copy delta: the in-progress qualifier is present.
     await expect(
       page.getByTestId("settings-notif-row-audit_period_assignment"),
     ).toContainText("in-progress period");
+  });
+
+  test("slice 594: toggling a slack per-kind cell PATCHes /v1/me/preferences", async ({
+    authedPage: page,
+  }) => {
+    // Slice 594 AC-2: a per-kind slack/webhook checkbox drives the existing
+    // /v1/me/preferences PATCH endpoint with the {event:{channel:bool}}
+    // shape (583 already accepts slack/webhook channel values).
+    //
+    // This test is HERMETIC on the GET side. The Notifications matrix reads
+    // its cell states from `getMyPreferences()` -> `fetch('/api/me/preferences')`
+    // (web/lib/api/me.ts), which unwraps `{ preferences: MePreferences }` and
+    // returns `body.preferences` (MePreferences = Record<event,
+    // Record<channel, boolean>>). The render reads `row.slack !== false` per
+    // cell. We cannot rely on the live shared docker-compose Postgres for the
+    // control_drift/slack initial state: the seed, sibling specs, and this
+    // test's OWN prior-run uncheck() all mutate that row, so the loaded state
+    // is non-deterministic (the failure that landed on PR #1123). Instead we
+    // route-mock the GET to return a full deterministic matrix with
+    // control_drift.slack = true, so the cell renders CHECKED every run. The
+    // PATCH (and any non-GET) falls through to the REAL backend via
+    // route.continue(), so the uncheck() still fires the real round-trip and
+    // the waitForResponse + postData() assertion exercises the live endpoint.
+    const ALL_EVENTS = [
+      "audit_period_assignment",
+      "policy_ack_due",
+      "risk_review_overdue",
+      "control_drift",
+      "audit_note_reply",
+      "evidence_staleness",
+    ];
+    // Full default-on matrix across every event × {in_app,email,slack,webhook}.
+    const preferences: Record<string, Record<string, boolean>> = {};
+    for (const ev of ALL_EVENTS) {
+      preferences[ev] = {
+        in_app: true,
+        email: true,
+        slack: true,
+        webhook: true,
+      };
+    }
+    await page.route("**/api/me/preferences", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ preferences }),
+        });
+        return;
+      }
+      // PATCH (and anything non-GET) hits the real backend so the
+      // waitForResponse + postData() assertion below is a genuine round-trip.
+      await route.continue();
+    });
+
+    // Slice 585: the per-kind slack cell is DISABLED when the channel is
+    // unconfigured (configured===false). The live docker-compose
+    // slack-channel env state is non-deterministic in CI, so — mirroring
+    // the slice-585 unconfigured test's route-level-assertion option — we
+    // intercept the BFF GET and inject configured=true to assert the
+    // INTERACTIVE branch deterministically. The injected body carries ONLY
+    // the booleans (no target/secret), matching the P0-585 wire contract.
+    await page.route("**/api/me/slack-channel", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ enabled: false, configured: true }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/settings");
+    await expect(
+      page.getByTestId("settings-section-notifications"),
+    ).toBeVisible();
+
+    const slackCell = page.getByTestId("settings-notif-control_drift-slack");
+    await expect(slackCell).toBeVisible();
+    // Checked from the mocked GET (control_drift.slack=true) + interactive
+    // (configured=true injected above).
+    await expect(slackCell).toBeChecked();
+    await expect(slackCell).toBeEnabled();
+
+    const patchResponse = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/me/preferences") &&
+        r.request().method() === "PATCH",
+    );
+    // Slice 171 (H4) pattern: the cell is a React-controlled `<input
+    // checked={slack}>` bound to TanStack-Query data. After the click,
+    // React re-renders against the still-true mocked `prefsQuery.data` and
+    // snaps the DOM `checked` back to true before the PATCH onSuccess
+    // re-fetch. `locator.uncheck()` auto-verifies post-state and would throw
+    // on that snap-back; `locator.click()` skips the post-state assertion —
+    // the truthful invariant lives in the server round-trip below (the same
+    // remedy AC-3 uses for the email cell).
+    await slackCell.click();
+    const resp = await patchResponse;
+    // The PATCH carried the per-kind slack opt-out for this event
+    // (control_drift.slack=false, since the cell started checked).
+    expect(resp.request().postData()).toContain("slack");
+  });
+
+  test("AC-15 (slice 584): Slack + webhook master toggles render opted-out by default", async ({
+    authedPage: page,
+  }) => {
+    // Slice 584: the Notifications section gains a master opt-in toggle
+    // for each of the slice-543 channels (Slack + generic webhook),
+    // mirroring the slice-445 email-delivery toggle. Each is backed by
+    // GET/PUT /v1/me/{slack,webhook}-channel and defaults opted-OUT
+    // (P0-543-3) — the seed user has no opt-in row, so the GET resolves
+    // enabled=false against the live platform and the checkbox renders
+    // unchecked with the "off" label. The toggle row renders whether or
+    // not the deployment has the channel env-configured; the operator-
+    // configured target/secret is NEVER surfaced (P0-543-2 / SSRF) — the
+    // row is a boolean toggle, no URL/token field.
+    await page.goto("/settings");
+    await expect(
+      page.getByTestId("settings-section-notifications"),
+    ).toBeVisible();
+
+    // Both new rows render with their copy + a toggle.
+    const slackRow = page.getByTestId("settings-slack-channel-toggle-row");
+    await expect(slackRow).toBeVisible();
+    await expect(slackRow).toContainText("Slack delivery");
+    const slackToggle = page.getByTestId("settings-slack-channel-toggle");
+    await expect(slackToggle).toBeVisible();
+    await expect(slackToggle).not.toBeChecked();
+
+    const webhookRow = page.getByTestId("settings-webhook-channel-toggle-row");
+    await expect(webhookRow).toBeVisible();
+    await expect(webhookRow).toContainText("Webhook delivery");
+    const webhookToggle = page.getByTestId("settings-webhook-channel-toggle");
+    await expect(webhookToggle).toBeVisible();
+    await expect(webhookToggle).not.toBeChecked();
+
+    // P0-543-2 / SSRF boundary: neither row exposes a free-text target
+    // input. The rows contain no <input> other than the boolean toggle
+    // checkbox itself.
+    await expect(slackRow.locator('input[type="text"]')).toHaveCount(0);
+    await expect(slackRow.locator('input[type="url"]')).toHaveCount(0);
+    await expect(webhookRow.locator('input[type="text"]')).toHaveCount(0);
+    await expect(webhookRow.locator('input[type="url"]')).toHaveCount(0);
+  });
+
+  test("slice 585: unconfigured channel renders disabled toggle + operator note", async ({
+    authedPage: page,
+  }) => {
+    // Slice 585: when the backend reports configured=false (the operator has
+    // not set the channel's delivery env), the toggle renders DISABLED with a
+    // muted "not configured by your administrator" note. The live
+    // docker-compose backend's channel-env state is not deterministic here, so
+    // we intercept the BFF GET and inject configured=false to assert the
+    // unconfigured branch deterministically (the slice spec's "route-level
+    // assertion" option). The injected body carries ONLY the booleans — no
+    // target/secret — matching the P0-585 wire contract.
+    await page.route("**/api/me/slack-channel", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ enabled: false, configured: false }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+
+    await page.goto("/settings");
+    await expect(
+      page.getByTestId("settings-section-notifications"),
+    ).toBeVisible();
+
+    const slackToggle = page.getByTestId("settings-slack-channel-toggle");
+    await expect(slackToggle).toBeVisible();
+    // The unconfigured channel's toggle is disabled and stays unchecked.
+    await expect(slackToggle).toBeDisabled();
+    await expect(slackToggle).not.toBeChecked();
+    // The explanatory note is shown.
+    const note = page.getByTestId("settings-slack-channel-unconfigured-note");
+    await expect(note).toBeVisible();
+    await expect(note).toContainText("not configured by your administrator");
   });
 
   test("AC-8: time-zone <select> reflects current value + PATCH wires", async ({

@@ -72,22 +72,24 @@ test.describe("/risks/new control-link multi-select", () => {
       timeout: 30_000,
     });
 
-    // Default treatment is mitigate per initialState() → picker visible.
-    await expect(
-      page.getByTestId("risks-create-control-multi-select"),
-    ).toBeVisible({ timeout: 30_000 });
-
-    // Switch to avoid → picker disappears.
-    await page.getByTestId("risks-create-treatment").selectOption("avoid");
+    // Slice 663: the opening default treatment is now "avoid" (the
+    // fresh-tenant-safe default with no required satellite field), so the
+    // picker is hidden on first paint.
     await expect(
       page.getByTestId("risks-create-control-multi-select"),
     ).toHaveCount(0);
 
-    // Back to mitigate → picker returns.
+    // Switch to mitigate → picker appears.
     await page.getByTestId("risks-create-treatment").selectOption("mitigate");
     await expect(
       page.getByTestId("risks-create-control-multi-select"),
-    ).toBeVisible();
+    ).toBeVisible({ timeout: 30_000 });
+
+    // Switch back to avoid → picker disappears.
+    await page.getByTestId("risks-create-treatment").selectOption("avoid");
+    await expect(
+      page.getByTestId("risks-create-control-multi-select"),
+    ).toHaveCount(0);
   });
 
   test("client-side validation blocks submit with mitigate + 0 links (AC-4)", async ({
@@ -116,8 +118,10 @@ test.describe("/risks/new control-link multi-select", () => {
     });
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
     await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
-    // Treatment defaults to mitigate; no controls selected → submit is
-    // blocked client-side with the required-error.
+    // Slice 663: explicitly select mitigate (no longer the opening
+    // default). With no controls selected → submit is blocked
+    // client-side with the required-error.
+    await page.getByTestId("risks-create-treatment").selectOption("mitigate");
     await page.getByTestId("risks-create-submit").click();
 
     await expect(page).toHaveURL(/\/risks\/new$/);
@@ -193,8 +197,11 @@ test.describe("/risks/new control-link multi-select", () => {
     });
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
     await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
+    // Slice 663: mitigate is no longer the opening default — select it
+    // so the control picker renders.
+    await page.getByTestId("risks-create-treatment").selectOption("mitigate");
 
-    // Picker is visible (mitigate default). Wait for the controls list.
+    // Picker is now visible. Wait for the controls list.
     await expect(
       page.getByTestId("risks-create-control-multi-select"),
     ).toBeVisible({ timeout: 30_000 });

@@ -38,24 +38,29 @@ public transparency log.
 ### Verify a downloaded release
 
 ```sh
-TAG=v0.1.0
+TAG=v1.17.0   # set to the release you downloaded
 VERSION="${TAG#v}"
 BASE="https://github.com/mgoodric/security-atlas/releases/download/${TAG}"
 
-curl -fSL "${BASE}/security-atlas_${VERSION}_checksums.txt"     -o checksums.txt
-curl -fSL "${BASE}/security-atlas_${VERSION}_checksums.txt.sig" -o checksums.txt.sig
-curl -fSL "${BASE}/security-atlas_${VERSION}_checksums.txt.pem" -o checksums.txt.pem
+curl -fSL "${BASE}/security-atlas_${VERSION}_checksums.txt"               -o checksums.txt
+curl -fSL "${BASE}/security-atlas_${VERSION}_checksums.txt.sigstore.json" -o checksums.txt.sigstore.json
 
+# Requires cosign v3.x (brew install cosign, or the release binaries).
 cosign verify-blob \
   --certificate-identity-regexp 'https://github.com/mgoodric/security-atlas/\.github/workflows/release\.yml@.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-  --certificate checksums.txt.pem \
-  --signature  checksums.txt.sig \
+  --bundle checksums.txt.sigstore.json \
   checksums.txt
 
 # Then verify a binary against the now-trusted checksums.
 sha256sum -c checksums.txt --ignore-missing
 ```
+
+> **Older releases (pre-slice-084):** releases cut on the cosign v2 stack
+> emitted a two-file `checksums.txt.sig` + `checksums.txt.pem` pair instead of
+> the single `.sigstore.json` bundle. Those releases stay verifiable with a
+> cosign v2 binary and the legacy `--certificate`/`--signature` flags. New
+> releases use the `.sigstore.json` bundle shown above.
 
 The release workflow runs the same verification step against its own
 freshly-published assets (see `Self-verify signed checksums` step in

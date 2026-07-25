@@ -266,14 +266,21 @@ remove the local account yourself.
 
 ## Out of scope (future work)
 
-These are not part of the shipped admin SSO surface today and are noted here
-only so expectations are clear:
+These are not part of the **admin SSO surface** on this page today and are
+noted here only so expectations are clear:
 
-- **Multi-IdP federation** — the surface manages one primary IdP per tenant.
-- **SCIM provisioning** — users are provisioned just-in-time at first OIDC
-  sign-in, not pushed from the IdP.
-- **Group-to-role mapping** — IdP group claims are not mapped to atlas roles;
-  roles are managed inside atlas.
+- **Multi-IdP federation** — this surface manages one primary IdP per tenant.
+
+> **Shipped on a separate surface (not on this page).** SCIM provisioning and
+> IdP-group-to-role mapping are available as of slices 508 / 509 / 733, exposed
+> through the SCIM endpoints (`/scim/v2/Users`, `/scim/v2/Groups`) with a
+> per-tenant SCIM credential rather than through this OIDC admin page:
+>
+> - **SCIM provisioning** — users (and groups) can be pushed from the IdP via
+>   SCIM, in addition to just-in-time provisioning at first OIDC sign-in.
+> - **Group-to-role mapping** — IdP group membership can map to atlas roles
+>   (fail-closed: an unmapped group grants nothing; manual role grants are
+>   preserved across re-derivation).
 
 ## See also
 

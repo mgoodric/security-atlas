@@ -32,6 +32,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -41,35 +42,13 @@ const (
 	tenantB = "22222222-2222-2222-2222-222222222222"
 )
 
-// envOrSkip returns the env value or skips the test. Mirrors slice
-// 014's pattern.
-func envOrSkip(t *testing.T, key string) string {
-	t.Helper()
-	v := os.Getenv(key)
-	if v == "" {
-		t.Skipf("%s not set; skipping integration test", key)
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	p, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return p
-}
-
 // boot wipes evidence ledger state and seeds the schema registry with a
 // known kind so push validation can succeed. Returns the ingest service
 // against atlas_app and a cleanup func.
 func boot(t *testing.T) (*ingest.Service, *pgxpool.Pool, *schemaregistry.Service) {
 	t.Helper()
-	adminPool := openPool(t, envOrSkip(t, "DATABASE_URL"))
-	appPool := openPool(t, envOrSkip(t, "DATABASE_URL_APP"))
+	adminPool := dbtest.NewMigratePool(t)
+	appPool := dbtest.NewAppPool(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -183,10 +162,6 @@ func boot(t *testing.T) (*ingest.Service, *pgxpool.Pool, *schemaregistry.Service
 
 	svc := ingest.New(appPool, reg)
 
-	t.Cleanup(func() {
-		adminPool.Close()
-		appPool.Close()
-	})
 	return svc, appPool, reg
 }
 

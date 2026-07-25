@@ -66,11 +66,19 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 const DEBOUNCE_MS = 250; // AC-6
-const PER_TYPE_LIMIT = 15; // headroom under slice 268's MaxLimit=50
+// Slice 661 added a fourth result type (`anchors`). Four types × 12 = 48
+// stays under slice 268's MaxLimit=50 with headroom.
+const PER_TYPE_LIMIT = 12; // headroom under slice 268's MaxLimit=50
+
+// SearchHitType is the discriminator union. Slice 661 added `anchors` —
+// the bundled SCF anchor catalog — so an empty tenant (zero instantiated
+// controls) can still find controls by their SCF code (CRY-04) or name
+// (encryption). See web/app/api/search/route.ts.
+type SearchHitType = "anchors" | "controls" | "risks" | "evidence";
 
 interface SearchHit {
   id: string;
-  type: "controls" | "risks" | "evidence";
+  type: SearchHitType;
   title: string;
   snippet: string;
   relevance_score: number;
@@ -83,19 +91,35 @@ interface SearchResponse {
 }
 
 interface Grouped {
+  anchors: SearchHit[];
   controls: SearchHit[];
   risks: SearchHit[];
   evidence: SearchHit[];
 }
 
 /**
+ * GROUP_ORDER is the canonical render + arrow-navigation order for the
+ * grouped popover. Anchors render first so an empty tenant's
+ * SCF-catalog matches (the slice 661 fix) are the most prominent group.
+ * The flat navigation order and the JSX both consume this single source
+ * of truth so they can never drift.
+ */
+export const GROUP_ORDER: readonly SearchHitType[] = [
+  "anchors",
+  "controls",
+  "risks",
+  "evidence",
+] as const;
+
+/**
  * groupByType partitions a hits array by their `type` field. Pure;
  * exported for unit coverage.
  */
 export function groupByType(hits: SearchHit[]): Grouped {
-  const out: Grouped = { controls: [], risks: [], evidence: [] };
+  const out: Grouped = { anchors: [], controls: [], risks: [], evidence: [] };
   for (const h of hits) {
-    if (h.type === "controls") out.controls.push(h);
+    if (h.type === "anchors") out.anchors.push(h);
+    else if (h.type === "controls") out.controls.push(h);
     else if (h.type === "risks") out.risks.push(h);
     else if (h.type === "evidence") out.evidence.push(h);
   }
@@ -112,6 +136,12 @@ export function groupByType(hits: SearchHit[]): Grouped {
  */
 export function hrefForHit(hit: SearchHit): string {
   switch (hit.type) {
+    case "anchors":
+      // Slice 661 — the anchor hit id is the SCF anchor UUID; the
+      // catalog detail page at /catalog/scf/[id] resolves it (the
+      // route accepts the UUID, matching the catalog list view's
+      // `/catalog/scf/${anchor.id}` link).
+      return `/catalog/scf/${encodeURIComponent(hit.id)}`;
     case "controls":
       return `/controls/${encodeURIComponent(hit.id)}`;
     case "risks":
@@ -153,10 +183,7 @@ export const LISTBOX_ID = "global-search-listbox";
  * option to carry a stable id so `aria-activedescendant` on the input
  * can name the currently-highlighted row programmatically.
  */
-export function optionIdFor(
-  type: "controls" | "risks" | "evidence",
-  id: string,
-): string {
+export function optionIdFor(type: SearchHitType, id: string): string {
   return `global-search-option-${type}-${id}`;
 }
 
@@ -294,7 +321,7 @@ export function GlobalSearch() {
   // used for arrow-key navigation. Stays in lockstep with the JSX
   // below because the same grouping is consumed in both places.
   const flatHits = useMemo(
-    () => [...grouped.controls, ...grouped.risks, ...grouped.evidence],
+    () => GROUP_ORDER.flatMap((type) => grouped[type]),
     [grouped],
   );
 
@@ -332,12 +359,16 @@ export function GlobalSearch() {
   );
 
   // Stable flat index for each (type, idx-within-type) tuple so we
-  // can highlight the active row when rendering grouped.
+  // can highlight the active row when rendering grouped. Computed by
+  // summing the sizes of every group that precedes `type` in
+  // GROUP_ORDER — the same order flatHits flattens, so the two can
+  // never drift (slice 661 added a fourth group).
   const flatIndexFor = (type: keyof Grouped, idx: number): number => {
     let offset = 0;
-    if (type === "risks") offset = grouped.controls.length;
-    else if (type === "evidence")
-      offset = grouped.controls.length + grouped.risks.length;
+    for (const t of GROUP_ORDER) {
+      if (t === type) break;
+      offset += grouped[t].length;
+    }
     return offset + idx;
   };
 
@@ -421,7 +452,7 @@ export function GlobalSearch() {
             </div>
           ) : (
             <>
-              {(["controls", "risks", "evidence"] as const).map((type) => {
+              {GROUP_ORDER.map((type) => {
                 const rows = grouped[type];
                 if (rows.length === 0) return null;
                 return (
@@ -456,7 +487,7 @@ export function GlobalSearch() {
 }
 
 interface ResultGroupProps {
-  type: "controls" | "risks" | "evidence";
+  type: SearchHitType;
   rows: SearchHit[];
   activeIndex: number;
   flatIndexFor: (idx: number) => number;
@@ -515,7 +546,8 @@ function ResultGroup({
   );
 }
 
-const GROUP_LABELS: Record<"controls" | "risks" | "evidence", string> = {
+const GROUP_LABELS: Record<SearchHitType, string> = {
+  anchors: "SCF anchors",
   controls: "Controls",
   risks: "Risks",
   evidence: "Evidence",

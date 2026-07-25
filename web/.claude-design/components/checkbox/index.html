@@ -1,0 +1,88 @@
+<!-- @dsCard group="Forms" name="Checkbox" subtitle="unchecked · checked · disabled · with label" -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Checkbox — security-atlas Design System</title>
+<link rel="stylesheet" href="../../_tokens.css" />
+<style>
+  /* Checkbox — translated from web/components/ui/checkbox.tsx +
+     checkbox-class.ts (base-nova / neutral, slice 363).
+     Box: 16x16, rounded, border-input, bg-transparent. Checked state fills
+     with --primary and shows a --primary-foreground check glyph
+     (data-[checked]:border-primary bg-primary text-primary-foreground).
+     Focus ring matches Input/Button (ring-3 ring-ring/50). */
+  .cb {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; flex-shrink: 0;
+    border: 1px solid var(--input); border-radius: var(--radius-sm);
+    background: transparent; color: transparent;
+    transition: background-color .12s ease, border-color .12s ease, box-shadow .12s ease;
+  }
+  .cb--checked { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
+  .cb--focus { border-color: var(--ring);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--ring) 50%, transparent); }
+  .cb--disabled { opacity: .5; cursor: not-allowed; }
+  .cb svg { width: 12px; height: 12px; }
+
+  .cb-row { display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--font-sans); font-size: 0.875rem; color: var(--foreground); }
+  .cb-row--disabled { color: var(--muted-foreground); }
+</style>
+</head>
+<body>
+<div class="ds-stages">
+  <div class="ds-stage">
+    <p class="ds-label">States — Light</p>
+    <div class="ds-col">
+      <label class="cb-row">
+        <span class="cb" role="checkbox" aria-checked="false"></span>
+        Acknowledge access-control policy
+      </label>
+      <label class="cb-row">
+        <span class="cb cb--checked" role="checkbox" aria-checked="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        </span>
+        Include in audit period
+      </label>
+      <label class="cb-row">
+        <span class="cb cb--checked cb--focus" role="checkbox" aria-checked="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        </span>
+        Focused (keyboard ring)
+      </label>
+      <label class="cb-row cb-row--disabled">
+        <span class="cb cb--disabled" role="checkbox" aria-checked="false" aria-disabled="true"></span>
+        Disabled option
+      </label>
+    </div>
+  </div>
+  <div class="ds-stage ds-stage--dark dark">
+    <p class="ds-label">States — Dark</p>
+    <div class="ds-col">
+      <label class="cb-row">
+        <span class="cb" role="checkbox" aria-checked="false"></span>
+        Acknowledge access-control policy
+      </label>
+      <label class="cb-row">
+        <span class="cb cb--checked" role="checkbox" aria-checked="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        </span>
+        Include in audit period
+      </label>
+      <label class="cb-row">
+        <span class="cb cb--checked cb--focus" role="checkbox" aria-checked="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+        </span>
+        Focused (keyboard ring)
+      </label>
+      <label class="cb-row cb-row--disabled">
+        <span class="cb cb--disabled" role="checkbox" aria-checked="false" aria-disabled="true"></span>
+        Disabled option
+      </label>
+    </div>
+  </div>
+</div>
+</body>
+</html>

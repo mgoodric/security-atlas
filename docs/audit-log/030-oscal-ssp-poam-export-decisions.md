@@ -29,6 +29,21 @@ once the export is validated against a real auditor's tooling.
 
 **Confidence: high.** The bundle text is genuinely human-authored; the mapping is faithful to §8.2.
 
+> **RESOLVED 2026-06-07 (slice 493).** When slice 030 shipped, the read path
+> (`ListActiveControls`) returned a projection that exposed `title` and
+> `control_family` but NOT `description`, so `aggregate.go` could not reach the
+> authored narrative. It used a stopgap: the SSP `Statement` was filled with
+> `ApplicabilityExpr` (a placeholder), then overwritten with a templated
+> `"<Title> (control family: <family>). Implementation owned by role <owner>."`
+> string — cookie-cutter boilerplate where the authored narrative belongs.
+> Slice 493 closes this: a purpose-built companion query
+> (`ListActiveControlsWithDescription`) carries the authored `description`, and
+> the SSP `Statement` is now the authored narrative verbatim — falling back to a
+> CLEARLY-LABELED synthesized summary only when a control has no authored
+> description (never empty). The `ApplicabilityExpr` placeholder + the
+> double-fill are removed; `Statement` is filled exactly once. See
+> `docs/audit-log/493-ssp-narratives-decisions.md`.
+
 ### D3 — POA&M items derive from failing control evaluations + open audit notes
 
 **Options considered:**

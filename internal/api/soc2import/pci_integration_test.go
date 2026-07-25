@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // Slice 447 integration suite — the FRAMEWORK-AGNOSTIC crosswalk importer
@@ -59,7 +60,7 @@ func resetPCI(t *testing.T, pool *pgxpool.Pool) {
 // AC-2 + AC-7 — importing the PCI crosswalk creates framework_requirements +
 // fw_to_scf_edges rows for PCI DSS v4.0, and re-importing is idempotent.
 func TestPCIImport_CreatesRowsAndIsIdempotent(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetPCI(t, pool)
 	ensureSCFLoaded(t, pool)
 	cw := loadPCICrosswalk(t)
@@ -99,7 +100,7 @@ func TestPCIImport_CreatesRowsAndIsIdempotent(t *testing.T) {
 // AC-3 — a PCI "8.x" code, an ISO "A.x" code, and a SOC 2 "CCx" code coexist
 // without collision (three distinct framework_versions).
 func TestPCIImport_DoesNotDisturbSOC2orISO(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	resetPCI(t, pool)
@@ -162,7 +163,7 @@ func TestPCIImport_DoesNotDisturbSOC2orISO(t *testing.T) {
 // with the STRM edge type. Mirrors the query the GET
 // /v1/requirements/{slug}/anchors read path runs. PCI 8.2.1 -> IAC-01.
 func TestPCIImport_RequirementResolvesToAnchorsWithSTRMType(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetPCI(t, pool)
 	ensureSCFLoaded(t, pool)
 	if _, err := soc2import.Import(context.Background(), pool, loadPCICrosswalk(t)); err != nil {
@@ -211,7 +212,7 @@ func TestPCIImport_RequirementResolvesToAnchorsWithSTRMType(t *testing.T) {
 // frameworks: one control, N frameworks, NO per-framework duplicated control
 // and NO requirement -> requirement edge.
 func TestPCIImport_SharedAnchorSatisfiesThreeFrameworks_Invariant1(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetCatalog(t, pool)
 	resetISO(t, pool)
 	resetPCI(t, pool)
@@ -299,7 +300,7 @@ func TestPCIImport_SharedAnchorSatisfiesThreeFrameworks_Invariant1(t *testing.T)
 // anchor is a clear loader error, not a panic and not a dangling edge. The
 // whole import rolls back, leaving no PCI requirement rows behind.
 func TestPCIImport_RejectsEdgeToNonexistentAnchor(t *testing.T) {
-	pool := openPool(t)
+	pool := dbtest.NewMigratePool(t)
 	resetPCI(t, pool)
 	ensureSCFLoaded(t, pool)
 

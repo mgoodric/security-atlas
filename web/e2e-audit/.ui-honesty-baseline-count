@@ -1,0 +1,14 @@
+# .ui-honesty-baseline-count — slice 699
+#
+# The standing UI-honesty finding count on `main`. The frontend-ui-honesty CI
+# job posts/refreshes its sticky PR comment ONLY when a run's total differs
+# from this number (AC-2) — the count is otherwise identical PR-to-PR, so
+# refreshing the sticky on every run is pure noise. The advisory CHECK still
+# runs on every PR and uploads the full report artifact regardless (AC-4).
+#
+# Seeded from the slice 693 bot-comment census (178 standing findings). If the
+# first CI run reports a different total (the census was an estimate), this
+# baseline is updated to that observed number — a documented maintenance task,
+# not a slice. Lines starting with '#' are ignored; the value is the first
+# integer found below.
+178

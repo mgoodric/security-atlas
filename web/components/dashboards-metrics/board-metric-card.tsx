@@ -19,6 +19,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { fetchDashboardFreshness } from "@/lib/api/dashboard";
+import {
+  EVIDENCE_FRESHNESS_METRIC_ID,
+  freshnessPctFromReport,
+} from "@/lib/api/freshness-consistency";
 import { fetchObservations, fetchTarget, type Metric } from "@/lib/api/metrics";
 
 import { formatValue, parseValue } from "./format";
@@ -50,8 +55,50 @@ export function BoardMetricCard({
     staleTime: 60_000,
   });
 
-  const latest = latestObservation(obsQuery.data?.observations);
+  // Slice 677 / ATLAS-020 — the evidence-freshness board KPI reads the
+  // LIVE freshness read model (the same source the dashboard widget uses)
+  // for its headline value + badge, so the two surfaces never disagree on
+  // the number. The stored-observation series still backs the sparkline
+  // (trend), but the current figure comes from one source of truth. This
+  // query shares the dashboard's TanStack key so it piggybacks the cache.
+  const isFreshnessKPI = metric.id === EVIDENCE_FRESHNESS_METRIC_ID;
+  const freshnessQuery = useQuery({
+    queryKey: ["dashboard", "freshness"],
+    queryFn: fetchDashboardFreshness,
+    enabled: isFreshnessKPI,
+    staleTime: 30_000,
+  });
+
   const target = targetQuery.data ?? null;
+
+  // For the freshness KPI, derive the headline value from live freshness;
+  // otherwise use the latest stored observation. `freshnessPctFromReport`
+  // returns 0-100; this metric's stored observations are FRACTIONS (0-1,
+  // the slice-076 evaluator's `fresh/total`), and the card's `formatValue`
+  // treats percent values <= 1 as fractions. To render identically to a
+  // stored observation — and to stay consistent across the boundary
+  // (a live 1% must show "1.0%", not "100.0%") — express the live value
+  // as the same 0-1 fraction the evaluator emits.
+  const liveFreshnessPct = isFreshnessKPI
+    ? freshnessPctFromReport(freshnessQuery.data)
+    : null;
+  const liveFreshnessFraction =
+    liveFreshnessPct !== null ? liveFreshnessPct / 100 : null;
+  const latest: Latest =
+    isFreshnessKPI && liveFreshnessFraction !== null
+      ? { raw: String(liveFreshnessFraction), value: liveFreshnessFraction }
+      : latestObservation(obsQuery.data?.observations);
+
+  // The freshness KPI's value-loading and has-value signals follow the
+  // live freshness query; every other metric follows the observations
+  // query. Keeping these as explicit locals keeps the JSX branches
+  // readable and the two surfaces' "do we have a number?" logic aligned.
+  const valueIsLoading = isFreshnessKPI
+    ? freshnessQuery.isLoading
+    : obsQuery.isLoading;
+  const hasValue = isFreshnessKPI
+    ? liveFreshnessPct !== null
+    : (obsQuery.data?.count ?? 0) > 0;
 
   return (
     <Card
@@ -72,7 +119,7 @@ export function BoardMetricCard({
         <CardDescription>{metric.description}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3 px-4">
-        {obsQuery.isLoading ? (
+        {valueIsLoading ? (
           <Skeleton className="h-14 w-full" />
         ) : (
           <div className="flex items-center justify-between gap-3">
@@ -106,7 +153,7 @@ export function BoardMetricCard({
             target={target}
             testid={`board-metric-${metric.id}-badge`}
           />
-          {!obsQuery.isLoading && (obsQuery.data?.count ?? 0) === 0 ? (
+          {!valueIsLoading && !hasValue ? (
             <Badge
               variant="ghost"
               data-testid={`board-metric-${metric.id}-empty`}

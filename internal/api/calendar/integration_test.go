@@ -30,7 +30,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -40,60 +39,28 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool pool/DSN boilerplate this file
+// used to re-derive now lives in the shared internal/dbtest harness (NewAppPool
+// = RLS-enforcing atlas_app default; NewMigratePool = privileged BYPASSRLS for
+// seeding + freshTenant cleanup).
 
 // freshTenant returns a new tenant id and registers a cleanup that
 // removes every row this slice's tests can create under it.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM exceptions WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-			`DELETE FROM policies WHERE tenant_id = $1`,
-			`DELETE FROM audit_periods WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"control_evaluations",
+		"exceptions",
+		"controls",
+		"policies",
+		"vendors",
+		"audit_periods",
+	)
 }
 
 // seedFrameworkVersion seeds the minimum catalog rows for an audit_period FK.
@@ -164,6 +131,49 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid
 	`, uuid.New(), tenant, ctrlID, expiresAt); err != nil {
 		t.Fatalf("seed exception: %v", err)
 	}
+}
+
+// seedControlWithSCF inserts a control with an explicit scf_id (the SCF
+// anchor code) and a known title so slice 732's exception-label JOIN can
+// be asserted. A blank scfID exercises the AC-2 no-SCF-code fallback path.
+func seedControlWithSCF(t *testing.T, admin *pgxpool.Pool, tenant, scfID, title string) uuid.UUID {
+	t.Helper()
+	ctrlID := uuid.New()
+	var scfArg any
+	if scfID == "" {
+		scfArg = nil
+	} else {
+		scfArg = scfID
+	}
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO controls (
+			id, tenant_id, scf_id, title, control_family, implementation_type,
+			bundle_id, evidence_queries, applicability_expr, freshness_class,
+			lifecycle_state
+		)
+		VALUES ($1, $2, $3, $4, 'AAA', 'manual_periodic',
+		        $5, '[]'::jsonb, 'true', 'quarterly', 'active')
+	`, ctrlID, tenant, scfArg, title, "test-bundle-732-"+ctrlID.String()); err != nil {
+		t.Fatalf("seed control with scf: %v", err)
+	}
+	return ctrlID
+}
+
+// seedVendor inserts a vendor with a last_review_date and review_cadence so
+// the calendar's vendor-review branch (slice 675) projects a next-review
+// event at last_review_date + cadence. Returns the vendor id.
+func seedVendor(t *testing.T, admin *pgxpool.Pool, tenant string, name string, lastReview time.Time, cadence string) uuid.UUID {
+	t.Helper()
+	vendorID := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO vendors (
+			id, tenant_id, name, criticality, review_cadence, last_review_date
+		)
+		VALUES ($1, $2, $3, 'high', $4, $5)
+	`, vendorID, tenant, name, cadence, lastReview); err != nil {
+		t.Fatalf("seed vendor: %v", err)
+	}
+	return vendorID
 }
 
 func seedEvaluation(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, evaluatedAt time.Time) {
@@ -254,8 +264,8 @@ func decodeJSON(t *testing.T, body []byte) map[string]any {
 // ----- ISC-94-1 + 94-2: RLS isolation across tenants -----
 
 func TestCalendar_RLSIsolatesExceptionsAcrossTenants(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -290,9 +300,79 @@ func TestCalendar_RLSIsolatesExceptionsAcrossTenants(t *testing.T) {
 	}
 }
 
+// TestCalendar_ExceptionTitleUsesSCFCodeNotUUID is the slice 732 AC-5
+// acceptance test: an exception on a control with a known SCF code renders
+// "Exception on <scf_code> — <control name>" and NEVER the raw control
+// UUID. The label is built in the calendar SQL JOIN (single source of
+// truth); the handler passes it through verbatim.
+func TestCalendar_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	tenant := freshTenant(t, admin)
+	now := time.Now().UTC()
+
+	ctrl := seedControlWithSCF(t, admin, tenant, "AAA-01", "Access Control Policy")
+	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
+
+	env := testServer(t, app, tenant)
+	resp, body := get(t, env, "/v1/calendar?types=exception")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("calendar GET: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	got := decodeJSON(t, body)
+	events := got["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 exception event, got %d: %s", len(events), string(body))
+	}
+	title := events[0].(map[string]any)["title"].(string)
+
+	const wantTitle = "Exception on AAA-01 — Access Control Policy"
+	if title != wantTitle {
+		t.Errorf("exception title = %q; want %q", title, wantTitle)
+	}
+	if strings.Contains(title, ctrl.String()) {
+		t.Errorf("exception title leaked the raw control UUID: %q", title)
+	}
+}
+
+// TestCalendar_ExceptionTitleFallsBackWhenNoSCFCode is the slice 732 AC-2
+// edge case: a control with NO SCF code falls back to "Exception on
+// <control name>" — it must still never print a bare UUID.
+func TestCalendar_ExceptionTitleFallsBackWhenNoSCFCode(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	tenant := freshTenant(t, admin)
+	now := time.Now().UTC()
+
+	ctrl := seedControlWithSCF(t, admin, tenant, "", "Custom unmapped control")
+	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
+
+	env := testServer(t, app, tenant)
+	resp, body := get(t, env, "/v1/calendar?types=exception")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("calendar GET: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	got := decodeJSON(t, body)
+	events := got["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 exception event, got %d: %s", len(events), string(body))
+	}
+	title := events[0].(map[string]any)["title"].(string)
+
+	const wantTitle = "Exception on Custom unmapped control"
+	if title != wantTitle {
+		t.Errorf("fallback exception title = %q; want %q", title, wantTitle)
+	}
+	if strings.Contains(title, ctrl.String()) {
+		t.Errorf("fallback exception title leaked the raw control UUID: %q", title)
+	}
+}
+
 func TestCalendar_RLSIsolatesControlCadenceAcrossTenants(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
@@ -318,8 +398,8 @@ func TestCalendar_RLSIsolatesControlCadenceAcrossTenants(t *testing.T) {
 // ----- ISC-94-3 + 94-4: cadence math -----
 
 func TestCalendar_ControlCadenceMathDueSoon(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	now := time.Now().UTC()
@@ -351,8 +431,8 @@ func TestCalendar_ControlCadenceMathDueSoon(t *testing.T) {
 }
 
 func TestCalendar_ControlCadenceMathOverdueWhenNeverEvaluated(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	// Control with cadence but NO evaluations -> status=overdue at now().
@@ -374,11 +454,89 @@ func TestCalendar_ControlCadenceMathOverdueWhenNeverEvaluated(t *testing.T) {
 	}
 }
 
+// ----- Slice 675: calendar agenda sources vendor reviews (AC-1 / AC-5) -----
+
+// TestCalendar_SurfacesVendorReviews is the slice-675 regression guard: a
+// vendor with a last_review_date + cadence whose next review falls in the
+// default window appears in the agenda with type=vendor. Before slice 675
+// the calendar's UNION had no vendor branch, so this returned 0 events.
+func TestCalendar_SurfacesVendorReviews(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	tenant := freshTenant(t, admin)
+	now := time.Now().UTC()
+
+	// last_review_date 30 days ago + quarterly cadence => next review in ~62
+	// days, inside the default 90-day forward window.
+	seedVendor(t, admin, tenant, "Acme Cloud", now.Add(-30*24*time.Hour), "quarterly")
+
+	env := testServer(t, app, tenant)
+	resp, body := get(t, env, "/v1/calendar?types=vendor")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("calendar GET: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	got := decodeJSON(t, body)
+	events := got["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 vendor-review event, got %d; body=%s", len(events), string(body))
+	}
+	first := events[0].(map[string]any)
+	if first["type"] != "vendor" {
+		t.Errorf("type=%v want=vendor", first["type"])
+	}
+	if !strings.Contains(first["title"].(string), "Acme Cloud") {
+		t.Errorf("title=%v want to contain vendor name", first["title"])
+	}
+	if first["related_entity_kind"] != "vendor" {
+		t.Errorf("related_entity_kind=%v want=vendor", first["related_entity_kind"])
+	}
+}
+
+// TestCalendar_AgendaSourcesAllDashboardTypes is the AC-5 acceptance test: a
+// tenant with an audit period + a vendor review + an exception shows ALL
+// three in the agenda (the demo-audit bug was: exceptions only).
+func TestCalendar_AgendaSourcesAllDashboardTypes(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	tenant := freshTenant(t, admin)
+	fvID := seedFrameworkVersion(t, admin)
+	now := time.Now().UTC()
+
+	// One of each: audit period closing in 30d, vendor review due in ~62d,
+	// exception expiring in 10d. All inside the default 90-day window.
+	seedAuditPeriod(t, admin, tenant, fvID, now.Add(30*24*time.Hour))
+	seedVendor(t, admin, tenant, "Globex SaaS", now.Add(-30*24*time.Hour), "quarterly")
+	ctrl := seedControlWithCadence(t, admin, tenant, "annual")
+	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
+
+	env := testServer(t, app, tenant)
+	// No types filter => all sources.
+	resp, body := get(t, env, "/v1/calendar?types=audit,vendor,exception")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("calendar GET: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	got := decodeJSON(t, body)
+	events := got["events"].([]any)
+
+	seen := map[string]bool{}
+	for _, e := range events {
+		ev := e.(map[string]any)
+		seen[ev["type"].(string)] = true
+	}
+	for _, want := range []string{"audit", "vendor", "exception"} {
+		if !seen[want] {
+			t.Errorf("agenda missing event type %q; types seen=%v body=%s", want, seen, string(body))
+		}
+	}
+}
+
 // ----- ISC-94-5: truncation flag fires at the 500-event threshold -----
 
 func TestCalendar_TruncationFiresAt500Events(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	now := time.Now().UTC()
@@ -415,8 +573,8 @@ func TestCalendar_TruncationFiresAt500Events(t *testing.T) {
 // ----- ISC-94-6: ICS feed validates as RFC 5545 -----
 
 func TestCalendarICS_FeedShapeValidates(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	fvID := seedFrameworkVersion(t, admin)
@@ -503,8 +661,8 @@ func TestCalendarICS_FeedShapeValidates(t *testing.T) {
 // ----- ISC-94-7: ICS auth rejects missing token + non-calendar-scope tokens -----
 
 func TestCalendarICS_RejectsMissingToken(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	env := testServer(t, app, tenant)
@@ -518,8 +676,8 @@ func TestCalendarICS_RejectsMissingToken(t *testing.T) {
 }
 
 func TestCalendarICS_RejectsNonCalendarScopeToken(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
 	env := testServer(t, app, tenant)

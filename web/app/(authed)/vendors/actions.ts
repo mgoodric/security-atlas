@@ -35,3 +35,12 @@ export async function updateVendorFromCookieSession(
   const decoded = (await res.json()) as { vendor: Vendor };
   return decoded.vendor;
 }
+
+export async function deleteVendorFromCookieSession(id: string): Promise<void> {
+  const res = await fetch(`/api/vendors/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+}

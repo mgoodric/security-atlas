@@ -123,6 +123,47 @@ set +e
   echo "status_for-yellow:$(status_for 1 100 0.5 2)"     # 1% > 0.5%, 1 < trigger 2 — yellow
   echo "status_for-red:$(status_for 2 100 0.5 2)"        # 2% > 0.5%, 2 >= trigger 2 — red
   echo "status_for-no-data:$(status_for 0 0 0.0 1)"      # no data
+
+  # ---- slice 420: integration-surface A->A+1 broadening ----
+  #
+  # is_integration_surface keys on the EXACT job name (P0-4). It must
+  # match the integration check and NOTHING else (lint / sqlc / unit).
+  if is_integration_surface "Go · integration (Postgres RLS)"; then
+    echo "is_integration_surface-exact:yes"
+  else
+    echo "is_integration_surface-exact:no"
+  fi
+  if is_integration_surface "Go · build + test"; then
+    echo "is_integration_surface-unit:yes"
+  else
+    echo "is_integration_surface-unit:no"
+  fi
+  if is_integration_surface "Lint · golangci-lint"; then
+    echo "is_integration_surface-lint:yes"
+  else
+    echo "is_integration_surface-lint:no"
+  fi
+
+  # classify_integration_transition FAIL_CONCL SUCC_CONCL CHANGED_FILES
+  #
+  # AC-5 (under-count fix proven): the scheduler-flake shape — integration
+  # red on A, green on A+1, and A+1 changed NO integration-surface code
+  # (a docs-only / CHANGELOG push) — IS a flake.
+  echo "ac5-scheduler-flake:$(classify_integration_transition failure success 'docs/flake-budget.md
+CHANGELOG.md')"
+  # AC-5 variant: A+1 changed nothing at all (empty diff) — still a flake.
+  echo "ac5-empty-diff:$(classify_integration_transition timed_out success '')"
+
+  # AC-4 (over-count guard proven): a genuine FIX-FORWARD — integration
+  # red on A, green on A+1 BECAUSE A+1 fixed the failing test (the diff
+  # touched the integration test package) — is NOT a flake.
+  echo "ac4-fix-forward-internal:$(classify_integration_transition failure success 'internal/metrics/scheduler/integration_test.go')"
+  echo "ac4-fix-forward-migration:$(classify_integration_transition failure success 'migrations/sql/20260607000000_ai_generations.sql')"
+  echo "ac4-fix-forward-cmd:$(classify_integration_transition failure success 'cmd/atlas/main.go')"
+
+  # not-applicable: A succeeded (no failure to clear), or A+1 not green.
+  echo "ac4-no-failure:$(classify_integration_transition success success 'docs/x.md')"
+  echo "ac4-no-success:$(classify_integration_transition failure failure 'docs/x.md')"
 ) > "/tmp/flake-counter-test-$$/output" 2>&1
 status=$?
 set -e
@@ -147,6 +188,28 @@ assert_contains "$out" "status_for-under-target:green" "test-4i status under-tar
 assert_contains "$out" "status_for-yellow:yellow" "test-4j status above-target-below-trigger = yellow"
 assert_contains "$out" "status_for-red:red" "test-4k status above-trigger = red"
 assert_contains "$out" "status_for-no-data:no-data" "test-4l status no-attempts = no-data"
+
+# Test 6 (slice 420) — integration-surface gate keys on the exact job
+# name only (P0-4): matches the integration check, rejects unit + lint.
+assert_contains "$out" "is_integration_surface-exact:yes" "test-6a integration job name matches"
+assert_contains "$out" "is_integration_surface-unit:no" "test-6b unit job name does NOT match integration"
+assert_contains "$out" "is_integration_surface-lint:no" "test-6c lint job name does NOT match integration"
+
+# Test 7 (slice 420 / AC-5) — rerun-cleared integration failure (the
+# scheduler-flake shape: red on A, green on A+1, no integration-code
+# change) IS counted as a flake. This is the under-count fix (I-1).
+assert_contains "$out" "ac5-scheduler-flake:flake" "test-7a AC-5 scheduler-flake shape IS a flake"
+assert_contains "$out" "ac5-empty-diff:flake" "test-7b AC-5 empty-diff red->green IS a flake"
+
+# Test 8 (slice 420 / AC-4) — a genuine code-FIX-FORWARD (A+1 touched the
+# integration test surface, so it plausibly FIXED the failure) is NOT a
+# flake. This is the over-count guard (I-2 / P0-3) — the load-bearing
+# JUDGMENT. No naive "any A->A+1 success = flake".
+assert_contains "$out" "ac4-fix-forward-internal:fix-forward" "test-8a AC-4 internal/ fix is NOT a flake"
+assert_contains "$out" "ac4-fix-forward-migration:fix-forward" "test-8b AC-4 migration fix is NOT a flake"
+assert_contains "$out" "ac4-fix-forward-cmd:fix-forward" "test-8c AC-4 cmd/ fix is NOT a flake"
+assert_contains "$out" "ac4-no-failure:not-applicable" "test-8d no failure to clear = not-applicable"
+assert_contains "$out" "ac4-no-success:not-applicable" "test-8e A+1 not green = not-applicable"
 
 # Test 5 — date math: SINCE_ISO is BEFORE NOW_ISO regardless of which
 # date dialect (GNU vs BSD) the host uses.

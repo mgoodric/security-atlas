@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -169,8 +170,27 @@ func TestAPIKeys_AuthenticateAndRevoke(t *testing.T) {
 
 func TestAPIKeys_RotationGraceWindow(t *testing.T) {
 	tenant := uuid.New()
-	// Set rotation grace to 50ms so the test runs without sleeping forever.
-	store := apikeystore.NewStore(appPool, adminPool, testHasher, 50*time.Millisecond)
+	// Drive the rotation-grace boundary with the slice-371 WithClock seam, not
+	// the real wall clock. Grace is enforced purely Go-side (Rotate sets
+	// retires_at = clock()+grace; Authenticate rejects when clock().After(
+	// retires_at)), so advancing a virtual clock asserts the boundary exactly.
+	// The old shape used a real 50ms grace + time.Sleep, which flaked on loaded
+	// CI: the Issue/Rotate/Authenticate DB round-trips could outrun 50ms before
+	// the "within grace" assertion ran, expiring the predecessor early.
+	const grace = time.Hour
+	var clockMu sync.Mutex
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	advance := func(d time.Duration) {
+		clockMu.Lock()
+		now = now.Add(d)
+		clockMu.Unlock()
+	}
+	store := apikeystore.NewStore(appPool, adminPool, testHasher, grace).
+		WithClock(func() time.Time {
+			clockMu.Lock()
+			defer clockMu.Unlock()
+			return now
+		})
 	store.SetPrefix(bearer.PrefixTest)
 
 	cred, predPlain, err := store.Issue(withTenant(t, tenant), tenant.String(), apikeystore.IssueInput{})
@@ -189,7 +209,8 @@ func TestAPIKeys_RotationGraceWindow(t *testing.T) {
 		t.Fatalf("Rotate returned zero predecessor_expires_at")
 	}
 
-	// Predecessor still authenticates within grace.
+	// Within grace (virtual now < retires_at): predecessor still authenticates.
+	advance(grace / 2)
 	if _, err := store.Authenticate(context.Background(), predPlain); err != nil {
 		t.Fatalf("Authenticate(predecessor within grace): %v", err)
 	}
@@ -198,8 +219,8 @@ func TestAPIKeys_RotationGraceWindow(t *testing.T) {
 		t.Fatalf("Authenticate(successor): %v", err)
 	}
 
-	// Wait past grace; predecessor should now reject.
-	time.Sleep(75 * time.Millisecond)
+	// Advance strictly past grace; predecessor should now reject.
+	advance(grace)
 	if _, err := store.Authenticate(context.Background(), predPlain); !errors.Is(err, apikeystore.ErrUnknownKey) {
 		t.Fatalf("Authenticate(predecessor post-grace) expected ErrUnknownKey, got %v", err)
 	}
@@ -257,7 +278,9 @@ func TestUsers_LocalSameEmailAcrossTenants(t *testing.T) {
 func TestSessions_CreateReadRevoke(t *testing.T) {
 	tenant := uuid.New()
 	uStore := users.NewStore(appPool)
-	sStore := sessions.NewStore(appPool, 100*time.Millisecond) // short TTL
+	// TTL is generous: this test exercises create/read/revoke, never expiry,
+	// so a tight TTL only risks a flake if a slow CI Create->Read outran it.
+	sStore := sessions.NewStore(appPool, time.Hour)
 
 	usr, err := uStore.CreateLocal(withTenant(t, tenant), users.CreateLocalInput{
 		TenantID: tenant,

@@ -61,17 +61,50 @@ type ArtifactUploader interface {
 	Put(ctx context.Context, in artifact.PutInput) (artifact.Artifact, error)
 }
 
+// walkthroughReader is the per-route read seam the two GET read paths —
+// GET /v1/walkthroughs/{id} (Get) and GET /v1/walkthroughs (List) — read
+// through (slice 689 added Get; slice 690's contract-tier rollout adds the
+// List read). It carries JUST the read methods those routes need —
+// deliberately narrow (slice 409 D1 / slice 411 D2 / slice 412 D2 sizing rule:
+// a two-method seam over the wider walkthrough.Store, NOT a mirror of its
+// create/attach/finalize surface). The contract-tier recorder
+// (contractrecord_test.go) injects a fixed-row stub satisfying this seam so the
+// wire shapes (with attachments + canonical_hash + tamper flag) record on the
+// plain `go test ./...` unit surface with no Postgres pool (ADR-0007 /
+// P0-409-1). The production *walkthrough.Store satisfies it verbatim; the seam
+// is unexported and New(*walkthrough.Store, ArtifactUploader) is unchanged
+// (P0-409-2). The write/export handlers keep using the concrete h.store
+// directly (Export also calls Get, but it streams a download envelope, not the
+// JSON wire shape the BFF consumes — it is left on the concrete store).
+type walkthroughReader interface {
+	Get(ctx context.Context, id uuid.UUID) (walkthrough.Walkthrough, error)
+	List(ctx context.Context) ([]walkthrough.Walkthrough, error)
+}
+
 // Handler bundles slice-027 routes over a walkthrough.Store + an optional
 // artifact uploader. When the uploader is nil, the attachments endpoint
 // 503s -- consistent with the slice-011 attest pattern.
+//
+// reader is the slice-689 per-route read seam the Get path reads through; New
+// points it at store, so production behavior is identical.
 type Handler struct {
 	store    *walkthrough.Store
 	uploader ArtifactUploader
+	reader   walkthroughReader
 }
 
-// New constructs a Handler.
+// New constructs a Handler. The slice-689 per-route read seam (reader) is
+// wired to the same store — the public signature is unchanged (P0-409-2).
 func New(store *walkthrough.Store, uploader ArtifactUploader) *Handler {
-	return &Handler{store: store, uploader: uploader}
+	return &Handler{store: store, uploader: uploader, reader: store}
+}
+
+// newHandlerWithReader constructs a Handler whose Get path reads through an
+// arbitrary read seam. It exists ONLY for the slice-689 contract recorder,
+// which injects a fixed-row stub so the single-walkthrough wire shape records
+// with no Postgres pool. Unexported — not part of the public surface.
+func newHandlerWithReader(reader walkthroughReader) *Handler {
+	return &Handler{reader: reader}
 }
 
 // ----- wire shapes -----
@@ -172,7 +205,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	wt, err := h.store.Get(ctx, id)
+	wt, err := h.reader.Get(ctx, id)
 	if err != nil {
 		h.writeStoreErr(w, r, "get walkthrough", err)
 		return
@@ -187,7 +220,7 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	ws, err := h.store.List(ctx)
+	ws, err := h.reader.List(ctx)
 	if err != nil {
 		h.writeStoreErr(w, r, "list walkthroughs", err)
 		return

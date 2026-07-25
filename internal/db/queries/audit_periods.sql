@@ -30,6 +30,27 @@ SELECT * FROM audit_periods
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC;
 
+-- name: ListAuditPeriodsWithFrameworkByTenant :many
+-- Slice 680 / ATLAS-033: the /audits list view rendered a truncated
+-- framework_version_id UUID (which read as an opaque content hash) in the
+-- "Framework version" column because the period row carries only the FK.
+-- This LIST-path query LEFT JOINs frameworks + framework_versions so the
+-- handler can surface a readable label ("SCF 2025.2") instead. LEFT JOIN
+-- (not INNER) so a period whose framework_version_id no longer resolves
+-- still appears in the list — the handler falls back to the UUID when the
+-- label is NULL. Catalog tables (frameworks, framework_versions) are
+-- tenant-NULL global rows; the audit_periods tenant filter + RLS still
+-- scope the result to the caller's tenant.
+SELECT
+    ap.*,
+    f.name        AS framework_name,
+    fv.version    AS framework_version
+FROM audit_periods ap
+LEFT JOIN framework_versions fv ON fv.id = ap.framework_version_id
+LEFT JOIN frameworks f          ON f.id = fv.framework_id
+WHERE ap.tenant_id = $1
+ORDER BY ap.created_at DESC, ap.id ASC;
+
 -- name: MinFrozenAtOverlappingWindow :one
 -- Slice 135 AC-12: the earliest `frozen_at` across all FROZEN
 -- audit_periods whose [period_start, period_end] intersects the

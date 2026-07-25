@@ -17,6 +17,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { AISuggestPanel } from "./ai-suggest-panel";
 import { CitationChips, CitationPicker } from "./citation-picker";
 import { SuggestionsPanel } from "./suggestions-panel";
 import type { Citation, Question } from "./types";
@@ -201,13 +202,25 @@ export function AnswerEditor({ questionnaireID, question }: AnswerEditorProps) {
           </Alert>
         ) : null}
 
-        {/* Suggestions panel */}
+        {/* Suggestions panel — deterministic SCF-anchor priors (slice 155) */}
         <SuggestionsPanel
           questionnaireID={questionnaireID}
           anchor={question.scf_anchor_id}
           onUseAnswer={(text) => {
             markDirty();
             setNarrative(text); // AC-13 REPLACE (no append)
+          }}
+        />
+
+        {/* Slice 441 — AI answer suggestion (cited draft, one-click approve).
+            The draft is NOT binding until the operator approves it; on approve
+            the approved text becomes the stored narrative. */}
+        <AISuggestPanel
+          questionnaireID={questionnaireID}
+          questionID={question.id}
+          onApproved={(text) => {
+            markDirty();
+            setNarrative(text);
           }}
         />
 

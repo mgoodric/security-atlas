@@ -42,9 +42,9 @@ export type LinkForResult =
   | { kind: "static"; reason: string };
 
 const EXCEPTION_REASON =
-  "Per-exception detail page is a future slice — view the exception register at /exceptions.";
+  "A per-exception detail page is not available yet — view the exception register at /exceptions.";
 const POLICY_REASON =
-  "Per-policy detail page is a future slice — view the policy register at /policies.";
+  "A per-policy detail page is not available yet — view the policy register at /policies.";
 
 function assertNever(x: never): never {
   throw new Error(
@@ -62,6 +62,10 @@ export function linkFor(ev: CalendarEvent): LinkForResult {
       return { kind: "static", reason: EXCEPTION_REASON };
     case "policy":
       return { kind: "static", reason: POLICY_REASON };
+    case "vendor":
+      // Slice 675: vendor review events link to the real per-vendor
+      // detail page (web/app/(authed)/vendors/[id]/page.tsx).
+      return { kind: "link", href: `/vendors/${ev.related_entity_id}` };
     case "control":
       return { kind: "link", href: `/controls/${ev.related_entity_id}` };
     default:

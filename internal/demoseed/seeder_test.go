@@ -270,3 +270,33 @@ func TestUUID_Sanity(t *testing.T) {
 		t.Error("uuid.New() returned uuid.Nil")
 	}
 }
+
+// TestSeededVendorOwnerIsEmail — ATLAS-032 (slice 679). The vendor
+// "Owner (email)" field is contractually an email; the prior seed
+// stamped a role string ("Head of Security"), which the form's email
+// validation now rejects. This guards the fix: every seeded vendor
+// owner must be a valid `local@demo.example` address, and none may be
+// one of the role labels.
+func TestSeededVendorOwnerIsEmail(t *testing.T) {
+	s := &Seeder{scale: 1.0, clock: time.Now}
+	fs := s.buildFixtures("demo")
+	if len(fs.vendors) == 0 {
+		t.Fatal("buildFixtures produced no vendors; cannot assert owner shape")
+	}
+	roleSet := make(map[string]bool, len(ownerRoles))
+	for _, r := range ownerRoles {
+		roleSet[r] = true
+	}
+	for _, v := range fs.vendors {
+		if !strings.Contains(v.OwnerUser, "@") {
+			t.Errorf("vendor %q owner %q has no '@'; want an email", v.Name, v.OwnerUser)
+			continue
+		}
+		if !strings.HasSuffix(v.OwnerUser, "@"+personEmailDomain) {
+			t.Errorf("vendor %q owner %q; want suffix @%s", v.Name, v.OwnerUser, personEmailDomain)
+		}
+		if roleSet[v.OwnerUser] {
+			t.Errorf("vendor %q owner %q is a role label, not an email (the ATLAS-032 regression)", v.Name, v.OwnerUser)
+		}
+	}
+}

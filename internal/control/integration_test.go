@@ -9,75 +9,31 @@ package control_test
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
-
 // freshTenant returns a brand-new tenant id and registers a cleanup that
 // wipes every row written under it. Each test owns its own tenant so RLS
-// guarantees isolation.
+// guarantees isolation. Pure tenant-scoped DELETE in FK order
+// (evidence_records before controls), so it delegates to dbtest.SeedTenant
+// (slice 435 / 742 drain). The previous `UPDATE controls SET superseded_by
+// = NULL` pre-step is unnecessary — `controls_superseded_by_fk` is ON DELETE
+// SET NULL, so deleting the whole tenant's controls in one statement resolves
+// the self-reference on its own.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		// Delete child rows first, then the controls. The previous
-		// `UPDATE controls SET superseded_by = NULL` pre-step is removed:
-		// it tried to NULL EVERY version of a bundle at once, which makes
-		// two rows share (tenant_id, bundle_id) with superseded_by IS NULL
-		// and trips the controls_one_active_version_per_bundle unique
-		// index (23505). It is also unnecessary —
-		// `controls_superseded_by_fk` is ON DELETE SET NULL, so deleting
-		// the whole tenant's controls in one statement resolves the
-		// self-reference on its own.
-		for _, stmt := range []string{
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"evidence_records",
+		"controls",
+	)
 }
 
 // seedSCFAnchor inserts a single SCF anchor row directly (no slice-006
@@ -151,8 +107,8 @@ func seedSCFAnchor(t *testing.T, admin *pgxpool.Pool, code, family string) (uuid
 // TestUpload_HappyPath_CreatesActiveRow — AC-3: posting a bundle creates a
 // controls row tied to the SCF anchor, with version=1 and superseded_by NULL.
 func TestUpload_HappyPath_CreatesActiveRow(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	_, code := seedSCFAnchor(t, admin, "IAC-06", "IAC")
 	tenant := freshTenant(t, admin)
@@ -191,8 +147,8 @@ func TestUpload_HappyPath_CreatesActiveRow(t *testing.T) {
 // TestUpload_ReuploadSupersedes — AC-6: same bundle_id again bumps version,
 // flags the predecessor's superseded_by.
 func TestUpload_ReuploadSupersedes(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	_, code := seedSCFAnchor(t, admin, "IAC-07", "IAC")
 	tenant := freshTenant(t, admin)
@@ -244,8 +200,8 @@ func TestUpload_ReuploadSupersedes(t *testing.T) {
 // version-bump all 50 SOC 2 controls, doubling the `controls` row count and
 // failing the slice-065 AC-7 idempotency assertion.
 func TestUpload_ReuploadIdenticalIsNoop(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	_, code := seedSCFAnchor(t, admin, "IAC-08", "IAC")
 	tenant := freshTenant(t, admin)
@@ -300,8 +256,8 @@ func TestUpload_ReuploadIdenticalIsNoop(t *testing.T) {
 // TestUpload_UnknownAnchor — AC-4 + invariant 7: bundle referencing an SCF
 // anchor that isn't registered must be rejected with ErrSCFAnchorUnknown.
 func TestUpload_UnknownAnchor(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)

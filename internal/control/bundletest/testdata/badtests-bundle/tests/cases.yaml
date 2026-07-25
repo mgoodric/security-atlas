@@ -1,0 +1,7 @@
+cases:
+  # Invalid: expected_state is not a known control state. LoadTestCases must
+  # reject this with a field-pointing error.
+  - name: bogus-expected-state
+    expected_state: maybe
+    records:
+      - result: pass

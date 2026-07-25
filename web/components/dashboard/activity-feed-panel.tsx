@@ -9,17 +9,16 @@
 // append-only archive), keyed newest-first by `received_at`.
 //
 // Slice 040 originally shipped this as a `MissingEndpointPanel` with
-// disabled filter chips. Slice 147 binds the panel to real data; the
-// filter chips remain visually present but are still disabled — the
-// slice-066 endpoint surfaces only the evidence branch today, so the
-// Controls / Approvals filter chips would have nothing to show. Per
-// slice-066 D1 "revisit once in use", widening the endpoint via a
-// `?source=` filter is the path to wire them — out of scope here.
+// disabled filter chips. Slice 147 bound the panel to real data but left
+// the filter chips visually present and inert. Slice 667 removed them:
+// the dashboard endpoint surfaces only the evidence branch and takes no
+// kind/source filter, so the chips had nothing to bind to and carried a
+// developer-facing placeholder tooltip. Wiring real filtering requires a
+// backend slice (widen the dashboard source + add a `?kind=` param) and
+// is tracked as a follow-up — see the slice 667 decisions log.
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import type { ActivityEvent, ActivityFeedResponse } from "@/lib/api/dashboard";
-
-const FILTER_CHIPS = ["All", "Evidence", "Controls", "Approvals"];
 
 // relativeTime renders an RFC3339Nano timestamp as a short human-readable
 // "Nm ago" / "Nh ago" / "Nd ago" string. Future timestamps degrade to
@@ -101,22 +100,6 @@ export function ActivityFeedPanel({
       skeletonClassName="h-48 w-full"
       testid="activity-feed-panel"
     >
-      <div
-        className="mb-3 flex items-center gap-2"
-        data-testid="activity-feed-filters"
-      >
-        {FILTER_CHIPS.map((chip) => (
-          <span
-            key={chip}
-            data-testid="activity-filter-chip"
-            aria-disabled="true"
-            className="cursor-not-allowed rounded bg-muted px-2 py-1 text-xs text-muted-foreground"
-            title="Filter chips activate once the activity endpoint widens beyond the evidence branch"
-          >
-            {chip}
-          </span>
-        ))}
-      </div>
       {!report || report.activity.length === 0 ? (
         <p
           className="py-6 text-sm text-muted-foreground"

@@ -33,61 +33,26 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 
 import { derivePageName } from "@/lib/page-names";
+import { useCurrentTenantName } from "@/lib/auth/use-current-tenant-name";
 
-interface Tenant {
-  id: string;
-  name: string;
-  current: boolean;
-}
-
-interface TenantsResponse {
-  tenants?: Tenant[];
-}
-
-/**
- * pickCurrentTenantName returns the visible name of the tenant the
- * caller is currently scoped to, or `null` when no `current` entry
- * exists. Exported for unit coverage; not used outside this file
- * today.
- */
-export function pickCurrentTenantName(tenants: Tenant[] | null): string | null {
-  if (!tenants || tenants.length === 0) return null;
-  const current = tenants.find((t) => t.current);
-  if (!current) return null;
-  const trimmed = current.name.trim();
-  return trimmed.length === 0 ? null : trimmed;
-}
+// pickCurrentTenantName is re-exported from the shared resolver
+// (`web/lib/auth/current-tenant.ts`, slice 674) so the existing
+// `breadcrumb.test.ts` import keeps resolving while the pick logic lives
+// in one place. New callers should import from `@/lib/auth/current-tenant`
+// directly.
+export { pickCurrentTenantName } from "@/lib/auth/current-tenant";
 
 export function Breadcrumb() {
   const pathname = usePathname() ?? "";
-  const [tenantName, setTenantName] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const resp = await fetch("/api/me/tenants", {
-          cache: "no-store",
-          credentials: "include",
-        });
-        if (cancelled) return;
-        if (!resp.ok) return;
-        const data = (await resp.json()) as TenantsResponse;
-        if (cancelled) return;
-        setTenantName(pickCurrentTenantName(data?.tenants ?? null));
-      } catch {
-        // Fail quiet — keep the last good state.
-      }
-    };
-    void load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Slice 674 — route through the shared `useCurrentTenantName` hook,
+  // which re-fetches on the slice-199 `tenant-switched` broadcast. The
+  // prior local mount-only fetch left this chip showing the origin
+  // tenant name after an in-tab switch (the switcher updated; this did
+  // not).
+  const tenantName = useCurrentTenantName();
 
   const pageName = derivePageName(pathname);
 

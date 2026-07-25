@@ -23,3 +23,14 @@ deploy/helm/templates/
 # out of testdata/ entirely — these files are tool-generated; humans
 # don't read them in editors.
 **/testdata/*.golden.json
+
+# Slice-status artifacts generated/appended by scripts/gen-status.sh and
+# scripts/slice-event.sh. `_STATUS.md` is regenerated on every `just status`
+# in the generator's own markdown style; `_events.jsonl` is append-only JSONL
+# (one object per line — prettier would reflow it and break the format);
+# `_STATUS_HISTORY.md` is a frozen archival log. Same generated-file rationale
+# as CHANGELOG.md above: prettier adds no value and its reflow churns against
+# the tool output.
+docs/issues/_STATUS.md
+docs/issues/_STATUS_HISTORY.md
+docs/issues/_events.jsonl

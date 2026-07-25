@@ -48,6 +48,11 @@ type Signature struct {
 	// recorded for the cosign-kms mode so a verifier knows which key to
 	// pass to `cosign verify-blob --key`. Empty for the embedded mode.
 	KeyRef string `json:"key_ref,omitempty"`
+	// Keyless holds the cosign-keyless mode's Fulcio certificate + Rekor
+	// transparency-log entry (slice 414 / 368b / ADR-0016). It is set iff
+	// Mode == ModeCosignKeyless and is omitted (nil) for every other mode,
+	// so a pre-414 or non-keyless manifest is byte-identical to before.
+	Keyless *KeylessAttestation `json:"keyless,omitempty"`
 	// Digest is the lowercase-hex sha256 over the canonical concatenation
 	// of every bundle member's own sha256 (see SignBundle). It is the
 	// blob both modes sign over.
@@ -192,17 +197,18 @@ func (s *Signer) SignBundle(b *Bundle) (Signature, error) {
 //     function returns ErrCosignVerifierRequired so a caller that holds
 //     only the embedded path fails closed rather than silently passing a
 //     KMS bundle it cannot check.
-//   - ModeCosignKeyless: not implemented in Phase 1 (slice 414).
+//   - ModeCosignKeyless: same as cosign-kms — requires a cosign verifier
+//     (Fulcio cert + Rekor inclusion checks); the embedded-only path fails
+//     closed with ErrCosignVerifierRequired rather than passing a bundle
+//     it cannot check (slice 414).
 //
 // Returns nil when the signature is valid.
 func VerifyBundle(b *Bundle) error {
 	switch ResolveMode(b.Signature.Mode) {
 	case ModeEmbeddedEd25519:
 		return verifyEmbedded(b)
-	case ModeCosignKMS:
+	case ModeCosignKMS, ModeCosignKeyless:
 		return ErrCosignVerifierRequired
-	case ModeCosignKeyless:
-		return fmt.Errorf("oscal: signing mode %q is not supported in this build (slice 414)", ModeCosignKeyless)
 	default:
 		return fmt.Errorf("oscal: unknown signing mode %q", b.Signature.Mode)
 	}

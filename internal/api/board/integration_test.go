@@ -33,7 +33,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"sync"
 	"testing"
 	"time"
@@ -43,6 +42,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -50,39 +50,42 @@ import (
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
+// enableFeatureFlag turns a gating feature flag ON for the test tenant.
+// Slice 660 wrapped the board (briefs + packs) routes in
+// featureflag.Gate("board.reporting"), which DEFAULTS OFF — so without an
+// explicit override every board route returns 404 for a fresh test tenant.
+// We upsert the override via the admin (BYPASSRLS) pool, the same effect as
+// an operator toggling the flag ON. Cleanup removes the row.
+func enableFeatureFlag(t *testing.T, admin *pgxpool.Pool, tenant, key, category string) {
 	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
+	ctx := context.Background()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO feature_flags (tenant_id, flag_key, enabled, description, category, last_changed_by, last_changed_at)
+		VALUES ($1, $2, TRUE, '', $3, 'integration-test', now())
+		ON CONFLICT (tenant_id, flag_key) DO UPDATE SET enabled = TRUE`,
+		tenant, key, category); err != nil {
+		t.Fatalf("enable feature flag %s: %v", key, err)
 	}
-	return v
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(),
+			`DELETE FROM feature_flags WHERE tenant_id = $1`, tenant)
+		_, _ = admin.Exec(context.Background(),
+			`DELETE FROM feature_flag_audit_log WHERE tenant_id = $1`, tenant)
+	})
 }
 
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
+// freshTenant is a CARVE-OUT (742 drain batch 21): it does MORE than a
+// tenant-scoped DELETE — it interleaves an enableFeatureFlag upsert (turning
+// board.reporting ON for the new tenant) that dbtest.SeedTenant cannot
+// express. So it stays inline; only its callers' pools are re-routed onto the
+// dbtest harness.
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	tenant := uuid.NewString()
+	// Slice 660: the board routes are gate-wrapped on board.reporting
+	// (default OFF). Enable it for the test tenant so the pre-slice-660
+	// route tests reach the real handler instead of the gate's 404.
+	enableFeatureFlag(t, admin, tenant, "board.reporting", "board")
 	t.Cleanup(func() {
 		ctx := context.Background()
 		for _, stmt := range []string{
@@ -261,8 +264,8 @@ func doRaw(t *testing.T, env testEnv, path string) (*http.Response, []byte) {
 // posture, drift count, and top-3 risks, with a templated narrative =====
 
 func TestGenerate_PinnedBriefWithAllSections(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -342,8 +345,8 @@ func TestGenerate_PinnedBriefWithAllSections(t *testing.T) {
 // ===== AC-1: a malformed period_end is rejected 400 =====
 
 func TestGenerate_MalformedPeriodEndIs400(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -372,8 +375,8 @@ func TestGenerate_MalformedPeriodEndIs400(t *testing.T) {
 // ORIGINAL frozen content — the snapshot is immutable =====
 
 func TestGet_ReturnsFrozenContentAfterLiveChange(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -418,8 +421,8 @@ func TestGet_ReturnsFrozenContentAfterLiveChange(t *testing.T) {
 // NEW brief row with a NEW id — never an edit of the pinned snapshot =====
 
 func TestGenerate_RepeatedPeriodEndCreatesNewBrief(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -451,8 +454,8 @@ func TestGenerate_RepeatedPeriodEndCreatesNewBrief(t *testing.T) {
 // ===== AC-4: GET .../{id}.md returns the frozen Markdown narrative =====
 
 func TestMarkdown_ReturnsFrozenNarrative(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -479,8 +482,8 @@ func TestMarkdown_ReturnsFrozenNarrative(t *testing.T) {
 // ===== AC-4: GET .../{id}/pdf returns a PDF (or 503 when chrome is absent) =====
 
 func TestPDF_ReturnsPDFOrServiceUnavailable(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -528,8 +531,8 @@ func TestPDF_RenderDeadlineDegradesTo503(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(2, time.Nanosecond, time.Second))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -556,8 +559,8 @@ func TestPDF_QueueSaturationDegradesTo503(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 5*time.Second, 0))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -608,8 +611,8 @@ func TestPDF_StressNoNonGraceful(t *testing.T) {
 	restore := pdfrender.SetDefaultForTest(pdfrender.New(1, 50*time.Millisecond, 80*time.Millisecond))
 	defer restore()
 
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -643,8 +646,8 @@ func safePrefix(b []byte) string {
 // ===== unknown id -> 404; missing bearer -> 401 =====
 
 func TestGet_UnknownIDIs404(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -655,8 +658,8 @@ func TestGet_UnknownIDIs404(t *testing.T) {
 }
 
 func TestBoardBriefs_MissingBearerIs401(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -673,8 +676,8 @@ func TestBoardBriefs_MissingBearerIs401(t *testing.T) {
 // ===== RLS: cross-tenant isolation — tenant A never sees tenant B's briefs ==
 
 func TestBoardBriefs_CrossTenantIsolation(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 

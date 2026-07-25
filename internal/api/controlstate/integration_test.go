@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -34,69 +33,26 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/scope"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness -----
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
+// Slice 435 / 742: the appDSN/adminDSN/openPool pool/DSN boilerplate this file
+// used to re-derive now lives in the shared internal/dbtest harness (NewAppPool
+// = RLS-enforcing atlas_app default; NewMigratePool = privileged BYPASSRLS for
+// seeding + freshTenant cleanup; WithTenantCtx tags the tenant GUC).
 
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-			`DELETE FROM scope_cells WHERE tenant_id = $1`,
-			`DELETE FROM controls WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
-}
-
-func ctxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
+	return dbtest.SeedTenant(t, admin,
+		"control_evaluations",
+		"evidence_records",
+		"scope_cells",
+		"controls",
+	)
 }
 
 func seedControl(t *testing.T, admin *pgxpool.Pool, tenant, implType, freshnessClass string) uuid.UUID {
@@ -186,14 +142,14 @@ func get(t *testing.T, env testEnv, path string) (*http.Response, map[string]any
 // ===== ISC-32: GET state returns result + counts + freshness =====
 
 func TestState_ReturnsEvaluatedState(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
 	ctrlID := seedControl(t, admin, tenant, "automated", "monthly")
 	seedEvidence(t, admin, tenant, ctrlID, "pass", time.Now().UTC().Add(-2*24*time.Hour))
-	if _, err := env.engine.EvaluateControl(ctxFor(t, tenant), ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+	if _, err := env.engine.EvaluateControl(dbtest.WithTenantCtx(t, tenant), ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
 		t.Fatalf("EvaluateControl: %v", err)
 	}
 
@@ -224,8 +180,8 @@ func TestState_ReturnsEvaluatedState(t *testing.T) {
 // ===== ISC-33: ?as-of= point-in-time horizon =====
 
 func TestState_AsOfHorizon(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -234,7 +190,7 @@ func TestState_AsOfHorizon(t *testing.T) {
 
 	// Evaluate now.
 	before := time.Now().UTC().Add(-1 * time.Hour)
-	if _, err := env.engine.EvaluateControl(ctxFor(t, tenant), ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+	if _, err := env.engine.EvaluateControl(dbtest.WithTenantCtx(t, tenant), ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
 		t.Fatalf("EvaluateControl: %v", err)
 	}
 
@@ -263,8 +219,8 @@ func TestState_AsOfHorizon(t *testing.T) {
 // ===== ISC-34: ?scope= predicate filter =====
 
 func TestState_ScopeFilter(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -280,7 +236,7 @@ func TestState_ScopeFilter(t *testing.T) {
 	}
 	ctrlID := seedControl(t, admin, tenant, "automated", "monthly")
 	seedEvidence(t, admin, tenant, ctrlID, "pass", time.Now().UTC().Add(-1*24*time.Hour))
-	if _, err := env.engine.EvaluateControl(ctxFor(t, tenant), ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+	if _, err := env.engine.EvaluateControl(dbtest.WithTenantCtx(t, tenant), ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
 		t.Fatalf("EvaluateControl: %v", err)
 	}
 
@@ -306,14 +262,14 @@ func TestState_ScopeFilter(t *testing.T) {
 // ===== ISC-35: GET effectiveness =====
 
 func TestEffectiveness_ReturnsRollingPassRate(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
 	ctrlID := seedControl(t, admin, tenant, "automated", "monthly")
 	seedEvidence(t, admin, tenant, ctrlID, "pass", time.Now().UTC().Add(-1*24*time.Hour))
-	if _, err := env.engine.EvaluateControl(ctxFor(t, tenant), ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+	if _, err := env.engine.EvaluateControl(dbtest.WithTenantCtx(t, tenant), ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
 		t.Fatalf("EvaluateControl: %v", err)
 	}
 
@@ -336,8 +292,8 @@ func TestEffectiveness_ReturnsRollingPassRate(t *testing.T) {
 // ===== ISC-37: unknown control id -> 404 =====
 
 func TestState_UnknownControlIs404(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -354,8 +310,8 @@ func TestState_UnknownControlIs404(t *testing.T) {
 // ===== ISC-37: missing bearer -> 401 =====
 
 func TestState_MissingBearerIs401(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	app := openPool(t, appDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 

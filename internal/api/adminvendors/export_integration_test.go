@@ -24,7 +24,6 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -34,60 +33,26 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
 // ===== Harness =====
 
-func appDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func openPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	return pool
-}
-
+// freshTenant returns a brand-new tenant id and registers cleanup of every
+// table the export tests touch. Pure-DELETE cleanup scoped by tenant_id, so
+// it delegates to dbtest.SeedTenant (slice 435 / 742 drain).
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM vendor_scope_cells WHERE tenant_id = $1`,
-			`DELETE FROM vendors WHERE tenant_id = $1`,
-			`DELETE FROM me_audit_log WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"vendor_scope_cells",
+		"vendors",
+		"me_audit_log",
+	)
 }
 
 func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 	t.Helper()
-	app := openPool(t, appDSN(t))
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{RotationGrace: time.Hour})
 	srv.AttachDB(app)
 	// Slice 197: JWT bearer via slice 190 path (admin claims).
@@ -99,7 +64,6 @@ func setupHTTPServer(t *testing.T, tenant string) (*httptest.Server, string) {
 	ts := httptest.NewServer(h)
 	t.Cleanup(func() {
 		ts.Close()
-		app.Close()
 	})
 	return ts, bearer
 }
@@ -195,8 +159,7 @@ func extractSearchableText(t *testing.T, format string, body []byte) string {
 // AC-2: the vendor export endpoint returns 200 + a CSV body with the
 // canonical header row.
 func TestVendorsExport_HappyPathCSV(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -245,8 +208,7 @@ func TestVendorsExport_HappyPathCSV(t *testing.T) {
 // leak the local-part through one format while masking it in the
 // others.
 func TestVendorsExport_EmailMasking(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -289,8 +251,7 @@ func TestVendorsExport_EmailMasking(t *testing.T) {
 // MUST carry action='vendors_export', the tenant id, and a success
 // result.
 func TestVendorsExport_MetaAuditFires(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenant := freshTenant(t, admin)
 	ts, bearer := setupHTTPServer(t, tenant)
 
@@ -333,8 +294,7 @@ func TestVendorsExport_MetaAuditFires(t *testing.T) {
 // AC-10: cross-tenant isolation across all three formats. Tenant A
 // runs the export; tenant B's vendor MUST NOT appear.
 func TestVendorsExport_CrossTenantIsolationAllThreeFormats(t *testing.T) {
-	admin := openPool(t, adminDSN(t))
-	defer admin.Close()
+	admin := dbtest.NewMigratePool(t)
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	tsA, bearerA := setupHTTPServer(t, tenantA)
