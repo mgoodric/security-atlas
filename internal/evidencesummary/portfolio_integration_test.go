@@ -57,6 +57,40 @@ func seedFamilyControl(t *testing.T, admin *pgxpool.Pool, tenant, family string)
 	return ctrlID
 }
 
+func seedFamilyControlWithBundle(t *testing.T, admin *pgxpool.Pool, tenant, family, bundle string) uuid.UUID {
+	t.Helper()
+	ctrlID := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO controls (
+			id, tenant_id, title, control_family, implementation_type,
+			bundle_id, evidence_queries, applicability_expr, freshness_class
+		)
+		VALUES ($1, $2, 'slice 752 portfolio ranking test control', $3, 'automated',
+		        $4, '[]'::jsonb, 'true', 'quarterly')
+	`, ctrlID, tenant, family, bundle); err != nil {
+		t.Fatalf("seed family control with bundle: %v", err)
+	}
+	return ctrlID
+}
+
+func seedEvidenceResult(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, observedAt time.Time, result string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO evidence_records (
+			id, tenant_id, control_id, control_ref, observed_at, ingested_at,
+			provenance, result, payload, hash, evidence_kind
+		)
+		VALUES ($1, $2, $3, $4, $5, now(), $6, $7, '{}'::jsonb, $8, 'access_review.completion')
+	`, id, tenant, ctrlID, ctrlID.String(), observedAt,
+		`{"connector_id":"test-connector"}`,
+		result,
+		"hash-752-"+id.String()[:8]); err != nil {
+		t.Fatalf("seed evidence result: %v", err)
+	}
+	return id
+}
+
 // seedFrameworkWithAnchorControl seeds frameworks -> framework_version -> one SCF
 // anchor -> one control anchored on it (+ one evidence record), for the framework
 // filter path. Returns the framework_version id + the control id + evidence id.
@@ -240,6 +274,60 @@ func TestPortfolio_TwoLevelBound(t *testing.T) {
 		if c.TotalCount != recsPerControl {
 			t.Errorf("control %s TotalCount = %d, want %d (full count for honesty)",
 				c.ControlID, c.TotalCount, recsPerControl)
+		}
+	}
+}
+
+// ----- OE-407 / 752 relevance leg: ranking is deterministic for a fixed fixture -----
+
+func TestPortfolio_RelevanceRankingDeterministic(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+
+	fam := "REL"
+	now := time.Date(2026, 7, 25, 12, 0, 0, 0, time.UTC)
+	// Bundle order is intentionally the opposite of desired relevance order. The
+	// resolver should still return: no-evidence gap, failing evidence, then the
+	// strongest/freshest passing evidence.
+	passing := seedFamilyControlWithBundle(t, admin, tenant, fam, "001-pass-first-by-bundle")
+	failing := seedFamilyControlWithBundle(t, admin, tenant, fam, "002-fail-second-by-bundle")
+	gap := seedFamilyControlWithBundle(t, admin, tenant, fam, "003-gap-last-by-bundle")
+
+	passEv := seedEvidenceResult(t, admin, tenant, passing, now.Add(-1*time.Hour), "pass")
+	failEv := seedEvidenceResult(t, admin, tenant, failing, now.Add(-2*time.Hour), "fail")
+
+	store := evidencesummary.NewPortfolioStore(app)
+	for i := 0; i < 2; i++ {
+		set, err := store.PortfolioSet(tenantCtx(t, tenant), evidencesummary.PortfolioFilter{Family: fam})
+		if err != nil {
+			t.Fatalf("PortfolioSet run %d: %v", i, err)
+		}
+		if len(set.Controls) != 3 {
+			t.Fatalf("run %d: controls = %d, want 3", i, len(set.Controls))
+		}
+		want := []uuid.UUID{gap, failing, passing}
+		for idx, wantID := range want {
+			if set.Controls[idx].ControlID != wantID {
+				t.Fatalf("run %d: relevance order = [%s %s %s], want [%s %s %s]",
+					i,
+					set.Controls[0].ControlID, set.Controls[1].ControlID, set.Controls[2].ControlID,
+					want[0], want[1], want[2])
+			}
+		}
+		if set.Controls[0].RelevanceScore <= set.Controls[1].RelevanceScore ||
+			set.Controls[1].RelevanceScore <= set.Controls[2].RelevanceScore {
+			t.Fatalf("run %d: relevance scores not descending: %d, %d, %d",
+				i,
+				set.Controls[0].RelevanceScore,
+				set.Controls[1].RelevanceScore,
+				set.Controls[2].RelevanceScore)
+		}
+		if len(set.Controls[1].Records) != 1 || set.Controls[1].Records[0].EvidenceID != failEv {
+			t.Fatalf("run %d: failing control evidence citation changed: %+v", i, set.Controls[1].Records)
+		}
+		if len(set.Controls[2].Records) != 1 || set.Controls[2].Records[0].EvidenceID != passEv {
+			t.Fatalf("run %d: passing control evidence citation changed: %+v", i, set.Controls[2].Records)
 		}
 	}
 }
