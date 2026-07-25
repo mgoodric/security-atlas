@@ -62,6 +62,14 @@ name: container-publish
 # merge job rather than a single emulated build's digest.
 #
 # See docs/audit-log/container-publish-native-arm64-decisions.md.
+#
+# ── Skip-edge-when-release-commit (slice 702) ─────────────────────────
+# A release-please merge used to fire TWO runs of this workflow for the
+# SAME SHA: the `push: main` edge run and, seconds later, the
+# `release: published` run. The `build` job's `if:` below now skips the
+# edge leg on the release commit. Rationale + measured evidence live at
+# that condition; the decision record is
+# docs/audit-log/702-container-publish-efficiency-decisions.md.
 
 on:
   release:
@@ -115,6 +123,50 @@ concurrency:
 jobs:
   build:
     name: Build ${{ matrix.image.name }} (${{ matrix.platform.arch }})
+    # Slice 702 — skip the edge build for the commit that is about to be
+    # released. A release-please merge fires TWO runs of this workflow
+    # for the SAME SHA: this `push: main` run (which would build `:edge`
+    # + `:main-<sha7>`) and, seconds later, the `release: published` run
+    # that builds `vX.Y.Z` + `X.Y` + `X` + `latest` from identical
+    # source. Measured on the last two releases: v1.17.0 push
+    # 14:03:25Z / release 14:03:43Z (18s apart); v1.16.0 push
+    # 15:46:17Z / release 15:46:30Z (13s apart). The edge leg is 8 image
+    # builds of a commit whose content ships moments later under a
+    # versioned tag.
+    #
+    # The condition keys on the release-please COMMIT MESSAGE, not on
+    # "does a tag point at github.sha", because the tag does NOT exist
+    # yet when this run starts — that 13-18s gap IS release-please
+    # cutting the tag, so a tag lookup here would be a race, not a
+    # guard. release-please's release commit subject is deterministic
+    # (`chore(main): release <version>`; squash-merge appends the PR
+    # number, which `startsWith` tolerates).
+    #
+    # Accepted consequences, both consistent with slice 451 AC-5 (the
+    # trust anchor for an edge image is its provenance attestation, not
+    # an image-per-SHA guarantee) and with the `cancel-in-progress`
+    # debounce above, which already drops superseded `:main-<sha7>`
+    # images:
+    #   - `:edge` lags by exactly one commit across a release. That
+    #     commit touches only CHANGELOG.md + .release-please-manifest.json
+    #     (verified against the last three release commits), neither of
+    #     which enters any image, so the lag is a tag pointer moving
+    #     late, not stale image content. The next merge to main
+    #     refreshes `:edge`.
+    #   - No `:main-<sha7>` image is published for the release commit.
+    #     The same code ships as `vX.Y.Z` + `latest` seconds later.
+    #
+    # If release-please ever merges a release commit and then fails to
+    # cut the tag, `workflow_dispatch` above is the manual escape hatch.
+    # A null `head_commit` (no such push shape on this branch, but
+    # defensively) coerces to '' and the build RUNS — the failure
+    # direction is "build anyway", never "silently skip".
+    #
+    # The `merge` job `needs: build`, so it is skipped transitively.
+    # This condition deliberately lives in exactly ONE place.
+    # (Quoted as a YAML string: the `chore(main): release ` literal
+    # contains `: `, which a plain scalar cannot carry.)
+    if: "${{ github.event_name != 'push' || !startsWith(github.event.head_commit.message, 'chore(main): release ') }}"
     runs-on: ${{ matrix.platform.runner }}
     strategy:
       fail-fast: false
@@ -225,6 +277,10 @@ jobs:
   merge:
     name: Merge + publish multi-arch manifest (${{ matrix.image.name }})
     runs-on: ubuntu-latest
+    # No `if:` here on purpose. `needs: build` + the default
+    # `if: success()` means this job is skipped whenever `build` is
+    # skipped, so slice 702's release-commit condition is inherited
+    # rather than duplicated (one expression, one drift surface).
     needs: build
     strategy:
       fail-fast: false
