@@ -1,28 +1,45 @@
-# Slice 567 — HIPAA finer-anchor re-point: JUDGMENT decisions log (pre-work + split)
+# Slice 567 — HIPAA finer-anchor re-point: JUDGMENT decisions log
 
 **Slice:** 567 — re-point the 21 palette-bound HIPAA Security Rule crosswalk rows
-(slice 516's residual table) at the finer SCF anchors that exist only in the
-operator's full catalog.
+(slice 516's residual table) at finer SCF anchors.
 **Type:** JUDGMENT (crosswalk-mapping accuracy is a subjective control call).
 **Parent dependency:** slice 516 (full HIPAA coverage) — merged.
-**Outcome of this pass:** the test-path half is **split into slice 754** and this
-slice is **blocked behind it**. No crosswalk YAML changed. The per-row control
-judgement is done here as pre-work so the follow-on applies it rather than
-re-deriving it.
 **Author:** agent (JUDGMENT slice convention — the agent makes the build-time
 mapping calls and records them here for post-deployment maintainer review).
 
-- detection_tier_actual: none
-- detection_tier_target: none
+**This log covers two passes.** Read it in order; the second pass did not
+invalidate the first.
 
-> No bug surfaced during this pass. The pass was scoping + control judgement; the
-> crosswalk data and the loader are untouched, so there was nothing to catch at
-> any tier. The one thing worth naming for the aggregate signal: the blocker was
-> found by **manual_review** of the seeding path (`scfseed.EnsureSCFCatalog` +
-> the shared `-p 1` suite), and that is the correct tier for an architectural
-> dependency — no test would have surfaced it, because the current tests pass.
+| Pass | Sections | Outcome                                                                                                                                                                                |
+| ---- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1    | D1–D5    | Scoping. Found the blocker is a catalog-content **governance** decision, not a test-harness gap. Split the seed path into slice 754, blocked 567, and pre-derived all 21 row verdicts. |
+| 2    | D6–D9    | Applied. The operator answered the governance question (option **A**, interim). The palette grew by 15 anchors, 16 rows re-pointed, 5 settled in place, both test tiers assert it.     |
+
+**Outcome:** all 21 residual rows are addressed and asserted. `data/crosswalks/hipaa-security-rule.yaml` and `migrations/fixtures/scf-sample.json` changed; no loader code changed.
+
+- detection_tier_actual: `manual_review`
+- detection_tier_target: `unit`
+
+> One defect surfaced, in pass 2, and it is worth the aggregate signal. The
+> pass-2 fixture growth initially reused the identifiers `IAC-22` and `DCH-06`.
+> Both are codes slice 654 had already catalogued as real-but-absent SCF anchors
+> **with a different recorded meaning** — 654's log names `IAC-22` as "Least
+> Privilege", and pairs `DCH-06` with encryption-at-rest. Titling `IAC-22` as
+> "Emergency Access (Break-Glass) Accounts" would have put two contradictory
+> claims about the same identifier in one repo. Caught by `manual_review`
+> (grepping every new identifier against its prior in-repo references before
+> committing); **should** have been caught at `unit` — nothing stops the next
+> fixture edit from re-colliding. D8 records the rule and the guard that is
+> missing.
 
 ---
+
+## Pass 1 — scoping and the split (D1–D5)
+
+> Retained verbatim as the historical record. D1's diagnosis and D2's rejected
+> shortcuts still stand; what changed in pass 2 is that the operator **made** the
+> governance call D1 correctly refused to make. D5's per-row judgement is the
+> input pass 2 applied — D6 is D5 resolved onto real identifiers.
 
 ## D1 — The blocker is not a missing test, it is a missing catalog decision (the split)
 
@@ -141,22 +158,206 @@ depend on slice 754.
 **Tally:** 13 RE-POINT, 6 CHECK, 2 HOLD (settled now, no dependency on 754).
 21 of 21 rows addressed.
 
-## D6 — Invariants held through this pass
+## D5-inv — Invariants held through pass 1
 
-- **Invariant #7** — nothing in this pass creates a requirement → requirement edge;
+- **Invariant #7** — nothing in pass 1 creates a requirement → requirement edge;
   no crosswalk data changed at all. Every proposed target in D5 is a
   requirement → SCF-anchor concept.
 - **567 boundary "do not weaken the sample fixture"** —
-  `migrations/fixtures/scf-sample.json` is untouched, and slice 754's AC-3 carries
-  the same protection forward.
+  `migrations/fixtures/scf-sample.json` was untouched in pass 1, and slice 754's
+  AC-3 carries the same protection forward.
 - **567 boundary "no re-point without a recorded rationale"** — no row was
-  re-pointed; every row that _will_ be re-pointed already has its rationale here.
+  re-pointed in pass 1; every row that _would_ be re-pointed already had its
+  rationale here.
 - **567 boundary "no unrelated crosswalk edits"** — zero crosswalk edits.
+
+---
+
+## Pass 2 — applying the operator's decision (D6–D9)
+
+> The governance question D1 escalated was answered on 2026-07-25: **option (A),
+> as an explicit INTERIM resolution.** Grow the bundled sample fixture with the
+> finer anchors the 21 rows need, so `scfseed.EnsureSCFCatalog` resolves them and
+> the shared suite stops rolling back. **Read D7 first** — it bounds exactly what
+> that decision did and did not settle.
+
+## D6 — The 21 residual rows as applied (the work list, resolved)
+
+D5 recorded each row's target as a control _concept_ because no catalog in this
+repo carried the identifiers (D3). Option (A) supplies them: the 15 concepts D5
+named are now anchors in the sample palette, and each row below points at one.
+The `Now` column is the pre-567 mapping; `Applied` is what ships.
+
+Verdict changes from D5: three rows D5 marked `CHECK` were re-pointed once the
+grown palette gave them a real target (rows 2, 9, 16); the other three `CHECK`
+rows were checked and deliberately **left in place** (rows 5, 17, 19) — a
+`CHECK` verdict was always "decide against the catalog", and for these three the
+honest answer was "no". The two `HOLD` rows are unchanged, as D5 settled them.
+
+| #   | Requirement                                                    | Now           | Applied                           | Verdict    | Control rationale                                                                                                                                                                                                                                                |
+| --- | -------------------------------------------------------------- | ------------- | --------------------------------- | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | §164.308(a)(1)(ii)(C) Sanction Policy                          | HRS-01 @ 0.60 | **HRS-07** `subset_of` 0.80       | re-point   | Applying sanctions to non-compliant workforce members is the disciplinary-process control itself, not the HR-security program containing it. HRS-01 over-covered it.                                                                                             |
+| 2   | §164.308(a)(4)(ii)(A) Isolate Clearinghouse Functions          | DCH-01 @ 0.55 | **NET-06** `intersects_with` 0.65 | re-point   | Structural isolation of clearinghouse ePHI from the larger organization is segmentation, not data classification. Fit stays partial: the HIPAA obligation is organizational as well as technical, so the lift is modest (0.55 → 0.65, still LOW).                |
+| 3   | §164.308(a)(5)(ii)(D) Password Management                      | IAC-01 @ 0.60 | **IAC-10** `equal` 0.85           | re-point   | Creating, changing, and safeguarding passwords **is** authenticator management. IAC-01 is the domain policy head above it.                                                                                                                                       |
+| 4   | §164.308(a)(7)(ii)(E) Applications & Data Criticality Analysis | BCD-02 @ 0.60 | **RSK-08** `equal` 0.85           | re-point   | Assessing relative criticality of applications and data in support of the other contingency components **is** a BIA. BCD-02 conflated the analysis input with the plan artifact it feeds.                                                                        |
+| 5   | §164.310(a)(2)(i) Contingency Operations                       | BCD-02 @ 0.60 | BCD-02 `intersects_with` 0.60     | left as-is | Genuinely straddles continuity and physical access, and neither family carries a control at that intersection worth minting. An emergency-facility-access anchor would exist only to serve this one row. BCD-02 remains the honest covering anchor.              |
+| 6   | §164.310(a)(2)(iv) Maintenance Records                         | PES-04 @ 0.55 | **MNT-02** `intersects_with` 0.70 | re-point   | Documenting repairs and modifications to a facility's security-related physical components is maintenance record-keeping, not physical access control. Partial because HIPAA scopes it to security-related components only.                                      |
+| 7   | §164.310(b) Workstation Use                                    | PES-04 @ 0.60 | **HRS-12** `intersects_with` 0.75 | re-point   | "Proper functions, manner of performance, and physical surroundings" is an acceptable-use / rules-of-behavior control; PES-04 covered only the surroundings clause. That clause keeps the relationship partial. Flagged in 481 D7, re-confirmed 516 D5.          |
+| 8   | §164.310(d)(2)(iii) Accountability                             | AST-01 @ 0.65 | **DCH-07** `subset_of` 0.75       | re-point   | Recording movements of hardware and media and the person responsible is media chain-of-custody — a control beneath the asset-management policy head, not the head itself.                                                                                        |
+| 9   | §164.312(a)(2)(ii) Emergency Access Procedure                  | IAC-21 @ 0.60 | **IAC-24** `equal` 0.80           | re-point   | Obtaining necessary ePHI during an emergency **is** break-glass. Privileged-account management was the covering anchor only because no break-glass anchor existed. Held at 0.80 rather than 0.85: HIPAA's framing is procedural, the anchor's is account-scoped. |
+| 10  | §164.312(a)(2)(iii) Automatic Logoff                           | IAC-01 @ 0.60 | **IAC-25** `equal` 0.85           | re-point   | Terminating a session after a predetermined period of inactivity **is** session termination. IAC-01, the domain policy head, badly over-covered it.                                                                                                              |
+| 11  | §164.312(c)(1) Integrity                                       | DCH-01 @ 0.65 | **DCH-05** `subset_of` 0.80       | re-point   | Protecting ePHI from improper alteration or destruction is data integrity, not classification-and-handling. The palette-bound row 481 D7 flagged and 516 D5 held. Row 12 carries the cryptographic mechanism that implements this policy-level obligation.       |
+| 12  | §164.312(c)(2) Mechanism to Authenticate ePHI                  | DCH-01 @ 0.60 | **CRY-11** `subset_of` 0.80       | re-point   | Electronic mechanisms corroborating that ePHI has not been altered — hashing, digital signatures — is the cryptographic verification that implements row 11. Kept on a distinct anchor rather than collapsing both rows onto one.                                |
+| 13  | §164.312(e)(2)(i) Integrity Controls (Transmission)            | NET-04 @ 0.60 | **CRY-12** `subset_of` 0.85       | re-point   | The requirement is modification **detection** in transit, not perimeter enforcement. Boundary protection answered a different question.                                                                                                                          |
+| 14  | §164.314(a)(2)(ii) Other Arrangements                          | TPM-01 @ 0.65 | TPM-01 `intersects_with` 0.65     | **hold**   | Final, no catalog dependency. A governmental-entity MOU in place of a business associate contract is an alternative legal instrument, not a security control. No catalog carries an anchor for it.                                                               |
+| 15  | §164.314(b)(1) Group Health Plans                              | TPM-01 @ 0.55 | TPM-01 `intersects_with` 0.55     | **hold**   | Final, no catalog dependency. A plan-document amendment obligation on a HIPAA-specific regulatory relationship, not a security control. TPM-01 at a deliberately low 0.55 is the honest mapping.                                                                 |
+| 16  | §164.314(b)(2)(i) Plan Safeguards                              | TPM-01 @ 0.55 | **TPM-05** `intersects_with` 0.65 | re-point   | Unlike rows 14–15 this one has a generic shape: require a counterparty to implement safeguards over data handled on your behalf. That is contractual security requirements. Plan-sponsor framing keeps it a modest lift.                                         |
+| 17  | §164.314(b)(2)(ii) Adequate Separation                         | TPM-01 @ 0.55 | TPM-01 `intersects_with` 0.55     | left as-is | Entity-level firewalling between plan and sponsor. The nearest finer concept, separation of duties, is role-level within one organization. Re-pointing would trade a correct coarse anchor for a wrong-altitude finer one.                                       |
+| 18  | §164.314(b)(2)(iii) Agents Safeguard                           | TPM-04 @ 0.60 | **TPM-05** `subset_of` 0.80       | re-point   | Requiring agents and subcontractors to agree to the same protections is contractual flow-down — a different control from third-party risk _assessment_ (TPM-04).                                                                                                 |
+| 19  | §164.316(b)(2)(i) Time Limit                                   | DCH-03 @ 0.60 | DCH-03 `intersects_with` 0.60     | left as-is | A retention-period obligation applied to compliance documentation. Retention is one control concept; splitting compliance-records retention from data retention would mint a distinction the catalog does not draw, to serve one row.                            |
+| 20  | §164.316(b)(2)(ii) Availability                                | CPL-01 @ 0.60 | **GOV-02** `subset_of` 0.80       | re-point   | Making documentation available to those responsible for implementing it is dissemination, not compliance management.                                                                                                                                             |
+| 21  | §164.316(b)(2)(iii) Updates                                    | GOV-01 @ 0.60 | **GOV-03** `subset_of` 0.80       | re-point   | Reviewing documentation periodically and updating it in response to environmental or operational change is a specific governance-maintenance control, not the governance program head.                                                                           |
+
+**Tally:** 16 re-pointed, 3 checked and left in place, 2 held. 21 of 21 addressed,
+every one with a rationale in this table **and** in its own `rationale` field in
+`data/crosswalks/hipaa-security-rule.yaml` (the boundary: no row re-pointed
+without a recorded control rationale).
+
+**Strength discipline.** No row was lifted past what its rationale earns. The
+three `equal`-leaning re-points reach 0.85 because the requirement and the anchor
+describe the same control; `subset_of` re-points sit at 0.75–0.85; the two rows
+whose fit stays genuinely partial (2, 16) lift only to 0.65 and remain LOW. Five
+rows did not move at all. A re-point is not an excuse to inflate.
+
+## D7 — What option (A) settled, and what it explicitly did NOT (the interim boundary)
+
+**This is the load-bearing scope note.** The operator's decision authorizes a
+**test-fixture change**. It is deliberately the least-committal path that unblocks
+the re-points, and it is **INTERIM**.
+
+What it settles:
+
+- `migrations/fixtures/scf-sample.json` — the bundled **test** palette, marked
+  `"release_version": "test-2026.1"` — grows by 15 anchors, from 62 to 77. This is
+  the slice 635/641 pattern (nine THR anchors seeded for exactly this class of
+  gap) applied deliberately rather than incidentally.
+- The finer anchors live in the **shared** seeded catalog, so the assertions run
+  in CI on every PR rather than behind an opt-in path that would never execute.
+  That is the whole reason (A) unblocks anything (D1).
+
+What it does **NOT** settle — each remains a separate, open item, not decided
+here:
+
+| Item                                                            | Status after this slice                                                                                                                                                                                                         |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **(B) Bundling the real SCF catalog**                           | **DEFERRED — legal.** Still gated on the SCF-redistribution legal review CLAUDE.md lists as _decide before bundling the SCF catalog in releases_. Nothing here bundles, ships, or reproduces an SCF release. Remains slice 754. |
+| **(C) Per-crosswalk catalog requirements**                      | **NOT DECIDED.** The most flexible and most invasive option; it reopens the slice-461 seed-order coupling. Untouched. Remains slice 754.                                                                                        |
+| Governance rule for what earns a place in the sample palette    | **NOT DECIDED.** 754's AC-1 (an ADR for option A or C) is 754's to discharge. This slice records a decision, not a standing policy.                                                                                             |
+| Reconciling fixture identifier numbering against a real release | **OPEN — see D8.** The numbering is fixture-local until (B) lands.                                                                                                                                                              |
+
+Slice 754 therefore stays filed and open. What changed is that 567 is no longer
+blocked behind it: the interim fixture resolves 567's need, and 754 now owns the
+durable catalog-source question rather than gating a HIPAA data slice on it.
+
+## D8 — Identifier numbering is fixture-local, and two codes had to be renumbered
+
+D3 (pass 1) refused to assert SCF identifiers from memory. Option (A) forces the
+issue: a fixture entry needs _an_ identifier. The honest position, recorded here
+and in the crosswalk YAML header:
+
+> The sample fixture is a curated **test** palette, not an SCF release. Anchor
+> **titles and descriptions** are the control concepts D5 derived, written in the
+> fixture's existing house style. Anchor **identifiers** are fixture-local. They
+> are plausible, not authoritative, and they are reconciled against real SCF
+> numbering when option (B) lands.
+
+Every other anchor in this fixture already carries that caveat — slice 641
+flagged it explicitly for the THR domain.
+
+**The collision, and the rule it produced.** Three of the 15 identifiers were
+already referenced elsewhere in this repo. Checked one at a time:
+
+| Identifier | Prior in-repo reference                                                                                                                            | Outcome                                                                                                                                                                                                |
+| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `IAC-10`   | Slice 654 remapped `1password.org_policy` off it; 654 anticipates "a more specific credential-management anchor (e.g. IAC-10 family) once present" | **Kept.** 654's reading corroborates Authenticator Management — a password-manager org policy pointing at IAC-10 is consistent.                                                                        |
+| `IAC-25`   | `Plans/UCF_GRAPH_MODEL.md` line 226 labels `SCF:IAC-25` "Session management"                                                                       | **Kept.** Independently corroborates Session Termination.                                                                                                                                              |
+| `IAC-22`   | Slice 654's log names it **"IAC-22 Least Privilege"**                                                                                              | **Renumbered → `IAC-24`.** A hard contradiction: the repo cannot say IAC-22 is Least Privilege in one file and Emergency Access (Break-Glass) in another.                                              |
+| `DCH-06`   | Slice 654 pairs it with `CRY-04` on `aws.s3.bucket_encryption_state` (encryption-at-rest context)                                                  | **Renumbered → `DCH-05`.** No title is recorded, so this is softer than IAC-22 — but the evidence context points away from "Data Integrity", and reusing it would be a guess against a recorded usage. |
+
+`IAC-24` and `DCH-05` were chosen because no file in the repo references either.
+The remaining eleven identifiers (`HRS-07`, `HRS-12`, `NET-06`, `RSK-08`,
+`MNT-02`, `DCH-07`, `CRY-11`, `CRY-12`, `TPM-05`, `GOV-02`, `GOV-03`) have no
+prior in-repo reference at all.
+
+**The rule, for the next fixture edit:** do not reuse an identifier this repo has
+already pinned to a different meaning — in particular the twelve real-but-absent
+codes slice 654 catalogued (`IAC-09`, `IAC-10`, `IAC-17`, `IAC-18`, `IAC-22`,
+`DCH-06`, `MON-02`, `TDA-06`, `TDA-09`, `IRO-02`, `IRO-07`, `IRO-13`). Today that
+rule is enforced by review, not by a test — which is why this slice's
+`detection_tier_target` is `unit`. A guard asserting fixture identifiers do not
+collide with codes recorded elsewhere is a genuine gap; it is **not** filed as
+part of this slice because it is a cross-cutting fixture-hygiene concern rather
+than HIPAA crosswalk work, and 754 (which owns the catalog-source question) is
+the natural home for it.
+
+**One consequence worth surfacing.** `IAC-10` and `DCH-05`'s concept (data
+integrity) are now present in the palette. Slice 654 remapped `1password.org_policy`
+off `IAC-10` and dropped `DCH-06` from `aws.s3.bucket_encryption_state`
+_specifically because those anchors were absent_, and 654's log anticipated
+revisiting "once present". Those schema hints are now re-openable. **Deliberately
+not touched here** — 567's boundary forbids unrelated edits, and schema
+`x-default-scf-anchors` hints are a different surface from crosswalk edges.
+
+## D9 — Invariants and boundaries held; how it was verified
+
+- **Invariant #7 (requirement → SCF anchor, never requirement → requirement).**
+  Every one of the 21 rows is a `requirement_code` → `scf_anchor` edge. No
+  requirement-to-requirement mapping was introduced; the standing
+  `TestImport_NoDirectRequirementToRequirementTableExists` guard is untouched and
+  green.
+- **"Do NOT weaken or delete the sample fixture; add alongside it."** The change
+  is strictly additive: 62 anchors → 77, zero removed, zero retitled, zero
+  duplicated. Asserted two ways —
+  `TestLoad_SamplePaletteStillCarriesPre567Anchors` walks **all five** bundled
+  crosswalks and fails on any dangling anchor, and
+  `TestHIPAAFinerAnchor_SamplePaletteNotWeakened` imports all five against the
+  grown palette through real Postgres and re-checks the pre-567 sentinel edges.
+- **"Do NOT re-point a row without a recorded control rationale."** Every one of
+  the 21 rows carries a `rationale` in the YAML naming its verdict and reasoning;
+  the unit test fails on an empty rationale for any residual row.
+- **"Do NOT bundle unrelated crosswalk edits."** Only
+  `data/crosswalks/hipaa-security-rule.yaml` changed. The other four crosswalks
+  are byte-identical.
+- **The importer runs clean.** `soc2import` imports the updated HIPAA crosswalk
+  with zero dangling edges. The rollback-on-nonexistent-anchor behaviour
+  (`TestHIPAAImport_RejectsEdgeToNonexistentAnchor`) still proves out against the
+  grown palette — the property that made this slice hard in the first place is
+  intact.
+
+**Verification actually run** (not inferred): the full `go test ./internal/...
+./cmd/...` unit sweep, and `go test -tags=integration -p 1` over
+`internal/api/soc2import`, `internal/api/scfimport`, and `internal/api/scfseed`
+against a real Postgres 16 with the forward migrations applied. All green.
+
+## Test path (slice 567 AC-1)
+
+Two tiers, both running in CI, following the slice-353 Q-2 convention:
+
+| File                                                             | Tier                     | What it proves                                                                                                                                                                                  |
+| ---------------------------------------------------------------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `internal/api/soc2import/hipaa_finer_anchor_test.go`             | pure Go, no DB           | All 21 rows carry their recorded anchor / STRM type / strength / non-empty rationale; every anchor resolves against the bundled fixture; no bundled crosswalk dangles.                          |
+| `internal/api/soc2import/hipaa_finer_anchor_integration_test.go` | `//go:build integration` | The same 21-row table asserted through real `fw_to_scf_edges` rows; the 15 added anchors are seeded in the current SCF framework version; all five crosswalks import against the grown palette. |
+
+The 21-row table is declared **once**, in the untagged file, and shared with the
+integration file — the two tiers cannot drift apart about what was decided.
 
 ## Out of scope (deliberate)
 
-- NO crosswalk YAML change (blocked behind slice 754 — D1).
-- NO change to `scfseed`, the sample fixture, or any loader code.
-- NO SCF identifiers asserted from memory (D3).
+- NO change to `scfseed`, the importer, or any loader code — pure data + tests.
+- NO SCF release bundled, reproduced, or shipped (D7 — option B stays deferred
+  pending legal review).
+- NO change to the other four bundled crosswalks.
+- NO re-opening of slice 654's schema `x-default-scf-anchors` remaps, though D8
+  notes two are now re-openable.
 - NO covered-entity workflow / BAA tracking / required-vs-addressable decision
   flow — still the deferred slice 517.

@@ -22,6 +22,12 @@
       "description": "Mechanisms exist to establish, activate, modify, disable, and remove logical access for users."
     },
     {
+      "scf_id": "IAC-10",
+      "family": "IAC",
+      "title": "Authenticator Management",
+      "description": "Mechanisms exist to securely manage authenticators, including the creation, distribution, strength, change, and safeguarding of passwords and other authenticators."
+    },
+    {
       "scf_id": "IAC-15",
       "family": "IAC",
       "title": "Account Review",
@@ -32,6 +38,18 @@
       "family": "IAC",
       "title": "Privileged Account Management",
       "description": "Mechanisms exist to govern the privileged account lifecycle."
+    },
+    {
+      "scf_id": "IAC-24",
+      "family": "IAC",
+      "title": "Emergency Access (Break-Glass) Accounts",
+      "description": "Mechanisms exist to establish, govern, and monitor emergency access accounts that allow necessary data and systems to be reached during an emergency, with after-the-fact review of their use."
+    },
+    {
+      "scf_id": "IAC-25",
+      "family": "IAC",
+      "title": "Session Termination",
+      "description": "Mechanisms exist to automatically terminate a user session after a defined period of inactivity or on a defined trigger condition."
     },
 
     {
@@ -161,6 +179,18 @@
       "title": "Cryptographic Key Management",
       "description": "Mechanisms exist to govern the cryptographic key management lifecycle."
     },
+    {
+      "scf_id": "CRY-11",
+      "family": "CRY",
+      "title": "Cryptographic Integrity Verification",
+      "description": "Cryptographic mechanisms exist to corroborate that data has not been altered or destroyed in an unauthorized manner, using hashing, digital signatures, or equivalent integrity checks."
+    },
+    {
+      "scf_id": "CRY-12",
+      "family": "CRY",
+      "title": "Transmission Integrity",
+      "description": "Cryptographic mechanisms exist to detect unauthorized modification of data during transmission across communications networks."
+    },
 
     {
       "scf_id": "DCH-01",
@@ -173,6 +203,18 @@
       "family": "DCH",
       "title": "Data Retention",
       "description": "Mechanisms exist to define and govern data retention."
+    },
+    {
+      "scf_id": "DCH-05",
+      "family": "DCH",
+      "title": "Data Integrity",
+      "description": "Mechanisms exist to protect data from improper alteration or destruction, and to detect unauthorized modification of stored data."
+    },
+    {
+      "scf_id": "DCH-07",
+      "family": "DCH",
+      "title": "Media Transportation & Custody",
+      "description": "Mechanisms exist to protect and control digital and non-digital media during transport outside of controlled areas, recording the movement of media and the personnel accountable for it."
     },
 
     {
@@ -195,6 +237,18 @@
       "description": "Mechanisms exist to facilitate the implementation of cybersecurity governance."
     },
     {
+      "scf_id": "GOV-02",
+      "family": "GOV",
+      "title": "Publishing Security Documentation",
+      "description": "Mechanisms exist to publish security policies, standards, and procedures and make them available to the personnel responsible for implementing them."
+    },
+    {
+      "scf_id": "GOV-03",
+      "family": "GOV",
+      "title": "Periodic Review & Update of Security Documentation",
+      "description": "Mechanisms exist to review security policies, standards, and procedures at planned intervals and update them in response to environmental or operational change."
+    },
+    {
       "scf_id": "GOV-04",
       "family": "GOV",
       "title": "Information Security Roles & Responsibilities",
@@ -214,10 +268,22 @@
       "description": "Mechanisms exist to provide security awareness training."
     },
     {
+      "scf_id": "HRS-07",
+      "family": "HRS",
+      "title": "Personnel Sanctions",
+      "description": "Mechanisms exist to apply a formal sanctions process to personnel who fail to comply with established security policies, standards, and procedures."
+    },
+    {
       "scf_id": "HRS-09",
       "family": "HRS",
       "title": "Personnel Termination Process",
       "description": "Mechanisms exist to govern personnel termination."
+    },
+    {
+      "scf_id": "HRS-12",
+      "family": "HRS",
+      "title": "Rules of Behavior (Acceptable Use)",
+      "description": "Mechanisms exist to define acceptable and unacceptable rules of behavior for the use of technologies, including the manner of performance and the physical surroundings in which they are used."
     },
 
     {
@@ -231,6 +297,13 @@
       "family": "IRO",
       "title": "Incident Reporting",
       "description": "Mechanisms exist to report incidents within defined time frames."
+    },
+
+    {
+      "scf_id": "MNT-02",
+      "family": "MNT",
+      "title": "Controlled Maintenance",
+      "description": "Mechanisms exist to conduct controlled maintenance and repair activities on facilities and system components, and to retain records of the repairs and modifications performed."
     },
 
     {
@@ -257,6 +330,12 @@
       "family": "NET",
       "title": "Boundary Protection",
       "description": "Mechanisms exist to protect network boundaries."
+    },
+    {
+      "scf_id": "NET-06",
+      "family": "NET",
+      "title": "Network Segmentation",
+      "description": "Mechanisms exist to segment networks and isolate systems, applications, and services that handle sensitive data from those that do not."
     },
     {
       "scf_id": "NET-08",
@@ -296,6 +375,12 @@
       "family": "RSK",
       "title": "Risk Assessment",
       "description": "Mechanisms exist to conduct routine risk assessments."
+    },
+    {
+      "scf_id": "RSK-08",
+      "family": "RSK",
+      "title": "Business Impact Analysis (BIA)",
+      "description": "Mechanisms exist to conduct a Business Impact Analysis to determine the relative criticality of applications, data, and business processes and the impact of their loss or unavailability."
     },
 
     {
@@ -384,6 +469,12 @@
       "family": "TPM",
       "title": "Third-Party Risk Assessments",
       "description": "Mechanisms exist to conduct third-party risk assessments."
+    },
+    {
+      "scf_id": "TPM-05",
+      "family": "TPM",
+      "title": "Third-Party Contract Requirements",
+      "description": "Mechanisms exist to require contractual security and privacy obligations of third parties, and to flow those obligations down to the agents and subcontractors that handle the organization's data on their behalf."
     },
 
     {

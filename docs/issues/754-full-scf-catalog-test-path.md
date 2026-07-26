@@ -3,14 +3,21 @@
 **Cluster:** Catalog
 **Estimate:** M-L (needs a governance answer first, then 1-2d)
 **Type:** JUDGMENT (the catalog-source call is a governance decision, not a lookup)
-**Status:** `needs-decision` (blocked on the SCF catalog-source governance call — see
-"The decision this slice needs" below)
+**Status:** `needs-decision` — still open for **(B)** and **(C)**. **(A) was taken
+as an explicit INTERIM measure for slice 567 only** (operator decision,
+2026-07-25): the bundled sample fixture grew by the 15 finer anchors HIPAA's 21
+residual rows needed (62 → 77), which unblocked 567 without touching the
+SCF-redistribution question. See `docs/audit-log/567-hipaa-finer-anchor-remap-decisions.md`
+D7 for exactly what that settled and what it did not.
 
 > Split out of slice 567 (OPENENGINE-403). Slice 567 asked for the 21 residual
 > HIPAA rows to be re-pointed at finer SCF anchors AND for the test path that
 > makes those edges resolvable. Scoping the test path showed it is the larger,
 > riskier half and that it turns on an unresolved governance question, so it is
-> its own slice. Slice 567 is blocked behind this one.
+> its own slice. **Slice 567 is no longer blocked behind this one** — the interim
+> fixture growth resolved its need. What remains here is the durable question:
+> which catalog source ultimately backs the finer anchors, and what standing rule
+> governs the sample palette.
 
 ## Narrative
 
@@ -48,6 +55,17 @@ different downstream slice:
   incidentally), with a stated rule for what earns a place in the sample palette.
   Cheapest; reverses slice 654's "deliberately not done" posture, so it needs an
   explicit decision and probably an ADR.
+  **TAKEN ONCE, AS AN INTERIM, FOR SLICE 567** (operator, 2026-07-25) — 15
+  anchors added for HIPAA's 21 residual rows. What is still owed here is the
+  **standing rule** (what earns a place in the palette) and the ADR; a one-off
+  authorized growth is not a policy. Two follow-ons this pass surfaced:
+  - Fixture identifiers are **fixture-local**, not authoritative SCF numbering,
+    and two of 567's initial choices (`IAC-22`, `DCH-06`) collided with meanings
+    slice 654 had already recorded — caught by review, not by a test. A guard
+    asserting fixture identifiers do not collide with codes recorded elsewhere
+    belongs with whatever answer lands here (567 decisions log D8).
+  - `IAC-10` and a data-integrity anchor are now present, so two of slice 654's
+    schema `x-default-scf-anchors` remaps are re-openable.
 - **(B) Bundle the real SCF catalog** — resolve the SCF-redistribution legal
   review first, then ship the release JSON as a second fixture and give
   `scfseed` a full-catalog seed mode. Highest fidelity, gated on legal review.
@@ -75,7 +93,8 @@ different downstream slice:
 - **#006** (SCF catalog importer) — merged; supplies `scfimport.Load` / `Import`.
 - **#461** (integration seed-order coupling) — merged; `scfseed` is the seam any
   new seed mode must extend without breaking.
-- Blocks **#567** (HIPAA finer-anchor re-point).
+- ~~Blocks **#567**~~ — no longer blocking; 567 shipped against the interim
+  option-(A) fixture growth and is `done`.
 
 ## Anti-criteria (P0)
 
