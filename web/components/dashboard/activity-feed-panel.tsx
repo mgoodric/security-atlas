@@ -17,6 +17,8 @@
 // backend slice (widen the dashboard source + add a `?kind=` param) and
 // is tracked as a follow-up — see the slice 667 decisions log.
 
+import Link from "next/link";
+
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import type { ActivityEvent, ActivityFeedResponse } from "@/lib/api/dashboard";
 
@@ -109,17 +111,28 @@ export function ActivityFeedPanel({
           CLI to populate this feed.
         </p>
       ) : (
-        <ul
-          className="divide-y divide-foreground/5"
-          data-testid="activity-feed-list"
-        >
-          {report.activity.map((event, idx) => (
-            <ActivityRow
-              key={`${event.ts}:${event.resource_id}:${idx}`}
-              event={event}
-            />
-          ))}
-        </ul>
+        <>
+          <ul
+            className="divide-y divide-foreground/5"
+            data-testid="activity-feed-list"
+          >
+            {report.activity.map((event, idx) => (
+              <ActivityRow
+                key={`${event.ts}:${event.resource_id}:${idx}`}
+                event={event}
+              />
+            ))}
+          </ul>
+          <div className="mt-4 text-center">
+            <Link
+              href="/activity"
+              className="text-xs text-muted-foreground hover:text-foreground"
+              data-testid="activity-feed-ledger-link"
+            >
+              View full activity ledger →
+            </Link>
+          </div>
+        </>
       )}
     </PanelCard>
   );
