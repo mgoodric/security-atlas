@@ -4,13 +4,14 @@ on:
   push:
     branches: [main]
   pull_request:
+  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 # Slice 061 — path-based filtering for docs-only PRs.
 #
@@ -43,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      code: ${{ github.event_name == 'merge_group' && 'true' || steps.filter.outputs.code }}
       # Slice 179 — narrow filter for the schema-removal-age check. The
       # check only runs when a PR touches the canonical
       # `internal/api/schemaregistry/schemas/` tree, so we gate the job
@@ -59,8 +60,15 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4
+        if: github.event_name != 'merge_group'
         id: filter
         with:
+          # Merge-queue refs are deliberately classified as code=true via
+          # the `changes` job output expression above. We do not ask
+          # paths-filter to infer a diff base for `merge_group`, because a
+          # false docs-only result would let stub-twins satisfy required
+          # checks without running the real queue gate.
+          #
           # `code: true` if ANY of these patterns match the PR diff (or the
           # push commit on main). Anything else — markdown, plan docs,
           # license, changelog — is `code: false` and the expensive jobs

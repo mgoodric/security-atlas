@@ -53,6 +53,16 @@
     "maintainer_apply": "`bash scripts/apply-branch-protection.sh` is run as part of this slice (issue OE-370 step 7). Reversal, if needed, is `git revert` of this file's change followed by a re-run of the same script — the PUT is a full-replace and idempotent."
   },
 
+  "$merge_queue_from_slice_415": {
+    "required": true,
+    "ui_setting": "GitHub repo → Settings → Branches → the `main` branch protection rule → enable `Require merge queue`.",
+    "api_note": "GitHub's protected-branch REST payload used by scripts/apply-branch-protection.sh does not expose the `Require merge queue` toggle. This `$`-prefixed block records the intended main-branch protection state for review and is stripped before the REST PUT, matching the repo's annotation convention. The maintainer must enable the UI setting after this PR is reviewed and merged.",
+    "required_status_checks_contexts": "UNCHANGED by slice 415; the merge queue reuses the existing contexts list verbatim.",
+    "required_linear_history": "retained true",
+    "enforce_admins": "retained true",
+    "tuning_defaults": "merge method squash; build concurrency 1; minimum pull requests to merge 1; maximum pull requests to merge 1; wait time 0 minutes; only merge non-failing pull requests enabled; remove failing entries from the queue."
+  },
+
   "required_status_checks": {
     "strict": false,
     "contexts": [
