@@ -62,6 +62,10 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 		"board_briefs",
 		"control_evaluations",
 		"risks",
+		// Slice 751: exceptions FK controls with ON DELETE RESTRICT, so the
+		// waiver rows must drop before the controls they waive.
+		"exception_audit_log",
+		"exceptions",
 		"controls",
 		"frameworks",
 	)

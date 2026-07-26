@@ -101,6 +101,34 @@ type Querier interface {
 	// attachment; if the period is still open, frozen_at remains NULL and the
 	// slice-026 query path keeps the population live until the period freezes.
 	AttachPopulationToPeriod(ctx context.Context, arg AttachPopulationToPeriodParams) error
+	// Slice 751 — the DETERMINISTIC exception-status aggregate the board brief
+	// freezes into `content.exceptions` and the AI-drafted exception-status
+	// narrative section grounds every numeric claim on.
+	//
+	// Board-package-owned (NOT in exceptions.sql) for the same reason
+	// ListRisksForBoardBrief is: the board brief's read of another module's table
+	// is a projection the board owns, so a change to the exception module's own
+	// query set never silently changes what the board reports.
+	//
+	// Three numbers, and only three (decisions log D1):
+	//   active_count             exceptions in force right now (status='active').
+	//   past_due_count           of those, the ones already past their own
+	//                            expires_at — a waiver outliving its sunset date.
+	//   oldest_active_started_at when the longest-standing active waiver began
+	//                            applying. Returned as a TIMESTAMP, not a day
+	//                            count: the age arithmetic is done in Go against
+	//                            the brief's generated_at so it uses the same
+	//                            clock (and the same overridable test clock) as
+	//                            the risk-aging path, rather than the DB's now().
+	//                            NULL when nothing is active.
+	//
+	// Tenant scoping: the explicit tenant_id predicate is the primary filter and
+	// the slice-021 FORCE ROW LEVEL SECURITY policy on `exceptions` is the
+	// defense-in-depth layer — another tenant's waiver is invisible to the
+	// aggregate, so it can never inflate a board-facing count (invariant #6).
+	// The COALESCE start chain mirrors the lifecycle: effective_from is set at
+	// activation, approved_at at approval, requested_at always.
+	BoardBriefExceptionAggregate(ctx context.Context, arg BoardBriefExceptionAggregateParams) (BoardBriefExceptionAggregateRow, error)
 	// Idempotency claim: insert a pending delivery-log row for
 	// (tenant, channel, recipient, digest_key). ON CONFLICT DO NOTHING means a
 	// second claim returns no row — the caller skips the send (no double-send /
