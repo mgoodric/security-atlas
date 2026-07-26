@@ -1181,6 +1181,170 @@ func TestRequirementCoverage_Slice482_RLSScopedRollup(t *testing.T) {
 	}
 }
 
+// ===== slice 402a / OE-473: cross-framework coverage-strength matrix =====
+
+func TestCoverageStrengthMatrix_Slice402a_AggregatesAnchorFrameworkCells(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+
+	soc2FVID := soc2017FrameworkVersionID(t)
+	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — 402a matrix")
+	seedScopeCell(t, tenantA)
+	netControl := seedControl(t, tenantA, "NET-04", "tenantA-402a-net", "Tenant A Boundary Matrix")
+	now := time.Now().UTC()
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-1*time.Hour))
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-2*time.Hour))
+
+	ts, bearer := setupHTTPServer(t, tenantA)
+	resp, body := get(t, ts, "/v1/coverage-strength/matrix?limit=100", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
+	}
+	cell := findMatrixCell(t, body, "NET-04", "soc2")
+	if d := cell.CoverageStrength - 0.8; d < -1e-6 || d > 1e-6 {
+		t.Fatalf("NET-04×SOC2 coverage_strength = %v; want 0.8", cell.CoverageStrength)
+	}
+	if cell.ConfidenceBand != "strong" {
+		t.Fatalf("NET-04×SOC2 confidence_band = %q; want strong", cell.ConfidenceBand)
+	}
+	if cell.BandToken != "pass" {
+		t.Fatalf("NET-04×SOC2 band_token = %q; want semantic status token pass", cell.BandToken)
+	}
+	if cell.RequirementCount == 0 {
+		t.Fatal("NET-04×SOC2 requirement_count = 0; want mapped requirements")
+	}
+}
+
+func TestCoverageStrengthMatrix_Slice402a_RLSScopedAggregation(t *testing.T) {
+	ensureCatalog(t)
+	wipeTenantState(t)
+
+	soc2FVID := soc2017FrameworkVersionID(t)
+	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — 402a A only")
+	seedScopeCell(t, tenantA)
+	netControl := seedControl(t, tenantA, "NET-04", "tenantA-402a-rls", "Tenant A Boundary RLS Matrix")
+	now := time.Now().UTC()
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-1*time.Hour))
+	seedEvaluation(t, tenantA, netControl, "pass", now.Add(-2*time.Hour))
+
+	tsA, bearerA := setupHTTPServer(t, tenantA)
+	respA, bodyA := get(t, tsA, "/v1/coverage-strength/matrix?limit=100", bearerA)
+	if respA.StatusCode != http.StatusOK {
+		t.Fatalf("tenant A status = %d; body=%s", respA.StatusCode, bodyA)
+	}
+	cellA := findMatrixCell(t, bodyA, "NET-04", "soc2")
+	if cellA.ConfidenceBand != "strong" {
+		t.Fatalf("tenant A matrix precondition band = %q; want strong", cellA.ConfidenceBand)
+	}
+
+	tsB, bearerB := setupHTTPServer(t, tenantB)
+	respB, bodyB := get(t, tsB, "/v1/coverage-strength/matrix?limit=100", bearerB)
+	if respB.StatusCode != http.StatusOK {
+		t.Fatalf("tenant B status = %d; body=%s", respB.StatusCode, bodyB)
+	}
+	cellB := findMatrixCell(t, bodyB, "NET-04", "soc2")
+	if cellB.CoverageStrength != 0 {
+		t.Fatalf("RLS VIOLATION: tenant B matrix coverage_strength = %v; want 0", cellB.CoverageStrength)
+	}
+	if cellB.ConfidenceBand != "uncovered" {
+		t.Fatalf("RLS VIOLATION: tenant B matrix confidence_band = %q; want uncovered", cellB.ConfidenceBand)
+	}
+	if cellB.BandToken != "info" {
+		t.Fatalf("tenant B matrix band_token = %q; want info for uncovered", cellB.BandToken)
+	}
+}
+
+func findMatrixCell(t *testing.T, body []byte, scfID string, frameworkSlug string) struct {
+	CoverageStrength float64 `json:"coverage_strength"`
+	ConfidenceBand   string  `json:"confidence_band"`
+	BandToken        string  `json:"band_token"`
+	RequirementCount int     `json:"requirement_count"`
+} {
+	t.Helper()
+	var got struct {
+		Axis struct {
+			Rows        string `json:"rows"`
+			Columns     string `json:"columns"`
+			Aggregation string `json:"aggregation"`
+		} `json:"axis"`
+		Bands []struct {
+			Band  string `json:"band"`
+			Token string `json:"token"`
+		} `json:"bands"`
+		Frameworks []struct {
+			FrameworkVersionID string `json:"framework_version_id"`
+			FrameworkSlug      string `json:"framework_slug"`
+		} `json:"frameworks"`
+		Rows []struct {
+			Anchor struct {
+				SCFID string `json:"scf_id"`
+			} `json:"anchor"`
+			Cells []struct {
+				FrameworkVersionID string  `json:"framework_version_id"`
+				CoverageStrength   float64 `json:"coverage_strength"`
+				ConfidenceBand     string  `json:"confidence_band"`
+				BandToken          string  `json:"band_token"`
+				RequirementCount   int     `json:"requirement_count"`
+			} `json:"cells"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal matrix: %v\nbody=%s", err, body)
+	}
+	if got.Axis.Rows != "scf_anchor" || got.Axis.Columns != "framework_current_version" {
+		t.Fatalf("unexpected matrix axis: %+v", got.Axis)
+	}
+	if got.Axis.Aggregation != "max(edge_strength * anchor_coverage)" {
+		t.Fatalf("unexpected aggregation contract: %q", got.Axis.Aggregation)
+	}
+	sawPassToken := false
+	for _, b := range got.Bands {
+		if b.Band == "strong" && b.Token == "pass" {
+			sawPassToken = true
+		}
+	}
+	if !sawPassToken {
+		t.Fatalf("matrix bands missing strong→pass semantic token mapping: %+v", got.Bands)
+	}
+	fvID := ""
+	for _, fw := range got.Frameworks {
+		if fw.FrameworkSlug == frameworkSlug {
+			fvID = fw.FrameworkVersionID
+			break
+		}
+	}
+	if fvID == "" {
+		t.Fatalf("framework %q not found in matrix frameworks: %+v", frameworkSlug, got.Frameworks)
+	}
+	for _, row := range got.Rows {
+		if row.Anchor.SCFID != scfID {
+			continue
+		}
+		for _, cell := range row.Cells {
+			if cell.FrameworkVersionID == fvID {
+				return struct {
+					CoverageStrength float64 `json:"coverage_strength"`
+					ConfidenceBand   string  `json:"confidence_band"`
+					BandToken        string  `json:"band_token"`
+					RequirementCount int     `json:"requirement_count"`
+				}{
+					CoverageStrength: cell.CoverageStrength,
+					ConfidenceBand:   cell.ConfidenceBand,
+					BandToken:        cell.BandToken,
+					RequirementCount: cell.RequirementCount,
+				}
+			}
+		}
+	}
+	t.Fatalf("cell %s×%s not found in matrix body=%s", scfID, frameworkSlug, body)
+	return struct {
+		CoverageStrength float64 `json:"coverage_strength"`
+		ConfidenceBand   string  `json:"confidence_band"`
+		BandToken        string  `json:"band_token"`
+		RequirementCount int     `json:"requirement_count"`
+	}{}
+}
+
 // TestAnchorRequirements_VersionPinNoBleed is the slice 484 load-bearing AC-7 /
 // P0-484-5 proof: two versions of ONE framework coexist; the default (no-pin)
 // read returns ONLY the current version's requirement, and pinning to the
