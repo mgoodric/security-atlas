@@ -57,6 +57,17 @@ type Rollup struct {
 	WorstResidualSeverity int `json:"worst_residual_severity,omitempty"`
 	OldestRiskAgeDays     int `json:"oldest_risk_age_days,omitempty"`
 
+	// ===== slice 751 exception-status-section fields =====
+	// Populated only for the exception_status_summary section
+	// (exceptionOnly=true), projected verbatim from the deterministic
+	// board.Brief.Exceptions aggregate. These three integers are the ENTIRE
+	// numeric surface the exception section is permitted to state — there is no
+	// derived or computed exception number anywhere in this package, so a claim
+	// the aggregate did not produce cannot be grounded.
+	ExceptionsActive       int `json:"exceptions_active,omitempty"`
+	ExceptionsPastDue      int `json:"exceptions_past_due,omitempty"`
+	OldestExceptionAgeDays int `json:"oldest_exception_age_days,omitempty"`
+
 	// Excerpts are the bounded, tenant-owned control/evidence excerpts the
 	// model may cite (guardrail 1's "cited evidence excerpts", P0-440-8). Each
 	// carries a canonical UUID the model cites verbatim.
@@ -64,11 +75,13 @@ type Rollup struct {
 
 	// ===== slice 501 section discriminators (unexported — not serialized) =====
 	// riskSeverity marks a risk-posture rollup so AllowedNumbers emits the
-	// risk-section fields; driftOnly marks a drift-activity rollup. Both default
+	// risk-section fields; driftOnly marks a drift-activity rollup;
+	// exceptionOnly marks an exception-status rollup (slice 751). All default
 	// false — a zero-value Rollup is a coverage rollup, preserving the slice-440
 	// behavior exactly.
-	riskSeverity bool
-	driftOnly    bool
+	riskSeverity  bool
+	driftOnly     bool
+	exceptionOnly bool
 }
 
 // Excerpt is one bounded, tenant-owned piece of citable material behind the
@@ -148,6 +161,18 @@ func (r Rollup) AllowedNumbers() map[int]bool {
 			r.RiskCount:             true,
 			r.WorstResidualSeverity: true,
 			r.OldestRiskAgeDays:     true,
+		}
+	}
+	// Exception-status section (slice 751): only the three board-grade
+	// exception integers from board.Brief.Exceptions are ground truth. Nothing
+	// else in the Rollup is reachable, so a coverage percentage or a risk
+	// severity accidentally carried in the struct can never validate a number in
+	// an exception draft.
+	if r.exceptionOnly {
+		return map[int]bool{
+			r.ExceptionsActive:       true,
+			r.ExceptionsPastDue:      true,
+			r.OldestExceptionAgeDays: true,
 		}
 	}
 	// Drift-activity section: only the drift integers are ground truth.

@@ -85,15 +85,20 @@ func buildMultiSectionRollups(periodEnd, ctrlID string) map[boardnarrative.Secti
 			{ID: uuid.NewString(), Title: "Stale access reviews", Category: "access", Treatment: "mitigate", ResidualSeverity: 12.0, AgeDays: 47},
 			{ID: uuid.NewString(), Title: "Unpatched host", Category: "vuln", Treatment: "mitigate", ResidualSeverity: 8.0, AgeDays: 20},
 		},
+		// Slice 751: the deterministic exceptions aggregate the exception-status
+		// section grounds on.
+		Exceptions: board.ExceptionSummary{ActiveCount: 4, PastDueCount: 1, OldestActiveAgeDays: 210},
 	}
 	excerpts := []boardnarrative.Excerpt{{ID: ctrlID, Kind: boardnarrative.KindControl, Title: "Access reviews", Excerpt: "quarterly"}}
 	cov, _ := boardnarrative.RollupForSection(brief, excerpts, boardnarrative.SectionControlCoverage)
 	risk, _ := boardnarrative.RollupForSection(brief, excerpts, boardnarrative.SectionRiskPosture)
 	drift, _ := boardnarrative.RollupForSection(brief, excerpts, boardnarrative.SectionDriftActivity)
+	exc, _ := boardnarrative.RollupForSection(brief, excerpts, boardnarrative.SectionExceptionStatus)
 	return map[boardnarrative.SectionKey]boardnarrative.Rollup{
 		boardnarrative.SectionControlCoverage: cov,
 		boardnarrative.SectionRiskPosture:     risk,
 		boardnarrative.SectionDriftActivity:   drift,
+		boardnarrative.SectionExceptionStatus: exc,
 	}
 }
 
@@ -119,6 +124,12 @@ func validDrafts(ctrlID string) map[string]string {
 			"1. Over the 30-day window the net control drift was -3.",
 			"2. In the window 3 controls drifted out of passing.",
 			"3. The posture is grounded in the access-review control (" + ctrlID + ").",
+		}, "\n"),
+		"## Exception status": strings.Join([]string{
+			"## Exception status",
+			"1. The program carries 4 exceptions in force as of the period end.",
+			"2. Of those, 1 is past its expiry date; the longest-standing has been in force 210 days.",
+			"3. The compensating control the program relies on is recorded as control (" + ctrlID + ").",
 		}, "\n"),
 	}
 }
@@ -207,6 +218,64 @@ func TestIntegration_MultiSection_FabricatedNumberInOneSection(t *testing.T) {
 	}
 	if riskSuppressed != 1 || others != len(boardnarrative.AIDraftedSections)-1 {
 		t.Fatalf("expected exactly the risk section suppressed: riskSuppressed=%d others=%d", riskSuppressed, others)
+	}
+}
+
+// TestIntegration_ExceptionSection_FabricatedNumberAutoRejected is the slice-751
+// end-to-end proof of the acceptance criterion: an exception-status draft whose
+// number does not match the deterministic aggregate is auto-rejected before the
+// operator sees it, and NO row is written for that section. The other sections
+// still draft — the suppression is per-section, as per-section approval requires.
+func TestIntegration_ExceptionSection_FabricatedNumberAutoRejected(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ctx := tenantCtx(t, tenant)
+
+	ctrlID, _ := seedControlWithEvidence(t, admin, tenant, "Access reviews")
+	rollups := buildMultiSectionRollups("2026-05-31", ctrlID)
+	drafts := validDrafts(ctrlID)
+	// The aggregate says 4 exceptions are in force; the model claims 12.
+	drafts["## Exception status"] = strings.Replace(
+		drafts["## Exception status"], "carries 4 exceptions", "carries 12 exceptions", 1)
+	svc, store := newMultiService(t, app, rollups, drafts)
+
+	results, err := svc.GenerateAll(ctx, boardnarrative.GenerateParams{PeriodEnd: "2026-05-31", AuthoredBy: "u1"})
+	if err != nil {
+		t.Fatalf("GenerateAll: %v", err)
+	}
+
+	var sawException bool
+	for _, res := range results {
+		if res.Section == boardnarrative.SectionExceptionStatus {
+			sawException = true
+			if !res.Suppressed || res.Reason != boardnarrative.ReasonNumericMismatch {
+				t.Fatalf("exception section with a fabricated count must be suppressed/numeric_mismatch, got suppressed=%v reason=%q",
+					res.Suppressed, res.Reason)
+			}
+			if res.RecordID != "" || res.Draft != "" {
+				t.Fatalf("suppressed exception section leaked a record id or draft text: %+v", res)
+			}
+			continue
+		}
+		if res.Suppressed {
+			t.Fatalf("section %q must NOT be suppressed (only the exception count was fabricated): %q", res.Section, res.Reason)
+		}
+	}
+	if !sawException {
+		t.Fatal("GenerateAll did not draft the exception-status section — it is not registered")
+	}
+
+	// Nothing was persisted for the suppressed section: the approved narrative
+	// can never contain it, so the fabricated number cannot reach the board.
+	shipped, err := store.ApprovedNarrative(ctx, "2026-05-31")
+	if err != nil {
+		t.Fatalf("ApprovedNarrative: %v", err)
+	}
+	for _, sec := range shipped {
+		if sec.Section == boardnarrative.SectionExceptionStatus {
+			t.Fatal("a suppressed exception section reached the shippable narrative")
+		}
 	}
 }
 
