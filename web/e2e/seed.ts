@@ -82,6 +82,14 @@ export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
 // owner-assignments so the save/load/delete/assign assertions are
 // deterministic. See fixtures/e2e/controls-list.sql for the full
 // rationale.
+//
+// OE-398c added "global-search" — a REAL search corpus (one control,
+// one risk, one evidence record, all carrying the same distinctive
+// token) so `global-search.spec.ts` can drive the shipped ⌘K surface
+// against the real `/api/search` → `GET /v1/search` path with no route
+// mock anywhere. The `controls-top-bar` fixture deliberately seeds no
+// corpus because that spec mocks the endpoint; this is its unmocked
+// twin.
 export type FixtureName =
   | "dashboard"
   | "control-detail"
@@ -93,6 +101,7 @@ export type FixtureName =
   | "audits-header"
   | "controls-top-bar"
   | "controls-list"
+  | "global-search"
   | "tenant-switch";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
