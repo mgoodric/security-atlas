@@ -123,6 +123,74 @@ to close it on four.
 | `npm-audit`, `trivy-image`, `schema-removal-age`, `cache-path-guard`, `integration-enrolment-check`, `coverage-excludes-check` | Informational / narrower-filter guards, none required today. Promoting them is a decision with its own soak, not a side effect of this slice. `schema-removal-age` in particular is gated on `changes.outputs.schemas`, a NARROWER filter — it is `skipped` on an ordinary code PR and would brick the gate (see the `needs:` block comment). |
 | `build-atlas`                                                                                                                  | Covered transitively: it is a `needs:` of `frontend-playwright` and `frontend-playwright-prod-build`, so a failed `build-atlas` makes both of those `skipped` on a code PR, which the gate already blocks on.                                                                                                                                 |
 
+### Post-merge re-verification of the reconciliation (slice 701a-ii)
+
+The table above was built from the files **before** this slice merged, and states
+"18 contexts / 10 needs" as the starting point. Re-derived from `main` at
+`2175a259`, after the merge, the end state checks out:
+
+- `needs:` count read straight off the blobs either side of the merge commit:
+  `252e282b^` → **10** entries, `252e282b` → **20** entries.
+- `contexts` is now **19** names (18 + `CI · merge-gate`), and file ↔ live agree
+  exactly (see "Branch-protection apply" below).
+- `git merge-base --is-ancestor 252e282b origin/main` → true.
+
+**14 of the 19 contexts are backed by a job in `needs:`.** The remaining five are
+`CI · merge-gate` itself (a job cannot `need` itself) plus the four D2 names. The
+four were re-verified **empirically** this time rather than by reading the
+workflow files, using check-run metadata from proof PR #1507:
+
+```
+Analyze (go)                 | typename=CheckRun | workflow=CodeQL
+GitGuardian Security Checks  | typename=CheckRun | workflow=<empty>
+DCO                          | typename=CheckRun | workflow=<empty>
+```
+
+`Analyze (…)` reports under a **different workflow** (`CodeQL`), and `needs:` is
+workflow-scoped, so it is unreachable from `ci.yml`. `GitGuardian` and `DCO`
+report an empty `workflowName` — GitHub Apps with no workflow job at all,
+confirming D2's claim from the outside. All four resolved on #1507, so none is a
+brick.
+
+### The `if:`-guard invariant, audited leg by leg
+
+The `needs:` block's own comment states the rule that keeps the gate from
+bricking: every entry must be a job whose `if:` is either unconditional or
+exactly `needs.changes.outputs.code == 'true'`. A job on a **narrower** filter
+would be `skipped` on an ordinary code PR and would block every code merge. D4
+asserts this was "verified job by job"; here is that audit, re-run against the
+merged `ci.yml` and recorded so it is falsifiable:
+
+| Job (`needs:` entry)             | Reported check name                                 | `if:` guard                  |
+| -------------------------------- | --------------------------------------------------- | ---------------------------- |
+| `changes`                        | `Detect changed paths`                              | unconditional                |
+| `precommit`                      | `pre-commit · all hooks`                            | unconditional                |
+| `actions-pin-check`              | `actions-pin-check`                                 | unconditional                |
+| `openapi-drift-check`            | `openapi-drift-check`                               | unconditional                |
+| `build-go`                       | `Go · build + test`                                 | `code == 'true'`             |
+| `tests-integration`              | `Go · integration (Postgres RLS)`                   | `always() && code == 'true'` |
+| `tests-integration-shard`        | `Go · integration (shard ${{ matrix.leg }})`        | `code == 'true'`             |
+| `lint-go`                        | `Go · lint`                                         | `code == 'true'`             |
+| `sqlc-drift`                     | `Go · sqlc generate diff`                           | `code == 'true'`             |
+| `proto`                          | `Proto · lint + generate diff`                      | `code == 'true'`             |
+| `build-frontend`                 | `Frontend · install + build`                        | `code == 'true'`             |
+| `frontend-playwright`            | `Frontend · Playwright e2e`                         | `code == 'true'`             |
+| `frontend-playwright-prod-build` | `Frontend · Playwright e2e (prod-build standalone)` | `code == 'true'`             |
+| `frontend-vitest`                | `Frontend · vitest`                                 | `code == 'true'`             |
+| `frontend-lint`                  | `Frontend · lint`                                   | `code == 'true'`             |
+| `helm-lint`                      | `Helm chart · lint + template`                      | `code == 'true'`             |
+| `lint-python`                    | `Python · ruff`                                     | `code == 'true'`             |
+| `oscal-bridge`                   | `OSCAL bridge · Python (ruff + pytest)`             | `code == 'true'`             |
+| `fuzz`                           | `Go · fuzz (bounded)`                               | `code == 'true'`             |
+| `govulncheck`                    | `Go · govulncheck`                                  | `code == 'true'`             |
+
+**Zero violations across all 20.** `tests-integration`'s `always() && code ==
+'true'` is the same gating predicate with an always-run wrapper, not a narrower
+one — it still resolves `skipped` when `code != 'true'`, which is the property
+the rule cares about. The live docs-only run confirms it: `tests-integration`
+appears in the Proof 2 log as `skipped`, alongside the other 15 path-filtered
+legs.
+
 ---
 
 ## D1 — Assertion list derived from `toJSON(needs)` (AC-2)
@@ -308,14 +376,103 @@ anti-criteria say that lands in isolation. Filed as a child OE.
 A real leg was forced to fail on this PR's branch, and `CI · merge-gate` went
 RED as a result.
 
-- **Forced failure:** commit `PROOF1_SHA` adds a deliberately-failing step to the
-  `PROOF1_JOB` job in `ci.yml`.
-- **Run (gate RED):** `PROOF1_RUN_URL`
-- **merge-gate conclusion:** `PROOF1_CONCLUSION`
-- **Revert:** commit `PROOF1_REVERT_SHA`
-- **Run after revert (gate GREEN):** `PROOF1_GREEN_RUN_URL`
+**Filled in by slice 701a-ii (OPENENGINE-462) against merged `main`, not from
+701a-i's own branch** — see the "why a throwaway PR" note below for why that
+matters.
 
-`PROOF1_LOG_EXCERPT`
+- **PR:** #1506 `proof/701a-ii-fail-closed` (`4e0f83e4`) — throwaway, **CLOSED
+  unmerged**.
+- **Forced failure:** commit `4e0f83e4` adds a deliberately-failing final step
+  (`PROOF (701a-ii) — force this leg RED` / `run: exit 1`) to the **`helm-lint`**
+  job in `ci.yml`.
+- **Run (gate RED):** <https://github.com/mgoodric/security-atlas/actions/runs/30190867273>
+- **merge-gate job:** <https://github.com/mgoodric/security-atlas/actions/runs/30190867273/job/89764622124>
+- **merge-gate conclusion:** `failure`. Whole run concluded `failure`.
+- **PR-level outcome:** `mergeStateStatus=BLOCKED`. The merge was actually
+  blocked, not merely reported red.
+- **Revert:** none needed — the proof never touched `main`. The branch was built
+  with `git commit-tree` against `origin/main` and pushed directly, so no working
+  tree ever carried the broken `ci.yml`, and closing the PR disposes of it
+  entirely.
+
+Verbatim from the gate's `Evaluate fail-closed merge-gate` step:
+
+```
+code='true' (Go-affecting PR) — EVERY leg in needs MUST be 'success'.
+Asserting 20 legs derived from toJSON(needs).
+
+  OK    actions-pin-check — actions-pin-check: success
+  OK    build-frontend — Frontend · install + build: success
+  OK    build-go — Go · build + test: success
+  OK    changes (path-filter oracle): success
+  OK    frontend-lint — Frontend · lint: success
+  OK    frontend-playwright — Frontend · Playwright e2e: success
+  OK    frontend-playwright-prod-build — Frontend · Playwright e2e (prod-build standalone): success
+  OK    frontend-vitest — Frontend · vitest: success
+  OK    fuzz — Go · fuzz (bounded): success
+  OK    govulncheck — Go · govulncheck: success
+  BLOCK helm-lint — Helm chart · lint + template: failure  <-- not 'success'
+  OK    lint-go — Go · lint: success
+  OK    lint-python — Python · ruff: success
+  OK    openapi-drift-check — openapi-drift-check: success
+  OK    oscal-bridge — OSCAL bridge · Python (ruff + pytest): success
+  OK    precommit — pre-commit · all hooks: success
+  OK    proto — Proto · lint + generate diff: success
+  OK    sqlc-drift — Go · sqlc generate diff: success
+  OK    tests-integration — Go · integration (Postgres RLS): success
+  OK    tests-integration-shard — Go · integration (shard matrix): success
+
+merge-gate is RED: a leg in needs did not succeed.
+This blocks the merge by design (slice 631).
+```
+
+**Nineteen of twenty legs `OK`, exactly one `BLOCK`, gate RED.** The failure is
+isolated to the intended leg — there is no ambiguity about what reddened the
+gate.
+
+**Why `helm-lint` and not one of the original ten.** The proof is only
+interesting if it exercises what 701a **changed**. Forcing `build-go` or
+`lint-go` red would have proven nothing about completeness: those were already in
+the slice-631 `needs:`, so the pre-existing gate would have caught them too.
+`helm-lint` is one of the six contexts-driven legs this slice **added**, so a RED
+gate driven by it proves the added entries are load-bearing rather than
+decorative. It is also the cheapest honest choice among the six — `helm lint` +
+`helm template` via `azure/setup-helm`, pulling no container images and touching
+no external registry (per slice 419, the only promotion candidate with a
+spotless 106/106 soak), so a forced failure there cannot be mistaken for
+registry flake.
+
+**The forced failure is provably the only cause.** The `helm-lint` job's four
+real steps all passed and only the injected step failed:
+
+```
+6. helm lint (default values):        success
+7. helm lint (production values):     success
+8. helm template (default values):    success
+9. helm template (production values): success
+10. PROOF (701a-ii) — force this leg RED: failure
+```
+
+`actionlint` issue-count parity was also checked between `main`'s `ci.yml` and
+the proof version — 11 pre-existing shellcheck warnings on both, all suppressed
+in-repo via `-shellcheck ""` — so the injected step added no lint surface of its
+own.
+
+**Step placement, and the #1496 lesson.** This slice's proof step is the **last**
+step of the job, after `actions/checkout`. 701a-i's own attempt at this proof put
+the step **before** checkout in `frontend-lint`, a job carrying
+`defaults.run.working-directory: web`. With no checkout yet, `web/` did not
+exist, so the step never started and the job died with
+`An error occurred trying to start process '/usr/bin/bash' with working directory
+'.../web'. No such file or directory` — which reads as a tooling fault, not an
+intentional proof. That is why it was first misdiagnosed as a pre-existing eslint
+error, and why it survived the squash-merge and forced `Frontend · lint` RED
+repo-wide until #1496 removed it.
+
+**Why a throwaway PR rather than 701a-i's own branch.** A proof step living on
+the branch being merged is one forgotten revert away from shipping to `main` —
+which is exactly what happened. Building the proof as a disposable branch off
+merged `main`, and closing it, makes the failure mode structurally unreachable.
 
 ## Proof 2 — docs-only PR, real legs skipped, gate GREEN (AC / OE step 6)
 
@@ -353,12 +510,71 @@ The docs-only row asserts exactly the AC-6/AC-7 semantics: 16 real legs
 `display()` map and the same jq derivation on a real runner. The only branch
 Proof 1 does not reach is the `skipped`-tolerance arm, which (a) covers.
 
-**(c) Closed by soak, before anything is deleted.** The first docs-only PR
-opened after this merges will exercise the arm live. That observation is a
-**hard precondition on the child slice** that deletes the stubs — the child must
-not start until a docs-only PR has resolved `CI · merge-gate` green from the
-skipped-legs path, which is the same soak slice 701 already demands. Filed as a
-child OE so it is tracked rather than assumed.
+**(c) CLOSED BY A LIVE DOCS-ONLY RUN (slice 701a-ii, OPENENGINE-462).** The
+precondition this section left open — "the first docs-only PR opened after this
+merges will exercise the arm live" — is now **satisfied, not assumed**.
+
+- **PR:** #1507 `proof/701a-ii-green-on-skip` (`f1772d1b`) — throwaway,
+  **CLOSED unmerged**.
+- **Run (gate GREEN):** <https://github.com/mgoodric/security-atlas/actions/runs/30190873485>
+- **merge-gate job:** <https://github.com/mgoodric/security-atlas/actions/runs/30190873485/job/89763884090>
+- **merge-gate conclusion:** `success`. Whole run concluded `success`.
+- **PR-level outcome:** `mergeable=MERGEABLE`, `mergeStateStatus=CLEAN` — every
+  one of the 19 required contexts resolved, zero non-`SUCCESS`/`SKIPPED` checks
+  on the PR. This is the stronger claim: not merely "the gate went green", but
+  "a docs-only PR is still mergeable under the promoted gate". That is the
+  property whose absence would have forced a revert of 701a-i.
+
+The PR adds one file under `docs/`, touching no path in the `code` filter, so
+`needs.changes.outputs.code` resolved to `false`. Verbatim from the gate's
+`Evaluate fail-closed merge-gate` step:
+
+```
+code='false' (no Go-affecting changes) — path-filtered legs may legitimately
+Asserting 20 legs derived from toJSON(needs).
+
+  OK    actions-pin-check — actions-pin-check: success
+  OK    changes (path-filter oracle): success
+  OK    openapi-drift-check — openapi-drift-check: success
+  OK    precommit — pre-commit · all hooks: success
+  SKIP  build-frontend — Frontend · install + build: skipped  (allowed: no Go-affecting changes)
+  SKIP  build-go — Go · build + test: skipped  (allowed: no Go-affecting changes)
+  SKIP  frontend-lint — Frontend · lint: skipped  (allowed: no Go-affecting changes)
+  SKIP  frontend-playwright — Frontend · Playwright e2e: skipped  (allowed: no Go-affecting changes)
+  SKIP  frontend-playwright-prod-build — Frontend · Playwright e2e (prod-build standalone): skipped  (allowed: no Go-affecting changes)
+  SKIP  frontend-vitest — Frontend · vitest: skipped  (allowed: no Go-affecting changes)
+  SKIP  fuzz — Go · fuzz (bounded): skipped  (allowed: no Go-affecting changes)
+  SKIP  govulncheck — Go · govulncheck: skipped  (allowed: no Go-affecting changes)
+  SKIP  helm-lint — Helm chart · lint + template: skipped  (allowed: no Go-affecting changes)
+  SKIP  lint-go — Go · lint: skipped  (allowed: no Go-affecting changes)
+  SKIP  lint-python — Python · ruff: skipped  (allowed: no Go-affecting changes)
+  SKIP  oscal-bridge — OSCAL bridge · Python (ruff + pytest): skipped  (allowed: no Go-affecting changes)
+  SKIP  proto — Proto · lint + generate diff: skipped  (allowed: no Go-affecting changes)
+  SKIP  sqlc-drift — Go · sqlc generate diff: skipped  (allowed: no Go-affecting changes)
+  SKIP  tests-integration — Go · integration (Postgres RLS): skipped  (allowed: no Go-affecting changes)
+  SKIP  tests-integration-shard — Go · integration (shard matrix): skipped  (allowed: no Go-affecting changes)
+
+merge-gate PASSES: every leg in needs resolved acceptably for code='false'.
+```
+
+Three things this pins down beyond "it went green", matching (a) row-for-row on a
+real runner:
+
+1. **`Asserting 20 legs`** — the `toJSON(needs)` derivation really did enumerate
+   all 20 entries at runtime. The `leg_count < 2` guard (D1) did not silently
+   degrade the gate into a no-op that reads as "all green".
+2. **Skip-tolerance is scoped, not blanket (D4 confirmed live).** Four legs are
+   still asserted `success` here — `changes` plus the three unconditional legs
+   `precommit`, `actions-pin-check`, `openapi-drift-check`. Exactly 16
+   path-filtered legs are forgiven, and only because `code == 'false'`.
+3. **The slice-061 stub pattern still resolves the required names.** `Helm chart ·
+lint + template` reported SUCCESS from `helm-lint-stub` while the real
+   `helm-lint` was `skipped` — docs-only PRs stay mergeable without paying for the
+   full matrix.
+
+**Consequence for the child slice:** the hard precondition this section placed on
+the stub collapse is discharged. Both arms of the gate are now proven live, so
+701a-iii is gated only on its own soak, not on this observation.
 
 ---
 
@@ -368,9 +584,29 @@ child OE so it is tracked rather than assumed.
 `required_status_checks.contexts` (18 → 19 names). Nothing was removed.
 
 - `DRY_RUN=1 bash scripts/apply-branch-protection.sh` → payload validated
-- `bash scripts/apply-branch-protection.sh` → `APPLY_RESULT`
-- post-apply convergence (`scripts/check-branch-protection-drift.sh`) →
-  `DRIFT_RESULT`
+- `bash scripts/apply-branch-protection.sh` → **applied.** Verified after the
+  fact (slice 701a-ii) against the live API rather than by trusting the script's
+  own exit code: `gh api repos/mgoodric/security-atlas/branches/main/protection`
+  returns 19 contexts including `CI · merge-gate`. The gate is live-required.
+- post-apply convergence (`scripts/check-branch-protection-drift.sh`) → **no
+  drift.** Re-run in slice 701a-ii:
+
+  ```
+  check-branch-protection-drift: no drift detected — file ↔ live in sync
+  (["Analyze (go)","Analyze (javascript-typescript)","CI · merge-gate","DCO",
+    "Frontend · Playwright e2e","Frontend · Playwright e2e (prod-build standalone)",
+    "Frontend · install + build","Frontend · vitest","GitGuardian Security Checks",
+    "Go · build + test","Go · integration (Postgres RLS)","Go · lint",
+    "Go · sqlc generate diff","Helm chart · lint + template",
+    "Proto · lint + generate diff","Python · ruff","actions-pin-check",
+    "openapi-drift-check","pre-commit · all hooks"])
+  ```
+
+  An independent sorted-set `diff` of `.github/branch-protection.json`'s
+  `contexts` against the live API agrees: identical, 19 names, zero drift. This
+  matters because the repo has been bitten twice before by the file moving
+  forward while the `gh api PUT` never ran (slices 069 → 127, and the three
+  contexts noted in `$deviations_from_slice_050_AC11`). It did not happen here.
 
 Reversal, if the promoted gate misbehaves: `git revert` this file's change and
 re-run `scripts/apply-branch-protection.sh`. The PUT is a full-replace and
