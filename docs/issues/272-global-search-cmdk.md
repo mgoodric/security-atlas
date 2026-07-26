@@ -41,7 +41,12 @@ remainder is stated in its own doc.
 
 So step 3 of the OE-398 brief ("if no cross-entity search exists, design the
 endpoint contract first") is moot: the endpoint exists, its contract is
-documented in the `internal/api/search` package doc, and the UI consumes it.
+documented in the `internal/api/search` package doc, in `docs/openapi.yaml`,
+and the UI consumes it. OE-465 tightened the OpenAPI entry so 398b can wire
+without guessing: `GET /v1/search?q=<query>&types=anchors,controls,risks,evidence&limit=N`
+returns `{ "hits": [{ "id", "type", "title", "snippet", "relevance_score" }],
+"count", "partial_types" }`; `q` is required with minimum length 2, `limit`
+defaults to 25 and caps at 50.
 
 ### Shape divergence: popover, not modal (resolved — keep the shipped shape)
 
