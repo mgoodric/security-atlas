@@ -476,6 +476,33 @@ paths:
       operationId: get-v1-activity
       security:
         - bearer: []
+      parameters:
+        - name: cursor
+          in: query
+          required: false
+          description: Opaque pagination cursor returned as next_cursor.
+          schema:
+            type: string
+        - name: limit
+          in: query
+          required: false
+          description: Page size, default 50, max 200.
+          schema:
+            type: string
+        - name: kind
+          in: query
+          required: false
+          description: Dashboard activity kind filter.
+          schema:
+            type: string
+            enum:
+              - decision
+              - evidence
+              - exception
+              - sample
+              - audit_period
+              - aggregation_rule
+              - walkthrough
       responses:
         default:
           description: Default response envelope.

@@ -210,6 +210,40 @@ func TestParameterExtraction(t *testing.T) {
 	}
 }
 
+// TestQueryParameterEmission pins the RouteSpec extension used by
+// GET /v1/activity: operation-specific query params, including enums, are
+// emitted alongside path parameters.
+func TestQueryParameterEmission(t *testing.T) {
+	specRoute := RouteSpec{
+		Method:  "GET",
+		Path:    "/v1/activity",
+		Tag:     "dashboard",
+		Tier:    "bearer",
+		Summary: "GET /v1/activity",
+		Query: []QueryParam{
+			{Name: "kind", Description: "Dashboard activity kind filter.", Enum: []string{"evidence", "exception"}},
+		},
+	}
+	var out bytes.Buffer
+	if err := Generate(&out, []RouteSpec{specRoute}); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	yaml := out.String()
+	for _, want := range []string{
+		"name: kind",
+		"in: query",
+		"required: false",
+		"description: Dashboard activity kind filter.",
+		"enum:",
+		"- evidence",
+		"- exception",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Errorf("query parameter output missing %q in:\n%s", want, yaml)
+		}
+	}
+}
+
 // opMarker returns a stable substring uniquely identifying a route in
 // the YAML output. Used by the security-block presence test.
 func opMarker(r RouteSpec) string {

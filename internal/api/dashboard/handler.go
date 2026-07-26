@@ -12,6 +12,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -30,7 +31,7 @@ const trendWindow = 90 * 24 * time.Hour
 // handler's public API is unchanged: New still takes a *Store).
 type reader interface {
 	FrameworkPosture(ctx context.Context, trendCutoff pgtype.Timestamptz) ([]dbx.FrameworkPostureRow, error)
-	ActivityFeed(ctx context.Context, cursor keyset, pageRows int32) ([]dbx.ListEvidenceActivityRow, error)
+	ActivityFeed(ctx context.Context, kindFilter string, cursor keyset, pageRows int32) ([]ActivityRow, error)
 	UpcomingItems(ctx context.Context, categoryFilter string, cursor keyset, pageRows int32) ([]dbx.ListUpcomingItemsRow, error)
 }
 
@@ -129,12 +130,12 @@ func (h *Handler) FrameworkPosture(w http.ResponseWriter, r *http.Request) {
 // ===== AC-2: GET /v1/activity =====
 
 // Activity handles GET /v1/activity — a paginated read model over the
-// evidence-ingest event archive (the slice-013/015 evidence_audit_log,
-// surfaced through the slice-062 admin_audit_log_v view).
+// tenant-public business activity kinds in the unified audit ledger.
 //
 // Query params:
 //   - cursor (optional) opaque keyset cursor. Omit for the first page.
 //   - limit  (optional) page size, default 50, max 200.
+//   - kind   (optional) one dashboard activity kind. Omit for all.
 //
 // Rows are newest-first.
 func (h *Handler) Activity(w http.ResponseWriter, r *http.Request) {
@@ -147,10 +148,30 @@ func (h *Handler) Activity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	kind := r.URL.Query().Get("kind")
+	if kind != "" && !validActivityKind(kind) {
+		httpresp.WriteError(w, http.StatusBadRequest,
+			"kind must be one of: decision, evidence, exception, sample, audit_period, aggregation_rule, walkthrough")
+		return
+	}
 	cursor, err := decodeCursor(r.URL.Query().Get("cursor"), firstPageActivity())
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if r.URL.Query().Get("cursor") != "" && cursor.kind == "" {
+		httpresp.WriteError(w, http.StatusBadRequest, errBadCursor.Error())
+		return
+	}
+	if cursor.kind != "" {
+		if !validActivityKind(cursor.kind) {
+			httpresp.WriteError(w, http.StatusBadRequest, errBadCursor.Error())
+			return
+		}
+		if _, err := uuid.Parse(cursor.id); err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, errBadCursor.Error())
+			return
+		}
 	}
 	pageRows, err := parseLimit(r.URL.Query().Get("limit"))
 	if err != nil {
@@ -158,7 +179,7 @@ func (h *Handler) Activity(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.store.ActivityFeed(ctx, cursor, pageRows)
+	rows, err := h.store.ActivityFeed(ctx, kind, cursor, pageRows)
 	if err != nil {
 		httperr.WriteInternal(w, r, "dashboard", err)
 		return
@@ -254,13 +275,13 @@ func (h *Handler) Upcoming(w http.ResponseWriter, r *http.Request) {
 // computes the next_cursor. When the store returned more than pageRows
 // rows, a next page exists and next_cursor is the keyset of the last
 // returned page row. Otherwise next_cursor is "" (no next page).
-func splitActivityPage(rows []dbx.ListEvidenceActivityRow, pageRows int32) ([]dbx.ListEvidenceActivityRow, string) {
+func splitActivityPage(rows []ActivityRow, pageRows int32) ([]ActivityRow, string) {
 	if int32(len(rows)) <= pageRows {
 		return rows, ""
 	}
 	page := rows[:pageRows]
 	last := page[len(page)-1]
-	return page, encodeCursor(keyset{ts: last.Ts.Time.UTC(), id: last.ResourceID})
+	return page, encodeCursor(keyset{ts: last.Ts.Time.UTC(), kind: last.Kind, id: last.RowID.String()})
 }
 
 // splitUpcomingPage is splitActivityPage's twin for the upcoming rollup.
@@ -285,6 +306,13 @@ func validUpcomingCategory(c string) bool {
 	default:
 		return false
 	}
+}
+
+// validActivityKind reports whether k is one of the dashboard feed's
+// tenant-public business kinds. `feature_flag` and `me` remain available on
+// the full ledger surfaces, not this compact dashboard panel feed.
+func validActivityKind(k string) bool {
+	return dashboardActivityKindAllowed(unifiedlog.Kind(k))
 }
 
 // tenantContext confirms the upstream slice-033 tenancy middleware lifted a

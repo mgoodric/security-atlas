@@ -303,9 +303,10 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 			return err
 		}
 	}
-	// Parameters: extract {placeholders} from the path.
+	// Parameters: extract {placeholders} from the path and append any
+	// operation-specific query parameters declared in RouteSpecs.
 	params := pathParameters(r.Path)
-	if len(params) > 0 {
+	if len(params) > 0 || len(r.Query) > 0 {
 		if _, err := io.WriteString(w, "      parameters:\n"); err != nil {
 			return err
 		}
@@ -321,6 +322,38 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 			}
 			if _, err := io.WriteString(w, "          schema:\n            type: string\n"); err != nil {
 				return err
+			}
+		}
+		for _, p := range r.Query {
+			if _, err := fmt.Fprintf(w, "        - name: %s\n", p.Name); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, "          in: query\n"); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, "          required: false\n"); err != nil {
+				return err
+			}
+			if p.Description != "" {
+				if _, err := fmt.Fprintf(w, "          description: %s\n", yamlSafe(p.Description)); err != nil {
+					return err
+				}
+			}
+			if _, err := io.WriteString(w, "          schema:\n"); err != nil {
+				return err
+			}
+			if _, err := io.WriteString(w, "            type: string\n"); err != nil {
+				return err
+			}
+			if len(p.Enum) > 0 {
+				if _, err := io.WriteString(w, "            enum:\n"); err != nil {
+					return err
+				}
+				for _, v := range p.Enum {
+					if _, err := fmt.Fprintf(w, "              - %s\n", v); err != nil {
+						return err
+					}
+				}
 			}
 		}
 	}
