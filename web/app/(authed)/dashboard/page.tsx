@@ -49,6 +49,8 @@ import {
   fetchDashboardUpcoming,
 } from "@/lib/api/dashboard";
 
+import { DashboardHeaderActions } from "./dashboard-header-actions";
+
 export default function DashboardPage() {
   const router = useRouter();
 
@@ -88,6 +90,13 @@ export default function DashboardPage() {
     postureQ.error ??
     activityQ.error ??
     null;
+  const snapshotIncomplete =
+    driftQ.isError ||
+    freshnessQ.isError ||
+    risksQ.isError ||
+    upcomingQ.isError ||
+    postureQ.isError ||
+    activityQ.isError;
   useEffect(() => {
     if (firstError instanceof APIError && firstError.status === 401) {
       router.push("/login?from=/dashboard");
@@ -110,7 +119,7 @@ export default function DashboardPage() {
         shape exposes a `received_at` — see slice header comment in
         `dashboard-header-subtitle.tsx` for the JUDGMENT note.
       */}
-      <header className="flex items-baseline justify-between">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-baseline sm:justify-between">
         <div>
           <div className="flex items-baseline gap-3">
             <h1 className="text-2xl font-semibold tracking-tight">Program</h1>
@@ -118,6 +127,7 @@ export default function DashboardPage() {
           </div>
           <DashboardHeaderSubtitle />
         </div>
+        <DashboardHeaderActions disabled={snapshotIncomplete} />
       </header>
 
       {/* ============ FRAMEWORK POSTURE TILES ============ */}

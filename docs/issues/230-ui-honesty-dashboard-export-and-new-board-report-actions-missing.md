@@ -3,13 +3,17 @@
 **Cluster:** Quality / UI parity (frontend)
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** `not-ready` (one of the two actions has no backing endpoint yet — see Dependencies)
+**Status:** `implemented` (reclassified against archived-mockup guidance; both
+shipped actions are backed by real endpoints)
 
 ## Narrative
 
-Surfaced during the slice 204 per-page UI parity audit fleet (page slug: `dashboard`; mockup file: `Plans/mockups/dashboard.html`). Category (i) layout / chrome parity.
+Surfaced during the slice 204 per-page UI parity audit fleet (page slug:
+`dashboard`; archived mockup file: `Plans/_archive/mockups/dashboard.html`).
+Category (i) layout / chrome parity.
 
-The dashboard mockup's header right-side action cluster (`Plans/mockups/dashboard.html` lines 125–131) renders two buttons:
+The dashboard mockup's header right-side action cluster
+(`Plans/_archive/mockups/dashboard.html` lines 125–131) renders two buttons:
 
 1. **"Export"** — secondary button. Mockup implies a one-click dashboard-state export (CSV / PDF / OSCAL bundle of current posture + risks + freshness + drift snapshots).
 2. **"New board report"** — primary CTA button with leading arrow icon. Mockup implies a click navigates to the board-pack composer (`/board-packs/new`) with the dashboard's current snapshot pre-attached.
@@ -18,7 +22,37 @@ The live `/dashboard` header (`web/app/(authed)/dashboard/page.tsx` lines 94–1
 
 **Why this is a finding.** The two CTAs are the dashboard's primary "act on what you see" affordances. Their absence pushes operators to sidebar-navigate to Board Packs and click through to create a new report from scratch — losing the dashboard's snapshot context. For the solo-security-leader persona on a board-report deadline, that's daily friction.
 
-**Why `not-ready`.** "New board report" can ship today: slice 053 (board-pack composer) + slice 052 (board-pack list) are merged; `/board-packs/new` is a real route. "Export" has no backing endpoint — there's no dashboard-snapshot-export API. The implementing slice MAY split this into two slices (board-report CTA = ship-able today; export = depends on a new endpoint) — that decision lives in the implementing slice's decisions log.
+**Historical `not-ready` reason.** At filing time, "New board report" was
+believed to map to a `/board-packs/new` composer and "Export" was believed to
+lack a dashboard-snapshot export endpoint. Both assumptions were rechecked in
+the implementation fire: `/board-packs/new` is stale and absent, while the
+dashboard export endpoint now exists from slice 269.
+
+## Slice 230 implementation classification
+
+Archive check first: `Plans/_archive/mockups/README.md` says per-page
+divergence between archived iteration-1 mockups and shipped `web/` is expected
+and is **not** automatically fileable drift. This slice was kept only because
+the two header actions name first-class product operations, so each action was
+reclassified against the live app/backend instead of treating the old mockup as
+binding design.
+
+- **Export:** genuine ship-gap, not merely expected mockup divergence. The
+  archived mockup's exact CSV / PDF / OSCAL menu is stale, but slice 269 later
+  shipped the real platform endpoint: `GET /v1/dashboard/export?format=json|csv|xlsx`.
+  Slice 230 adds the missing BFF at `GET /api/dashboard/export` and the
+  dashboard header menu for the endpoint's actual supported formats. No PDF or
+  OSCAL option ships because the backing endpoint does not support those formats.
+- **New board report:** genuine ship-gap, not merely expected mockup divergence.
+  The old `/board-packs/new?from=dashboard-snapshot...` composer route is stale
+  and does not exist in `web/app`, but the live board-pack draft generation
+  endpoint exists: `POST /api/board-packs` -> `POST /v1/board-packs`. Slice 230
+  wires the dashboard CTA to generate a draft from the current date snapshot and
+  opens the created `/board-packs/{id}` review page.
+
+No follow-up OE was filed for a missing endpoint: the original Export blocker was
+closed by slice 269 before this implementation fire. The UI intentionally omits
+any unbacked PDF/OSCAL export option and any `/board-packs/new` composer link.
 
 ## Threat model
 
@@ -32,10 +66,10 @@ The live `/dashboard` header (`web/app/(authed)/dashboard/page.tsx` lines 94–1
 
 ## Acceptance criteria
 
-- **AC-1.** Header right-side action cluster renders two buttons matching the mockup's order (Export · secondary, New board report · primary).
-- **AC-2.** "New board report" navigates to `/board-packs/new` with a `?from=dashboard-snapshot&snapshot_at={iso}` query parameter that the board-pack composer reads to pre-fill the snapshot section.
-- **AC-3.** "Export" opens a small menu (CSV / PDF / OSCAL bundle) — OR the implementing slice splits the export action into its own follow-on slice and renders only the board-report CTA at v1.
-- **AC-4.** Both actions are role-gated: a user without `board:write` does not see "New board report"; a user without `evidence:export` does not see "Export".
+- **AC-1.** Header right-side action cluster renders only actions backed by live endpoints.
+- **AC-2.** "New board report" posts to `POST /api/board-packs`, then opens the returned `/board-packs/{id}` draft review page.
+- **AC-3.** "Export" opens a small menu for the real dashboard export formats (JSON / CSV ZIP / XLSX). PDF and OSCAL are omitted because the endpoint does not support them.
+- **AC-4.** Both actions are role-gated in the UI: "New board report" renders only for admin callers; "Export" renders only for admin / `grc_engineer` callers, matching the backend handler's effective access gate.
 - **AC-5.** Disabled-state honesty: if the dashboard is in a degraded state (e.g. all panel queries errored), the buttons render disabled with a tooltip explaining why ("Snapshot incomplete — refresh panels first").
 
 ## Constitutional invariants honored
@@ -50,8 +84,11 @@ The live `/dashboard` header (`web/app/(authed)/dashboard/page.tsx` lines 94–1
 
 ## Dependencies
 
-- **Slice 053** (board-pack composer) — merged. Backs "New board report".
-- **No dashboard-snapshot export endpoint exists.** The implementing slice files a separate endpoint slice OR scopes this slice to the board-report CTA only.
+- **Board-pack generation endpoint** — present in `POST /v1/board-packs`, exposed
+  through `POST /api/board-packs`. Backs "New board report".
+- **Slice 269 dashboard snapshot export endpoint** — merged. Backs "Export" via
+  `GET /v1/dashboard/export?format=json|csv|xlsx`, exposed through the slice 230
+  BFF `GET /api/dashboard/export`.
 
 ## Anti-criteria (P0 — block merge)
 

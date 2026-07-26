@@ -255,17 +255,21 @@ export function boardPackPdfURL(id: string): string {
 
 export type SessionMe = {
   is_admin: boolean;
+  roles: string[];
 };
 
 export async function getSessionMe(): Promise<SessionMe> {
   const res = await fetch("/api/admin/me", { cache: "no-store" });
   if (res.status === 401) {
-    return { is_admin: false };
+    return { is_admin: false, roles: [] };
   }
   if (!res.ok) {
     // Don't throw — degrade to "not approver" so the UI stays usable.
-    return { is_admin: false };
+    return { is_admin: false, roles: [] };
   }
-  const body = (await res.json()) as { is_admin?: boolean };
-  return { is_admin: body.is_admin === true };
+  const body = (await res.json()) as { is_admin?: boolean; roles?: unknown };
+  const roles = Array.isArray(body.roles)
+    ? body.roles.filter((role): role is string => typeof role === "string")
+    : [];
+  return { is_admin: body.is_admin === true, roles };
 }

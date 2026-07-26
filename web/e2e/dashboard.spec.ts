@@ -89,6 +89,124 @@ test.describe("dashboard view", () => {
     await expect(page.getByTestId("activity-feed-panel")).toBeVisible();
   });
 
+  test("slice 230: Export renders only when backed by the dashboard export endpoint", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/admin/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          is_admin: false,
+          roles: ["grc_engineer"],
+        }),
+      });
+    });
+
+    await page.goto("/dashboard");
+
+    await expect(page.getByTestId("dashboard-header-actions")).toBeVisible();
+    await expect(page.getByTestId("dashboard-new-board-report")).toHaveCount(
+      0,
+    );
+
+    await page.getByTestId("dashboard-export-trigger").click();
+    await expect(page.getByTestId("dashboard-export-json")).toHaveAttribute(
+      "href",
+      "/api/dashboard/export?format=json",
+    );
+    await expect(page.getByTestId("dashboard-export-csv")).toHaveAttribute(
+      "href",
+      "/api/dashboard/export?format=csv",
+    );
+    await expect(page.getByTestId("dashboard-export-xlsx")).toHaveAttribute(
+      "href",
+      "/api/dashboard/export?format=xlsx",
+    );
+    await expect(page.getByTestId("dashboard-export-oscal")).toHaveCount(0);
+  });
+
+  test("slice 230: New board report generates a real board-pack draft and opens it", async ({
+    authedPage: page,
+  }) => {
+    const packId = "00000000-0000-0000-0000-0000000230aa";
+    let postedPeriodEnd = "";
+
+    await page.route("**/api/admin/me", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          is_admin: true,
+          roles: ["admin"],
+        }),
+      });
+    });
+    await page.route("**/api/board-packs", async (route) => {
+      if (route.request().method() === "POST") {
+        const body = JSON.parse(route.request().postData() ?? "{}") as {
+          period_end?: string;
+        };
+        postedPeriodEnd = String(body.period_end ?? "");
+        await route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: packId,
+            period_end: postedPeriodEnd,
+            status: "draft",
+            content: {
+              period_end: postedPeriodEnd,
+              generated_at: `${postedPeriodEnd}T00:00:00Z`,
+              status: "draft",
+              sections: {},
+            },
+            narrative_md: "Dashboard-generated board pack mock.",
+            created_at: `${postedPeriodEnd}T00:00:00Z`,
+            updated_at: `${postedPeriodEnd}T00:00:00Z`,
+          }),
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await page.route(`**/api/board-packs/${packId}`, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          id: packId,
+          period_end: postedPeriodEnd,
+          status: "draft",
+          content: {
+            period_end: postedPeriodEnd,
+            generated_at: `${postedPeriodEnd}T00:00:00Z`,
+            status: "draft",
+            sections: {},
+          },
+          narrative_md: "Dashboard-generated board pack mock.",
+          created_at: `${postedPeriodEnd}T00:00:00Z`,
+          updated_at: `${postedPeriodEnd}T00:00:00Z`,
+        }),
+      });
+    });
+
+    await page.goto("/dashboard");
+    await expect(page.getByTestId("dashboard-new-board-report")).toBeVisible();
+
+    const postResp = page.waitForResponse(
+      (r) =>
+        r.url().includes("/api/board-packs") &&
+        r.request().method() === "POST" &&
+        r.status() === 201,
+    );
+    await page.getByTestId("dashboard-new-board-report").click();
+    await postResp;
+
+    expect(postedPeriodEnd).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    await expect(page).toHaveURL(new RegExp(`/board-packs/${packId}$`));
+  });
+
   test("AC-2: framework posture tiles bind to /v1/frameworks/posture (slice 147)", async ({
     authedPage: page,
   }) => {
