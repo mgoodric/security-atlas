@@ -3,7 +3,54 @@
 **Cluster:** Quality / UI parity (frontend)
 **Estimate:** 0.5d
 **Type:** AFK
-**Status:** `not-ready` (depends on a real backing search endpoint — see Dependencies)
+**Status:** `superseded` — closed as a duplicate of slice 272, which shipped via
+slice 223. Reconciled 2026-07-25 (OE-398).
+
+## Reconciliation (2026-07-25, OE-398)
+
+**This slice and slice 272 describe the same gap from opposite ends** — 228
+from the UI end ("the topbar renders no search input"), 272 from the shape end
+("the ⌘K surface is a substantive feature, not chrome"). Both named the same
+missing capability and the same blocker (no unified cross-entity search
+endpoint). It shipped once, so this slice is closed rather than built again.
+The audit of what landed where lives in
+[`272-global-search-cmdk.md`](272-global-search-cmdk.md); the short version:
+
+- The `not-ready` blocker is discharged. Option (a) from the Dependencies
+  section below — "a unified `/v1/search` returning typed hits" — is the one
+  that got picked, by slice 268 (merged 2026-05-23, #593). Option (b), the
+  UI-side fan-out, was explicitly rejected in slice 268 D1.
+- "No risks search slice exists yet" is resolved: slice 268 added the risks
+  ILIKE branch inline, exactly as this doc's Dependencies section allowed.
+- The topbar input shipped in slice 223 (`web/components/shell/global-search.tsx`,
+  rendered by `web/components/shell/topbar.tsx`) with this slice's AC-1 shape:
+  right-pinned input, `⌘K` badge, placeholder "Search controls, evidence,
+  risks…". Slice 272's competing "centered modal" shape was NOT adopted — this
+  slice's shape won. See 272's reconciliation section for why.
+- AC-6 (cross-tenant RLS test) is covered by
+  `TestSlice268_CrossTenantIsolation` in `internal/api/search/integration_test.go`,
+  a two-tenant fixture where both tenants carry rows matching the same literal.
+
+### Distinct remainder
+
+Two items in this doc were not covered by the shipped work, and neither is a
+UI-honesty gap:
+
+1. **The `data-testid="global-search-results"` name in AC-3.** The shipped
+   surface uses `global-search-popover` for the container plus per-group
+   `global-search-group-{type}` and per-row `global-search-row-{type}` testids
+   — a finer-grained scheme than the single testid this doc proposed, and the
+   one the e2e specs and the slice 361 ARIA audit are written against. The
+   proposed name is superseded, not unimplemented; no action.
+2. **The pg_trgm index named in the D (DoS) threat-model row.** Slice 268
+   shipped the server-side `LIMIT` (hard cap 50, per-type top-K 25) but
+   deliberately NOT the index — P0-A2 of slice 268 forbids full-text-search
+   infrastructure in that slice, deferring pg_trgm to a future slice "if
+   quality demands it". This is the only substantive remainder: unindexed
+   ILIKE over a large evidence ledger is a latency concern, not a correctness
+   or isolation one. It is **not** re-opened here; it belongs to whichever
+   slice measures search latency against a production-scale corpus and finds
+   it wanting.
 
 ## Narrative
 

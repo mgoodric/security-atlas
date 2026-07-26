@@ -1,0 +1,36 @@
+# compose.chaos-nats-211.yml — chaos-only overlay for slice 335 Experiment 2
+# (NATS JetStream consumer lag spike), executed by slice 355.
+#
+# WHY THIS FILE EXISTS.
+#
+# The design's injection mechanism is `nats consumer pause <stream>
+# <consumer>`. The JetStream consumer-pause API ($JS.API.CONSUMER.PAUSE) was
+# introduced in NATS Server 2.11. The shipped bundle
+# (deploy/docker/docker-compose.yml) pins `nats:2.10-alpine`, on which the
+# call is refused outright:
+#
+#   nats: error: pausing Consumers requires NATS Server 2.11
+#
+# This overlay raises ONLY the nats service's image tag for the duration of
+# the experiment. It changes no stream config, no consumer config, and no
+# other service. The named `nats-data` volume is untouched, so JetStream
+# state (stream + all four durable consumers) survives the swap.
+#
+# THIS IS AN EXPERIMENT ARTIFACT, NOT A PRODUCT CHANGE. The shipped bundle
+# stays on 2.10 — bumping it is a separate decision with its own upgrade
+# testing, filed as a follow-up rather than smuggled in here (slice 355 P0-3:
+# the experiment does not permanently alter the NATS deployment).
+#
+# Apply (from the compose project that owns the running stack):
+#
+#   docker compose -p security-atlas \
+#     -f deploy/docker/docker-compose.yml \
+#     -f scripts/chaos/compose.chaos-nats-211.yml \
+#     --env-file deploy/docker/.env \
+#     up -d --no-deps nats
+#
+# Revert by re-running the same command WITHOUT the -f overlay.
+
+services:
+  nats:
+    image: nats:2.11-alpine
