@@ -1,0 +1,28 @@
+docs/audit-log/536a-crosswalk-conflict-detection-decisions.md
+  s_151aa9a65ed706::t_c7cab5f85824dd 33-317
+  s_151aa9a65ed706::t_bb126b1d14b046 1-32
+cmd/scripts/coverage-thresholds.json
+  s_151aa9a65ed706::t_4f3f744c2b68b5 2,263
+internal/crosswalkconflict/conflict.go
+  s_151aa9a65ed706::t_365a3a3f5a2fd4 1-598
+internal/crosswalkconflict/conflict_test.go
+  s_151aa9a65ed706::t_3ba9c428e41f51 1-662
+internal/crosswalkconflict/dbrows.go
+  s_151aa9a65ed706::t_883853f90e7ece 1-66
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "6068efb3b1d9e372acc6453921b973b49f36386c",
+  "prompts": {},
+  "sessions": {
+    "s_151aa9a65ed706": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e4e95a12-e837-4ebe-90e5-4db791620781",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
