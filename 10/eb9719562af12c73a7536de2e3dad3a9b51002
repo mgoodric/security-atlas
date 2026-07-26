@@ -1,0 +1,27 @@
+web/e2e/README.md
+  s_fde5f8f2bb0801::t_54bdc2263ab686 20-29
+web/e2e/global-search.spec.ts
+  s_fde5f8f2bb0801::t_ace85704af3423 1-233
+fixtures/e2e/README.md
+  s_fde5f8f2bb0801::t_d0274251ebb064 49
+fixtures/e2e/global-search.sql
+  s_fde5f8f2bb0801::t_74e37109a1c73c 1-131
+web/e2e/seed.ts
+  s_fde5f8f2bb0801::t_fb0aec4277760d 85-92,104
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "10eb9719562af12c73a7536de2e3dad3a9b51002",
+  "prompts": {},
+  "sessions": {
+    "s_fde5f8f2bb0801": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f0c6bd0f-ede8-4d58-8619-64a7cf0b62a8",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
