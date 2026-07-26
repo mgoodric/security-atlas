@@ -1,0 +1,68 @@
+docs/audit-log/751-board-narrative-exception-status-decisions.md
+  s_28a08b2b5b9f10::t_df089fb26c887c 35-158
+  s_28a08b2b5b9f10::t_c11d7a9c7d8b75 21-26
+  s_28a08b2b5b9f10::t_784cb51ff375e8 18-20
+  s_28a08b2b5b9f10::t_ae9d3f8585dfe7 27-29,32-34
+  s_28a08b2b5b9f10::t_a8fb5a4642dd14 159-161
+  s_28a08b2b5b9f10::t_26656fa34d0f56 1-17,30-31,162-185
+internal/board/exception_summary_test.go
+  s_90494127dacc5a::t_7a522e55dae885 1-87
+internal/boardnarrative/multisection_integration_test.go
+  s_9b8cabad00be0b::t_cb51996af516cf 88-90,96,101,128-133,224-281
+internal/boardnarrative/prompt.go
+  s_90494127dacc5a::t_1f3d09cdc3aa6f 115-118
+internal/db/dbx/board_briefs.sql.go
+  s_28a08b2b5b9f10::t_6c92ff4675de40 14-73
+internal/db/dbx/querier.go
+  s_28a08b2b5b9f10::t_a41b10570b20b4 104-131
+internal/board/brief.go
+  s_28a08b2b5b9f10::t_8b73311ac5951a 71-105
+internal/board/exception_aggregate_integration_test.go
+  s_28a08b2b5b9f10::t_68b04c9f8f935a 1-276
+internal/board/generator.go
+  s_28a08b2b5b9f10::t_debe141f0e8d99 167-175,182,186-209
+internal/board/integration_test.go
+  s_28a08b2b5b9f10::t_d1b9f0790ead64 65-68
+internal/board/store.go
+  s_28a08b2b5b9f10::t_fa907a7e97440b 130-178
+internal/boardnarrative/exception_section_test.go
+  s_28a08b2b5b9f10::t_175944ebf2e10a 1-556
+internal/boardnarrative/rollup.go
+  s_28a08b2b5b9f10::t_593047826d1d6e 60-70,78-79,82-84,166-177
+internal/boardnarrative/sections.go
+  s_28a08b2b5b9f10::t_f25bf60bdbf787 60-69,140-148,159,342-441
+internal/db/queries/board_briefs.sql
+  s_28a08b2b5b9f10::t_4095e1ad2bc971 60-99
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "498ab6852ef6c82090f29ab07779a9f174904d0e",
+  "prompts": {},
+  "sessions": {
+    "s_28a08b2b5b9f10": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9375eee3-ab09-43a3-a8e7-63fc99d245e4",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_90494127dacc5a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70dc1c02-0dc3-4ecc-a6e4-f7309aff5bd5",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_9b8cabad00be0b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7c9c0369-013f-4bf7-b794-6793e19427a8",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
