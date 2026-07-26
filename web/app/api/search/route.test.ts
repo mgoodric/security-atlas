@@ -236,3 +236,191 @@ describe("GET /api/search", () => {
     expect(calledURL).toContain("/v1/search");
   });
 });
+
+// Slice 398b (OE-466) — coverage for the contract slice 398a (OE-465)
+// pinned in docs/openapi.yaml (`get-v1-search`). The tests above pin
+// the forwarding mechanics; these pin the specific contract terms the
+// ⌘K surface depends on: a merged multi-type hit list, and the `limit`
+// bounds. The client half is pinned in
+// web/components/shell/global-search.test.ts.
+describe("GET /api/search — 398a contract (slice 398b)", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    mockCookieGet.mockReset();
+    delete process.env.ATLAS_HTTP_URL;
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
+    process.env.ATLAS_HTTP_URL = "http://atlas:8080";
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  test("passes a merged controls + evidence + risks hit list through intact", async () => {
+    // The ⌘K surface groups by `type`, so every requested type must
+    // survive the proxy. A BFF that filtered, reshaped, or collapsed
+    // the merged list would starve a whole group in the popover.
+    mockCookieGet.mockReturnValue({ value: "test-bearer-398b" });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          hits: [
+            {
+              id: "00000000-0000-0000-0000-0000000000c1",
+              type: "controls",
+              title: "Encryption at rest",
+              snippet: "Encryption at rest — prod object stores",
+              relevance_score: 1.0,
+            },
+            {
+              id: "00000000-0000-0000-0000-0000000000e1",
+              type: "evidence",
+              title: "kms.key_rotation",
+              snippet: "kms.key_rotation — CRY-04",
+              relevance_score: 0.75,
+            },
+            {
+              id: "00000000-0000-0000-0000-0000000000r1",
+              type: "risks",
+              title: "Unencrypted backups",
+              snippet: "Backups written without envelope encryption",
+              relevance_score: 0.5,
+            },
+          ],
+          count: 3,
+          partial_types: [],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const req = makeReq(
+      "http://localhost:3000/api/search?q=encryption&limit=48",
+    ) as unknown as Parameters<typeof GET>[0];
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      hits: { id: string; type: string }[];
+      count: number;
+      partial_types: string[];
+    };
+    expect(body.count).toBe(3);
+    expect(body.hits.map((h) => h.type)).toEqual([
+      "controls",
+      "evidence",
+      "risks",
+    ]);
+    // Relevance order is the upstream's to decide; the BFF must not
+    // re-sort it.
+    expect(body.hits.map((h) => h.id)).toEqual([
+      "00000000-0000-0000-0000-0000000000c1",
+      "00000000-0000-0000-0000-0000000000e1",
+      "00000000-0000-0000-0000-0000000000r1",
+    ]);
+    expect(body.partial_types).toEqual([]);
+  });
+
+  test("surfaces partial_types when a type is denied upstream", async () => {
+    // Per-type OPA denial drops the type from the merge and names it in
+    // partial_types. The popover renders that as the "hidden by your
+    // role" footer, so the array must not be swallowed by the proxy.
+    mockCookieGet.mockReturnValue({ value: "test-bearer-398b" });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          hits: [
+            {
+              id: "00000000-0000-0000-0000-0000000000c1",
+              type: "controls",
+              title: "Encryption at rest",
+              snippet: "Encryption at rest",
+              relevance_score: 1.0,
+            },
+          ],
+          count: 1,
+          partial_types: ["risks"],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const req = makeReq(
+      "http://localhost:3000/api/search?q=encryption",
+    ) as unknown as Parameters<typeof GET>[0];
+    const res = await GET(req);
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { partial_types: string[] };
+    expect(body.partial_types).toEqual(["risks"]);
+  });
+
+  test("forwards limit at the contract ceiling (50) verbatim", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-398b" });
+    let capturedURL = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      capturedURL = typeof input === "string" ? input : input.toString();
+      return new Response(
+        JSON.stringify({ hits: [], count: 0, partial_types: [] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const req = makeReq(
+      "http://localhost:3000/api/search?q=iam&limit=50",
+    ) as unknown as Parameters<typeof GET>[0];
+    expect((await GET(req)).status).toBe(200);
+    expect(capturedURL).toContain("limit=50");
+  });
+
+  test("propagates upstream 400 for a limit above the ceiling", async () => {
+    // The cap is hard upstream — 51 is a 400, not a clamp to 50. The
+    // BFF must NOT quietly rewrite it, or the client would never learn
+    // its request was out of contract.
+    mockCookieGet.mockReturnValue({ value: "test-bearer-398b" });
+    let capturedURL = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      capturedURL = typeof input === "string" ? input : input.toString();
+      return new Response(JSON.stringify({ error: "limit must be ≤ 50" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    const req = makeReq(
+      "http://localhost:3000/api/search?q=iam&limit=51",
+    ) as unknown as Parameters<typeof GET>[0];
+    const res = await GET(req);
+
+    expect(res.status).toBe(400);
+    expect(capturedURL).toContain("limit=51");
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBe("limit must be ≤ 50");
+  });
+
+  test("keeps the free-text query in the query string, never a path segment (P0-272-3)", async () => {
+    // A query crafted to look like a path escape must stay an encoded
+    // parameter VALUE. This is the threat-model assertion for the ⌘K
+    // input: free text is untrusted at the BFF boundary.
+    mockCookieGet.mockReturnValue({ value: "test-bearer-398b" });
+    let capturedURL = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      capturedURL = typeof input === "string" ? input : input.toString();
+      return new Response(
+        JSON.stringify({ hits: [], count: 0, partial_types: [] }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      );
+    });
+
+    const req = makeReq(
+      `http://localhost:3000/api/search?q=${encodeURIComponent(
+        "../v1/tenants",
+      )}`,
+    ) as unknown as Parameters<typeof GET>[0];
+    expect((await GET(req)).status).toBe(200);
+
+    const upstream = new URL(capturedURL);
+    expect(upstream.pathname).toBe("/v1/search");
+    expect(upstream.searchParams.get("q")).toBe("../v1/tenants");
+  });
+});

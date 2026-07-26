@@ -21,12 +21,17 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  buildSearchRequestURL,
+  GROUP_ORDER,
   groupByType,
   hrefForHit,
   isShortcutTrigger,
   LISTBOX_ID,
   optionIdFor,
   resultCountAnnouncement,
+  SEARCH_LIMIT,
+  SEARCH_MAX_LIMIT,
+  SEARCH_MIN_QUERY_LEN,
 } from "./global-search";
 
 interface Hit {
@@ -232,5 +237,72 @@ describe("LISTBOX_ID (slice 361)", () => {
     // failing test rather than a silent divergence between the input
     // and the popover.
     expect(LISTBOX_ID).toBe("global-search-listbox");
+  });
+});
+
+// Slice 398b (OE-466) — the request this surface sends must stay inside
+// the `GET /v1/search` contract slice 398a (OE-465) pinned in
+// docs/openapi.yaml. These pin the client half of that contract; the
+// BFF half is pinned in web/app/api/search/route.test.ts.
+describe("search request contract (slice 398b)", () => {
+  test("SEARCH_MAX_LIMIT mirrors the contract's hard ceiling", () => {
+    // docs/openapi.yaml → get-v1-search → limit.maximum, and upstream
+    // search.MaxLimit. A value above it is a 400, not a clamp.
+    expect(SEARCH_MAX_LIMIT).toBe(50);
+  });
+
+  test("SEARCH_MIN_QUERY_LEN mirrors the contract's q.minLength", () => {
+    expect(SEARCH_MIN_QUERY_LEN).toBe(2);
+  });
+
+  test("SEARCH_LIMIT never exceeds the contract's hard ceiling", () => {
+    // The regression this guards: raising PER_TYPE_TARGET or adding a
+    // fifth group pushes the derived limit past 50, and every search
+    // starts answering 400 instead of returning hits.
+    expect(SEARCH_LIMIT).toBeLessThanOrEqual(SEARCH_MAX_LIMIT);
+    expect(SEARCH_LIMIT).toBeGreaterThan(0);
+  });
+
+  test("SEARCH_LIMIT covers every rendered group", () => {
+    // The bug this pins: slice 661 added the fourth (`anchors`) group
+    // but left the multiplier at three, so the surface asked for 36
+    // merged hits while its own comment claimed 48 — the last group
+    // could be starved by the upstream's cross-type relevance sort.
+    // Deriving the limit from GROUP_ORDER makes that drift impossible.
+    expect(SEARCH_LIMIT).toBeGreaterThanOrEqual(GROUP_ORDER.length);
+    expect(SEARCH_LIMIT % GROUP_ORDER.length).toBe(0);
+  });
+
+  test("builds a BFF URL carrying q and the derived limit", () => {
+    expect(buildSearchRequestURL("iam")).toBe(
+      `/api/search?q=iam&limit=${SEARCH_LIMIT}`,
+    );
+  });
+
+  test("trims the raw input before sending it", () => {
+    expect(buildSearchRequestURL("  encryption  ")).toBe(
+      `/api/search?q=encryption&limit=${SEARCH_LIMIT}`,
+    );
+  });
+
+  test("URL-encodes the free-text query (P0-272-3)", () => {
+    // The query is untrusted free text. It must ride as an encoded
+    // query-string VALUE — never as a path segment, and never able to
+    // inject an extra parameter of its own.
+    const url = buildSearchRequestURL("a&limit=999#x /../v1/tenants");
+    expect(url).toBe(
+      `/api/search?q=a%26limit%3D999%23x%20%2F..%2Fv1%2Ftenants&limit=${SEARCH_LIMIT}`,
+    );
+    expect(url.startsWith("/api/search?q=")).toBe(true);
+    // Exactly two parameters — the injected `limit=999` stayed inside
+    // the encoded value rather than becoming a parameter.
+    expect(url.split("&")).toHaveLength(2);
+  });
+
+  test("omits `types` so a new upstream type reaches the UI unchanged", () => {
+    // The contract defines "omit for all supported types". Sending an
+    // explicit list would silently exclude any type added upstream
+    // later — the failure mode that hid SCF anchors before slice 661.
+    expect(buildSearchRequestURL("iam")).not.toContain("types=");
   });
 });
