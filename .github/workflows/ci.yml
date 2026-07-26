@@ -1237,6 +1237,21 @@ jobs:
       - name: helm template (production values)
         run: helm template ci-prod deploy/helm -f deploy/helm/values-production.yaml > /dev/null
 
+      # TEMPORARY — slice 701a-ii fail-closed PROOF (OE-462 step 2). Forces one
+      # real leg RED on a code PR so `CI · merge-gate` can be observed failing.
+      # `helm-lint` is one of the legs slice 701a-i ADDED to merge-gate's
+      # `needs:`, so a RED gate here proves the COMPLETENESS fix actually bites,
+      # not merely that the pre-existing legs still work.
+      #
+      # This step is deliberately the LAST step in the job, after `checkout` —
+      # the slice-701a proof step was placed BEFORE checkout in a job carrying
+      # `defaults.run.working-directory: web`, so it died on a missing directory
+      # and read as a tooling fault rather than an intentional proof (PR #1496).
+      #
+      # THIS BRANCH IS A THROWAWAY. Its PR is CLOSED, never merged.
+      - name: PROOF (701a-ii) — force this leg RED
+        run: exit 1
+
   helm-lint-stub:
     name: Helm chart · lint + template
     needs: changes
