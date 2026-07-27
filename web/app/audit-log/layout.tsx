@@ -9,7 +9,7 @@
 //   1. proxy.ts (Next 16 request interceptor) gates ALL non-exempt paths
 //      on the session cookie; unauthenticated traffic gets bounced to
 //      /login before this layout renders.
-//   2. THIS LAYOUT issues a /api/admin/me preflight on the server (so a
+//   2. THIS LAYOUT issues a /v1/me preflight on the server (so a
 //      stale client-side cache cannot bypass it). Callers without one of
 //      { admin, auditor, grc_engineer } get a server-side
 //      `redirect("/dashboard?error=admin-only")`, preserving the
@@ -24,16 +24,26 @@
 // (`roles.includes("grc_engineer")`). These three role checks match
 // slice-124's `HasUnifiedAuditLogRole` SQL exactly.
 //
-// Fail-closed posture (P0-A3): when the BFF returns no `roles` array
-// (legacy upstream / BFF error / network blip), the layout treats it as
+// Fail-closed posture (P0-A3): when the platform returns no `roles` array
+// (legacy upstream / error / network blip), the layout treats it as
 // `[]` and admits only on `is_admin === true`. Non-admins with a missing
 // `roles` array see the redirect — identical to the pre-slice-130 behavior.
 // Never silently admit on a missing field.
+//
+// OE-549: the preflight used to self-fetch this app's own `/api/admin/me`
+// BFF route at an origin rebuilt from the request Host header, which does
+// not resolve inside the web container (external published port; bind on
+// the container IP rather than loopback) — so `/audit-log` 500'd in the
+// shipped image. It now calls the platform's `/v1/me` through the same
+// stable internal base the rest of the app uses. The fail-closed contract
+// is unchanged: `fetchAdminMe` collapses every failure mode to
+// `{ is_admin: false, roles: [] }`, which `canReachAuditLog` rejects.
 
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { fetchAdminMe } from "@/lib/api/self.server";
 
 // AUDIT_LOG_ROLES — the canonical set of roles permitted to reach
 // /audit-log. MUST match `internal/db/queries/unified_audit_log_role.sql`
@@ -69,21 +79,6 @@ export function canReachAuditLog(body: {
       typeof r === "string" &&
       (AUDIT_LOG_ROLES as readonly string[]).includes(r),
   );
-}
-
-async function fetchAdminMe(bearer: string): Promise<{
-  is_admin?: boolean;
-  roles?: unknown;
-}> {
-  const h = await headers();
-  const host = h.get("host") ?? "localhost:3000";
-  const proto = h.get("x-forwarded-proto") ?? "http";
-  const res = await fetch(`${proto}://${host}/api/admin/me`, {
-    headers: { Cookie: `${ATLAS_JWT_COOKIE}=${bearer}` },
-    cache: "no-store",
-  });
-  if (!res.ok) return {};
-  return (await res.json()) as { is_admin?: boolean; roles?: unknown };
 }
 
 export default async function AuditLogLayout({
