@@ -45,6 +45,10 @@ Once connected, the assistant can answer questions from your **live data**:
 | `get_risk`           | "Show risk R-14 with its linked controls and residual score."     |
 | `list_evidence`      | "What evidence landed in the last 30 days?" (never raw payloads)  |
 | `list_audit_periods` | "Which audit periods exist and which are frozen?"                 |
+| `list_policies`      | "List my policies and their acknowledgment state."                |
+| `list_vendors`       | "Show my third-party vendors and their review cadence."           |
+| `list_exceptions`    | "What exceptions are active, and when do they expire?"            |
+| `list_action_plans`  | "What remediation (OSCAL POA&M) is still open?"                   |
 
 Every list tool returns up to 100 rows by default; pass `limit=N` (max 500) to
 widen. There is no "return everything" option — a request over 500 is rejected.
@@ -160,6 +164,14 @@ Restart the assistant. Ask it _"list my top risks"_ to confirm the connection.
   over the same authenticated HTTP API the web UI uses.
 - Because tokens grant real access, treat the assistant like any other client that
   holds a credential: scope it, rotate it, and revoke it when a teammate leaves.
+
+## Ready-made skills
+
+The repo ships a few optional [operator skills](https://github.com/mgoodric/security-atlas/tree/main/skills)
+that turn recurring tasks into one command over these tools — a top-risk briefing,
+a stale-evidence sweep, and an audit-readiness snapshot. They are read-only and
+self-contained; see [`skills/README.md`](https://github.com/mgoodric/security-atlas/blob/main/skills/README.md)
+for install steps.
 
 ## Reference
 

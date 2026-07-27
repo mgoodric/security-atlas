@@ -326,31 +326,31 @@ func TestListAuditPeriods_StatusEnumValidation(t *testing.T) {
 
 // ===== All() wires correctly =====
 
-func TestAll_WiresSixReadTools(t *testing.T) {
+func TestAll_WiresReadTools(t *testing.T) {
 	t.Parallel()
 
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
 	all := tools.All(client)
-	if len(all) != 6 {
-		t.Fatalf("All() = %d tools, want 6 read tools (slice 172 P0-A10)", len(all))
+	if len(all) != 10 {
+		t.Fatalf("All() = %d tools, want 10 read tools (slice 172 P0-A10 + widened surface)", len(all))
 	}
-	// Read tools are the first six entries of CanonicalToolOrder.
-	for i, want := range mcp.CanonicalToolOrder[:6] {
+	// Read tools are the first ten entries of CanonicalToolOrder.
+	for i, want := range mcp.CanonicalToolOrder[:10] {
 		if got := all[i].Definition().Name; got != want {
 			t.Errorf("all[%d] = %q, want %q (CanonicalToolOrder)", i, got, want)
 		}
 	}
 }
 
-// TestAllWithWrites_WiresElevenTools — slice 173 expands the surface to
-// 11 tools (6 reads + 5 writes). Order is fixed by mcp.CanonicalToolOrder.
-func TestAllWithWrites_WiresElevenTools(t *testing.T) {
+// TestAllWithWrites_WiresAllTools — the full surface is 15 tools
+// (10 reads + 5 writes). Order is fixed by mcp.CanonicalToolOrder.
+func TestAllWithWrites_WiresAllTools(t *testing.T) {
 	t.Parallel()
 
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
 	all := tools.AllWithWrites(client)
-	if len(all) != 11 {
-		t.Fatalf("AllWithWrites() = %d tools, want 11 (6 reads + 5 writes)", len(all))
+	if len(all) != 15 {
+		t.Fatalf("AllWithWrites() = %d tools, want 15 (10 reads + 5 writes)", len(all))
 	}
 	for i, want := range mcp.CanonicalToolOrder {
 		if got := all[i].Definition().Name; got != want {
