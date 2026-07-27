@@ -134,6 +134,9 @@ function AdminBreadcrumb({
         <Link href="/admin/audit" className="hover:text-foreground">
           Audit
         </Link>
+        <Link href="/admin/crosswalk-review" className="hover:text-foreground">
+          Crosswalk review
+        </Link>
         <Link href="/admin/super-admins" className="hover:text-foreground">
           Super admins
         </Link>

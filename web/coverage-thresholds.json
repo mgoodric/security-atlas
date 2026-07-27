@@ -235,6 +235,30 @@
       "functions": 98,
       "lines": 98
     },
+    "app/api/admin/crosswalk-edges/[id]/audit/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/crosswalk-edges/[id]/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/crosswalk-edges/[id]/tier/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
+    "app/api/admin/crosswalk-review/route.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "app/api/admin/demo/status/route.ts": {
       "statements": 98,
       "branches": 64,
@@ -744,6 +768,12 @@
       "branches": 2,
       "functions": 18,
       "lines": 6
+    },
+    "lib/api/crosswalk-review.ts": {
+      "statements": 92,
+      "branches": 92,
+      "functions": 81,
+      "lines": 91
     },
     "lib/api/dashboard.ts": {
       "statements": 42,

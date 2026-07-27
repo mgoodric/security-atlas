@@ -153,3 +153,92 @@ SELECT *
 FROM fw_to_scf_edge_tier_transitions
 WHERE edge_id = $1
 ORDER BY created_at DESC;
+
+-- ===== slice 536b: crosswalk review queue + content editing =====
+
+-- name: ListFrameworkRequirementsForVersionPaged :many
+-- The review queue's page of requirements, ordered by code so the operator's
+-- position is stable across refreshes. Paginated because slice 536's
+-- threat-model D asks for a bounded scan per framework_version rather than the
+-- whole catalog in one response.
+SELECT *
+FROM framework_requirements
+WHERE framework_version_id = $1
+ORDER BY code
+LIMIT $2 OFFSET $3;
+
+-- name: ListFwToScfEdgesForRequirementIDs :many
+-- One round trip for a whole page of requirements' edges, instead of N calls to
+-- ListFwToScfEdgesForRequirement. Same projection as that query plus the
+-- requirement code, which the conflict adapter needs to label a finding and
+-- which the per-requirement variant cannot supply (it joins scf_anchors, not
+-- framework_requirements).
+SELECT
+    e.id,
+    e.framework_requirement_id,
+    r.code AS requirement_code,
+    e.scf_anchor_id,
+    e.relationship_type,
+    e.strength,
+    e.source_attribution,
+    e.mapping_tier,
+    e.rationale,
+    e.updated_at,
+    a.scf_id,
+    a.family,
+    a.title AS anchor_title
+FROM fw_to_scf_edges e
+JOIN scf_anchors a ON a.id = e.scf_anchor_id
+JOIN framework_requirements r ON r.id = e.framework_requirement_id
+WHERE e.framework_requirement_id = ANY($1::uuid[])
+ORDER BY r.code, a.scf_id;
+
+-- name: GetFwToScfEdgeContentForUpdate :one
+-- Row-lock the edge's editable content inside the edit transaction so a
+-- concurrent edit cannot race the read-validate-write window (the same shape
+-- GetFwToScfEdgeTierForUpdate uses for the tier path). mapping_tier comes back
+-- with it because a content edit on a `verified` edge demotes it in the same tx
+-- (slice 536b D-536b-1). Returns ErrNoRows for an unknown edge.
+SELECT id, framework_requirement_id, scf_anchor_id,
+       relationship_type, strength, rationale, mapping_tier
+FROM fw_to_scf_edges
+WHERE id = $1
+FOR UPDATE;
+
+-- name: SetFwToScfEdgeContent :exec
+-- Apply a reviewer's content edit. The statement writes ONLY the three STRM
+-- content columns the slice-536b grant widened to, plus updated_at. It never
+-- names framework_requirement_id, scf_anchor_id or source_attribution — and
+-- atlas_app is not granted UPDATE on those columns either, so invariant #7 (an
+-- edit can never re-point an edge) and the provenance axis are enforced at the
+-- database as well as here. Validation runs in Go BEFORE this executes; the
+-- audit row is inserted in the same tx.
+UPDATE fw_to_scf_edges
+SET relationship_type = $2,
+    strength          = $3,
+    rationale         = $4,
+    updated_at        = now()
+WHERE id = $1;
+
+-- name: InsertFwToScfEdgeContentEdit :one
+-- Append the immutable audit row for a content edit (threat-model R). Written
+-- in the SAME transaction as SetFwToScfEdgeContent — there is no code path that
+-- changes edge content without also inserting here.
+INSERT INTO fw_to_scf_edge_content_edits (
+    edge_id, editor_id,
+    from_relationship_type, to_relationship_type,
+    from_strength, to_strength,
+    from_rationale, to_rationale,
+    note
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: ListFwToScfEdgeContentEdits :many
+-- Admin/maintainer-scoped read of an edge's content-edit history (newest
+-- first). Editor identity stays behind the admin boundary, never on the public
+-- /anchors payload (the slice-483 P0-483-6 line, held for this trail too).
+SELECT *
+FROM fw_to_scf_edge_content_edits
+WHERE edge_id = $1
+ORDER BY created_at DESC;

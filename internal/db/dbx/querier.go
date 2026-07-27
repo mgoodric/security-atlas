@@ -785,6 +785,12 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// Row-lock the edge's editable content inside the edit transaction so a
+	// concurrent edit cannot race the read-validate-write window (the same shape
+	// GetFwToScfEdgeTierForUpdate uses for the tier path). mapping_tier comes back
+	// with it because a content edit on a `verified` edge demotes it in the same tx
+	// (slice 536b D-536b-1). Returns ErrNoRows for an unknown edge.
+	GetFwToScfEdgeContentForUpdate(ctx context.Context, id pgtype.UUID) (GetFwToScfEdgeContentForUpdateRow, error)
 	// ===== slice 483: crosswalk mapping-tier governance =====
 	// Read the current trust tier of one edge by id. The transition store calls
 	// this FOR UPDATE (see GetFwToScfEdgeTierForUpdate) inside the tx; this plain
@@ -1106,6 +1112,10 @@ type Querier interface {
 	// ON CONFLICT DO NOTHING leaves a previously-decided row untouched.
 	InsertFrameworkVersionMigration(ctx context.Context, arg InsertFrameworkVersionMigrationParams) (FrameworkVersionMigration, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Append the immutable audit row for a content edit (threat-model R). Written
+	// in the SAME transaction as SetFwToScfEdgeContent — there is no code path that
+	// changes edge content without also inserting here.
+	InsertFwToScfEdgeContentEdit(ctx context.Context, arg InsertFwToScfEdgeContentEditParams) (FwToScfEdgeContentEdit, error)
 	// Append the immutable audit row for a tier transition (threat-model R /
 	// P0-483-4). Written in the SAME transaction as SetFwToScfEdgeTier.
 	InsertFwToScfEdgeTierTransition(ctx context.Context, arg InsertFwToScfEdgeTierTransitionParams) (FwToScfEdgeTierTransition, error)
@@ -1998,6 +2008,12 @@ type Querier interface {
 	// shape includes never-toggled flags too.
 	ListFeatureFlags(ctx context.Context, tenantID pgtype.UUID) ([]FeatureFlag, error)
 	ListFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) ([]FrameworkRequirement, error)
+	// ===== slice 536b: crosswalk review queue + content editing =====
+	// The review queue's page of requirements, ordered by code so the operator's
+	// position is stable across refreshes. Paginated because slice 536's
+	// threat-model D asks for a bounded scan per framework_version rather than the
+	// whole catalog in one response.
+	ListFrameworkRequirementsForVersionPaged(ctx context.Context, arg ListFrameworkRequirementsForVersionPagedParams) ([]FrameworkRequirement, error)
 	// Newest first. Caller filters by framework_version + state in the
 	// application layer because sqlc-static optional WHERE is noisy; the row
 	// count per tenant is bounded by (#frameworks × scope-versions) which stays
@@ -2018,6 +2034,10 @@ type Querier interface {
 	// catalog (`tenant_id IS NULL`) and any tenant-private frameworks. Drives
 	// the per-framework posture rows in the brief (one row per framework).
 	ListFrameworksForTenant(ctx context.Context, tenantID pgtype.UUID) ([]Framework, error)
+	// Admin/maintainer-scoped read of an edge's content-edit history (newest
+	// first). Editor identity stays behind the admin boundary, never on the public
+	// /anchors payload (the slice-483 P0-483-6 line, held for this trail too).
+	ListFwToScfEdgeContentEdits(ctx context.Context, edgeID pgtype.UUID) ([]FwToScfEdgeContentEdit, error)
 	// Admin/maintainer-scoped read of an edge's transition history (newest first).
 	// NOT on the public /anchors payload — reviewer identity stays behind the admin
 	// boundary (threat-model I / P0-483-6).
@@ -2026,6 +2046,12 @@ type Querier interface {
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
+	// One round trip for a whole page of requirements' edges, instead of N calls to
+	// ListFwToScfEdgesForRequirement. Same projection as that query plus the
+	// requirement code, which the conflict adapter needs to label a finding and
+	// which the per-requirement variant cannot supply (it joins scf_anchors, not
+	// framework_requirements).
+	ListFwToScfEdgesForRequirementIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]ListFwToScfEdgesForRequirementIDsRow, error)
 	// ===== user_roles origin-aware reconciliation =====
 	// The user's CURRENT group-derived roles (origin='group-derived') in the
 	// tenant. The resolver diffs this against the freshly-resolved target set to
@@ -2903,6 +2929,14 @@ type Querier interface {
 	// slice 484 D2). Legality is enforced in Go (internal/frameworkversion) BEFORE
 	// this runs; this is the unconditional write inside the lifecycle tx.
 	SetFrameworkVersionStatus(ctx context.Context, arg SetFrameworkVersionStatusParams) error
+	// Apply a reviewer's content edit. The statement writes ONLY the three STRM
+	// content columns the slice-536b grant widened to, plus updated_at. It never
+	// names framework_requirement_id, scf_anchor_id or source_attribution — and
+	// atlas_app is not granted UPDATE on those columns either, so invariant #7 (an
+	// edit can never re-point an edge) and the provenance axis are enforced at the
+	// database as well as here. Validation runs in Go BEFORE this executes; the
+	// audit row is inserted in the same tx.
+	SetFwToScfEdgeContent(ctx context.Context, arg SetFwToScfEdgeContentParams) error
 	// Flip ONLY the trust tier (the narrow column-level UPDATE grant — slice 483
 	// D1). Legality of the move is enforced in Go (internal/crosswalktier state
 	// machine) BEFORE this runs; this query is the unconditional write inside the

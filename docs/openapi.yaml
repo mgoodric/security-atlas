@@ -52,6 +52,7 @@ tags:
   - name: admin-audit-periods
   - name: admin-authz-bundle
   - name: admin-credentials
+  - name: admin-crosswalk-review
   - name: admin-crosswalk-tier
   - name: admin-demo
   - name: admin-evidence
@@ -634,6 +635,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-edges/{id}:
+    patch:
+      summary: PATCH /v1/admin/crosswalk-edges/{id} — edit a mapping's STRM content; writes an append-only audit row (slice 536b)
+      tags: [admin-crosswalk-review]
+      operationId: patch-v1-admin-crosswalk-edges-id
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-edges/{id}/audit:
+    get:
+      summary: GET /v1/admin/crosswalk-edges/{id}/audit — one mapping's content-edit + tier-transition trails (slice 536b)
+      tags: [admin-crosswalk-review]
+      operationId: get-v1-admin-crosswalk-edges-id-audit
+      security:
+        - adminBearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/admin/crosswalk-edges/{id}/tier:
     post:
       summary: POST /v1/admin/crosswalk-edges/{id}/tier — transition a crosswalk mapping's trust tier (slice 483)
@@ -647,6 +688,20 @@ paths:
           required: true
           schema:
             type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/admin/crosswalk-review:
+    get:
+      summary: GET /v1/admin/crosswalk-review — paginated STRM mapping review queue with slice-536a conflict findings (slice 536b)
+      tags: [admin-crosswalk-review]
+      operationId: get-v1-admin-crosswalk-review
+      security:
+        - adminBearer: []
       responses:
         default:
           description: Default response envelope.

@@ -7,6 +7,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
+	"github.com/mgoodric/security-atlas/internal/api/admincrosswalkreview"
 	"github.com/mgoodric/security-atlas/internal/api/admincrosswalktier"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
 	"github.com/mgoodric/security-atlas/internal/api/adminframeworkversions"
@@ -24,7 +25,9 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/crosswalkedit"
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkversion"
 	"github.com/mgoodric/security-atlas/internal/scim"
@@ -163,6 +166,26 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// parallel-batch convention (chi.Mux rejects two Mounts at "/").
 	crosswalkTierH := admincrosswalktier.New(crosswalktier.NewStore(s.dbPool))
 	root.Post("/v1/admin/crosswalk-edges/{id}/tier", crosswalkTierH.Transition)
+
+	// Slice 536b: the crosswalk review/edit surface on top of 483. The queue
+	// read joins each requirement's edges to the slice-536a conflict findings;
+	// the PATCH edits a mapping's STRM content (relationship_type / strength /
+	// rationale) and writes an append-only content-edit audit row in the same
+	// transaction; the audit read returns both trails for one edge.
+	//
+	// There is deliberately NO approve/reject route here — approve/reject is
+	// the POST .../tier route registered directly above, and the UI calls that
+	// one. A second approval workflow is the anti-criterion slice 536a §1.2
+	// grounded in the merged 483 code. Same catalog-table posture as the tier
+	// route: admin-role authz + append-only audit, no tenant RLS.
+	crosswalkReviewH := admincrosswalkreview.New(
+		dbx.New(s.dbPool),
+		crosswalkedit.NewStore(s.dbPool),
+		crosswalktier.NewStore(s.dbPool),
+	)
+	root.Get("/v1/admin/crosswalk-review", crosswalkReviewH.Queue)
+	root.Patch("/v1/admin/crosswalk-edges/{id}", crosswalkReviewH.Edit)
+	root.Get("/v1/admin/crosswalk-edges/{id}/audit", crosswalkReviewH.Audit)
 
 	// Slice 484: framework-versioning capability (ADR 0019). Admin-gated
 	// (cred.IsAdmin; a non-admin promotion is 403 — threat-model E /

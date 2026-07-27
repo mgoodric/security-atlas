@@ -71,6 +71,11 @@ func TestValidateTransition_LegalMoves(t *testing.T) {
 		{TierDraft, TierRejected},
 		{TierUnderReview, TierVerified},
 		{TierUnderReview, TierRejected},
+		// Slice 536b D-536b-1: the demotion edge. A verified mapping whose
+		// content is edited re-enters review rather than staying verified as
+		// something it no longer is. Trust-reducing only — under_review ->
+		// verified is still the sole way in.
+		{TierVerified, TierUnderReview},
 	}
 	for _, m := range legal {
 		m := m
@@ -95,9 +100,10 @@ func TestValidateTransition_IllegalMoves(t *testing.T) {
 		{TierRejected, TierDraft},
 		{TierRejected, TierUnderReview},
 		{TierRejected, TierVerified},
-		// verified is not demoted via this API.
+		// verified demotes ONLY to under_review (slice 536b D-536b-1). It never
+		// resets to draft and never jumps straight to the terminal rejected
+		// tier — a demoted mapping goes back through review.
 		{TierVerified, TierDraft},
-		{TierVerified, TierUnderReview},
 		{TierVerified, TierRejected},
 		// Backwards / skip moves.
 		{TierUnderReview, TierDraft},

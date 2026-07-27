@@ -85,13 +85,37 @@ func TierFromDB(d dbx.CrosswalkMappingTier) Tier { return Tier(d) }
 //
 //	draft        -> under_review | rejected
 //	under_review -> verified     | rejected
-//	verified     -> (none — a verified mapping is not demoted via this API)
+//	verified     -> under_review (demotion — slice 536b D-536b-1)
 //	rejected     -> (none — terminal)
 //
 // The scf_official seed-to-verified path is NOT an operator transition: it is a
 // load/seed-time data step (the migration sets it), so it is deliberately
 // absent here. There is intentionally NO draft -> verified edge: a community
 // draft must pass through under_review (the load-bearing P0-483 guard).
+//
+// # The verified -> under_review demotion edge (added by slice 536b)
+//
+// Slice 483 shipped verified with no outgoing edges and listed the gap on its
+// own "Revisit once in use": a verified mapping whose CONTENT later changes is
+// no longer the mapping that was verified, and 483 had no way to say so because
+// it had no content-edit surface. Slice 536b adds that surface
+// (internal/crosswalkedit), so the gap became load-bearing and 536a §1.4
+// D-536b-1 named the choice: extend THIS machine with the demotion edge, or
+// forbid content edits on verified mappings entirely.
+//
+// Extending is the right half of that choice. Forbidding would freeze every
+// verified mapping's content permanently and push maintainers back to hand-
+// editing the YAML crosswalk — the exact workflow slice 536 exists to replace.
+// It is also strictly trust-REDUCING, so it cannot become a path to approval:
+// under_review -> verified remains the only way into verified and it remains a
+// human act through the admin tier endpoint. There is still no verified ->
+// draft and no verified -> rejected edge — a demoted mapping re-enters review,
+// it does not silently reset or die.
+//
+// One machine, one lifecycle: the edit store performs the demotion by calling
+// this same ValidateTransition and writing the same fw_to_scf_edge_tier_
+// transitions audit row, so there is no second approval workflow (the slice
+// 536 boundary).
 var legalTransitions = map[Tier]map[Tier]bool{
 	TierDraft: {
 		TierUnderReview: true,
@@ -101,7 +125,9 @@ var legalTransitions = map[Tier]map[Tier]bool{
 		TierVerified: true,
 		TierRejected: true,
 	},
-	TierVerified: {},
+	TierVerified: {
+		TierUnderReview: true,
+	},
 	TierRejected: {},
 }
 
