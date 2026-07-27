@@ -1,0 +1,125 @@
+internal/crosswalktier/tier_test.go
+  s_c757b79257d4ae::t_4d184eaa837318 103-105
+  s_c757b79257d4ae::t_0c54921646854b 74-78
+internal/crosswalkedit/store.go
+  s_c757b79257d4ae::t_fc67864067a7ca 1-256
+internal/db/queries/framework_crosswalk.sql
+  s_c757b79257d4ae::t_25cb1d7aa0c22e 156-244
+web/lib/api/crosswalk-review.ts
+  s_c757b79257d4ae::t_8f6bfbb5042ff6 1-221,267-284
+  s_4da74f326f168b::t_77a546a3ce43ff 222-266
+internal/crosswalktier/tier.go
+  s_c757b79257d4ae::t_1df258f59ffcd9 88,95-118,128-129
+  s_c757b79257d4ae::t_1cd01d4e803b28 130
+migrations/sql/20260612110000_crosswalk_content_edit.sql
+  s_c757b79257d4ae::t_584dc73d2d501f 1-102
+cmd/scripts/coverage-thresholds.json
+  s_c757b79257d4ae::t_053b585c4e29a3 2
+  s_c757b79257d4ae::t_5f6343534644f2 265
+  s_c757b79257d4ae::t_b6f62da9b904dd 189
+web/app/api/admin/crosswalk-edges/[id]/tier/route.ts
+  s_4da74f326f168b::t_d48fa8b8179199 1-82
+web/lib/api/crosswalk-review.test.ts
+  s_4da74f326f168b::t_454e0e025d3073 1-15,17,19-20,22,24-26,42-48,52-119,123-131,217-320
+  s_4da74f326f168b::t_5f62615183116c 49-51,120-122
+  s_4da74f326f168b::t_a238fcae9174c4 16,18,21,23,27-41
+  s_4da74f326f168b::t_50e29c16170e74 132-216
+internal/db/dbx/querier.go
+  s_c757b79257d4ae::t_31029517f07f56 788-793,1115-1118,2011-2016,2037-2040,2049-2054,2932-2939
+migrations/sql/20260612110000_crosswalk_content_edit.down.sql
+  s_c757b79257d4ae::t_499c28e62cd04b 1-19
+internal/api/openapi/routes.go
+  s_c757b79257d4ae::t_75cc8a629089ea 57-58,197
+internal/api/admincrosswalkreview/http_integration_test.go
+  s_c757b79257d4ae::t_57ccfc61c1c138 1-575
+docs/openapi.yaml
+  s_c757b79257d4ae::t_721efd923cfdc8 55,638-677,698-711
+internal/api/testdata/routes_mw.golden
+  s_6ec5fc9a8b221d::t_af968b11816e5d 42-43,181
+internal/db/dbx/models.go
+  s_c757b79257d4ae::t_31029517f07f56 1834-1847
+internal/db/dbx/framework_crosswalk.sql.go
+  s_c757b79257d4ae::t_31029517f07f56 177-214,307-362,437-526,633-741
+  s_c757b79257d4ae::t_ef7c5fdb853ae7 742
+sqlc.yaml
+  s_c757b79257d4ae::t_2bbdf4ac63ac35 87
+internal/crosswalkedit/edit.go
+  s_c757b79257d4ae::t_9514f46e1eabd7 1-179
+web/app/api/admin/crosswalk-edges/[id]/route.test.ts
+  s_4da74f326f168b::t_fde62b150c681d 1-168,173-197,202-231
+  s_4da74f326f168b::t_5f62615183116c 169-172,198-201
+web/app/api/admin/crosswalk-edges/[id]/audit/route.test.ts
+  s_4da74f326f168b::t_5f62615183116c 30-32
+  s_4da74f326f168b::t_4c70aed738c32e 1-29,33-126
+web/app/admin/crosswalk-review/page.tsx
+  s_4da74f326f168b::t_f757f1205385e5 1-634,637-685,690-696,701-806,809-821,826-836
+  s_4da74f326f168b::t_5f62615183116c 635-636,686-689,697-700,807-808,822-825
+internal/api/testdata/routes.golden
+  s_6ec5fc9a8b221d::t_af968b11816e5d 42-43,181
+internal/api/admincrosswalkreview/http.go
+  s_c757b79257d4ae::t_0ea3922a244368 1-496
+web/app/api/admin/crosswalk-review/route.ts
+  s_c757b79257d4ae::t_bcfef7b846ba67 1-56
+web/app/api/admin/crosswalk-review/route.test.ts
+  s_4da74f326f168b::t_41aa657833d9cf 1-196
+internal/crosswalkedit/edit_test.go
+  s_c757b79257d4ae::t_7c43e84a67ff09 247-252,264-271
+  s_c757b79257d4ae::t_196d09c742b233 1-8,11-221,272
+  s_c757b79257d4ae::t_214918a389c706 222-246,253-263
+  s_c757b79257d4ae::t_c42d8d2a2e05c2 9-10
+web/app/admin/layout.tsx
+  s_4da74f326f168b::t_d51bbbe1125487 137-139
+scripts/integration-shards.txt
+  s_c757b79257d4ae::t_4a1f1de8b49a89 80
+web/app/api/admin/crosswalk-edges/[id]/audit/route.ts
+  s_4da74f326f168b::t_f902b96833586b 1-38
+web/app/api/admin/crosswalk-edges/[id]/tier/route.test.ts
+  s_4da74f326f168b::t_48008b4576d539 1-191
+internal/api/register_admin.go
+  s_c757b79257d4ae::t_fa06ee3ac823b4 10,28,30
+  s_c757b79257d4ae::t_3dcfcdd1f4afeb 170-189
+web/coverage-thresholds.json
+  s_4da74f326f168b::t_4cab7d28fe6e2b 238-261,772-777
+web/app/api/admin/crosswalk-edges/[id]/route.ts
+  s_4da74f326f168b::t_5f62615183116c 107-112
+  s_4da74f326f168b::t_40f7205837ac96 1-106,113-115
+docs/audit-log/536b-crosswalk-review-edit-ui-decisions.md
+  s_4da74f326f168b::t_fbbe730507655b 1-5,8-23,32-63,65-90,93-222,224-268,275-291,293-301,305
+  s_6ec5fc9a8b221d::t_5bfb620e41bbdf 6-7,24-31,64,91-92,223,269-274,292,302-304,306-308
+internal/api/admincrosswalkreview/wire.go
+  s_c757b79257d4ae::t_40a2ce77ab3a7a 1-156
+internal/api/admincrosswalkreview/helpers_test.go
+  s_c757b79257d4ae::t_b258b33abd2bc2 1-360
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "15e7d881cc5d30aae6e18b29b2799dd1a1cc1311",
+  "prompts": {},
+  "sessions": {
+    "s_4da74f326f168b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "869c01ea-a630-4e4d-9fe6-617f4995cdd6",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_6ec5fc9a8b221d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "8e664644-f372-4ef8-a9d8-51259af34b3d",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_c757b79257d4ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4df9aa83-4725-4f3d-902b-5b30d9d119db",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
