@@ -211,6 +211,7 @@ The same version also renders in the bottom-right of every page in the web UI; c
 - **Design canvas:** [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) — vision, primitives, the control graph, evidence engine, scope, risk, metrics, audit workflow, tech stack, roadmap, open questions.
 - **Constitutional principles:** [`CLAUDE.md`](./CLAUDE.md) — the architecture invariants, anti-patterns we reject, the AI-assist boundary, and licensing constraints.
 - **Self-hosting guide:** [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md)
+- **MCP server (assistant access):** [`docs-site/docs/mcp.md`](./docs-site/docs/mcp.md) — query and update your program from Claude Desktop / Claude Code.
 - **Architecture decisions (ADRs):** [`docs/adr/`](./docs/adr/)
 - **Release & verification:** [`docs/releases.md`](./docs/releases.md) · [`docs/RELEASE_READINESS.md`](./docs/RELEASE_READINESS.md)
 - **Slice backlog (how the project is built):** [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) · live merge trail in [`docs/issues/_STATUS.md`](./docs/issues/_STATUS.md)
@@ -222,6 +223,18 @@ The same version also renders in the bottom-right of every page in the web UI; c
 security-atlas authenticates request traffic via an internal **OAuth 2.0 Authorization Server** that issues short-lived **JWT access tokens** carrying the tenant in-claim (RFC 9068 JWT Profile + RFC 8693 Token Exchange for tenant switching). This is the live auth mechanism today — the JWKS endpoint (`/.well-known/jwks.json`), OIDC discovery (`/.well-known/openid-configuration`), and the grant flows (authorization-code + PKCE for the browser, device-code for the CLI, client-credentials for services) are all shipped.
 
 The Authorization Server layers on an OIDC relying party: the relying party authenticates the human against your external IdP (Okta, Entra ID, Google, etc.); the AS layer mints the atlas JWT. Two roles, one server process — security-atlas is not itself an IdP. The architectural commitment is captured in [ADR-0003](./docs/adr/0003-oauth-authorization-server.md); operator setup lives in the [OAuth grants](./docs-site/docs/oauth-grants.md) and [OIDC setup](./docs-site/docs/oidc-setup.md) guides.
+
+---
+
+## Assistant access (MCP)
+
+security-atlas ships an **MCP (Model Context Protocol) server** — `atlas-mcp` — so your security team can query and update the program from an AI assistant (Claude Desktop, Claude Code, or any MCP client) instead of clicking through the UI. Ask _"what are my top risks in treatment?"_ or _"which controls have stale evidence?"_ and the assistant answers from your live data.
+
+- **Read tools** cover controls, risks, evidence, and audit periods — scoped to your tenant, with the same row-level isolation as the rest of the platform.
+- **Write tools** (create a risk, update a control's state, push evidence, change a risk's treatment) **never mutate your data unattended.** Each files a _proposal_ that a human approver must confirm — in the assistant via `confirm_write`, or with the Approve button in the web UI — and that boundary is enforced at the database layer. An AI cannot publish an audit-binding change on its own.
+- The assistant authenticates with a normal atlas bearer token and sees only what that credential is allowed to see.
+
+**Status: experimental** — the tool surface is in soak and may change; pin your MCP client to a specific `atlas-mcp` version. Full setup (client config for Claude Desktop / Claude Code, token handling, the complete tool list, and the approval flow) is in the **[MCP server guide](./docs-site/docs/mcp.md)** and [`cmd/atlas-mcp/README.md`](./cmd/atlas-mcp/README.md).
 
 ---
 
