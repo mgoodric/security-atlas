@@ -1,0 +1,24 @@
+README.md
+  s_138a8c90a6b2be::t_a6b37cf5e8439b 22,26,28,30,34,36,49,51,53,57-60,63-65,82-99
+  s_138a8c90a6b2be::t_e81ffbb225562c 67,69,80-81
+  s_138a8c90a6b2be::t_3eb630fbaba7c1 109
+  s_138a8c90a6b2be::t_cc7daf663a8d56 71-78
+  s_138a8c90a6b2be::t_60b15e1f7e4075 32,38-47,55,61
+  s_138a8c90a6b2be::t_26caafa6d8238b 62
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "b3f82cf4f58b4882898f9a0e9381a5789498e774",
+  "prompts": {},
+  "sessions": {
+    "s_138a8c90a6b2be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c96316ce-f270-403d-86b3-8c9a2fa71586",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
