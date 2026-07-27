@@ -1,0 +1,27 @@
+docs-site/mkdocs.yml
+  s_138a8c90a6b2be::t_2cd8a6265c1c43 123
+README.md
+  s_138a8c90a6b2be::t_58578786f8d8fe 229-240
+  s_138a8c90a6b2be::t_cb72d61981836c 214
+docs-site/docs/mcp.md
+  s_138a8c90a6b2be::t_3ce05eaf7b1dba 75
+  s_138a8c90a6b2be::t_6e3baa706f3f8f 1-15,21-39,48-53,57-59,61-74,76-169
+  s_138a8c90a6b2be::t_2adbc7b966b411 16-20
+  s_138a8c90a6b2be::t_867f5d0432204d 40-47,54-56,60
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "4a5969fb417dcf1b0d382231b43af742e58f4313",
+  "prompts": {},
+  "sessions": {
+    "s_138a8c90a6b2be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c96316ce-f270-403d-86b3-8c9a2fa71586",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
