@@ -341,6 +341,11 @@ var CanonicalToolOrder = []string{
 	"get_risk",
 	"list_evidence",
 	"list_audit_periods",
+	// Program-record read tools (widened surface)
+	"list_policies",
+	"list_vendors",
+	"list_exceptions",
+	"list_action_plans",
 	// Slice 173 — write tools (HITL approval)
 	"create_risk",
 	"update_control_state",

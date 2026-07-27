@@ -230,7 +230,7 @@ The Authorization Server layers on an OIDC relying party: the relying party auth
 
 security-atlas ships an **MCP (Model Context Protocol) server** — `atlas-mcp` — so your security team can query and update the program from an AI assistant (Claude Desktop, Claude Code, or any MCP client) instead of clicking through the UI. Ask _"what are my top risks in treatment?"_ or _"which controls have stale evidence?"_ and the assistant answers from your live data.
 
-- **Read tools** cover controls, risks, evidence, and audit periods — scoped to your tenant, with the same row-level isolation as the rest of the platform.
+- **Read tools** cover controls, risks, evidence, audit periods, policies, vendors, exceptions, and action plans — scoped to your tenant, with the same row-level isolation as the rest of the platform. A few ready-made [operator skills](./skills/) wrap them into one-command workflows (risk briefing, evidence-freshness sweep, audit-readiness snapshot).
 - **Write tools** (create a risk, update a control's state, push evidence, change a risk's treatment) **never mutate your data unattended.** Each files a _proposal_ that a human approver must confirm — in the assistant via `confirm_write`, or with the Approve button in the web UI — and that boundary is enforced at the database layer. An AI cannot publish an audit-binding change on its own.
 - The assistant authenticates with a normal atlas bearer token and sees only what that credential is allowed to see.
 
