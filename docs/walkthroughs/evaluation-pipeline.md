@@ -253,6 +253,6 @@ Each stage is a separate Go package; the contract between them is the table colu
 ### Where to read more
 
 - **Canvas:** [`Plans/canvas/04-evidence-engine.md`](../../Plans/canvas/04-evidence-engine.md) — §4.1 Evidence SDK, §4.3 ingestion vs evaluation separation
-- **Slice docs:** [`docs/issues/003-evidence-sdk-push.md`](../issues/003-evidence-sdk-push.md), [`docs/issues/012-eval-engine.md`](../issues/012-eval-engine.md), [`docs/issues/013-evidence-ledger.md`](../issues/013-evidence-ledger.md), [`docs/issues/014-schema-registry.md`](../issues/014-schema-registry.md), [`docs/issues/017-control-effectiveness.md`](../issues/017-control-effectiveness.md)
+- **Slice docs:** [`docs/issues/003-evidence-sdk-proto-push-client-cli.md`](../issues/003-evidence-sdk-proto-push-client-cli.md), [`docs/issues/012-control-state-evaluation.md`](../issues/012-control-state-evaluation.md), [`docs/issues/013-evidence-ledger-write-api.md`](../issues/013-evidence-ledger-write-api.md), [`docs/issues/014-schema-registry-service.md`](../issues/014-schema-registry-service.md), [`docs/issues/017-scope-dimensions-applicability.md`](../issues/017-scope-dimensions-applicability.md)
 - **Go packages:** [`internal/evidence/ingest/`](../../internal/evidence/ingest/) (push handler), [`internal/api/schemaregistry/`](../../internal/api/schemaregistry/) (validation), [`internal/eval/`](../../internal/eval/) (engine + effectiveness)
 - **Proto:** [`proto/evidence/v1/`](../../proto/evidence/v1/) — `PushRequest`, `EvidenceRecord`, `EvidenceReceipt`

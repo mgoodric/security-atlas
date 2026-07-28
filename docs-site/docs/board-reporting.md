@@ -27,10 +27,21 @@ their next quarterly board pack from this tool. Two artifacts ship:
 A one-page status. Generates in seconds from live evidence and control
 state — no manual data entry required.
 
+Generate one from the web UI, or over the API:
+
 ```sh
-just atlas-cli board-brief generate \
-  --tenant <tenant-id> \
-  --month 2026-04
+# Generate the brief for a report date. Returns 201 with
+# { id, period_end, generated_at, content, narrative_md }.
+curl -fsS -X POST http://localhost:8080/v1/board-briefs \
+  -H "Authorization: Bearer $ATLAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"period_end":"2026-04-30"}'
+
+# Fetch it back as Markdown or PDF.
+curl -fsS http://localhost:8080/v1/board-briefs/<id>.md \
+  -H "Authorization: Bearer $ATLAS_TOKEN"
+curl -fsS http://localhost:8080/v1/board-briefs/<id>/pdf \
+  -H "Authorization: Bearer $ATLAS_TOKEN" -o brief.pdf
 ```
 
 What it contains:
@@ -62,11 +73,27 @@ A 6-12 page board-ready document. Same data, deeper cuts:
 - **Narrative** — five auto-drafted sections, every one human-approved
   before the pack is exported
 
+The pack is a three-step flow — generate, approve each narrative section,
+then publish — because no AI-drafted section leaves the system unapproved:
+
 ```sh
-just atlas-cli board-pack generate \
-  --tenant <tenant-id> \
-  --quarter 2026Q1 \
-  --out ./board-pack-2026q1.pdf
+# 1. Generate the draft pack for the period end date.
+curl -fsS -X POST http://localhost:8080/v1/board-packs \
+  -H "Authorization: Bearer $ATLAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"period_end":"2026-03-31"}'
+
+# 2. Approve each narrative section (edit first with PUT .../sections/<key>).
+curl -fsS -X POST http://localhost:8080/v1/board-packs/<id>/sections/<key>/approve \
+  -H "Authorization: Bearer $ATLAS_TOKEN"
+
+# 3. Publish, then export.
+curl -fsS -X POST http://localhost:8080/v1/board-packs/<id>/publish \
+  -H "Authorization: Bearer $ATLAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"published_by":"you@example.com"}'
+curl -fsS http://localhost:8080/v1/board-packs/<id>/pdf \
+  -H "Authorization: Bearer $ATLAS_TOKEN" -o board-pack-2026q1.pdf
 ```
 
 ## How the AI-drafted narrative is bounded

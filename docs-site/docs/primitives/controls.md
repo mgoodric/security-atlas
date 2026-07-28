@@ -168,16 +168,18 @@ kit shipped in slice 010, for example), the platform reads OSCAL
 catalogs:
 
 ```sh
-just atlas-cli catalog import \
-  --framework soc2 \
-  --version v2017 \
-  --catalog ./catalogs/soc2-v2017.oscal.json
+atlas-oscal import-catalog ./nist-800-53-rev5.oscal.json \
+  --dsn "$DATABASE_URL_APP" \
+  --tenant-id <tenant uuid> \
+  --source-label "NIST SP 800-53 rev5" \
+  --imported-by "you@example.com"
 ```
 
 The importer is idempotent — re-running with the same OSCAL file is a
-no-op (content-addressed by sha256 of the catalog). See [Framework
-setup](../framework-setup.md) for the end-to-end framework activation
-flow.
+no-op (content-addressed by sha256 of the catalog). See [OSCAL catalog
+import](../oscal-catalog-import.md) for the limits and the full flag set,
+and [Framework setup](../framework-setup.md) for the end-to-end framework
+activation flow.
 
 ## What changes when a control retires
 
