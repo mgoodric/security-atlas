@@ -161,8 +161,9 @@ export function DemoControls() {
             <code className="rounded bg-muted px-1 py-0.5 text-xs">
               ATLAS_ENABLE_DEMO_SEED=true
             </code>{" "}
-            in the docker-compose env (or the equivalent secrets surface) and
-            restart the atlas server to expose these actions.
+            in <code className="text-xs">deploy/docker/.env</code> (or the
+            equivalent secrets surface) and restart the atlas service to expose
+            these actions.
           </p>
           <p className="mt-2 text-xs text-muted-foreground">
             This page is intentionally always reachable for admins on every
