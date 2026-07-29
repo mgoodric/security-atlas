@@ -331,26 +331,26 @@ func TestAll_WiresReadTools(t *testing.T) {
 
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
 	all := tools.All(client)
-	if len(all) != 10 {
-		t.Fatalf("All() = %d tools, want 10 read tools (slice 172 P0-A10 + widened surface)", len(all))
+	if len(all) != 11 {
+		t.Fatalf("All() = %d tools, want 11 read tools (slice 172 P0-A10 + widened surface)", len(all))
 	}
-	// Read tools are the first ten entries of CanonicalToolOrder.
-	for i, want := range mcp.CanonicalToolOrder[:10] {
+	// Read tools are the first eleven entries of CanonicalToolOrder.
+	for i, want := range mcp.CanonicalToolOrder[:11] {
 		if got := all[i].Definition().Name; got != want {
 			t.Errorf("all[%d] = %q, want %q (CanonicalToolOrder)", i, got, want)
 		}
 	}
 }
 
-// TestAllWithWrites_WiresAllTools — the full surface is 15 tools
-// (10 reads + 5 writes). Order is fixed by mcp.CanonicalToolOrder.
+// TestAllWithWrites_WiresAllTools — the full surface is 16 tools
+// (11 reads + 5 writes). Order is fixed by mcp.CanonicalToolOrder.
 func TestAllWithWrites_WiresAllTools(t *testing.T) {
 	t.Parallel()
 
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
 	all := tools.AllWithWrites(client)
-	if len(all) != 15 {
-		t.Fatalf("AllWithWrites() = %d tools, want 15 (10 reads + 5 writes)", len(all))
+	if len(all) != 16 {
+		t.Fatalf("AllWithWrites() = %d tools, want 16 (11 reads + 5 writes)", len(all))
 	}
 	for i, want := range mcp.CanonicalToolOrder {
 		if got := all[i].Definition().Name; got != want {

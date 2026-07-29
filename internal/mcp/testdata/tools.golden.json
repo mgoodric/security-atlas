@@ -214,6 +214,22 @@
       }
     },
     {
+      "name": "list_framework_posture",
+      "description": "List the bearer tenant's per-framework posture (coverage percentage, freshness composite, and 90-day trend delta — one row per active framework version). Returns canonical posture rows.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "limit": {
+            "description": "Result cap; default 100, max 500. A request over 500 is a tool error.",
+            "maximum": 500,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      }
+    },
+    {
       "name": "create_risk",
       "description": "Propose a new risk register entry. The proposal is staged at state='ai_proposed' until an authorized approver confirms or rejects it. Use confirm_write(proposal_id) to commit. No audit-binding artifact is published until a human approves.",
       "inputSchema": {
