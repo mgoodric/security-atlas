@@ -1,7 +1,8 @@
 // Program-record read tools — list_policies / list_vendors /
-// list_exceptions / list_action_plans. These widen the slice-172
-// read surface (controls, risks, evidence, audit periods) to the rest
-// of the program records a security team asks about.
+// list_exceptions / list_action_plans / list_framework_posture. These
+// widen the slice-172 read surface (controls, risks, evidence, audit
+// periods) to the rest of the program records a security team asks
+// about.
 //
 // Each wraps an existing platform list endpoint whose wire shape is a
 // flat `{"<key>": [...]}` object. Rather than re-declare a typed row
@@ -142,5 +143,20 @@ func NewListActionPlans(c *mcp.Client) mcp.Tool {
 		desc:     "List the bearer tenant's action plans (forward-looking remediation commitments with milestones; OSCAL POA&M). Returns canonical action-plan rows.",
 		endpoint: "/v1/action-plans",
 		listKey:  "action_plans",
+	}
+}
+
+// NewListFrameworkPosture wraps GET /v1/frameworks/posture. The
+// endpoint's wire shape is `{"frameworks": [...], "count": N}` — a flat
+// list of per-framework-version posture rows (coverage_pct,
+// freshness_composite, trend_delta_90d), so the generic passthrough
+// fits; the sibling `count` is derived and re-emitted by the envelope.
+func NewListFrameworkPosture(c *mcp.Client) mcp.Tool {
+	return &programListTool{
+		client:   c,
+		name:     "list_framework_posture",
+		desc:     "List the bearer tenant's per-framework posture (coverage percentage, freshness composite, and 90-day trend delta — one row per active framework version). Returns canonical posture rows.",
+		endpoint: "/v1/frameworks/posture",
+		listKey:  "frameworks",
 	}
 }

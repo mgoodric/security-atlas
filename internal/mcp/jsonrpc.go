@@ -346,6 +346,7 @@ var CanonicalToolOrder = []string{
 	"list_vendors",
 	"list_exceptions",
 	"list_action_plans",
+	"list_framework_posture",
 	// Slice 173 — write tools (HITL approval)
 	"create_risk",
 	"update_control_state",

@@ -89,5 +89,6 @@ func All(client *mcp.Client) []mcp.Tool {
 		NewListVendors(client),
 		NewListExceptions(client),
 		NewListActionPlans(client),
+		NewListFrameworkPosture(client),
 	}
 }
