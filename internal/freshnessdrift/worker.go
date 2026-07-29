@@ -36,6 +36,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/drift"
+	"github.com/mgoodric/security-atlas/internal/driftalerts"
 	"github.com/mgoodric/security-atlas/internal/evidence/streambuf"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -60,17 +61,45 @@ const DefaultDailyTickCheck = time.Hour
 type Refresher struct {
 	freshness *freshness.Store
 	drift     *drift.Store
+	alerts    *driftalerts.Store
 }
 
 // RefreshTenant refreshes the freshness read model and captures a drift
 // snapshot for the tenant in ctx. `trigger` is recorded on the drift snapshot
 // (drift.TriggerScheduled | drift.TriggerIngest | drift.TriggerManual).
 func (r *Refresher) RefreshTenant(ctx context.Context, trigger string) error {
+	beforeFreshness, err := r.freshness.List(ctx)
+	if err != nil {
+		return fmt.Errorf("freshness list before refresh: %w", err)
+	}
+	beforeDrift, hasBeforeDrift, err := r.drift.LatestSnapshotSince(ctx, 48*time.Hour)
+	if err != nil {
+		return fmt.Errorf("drift snapshot before refresh: %w", err)
+	}
 	if _, err := r.freshness.Refresh(ctx); err != nil {
 		return fmt.Errorf("freshness refresh: %w", err)
 	}
-	if _, err := r.drift.CaptureSnapshot(ctx, trigger); err != nil {
+	afterFreshness, err := r.freshness.List(ctx)
+	if err != nil {
+		return fmt.Errorf("freshness list after refresh: %w", err)
+	}
+	afterDrift, err := r.drift.CaptureSnapshot(ctx, trigger)
+	if err != nil {
 		return fmt.Errorf("drift snapshot: %w", err)
+	}
+	if r.alerts != nil {
+		var beforePtr *drift.Snapshot
+		if hasBeforeDrift {
+			beforePtr = &beforeDrift
+		}
+		if _, err := r.alerts.AlertTenant(ctx, driftalerts.Evaluation{
+			BeforeFreshness: beforeFreshness,
+			AfterFreshness:  afterFreshness,
+			BeforeDrift:     beforePtr,
+			AfterDrift:      afterDrift,
+		}); err != nil {
+			return fmt.Errorf("drift/freshness alerts: %w", err)
+		}
 	}
 	return nil
 }
@@ -85,6 +114,7 @@ func NewRefresherFactory(appPool *pgxpool.Pool) RefresherFactory {
 		return &Refresher{
 			freshness: freshness.NewStore(appPool),
 			drift:     drift.NewStore(appPool),
+			alerts:    driftalerts.NewStore(appPool),
 		}
 	}
 }
