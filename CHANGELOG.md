@@ -2932,6 +2932,28 @@ assertions` subsection so future spec authors avoid the same
   Production compose unchanged. Both `bundled` and `external`
   matrix modes use the staged shape.
 
+## [1.19.0](https://github.com/mgoodric/security-atlas/compare/v1.18.0...v1.19.0) (2026-07-29)
+
+
+### Features
+
+* **mcp:** add list_framework_posture read tool (OE-593) ([#1529](https://github.com/mgoodric/security-atlas/issues/1529)) ([2e31ae6](https://github.com/mgoodric/security-atlas/commit/2e31ae6f1aa44bb0623f2dd83f891c19dda92e85))
+* **mcp:** widen the read surface (+4 tools) + operator skills ([#1524](https://github.com/mgoodric/security-atlas/issues/1524)) ([6922837](https://github.com/mgoodric/security-atlas/commit/6922837584d25f4a2327cd73c5594c83fa8bbe22))
+
+
+### Bug Fixes
+
+* **deploy:** OE-553 — wire ATLAS_ENABLE_DEMO_SEED through the self-host bundle ([#1526](https://github.com/mgoodric/security-atlas/issues/1526)) ([2cb45d0](https://github.com/mgoodric/security-atlas/commit/2cb45d035a2daa98f95090adb7cfea419f7259e5))
+* **web:** OE-592 — offer only backend-savable methodologies in the risk-create form ([#1528](https://github.com/mgoodric/security-atlas/issues/1528)) ([1181623](https://github.com/mgoodric/security-atlas/commit/1181623b81a90715fc2b4a82955db8d6a65cf9b0))
+* **web:** resolve the admin + audit-log auth gate against atlas, not the app's own origin ([603fd82](https://github.com/mgoodric/security-atlas/commit/603fd8227e5218f70aefddea1c49824993e643e6))
+* **web:** resolve the admin + audit-log auth gate against atlas, not the app's own origin ([#1521](https://github.com/mgoodric/security-atlas/issues/1521)) ([4a40195](https://github.com/mgoodric/security-atlas/commit/4a401956a37e577950ccb2667579c75dc9db45e4))
+
+
+### Documentation
+
+* **mcp:** surface the atlas-mcp server for operators (README + docs-site guide) ([#1522](https://github.com/mgoodric/security-atlas/issues/1522)) ([d65db2e](https://github.com/mgoodric/security-atlas/commit/d65db2ee521860818a90297335a381ad7fd74d42))
+* **readme:** rewrite for a security-practitioner audience (analyst to CISO) ([#1519](https://github.com/mgoodric/security-atlas/issues/1519)) ([5e53210](https://github.com/mgoodric/security-atlas/commit/5e53210f5b58db7eab64e7d3d0cbee7cadaaca75))
+
 ## [1.18.0](https://github.com/mgoodric/security-atlas/compare/v1.17.0...v1.18.0) (2026-07-26)
 
 
