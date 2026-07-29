@@ -2155,6 +2155,19 @@ type QuestionnaireAnswer struct {
 	ModelProvider string             `json:"model_provider"`
 }
 
+type QuestionnaireExportAuditLog struct {
+	ID                  pgtype.UUID        `json:"id"`
+	TenantID            pgtype.UUID        `json:"tenant_id"`
+	QuestionnaireID     pgtype.UUID        `json:"questionnaire_id"`
+	Actor               string             `json:"actor"`
+	ManualCount         int32              `json:"manual_count"`
+	ApprovedAiCount     int32              `json:"approved_ai_count"`
+	ExcludedDraftCount  int32              `json:"excluded_draft_count"`
+	ExportedAnswerCount int32              `json:"exported_answer_count"`
+	OccurredAt          pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule       string             `json:"subject_module"`
+}
+
 type QuestionnaireQuestion struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`

@@ -19,7 +19,10 @@ import { use, useEffect, useMemo, useState } from "react";
 
 import { AnswerEditor } from "@/components/questionnaire/answer-editor";
 import { QuestionList } from "@/components/questionnaire/question-list";
-import type { QuestionnaireDetail } from "@/components/questionnaire/types";
+import type {
+  Question,
+  QuestionnaireDetail,
+} from "@/components/questionnaire/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -41,7 +44,7 @@ async function fetchDetail(id: string): Promise<QuestionnaireDetail> {
   return (await res.json()) as QuestionnaireDetail;
 }
 
-async function exportPDF(id: string, name: string): Promise<void> {
+async function exportPDF(id: string, name: string): Promise<string> {
   const res = await fetch(`/api/questionnaires/${id}/export-pdf`, {
     method: "POST",
   });
@@ -64,6 +67,20 @@ async function exportPDF(id: string, name: string): Promise<void> {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+  return (
+    res.headers.get("X-Questionnaire-Export-Summary") ??
+    exportExclusionSummary(0)
+  );
+}
+
+export function pendingApprovalDraftCount(questions: Question[]): number {
+  return questions.filter(
+    (q) => q.answer?.ai_assisted === true && q.answer.human_approved !== true,
+  ).length;
+}
+
+export function exportExclusionSummary(count: number): string {
+  return `${count} drafted answers pending approval were excluded`;
 }
 
 export default function QuestionnaireDetailPage(props: {
@@ -75,6 +92,7 @@ export default function QuestionnaireDetailPage(props: {
   const pane = (search.get("pane") ?? "list") as "list" | "edit";
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [pdfSummary, setPdfSummary] = useState<string | null>(null);
 
   const detailQ = useQuery({
     queryKey: ["questionnaire", id],
@@ -134,6 +152,7 @@ export default function QuestionnaireDetailPage(props: {
   if (!detailQ.data) return null;
 
   const { questionnaire, questions } = detailQ.data;
+  const pendingDrafts = pendingApprovalDraftCount(questions);
 
   return (
     <div
@@ -160,14 +179,23 @@ export default function QuestionnaireDetailPage(props: {
           ) : null}
         </div>
         <div className="flex items-center gap-2">
+          {pendingDrafts > 0 ? (
+            <div
+              className="max-w-[18rem] text-right text-xs text-amber-700 dark:text-amber-400"
+              data-testid="questionnaire-export-pending-drafts"
+            >
+              {exportExclusionSummary(pendingDrafts)}
+            </div>
+          ) : null}
           <Button
             variant="outline"
             size="sm"
             data-testid="questionnaire-export-pdf"
             onClick={async () => {
               setPdfError(null);
+              setPdfSummary(null);
               try {
-                await exportPDF(id, questionnaire.name);
+                setPdfSummary(await exportPDF(id, questionnaire.name));
               } catch (err) {
                 setPdfError((err as Error).message);
               }
@@ -186,6 +214,12 @@ export default function QuestionnaireDetailPage(props: {
         >
           <AlertTitle>PDF export failed</AlertTitle>
           <AlertDescription>{pdfError}</AlertDescription>
+        </Alert>
+      ) : null}
+      {pdfSummary ? (
+        <Alert className="mt-3" data-testid="questionnaire-export-summary">
+          <AlertTitle>PDF export complete</AlertTitle>
+          <AlertDescription>{pdfSummary}</AlertDescription>
         </Alert>
       ) : null}
 

@@ -5,6 +5,7 @@ import (
 
 	checklistapi "github.com/mgoodric/security-atlas/internal/api/checklist"
 	questionnairesapi "github.com/mgoodric/security-atlas/internal/api/questionnaires"
+	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/checklist"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
@@ -46,7 +47,11 @@ func (s *Server) registerQuestionnaire(root *chi.Mux) {
 		qaiStore,
 		qaiStore,
 	)
-	questionnairesH := questionnairesapi.NewWithSuggest(questionnaireStore, qaiSvc)
+	questionnairesH := questionnairesapi.NewWithSuggestAndAudit(
+		questionnaireStore,
+		qaiSvc,
+		audit.NewQuestionnaireExportWriter(s.dbPool),
+	)
 	questionnairesH.RegisterRoutes(root)
 	// Slice 471: role-scoped control-implementation checklist generator v0
 	// (cited, non-binding). The which-control -> which-role split is

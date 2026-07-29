@@ -8,9 +8,9 @@
 //     comma).
 //   - joinKinds: multiple elements -> comma-joined values, declaration
 //     order preserved.
-//   - AllKinds: declaration order matches the slice-124 / 180 contract
-//     (decision, evidence, exception, sample, audit_period,
-//     aggregation_rule, feature_flag, me, walkthrough). A reorder is a
+//   - AllKinds: declaration order matches the slice-124 / 180 / 758 contract
+//     (decision, evidence, exception, sample, audit_period, aggregation_rule,
+//     feature_flag, me, walkthrough, questionnaire_export). A reorder is a
 //     wire-shape change that must NOT happen without a slice update.
 //
 // All branches are pure-Go. The DB-bound Query happy paths are in
@@ -49,10 +49,10 @@ func TestJoinKinds_Multiple(t *testing.T) {
 	}
 }
 
-func TestJoinKinds_PreservesAllNine(t *testing.T) {
+func TestJoinKinds_PreservesAllKinds(t *testing.T) {
 	t.Parallel()
 	got := joinKinds(AllKinds)
-	want := "decision,evidence,exception,sample,audit_period,aggregation_rule,feature_flag,me,walkthrough"
+	want := "decision,evidence,exception,sample,audit_period,aggregation_rule,feature_flag,me,walkthrough,questionnaire_export"
 	if got != want {
 		t.Errorf("joinKinds(AllKinds) = %q; want %q", got, want)
 	}
@@ -75,6 +75,7 @@ func TestAllKinds_DeclarationOrderIsContractual(t *testing.T) {
 		KindFeatureFlag,
 		KindMe,
 		KindWalkthrough,
+		KindQuestionnaireExport,
 	}
 	if !reflect.DeepEqual(AllKinds, want) {
 		t.Errorf("AllKinds = %v; want %v", AllKinds, want)

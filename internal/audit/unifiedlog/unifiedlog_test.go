@@ -8,7 +8,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 )
 
-func TestIsCanonical_AllNineKindsAccepted(t *testing.T) {
+func TestIsCanonical_AllKindsAccepted(t *testing.T) {
 	t.Parallel()
 	for _, k := range unifiedlog.AllKinds {
 		if !unifiedlog.IsCanonical(k) {
@@ -31,11 +31,11 @@ func TestIsCanonical_RejectsUnknown(t *testing.T) {
 	}
 }
 
-func TestAllKinds_NineExactly(t *testing.T) {
+func TestAllKinds_TenExactly(t *testing.T) {
 	t.Parallel()
-	// Slice 124 wires exactly nine per-domain audit-log tables. A change
+	// Slice 758 wires the tenth per-domain audit-log table. A change
 	// to this count must come with a slice (extension or retirement).
-	if got, want := len(unifiedlog.AllKinds), 9; got != want {
+	if got, want := len(unifiedlog.AllKinds), 10; got != want {
 		t.Errorf("AllKinds len = %d; want %d", got, want)
 	}
 }

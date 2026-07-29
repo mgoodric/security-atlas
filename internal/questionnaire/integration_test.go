@@ -51,6 +51,7 @@ import (
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
+		"questionnaire_export_audit_log",
 		"questionnaire_answers",
 		"questionnaire_questions",
 		"questionnaires",

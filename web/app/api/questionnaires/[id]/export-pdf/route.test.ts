@@ -56,6 +56,26 @@ describe("POST /api/questionnaires/[id]/export-pdf", () => {
     expect(init?.method).toBe("POST");
   });
 
+  test("preserves questionnaire export exclusion headers", async () => {
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(new Uint8Array([0x25, 0x50, 0x44, 0x46]).buffer, {
+        status: 200,
+        headers: {
+          "Content-Type": "application/pdf",
+          "X-Questionnaire-Excluded-Draft-Count": "2",
+          "X-Questionnaire-Export-Summary":
+            "2 drafted answers pending approval were excluded",
+        },
+      }),
+    );
+    const res = await POST({} as never, paramsFor("q1"));
+    expect(res.headers.get("X-Questionnaire-Excluded-Draft-Count")).toBe("2");
+    expect(res.headers.get("X-Questionnaire-Export-Summary")).toBe(
+      "2 drafted answers pending approval were excluded",
+    );
+  });
+
   test("propagates upstream 503 chrome unavailable", async () => {
     mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(

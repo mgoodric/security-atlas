@@ -21,6 +21,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -30,6 +31,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/audit"
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -41,8 +43,9 @@ import (
 // wired local inference) the suggest/approve routes return 503 rather than
 // panicking, so the rest of the questionnaire surface is unaffected.
 type Handler struct {
-	store   *questionnaire.Store
-	suggest *qaisuggest.Service
+	store       *questionnaire.Store
+	suggest     *qaisuggest.Service
+	exportAudit *audit.QuestionnaireExportWriter
 }
 
 // New constructs a Handler without the AI-suggestion surface (slice 155 only).
@@ -54,6 +57,10 @@ func New(store *questionnaire.Store) *Handler {
 // service. When suggest is non-nil the suggest + approve routes are live.
 func NewWithSuggest(store *questionnaire.Store, suggest *qaisuggest.Service) *Handler {
 	return &Handler{store: store, suggest: suggest}
+}
+
+func NewWithSuggestAndAudit(store *questionnaire.Store, suggest *qaisuggest.Service, exportAudit *audit.QuestionnaireExportWriter) *Handler {
+	return &Handler{store: store, suggest: suggest, exportAudit: exportAudit}
 }
 
 // RegisterRoutes attaches the slice-155 routes directly onto the
@@ -303,8 +310,8 @@ func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {
 
 // ExportPDF renders the questionnaire to PDF.
 func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
@@ -319,31 +326,13 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
-	in := questionnaire.PDFInput{
-		QuestionnaireName: q.Name,
-		SourceLabel:       q.SourceLabel,
-		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
-		Items:             make([]questionnaire.PDFItem, 0, len(items)),
-	}
-	for _, it := range items {
-		pi := questionnaire.PDFItem{
-			Code:         it.Code,
-			Text:         it.Text,
-			Domain:       it.Domain,
-			ScfAnchorID:  it.ScfAnchorID,
-			NeedsMapping: it.NeedsMapping,
-		}
-		if it.Answer != nil {
-			pi.AnswerValue = it.Answer.AnswerValue
-			pi.Narrative = it.Answer.Narrative
-		}
-		in.Items = append(in.Items, pi)
-	}
+	exportedAt := time.Now().UTC()
+	built := questionnaire.BuildExportPDFInput(q, items, exportedAt)
 
 	// The render budget + concurrency cap live on the shared pdfrender
 	// limiter (slice 475); questionnaire.RenderPDF routes through it. We do
 	// NOT apply a second deadline here — the limiter owns it.
-	buf, err := questionnaire.RenderPDF(r.Context(), in)
+	buf, err := questionnaire.RenderPDF(r.Context(), built.Input)
 	if err != nil {
 		if status, msg, ok := pdfDegradation(err); ok {
 			logPDFDegradation(r, err)
@@ -353,7 +342,25 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "questionnaires", err)
 		return
 	}
+	if h.exportAudit != nil {
+		if err := h.exportAudit.WriteQuestionnaireExport(ctx, audit.QuestionnaireExportEvent{
+			Actor:           exportActor(cred),
+			QuestionnaireID: q.ID,
+			Counts: audit.QuestionnaireExportCounts{
+				Manual:          built.Counts.Manual,
+				ApprovedAI:      built.Counts.ApprovedAI,
+				ExcludedDrafts:  built.Counts.ExcludedDrafts,
+				ExportedAnswers: built.Counts.ExportedAnswers,
+			},
+			OccurredAt: exportedAt,
+		}); err != nil {
+			httperr.WriteInternal(w, r, "questionnaires", err)
+			return
+		}
+	}
 	w.Header().Set("Content-Type", "application/pdf")
+	w.Header().Set("X-Questionnaire-Excluded-Draft-Count", strconv.Itoa(built.Counts.ExcludedDrafts))
+	w.Header().Set("X-Questionnaire-Export-Summary", questionnaire.ExportExclusionSummary(built.Counts.ExcludedDrafts))
 	_, _ = w.Write(buf)
 }
 
@@ -475,4 +482,11 @@ func (h *Handler) tenantCred(r *http.Request) (context.Context, credstore.Creden
 		return nil, credstore.Credential{}, false
 	}
 	return r.Context(), c, true
+}
+
+func exportActor(cred credstore.Credential) string {
+	if cred.UserID != "" {
+		return cred.UserID
+	}
+	return cred.ID
 }
