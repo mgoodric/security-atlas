@@ -12,8 +12,13 @@
 // Enum option lists mirror `internal/db/dbx/models.go`:
 //   RiskCategory:    confidentiality | integrity | availability | privacy
 //                    | regulatory | operational | financial
-//   RiskMethodology: nist_800_30 (default) | fair | cis_ram | iso_27005
-//                    | qualitative_5x5
+//   RiskMethodology: OE-592 — deliberately NARROWER than the dbx enum.
+//                    The form offers only nist_800_30 (default) and
+//                    qualitative_5x5 (OFFERED_METHODOLOGIES in
+//                    validate.ts); the other enum values (fair, cis_ram,
+//                    iso_27005) cannot be saved with the 5x5 score shape
+//                    this form submits, so offering them was a
+//                    guaranteed validation error.
 //   RiskTreatment:   accept | mitigate (default) | transfer | avoid
 //
 // 5x5 inherent_score widget: two native `<select>` dropdowns (1..5 each)
@@ -40,6 +45,7 @@ import {
   DEFAULT_TREATMENT,
   FieldErrors,
   hasErrors,
+  OFFERED_METHODOLOGIES,
   validateRiskForm,
 } from "./validate";
 
@@ -53,14 +59,6 @@ const CATEGORIES = [
   "financial",
 ] as const;
 
-const METHODOLOGIES = [
-  "nist_800_30",
-  "fair",
-  "cis_ram",
-  "iso_27005",
-  "qualitative_5x5",
-] as const;
-
 const TREATMENTS = ["mitigate", "transfer", "accept", "avoid"] as const;
 
 const SCORE_LEVELS = [1, 2, 3, 4, 5] as const;
@@ -69,7 +67,7 @@ type FormState = {
   title: string;
   description: string;
   category: (typeof CATEGORIES)[number];
-  methodology: (typeof METHODOLOGIES)[number];
+  methodology: (typeof OFFERED_METHODOLOGIES)[number];
   treatment: (typeof TREATMENTS)[number];
   treatment_owner: string;
   likelihood: number;
@@ -271,7 +269,7 @@ export function RiskForm({ onSubmit }: Props) {
             className={SELECT_CLASS}
             data-testid="risks-create-methodology"
           >
-            {METHODOLOGIES.map((m) => (
+            {OFFERED_METHODOLOGIES.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>
@@ -279,7 +277,7 @@ export function RiskForm({ onSubmit }: Props) {
           </select>
           <p className={HELP_CLASS}>
             Default <span className="font-mono">nist_800_30</span> per canvas
-            §6.2.
+            §6.2. FAIR, CIS RAM and ISO 27005 are not yet supported.
           </p>
         </div>
       </div>

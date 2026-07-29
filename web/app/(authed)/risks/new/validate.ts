@@ -15,6 +15,25 @@
 
 export type RiskTreatment = "mitigate" | "transfer" | "accept" | "avoid";
 
+// OFFERED_METHODOLOGIES — OE-592 (UI honesty, same class as slices
+// 228/230/232): the form offers ONLY the methodologies the backend can
+// actually save from this form. The dbx enum names five, but the form
+// always submits inherent_score as {likelihood, impact} — the 5×5 shape
+// that only nist_800_30 and qualitative_5x5 accept (see
+// `internal/risk/severity.go`: these two are the scored/aggregatable
+// set; fair requires lef/lm and fails the methodology schema outright).
+// Offering fair / cis_ram / iso_27005 therefore presented an affordance
+// that could not succeed. Whether to actually SUPPORT those three is
+// the open "risk-methodology default lock" product decision (CLAUDE.md
+// open questions) — resolving it means widening this list alongside a
+// real per-methodology score widget, not just re-adding option tags.
+export const OFFERED_METHODOLOGIES = [
+  "nist_800_30",
+  "qualitative_5x5",
+] as const;
+
+export type RiskMethodology = (typeof OFFERED_METHODOLOGIES)[number];
+
 // DEFAULT_TREATMENT — slice 663.
 //
 // The risk-create form (risk-form.tsx) opens on this treatment. It is
