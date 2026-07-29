@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -70,26 +72,29 @@ func newCatalogImportSCFCmd() *cobra.Command {
 }
 
 // newCatalogImportCrosswalkCmd wires `atlas-cli catalog import-crosswalk
-// <path>`. The framework-agnostic crosswalk YAML at <path> is loaded,
-// validated, and applied against the DB at --dsn (DATABASE_URL by default).
-// Idempotent on re-runs. The same command imports any framework's
-// requirement-to-SCF-anchor crosswalk (SOC 2, ISO 27001:2022, PCI DSS, …) —
-// the framework_slug/framework_version inside the YAML selects the target.
+// <path>`. Framework-agnostic crosswalk YAML and SCF-format XLSX workbooks are
+// loaded, validated, and applied against the DB at --dsn (DATABASE_URL by
+// default). Idempotent on re-runs. The same command imports any framework's
+// requirement-to-SCF-anchor crosswalk (SOC 2, ISO 27001:2022, PCI DSS, …).
 //
 // The legacy `import-soc2` name remains as an alias so existing operator
 // runbooks keep working after the slice-438 generalization.
 //
-// The agent-authored DRAFT mapping files ship with
-// `source_attribution: community_draft` on every row — the maintainer
-// spot-checks via the per-slice decisions log; the importer is the same
-// machinery once a publisher-official crosswalk lands with
-// `source_attribution: scf_official`.
+// The agent-authored DRAFT mapping files and SCF workbook imports land with
+// `source_attribution: community_draft` — maintainers review/promote through
+// the crosswalk tier workflow.
 func newCatalogImportCrosswalkCmd() *cobra.Command {
 	var dsn string
+	var frameworkColumn string
+	var frameworkSlug string
+	var frameworkName string
+	var frameworkIssuer string
+	var frameworkVersion string
+	var releaseDate string
 	cmd := &cobra.Command{
 		Use:     "import-crosswalk <path>",
 		Aliases: []string{"import-soc2"},
-		Short:   "import a framework→SCF crosswalk YAML into Postgres (SOC 2, ISO 27001, …)",
+		Short:   "import a framework→SCF crosswalk YAML or SCF workbook into Postgres",
 		Args:    cobra.ExactArgs(1),
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if dsn == "" {
@@ -102,7 +107,20 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 		},
 		RunE: func(_ *cobra.Command, args []string) error {
 			path := args[0]
-			cw, err := soc2import.Load(path)
+			var cw *soc2import.Crosswalk
+			var err error
+			if strings.EqualFold(filepath.Ext(path), ".xlsx") {
+				cw, err = soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{
+					FrameworkColumn:  frameworkColumn,
+					FrameworkSlug:    frameworkSlug,
+					FrameworkName:    frameworkName,
+					FrameworkIssuer:  frameworkIssuer,
+					FrameworkVersion: frameworkVersion,
+					ReleaseDate:      releaseDate,
+				})
+			} else {
+				cw, err = soc2import.Load(path)
+			}
 			if err != nil {
 				return err
 			}
@@ -137,5 +155,11 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL)")
+	cmd.Flags().StringVar(&frameworkColumn, "framework-column", "", "SCF workbook column header to import (required when an .xlsx has multiple framework columns)")
+	cmd.Flags().StringVar(&frameworkSlug, "framework-slug", "", "framework slug override for SCF workbook imports")
+	cmd.Flags().StringVar(&frameworkName, "framework-name", "", "framework name override for SCF workbook imports")
+	cmd.Flags().StringVar(&frameworkIssuer, "framework-issuer", "", "framework issuer override for SCF workbook imports")
+	cmd.Flags().StringVar(&frameworkVersion, "framework-version", "", "framework version override for SCF workbook imports")
+	cmd.Flags().StringVar(&releaseDate, "release-date", "", "framework release date override (YYYY-MM-DD) for SCF workbook imports")
 	return cmd
 }

@@ -33,6 +33,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -128,8 +130,11 @@ func (m *Mapping) UnmarshalYAML(value *yaml.Node) error {
 	return nil
 }
 
-// Load reads a YAML crosswalk file from disk and validates it.
+// Load reads a YAML crosswalk file or SCF workbook from disk and validates it.
 func Load(path string) (*Crosswalk, error) {
+	if strings.EqualFold(filepath.Ext(path), ".xlsx") {
+		return LoadSCFWorkbook(path, SCFWorkbookOptions{})
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("crosswalk: read %s: %w", path, err)

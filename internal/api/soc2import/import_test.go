@@ -42,6 +42,21 @@ func resetCatalog(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
+func resetFrameworkCatalog(t *testing.T, pool *pgxpool.Pool, slug string) {
+	t.Helper()
+	ctx := context.Background()
+	for _, stmt := range []string{
+		"DELETE FROM fw_to_scf_edges WHERE framework_requirement_id IN (SELECT fr.id FROM framework_requirements fr JOIN framework_versions fv ON fv.id = fr.framework_version_id JOIN frameworks f ON f.id = fv.framework_id WHERE f.slug = $1 AND f.tenant_id IS NULL)",
+		"DELETE FROM framework_requirements WHERE framework_version_id IN (SELECT fv.id FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id WHERE f.slug = $1 AND f.tenant_id IS NULL)",
+		"DELETE FROM framework_versions WHERE framework_id IN (SELECT id FROM frameworks WHERE slug = $1 AND tenant_id IS NULL)",
+		"DELETE FROM frameworks WHERE slug = $1 AND tenant_id IS NULL",
+	} {
+		if _, err := pool.Exec(ctx, stmt, slug); err != nil {
+			t.Fatalf("cleanup %q for %s: %v", stmt, slug, err)
+		}
+	}
+}
+
 // ensureSCFLoaded ensures the CURRENT SCF framework version holds the full
 // sample catalog before each crosswalk-import test. It delegates to the
 // shared slice 461 helper, which is order-independent: a prior package that
@@ -145,6 +160,42 @@ func TestImport_EveryDraftedEdgeIsCommunityDraft(t *testing.T) {
 	if communityDraftCount != totalCount {
 		t.Fatalf("community_draft edges = %d; want %d (every drafted row is community_draft pending HITL)",
 			communityDraftCount, totalCount)
+	}
+}
+
+func TestImport_SCFWorkbookCreatesCommunityDraftEdges(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	resetFrameworkCatalog(t, pool, "general-example-standard-2026")
+	ensureSCFLoaded(t, pool)
+	cw, err := soc2import.LoadSCFWorkbook(writeWideSCFWorkbook(t), soc2import.SCFWorkbookOptions{})
+	if err != nil {
+		t.Fatalf("LoadSCFWorkbook: %v", err)
+	}
+
+	report, err := soc2import.Import(context.Background(), pool, cw)
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	if report.RequirementsCreated != len(cw.Requirements) || report.EdgesCreated != len(cw.Mappings) {
+		t.Fatalf("report created counts = req %d edges %d; want %d/%d",
+			report.RequirementsCreated, report.EdgesCreated, len(cw.Requirements), len(cw.Mappings))
+	}
+
+	var communityDraft, draftTier int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT
+		  count(*) FILTER (WHERE e.source_attribution = 'community_draft'),
+		  count(*) FILTER (WHERE e.mapping_tier = 'draft')
+		FROM fw_to_scf_edges e
+		JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+		JOIN framework_versions fv ON fv.id = fr.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'general-example-standard-2026'`).Scan(&communityDraft, &draftTier); err != nil {
+		t.Fatalf("edge provenance query: %v", err)
+	}
+	if communityDraft != len(cw.Mappings) || draftTier != len(cw.Mappings) {
+		t.Fatalf("xlsx import provenance/tier = community_draft %d draft %d; want %d",
+			communityDraft, draftTier, len(cw.Mappings))
 	}
 }
 
