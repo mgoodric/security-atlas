@@ -191,6 +191,19 @@ release:
 
     sha256sum -c {{ .ProjectName }}_{{ .Version }}_checksums.txt
     ```
+
+    Stable container images for this release are signed by the
+    `container-publish.yml` workflow after the multi-arch manifest is
+    published:
+
+    ```sh
+    IMAGE=ghcr.io/mgoodric/security-atlas
+    TAG=v{{ .Version }}
+
+    cosign verify "${IMAGE}:${TAG}" \
+      --certificate-identity-regexp 'https://github.com/mgoodric/security-atlas/\.github/workflows/container-publish\.yml@.*' \
+      --certificate-oidc-issuer https://token.actions.githubusercontent.com
+    ```
   footer: |
     ---
     Full changelog: https://github.com/mgoodric/security-atlas/compare/{{ .PreviousTag }}...{{ .Tag }}

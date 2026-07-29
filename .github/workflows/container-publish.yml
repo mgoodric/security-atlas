@@ -6,10 +6,10 @@ name: container-publish
 #      release-please workflow cuts a `v*.*.*` tag, GoReleaser publishes
 #      the GitHub Release, and that event fires this workflow). Builds
 #      multi-arch images tagged `vX.Y.Z`, `X.Y`, `X`, and `latest`.
-#      Stable images are subsequently cosign-signed via
-#      `release.yml`'s signing job (the cosign step lives in the release
-#      workflow because keyless OIDC bindings to a workflow identity
-#      are stronger when the signing step IS the release).
+#      Stable images are cosign-signed in this workflow after the
+#      multi-arch manifest list is assembled. The signature binds the
+#      immutable index digest to this workflow's GitHub Actions OIDC
+#      identity.
 #
 #   2. Edge channel — triggered by `push: branches: [main]` (slice 207).
 #      Every merge to `main` after branch-protection's required-checks
@@ -212,6 +212,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install cosign
+        if: ${{ github.event_name == 'release' }}
+        # Stable release images are signed keylessly with the same Sigstore
+        # v3 stack as release.yml's checksum signing. No key material is
+        # stored in secrets; cosign uses this job's GitHub Actions OIDC token
+        # to mint a short-lived Fulcio certificate.
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        with:
+          cosign-release: "v3.0.6"
+
       - name: Compute BUILD_TIME (RFC3339 UTC)
         id: buildtime
         run: echo "value=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
@@ -367,6 +377,24 @@ jobs:
           PRIMARY_TAG=$(echo "${{ steps.meta.outputs.tags }}" | head -n1)
           d=$(docker buildx imagetools inspect "${PRIMARY_TAG}" --format '{{json .Manifest.Digest}}' | tr -d '"')
           echo "value=${d}" >> "$GITHUB_OUTPUT"
+
+      - name: Sign release image digest
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          set -euo pipefail
+          image_ref="${{ matrix.image.target }}@${{ steps.digest.outputs.value }}"
+          cosign sign --yes "${image_ref}"
+          echo "cosign signed ${image_ref}"
+
+      - name: Self-verify release image signature
+        if: ${{ github.event_name == 'release' }}
+        run: |
+          set -euo pipefail
+          image_ref="${{ matrix.image.target }}@${{ steps.digest.outputs.value }}"
+          cosign verify "${image_ref}" \
+            --certificate-identity-regexp "https://github.com/${GITHUB_REPOSITORY}/\.github/workflows/container-publish\.yml@.*" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          echo "cosign verify OK for ${image_ref}"
 
       - name: Attest provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
