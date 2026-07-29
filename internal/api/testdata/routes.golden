@@ -147,6 +147,7 @@ GET /v1/policies/{id}/pdf
 GET /v1/populations/{id}
 GET /v1/questionnaires
 GET /v1/questionnaires/{id}
+GET /v1/questionnaires/{id}/answer-runs/{runId}
 GET /v1/questionnaires/{id}/suggestions
 GET /v1/requirements/{id}/anchors
 GET /v1/requirements/{id}/coverage
@@ -272,6 +273,8 @@ POST /v1/policies/{id}/acknowledge
 POST /v1/policies/{id}/publish
 POST /v1/populations
 POST /v1/questionnaires
+POST /v1/questionnaires/{id}/answer-runs
+POST /v1/questionnaires/{id}/answer-runs/{runId}/cancel
 POST /v1/questionnaires/{id}/answers/{qid}/ai-approve
 POST /v1/questionnaires/{id}/answers/{qid}/ai-suggest
 POST /v1/questionnaires/{id}/export-pdf

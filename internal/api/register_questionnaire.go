@@ -46,7 +46,9 @@ func (s *Server) registerQuestionnaire(root *chi.Mux) {
 		qaiStore,
 		qaiStore,
 	)
-	questionnairesH := questionnairesapi.NewWithSuggest(questionnaireStore, qaiSvc)
+	answerRunStore := questionnaire.NewAnswerRunStore(s.dbPool)
+	answerRunSvc := questionnaire.NewAnswerRunService(answerRunStore, qaiSvc)
+	questionnairesH := questionnairesapi.NewWithSuggestAndAnswerRuns(questionnaireStore, qaiSvc, answerRunSvc)
 	questionnairesH.RegisterRoutes(root)
 	// Slice 471: role-scoped control-implementation checklist generator v0
 	// (cited, non-binding). The which-control -> which-role split is
