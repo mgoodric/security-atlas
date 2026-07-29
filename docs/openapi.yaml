@@ -4192,6 +4192,91 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest:
+    post:
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-ai-suggest
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve:
+    post:
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-proposalID-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: proposalID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject:
+    post:
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-proposalID-reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: proposalID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/questionnaires/{id}/suggestions:
     get:
       summary: GET /v1/questionnaires/{id}/suggestions

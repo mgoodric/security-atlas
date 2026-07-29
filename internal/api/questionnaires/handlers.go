@@ -31,6 +31,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
+	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -41,8 +42,9 @@ import (
 // wired local inference) the suggest/approve routes return 503 rather than
 // panicking, so the rest of the questionnaire surface is unaffected.
 type Handler struct {
-	store   *questionnaire.Store
-	suggest *qaisuggest.Service
+	store          *questionnaire.Store
+	suggest        *qaisuggest.Service
+	mappingSuggest *qmapsuggest.Service
 }
 
 // New constructs a Handler without the AI-suggestion surface (slice 155 only).
@@ -54,6 +56,12 @@ func New(store *questionnaire.Store) *Handler {
 // service. When suggest is non-nil the suggest + approve routes are live.
 func NewWithSuggest(store *questionnaire.Store, suggest *qaisuggest.Service) *Handler {
 	return &Handler{store: store, suggest: suggest}
+}
+
+// NewWithAI constructs a Handler wired with both questionnaire AI surfaces:
+// answer drafting (slice 441) and SCF mapping proposals (slice 755).
+func NewWithAI(store *questionnaire.Store, suggest *qaisuggest.Service, mappingSuggest *qmapsuggest.Service) *Handler {
+	return &Handler{store: store, suggest: suggest, mappingSuggest: mappingSuggest}
 }
 
 // RegisterRoutes attaches the slice-155 routes directly onto the
@@ -74,6 +82,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	// them first.
 	r.Post("/v1/questionnaires/{id}/answers/{qid}/ai-suggest", h.AISuggest)
 	r.Post("/v1/questionnaires/{id}/answers/{qid}/ai-approve", h.AIApprove)
+	r.Post("/v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest", h.MappingSuggest)
+	r.Post("/v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve", h.MappingApprove)
+	r.Post("/v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject", h.MappingReject)
 	r.Patch("/v1/questionnaires/{id}/answers/{qid}", h.UpsertAnswer)
 	r.Get("/v1/questionnaires/{id}", h.Get)
 }
@@ -461,6 +472,112 @@ type aiApproveRequest struct {
 	AnswerID    string `json:"answer_id"`
 	Narrative   string `json:"narrative"`
 	AnswerValue string `json:"answer_value"`
+}
+
+// ===== POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest =====
+
+func (h *Handler) MappingSuggest(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to suggest an SCF mapping")
+		return
+	}
+	if h.mappingSuggest == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		return
+	}
+	qid, err := uuid.Parse(chi.URLParam(r, "qid"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "qid must be a uuid")
+		return
+	}
+	out, err := h.mappingSuggest.Suggest(ctx, qmapsuggest.SuggestParams{
+		QuestionID: qid,
+		Actor:      cred.ID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, qmapsuggest.ErrQuestionNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "needs_mapping question not found")
+		case errors.Is(err, qmapsuggest.ErrQuestionCanonical):
+			httpresp.WriteError(w, http.StatusConflict, "question is already mapped")
+		default:
+			httperr.WriteInternal(w, r, "questionnaires", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) MappingApprove(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to approve an SCF mapping")
+		return
+	}
+	if h.mappingSuggest == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		return
+	}
+	proposalID, err := uuid.Parse(chi.URLParam(r, "proposalID"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "proposalID must be a uuid")
+		return
+	}
+	out, err := h.mappingSuggest.Approve(ctx, proposalID, cred.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, qmapsuggest.ErrApproverRequired):
+			httpresp.WriteError(w, http.StatusBadRequest, "approver is required")
+		case errors.Is(err, qmapsuggest.ErrProposalNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "mapping proposal not found")
+		case errors.Is(err, qmapsuggest.ErrQuestionCanonical):
+			httpresp.WriteError(w, http.StatusConflict, "question is already mapped")
+		default:
+			httperr.WriteInternal(w, r, "questionnaires", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) MappingReject(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to reject an SCF mapping")
+		return
+	}
+	if h.mappingSuggest == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		return
+	}
+	proposalID, err := uuid.Parse(chi.URLParam(r, "proposalID"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "proposalID must be a uuid")
+		return
+	}
+	out, err := h.mappingSuggest.Reject(ctx, proposalID, cred.ID)
+	if err != nil {
+		if errors.Is(err, qmapsuggest.ErrProposalNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "mapping proposal not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "questionnaires", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
 }
 
 // tenantCred resolves the tenant context + the authenticated credential. Both
