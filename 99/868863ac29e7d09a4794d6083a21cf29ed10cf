@@ -1,0 +1,47 @@
+internal/audit/notifications/dispatch.go
+  s_90205a2b87a84f::t_c5e2105e19ab7a 39-42
+internal/db/dbx/drift_freshness_alerts.sql.go
+  s_90205a2b87a84f::t_d857df4726a7e7 1-151
+internal/db/dbx/models.go
+  s_90205a2b87a84f::t_8b4a0fc0b99a68 1586-1609
+internal/db/dbx/querier.go
+  s_90205a2b87a84f::t_0d7a104c39486b 138,179,707-708,3123
+internal/db/queries/drift_freshness_alerts.sql
+  s_90205a2b87a84f::t_85961302d1880f 1-39
+internal/drift/drift.go
+  s_90205a2b87a84f::t_aed9d0238cfa8f 183-217
+internal/driftalerts/alerts.go
+  s_90205a2b87a84f::t_ad3409b257da91 1-310
+internal/driftalerts/alerts_test.go
+  s_90205a2b87a84f::t_0088531efef2e3 1-65
+internal/driftalerts/integration_test.go
+  s_90205a2b87a84f::t_8ce9eab88c4992 1-185
+internal/freshnessdrift/worker.go
+  s_90205a2b87a84f::t_8d84cd77443c03 39,64,71-78,82-87,90-103,117
+internal/notify/slack/slack.go
+  s_90205a2b87a84f::t_eacd2ae20953ed 266,366-391
+internal/notify/webhook/webhook.go
+  s_90205a2b87a84f::t_a76a725f105245 316,416-441
+migrations/sql/20260728000000_drift_freshness_alerts.down.sql
+  s_90205a2b87a84f::t_a4b7f3a3c4b599 1-2
+migrations/sql/20260728000000_drift_freshness_alerts.sql
+  s_90205a2b87a84f::t_269bc82f1ba6c5 1-81
+sqlc.yaml
+  s_90205a2b87a84f::t_f95d3312fb4dd0 87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.18",
+  "base_commit_sha": "99868863ac29e7d09a4794d6083a21cf29ed10cf",
+  "prompts": {},
+  "sessions": {
+    "s_90205a2b87a84f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb476-6e46-75c1-8d0e-91a58843e799",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
