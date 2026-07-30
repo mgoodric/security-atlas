@@ -108,29 +108,40 @@ const createVendor = `-- name: CreateVendor :one
 INSERT INTO vendors (
     id, tenant_id, name, domain, criticality, contract_start, contract_end,
     dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user,
-    linked_sow_uri, notes
+    linked_sow_uri, notes, annual_cost, currency, renewal_date, auto_renew,
+    license_count, tool_category, cost_owner, commercial_status, billing_cadence
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21, $22, $23
 )
-RETURNING id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at
+RETURNING id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence
 `
 
 type CreateVendorParams struct {
-	ID             pgtype.UUID         `json:"id"`
-	TenantID       pgtype.UUID         `json:"tenant_id"`
-	Name           string              `json:"name"`
-	Domain         *string             `json:"domain"`
-	Criticality    VendorCriticality   `json:"criticality"`
-	ContractStart  pgtype.Date         `json:"contract_start"`
-	ContractEnd    pgtype.Date         `json:"contract_end"`
-	DpaSigned      bool                `json:"dpa_signed"`
-	DpaSignedAt    pgtype.Date         `json:"dpa_signed_at"`
-	ReviewCadence  VendorReviewCadence `json:"review_cadence"`
-	LastReviewDate pgtype.Date         `json:"last_review_date"`
-	OwnerUser      string              `json:"owner_user"`
-	LinkedSowUri   *string             `json:"linked_sow_uri"`
-	Notes          string              `json:"notes"`
+	ID               pgtype.UUID            `json:"id"`
+	TenantID         pgtype.UUID            `json:"tenant_id"`
+	Name             string                 `json:"name"`
+	Domain           *string                `json:"domain"`
+	Criticality      VendorCriticality      `json:"criticality"`
+	ContractStart    pgtype.Date            `json:"contract_start"`
+	ContractEnd      pgtype.Date            `json:"contract_end"`
+	DpaSigned        bool                   `json:"dpa_signed"`
+	DpaSignedAt      pgtype.Date            `json:"dpa_signed_at"`
+	ReviewCadence    VendorReviewCadence    `json:"review_cadence"`
+	LastReviewDate   pgtype.Date            `json:"last_review_date"`
+	OwnerUser        string                 `json:"owner_user"`
+	LinkedSowUri     *string                `json:"linked_sow_uri"`
+	Notes            string                 `json:"notes"`
+	AnnualCost       *float64               `json:"annual_cost"`
+	Currency         *string                `json:"currency"`
+	RenewalDate      pgtype.Date            `json:"renewal_date"`
+	AutoRenew        bool                   `json:"auto_renew"`
+	LicenseCount     *int32                 `json:"license_count"`
+	ToolCategory     *VendorToolCategory    `json:"tool_category"`
+	CostOwner        string                 `json:"cost_owner"`
+	CommercialStatus VendorCommercialStatus `json:"commercial_status"`
+	BillingCadence   *VendorBillingCadence  `json:"billing_cadence"`
 }
 
 // Insert a vendor. tenant_id is captured directly so RLS evaluates the
@@ -152,6 +163,15 @@ func (q *Queries) CreateVendor(ctx context.Context, arg CreateVendorParams) (Ven
 		arg.OwnerUser,
 		arg.LinkedSowUri,
 		arg.Notes,
+		arg.AnnualCost,
+		arg.Currency,
+		arg.RenewalDate,
+		arg.AutoRenew,
+		arg.LicenseCount,
+		arg.ToolCategory,
+		arg.CostOwner,
+		arg.CommercialStatus,
+		arg.BillingCadence,
 	)
 	var i Vendor
 	err := row.Scan(
@@ -171,6 +191,15 @@ func (q *Queries) CreateVendor(ctx context.Context, arg CreateVendorParams) (Ven
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AnnualCost,
+		&i.Currency,
+		&i.RenewalDate,
+		&i.AutoRenew,
+		&i.LicenseCount,
+		&i.ToolCategory,
+		&i.CostOwner,
+		&i.CommercialStatus,
+		&i.BillingCadence,
 	)
 	return i, err
 }
@@ -190,7 +219,7 @@ func (q *Queries) DeleteVendor(ctx context.Context, arg DeleteVendorParams) erro
 }
 
 const getVendor = `-- name: GetVendor :one
-SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at FROM vendors
+SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence FROM vendors
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -219,12 +248,21 @@ func (q *Queries) GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, e
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AnnualCost,
+		&i.Currency,
+		&i.RenewalDate,
+		&i.AutoRenew,
+		&i.LicenseCount,
+		&i.ToolCategory,
+		&i.CostOwner,
+		&i.CommercialStatus,
+		&i.BillingCadence,
 	)
 	return i, err
 }
 
 const listOverdueVendors = `-- name: ListOverdueVendors :many
-SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at FROM vendors
+SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence FROM vendors
 WHERE tenant_id = $1
   AND ($2::vendor_criticality IS NULL
        OR criticality = $2)
@@ -281,6 +319,15 @@ func (q *Queries) ListOverdueVendors(ctx context.Context, arg ListOverdueVendors
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AnnualCost,
+			&i.Currency,
+			&i.RenewalDate,
+			&i.AutoRenew,
+			&i.LicenseCount,
+			&i.ToolCategory,
+			&i.CostOwner,
+			&i.CommercialStatus,
+			&i.BillingCadence,
 		); err != nil {
 			return nil, err
 		}
@@ -324,17 +371,86 @@ func (q *Queries) ListVendorScopeCells(ctx context.Context, arg ListVendorScopeC
 	return items, nil
 }
 
+const listVendorSpendRollup = `-- name: ListVendorSpendRollup :many
+SELECT
+    NULL::vendor_tool_category AS tool_category,
+    currency,
+    SUM(annual_cost)::float8 AS annual_cost,
+    COUNT(*)::bigint AS vendor_count
+FROM vendors v
+WHERE v.tenant_id = $1
+  AND v.annual_cost IS NOT NULL
+  AND v.currency IS NOT NULL
+  AND v.commercial_status <> 'churned'
+GROUP BY v.currency
+
+UNION ALL
+
+SELECT
+    v.tool_category,
+    v.currency,
+    SUM(v.annual_cost)::float8 AS annual_cost,
+    COUNT(*)::bigint AS vendor_count
+FROM vendors v
+WHERE v.tenant_id = $1
+  AND v.annual_cost IS NOT NULL
+  AND v.currency IS NOT NULL
+  AND v.commercial_status <> 'churned'
+  AND v.tool_category IS NOT NULL
+GROUP BY v.tool_category, v.currency
+ORDER BY currency ASC, tool_category ASC NULLS FIRST
+`
+
+type ListVendorSpendRollupRow struct {
+	ToolCategory *VendorToolCategory `json:"tool_category"`
+	Currency     *string             `json:"currency"`
+	AnnualCost   float64             `json:"annual_cost"`
+	VendorCount  int64               `json:"vendor_count"`
+}
+
+// Commercial spend rollup for purchased security tooling. Aggregates only
+// rows with annual_cost + currency and excludes churned tools from current
+// spend. category NULL is the overall rollup for that currency; non-NULL
+// rows are category subtotals.
+func (q *Queries) ListVendorSpendRollup(ctx context.Context, tenantID pgtype.UUID) ([]ListVendorSpendRollupRow, error) {
+	rows, err := q.db.Query(ctx, listVendorSpendRollup, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVendorSpendRollupRow
+	for rows.Next() {
+		var i ListVendorSpendRollupRow
+		if err := rows.Scan(
+			&i.ToolCategory,
+			&i.Currency,
+			&i.AnnualCost,
+			&i.VendorCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVendors = `-- name: ListVendors :many
-SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at FROM vendors
+SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence FROM vendors
 WHERE tenant_id = $1
   AND ($2::vendor_criticality IS NULL
        OR criticality = $2)
+  AND ($3::vendor_tool_category IS NULL
+       OR tool_category = $3)
 ORDER BY criticality DESC, name ASC
 `
 
 type ListVendorsParams struct {
-	TenantID    pgtype.UUID        `json:"tenant_id"`
-	Criticality *VendorCriticality `json:"criticality"`
+	TenantID     pgtype.UUID         `json:"tenant_id"`
+	Criticality  *VendorCriticality  `json:"criticality"`
+	ToolCategory *VendorToolCategory `json:"tool_category"`
 }
 
 // AC-2 filter by criticality. NULL criticality_filter means "all" — the
@@ -342,7 +458,7 @@ type ListVendorsParams struct {
 // pattern keeps the query plan stable and lets sqlc emit a *VendorCriticality
 // parameter so callers can pass nil for "no filter".
 func (q *Queries) ListVendors(ctx context.Context, arg ListVendorsParams) ([]Vendor, error) {
-	rows, err := q.db.Query(ctx, listVendors, arg.TenantID, arg.Criticality)
+	rows, err := q.db.Query(ctx, listVendors, arg.TenantID, arg.Criticality, arg.ToolCategory)
 	if err != nil {
 		return nil, err
 	}
@@ -367,6 +483,15 @@ func (q *Queries) ListVendors(ctx context.Context, arg ListVendorsParams) ([]Ven
 			&i.Notes,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AnnualCost,
+			&i.Currency,
+			&i.RenewalDate,
+			&i.AutoRenew,
+			&i.LicenseCount,
+			&i.ToolCategory,
+			&i.CostOwner,
+			&i.CommercialStatus,
+			&i.BillingCadence,
 		); err != nil {
 			return nil, err
 		}
@@ -414,26 +539,44 @@ UPDATE vendors SET
     owner_user       = $12,
     linked_sow_uri   = $13,
     notes            = $14,
+    annual_cost      = $15,
+    currency         = $16,
+    renewal_date     = $17,
+    auto_renew       = $18,
+    license_count    = $19,
+    tool_category    = $20,
+    cost_owner       = $21,
+    commercial_status = $22,
+    billing_cadence  = $23,
     updated_at       = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at
+RETURNING id, tenant_id, name, domain, criticality, contract_start, contract_end, dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user, linked_sow_uri, notes, created_at, updated_at, annual_cost, currency, renewal_date, auto_renew, license_count, tool_category, cost_owner, commercial_status, billing_cadence
 `
 
 type UpdateVendorParams struct {
-	TenantID       pgtype.UUID         `json:"tenant_id"`
-	ID             pgtype.UUID         `json:"id"`
-	Name           string              `json:"name"`
-	Domain         *string             `json:"domain"`
-	Criticality    VendorCriticality   `json:"criticality"`
-	ContractStart  pgtype.Date         `json:"contract_start"`
-	ContractEnd    pgtype.Date         `json:"contract_end"`
-	DpaSigned      bool                `json:"dpa_signed"`
-	DpaSignedAt    pgtype.Date         `json:"dpa_signed_at"`
-	ReviewCadence  VendorReviewCadence `json:"review_cadence"`
-	LastReviewDate pgtype.Date         `json:"last_review_date"`
-	OwnerUser      string              `json:"owner_user"`
-	LinkedSowUri   *string             `json:"linked_sow_uri"`
-	Notes          string              `json:"notes"`
+	TenantID         pgtype.UUID            `json:"tenant_id"`
+	ID               pgtype.UUID            `json:"id"`
+	Name             string                 `json:"name"`
+	Domain           *string                `json:"domain"`
+	Criticality      VendorCriticality      `json:"criticality"`
+	ContractStart    pgtype.Date            `json:"contract_start"`
+	ContractEnd      pgtype.Date            `json:"contract_end"`
+	DpaSigned        bool                   `json:"dpa_signed"`
+	DpaSignedAt      pgtype.Date            `json:"dpa_signed_at"`
+	ReviewCadence    VendorReviewCadence    `json:"review_cadence"`
+	LastReviewDate   pgtype.Date            `json:"last_review_date"`
+	OwnerUser        string                 `json:"owner_user"`
+	LinkedSowUri     *string                `json:"linked_sow_uri"`
+	Notes            string                 `json:"notes"`
+	AnnualCost       *float64               `json:"annual_cost"`
+	Currency         *string                `json:"currency"`
+	RenewalDate      pgtype.Date            `json:"renewal_date"`
+	AutoRenew        bool                   `json:"auto_renew"`
+	LicenseCount     *int32                 `json:"license_count"`
+	ToolCategory     *VendorToolCategory    `json:"tool_category"`
+	CostOwner        string                 `json:"cost_owner"`
+	CommercialStatus VendorCommercialStatus `json:"commercial_status"`
+	BillingCadence   *VendorBillingCadence  `json:"billing_cadence"`
 }
 
 // Full-row update. Caller is responsible for sending every field; partial
@@ -455,6 +598,15 @@ func (q *Queries) UpdateVendor(ctx context.Context, arg UpdateVendorParams) (Ven
 		arg.OwnerUser,
 		arg.LinkedSowUri,
 		arg.Notes,
+		arg.AnnualCost,
+		arg.Currency,
+		arg.RenewalDate,
+		arg.AutoRenew,
+		arg.LicenseCount,
+		arg.ToolCategory,
+		arg.CostOwner,
+		arg.CommercialStatus,
+		arg.BillingCadence,
 	)
 	var i Vendor
 	err := row.Scan(
@@ -474,6 +626,15 @@ func (q *Queries) UpdateVendor(ctx context.Context, arg UpdateVendorParams) (Ven
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.AnnualCost,
+		&i.Currency,
+		&i.RenewalDate,
+		&i.AutoRenew,
+		&i.LicenseCount,
+		&i.ToolCategory,
+		&i.CostOwner,
+		&i.CommercialStatus,
+		&i.BillingCadence,
 	)
 	return i, err
 }

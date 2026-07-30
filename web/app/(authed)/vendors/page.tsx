@@ -26,12 +26,17 @@ import {
 } from "@/components/ui/table";
 import { APIError } from "@/lib/api/base";
 import { formatOnTimeRate } from "@/lib/api/vendor-burndown-format";
-import { Vendor, VendorBurndown } from "@/lib/api/vendors";
+import {
+  Vendor,
+  VendorBurndown,
+  VendorSpendRollupRow,
+} from "@/lib/api/vendors";
 
 // Slice 024 — vendor lite list view. The filters are query-param-driven so
 // a deep link survives reload and the user can bookmark "high + overdue".
 
 type ListResp = { vendors: Vendor[] };
+type SpendResp = { rollup: VendorSpendRollupRow[] };
 
 async function fetchVendors(params: URLSearchParams): Promise<Vendor[]> {
   const res = await fetch(`/api/vendors?${params.toString()}`);
@@ -51,24 +56,40 @@ async function fetchBurndown(criticality?: string): Promise<VendorBurndown> {
   return (await res.json()) as VendorBurndown;
 }
 
+async function fetchSpend(): Promise<VendorSpendRollupRow[]> {
+  const res = await fetch(`/api/vendors/spend`);
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  const body = (await res.json()) as SpendResp;
+  return body.rollup;
+}
+
 export default function VendorsPage() {
   const router = useRouter();
   const search = useSearchParams();
   const criticality = search.get("criticality") ?? "";
+  const toolCategory = search.get("tool_category") ?? "";
   const overdueOnly = search.get("overdue") === "true";
 
   const params = new URLSearchParams();
   if (criticality) params.set("criticality", criticality);
+  if (toolCategory) params.set("tool_category", toolCategory);
   if (overdueOnly) params.set("overdue", "true");
 
   const vendorsQ = useQuery({
-    queryKey: ["vendors", criticality, overdueOnly],
+    queryKey: ["vendors", criticality, toolCategory, overdueOnly],
     queryFn: () => fetchVendors(params),
   });
 
   const burndownQ = useQuery({
     queryKey: ["vendors-burndown", criticality],
     queryFn: () => fetchBurndown(criticality || undefined),
+  });
+
+  const spendQ = useQuery({
+    queryKey: ["vendors-spend"],
+    queryFn: fetchSpend,
   });
 
   useEffect(() => {
@@ -115,6 +136,12 @@ export default function VendorsPage() {
         error={burndownQ.error}
       />
 
+      <SpendCard
+        rollup={spendQ.data}
+        loading={spendQ.isLoading}
+        error={spendQ.error}
+      />
+
       <Card>
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <div>
@@ -135,6 +162,31 @@ export default function VendorsPage() {
                 label={c}
                 active={criticality === c}
                 onClick={() => setFilter("criticality", c)}
+              />
+            ))}
+            <FilterButton
+              label="All tooling"
+              active={toolCategory === ""}
+              onClick={() => setFilter("tool_category", null)}
+            />
+            {(
+              [
+                "edr",
+                "siem",
+                "iam",
+                "vuln_mgmt",
+                "cloud_security",
+                "appsec",
+                "grc",
+                "monitoring",
+                "other",
+              ] as const
+            ).map((c) => (
+              <FilterButton
+                key={c}
+                label={c.replace("_", " ")}
+                active={toolCategory === c}
+                onClick={() => setFilter("tool_category", c)}
               />
             ))}
             <FilterButton
@@ -174,71 +226,139 @@ function VendorTable({ vendors }: { vendors: Vendor[] }) {
     );
   }
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead className="w-28">Criticality</TableHead>
-          <TableHead className="w-28">Cadence</TableHead>
-          <TableHead className="w-32">Last review</TableHead>
-          <TableHead className="w-20">DPA</TableHead>
-          <TableHead className="w-24">Status</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {vendors.map((v) => (
-          <TableRow key={v.id} className="cursor-pointer">
-            <TableCell>
-              {/* Slice 679 (ATLAS-030): name and domain render on
+    <div className="overflow-x-auto">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Name</TableHead>
+            <TableHead className="w-28">Criticality</TableHead>
+            <TableHead className="w-28">Cadence</TableHead>
+            <TableHead className="w-32">Category</TableHead>
+            <TableHead className="w-32">Renewal</TableHead>
+            <TableHead className="w-32">Annual spend</TableHead>
+            <TableHead className="w-32">Last review</TableHead>
+            <TableHead className="w-20">DPA</TableHead>
+            <TableHead className="w-24">Status</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {vendors.map((v) => (
+            <TableRow key={v.id} className="cursor-pointer">
+              <TableCell>
+                {/* Slice 679 (ATLAS-030): name and domain render on
                   separate lines as primary + secondary text so the two
                   values never read as one concatenated string
                   ("Pinecone Bankpineconebank.example"). */}
-              <div className="flex flex-col gap-0.5">
-                <Link
-                  href={`/vendors/${v.id}`}
-                  className="text-sm font-medium hover:underline"
-                  data-testid="vendor-name"
-                >
-                  {v.name}
-                </Link>
-                {v.domain ? (
-                  <span
-                    className="text-xs text-muted-foreground"
-                    data-testid="vendor-domain"
+                <div className="flex flex-col gap-0.5">
+                  <Link
+                    href={`/vendors/${v.id}`}
+                    className="text-sm font-medium hover:underline"
+                    data-testid="vendor-name"
                   >
-                    {v.domain}
-                  </span>
-                ) : null}
-              </div>
-            </TableCell>
-            <TableCell>
-              <CriticalityBadge value={v.criticality} />
-            </TableCell>
-            <TableCell className="text-xs">{v.review_cadence}</TableCell>
-            <TableCell className="text-xs">
-              {v.last_review_date ?? (
-                <span className="text-muted-foreground">never</span>
-              )}
-            </TableCell>
-            <TableCell>
-              {v.dpa_signed ? (
-                <Badge variant="secondary">signed</Badge>
-              ) : (
-                <Badge variant="outline">no</Badge>
-              )}
-            </TableCell>
-            <TableCell>
-              {v.overdue ? (
-                <Badge variant="destructive">overdue</Badge>
-              ) : (
-                <Badge variant="secondary">on time</Badge>
-              )}
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+                    {v.name}
+                  </Link>
+                  {v.domain ? (
+                    <span
+                      className="text-xs text-muted-foreground"
+                      data-testid="vendor-domain"
+                    >
+                      {v.domain}
+                    </span>
+                  ) : null}
+                </div>
+              </TableCell>
+              <TableCell>
+                <CriticalityBadge value={v.criticality} />
+              </TableCell>
+              <TableCell className="text-xs">{v.review_cadence}</TableCell>
+              <TableCell className="text-xs">
+                {v.tool_category?.replace("_", " ") ?? (
+                  <span className="text-muted-foreground">none</span>
+                )}
+              </TableCell>
+              <TableCell className="text-xs">
+                {v.renewal_date ?? (
+                  <span className="text-muted-foreground">none</span>
+                )}
+              </TableCell>
+              <TableCell className="text-xs">
+                {formatSpend(v.annual_cost, v.currency)}
+              </TableCell>
+              <TableCell className="text-xs">
+                {v.last_review_date ?? (
+                  <span className="text-muted-foreground">never</span>
+                )}
+              </TableCell>
+              <TableCell>
+                {v.dpa_signed ? (
+                  <Badge variant="secondary">signed</Badge>
+                ) : (
+                  <Badge variant="outline">no</Badge>
+                )}
+              </TableCell>
+              <TableCell>
+                {v.overdue ? (
+                  <Badge variant="destructive">overdue</Badge>
+                ) : (
+                  <Badge variant="secondary">on time</Badge>
+                )}
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
   );
+}
+
+function SpendCard({
+  rollup,
+  loading,
+  error,
+}: {
+  rollup: VendorSpendRollupRow[] | undefined;
+  loading: boolean;
+  error: unknown;
+}) {
+  if (loading) return <Skeleton className="h-24 w-full" />;
+  if (error || !rollup || rollup.length === 0) return null;
+  const overall = rollup.filter((r) => !r.tool_category);
+  const byCategory = rollup.filter((r) => r.tool_category);
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Security software spend</CardTitle>
+        <CardDescription>
+          Annualized entered spend, grouped by currency and category.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-wrap gap-6">
+        {overall.map((r) => (
+          <Stat
+            key={`overall-${r.currency}`}
+            label={`Overall ${r.currency}`}
+            value={formatSpend(r.annual_cost, r.currency)}
+            sub={`${r.vendor_count} tools`}
+          />
+        ))}
+        {byCategory.map((r) => (
+          <Stat
+            key={`${r.currency}-${r.tool_category}`}
+            label={`${r.tool_category?.replace("_", " ")} ${r.currency}`}
+            value={formatSpend(r.annual_cost, r.currency)}
+            sub={`${r.vendor_count} tools`}
+          />
+        ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function formatSpend(amount?: number | null, currency?: string | null): string {
+  if (amount == null || !currency) return "—";
+  return `${currency} ${amount.toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function CriticalityBadge({ value }: { value: string }) {

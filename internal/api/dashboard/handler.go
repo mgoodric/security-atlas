@@ -187,13 +187,14 @@ func (h *Handler) Activity(w http.ResponseWriter, r *http.Request) {
 // ===== AC-4: GET /v1/upcoming =====
 
 // Upcoming handles GET /v1/upcoming — a unified rollup across expiring
-// exceptions, policy-ack expirations, vendor reviews, and audit-period
+// exceptions, policy-ack expirations, vendor reviews, vendor renewals, and audit-period
 // milestones, merged into one date-sorted (ascending) paginated feed.
 //
 // Query params:
 //   - cursor   (optional) opaque keyset cursor. Omit for the first page.
 //   - limit    (optional) page size, default 50, max 200.
 //   - category (optional) one of exception / policy_ack / vendor_review /
+//     vendor_renewal /
 //     audit_period — narrows to one source. Omit for all.
 func (h *Handler) Upcoming(w http.ResponseWriter, r *http.Request) {
 	if !requireProgramRead(w, r) {
@@ -208,7 +209,7 @@ func (h *Handler) Upcoming(w http.ResponseWriter, r *http.Request) {
 	category := r.URL.Query().Get("category")
 	if category != "" && !validUpcomingCategory(category) {
 		httpresp.WriteError(w, http.StatusBadRequest,
-			"category must be one of: exception, policy_ack, vendor_review, audit_period")
+			"category must be one of: exception, policy_ack, vendor_review, vendor_renewal, audit_period")
 
 		return
 	}
@@ -275,12 +276,12 @@ func splitUpcomingPage(rows []dbx.ListUpcomingItemsRow, pageRows int32) ([]dbx.L
 
 // ===== helpers =====
 
-// validUpcomingCategory reports whether c is one of the four rollup
+// validUpcomingCategory reports whether c is one of the rollup
 // category names. The empty string ("all") is handled before this is
 // called.
 func validUpcomingCategory(c string) bool {
 	switch c {
-	case "exception", "policy_ack", "vendor_review", "audit_period":
+	case "exception", "policy_ack", "vendor_review", "vendor_renewal", "audit_period":
 		return true
 	default:
 		return false

@@ -5,10 +5,12 @@
 INSERT INTO vendors (
     id, tenant_id, name, domain, criticality, contract_start, contract_end,
     dpa_signed, dpa_signed_at, review_cadence, last_review_date, owner_user,
-    linked_sow_uri, notes
+    linked_sow_uri, notes, annual_cost, currency, renewal_date, auto_renew,
+    license_count, tool_category, cost_owner, commercial_status, billing_cadence
 )
 VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16,
+    $17, $18, $19, $20, $21, $22, $23
 )
 RETURNING *;
 
@@ -29,6 +31,15 @@ UPDATE vendors SET
     owner_user       = $12,
     linked_sow_uri   = $13,
     notes            = $14,
+    annual_cost      = $15,
+    currency         = $16,
+    renewal_date     = $17,
+    auto_renew       = $18,
+    license_count    = $19,
+    tool_category    = $20,
+    cost_owner       = $21,
+    commercial_status = $22,
+    billing_cadence  = $23,
     updated_at       = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;
@@ -49,6 +60,8 @@ SELECT * FROM vendors
 WHERE tenant_id = @tenant_id
   AND (sqlc.narg('criticality')::vendor_criticality IS NULL
        OR criticality = sqlc.narg('criticality'))
+  AND (sqlc.narg('tool_category')::vendor_tool_category IS NULL
+       OR tool_category = sqlc.narg('tool_category'))
 ORDER BY criticality DESC, name ASC;
 
 -- name: ListOverdueVendors :many
@@ -100,6 +113,39 @@ WHERE tenant_id = @tenant_id
   AND (sqlc.narg('criticality')::vendor_criticality IS NULL
        OR criticality = sqlc.narg('criticality'))
 GROUP BY criticality;
+
+-- name: ListVendorSpendRollup :many
+-- Commercial spend rollup for purchased security tooling. Aggregates only
+-- rows with annual_cost + currency and excludes churned tools from current
+-- spend. category NULL is the overall rollup for that currency; non-NULL
+-- rows are category subtotals.
+SELECT
+    NULL::vendor_tool_category AS tool_category,
+    currency,
+    SUM(annual_cost)::float8 AS annual_cost,
+    COUNT(*)::bigint AS vendor_count
+FROM vendors v
+WHERE v.tenant_id = @tenant_id
+  AND v.annual_cost IS NOT NULL
+  AND v.currency IS NOT NULL
+  AND v.commercial_status <> 'churned'
+GROUP BY v.currency
+
+UNION ALL
+
+SELECT
+    v.tool_category,
+    v.currency,
+    SUM(v.annual_cost)::float8 AS annual_cost,
+    COUNT(*)::bigint AS vendor_count
+FROM vendors v
+WHERE v.tenant_id = @tenant_id
+  AND v.annual_cost IS NOT NULL
+  AND v.currency IS NOT NULL
+  AND v.commercial_status <> 'churned'
+  AND v.tool_category IS NOT NULL
+GROUP BY v.tool_category, v.currency
+ORDER BY currency ASC, tool_category ASC NULLS FIRST;
 
 -- name: SetVendorLastReviewDate :exec
 -- Slice 688: keep vendors.last_review_date consistent with the vendor_reviews
