@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/security_awareness.training_completion/1.0.0.json",
+  "x-evidence-kind": "security_awareness.training_completion.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["HRS-04"],
+  "title": "Security awareness training completion",
+  "description": "A per-person security-awareness training assignment completion. Produced by the security awareness tracking surface from manual entry, CSV import, or an LMS connector import. The record contains training/campaign identifiers, completion timestamp/source, and optional phishing-simulation outcome metadata; it does not contain course content or sensitive HRIS PII.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "assignment_id",
+    "campaign_id",
+    "campaign_name",
+    "course_code",
+    "course_title",
+    "person_id",
+    "completed_at",
+    "completion_source"
+  ],
+  "properties": {
+    "assignment_id": { "type": "string", "format": "uuid" },
+    "campaign_id": { "type": "string", "format": "uuid" },
+    "campaign_name": { "type": "string" },
+    "course_code": { "type": "string" },
+    "course_title": { "type": "string" },
+    "person_id": { "type": "string", "format": "uuid" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "completion_source": {
+      "type": "string",
+      "enum": ["manual", "csv", "lms_connector"]
+    },
+    "phishing_outcome": {
+      "type": "string",
+      "enum": ["no_click", "clicked", "reported", "credential_submitted"]
+    }
+  }
+}

@@ -2352,6 +2352,68 @@ type ScopeDimension struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type SecurityTrainingAssignment struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	CampaignID       pgtype.UUID        `json:"campaign_id"`
+	PersonID         pgtype.UUID        `json:"person_id"`
+	DueAt            pgtype.Timestamptz `json:"due_at"`
+	AssignedAt       pgtype.Timestamptz `json:"assigned_at"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	CompletionSource *string            `json:"completion_source"`
+	EvidenceRecordID pgtype.UUID        `json:"evidence_record_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SecurityTrainingCampaign struct {
+	ID        pgtype.UUID        `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	CourseID  pgtype.UUID        `json:"course_id"`
+	Name      string             `json:"name"`
+	StartsAt  pgtype.Timestamptz `json:"starts_at"`
+	DueAt     pgtype.Timestamptz `json:"due_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SecurityTrainingCourse struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	Code        string             `json:"code"`
+	Title       string             `json:"title"`
+	Description string             `json:"description"`
+	Required    bool               `json:"required"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SecurityTrainingPerson struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	Source          string             `json:"source"`
+	SourcePersonID  *string            `json:"source_person_id"`
+	DisplayName     string             `json:"display_name"`
+	WorkEmail       *string            `json:"work_email"`
+	RecipientUserID *string            `json:"recipient_user_id"`
+	Active          bool               `json:"active"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SecurityTrainingPhishingResult struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	AssignmentID pgtype.UUID        `json:"assignment_id"`
+	SimulationID string             `json:"simulation_id"`
+	SentAt       pgtype.Timestamptz `json:"sent_at"`
+	Outcome      string             `json:"outcome"`
+	ClickedAt    pgtype.Timestamptz `json:"clicked_at"`
+	ReportedAt   pgtype.Timestamptz `json:"reported_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Session struct {
 	ID         string             `json:"id"`
 	TenantID   pgtype.UUID        `json:"tenant_id"`
