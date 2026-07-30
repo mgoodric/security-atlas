@@ -54,6 +54,7 @@ type Querier interface {
 	// service rejects a blank approver before this call. Scoped to the tenant +
 	// the AI-assisted draft; an absent/cross-tenant id returns no row.
 	ApproveBoardNarrativeSection(ctx context.Context, arg ApproveBoardNarrativeSectionParams) (BoardNarrativeSection, error)
+	ApproveChange(ctx context.Context, arg ApproveChangeParams) (Change, error)
 	// One-click per-section approval (AC-10): flip human_approved=TRUE + record the
 	// approver on an AI-assisted, currently-unapproved section. The
 	// ai_assisted=TRUE AND human_approver IS NOT NULL guard in the WHERE means an
@@ -129,6 +130,9 @@ type Querier interface {
 	// The COALESCE start chain mirrors the lifecycle: effective_from is set at
 	// activation, approved_at at approval, requested_at always.
 	BoardBriefExceptionAggregate(ctx context.Context, arg BoardBriefExceptionAggregateParams) (BoardBriefExceptionAggregateRow, error)
+	ChangeControlExistsInTenant(ctx context.Context, arg ChangeControlExistsInTenantParams) (bool, error)
+	ChangeRollup(ctx context.Context, tenantID pgtype.UUID) (ChangeRollupRow, error)
+	ChangeUserExistsInTenant(ctx context.Context, arg ChangeUserExistsInTenantParams) (bool, error)
 	// Idempotency claim: insert a pending delivery-log row for
 	// (tenant, channel, recipient, digest_key). ON CONFLICT DO NOTHING means a
 	// second claim returns no row — the caller skips the send (no double-send /
@@ -306,6 +310,8 @@ type Querier interface {
 	// Insert a period with status='open'. frozen_at / frozen_hash / frozen_by
 	// are NULL on create (enforced by audit_periods_frozen_coherent CHECK).
 	CreateAuditPeriod(ctx context.Context, arg CreateAuditPeriodParams) (AuditPeriod, error)
+	// Change-management register queries for OE-629.
+	CreateChange(ctx context.Context, arg CreateChangeParams) (Change, error)
 	// Insert a new Decision Log entry (canvas §6.7). Slice 052 ships the table
 	// + queries; slice 055 adds the HTTP CRUD surface. decision_id is the
 	// tenant-visible identifier ("DL-2026-04-12"); the application generates it.
@@ -678,6 +684,8 @@ type Querier interface {
 	// cross-tenant id returns ErrNoRows (the handler maps that to 404). Works
 	// for both draft and published packs.
 	GetBoardPackByID(ctx context.Context, arg GetBoardPackByIDParams) (BoardPack, error)
+	GetChangeByID(ctx context.Context, arg GetChangeByIDParams) (Change, error)
+	GetChangeBySourceRef(ctx context.Context, arg GetChangeBySourceRefParams) (Change, error)
 	// Read a delivery-log row by id (tests + outcome inspection).
 	GetChannelDeliveryLog(ctx context.Context, arg GetChannelDeliveryLogParams) (ChannelDeliveryLog, error)
 	// Fetch one section by id within the caller's tenant. Used by the approval flow
@@ -986,6 +994,7 @@ type Querier interface {
 	// The CAST chain (jsonb -> text -> int) is necessary because pgx cannot
 	// read jsonb-number values directly as int4 without an explicit cast.
 	HeatmapBuckets(ctx context.Context, tenantID pgtype.UUID) ([]HeatmapBucketsRow, error)
+	ImplementChange(ctx context.Context, arg ImplementChangeParams) (Change, error)
 	// Persist a new API key. token_hash is HMAC-SHA256(plaintext, BEARER_HASH_KEY)
 	// per ADR 0002 — computed by the application layer before this call. last4 is
 	// the last four characters of the plaintext bearer (safe to surface).
@@ -1273,6 +1282,7 @@ type Querier interface {
 	// Idempotent at the handler layer (it checks existence first); the PK makes
 	// a duplicate INSERT a unique-violation the store maps to 409.
 	LinkActionPlanRisk(ctx context.Context, arg LinkActionPlanRiskParams) error
+	LinkChangeControl(ctx context.Context, arg LinkChangeControlParams) error
 	// ===== decision_controls =====
 	LinkDecisionControl(ctx context.Context, arg LinkDecisionControlParams) error
 	// ===== decision_exceptions =====
@@ -1682,6 +1692,9 @@ type Querier interface {
 	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
 	// inside an ARRAY[] constructor.
 	ListCandidateRisksForRule(ctx context.Context, arg ListCandidateRisksForRuleParams) ([]Risk, error)
+	ListChangeAuditLog(ctx context.Context, arg ListChangeAuditLogParams) ([]ChangeAuditLog, error)
+	ListChangeControls(ctx context.Context, arg ListChangeControlsParams) ([]ListChangeControlsRow, error)
+	ListChanges(ctx context.Context, arg ListChangesParams) ([]Change, error)
 	// The cited task items in one section, render order. Tenant-scoped.
 	ListChecklistItemsBySection(ctx context.Context, arg ListChecklistItemsBySectionParams) ([]ChecklistItem, error)
 	// Load all sections of one generation for the caller's tenant, role order
@@ -3202,6 +3215,7 @@ type Querier interface {
 	// active user in the calling tenant? RLS hides cross-tenant users; the
 	// status gate rejects a disabled user as an assignment target.
 	UserExistsInTenant(ctx context.Context, arg UserExistsInTenantParams) (bool, error)
+	VerifyChange(ctx context.Context, arg VerifyChangeParams) (Change, error)
 	// Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
 	// Read-only integrity walk — recomputes each record's canonical hash and
 	// compares to the stored `hash`. Ordered by id ASC so the caller can page
@@ -3252,6 +3266,7 @@ type Querier interface {
 	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 	// the DB layer; explicit-is-clearer per AC-5).
 	WriteAuditPeriodLog(ctx context.Context, arg WriteAuditPeriodLogParams) (AuditPeriodAuditLog, error)
+	WriteChangeAuditLog(ctx context.Context, arg WriteChangeAuditLogParams) (ChangeAuditLog, error)
 	// Decision Log audit log (slice 055, migration _030).
 	//
 	// decisions_audit is an append-only mutation log: every PATCH, supersede,

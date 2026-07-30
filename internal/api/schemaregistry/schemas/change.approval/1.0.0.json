@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/change.approval/1.0.0.json",
+  "x-evidence-kind": "change.approval.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CHG-02", "CFG-04"],
+  "title": "Change approval evidence",
+  "description": "Evidence that an operational change was approved before implementation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["change_id", "title", "status", "source", "action"],
+  "properties": {
+    "change_id": { "type": "string", "format": "uuid" },
+    "title": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "const": "approved" },
+    "source": { "type": "string", "enum": ["manual", "jira", "csv"] },
+    "source_ref": { "type": "string" },
+    "risk_notes": { "type": "string" },
+    "rollback_notes": { "type": "string" },
+    "action": { "type": "string", "const": "approved" }
+  }
+}

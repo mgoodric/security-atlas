@@ -98,6 +98,8 @@ func DefaultSeed() []KindVersion {
 		{Kind: "1password.org_policy.v1", Version: "1.0.0"},
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
+		{Kind: "change.approval.v1", Version: "1.0.0"},
+		{Kind: "change.verification.v1", Version: "1.0.0"},
 		{Kind: "manual.upload.v1", Version: "1.0.0"},
 		// Slice 486: Azure connector (Entra ID + Storage).
 		{Kind: "azure.entra_role_assignment.v1", Version: "1.0.0"},

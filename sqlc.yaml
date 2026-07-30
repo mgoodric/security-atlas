@@ -86,6 +86,7 @@ sql:
       - "migrations/sql/20260612100000_tenant_llm_routing.sql"
       - "migrations/sql/20260730000000_security_awareness_training.sql"
       - "migrations/sql/20260730000000_vendor_commercial_fields.sql"
+      - "migrations/sql/20260802000000_change_management.sql"
     queries: "internal/db/queries"
     gen:
       go:
