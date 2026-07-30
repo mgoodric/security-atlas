@@ -1,0 +1,25 @@
+internal/controlimport/import.go
+  s_ce153060edeb92::t_be73e592174b65 1-221
+internal/controlimport/import_test.go
+  s_ce153060edeb92::t_b2bc5d8bc5000a 1-101
+internal/controlimport/service.go
+  s_ce153060edeb92::t_4cd4db0aeb7b3a 1-364
+internal/controlimport/service_test.go
+  s_ce153060edeb92::t_4f64c159177c9b 1-216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.16",
+  "base_commit_sha": "f124890740779c310713a7f6ba5a768238d0f1f2",
+  "prompts": {},
+  "sessions": {
+    "s_ce153060edeb92": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb3f1-267e-7dc3-85f8-4e6062f6b689",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
