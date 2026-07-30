@@ -46,6 +46,7 @@ var Events = []string{
 	// internal/notify/email/kindfilter.go (kindToEvent).
 	"audit_note_reply",
 	"evidence_staleness",
+	"vulnerability_sla_overdue",
 }
 
 // Channels is the canonical channel whitelist. Mirrors the migration's CHECK constraint.

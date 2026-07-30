@@ -7,7 +7,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/metrics/eval"
 )
 
-func TestRegistry_RegistersAllEightStarters(t *testing.T) {
+func TestRegistry_RegistersStarters(t *testing.T) {
 	r := eval.NewRegistry(nil)
 	got := r.Names()
 	want := []string{
@@ -19,6 +19,7 @@ func TestRegistry_RegistersAllEightStarters(t *testing.T) {
 		"policy_attestation_rate",
 		"program_effectiveness",
 		"vendor_risk_concentration",
+		"vulnerability_sla",
 	}
 	sort.Strings(want)
 	if len(got) != len(want) {

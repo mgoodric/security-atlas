@@ -143,12 +143,13 @@ func buildDeepLink(baseURL string) string {
 // injection + minimum-disclosure). Unknown types fall back to a generic
 // label.
 var typeLabels = map[string]string{
-	"audit_note.reply":        "Audit-note replies",
-	"control.drift":           "Control-drift alerts",
-	"policy_ack_due":          "Policy acknowledgments due",
-	"risk_review_overdue":     "Overdue risk reviews",
-	"audit_period_assignment": "Audit-period assignments",
-	"evidence.staleness":      "Stale-evidence digests",
+	"audit_note.reply":          "Audit-note replies",
+	"control.drift":             "Control-drift alerts",
+	"policy_ack_due":            "Policy acknowledgments due",
+	"risk_review_overdue":       "Overdue risk reviews",
+	"audit_period_assignment":   "Audit-period assignments",
+	"evidence.staleness":        "Stale-evidence digests",
+	"vulnerability.sla_overdue": "Vulnerability SLA alerts",
 }
 
 func typeLabel(t string) string {

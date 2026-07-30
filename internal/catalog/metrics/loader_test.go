@@ -217,7 +217,7 @@ func TestLoad_ManualWithEvaluatorIsRejected(t *testing.T) {
 
 func TestLoad_AcceptsRealCatalog(t *testing.T) {
 	// Smoke-test the actual catalogs/metrics/ directory by mirroring the
-	// same load logic used at boot. Registers exactly the 8 evaluators
+	// same load logic used at boot. Registers exactly the evaluators
 	// the catalog references.
 	fsys := realCatalogFS(t)
 	registered := cat.MapRegistry{
@@ -229,6 +229,7 @@ func TestLoad_AcceptsRealCatalog(t *testing.T) {
 		"vendor_risk_concentration":    {},
 		"exception_expiration_runway":  {},
 		"critical_findings_sla":        {},
+		"vulnerability_sla":            {},
 	}
 	c, err := cat.Load(fsys, registered)
 	if err != nil {
@@ -238,7 +239,7 @@ func TestLoad_AcceptsRealCatalog(t *testing.T) {
 		t.Errorf("Load real catalog: got %d metrics, want 35-45", got)
 	}
 	// Every parent reference resolved (Load already guarantees this) and
-	// every computed metric is one of the eight registered evaluators.
+	// every computed metric is one of the registered evaluators.
 	for _, m := range c.Metrics {
 		if m.ComputeStrategy == cat.StrategyComputed {
 			if !registered.Has(m.ComputeEvaluator) {
