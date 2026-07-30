@@ -1,0 +1,67 @@
+CHANGELOG.md
+  s_a74c323d6d884b::t_1c708869ff4808 16-17
+docs/audit-log/758-questionnaire-export-gate-decisions.md
+  s_a74c323d6d884b::t_6924b05ed9cb22 1-54
+internal/api/questionnaires/handlers.go
+  s_a74c323d6d884b::t_b0c210d3effca4 24,34,46-48,62-65,313-314,329-330,335,345-360,362-363,486-492
+internal/api/questionnaires/integration_test.go
+  s_a74c323d6d884b::t_7fb6385ceca4a9 60,344-433,534-591
+internal/api/register_questionnaire.go
+  s_a74c323d6d884b::t_0c66180a911099 8,50-54
+internal/audit/questionnaire_export.go
+  s_a74c323d6d884b::t_08f0ff5b44d239 1-86
+internal/audit/unifiedlog/joinkinds_test.go
+  s_a74c323d6d884b::t_0c5fbb47ef50af 11-13,52,55,78
+internal/audit/unifiedlog/unifiedlog.go
+  s_a74c323d6d884b::t_78146f7cd90a1f 2,5-6,55,60-69,98,101
+internal/audit/unifiedlog/unifiedlog_test.go
+  s_a74c323d6d884b::t_44e02f04799d5a 11,34,36,38
+internal/db/dbx/models.go
+  s_a74c323d6d884b::t_a11528e51940d1 2158-2170
+internal/db/dbx/unified_audit_log.sql.go
+  s_a74c323d6d884b::t_e6aceb0557e075 172-188
+internal/db/queries/unified_audit_log.sql
+  s_a74c323d6d884b::t_5ce2a4ee2453d3 227-243
+internal/questionnaire/export_gate.go
+  s_a74c323d6d884b::t_864fa2c424e07c 1-87
+internal/questionnaire/export_gate_test.go
+  s_a74c323d6d884b::t_1d6689a1cbfe9d 1-86
+internal/questionnaire/integration_test.go
+  s_a74c323d6d884b::t_d5421c904cebe4 54
+internal/questionnaire/store.go
+  s_a74c323d6d884b::t_abbc7ce466b368 68-74,406-412
+migrations/sql/20260612110000_questionnaire_export_audit_log.down.sql
+  s_a74c323d6d884b::t_1d61216d2402c4 1
+migrations/sql/20260612110000_questionnaire_export_audit_log.sql
+  s_a74c323d6d884b::t_c3dc51b8ba1e35 1-47
+sqlc.yaml
+  s_a74c323d6d884b::t_e5c0bc249e72c9 87
+web/app/(authed)/questionnaires/[id]/page.tsx
+  s_a74c323d6d884b::t_528e89c1ceee51 22-25,47,70-83,95,155,182-189,196,198,219-224
+web/app/api/questionnaires/[id]/export-pdf/route.test.ts
+  s_a74c323d6d884b::t_527b70cb82cd4f 59-78
+web/app/api/questionnaires/[id]/export-pdf/route.ts
+  s_a74c323d6d884b::t_57502c2fd25d1e 46-56,59
+web/components/questionnaire/types.ts
+  s_a74c323d6d884b::t_374abd02bfdc14 25-26
+web/lib/api/audit-log.test.ts
+  s_a74c323d6d884b::t_79912109d54765 88,99
+web/lib/api/audit-log.ts
+  s_a74c323d6d884b::t_9f89383541c0a4 17,32
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.18",
+  "base_commit_sha": "898da4a1ff945cf2e4e8b06a61cc6ef8d9d4c25b",
+  "prompts": {},
+  "sessions": {
+    "s_a74c323d6d884b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb4b9-87f0-7ef0-9e13-19a804233ac6",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
