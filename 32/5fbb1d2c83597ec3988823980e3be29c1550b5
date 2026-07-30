@@ -1,0 +1,29 @@
+cmd/atlas-cli/cmd_catalog.go
+  s_eeeb1352e4fcfd::t_8bea2719cfefba 7,9,75-78,83-85,88-93,97,110-123,158-163
+docs/operator/scf-crosswalk-import.md
+  s_eeeb1352e4fcfd::t_19e688d1db622f 1-74
+internal/api/soc2import/import_test.go
+  s_eeeb1352e4fcfd::t_289b7ce7b6048b 45-59,166-201
+internal/api/soc2import/loader.go
+  s_eeeb1352e4fcfd::t_b4b88a71787829 36-37,133,135-137
+internal/api/soc2import/scf_workbook.go
+  s_eeeb1352e4fcfd::t_b233d9c5895687 1-434
+internal/api/soc2import/scf_workbook_test.go
+  s_eeeb1352e4fcfd::t_2d21f084cab969 1-192
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.18",
+  "base_commit_sha": "325fbb1d2c83597ec3988823980e3be29c1550b5",
+  "prompts": {},
+  "sessions": {
+    "s_eeeb1352e4fcfd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb4a2-cb34-70f3-ba30-a26016573512",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
