@@ -1,9 +1,9 @@
 internal/board/integration_test.go
-  s_138a8c90a6b2be::t_2a46229ecc478a 97-108,111,342-344,346,348,351,374-377,380,392,684-686,701,738-744,746,761,773-779
+  s_138a8c90a6b2be::t_f61a4e52b4c543 97-108,111,342-344,346,348,351,374-377,380,392,684-686,701,738-744,746,761,773-779
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.6.16",
+  "git_ai_version": "1.6.19",
   "base_commit_sha": "4dfa7ce329d0d87fa6fec3a1f524920259d40ec3",
   "prompts": {},
   "sessions": {
