@@ -6,9 +6,10 @@
 // Design:
 //
 //   - Server component (mirrors slice 186 `sidebar.tsx`): reads the
-//     bearer cookie server-side, calls the existing BFF `/api/me` (slice
-//     108 GET handler), and renders the initials + display name in
-//     markup the client receives whole. No client-side state.
+//     bearer cookie server-side, calls the platform's `/v1/me` (the same
+//     upstream the slice 108 BFF GET handler proxies), and renders the
+//     initials + display name in markup the client receives whole. No
+//     client-side state.
 //   - Fail closed: any fetch error / missing bearer / unparseable body
 //     renders NULL. Better a brief gap than the wrong identity.
 //     (Parallels P0-186-4 from the sidebar admin-role-gate.)
@@ -21,9 +22,10 @@
 //     cookie; the platform's /v1/me handler reads the bearer-bound
 //     user record. The avatar never reads or forwards a tenant_id.
 
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 
 import { deriveDisplayName, deriveInitials } from "@/lib/display-name";
+import { fetchSelfProfile } from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 interface MeBody {
@@ -32,29 +34,22 @@ interface MeBody {
 }
 
 /**
- * Fetches the operator's profile via the BFF `/api/me` route. Mirrors
- * the slice 186 `fetchAdminMe` shape — self-referential fetch via
- * host + proto so the call resolves whether we're rendering on the
- * server-rendered page or in dev with the proxy. Returns `null` on any
- * failure so the caller can collapse to "render nothing".
+ * Fetches the operator's profile from the platform's `/v1/me`. Returns
+ * `null` on any failure so the caller can collapse to "render nothing".
+ *
+ * OE-549: this was a self-referential fetch of the app's own `/api/me`
+ * BFF route at an origin rebuilt from the request Host header. Inside
+ * the web container that address is refused (the Host carries the
+ * EXTERNAL published port; next-server binds the container IP, not
+ * loopback), so the avatar silently never rendered on ANY authed page —
+ * the same defect that 500'd `/admin/*`, just fail-soft. It now reads
+ * the platform through the stable internal base.
  */
 async function fetchMe(): Promise<MeBody | null> {
-  try {
-    const jar = await cookies();
-    const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
-    if (!bearer) return null;
-    const h = await headers();
-    const host = h.get("host") ?? "localhost:3000";
-    const proto = h.get("x-forwarded-proto") ?? "http";
-    const res = await fetch(`${proto}://${host}/api/me`, {
-      headers: { Cookie: `${ATLAS_JWT_COOKIE}=${bearer}` },
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    return (await res.json()) as MeBody;
-  } catch {
-    return null;
-  }
+  const jar = await cookies();
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
+  if (!bearer) return null;
+  return fetchSelfProfile(bearer);
 }
 
 function asString(v: unknown): string {

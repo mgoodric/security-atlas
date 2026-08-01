@@ -203,3 +203,5 @@
 {"slice":701,"to":"deferred","ts":"2026-06-13","ref":"","note":"billing-only / off the critical path (parallel or non-critical job); maintainer prioritizes time-to-live not runner-minutes; revisit when dev slows — see slice 747"}
 {"slice":702,"to":"deferred","ts":"2026-06-13","ref":"","note":"billing-only / off the critical path (parallel or non-critical job); maintainer prioritizes time-to-live not runner-minutes; revisit when dev slows — see slice 747"}
 {"slice":703,"to":"deferred","ts":"2026-06-13","ref":"","note":"billing-only / off the critical path (parallel or non-critical job); maintainer prioritizes time-to-live not runner-minutes; revisit when dev slows — see slice 747"}
+{"slice":272,"to":"merged","ts":"2026-07-25","ref":"","note":"shipped by slice 223 on slice 268's endpoint (+361 ARIA, +661 anchors); not-ready gate discharged, click-navigate e2e leg added — OE-398"}
+{"slice":228,"to":"superseded","ts":"2026-07-25","ref":"","note":"duplicate of slice 272 from the UI end; shipped once via slice 223. Distinct remainder (pg_trgm index) stated in the slice doc — OE-398"}

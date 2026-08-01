@@ -227,6 +227,48 @@ test.describe("dashboard view", () => {
     await expect(rows.or(emptyState).first()).toBeVisible();
   });
 
+  test("slice 232: activity feed footer navigates to the real /activity ledger", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/dashboard/activity", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          activity: [
+            {
+              ts: "2026-07-25T12:00:00Z",
+              event_type: "evidence.ingested",
+              actor: "test-user",
+              resource_type: "evidence",
+              resource_id: "test-evidence-001",
+              summary: { filename: "policy.pdf" },
+            },
+          ],
+          count: 1,
+          next_cursor: "",
+        }),
+      });
+    });
+    await page.route("**/api/activity?**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ entries: [], next_cursor: "" }),
+      });
+    });
+
+    await page.goto("/dashboard");
+    const link = page.getByTestId("activity-feed-ledger-link");
+    await expect(link).toBeVisible();
+    await expect(link).toHaveAttribute("href", "/activity");
+
+    await link.click();
+    await expect(page).toHaveURL(/\/activity$/);
+    await expect(page.getByRole("heading", { name: "Activity" })).toBeVisible();
+    await expect(page.getByTestId("activity-page")).toBeVisible();
+  });
+
   test("AC-2/AC-3 slice 667: no inert filter chips or dev placeholder note", async ({
     authedPage: page,
   }) => {

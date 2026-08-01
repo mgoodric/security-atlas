@@ -4699,13 +4699,50 @@ paths:
       operationId: get-v1-search
       security:
         - bearer: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Free-text lexical query. Must be at least 2 characters after trimming.
+          schema:
+            type: string
+            minLength: 2
+        - name: types
+          in: query
+          required: false
+          description: Comma-separated result types. Omit for all supported types.
+          schema:
+            type: string
+            pattern: "^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$"
+            examples: ["controls,risks,evidence"]
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of merged hits to return. Defaults to 25; hard cap is 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 25
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: RLS-scoped merged search results across admitted result types.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: Invalid q, limit, or types query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing tenant or bearer context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/tenants/{id}:
     patch:
       summary: PATCH /v1/tenants/{id} — rename a tenant and/or set its control-bundle gate policy (per-tenant admin or super_admin)
@@ -5064,3 +5101,49 @@ components:
         Empty acknowledgment envelope. Used by mutation endpoints that
         do not return a representation of the mutated resource (e.g.
         `POST /v1/policies/{id}/publish`).
+    SearchResponse:
+      type: object
+      required: [hits, count, partial_types]
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchHit"
+        count:
+          type: integer
+          minimum: 0
+          description: Number of hits returned after relevance sorting and the global limit.
+        partial_types:
+          type: array
+          items:
+            type: string
+            enum: [anchors, controls, risks, evidence]
+          description: Requested types omitted because per-type authorization denied them.
+      description: |
+        Unified lexical search response for `GET /v1/search`. Controls,
+        risks, and evidence are tenant-confined by database RLS. Anchors are
+        bundled tenant-agnostic catalog rows.
+    SearchHit:
+      type: object
+      required: [id, type, title, snippet, relevance_score]
+      properties:
+        id:
+          type: string
+          description: Stable identifier for the matched row or bundled anchor.
+        type:
+          type: string
+          enum: [anchors, controls, risks, evidence]
+          description: Result discriminator used by clients for grouping and routing.
+        title:
+          type: string
+          description: Display title for the matched result.
+        snippet:
+          type: string
+          maxLength: 120
+          description: Short textual context for the match.
+        relevance_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Lexical token-overlap relevance score. Higher sorts first.

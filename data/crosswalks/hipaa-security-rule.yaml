@@ -56,11 +56,29 @@
 #   scope (canvas §10.3; P0-516 anti-criteria) — this is CATALOG edges only.
 #   See docs/audit-log/516-hipaa-full-coverage-decisions.md.
 #
+# FINER-ANCHOR RE-POINT (slice 567 — the 21 palette-bound residual rows):
+#   Slice 516's decisions log carried a 21-row residual table: rows that had to
+#   map to the closest COVERING anchor because the bundled sample palette had no
+#   finer one. Slice 567 grows that palette with the 15 finer anchors those rows
+#   need (the operator's INTERIM option-(A) decision — see slice 754) and
+#   re-points 16 of the 21. The other five are settled in place: two are HIPAA
+#   regulatory arrangements with no control analog in any catalog
+#   (§164.314(a)(2)(ii), §164.314(b)(1)) and three were checked against the grown
+#   palette and deliberately not re-pointed (§164.310(a)(2)(i),
+#   §164.314(b)(2)(ii), §164.316(b)(2)(i)). Every one of the 21 carries its
+#   verdict in its own `rationale` below; the full reasoning is in
+#   docs/audit-log/567-hipaa-finer-anchor-remap-decisions.md D6.
+#   The sample fixture remains a curated TEST palette, not an SCF release —
+#   identifier numbering is reconciled against the real catalog when slice 754
+#   option (B) lands. NO other crosswalk was touched.
+#
 # Source basis (methodology, not copied text):
 #   - 45 CFR §§164.308 / 164.310 / 164.312 section identifiers + short titles
 #     (factual references to a public-domain U.S. government work)
 #   - SCF anchor families published in the platform's slice-006 fixture
-#     (migrations/fixtures/scf-sample.json — 53 anchors)
+#     (migrations/fixtures/scf-sample.json — 77 anchors; the file was a
+#     53-anchor palette when slice 481 authored these rows, grew to 62 in
+#     slices 635/641, and to 77 in slice 567)
 #   - NIST IR 8477 STRM methodology (canvas §3.2; UCF_GRAPH_MODEL.md §4)
 #   - NIST SP 800-66r2 (HIPAA Security Rule → SP 800-53 guidance) informs the
 #     anchor choices; these rows are the agent's independent draft pending review.
@@ -326,10 +344,10 @@ mappings:
     strength: 0.8
     rationale: "HIPAA Risk Management (reduce risks to reasonable level) is governed by the SCF Risk Management Program."
   - requirement_code: "164.308(a)(1)(ii)(C)"
-    scf_anchor: "HRS-01"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Sanction Policy (sanctions for non-compliant workforce) overlaps SCF Human Resources Security; the disciplinary-process facet is narrower than HR security and no dedicated sanctions anchor exists in the sample palette (LOW)."
+    scf_anchor: "HRS-07"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Slice 567 re-point (was HRS-01 @ 0.60). Sanction Policy (apply appropriate sanctions against workforce members who fail to comply) is the disciplinary-process control itself, not the HR-security program that contains it; HRS-07 Personnel Sanctions is the dedicated anchor and HRS-01 over-covered the requirement. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 1."
   - requirement_code: "164.308(a)(1)(ii)(D)"
     scf_anchor: "AAA-12"
     relationship_type: "equal"
@@ -366,10 +384,10 @@ mappings:
     strength: 0.8
     rationale: "Information Access Management (authorizing access) is covered by SCF User Provisioning & Lifecycle."
   - requirement_code: "164.308(a)(4)(ii)(A)"
-    scf_anchor: "DCH-01"
+    scf_anchor: "NET-06"
     relationship_type: "intersects_with"
-    strength: 0.55
-    rationale: "Isolating Health Care Clearinghouse Functions (protect ePHI from the larger org) overlaps SCF Data Classification & Handling for the segregation concept; the clearinghouse-isolation control has no dedicated anchor in the sample palette (LOW)."
+    strength: 0.65
+    rationale: "Slice 567 re-point (was DCH-01 @ 0.55). Isolating Health Care Clearinghouse Functions is structural isolation of the clearinghouse's ePHI from the larger organization — a segmentation control, not a data-classification one. NET-06 Network Segmentation is the closer concept, though the HIPAA obligation is organizational as well as technical, so the fit stays partial. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 2."
   - requirement_code: "164.308(a)(4)(ii)(B)"
     scf_anchor: "IAC-07"
     relationship_type: "subset_of"
@@ -401,10 +419,10 @@ mappings:
     strength: 0.7
     rationale: "Log-in Monitoring (monitor log-in attempts, report discrepancies) overlaps SCF Anomalous Behavior Detection; broader correlation gap (MEDIUM)."
   - requirement_code: "164.308(a)(5)(ii)(D)"
-    scf_anchor: "IAC-01"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Password Management (create/change/safeguard passwords) overlaps SCF Identification & Authentication Policy; the sample palette has no dedicated authenticator/password-management anchor, so this is the closest covering anchor (LOW)."
+    scf_anchor: "IAC-10"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Password Management (procedures for creating, changing, and safeguarding passwords) IS authenticator management; IAC-01 is the domain policy head that sits above it. IAC-10 Authenticator Management is the requirement's direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 3."
   - requirement_code: "164.308(a)(6)(i)"
     scf_anchor: "IRO-04"
     relationship_type: "subset_of"
@@ -441,10 +459,10 @@ mappings:
     strength: 0.85
     rationale: "Testing and Revision Procedures (periodic contingency testing) map directly to SCF Backup Testing."
   - requirement_code: "164.308(a)(7)(ii)(E)"
-    scf_anchor: "BCD-02"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Applications and Data Criticality Analysis (assess relative criticality) overlaps SCF Business Continuity Plan; a dedicated business-impact-analysis anchor is absent from the sample palette (LOW)."
+    scf_anchor: "RSK-08"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Slice 567 re-point (was BCD-02 @ 0.60). Applications and Data Criticality Analysis (assess the relative criticality of specific applications and data in support of the other contingency components) IS a Business Impact Analysis; mapping it to the continuity PLAN conflated the analysis input with the plan artifact it feeds. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 4."
   - requirement_code: "164.308(a)(8)"
     scf_anchor: "CPL-01"
     relationship_type: "subset_of"
@@ -471,7 +489,7 @@ mappings:
     scf_anchor: "BCD-02"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Contingency Operations (facility access supporting data restoration in an emergency) overlaps SCF Business Continuity Plan; the physical-access-in-emergency facet straddles continuity and physical-access controls (LOW)."
+    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Contingency Operations (facility access supporting data restoration in an emergency) genuinely straddles continuity and physical access, and neither family carries a control at that intersection worth minting: an emergency-facility-access anchor would exist only to serve this one row. BCD-02 remains the honest covering anchor at 0.60 (LOW). See decisions log D6 row 5."
   - requirement_code: "164.310(a)(2)(ii)"
     scf_anchor: "PES-04"
     relationship_type: "subset_of"
@@ -483,15 +501,15 @@ mappings:
     strength: 0.8
     rationale: "Access Control and Validation Procedures (control/validate person access by role, visitor control) are covered by SCF Physical Access Control."
   - requirement_code: "164.310(a)(2)(iv)"
-    scf_anchor: "PES-04"
+    scf_anchor: "MNT-02"
     relationship_type: "intersects_with"
-    strength: 0.55
-    rationale: "Maintenance Records (document security-related facility repairs/modifications) overlaps SCF Physical Access Control; a dedicated physical-maintenance-records anchor is absent from the sample palette (LOW)."
+    strength: 0.7
+    rationale: "Slice 567 re-point (was PES-04 @ 0.55). Maintenance Records (document repairs and modifications to the physical components of a facility which are related to security) is maintenance record-keeping, not physical access control; MNT-02 Controlled Maintenance carries the record-retention obligation. The fit stays partial because HIPAA scopes it to security-related facility components. Lift 0.55 -> 0.70 (LOW -> MEDIUM). See decisions log D6 row 6."
   - requirement_code: "164.310(b)"
-    scf_anchor: "PES-04"
+    scf_anchor: "HRS-12"
     relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Workstation Use (proper function, manner, surroundings) overlaps SCF Physical Access Control; the use-policy facet is broader than physical access (LOW)."
+    strength: 0.75
+    rationale: "Slice 567 re-point (was PES-04 @ 0.60; flagged in slice 481 D7 and re-confirmed in 516 D5). Workstation Use specifies the proper functions, the manner of performance, and the physical surroundings of a workstation — an acceptable-use / rules-of-behavior control. PES-04 covered only the surroundings clause. HRS-12 Rules of Behavior carries the use-policy body; the physical-surroundings clause keeps the relationship partial. Lift 0.60 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 7."
   - requirement_code: "164.310(c)"
     scf_anchor: "PES-04"
     relationship_type: "subset_of"
@@ -513,10 +531,10 @@ mappings:
     strength: 0.8
     rationale: "Media Re-use (remove ePHI from media before re-use) is the sanitization facet of SCF Asset Disposal."
   - requirement_code: "164.310(d)(2)(iii)"
-    scf_anchor: "AST-01"
-    relationship_type: "intersects_with"
-    strength: 0.65
-    rationale: "Accountability (record movements of hardware/media and the responsible person) overlaps SCF Asset Management Policy; the chain-of-custody facet is narrower than the asset-management policy (LOW)."
+    scf_anchor: "DCH-07"
+    relationship_type: "subset_of"
+    strength: 0.75
+    rationale: "Slice 567 re-point (was AST-01 @ 0.65). Accountability (record the movements of hardware and electronic media and any person responsible therefor) is media chain-of-custody, a specific control beneath the asset-management policy head rather than the head itself. DCH-07 Media Transportation & Custody carries the movement-and-accountability record. Lift 0.65 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 8."
   - requirement_code: "164.310(d)(2)(iv)"
     scf_anchor: "BCD-09"
     relationship_type: "subset_of"
@@ -536,15 +554,15 @@ mappings:
     strength: 0.75
     rationale: "Unique User Identification strongly overlaps SCF User Provisioning & Lifecycle (unique identity is a provisioning outcome)."
   - requirement_code: "164.312(a)(2)(ii)"
-    scf_anchor: "IAC-21"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Emergency Access Procedure (obtain necessary ePHI during an emergency, e.g. break-glass) overlaps SCF Privileged Account Management; a dedicated break-glass anchor is absent from the sample palette (LOW)."
+    scf_anchor: "IAC-24"
+    relationship_type: "equal"
+    strength: 0.8
+    rationale: "Slice 567 re-point (was IAC-21 @ 0.60). Emergency Access Procedure (procedures for obtaining necessary ePHI during an emergency) IS the break-glass control; privileged-account management was the covering anchor only because no break-glass anchor existed. IAC-24 Emergency Access (Break-Glass) Accounts is the direct equivalent. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 9."
   - requirement_code: "164.312(a)(2)(iii)"
-    scf_anchor: "IAC-01"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Automatic Logoff (terminate session after inactivity) overlaps SCF Identification & Authentication Policy; a dedicated session-management anchor is absent from the sample palette (LOW)."
+    scf_anchor: "IAC-25"
+    relationship_type: "equal"
+    strength: 0.85
+    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Automatic Logoff (electronic procedures that terminate an electronic session after a predetermined time of inactivity) IS session termination; IAC-01, the domain policy head, badly over-covered it. IAC-25 Session Termination is the direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 10."
   - requirement_code: "164.312(a)(2)(iv)"
     scf_anchor: "CRY-04"
     relationship_type: "equal"
@@ -556,15 +574,15 @@ mappings:
     strength: 0.9
     rationale: "Audit Controls (record and examine system activity) map directly to SCF Auditing & Accountability."
   - requirement_code: "164.312(c)(1)"
-    scf_anchor: "DCH-01"
-    relationship_type: "intersects_with"
-    strength: 0.65
-    rationale: "Slice 516 D7 re-confirm. Integrity (protect ePHI from improper alteration/destruction) overlaps SCF Data Classification & Handling; a dedicated data-integrity anchor is STILL absent from the 53-anchor sample fixture, so DCH-01 remains the closest covering anchor. The operator's full SCF catalog (slice 006) carries a finer data-integrity anchor; this row should be re-pointed there once that catalog is imported. Held at 0.65 (LOW) — palette-bound, see decisions log D5."
+    scf_anchor: "DCH-05"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Slice 567 re-point (was DCH-01 @ 0.65; the palette-bound row slice 481 D7 flagged and slice 516 D5 held). Integrity (protect ePHI from improper alteration or destruction) is a data-integrity control, not a classification-and-handling one; DCH-01 was the covering anchor only because no integrity anchor existed. DCH-05 Data Integrity is the policy-level integrity anchor; 164.312(c)(2) carries the cryptographic mechanism that implements it. Lift 0.65 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 11."
   - requirement_code: "164.312(c)(2)"
-    scf_anchor: "DCH-01"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Mechanism to Authenticate ePHI (corroborate ePHI not altered/destroyed) overlaps SCF Data Classification & Handling for the integrity-verification concept; no dedicated cryptographic-integrity anchor exists in the sample palette (LOW)."
+    scf_anchor: "CRY-11"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Slice 567 re-point (was DCH-01 @ 0.60). Mechanism to Authenticate ePHI (electronic mechanisms to corroborate that ePHI has not been altered or destroyed in an unauthorized manner) is the cryptographic verification mechanism — hashing, digital signatures — that implements 164.312(c)(1)'s integrity obligation. CRY-11 Cryptographic Integrity Verification keeps the mechanism distinct from the policy-level DCH-05 anchor rather than collapsing both onto one row. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 12."
   - requirement_code: "164.312(d)"
     scf_anchor: "IAC-01"
     relationship_type: "subset_of"
@@ -576,10 +594,10 @@ mappings:
     strength: 0.7
     rationale: "Transmission Security (guard against unauthorized access to ePHI in transit) overlaps SCF Boundary Protection; the cryptographic facet sits in 164.312(e)(2)(ii) (MEDIUM)."
   - requirement_code: "164.312(e)(2)(i)"
-    scf_anchor: "NET-04"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Integrity Controls (Transmission) (ensure transmitted ePHI is not improperly modified without detection) overlaps SCF Boundary Protection; the transmission-integrity facet is narrower than boundary protection and no dedicated transmission-integrity anchor exists in the sample palette (LOW)."
+    scf_anchor: "CRY-12"
+    relationship_type: "subset_of"
+    strength: 0.85
+    rationale: "Slice 567 re-point (was NET-04 @ 0.60). Integrity Controls (Transmission) requires that transmitted ePHI is not improperly modified without detection — modification DETECTION in transit, not perimeter enforcement. Boundary protection answered a different question. CRY-12 Transmission Integrity is the on-point anchor. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 13."
   - requirement_code: "164.312(e)(2)(ii)"
     scf_anchor: "CRY-08"
     relationship_type: "equal"
@@ -605,7 +623,7 @@ mappings:
     scf_anchor: "TPM-01"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Other Arrangements (governmental-entity MOU alternative to a BAC) overlaps SCF Third-Party Management; the alternative-instrument facet is narrower than the general third-party-management program (LOW)."
+    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Other Arrangements (a governmental-entity memorandum of understanding in place of a business associate contract) is an alternative legal instrument, not a security control; no control catalog carries an anchor for it. TPM-01 is and remains the correct covering anchor at 0.65 (LOW). See decisions log D6 row 14."
   - requirement_code: "164.314(a)(2)(iii)"
     scf_anchor: "TPM-04"
     relationship_type: "subset_of"
@@ -615,22 +633,22 @@ mappings:
     scf_anchor: "TPM-01"
     relationship_type: "intersects_with"
     strength: 0.55
-    rationale: "Requirements for Group Health Plans (plan documents require the plan sponsor to safeguard ePHI) overlaps SCF Third-Party Management; the group-health-plan/plan-sponsor relationship is a HIPAA-specific arrangement with no dedicated anchor in the sample palette (LOW)."
+    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Requirements for Group Health Plans (plan documents must require the plan sponsor to safeguard ePHI) is a plan-document amendment obligation on a HIPAA-specific regulatory relationship, not a security control; there is no SCF analog to find. TPM-01 as covering anchor at a deliberately low 0.55 is the honest mapping. See decisions log D6 row 15."
   - requirement_code: "164.314(b)(2)(i)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-05"
     relationship_type: "intersects_with"
-    strength: 0.55
-    rationale: "Plan Document Safeguards / Implement Reasonable Safeguards (plan sponsor implements admin/physical/technical safeguards) overlaps SCF Third-Party Management; the plan-sponsor obligation has no dedicated anchor in the sample palette (LOW)."
+    strength: 0.65
+    rationale: "Slice 567 re-point (was TPM-01 @ 0.55). Unlike 164.314(a)(2)(ii) and 164.314(b)(1), this row has a generic shape: require a counterparty to implement safeguards that protect data handled on your behalf. That is a contractual-security-requirements control, so TPM-05 fits better than the third-party-management head — but the plan-sponsor framing keeps it a modest lift. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 16."
   - requirement_code: "164.314(b)(2)(ii)"
     scf_anchor: "TPM-01"
     relationship_type: "intersects_with"
     strength: 0.55
-    rationale: "Plan Document Safeguards / Ensure Adequate Separation (separation between plan and plan sponsor supported by security measures) overlaps SCF Third-Party Management; segregation-of-the-plan-sponsor has no dedicated anchor in the sample palette (LOW)."
+    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Ensure Adequate Separation is ENTITY-level firewalling between the group health plan and its sponsor; the nearest finer concept, separation of duties, is ROLE-level within one organization. Re-pointing would trade a correct coarse anchor for a wrong-altitude finer one. TPM-01 stays at 0.55 (LOW). See decisions log D6 row 17."
   - requirement_code: "164.314(b)(2)(iii)"
-    scf_anchor: "TPM-04"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Plan Document Safeguards / Ensure Agents Safeguard (plan sponsor ensures its agents safeguard ePHI) overlaps SCF Third-Party Risk Assessments for the flow-down-to-agents concept (LOW)."
+    scf_anchor: "TPM-05"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Slice 567 re-point (was TPM-04 @ 0.60). Ensure Agents Safeguard requires that agents and subcontractors agree to the same protections — contractual flow-down, which is a different control from third-party risk ASSESSMENT. TPM-05 Third-Party Contract Requirements carries the flow-down obligation. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 18."
 
   # ===== POLICIES, PROCEDURES, AND DOCUMENTATION (§164.316) → SCF =====
   # New in slice 516. Program-governance + documentation-retention obligations.
@@ -648,14 +666,14 @@ mappings:
     scf_anchor: "DCH-03"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Time Limit (retain documentation six years) overlaps SCF Data Retention; the compliance-document-retention facet is narrower than the general data-retention policy (LOW)."
+    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Time Limit (retain the required documentation six years) is a retention-period obligation applied to compliance documentation. Retention is one control concept; splitting compliance-records retention from data retention would mint a distinction the catalog does not draw, to serve one row. DCH-03 stays at 0.60 (LOW). See decisions log D6 row 19."
   - requirement_code: "164.316(b)(2)(ii)"
-    scf_anchor: "CPL-01"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Availability (make documentation available to those implementing the procedures) overlaps SCF Compliance Management; the document-availability facet is narrower than the compliance-management program (LOW)."
+    scf_anchor: "GOV-02"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Slice 567 re-point (was CPL-01 @ 0.60). Availability (make documentation available to those persons responsible for implementing the procedures to which it pertains) is documentation DISSEMINATION, not compliance management. GOV-02 Publishing Security Documentation is the on-point anchor. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 20."
   - requirement_code: "164.316(b)(2)(iii)"
-    scf_anchor: "GOV-01"
-    relationship_type: "intersects_with"
-    strength: 0.6
-    rationale: "Updates (review/update documentation in response to environmental/operational change) overlaps SCF Information Security Governance; the periodic-policy-review facet is narrower than the governance program (LOW)."
+    scf_anchor: "GOV-03"
+    relationship_type: "subset_of"
+    strength: 0.8
+    rationale: "Slice 567 re-point (was GOV-01 @ 0.60). Updates (review documentation periodically and update it in response to environmental or operational changes) is the periodic review-and-update control, a specific governance-maintenance obligation rather than the governance program head. GOV-03 Periodic Review & Update of Security Documentation is the on-point anchor. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 21."

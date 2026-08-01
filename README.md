@@ -19,56 +19,84 @@
   <img alt="security-atlas program dashboard: drift, freshness, top risks, upcoming reviews" src="./docs/images/hero-dashboard.png">
 </picture>
 
-**Run your whole security-compliance program — SOC 2, ISO 27001, and more — from one open-source app you host yourself.**
+**One open-source, self-hosted platform for your whole security program — compliance and audit, risk, third-party, policy, evidence, and board reporting — instead of a dozen spreadsheets and single-purpose tools.**
 
 ---
 
-## What is this?
+## What is security-atlas?
 
-If you run security or compliance at a company, you know the drill: prove to auditors and customers that you actually do what your policies say. That means collecting evidence (screenshots, config exports, access reviews), mapping it to controls, and doing it again for every framework — SOC 2, then ISO 27001, then a customer's security questionnaire — usually in a pile of spreadsheets or a SaaS tool that holds your data hostage and gets expensive at renewal.
+security-atlas is a **GRC platform** — Governance, Risk, and Compliance — that a security team runs as the single system of record for its program. It replaces the usual sprawl: evidence in screenshots and spreadsheets, a risk register in Excel, a separate vendor-review tracker, policy PDFs on a shared drive, and a SaaS compliance tool that holds your data and gets expensive at renewal.
 
-**security-atlas is a GRC platform** (GRC = Governance, Risk, and Compliance) that runs your entire program from a single source of truth — and you host it on your own server, so your evidence never leaves your control.
+You **host it yourself**, so your evidence, risk data, and audit trail never leave your control. It is Apache-2.0 open source — no paid edition, no features locked behind a license tier.
 
-The core idea: **write a control once, satisfy many frameworks at once.** Most tools make you re-create the same control for every framework you're audited against. security-atlas keeps one set of controls and maps each to the frameworks it satisfies, so adding ISO 27001 on top of SOC 2 is mostly mapping, not re-work. It does this using the [Secure Controls Framework](https://securecontrolsframework.com/) (SCF) — an open catalog of ~1,400 controls already cross-referenced to 200+ frameworks.
+**The core idea: describe a control once, and satisfy every framework it maps to.** Most tools make you re-create the same control separately for SOC 2, then ISO 27001, then PCI. security-atlas keeps one set of controls and _crosswalks_ each to the frameworks it satisfies — built on the [Secure Controls Framework](https://securecontrolsframework.com/) (SCF), an open catalog of ~1,400 controls already mapped to 200+ frameworks. Adding a framework becomes mostly mapping, not re-work.
 
-## What it does
+## What it covers
 
-- **Collects evidence automatically** from the systems you already run — AWS, GitHub, Okta, GCP, Azure, Kubernetes, and more — through open, read-only connectors. Manual evidence (a signed policy, a meeting note) is a first-class citizen too.
-- **Maps one control to many frameworks**, so SOC 2, ISO 27001, NIST CSF, PCI DSS, HIPAA, and GDPR draw from the same controls instead of duplicated copies.
-- **Runs your SOC 2 audit** end to end: an auditor workspace, evidence sampling, and a frozen audit period so the auditor sees a stable snapshot while your live program keeps moving.
-- **Generates the board report** — the quarterly security update for your leadership, drafted from real data with every number checked against the source.
-- **Tracks risks, policies, exceptions, and vendor reviews** in the same place, linked to the controls they affect.
-- **Exports in OSCAL** (the NIST open standard for compliance data), so your data is portable and not locked in.
+security-atlas spans the disciplines a security program runs day to day — not just audit prep:
+
+| Discipline                                   | What the platform does                                                                                                                                                                                                                                                                                                          |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Compliance & audit management**            | One control catalog crosswalked to SOC 2, ISO 27001, NIST CSF, PCI DSS, HIPAA, and GDPR. A dedicated auditor workspace with evidence sampling, control walkthroughs, and reviewer comments. Export to [OSCAL](https://pages.nist.gov/OSCAL/) — the NIST open standard — as SSP, Assessment Plan, Assessment Results, and POA&M. |
+| **Evidence & continuous control monitoring** | Read-only connectors pull evidence from the systems you already run (AWS, GitHub, Okta, GCP, Azure, Kubernetes, osquery, and more). Manual evidence — a signed policy, a meeting note — is first-class. Per-control freshness and drift tracking show when a control quietly stops passing.                                     |
+| **Risk management**                          | A risk register with inherent-vs-residual scoring, a treatment lifecycle (mitigate / transfer / accept / avoid), and links from each risk to the controls that address it — organized as a tier that rolls up your org hierarchy (see below).                                                                                   |
+| **Third-party / vendor risk**                | A vendor register, recurring vendor reviews with a review-due burndown, and intake for the security questionnaires your own customers send you.                                                                                                                                                                                 |
+| **Policy & exception management**            | A policy library with acknowledgment tracking, an exception workflow (request → approve → active → auto-expire, with compensating controls and a hard expiry cap), and **Action Plans** for tracking remediation commitments to closure.                                                                                        |
+| **Trust & questionnaires**                   | Answer inbound security questionnaires from one place, with AI-assist that drafts answers grounded in your actual evidence and policies (every suggestion cited; see the AI boundary below).                                                                                                                                    |
+| **Metrics & board reporting**                | KPI and metric dashboards for program health, plus first-class **board pack** generation — the quarterly security update for leadership, built from real program data rather than hand-assembled slides.                                                                                                                        |
+| **Identity, access & multi-tenancy**         | Sign-in through your existing IdP (Okta, Entra ID, Google) over OIDC, role-based and attribute-based access control, and multi-tenant isolation enforced in the database itself — not just in application code.                                                                                                                 |
+
+## What makes it different
+
+A few things security-atlas does that most GRC tools don't:
+
+- **One control, many frameworks — for real.** Controls are never duplicated per framework. Each maps to the requirements it satisfies through a shared SCF reference, so a single control can answer SOC 2 CC-series, an ISO 27001 Annex A control, and a PCI requirement at once. Add a framework and you are mostly mapping, not rebuilding.
+
+- **A tiered, methodology-aware risk register.** Risks roll up through your **org hierarchy** (a division's risk posture aggregates from its teams), carry both **inherent and residual** scores, and enforce a treatment discipline — marking a risk _mitigated_ requires linking the controls that mitigate it; marking it _accepted_ requires an explicit accept-until date. Scoring ships with NIST SP 800-30 and a qualitative 5×5 today, with FAIR, CIS RAM, and ISO 27005 modeled for future support. Most tools give you one flat 5×5 grid and a spreadsheet export.
+
+- **An append-only evidence ledger you can replay.** Evidence is never overwritten or deleted — it is an immutable ledger. Ingestion (recording evidence) and evaluation (scoring controls against it) are separate stages, so a bug in scoring can never corrupt the underlying record, and you can reconstruct exactly what was true on any past date.
+
+- **Frozen audit periods.** When you freeze an audit period, the auditor samples from a stable snapshot as of the freeze date, while your live program keeps moving underneath. No more "the evidence changed while the auditor was looking at it."
+
+- **Framework-scoped applicability.** A PCI cardholder-data environment, a HIPAA ePHI boundary, and a SOC 2 system boundary are not the same scope. security-atlas computes whether a control applies as the _intersection_ of the control's applicability and the framework's scope — rather than pretending your whole estate is in scope for everything.
+
+- **Remediation modeled precisely.** An **Exception** (accepted non-compliance with compensating controls and a fixed expiry) is a distinct object from an **Action Plan** (a forward-looking remediation with milestones, exported as an OSCAL POA&M). Most tools collapse both into one "issue," which is exactly what pushes teams back to a spreadsheet.
+
+- **Private, auditable AI-assist.** AI features run on a **local model by default** — nothing leaves your deployment. Every AI suggestion (a questionnaire answer, a board-narrative section, a gap explanation) carries **mandatory citations** to the specific evidence or policy behind it, numeric claims are checked against the source data, and **nothing is published without one-click human approval**. No hallucinated audit answers.
+
+## How it compares
+
+Most teams choose a compliance tool from one of two categories. Here is where security-atlas sits — including the trade-offs, so you can judge the fit honestly:
+
+| Dimension                     | SaaS compliance tools (e.g. Vanta, Drata)                         | Enterprise GRC suites (e.g. OneTrust, Archer) | security-atlas                                                         |
+| ----------------------------- | ----------------------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------- |
+| **Where it runs**             | Vendor-hosted SaaS                                                | Vendor-hosted or licensed enterprise install  | You self-host — a single VM up to Kubernetes                           |
+| **Where your evidence lives** | The vendor's cloud                                                | The vendor's cloud or your enterprise estate  | Your infrastructure only                                               |
+| **Cost model**                | Annual subscription, commonly scaling with frameworks + headcount | Enterprise licensing                          | Apache-2.0 open source — no license fee, no paid tier                  |
+| **Adding a framework**        | More subscription and per-framework setup                         | A configuration project                       | Mostly crosswalk mapping — one control satisfies many frameworks (SCF) |
+| **Data portability**          | Export varies by vendor                                           | Varies by vendor                              | OSCAL in and out (the NIST open standard)                              |
+| **Breadth**                   | Focused on audit / compliance automation                          | Broad GRC, often heavy to operate             | Audit, risk, vendor, policy, evidence, and board reporting in one app  |
+
+security-atlas is the right fit when you want to **own your data and your control graph**, run a broad program from one place, and avoid a renewal cliff. The honest trade-off: it is **not a managed service** — there is no vendor SOC to call and you run your own upgrades and backups. If you want zero-ops SaaS and don't mind vendor-hosted evidence, a hosted tool is the better choice.
 
 ## Who it's for
 
-The first user we built for is the **solo security leader at a 50–150-person startup** who runs the entire program alone — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — and whose own customers will scrutinize how they handle security. If that's you, the goal is simple: run your next SOC 2 audit out of security-atlas and build your next board pack from it, without reaching for a spreadsheet to fill a gap.
+Built first for the **solo security leader at a 50–150-person company** who runs the entire program alone — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — and whose own customers scrutinize how they handle security. The goal is concrete: run your next SOC 2 audit out of security-atlas and build your next board pack from it, without reaching for a spreadsheet to fill a gap. It scales up from there to a small security team.
 
 ## Project status
 
-security-atlas is a **pure-community open-source project** under the
+security-atlas is a **community open-source project** under the
 [Apache 2.0 license](./LICENSE). v1 is complete and operator-grade; active
-v2 development continues. There is **no hosted SaaS** offered by the project
-owners and **no paid edition** with locked-away features — you run the whole
-thing yourself.
+v2 development continues (deeper PCI/HIPAA and privacy workflows are on the
+roadmap). There is **no hosted SaaS** from the project owners and **no paid
+edition** with locked-away features — you run the whole thing yourself.
 
 For what shipped and when, see the [latest release](https://github.com/mgoodric/security-atlas/releases/latest)
-and [`CHANGELOG.md`](./CHANGELOG.md). The full governance model, funding
-posture, and succession plan live in [`GOVERNANCE.md`](./GOVERNANCE.md); the
-re-evaluation triggers for the no-SaaS posture are documented there.
-
----
-
-## Why security-atlas (the design bets)
-
-Existing GRC tools optimize for the first-SOC-2-in-90-days SMB sale. They model controls per-framework, store evidence in a vendor cloud, and the Year-2 renewal cliff is well-documented. security-atlas makes the opposite bets:
-
-- **One control, N framework satisfactions.** The Unified Control Framework is a graph with STRM-typed edges through SCF anchors. Controls are never duplicated per framework.
-- **Append-only evidence ledger.** Ingestion and evaluation are separate stages; evaluation never writes to source-of-truth evidence. Point-in-time replay is always possible, so a bug in scoring can never corrupt the record.
-- **Self-hostable from day one.** A single mid-size VM runs the whole platform: NATS JetStream (single binary) · Postgres · an S3-compatible artifact store.
-- **OSCAL-native.** Ingest catalogs / profiles / component-definitions; export SSP / AP / AR / POA&M.
-
-The complete design rationale — invariants, anti-patterns we reject, and the AI-assist boundary — lives in the [architecture canvas](./Plans/ARCHITECTURE_CANVAS.md) and [`CLAUDE.md`](./CLAUDE.md).
+and [`CHANGELOG.md`](./CHANGELOG.md). The governance model, funding posture, and
+succession plan live in [`GOVERNANCE.md`](./GOVERNANCE.md). The full design
+rationale — architecture invariants, the anti-patterns the project rejects, and
+the AI-assist boundary — lives in the [architecture canvas](./Plans/ARCHITECTURE_CANVAS.md)
+and [`CLAUDE.md`](./CLAUDE.md).
 
 ---
 
@@ -78,7 +106,7 @@ Captured from the running app against the hermetic demo fixtures (`fixtures/read
 
 ### Control detail: framework crosswalks
 
-One control, many framework satisfactions. STRM-typed edges through a single SCF anchor.
+One control mapped to every framework requirement it satisfies — SOC 2, ISO 27001, and more — through a single shared SCF reference, instead of a duplicated control per framework.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="./docs/images/control-detail-dark.png">
@@ -183,6 +211,7 @@ The same version also renders in the bottom-right of every page in the web UI; c
 - **Design canvas:** [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) — vision, primitives, the control graph, evidence engine, scope, risk, metrics, audit workflow, tech stack, roadmap, open questions.
 - **Constitutional principles:** [`CLAUDE.md`](./CLAUDE.md) — the architecture invariants, anti-patterns we reject, the AI-assist boundary, and licensing constraints.
 - **Self-hosting guide:** [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md)
+- **MCP server (assistant access):** [`docs-site/docs/mcp.md`](./docs-site/docs/mcp.md) — query and update your program from Claude Desktop / Claude Code.
 - **Architecture decisions (ADRs):** [`docs/adr/`](./docs/adr/)
 - **Release & verification:** [`docs/releases.md`](./docs/releases.md) · [`docs/RELEASE_READINESS.md`](./docs/RELEASE_READINESS.md)
 - **Slice backlog (how the project is built):** [`docs/issues/_INDEX.md`](./docs/issues/_INDEX.md) · live merge trail in [`docs/issues/_STATUS.md`](./docs/issues/_STATUS.md)
@@ -194,6 +223,18 @@ The same version also renders in the bottom-right of every page in the web UI; c
 security-atlas authenticates request traffic via an internal **OAuth 2.0 Authorization Server** that issues short-lived **JWT access tokens** carrying the tenant in-claim (RFC 9068 JWT Profile + RFC 8693 Token Exchange for tenant switching). This is the live auth mechanism today — the JWKS endpoint (`/.well-known/jwks.json`), OIDC discovery (`/.well-known/openid-configuration`), and the grant flows (authorization-code + PKCE for the browser, device-code for the CLI, client-credentials for services) are all shipped.
 
 The Authorization Server layers on an OIDC relying party: the relying party authenticates the human against your external IdP (Okta, Entra ID, Google, etc.); the AS layer mints the atlas JWT. Two roles, one server process — security-atlas is not itself an IdP. The architectural commitment is captured in [ADR-0003](./docs/adr/0003-oauth-authorization-server.md); operator setup lives in the [OAuth grants](./docs-site/docs/oauth-grants.md) and [OIDC setup](./docs-site/docs/oidc-setup.md) guides.
+
+---
+
+## Assistant access (MCP)
+
+security-atlas ships an **MCP (Model Context Protocol) server** — `atlas-mcp` — so your security team can query and update the program from an AI assistant (Claude Desktop, Claude Code, or any MCP client) instead of clicking through the UI. Ask _"what are my top risks in treatment?"_ or _"which controls have stale evidence?"_ and the assistant answers from your live data.
+
+- **Read tools** cover controls, risks, evidence, audit periods, policies, vendors, exceptions, and action plans — scoped to your tenant, with the same row-level isolation as the rest of the platform. A few ready-made [operator skills](./skills/) wrap them into one-command workflows (risk briefing, evidence-freshness sweep, audit-readiness snapshot).
+- **Write tools** (create a risk, update a control's state, push evidence, change a risk's treatment) **never mutate your data unattended.** Each files a _proposal_ that a human approver must confirm — in the assistant via `confirm_write`, or with the Approve button in the web UI — and that boundary is enforced at the database layer. An AI cannot publish an audit-binding change on its own.
+- The assistant authenticates with a normal atlas bearer token and sees only what that credential is allowed to see.
+
+**Status: experimental** — the tool surface is in soak and may change; pin your MCP client to a specific `atlas-mcp` version. Full setup (client config for Claude Desktop / Claude Code, token handling, the complete tool list, and the approval flow) is in the **[MCP server guide](./docs-site/docs/mcp.md)** and [`cmd/atlas-mcp/README.md`](./cmd/atlas-mcp/README.md).
 
 ---
 

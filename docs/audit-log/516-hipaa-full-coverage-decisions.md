@@ -159,29 +159,39 @@ where a finer anchor exists only in the operator's full SCF catalog the rational
 says so. These are the rows a maintainer should re-point first once the full
 catalog is imported.
 
-| Requirement                                 | Anchor | Strength | Why low                                                  |
-| ------------------------------------------- | ------ | -------- | -------------------------------------------------------- |
-| §164.308(a)(1)(ii)(C) Sanction Policy       | HRS-01 | 0.60     | No dedicated sanctions anchor; HR-security is broader    |
-| §164.308(a)(4)(ii)(A) Isolate Clearinghouse | DCH-01 | 0.55     | No clearinghouse-isolation anchor                        |
-| §164.308(a)(5)(ii)(D) Password Management   | IAC-01 | 0.60     | No dedicated authenticator/password anchor               |
-| §164.308(a)(7)(ii)(E) Criticality Analysis  | BCD-02 | 0.60     | No business-impact-analysis anchor                       |
-| §164.310(a)(2)(i) Contingency Operations    | BCD-02 | 0.60     | Straddles continuity + physical access                   |
-| §164.310(a)(2)(iv) Maintenance Records      | PES-04 | 0.55     | No physical-maintenance-records anchor                   |
-| §164.310(b) Workstation Use                 | PES-04 | 0.60     | 481 D7 — no use-policy anchor finer than physical access |
-| §164.310(d)(2)(iii) Accountability          | AST-01 | 0.65     | Chain-of-custody narrower than asset-mgmt policy         |
-| §164.312(a)(2)(ii) Emergency Access         | IAC-21 | 0.60     | No break-glass anchor; privileged-acct-mgmt closest      |
-| §164.312(a)(2)(iii) Automatic Logoff        | IAC-01 | 0.60     | No session-management anchor                             |
-| §164.312(c)(1) Integrity                    | DCH-01 | 0.65     | 481 D7 — no data-integrity anchor in fixture             |
-| §164.312(c)(2) Authenticate ePHI            | DCH-01 | 0.60     | No cryptographic-integrity anchor                        |
-| §164.312(e)(2)(i) Transmission Integrity    | NET-04 | 0.60     | No transmission-integrity anchor                         |
-| §164.314(a)(2)(ii) Other Arrangements       | TPM-01 | 0.65     | Alternative-instrument facet narrower                    |
-| §164.314(b)(1) Group Health Plans           | TPM-01 | 0.55     | HIPAA-specific plan-sponsor arrangement, no anchor       |
-| §164.314(b)(2)(i) Plan Safeguards           | TPM-01 | 0.55     | Plan-sponsor obligation, no anchor                       |
-| §164.314(b)(2)(ii) Adequate Separation      | TPM-01 | 0.55     | Plan/sponsor segregation, no anchor                      |
-| §164.314(b)(2)(iii) Agents Safeguard        | TPM-04 | 0.60     | Flow-down-to-agents facet                                |
-| §164.316(b)(2)(i) Time Limit                | DCH-03 | 0.60     | Compliance-doc-retention narrower than data-retention    |
-| §164.316(b)(2)(ii) Availability             | CPL-01 | 0.60     | Document-availability narrower than compliance-mgmt      |
-| §164.316(b)(2)(iii) Updates                 | GOV-01 | 0.60     | Periodic-policy-review narrower than governance          |
+> **RESOLVED BY SLICE 567 (2026-07-25).** All 21 rows have been addressed. The
+> operator authorized growing the sample palette with the finer anchors these
+> rows needed (62 → 77 anchors; an explicit INTERIM measure — the real-SCF
+> bundling question stays with slice 754). 16 rows were re-pointed, 3 were
+> checked against the grown palette and deliberately left in place, and 2 are
+> held permanently as HIPAA regulatory arrangements with no control analog in any
+> catalog. The `Now` column below is preserved as the historical record; `567`
+> records the disposition. Per-row rationales:
+> `docs/audit-log/567-hipaa-finer-anchor-remap-decisions.md` D6.
+
+| Requirement                                 | Anchor (516) | Strength | Why low                                                  | 567 disposition                         |
+| ------------------------------------------- | ------------ | -------- | -------------------------------------------------------- | --------------------------------------- |
+| §164.308(a)(1)(ii)(C) Sanction Policy       | HRS-01       | 0.60     | No dedicated sanctions anchor; HR-security is broader    | → **HRS-07** `subset_of` 0.80           |
+| §164.308(a)(4)(ii)(A) Isolate Clearinghouse | DCH-01       | 0.55     | No clearinghouse-isolation anchor                        | → **NET-06** `intersects_with` 0.65     |
+| §164.308(a)(5)(ii)(D) Password Management   | IAC-01       | 0.60     | No dedicated authenticator/password anchor               | → **IAC-10** `equal` 0.85               |
+| §164.308(a)(7)(ii)(E) Criticality Analysis  | BCD-02       | 0.60     | No business-impact-analysis anchor                       | → **RSK-08** `equal` 0.85               |
+| §164.310(a)(2)(i) Contingency Operations    | BCD-02       | 0.60     | Straddles continuity + physical access                   | left as-is (no anchor at that straddle) |
+| §164.310(a)(2)(iv) Maintenance Records      | PES-04       | 0.55     | No physical-maintenance-records anchor                   | → **MNT-02** `intersects_with` 0.70     |
+| §164.310(b) Workstation Use                 | PES-04       | 0.60     | 481 D7 — no use-policy anchor finer than physical access | → **HRS-12** `intersects_with` 0.75     |
+| §164.310(d)(2)(iii) Accountability          | AST-01       | 0.65     | Chain-of-custody narrower than asset-mgmt policy         | → **DCH-07** `subset_of` 0.75           |
+| §164.312(a)(2)(ii) Emergency Access         | IAC-21       | 0.60     | No break-glass anchor; privileged-acct-mgmt closest      | → **IAC-24** `equal` 0.80               |
+| §164.312(a)(2)(iii) Automatic Logoff        | IAC-01       | 0.60     | No session-management anchor                             | → **IAC-25** `equal` 0.85               |
+| §164.312(c)(1) Integrity                    | DCH-01       | 0.65     | 481 D7 — no data-integrity anchor in fixture             | → **DCH-05** `subset_of` 0.80           |
+| §164.312(c)(2) Authenticate ePHI            | DCH-01       | 0.60     | No cryptographic-integrity anchor                        | → **CRY-11** `subset_of` 0.80           |
+| §164.312(e)(2)(i) Transmission Integrity    | NET-04       | 0.60     | No transmission-integrity anchor                         | → **CRY-12** `subset_of` 0.85           |
+| §164.314(a)(2)(ii) Other Arrangements       | TPM-01       | 0.65     | Alternative-instrument facet narrower                    | **held — final** (no control analog)    |
+| §164.314(b)(1) Group Health Plans           | TPM-01       | 0.55     | HIPAA-specific plan-sponsor arrangement, no anchor       | **held — final** (no control analog)    |
+| §164.314(b)(2)(i) Plan Safeguards           | TPM-01       | 0.55     | Plan-sponsor obligation, no anchor                       | → **TPM-05** `intersects_with` 0.65     |
+| §164.314(b)(2)(ii) Adequate Separation      | TPM-01       | 0.55     | Plan/sponsor segregation, no anchor                      | left as-is (entity-level vs role-level) |
+| §164.314(b)(2)(iii) Agents Safeguard        | TPM-04       | 0.60     | Flow-down-to-agents facet                                | → **TPM-05** `subset_of` 0.80           |
+| §164.316(b)(2)(i) Time Limit                | DCH-03       | 0.60     | Compliance-doc-retention narrower than data-retention    | left as-is (retention is one concept)   |
+| §164.316(b)(2)(ii) Availability             | CPL-01       | 0.60     | Document-availability narrower than compliance-mgmt      | → **GOV-02** `subset_of` 0.80           |
+| §164.316(b)(2)(iii) Updates                 | GOV-01       | 0.60     | Periodic-policy-review narrower than governance          | → **GOV-03** `subset_of` 0.80           |
 
 STRM distribution across the 67 edges: 16 `equal`, 24 `subset_of`, 27
 `intersects_with`. Strength range [0.55, 0.90].

@@ -127,6 +127,55 @@ func (s *Store) ListRisksAsOf(ctx context.Context, asOf time.Time) ([]riskRow, e
 	return out, nil
 }
 
+// exceptionAggRow is the raw deterministic exceptions aggregate as read from
+// the DB (slice 751). It is the DB-shaped intermediate; the Generator turns it
+// into the Brief's ExceptionSummary by resolving the oldest-active start
+// timestamp into an age in days against the brief's generation clock (so the
+// aging arithmetic uses the same overridable clock as the risk-aging path,
+// never the DB's now()).
+type exceptionAggRow struct {
+	// ActiveCount / PastDueCount are the two COUNT(*) FILTER results.
+	ActiveCount  int
+	PastDueCount int
+	// OldestActiveStartedAt is when the longest-standing ACTIVE exception began
+	// applying. Zero when no exception is active (the SQL MIN is NULL).
+	OldestActiveStartedAt time.Time
+}
+
+// ExceptionAggregate returns the deterministic, RLS-scoped exception-status
+// aggregate for the tenant in ctx as of `asOf` (slice 751 — the prerequisite
+// the exception-status board-narrative section grounds on).
+//
+// It runs inside the tenant-scoped transaction like every other Store read, so
+// the slice-021 FORCE ROW LEVEL SECURITY policy on `exceptions` applies: a
+// waiver belonging to another tenant is invisible to the aggregate. That is the
+// load-bearing property — a board-facing count that could include a foreign
+// tenant's waiver would be worse than no count at all.
+func (s *Store) ExceptionAggregate(ctx context.Context, asOf time.Time) (exceptionAggRow, error) {
+	var out exceptionAggRow
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		row, err := q.BoardBriefExceptionAggregate(ctx, dbx.BoardBriefExceptionAggregateParams{
+			TenantID: pgUUID(tenantID),
+			AsOf:     pgTimestamptz(asOf),
+		})
+		if err != nil {
+			return fmt.Errorf("board brief exception aggregate: %w", err)
+		}
+		out = exceptionAggRow{
+			ActiveCount:  int(row.ActiveCount),
+			PastDueCount: int(row.PastDueCount),
+		}
+		if row.OldestActiveStartedAt.Valid {
+			out.OldestActiveStartedAt = row.OldestActiveStartedAt.Time
+		}
+		return nil
+	})
+	if err != nil {
+		return exceptionAggRow{}, err
+	}
+	return out, nil
+}
+
 // Insert appends one generated brief to the append-only `board_briefs`
 // table and returns the stored row. The Brief is serialized to JSONB; the
 // rendered narrative is stored alongside. A second Insert for the same

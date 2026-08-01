@@ -119,6 +119,68 @@ missing_dir="$fixture/does-not-exist"
 # Fixture 6 — workflows dir exists but is empty (no .yml files).
 mkdir -p "$fixture/empty"
 
+# Fixture 7 (slice 418) — a workflow that `uses:` an in-repo composite
+# action by path. `./`-prefixed refs have no `@<ref>` to pin and no
+# tag-jacking surface, so the guard must PASS them (and say so).
+mkdir -p "$fixture/localref"
+cat >"$fixture/localref/local.yml" <<'YAML'
+name: local
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+      - name: Bring up the stack
+        uses: ./.github/actions/atlas-stack-up
+YAML
+
+# Fixture 8 (slice 418) — composite-action tree. The guard must scan
+# `.github/actions/*/action.yml` too, so a TAG-pinned third-party action
+# hiding inside a composite action is still caught. The workflows dir
+# here is clean; only the action file is dirty.
+mkdir -p "$fixture/withactions/workflows"
+cat >"$fixture/withactions/workflows/ok.yml" <<'YAML'
+name: ok
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/dirty
+YAML
+mkdir -p "$fixture/withactions/actions/dirty"
+cat >"$fixture/withactions/actions/dirty/action.yml" <<'YAML'
+name: dirty
+description: composite action smuggling a tag-pinned third-party action
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v4
+YAML
+
+# Fixture 9 (slice 418) — same shape, but the composite action's
+# third-party `uses:` IS SHA-pinned. Must pass.
+mkdir -p "$fixture/cleanactions/workflows"
+cat >"$fixture/cleanactions/workflows/ok.yml" <<'YAML'
+name: ok
+on: [push]
+jobs:
+  a:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ./.github/actions/clean
+YAML
+mkdir -p "$fixture/cleanactions/actions/clean"
+cat >"$fixture/cleanactions/actions/clean/action.yml" <<'YAML'
+name: clean
+description: composite action with a SHA-pinned third-party action
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v4.1.8
+YAML
+
 # --------------------------------------------------------------------
 # Run cases
 # --------------------------------------------------------------------
@@ -179,6 +241,35 @@ ATLAS_WORKFLOWS_DIR="$fixture/pinned" "$SCRIPT" >/dev/null 2>&1
 rc_7=$?
 set -e
 assert_eq "$rc_7" "0" "case 7: reproducibility — second run of case 1 should also exit 0"
+
+# Case 8 (slice 418) — a `./`-prefixed local action reference is exempt
+# from pinning and must NOT be reported as a violation.
+set +e
+output_8="$(ATLAS_WORKFLOWS_DIR="$fixture/localref" "$SCRIPT" 2>&1)"
+rc_8=$?
+set -e
+assert_eq "$rc_8" "0" "case 8: local ./ action reference should exit 0"
+assert_contains "$output_8" "1 local" "case 8: summary should count the local reference separately"
+
+# Case 9 (slice 418) — a tag-pinned third-party action INSIDE a
+# composite action must be caught, even when every workflow is clean.
+set +e
+output_9="$(ATLAS_WORKFLOWS_DIR="$fixture/withactions/workflows" \
+  ATLAS_ACTIONS_DIR="$fixture/withactions/actions" "$SCRIPT" 2>&1)"
+rc_9=$?
+set -e
+assert_eq "$rc_9" "1" "case 9: tag-pinned action inside a composite action should exit 1"
+assert_contains "$output_9" "actions/download-artifact@v4" "case 9: diagnostic should name the offending line inside action.yml"
+
+# Case 10 (slice 418) — the same shape with the composite action's
+# third-party `uses:` SHA-pinned must pass.
+set +e
+output_10="$(ATLAS_WORKFLOWS_DIR="$fixture/cleanactions/workflows" \
+  ATLAS_ACTIONS_DIR="$fixture/cleanactions/actions" "$SCRIPT" 2>&1)"
+rc_10=$?
+set -e
+assert_eq "$rc_10" "0" "case 10: SHA-pinned action inside a composite action should exit 0"
+assert_contains "$output_10" "no tag-pinned actions detected" "case 10: output should report success"
 
 # --------------------------------------------------------------------
 # Report

@@ -164,13 +164,47 @@ func (g *Generator) assemble(ctx context.Context, periodEnd, generatedAt time.Ti
 	}
 	topRisks := rankTopRisks(riskRows, generatedAt, TopRisksCount)
 
+	// --- exceptions: the deterministic exception-status aggregate (slice 751) ---
+	// Read under the same RLS context as every other input; the age arithmetic
+	// runs against generatedAt so the brief's clock (overridable in tests) is
+	// the single time source for both risk aging and exception aging.
+	excAgg, err := g.store.ExceptionAggregate(ctx, generatedAt)
+	if err != nil {
+		return Brief{}, err
+	}
+
 	return Brief{
 		PeriodEnd:   periodEnd.Format("2006-01-02"),
 		GeneratedAt: generatedAt.Format(time.RFC3339),
 		Frameworks:  postures,
 		Drift:       driftSummary,
 		TopRisks:    topRisks,
+		Exceptions:  exceptionSummary(excAgg, generatedAt),
 	}, nil
+}
+
+// exceptionSummary projects the raw DB aggregate into the Brief's
+// ExceptionSummary, resolving the oldest-active start timestamp into an age in
+// days against `now` (slice 751). Pure — the only non-trivial branch is the
+// no-active-exception case, where the SQL MIN is NULL (a zero start time) and
+// the honest age is 0, NOT the age since the zero time.
+//
+// A start timestamp in the future (an operator scheduled effective_from ahead
+// of the brief date) clamps to 0 rather than reporting a negative age: a
+// negative day count in a board narrative reads as a bug, and the number the
+// board cares about is "how long has this waiver been standing", which is zero
+// before it starts. Mirrors the rankTopRisks age-proxy discipline.
+func exceptionSummary(agg exceptionAggRow, now time.Time) ExceptionSummary {
+	out := ExceptionSummary{
+		ActiveCount:  agg.ActiveCount,
+		PastDueCount: agg.PastDueCount,
+	}
+	if !agg.OldestActiveStartedAt.IsZero() {
+		if d := now.Sub(agg.OldestActiveStartedAt); d > 0 {
+			out.OldestActiveAgeDays = int(d.Hours() / 24)
+		}
+	}
+	return out
 }
 
 // programPosture derives the program-wide coverage and freshness percentages

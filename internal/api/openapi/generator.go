@@ -203,6 +203,52 @@ components:
         Empty acknowledgment envelope. Used by mutation endpoints that
         do not return a representation of the mutated resource (e.g.
         ` + "`POST /v1/policies/{id}/publish`" + `).
+    SearchResponse:
+      type: object
+      required: [hits, count, partial_types]
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchHit"
+        count:
+          type: integer
+          minimum: 0
+          description: Number of hits returned after relevance sorting and the global limit.
+        partial_types:
+          type: array
+          items:
+            type: string
+            enum: [anchors, controls, risks, evidence]
+          description: Requested types omitted because per-type authorization denied them.
+      description: |
+        Unified lexical search response for ` + "`GET /v1/search`" + `. Controls,
+        risks, and evidence are tenant-confined by database RLS. Anchors are
+        bundled tenant-agnostic catalog rows.
+    SearchHit:
+      type: object
+      required: [id, type, title, snippet, relevance_score]
+      properties:
+        id:
+          type: string
+          description: Stable identifier for the matched row or bundled anchor.
+        type:
+          type: string
+          enum: [anchors, controls, risks, evidence]
+          description: Result discriminator used by clients for grouping and routing.
+        title:
+          type: string
+          description: Display title for the matched result.
+        snippet:
+          type: string
+          maxLength: 120
+          description: Short textual context for the match.
+        relevance_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Lexical token-overlap relevance score. Higher sorts first.
 `
 }
 
@@ -324,6 +370,12 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 			}
 		}
 	}
+	if isSearchOperation(r) {
+		if err := writeSearchOperationDetails(w); err != nil {
+			return err
+		}
+		return nil
+	}
 	// Responses — single `default` ref to the Ack envelope. v1 spec
 	// does not commit to per-operation response schemas; follow-on
 	// slice will refine. Operations that genuinely return bodies (most
@@ -349,6 +401,61 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 		return err
 	}
 	if _, err := io.WriteString(w, "                $ref: \"#/components/schemas/Ack\"\n"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func isSearchOperation(r RouteSpec) bool {
+	return r.Method == "GET" && r.Path == "/v1/search"
+}
+
+func writeSearchOperationDetails(w io.Writer) error {
+	if _, err := io.WriteString(w, `      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Free-text lexical query. Must be at least 2 characters after trimming.
+          schema:
+            type: string
+            minLength: 2
+        - name: types
+          in: query
+          required: false
+          description: Comma-separated result types. Omit for all supported types.
+          schema:
+            type: string
+            pattern: "^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$"
+            examples: ["controls,risks,evidence"]
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of merged hits to return. Defaults to 25; hard cap is 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 25
+      responses:
+        "200":
+          description: RLS-scoped merged search results across admitted result types.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: Invalid q, limit, or types query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing tenant or bearer context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`); err != nil {
 		return err
 	}
 	return nil

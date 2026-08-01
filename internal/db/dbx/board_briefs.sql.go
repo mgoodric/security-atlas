@@ -11,6 +11,66 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const boardBriefExceptionAggregate = `-- name: BoardBriefExceptionAggregate :one
+SELECT
+    COUNT(*) FILTER (WHERE status = 'active')::bigint AS active_count,
+    COUNT(*) FILTER (
+        WHERE status = 'active' AND expires_at <= $1::timestamptz
+    )::bigint AS past_due_count,
+    (
+        MIN(COALESCE(effective_from, approved_at, requested_at))
+            FILTER (WHERE status = 'active')
+    )::timestamptz AS oldest_active_started_at
+FROM exceptions
+WHERE tenant_id = $2::uuid
+`
+
+type BoardBriefExceptionAggregateParams struct {
+	AsOf     pgtype.Timestamptz `json:"as_of"`
+	TenantID pgtype.UUID        `json:"tenant_id"`
+}
+
+type BoardBriefExceptionAggregateRow struct {
+	ActiveCount           int64              `json:"active_count"`
+	PastDueCount          int64              `json:"past_due_count"`
+	OldestActiveStartedAt pgtype.Timestamptz `json:"oldest_active_started_at"`
+}
+
+// Slice 751 — the DETERMINISTIC exception-status aggregate the board brief
+// freezes into `content.exceptions` and the AI-drafted exception-status
+// narrative section grounds every numeric claim on.
+//
+// Board-package-owned (NOT in exceptions.sql) for the same reason
+// ListRisksForBoardBrief is: the board brief's read of another module's table
+// is a projection the board owns, so a change to the exception module's own
+// query set never silently changes what the board reports.
+//
+// Three numbers, and only three (decisions log D1):
+//
+//	active_count             exceptions in force right now (status='active').
+//	past_due_count           of those, the ones already past their own
+//	                         expires_at — a waiver outliving its sunset date.
+//	oldest_active_started_at when the longest-standing active waiver began
+//	                         applying. Returned as a TIMESTAMP, not a day
+//	                         count: the age arithmetic is done in Go against
+//	                         the brief's generated_at so it uses the same
+//	                         clock (and the same overridable test clock) as
+//	                         the risk-aging path, rather than the DB's now().
+//	                         NULL when nothing is active.
+//
+// Tenant scoping: the explicit tenant_id predicate is the primary filter and
+// the slice-021 FORCE ROW LEVEL SECURITY policy on `exceptions` is the
+// defense-in-depth layer — another tenant's waiver is invisible to the
+// aggregate, so it can never inflate a board-facing count (invariant #6).
+// The COALESCE start chain mirrors the lifecycle: effective_from is set at
+// activation, approved_at at approval, requested_at always.
+func (q *Queries) BoardBriefExceptionAggregate(ctx context.Context, arg BoardBriefExceptionAggregateParams) (BoardBriefExceptionAggregateRow, error) {
+	row := q.db.QueryRow(ctx, boardBriefExceptionAggregate, arg.AsOf, arg.TenantID)
+	var i BoardBriefExceptionAggregateRow
+	err := row.Scan(&i.ActiveCount, &i.PastDueCount, &i.OldestActiveStartedAt)
+	return i, err
+}
+
 const getBoardBriefByID = `-- name: GetBoardBriefByID :one
 SELECT id, tenant_id, period_end, generated_at, content, narrative_md, created_at FROM board_briefs
 WHERE tenant_id = $1 AND id = $2

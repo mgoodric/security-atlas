@@ -210,6 +210,34 @@ func TestParameterExtraction(t *testing.T) {
 	}
 }
 
+func TestSearchOperationDocumentsContract(t *testing.T) {
+	var out bytes.Buffer
+	if err := Generate(&out, RouteSpecs); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	yaml := out.String()
+	for _, want := range []string{
+		"  /v1/search:",
+		"        - name: q",
+		"          in: query",
+		"            minLength: 2",
+		"        - name: types",
+		"            pattern: \"^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$\"",
+		"        - name: limit",
+		"            maximum: 50",
+		"        \"200\":",
+		"                $ref: \"#/components/schemas/SearchResponse\"",
+		"    SearchResponse:",
+		"    SearchHit:",
+		"          enum: [anchors, controls, risks, evidence]",
+		"        relevance_score:",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Errorf("search contract missing marker: %q", want)
+		}
+	}
+}
+
 // opMarker returns a stable substring uniquely identifying a route in
 // the YAML output. Used by the security-block presence test.
 func opMarker(r RouteSpec) string {

@@ -28,6 +28,16 @@
 //   IN:  ?q=<query>&types=controls,risks,evidence&limit=N
 //   OUT: { hits: [...], count: N, partial_types: [...] }
 //
+// Slice 398b (OE-466) — reconciled against the contract slice 398a
+// (OE-465) pinned in `docs/openapi.yaml` (`get-v1-search`): `q` is
+// required with `minLength: 2`, `limit` defaults to 25 and hard-caps at
+// 50, and `limit` bounds the MERGED hit list rather than each type.
+// The request shape is now derived from GROUP_ORDER via
+// `buildSearchRequestURL` instead of a hand-maintained multiplier — the
+// multiplier had drifted to `× 3` when slice 661 added the fourth
+// (`anchors`) group, so the surface asked for 36 merged hits while its
+// own comment claimed 48. No interaction or ARIA change (P0-361-1).
+//
 // The component is a single-purpose client component. Visible on
 // every authed page via the shared topbar.
 //
@@ -49,9 +59,9 @@
 //   * ⌘K (or Ctrl+K on non-mac) focuses the input. Esc blurs and
 //     closes the popover.
 //   * Typing debounces by 250ms before firing the BFF call (AC-6).
-//     The upstream caps `limit` at 50; we request 15 per type so
-//     three types × top-K stays well under the cap with comfortable
-//     headroom.
+//     The request asks for `SEARCH_LIMIT` merged hits — enough for
+//     every rendered group to fill to PER_TYPE_TARGET, clamped to the
+//     contract's hard ceiling of 50.
 //   * Results render in a popover below the input, grouped by entity
 //     type. Each row is a `<Link>` to the entity's detail page (or
 //     the established alias when no per-row detail page exists yet:
@@ -66,9 +76,29 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 const DEBOUNCE_MS = 250; // AC-6
-// Slice 661 added a fourth result type (`anchors`). Four types × 12 = 48
-// stays under slice 268's MaxLimit=50 with headroom.
-const PER_TYPE_LIMIT = 12; // headroom under slice 268's MaxLimit=50
+
+/**
+ * SEARCH_MAX_LIMIT mirrors the hard ceiling the `GET /v1/search`
+ * contract pins (`docs/openapi.yaml` → `limit.maximum: 50`, upstream
+ * `search.MaxLimit`). Requesting more is a 400, not a clamp.
+ *
+ * `limit` is a GLOBAL cap on the MERGED hit list — not a per-type cap.
+ * The upstream applies its own per-type top-K (`search.PerTypeTopK`)
+ * before the cross-type relevance sort, then truncates the merged list
+ * to `limit`. Reading it as per-type is the mistake this constant set
+ * exists to prevent.
+ */
+export const SEARCH_MAX_LIMIT = 50;
+
+/**
+ * PER_TYPE_TARGET is how many rows we want each rendered group to be
+ * able to fill in the best case. The requested `limit` is derived from
+ * it and GROUP_ORDER.length so adding a fifth result type upstream
+ * cannot silently under-request again — which is exactly what happened
+ * when slice 661 added the `anchors` group and left the multiplier at
+ * three, asking for 36 merged hits while the comment claimed 48.
+ */
+const PER_TYPE_TARGET = 12;
 
 // SearchHitType is the discriminator union. Slice 661 added `anchors` —
 // the bundled SCF anchor catalog — so an empty tenant (zero instantiated
@@ -110,6 +140,43 @@ export const GROUP_ORDER: readonly SearchHitType[] = [
   "risks",
   "evidence",
 ] as const;
+
+/**
+ * SEARCH_MIN_QUERY_LEN mirrors the contract's `q.minLength: 2`
+ * (upstream `search.MinQueryLen`). Below it the component does not
+ * fire — the upstream would answer 400, so spending the round-trip to
+ * be told so is waste, not honesty.
+ */
+export const SEARCH_MIN_QUERY_LEN = 2;
+
+/**
+ * SEARCH_LIMIT is the `limit` this client requests: enough merged hits
+ * for every rendered group to fill to PER_TYPE_TARGET, clamped to the
+ * contract's hard ceiling. Derived rather than hardcoded so the group
+ * list stays the single source of truth.
+ */
+export const SEARCH_LIMIT = Math.min(
+  PER_TYPE_TARGET * GROUP_ORDER.length,
+  SEARCH_MAX_LIMIT,
+);
+
+/**
+ * buildSearchRequestURL returns the BFF URL for a raw input value.
+ * Pure; exported for unit coverage.
+ *
+ * Contract notes (398a / `docs/openapi.yaml` → `get-v1-search`):
+ *   * `q` is sent URL-encoded as a query-STRING parameter, never as a
+ *     path segment (P0-272-3 — the free-text query is untrusted).
+ *   * `types` is deliberately omitted. The contract defines "omit for
+ *     all supported types", so omitting means a fifth upstream type
+ *     reaches this surface without a client change; an explicit list
+ *     would silently exclude it.
+ *   * `limit` is the merged-hit cap, always ≤ SEARCH_MAX_LIMIT.
+ */
+export function buildSearchRequestURL(rawQuery: string): string {
+  const trimmed = rawQuery.trim();
+  return `/api/search?q=${encodeURIComponent(trimmed)}&limit=${SEARCH_LIMIT}`;
+}
 
 /**
  * groupByType partitions a hits array by their `type` field. Pure;
@@ -256,7 +323,7 @@ export function GlobalSearch() {
     let cancelled = false;
     const trimmed = query.trim();
 
-    if (trimmed.length < 2) {
+    if (trimmed.length < SEARCH_MIN_QUERY_LEN) {
       const microTimer = setTimeout(() => {
         if (cancelled) return;
         setResults([]);
@@ -276,15 +343,10 @@ export function GlobalSearch() {
 
     const fetchTimer = setTimeout(async () => {
       try {
-        const resp = await fetch(
-          `/api/search?q=${encodeURIComponent(trimmed)}&limit=${
-            PER_TYPE_LIMIT * 3
-          }`,
-          {
-            cache: "no-store",
-            credentials: "include",
-          },
-        );
+        const resp = await fetch(buildSearchRequestURL(trimmed), {
+          cache: "no-store",
+          credentials: "include",
+        });
         if (cancelled) return;
         if (!resp.ok) {
           setResults([]);
@@ -372,7 +434,7 @@ export function GlobalSearch() {
     return offset + idx;
   };
 
-  const showPopover = open && query.trim().length >= 2;
+  const showPopover = open && query.trim().length >= SEARCH_MIN_QUERY_LEN;
 
   // Slice 361 — derive the active option's stable DOM id for
   // `aria-activedescendant`. Empty string when no row is active so the

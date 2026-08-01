@@ -57,6 +57,16 @@ const (
 	// delta, controls drifted out, window length) — the audit-period-progress /
 	// KPI-movement section, grounded in board.Brief.Drift.
 	SectionDriftActivity SectionKey = "drift_activity_summary"
+
+	// SectionExceptionStatus summarizes the exception (waiver) register —
+	// how many exceptions are in force, how many are past their own expiry
+	// date, and the age of the longest-standing one. Grounded in the slice-751
+	// deterministic board.Brief.Exceptions aggregate. This section did NOT ship
+	// in slice 501 precisely because that aggregate did not exist: an AI-drafted
+	// exception claim with no ground truth behind it is unverifiable at
+	// guardrail 5, which is the one failure mode the four gates exist to
+	// prevent.
+	SectionExceptionStatus SectionKey = "exception_status_summary"
 )
 
 // SectionDef is the per-section configuration the section-agnostic Service
@@ -127,6 +137,15 @@ var sectionDefs = map[SectionKey]SectionDef{
 		systemPrompt:  buildDriftSystemPrompt,
 		userPrompt:    buildDriftPrompt,
 	},
+	SectionExceptionStatus: {
+		Key:           SectionExceptionStatus,
+		PromptVersion: "boardnarrative-exception-v0",
+		Heading:       exceptionHeading,
+		ExpectedItems: exceptionExpectedItems,
+		buildRollup:   exceptionRollupFromBrief,
+		systemPrompt:  buildExceptionSystemPrompt,
+		userPrompt:    buildExceptionPrompt,
+	},
 }
 
 // AIDraftedSections is the ordered list of section keys the Service drafts, in
@@ -137,6 +156,7 @@ var AIDraftedSections = []SectionKey{
 	SectionControlCoverage,
 	SectionRiskPosture,
 	SectionDriftActivity,
+	SectionExceptionStatus,
 }
 
 // sectionDef looks up a section's definition. ok=false for an unknown key (a
@@ -315,6 +335,106 @@ func buildDriftPrompt(r Rollup) string {
 	fmt.Fprintf(&b, "  - drift_window_days: %s\n", itoa(r.WindowDays))
 	fmt.Fprintf(&b, "  - drift_delta_30d: %s\n", itoa(r.Delta))
 	fmt.Fprintf(&b, "  - controls_drifted_out: %s\n", itoa(r.FlippedOutCount))
+	writeCitableBlock(&b, r.Excerpts)
+	return b.String()
+}
+
+// ----------------------------------------------------------------------------
+// Exception-status section (SectionExceptionStatus) — slice 751.
+//
+// Grounded in board.Brief.Exceptions, the deterministic RLS-scoped exceptions
+// aggregate this slice added. Every number is one of the three integers that
+// aggregate produces: how many exceptions are in force, how many of those are
+// past their own expiry date, and the age in days of the longest-standing one.
+//
+// WHY THOSE THREE AND NOTHING ELSE (the JUDGMENT call — decisions log D1). A
+// board is being asked to understand accepted risk, not to administer a
+// workflow:
+//
+//   - active count is the accepted-risk headline: how many controls the
+//     program has explicitly, formally decided not to meet right now;
+//   - past-due count is the governance-hygiene signal: a waiver still in force
+//     after the sunset date it was granted under is the failure mode the
+//     365-day cap and the auto-expiry tick exist to prevent, so a non-zero
+//     value is exactly what a board should hear about;
+//   - oldest active age is the permanent-exception smell: a waiver standing for
+//     hundreds of days is a decision that quietly became architecture.
+//
+// Deliberately NOT board-grade, and therefore absent from the aggregate so they
+// cannot be stated at all: requested/pending counts (workflow backlog, the
+// operator's queue not the board's), denied and expired counts (historical
+// churn — a denied waiver is the process working), and any per-control or
+// per-scope breakdown (a board pack is not an exception register export).
+// ----------------------------------------------------------------------------
+
+const (
+	exceptionHeading       = "## Exception status"
+	exceptionExpectedItems = 3
+)
+
+// exceptionRollupFromBrief projects a board.Brief's deterministic exceptions
+// aggregate into the exception-status Rollup. Pure — no IO, no derivation: each
+// field is copied verbatim from board.Brief.Exceptions, so the set of numbers
+// the section may state is exactly the set the aggregate computed.
+//
+// Returns ErrNoBriefData when the Brief carries no framework posture (the same
+// "nothing to summarize" gate as every other section). An EMPTY exception
+// register is NOT an error — zero active exceptions is a real, board-relevant
+// posture the section reports as zero.
+func exceptionRollupFromBrief(b board.Brief, excerpts []Excerpt) (Rollup, error) {
+	if len(b.Frameworks) == 0 {
+		return Rollup{}, ErrNoBriefData
+	}
+	bounded := excerpts
+	if len(bounded) > maxCitedExcerpts {
+		bounded = bounded[:maxCitedExcerpts]
+	}
+	return Rollup{
+		PeriodEnd:              b.PeriodEnd,
+		ExceptionsActive:       b.Exceptions.ActiveCount,
+		ExceptionsPastDue:      b.Exceptions.PastDueCount,
+		OldestExceptionAgeDays: b.Exceptions.OldestActiveAgeDays,
+		Excerpts:               bounded,
+		exceptionOnly:          true,
+	}, nil
+}
+
+func buildExceptionSystemPrompt() string {
+	return strings.ReplaceAll(exceptionSystemPromptBase, bannedPhrasesPlaceholder, BannedPhraseListForPrompt())
+}
+
+const exceptionSystemPromptBase = `You draft ONE numbered section of a board-of-directors security report: the "Exception status" section. Your draft is reviewed by a human operator and is NOT shown to the board until that operator approves it.
+
+The audience is non-technical board members who take your words at face value. Your voice is measured, factual, and slightly defensive — like a federal Inspector-General report, not a marketing deck. Report facts; never editorialize, never use superlatives the data does not earn. An exception is a formal, time-bounded decision not to meet a control; describe it plainly as that, and never characterize the number as acceptable, concerning, or improving — the board draws that conclusion, not you.
+
+Rules you MUST follow:
+
+1. GROUNDING. Use ONLY the pre-computed rollup numbers and the cited control/evidence material provided below. Do not introduce any number, exception count, age, expiry date, or fact that is not in the rollup. Do not describe an individual exception — the rollup gives you counts, not cases.
+
+2. NUMBERS. State ONLY integers that appear verbatim in the rollup. Do not compute new numbers, do not round, do not estimate, do not derive a percentage or a ratio from the counts. If the rollup says 4 exceptions are in force, write 4 — never "roughly a handful" and never "4 of 30 controls".
+
+3. CITATIONS. For the third sentence, cite a supporting control or evidence by its exact id verbatim (the canonical UUID shown in the rollup), in parentheses. Cite ONLY ids that appear in the rollup's citable material below. Do not invent ids.
+
+4. SECTION SHAPE. Emit EXACTLY this structure and nothing else — no preamble, no summary, no extra sections, no closing remarks:
+
+## Exception status
+1. <one sentence stating how many exceptions are in force as of the period end>
+2. <one sentence stating how many of those are past their expiry date and the age in days of the longest-standing one>
+3. <one sentence on a control the program relies on, citing one or more control/evidence ids from the rollup>
+
+Emit the heading verbatim, then exactly three numbered items, numbered 1 through 3 in order.
+
+5. TONE. Do NOT use any of these banned phrases or any unprompted superlative:
+__BANNED_PHRASES__
+Be plain. A sentence that sounds like a press release fails; a sentence that sounds like a clinical observation passes.`
+
+func buildExceptionPrompt(r Rollup) string {
+	var b strings.Builder
+	b.WriteString("Pre-computed rollup (state ONLY these numbers):\n")
+	fmt.Fprintf(&b, "  - period_end: %s\n", r.PeriodEnd)
+	fmt.Fprintf(&b, "  - exceptions_in_force: %s\n", itoa(r.ExceptionsActive))
+	fmt.Fprintf(&b, "  - exceptions_past_expiry: %s\n", itoa(r.ExceptionsPastDue))
+	fmt.Fprintf(&b, "  - oldest_exception_age_days: %s\n", itoa(r.OldestExceptionAgeDays))
 	writeCitableBlock(&b, r.Excerpts)
 	return b.String()
 }

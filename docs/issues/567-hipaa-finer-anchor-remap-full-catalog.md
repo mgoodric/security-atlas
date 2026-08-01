@@ -3,7 +3,25 @@
 **Cluster:** Catalog
 **Estimate:** S (<1d)
 **Type:** JUDGMENT (crosswalk-mapping accuracy is a subjective control call)
-**Status:** `blocked` (depends on a test path that seeds the operator's FULL SCF catalog, not the 53-anchor sample fixture)
+**Status:** `done`. Two passes.
+
+- **Pass 1 (scoping)** found the blocker was not a test-harness gap but a
+  **catalog-content governance decision**: the shared integration suite seeds one
+  catalog and the importer rolls back on an unresolvable anchor, so a re-pointed
+  row breaks all five frameworks' suites, not just its own assertion. The seed
+  path was split out as slice 754
+  (`docs/issues/754-full-scf-catalog-test-path.md`) and the per-row control
+  judgement for all 21 residual rows was recorded as pre-work (decisions log D5).
+- **Pass 2 (applied)** — the operator answered 754's governance question on
+  2026-07-25: **option (A), explicitly INTERIM.** Grow the bundled sample fixture
+  with the finer anchors the 21 rows need (62 → 77 anchors) so the shared seed
+  resolves them. 16 rows re-pointed, 3 checked and left in place, 2 held; both
+  test tiers assert all 21. See decisions log D6–D9.
+
+Slice **754 stays open** and is no longer blocking: it now owns the durable
+catalog-source question — **(B)** bundling a real SCF release (deferred pending
+the SCF-redistribution legal review) and **(C)** per-crosswalk catalog
+requirements — neither of which this slice decided (decisions log D7).
 
 ## Narrative
 
@@ -35,19 +53,29 @@ Pure data + decisions-log update; no loader change.
 
 ## Acceptance criteria
 
-- [ ] A test path seeds the operator's full SCF catalog so finer-anchor edges
-      resolve (or this slice establishes that path).
-- [ ] The slice-516 palette-bound rows whose finer anchor exists in the full
-      catalog are re-pointed and their strength lifted where justified.
-- [ ] Decisions log records each re-map; the slice-516 residual table is updated.
-- [ ] Anchor-palette resolution holds against whatever catalog the test seeds
-      (zero dangling edges; rollback-on-nonexistent-anchor still proven).
+- [x] A test path seeds a catalog carrying the finer anchors so those edges
+      resolve. Option (A): the shared `scfseed.EnsureSCFCatalog` palette itself
+      grew, so the assertions run in CI on every PR rather than behind an opt-in
+      path that would never execute. Two tiers —
+      `internal/api/soc2import/hipaa_finer_anchor_test.go` (pure Go) and
+      `hipaa_finer_anchor_integration_test.go` (`//go:build integration`).
+- [x] The slice-516 palette-bound rows whose finer anchor now exists are
+      re-pointed and their strength lifted where justified — 16 of 21. Five did
+      not move (3 checked and left, 2 held); no row was lifted past what its
+      rationale earns.
+- [x] Decisions log records each re-map (D6, all 21 rows); the slice-516 residual
+      table is updated in place with each row's disposition.
+- [x] Anchor-palette resolution holds — zero dangling edges across all five
+      bundled crosswalks, and `TestHIPAAImport_RejectsEdgeToNonexistentAnchor`
+      still proves rollback-on-nonexistent-anchor against the grown palette.
 
 ## Dependencies
 
 - **#516** (full HIPAA coverage) — merged first (this slice's parent).
-- A full-SCF-catalog test-seed path (does not yet exist for the soc2import
-  integration suite, which seeds the 53-anchor sample fixture).
+- **#754** (a catalog-seed path carrying the finer anchors) — was blocking;
+  resolved for this slice's purposes by the operator's interim option-(A) call.
+  754 remains open for the durable catalog-source question ((B) real-SCF
+  bundling, gated on legal review; (C) per-crosswalk catalog requirements).
 
 ## Anti-criteria (P0)
 
