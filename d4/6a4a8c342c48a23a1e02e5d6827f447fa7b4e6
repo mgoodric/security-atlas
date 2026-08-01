@@ -1,11 +1,11 @@
 .github/workflows/container-publish.yml
-  s_138a8c90a6b2be::t_c8ccd45a3b8d23 5-6,15,21,24,27,30,32-36
+  s_138a8c90a6b2be::t_eae4595883142e 5-6,15,21,24,27,30,32-36
 README.md
-  s_138a8c90a6b2be::t_a1828bed79d000 178-185
+  s_138a8c90a6b2be::t_491369a528c26e 178-185
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.6.16",
+  "git_ai_version": "1.6.19",
   "base_commit_sha": "d46a4a8c342c48a23a1e02e5d6827f447fa7b4e6",
   "prompts": {},
   "sessions": {
