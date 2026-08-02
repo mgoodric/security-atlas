@@ -2482,6 +2482,36 @@ type VendorScopeCell struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Vulnerability struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	Source           string             `json:"source"`
+	Identifier       string             `json:"identifier"`
+	Title            string             `json:"title"`
+	Severity         string             `json:"severity"`
+	AffectedAsset    string             `json:"affected_asset"`
+	AffectedApp      string             `json:"affected_app"`
+	AffectedAppTier  *string            `json:"affected_app_tier"`
+	DiscoveredAt     pgtype.Timestamptz `json:"discovered_at"`
+	Status           string             `json:"status"`
+	SlaDueAt         pgtype.Timestamptz `json:"sla_due_at"`
+	ActionPlanID     pgtype.UUID        `json:"action_plan_id"`
+	EvidenceRecordID pgtype.UUID        `json:"evidence_record_id"`
+	RawFinding       []byte             `json:"raw_finding"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type VulnerabilitySlaAlertLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	VulnerabilityID pgtype.UUID        `json:"vulnerability_id"`
+	RecipientUserID string             `json:"recipient_user_id"`
+	DedupKey        string             `json:"dedup_key"`
+	NotificationID  pgtype.UUID        `json:"notification_id"`
+	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+}
+
 type Walkthrough struct {
 	ID            pgtype.UUID        `json:"id"`
 	TenantID      pgtype.UUID        `json:"tenant_id"`

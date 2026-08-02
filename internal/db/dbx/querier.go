@@ -2497,8 +2497,8 @@ type Querier interface {
 	// tenant_id appearing in metrics-relevant primitives.
 	//
 	// Implementation: union the tenant_id columns across controls,
-	// evidence_records, and risks — the cheapest broad signal that a
-	// tenant exists. A tenant with zero rows in all three has nothing to
+	// evidence_records, risks, and vulnerabilities — the cheapest broad signal
+	// that a tenant exists. A tenant with zero rows in all four has nothing to
 	// measure and is skipped.
 	ListTenantsForMetricsScheduler(ctx context.Context) ([]pgtype.UUID, error)
 	// The scheduled time-based recompute (AC-2) runs as the migrator role

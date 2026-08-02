@@ -41,14 +41,15 @@ package notify
 // The slice-108 event whitelist (internal/auth/userprefs.Events) is:
 //
 //	audit_period_assignment, policy_ack_due, risk_review_overdue, control_drift,
-//	audit_note_reply, evidence_staleness
+//	audit_note_reply, evidence_staleness, vulnerability_sla_overdue
 var kindToEvent = map[string]string{
-	"audit_period_assignment": "audit_period_assignment",
-	"policy_ack_due":          "policy_ack_due",
-	"risk_review_overdue":     "risk_review_overdue",
-	"control.drift":           "control_drift",
-	"audit_note.reply":        "audit_note_reply",
-	"evidence.staleness":      "evidence_staleness",
+	"audit_period_assignment":   "audit_period_assignment",
+	"policy_ack_due":            "policy_ack_due",
+	"risk_review_overdue":       "risk_review_overdue",
+	"control.drift":             "control_drift",
+	"audit_note.reply":          "audit_note_reply",
+	"evidence.staleness":        "evidence_staleness",
+	"vulnerability.sla_overdue": "vulnerability_sla_overdue",
 }
 
 // KindToEvent exposes the canonical kind→event mapping for callers (e.g. the

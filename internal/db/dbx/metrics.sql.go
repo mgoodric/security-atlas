@@ -568,6 +568,8 @@ FROM (
     SELECT tenant_id FROM evidence_records WHERE tenant_id IS NOT NULL
     UNION
     SELECT tenant_id FROM risks            WHERE tenant_id IS NOT NULL
+    UNION
+    SELECT tenant_id FROM vulnerabilities  WHERE tenant_id IS NOT NULL
 ) t
 WHERE t.tenant_id IS NOT NULL
 `
@@ -580,8 +582,8 @@ WHERE t.tenant_id IS NOT NULL
 // tenant_id appearing in metrics-relevant primitives.
 //
 // Implementation: union the tenant_id columns across controls,
-// evidence_records, and risks — the cheapest broad signal that a
-// tenant exists. A tenant with zero rows in all three has nothing to
+// evidence_records, risks, and vulnerabilities — the cheapest broad signal
+// that a tenant exists. A tenant with zero rows in all four has nothing to
 // measure and is skipped.
 func (q *Queries) ListTenantsForMetricsScheduler(ctx context.Context) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listTenantsForMetricsScheduler)

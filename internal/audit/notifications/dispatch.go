@@ -42,6 +42,9 @@ const (
 	// kindToEvent ("evidence.staleness" -> "evidence_staleness") and
 	// typeLabels. Do NOT rename without moving those maps in the same change.
 	TypeEvidenceStaleness = "evidence.staleness"
+	// TypeVulnerabilitySLAOverdue is written by the vulnerability-management
+	// SLA rollup and consumed by the existing notification delivery channels.
+	TypeVulnerabilitySLAOverdue = "vulnerability.sla_overdue"
 )
 
 // ErrNotFound is returned for cross-recipient, cross-tenant, or absent
