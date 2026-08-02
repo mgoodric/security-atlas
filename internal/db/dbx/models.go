@@ -1583,6 +1583,30 @@ type DecisionsAudit struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type DriftFreshnessAlertConfig struct {
+	TenantID                 pgtype.UUID        `json:"tenant_id"`
+	Enabled                  bool               `json:"enabled"`
+	SlackEnabled             bool               `json:"slack_enabled"`
+	PagerdutyEnabled         bool               `json:"pagerduty_enabled"`
+	ControlDriftEnabled      bool               `json:"control_drift_enabled"`
+	EvidenceStalenessEnabled bool               `json:"evidence_staleness_enabled"`
+	MinDriftedControls       int32              `json:"min_drifted_controls"`
+	MinStaleAge              pgtype.Interval    `json:"min_stale_age"`
+	DebounceInterval         pgtype.Interval    `json:"debounce_interval"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DriftFreshnessAlertLog struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	RecipientUserID string             `json:"recipient_user_id"`
+	EventType       string             `json:"event_type"`
+	ControlID       pgtype.UUID        `json:"control_id"`
+	StateKey        string             `json:"state_key"`
+	NotificationID  pgtype.UUID        `json:"notification_id"`
+	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+}
+
 type EmailChannelOptin struct {
 	TenantID  pgtype.UUID        `json:"tenant_id"`
 	UserID    pgtype.UUID        `json:"user_id"`
