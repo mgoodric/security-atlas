@@ -100,6 +100,22 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	if err := ValidateInherentScore(in.Methodology, in.InherentScore); err != nil {
 		return Risk{}, err
 	}
+	if in.Methodology == dbx.RiskMethodologyFair {
+		normalized, err := NormalizeFairScoreJSON(in.InherentScore)
+		if err != nil {
+			return Risk{}, fmt.Errorf("%w: %v", ErrInherentScoreInvalid, err)
+		}
+		in.InherentScore = normalized
+		if len(in.ResidualScore) == 0 {
+			in.ResidualScore = normalized
+		} else {
+			normalizedResidual, err := NormalizeFairScoreJSON(in.ResidualScore)
+			if err != nil {
+				return Risk{}, fmt.Errorf("%w: residual_score: %v", ErrInherentScoreInvalid, err)
+			}
+			in.ResidualScore = normalizedResidual
+		}
+	}
 	if err := ValidateTreatment(TreatmentInput{
 		Treatment:            in.Treatment,
 		AcceptedUntilPresent: in.AcceptedUntil != nil,

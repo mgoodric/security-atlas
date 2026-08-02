@@ -37,6 +37,8 @@ import { fetchRiskDetail } from "@/lib/api/risks";
 
 import {
   formatResidualScore,
+  fairScore,
+  formatDollars,
   residualState,
   reviewDuePending,
   severityBand,
@@ -109,6 +111,10 @@ export default function RiskDetailPage({
 
   const { risk } = data;
   const band = severityBand(risk.severity);
+  const fairInherent =
+    risk.methodology === "fair" ? fairScore(risk.inherent_score) : null;
+  const fairResidual =
+    risk.methodology === "fair" ? fairScore(risk.residual_score) : null;
 
   // Residual: prefer the live-derived magnitude when the BFF carried a
   // deriver breakdown; otherwise fall back to the stored residual_score.
@@ -178,25 +184,45 @@ export default function RiskDetailPage({
       <div className="grid gap-4 sm:grid-cols-2">
         <Card size="sm" data-testid="risk-detail-severity-card">
           <CardContent>
-            <div
-              className="text-[11px] uppercase tracking-wider text-muted-foreground"
-              title="Inherent severity: likelihood × impact on the 5×5 grid, before any control mitigation."
-            >
-              Inherent severity
-            </div>
-            <div className="mt-1 flex items-center gap-2">
-              <span
-                className={`inline-flex items-center justify-center w-7 h-7 text-sm font-semibold rounded ${severityClasses(
-                  band,
-                )}`}
-                data-testid="risk-detail-severity"
-              >
-                {risk.severity}
-              </span>
-              <span className="text-xs text-muted-foreground capitalize">
-                {band}
-              </span>
-            </div>
+            {fairInherent ? (
+              <>
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+                  Inherent annualized exposure
+                </div>
+                <div
+                  className="mt-1 text-2xl font-semibold"
+                  data-testid="risk-detail-fair-inherent-exposure"
+                >
+                  {formatDollars(fairInherent.annualized_loss_exposure)}
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {fairInherent.loss_event_frequency.toFixed(2)} events/year ×{" "}
+                  {formatDollars(fairInherent.loss_magnitude)}
+                </div>
+              </>
+            ) : (
+              <>
+                <div
+                  className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                  title="Inherent severity: likelihood × impact on the 5×5 grid, before any control mitigation."
+                >
+                  Inherent severity
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <span
+                    className={`inline-flex items-center justify-center w-7 h-7 text-sm font-semibold rounded ${severityClasses(
+                      band,
+                    )}`}
+                    data-testid="risk-detail-severity"
+                  >
+                    {risk.severity}
+                  </span>
+                  <span className="text-xs text-muted-foreground capitalize">
+                    {band}
+                  </span>
+                </div>
+              </>
+            )}
           </CardContent>
         </Card>
 
@@ -206,7 +232,9 @@ export default function RiskDetailPage({
               className="text-[11px] uppercase tracking-wider text-muted-foreground"
               title="Residual: inherent severity reduced by the linked controls' measured effectiveness (0..1)."
             >
-              Residual (after controls)
+              {fairResidual
+                ? "Residual annualized exposure"
+                : "Residual (after controls)"}
             </div>
             <div
               className="mt-1 text-2xl font-semibold"

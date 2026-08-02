@@ -16,6 +16,8 @@ import {
   applyFilters,
   clearFilters,
   DEFAULT_FILTERS,
+  fairScore,
+  formatDollars,
   formatResidualScore,
   isDefault,
   residualClass,
@@ -413,6 +415,62 @@ describe("formatResidualScore", () => {
     // formatted as a fixed-2.
     expect(formatResidualScore({ likelihood: 6, impact: 6 })).toBe("1.44");
   });
+
+  test("formats FAIR annualized loss exposure as dollars", () => {
+    expect(
+      formatResidualScore({
+        loss_event_frequency: 2,
+        loss_magnitude: 50000,
+        annualized_loss_exposure: 100000,
+      }),
+    ).toBe("$100,000");
+  });
+
+  test("renders '—' when the 5x5 product is not finite", () => {
+    expect(formatResidualScore({ likelihood: Infinity, impact: 2 })).toBe("—");
+  });
+});
+
+describe("fairScore", () => {
+  test("derives exposure when only frequency and magnitude are present", () => {
+    expect(
+      fairScore({ loss_event_frequency: 1.5, loss_magnitude: 40000 }),
+    ).toEqual({
+      loss_event_frequency: 1.5,
+      loss_magnitude: 40000,
+      annualized_loss_exposure: 60000,
+    });
+  });
+
+  test("accepts legacy lef/lm aliases", () => {
+    expect(fairScore({ lef: 2, lm: 50000 })?.annualized_loss_exposure).toBe(
+      100000,
+    );
+  });
+
+  test("rejects an exposure that is not a finite number", () => {
+    expect(
+      fairScore({
+        loss_event_frequency: 1,
+        loss_magnitude: 2,
+        annualized_loss_exposure: Number.NaN,
+      }),
+    ).toBeNull();
+    expect(
+      fairScore({ loss_event_frequency: Infinity, loss_magnitude: 2 }),
+    ).toBeNull();
+  });
+});
+
+describe("formatDollars", () => {
+  test("formats a finite number as whole USD", () => {
+    expect(formatDollars(60000)).toBe("$60,000");
+  });
+
+  test("renders '—' for a non-finite number", () => {
+    expect(formatDollars(Number.NaN)).toBe("—");
+    expect(formatDollars(Infinity)).toBe("—");
+  });
 });
 
 describe("severityClasses + residualClass", () => {
@@ -428,6 +486,12 @@ describe("severityClasses + residualClass", () => {
     expect(residualClass("0.45")).toContain("amber");
     expect(residualClass("0.15")).toContain("emerald");
     expect(residualClass("—")).toContain("muted");
+  });
+
+  test("residualClass mutes a string that does not parse as a number", () => {
+    // A FAIR row's formatted "$60,000" is not parseFloat-able — the
+    // residual column renders it neutrally rather than banding it.
+    expect(residualClass("$60,000")).toContain("muted");
   });
 });
 
@@ -454,6 +518,16 @@ describe("residualState (slice 680 / ATLAS-029)", () => {
   test("a valid {likelihood, impact} residual is scored", () => {
     expect(residualState({ likelihood: 2, impact: 3 })).toBe("scored");
     expect(residualState({ likelihood: 4, impact: 5 })).toBe("scored");
+  });
+
+  test("a FAIR residual is scored", () => {
+    expect(
+      residualState({ loss_event_frequency: 1.5, loss_magnitude: 40000 }),
+    ).toBe("scored");
+  });
+
+  test("a residual whose 5x5 product is not finite is pending", () => {
+    expect(residualState({ likelihood: Infinity, impact: 2 })).toBe("pending");
   });
 });
 

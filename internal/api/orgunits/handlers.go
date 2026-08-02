@@ -56,6 +56,15 @@ type wire struct {
 	// attributed risks gets an empty (but non-nil) map when the param is
 	// set — so the field is present and explicitly empty, not missing.
 	RiskCounts map[string]int `json:"risk_counts,omitempty"`
+	// FairExposure is populated alongside risk_counts. It is a FAIR-only
+	// dollars/year rollup and is intentionally not mixed into RiskCounts'
+	// 5x5 severity scalar.
+	FairExposure *fairExposureWire `json:"fair_exposure,omitempty"`
+}
+
+type fairExposureWire struct {
+	RiskCount              int     `json:"risk_count"`
+	AnnualizedLossExposure float64 `json:"annualized_loss_exposure"`
 }
 
 type createReq struct {
@@ -181,6 +190,26 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 				out[i].RiskCounts = m
 			} else {
 				out[i].RiskCounts = map[string]int{}
+			}
+		}
+
+		fair, ferr := h.store.FairExposureByOrgUnit(r.Context())
+		if ferr != nil {
+			httperr.WriteInternal(w, r, "fair exposure by org_unit", ferr)
+			return
+		}
+		fairByUnit := make(map[string]fairExposureWire, len(fair))
+		for _, f := range fair {
+			fairByUnit[f.OrgUnitID.String()] = fairExposureWire{
+				RiskCount:              f.RiskCount,
+				AnnualizedLossExposure: f.AnnualizedLossExposure,
+			}
+		}
+		for i := range out {
+			if f, ok := fairByUnit[out[i].ID]; ok {
+				out[i].FairExposure = &f
+			} else {
+				out[i].FairExposure = &fairExposureWire{}
 			}
 		}
 	}
