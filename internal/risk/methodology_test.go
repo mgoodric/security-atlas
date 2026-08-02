@@ -49,7 +49,13 @@ func TestValidateInherentScore(t *testing.T) {
 		},
 		// ---- fair ----
 		{
-			name:        "fair valid",
+			name:        "fair valid canonical",
+			methodology: dbx.RiskMethodologyFair,
+			body:        `{"loss_event_frequency":1.2,"loss_magnitude":50000,"annualized_loss_exposure":60000}`,
+			wantErr:     nil,
+		},
+		{
+			name:        "fair valid legacy aliases",
 			methodology: dbx.RiskMethodologyFair,
 			body:        `{"lef":1.2,"lm":50000}`,
 			wantErr:     nil,
@@ -64,6 +70,12 @@ func TestValidateInherentScore(t *testing.T) {
 			name:        "fair missing lm",
 			methodology: dbx.RiskMethodologyFair,
 			body:        `{"lef":1.2}`,
+			wantErr:     risk.ErrInherentScoreInvalid,
+		},
+		{
+			name:        "fair rejects mismatched annualized loss exposure",
+			methodology: dbx.RiskMethodologyFair,
+			body:        `{"loss_event_frequency":2,"loss_magnitude":50000,"annualized_loss_exposure":99}`,
 			wantErr:     risk.ErrInherentScoreInvalid,
 		},
 		// ---- qualitative_5x5 ----
@@ -129,6 +141,18 @@ func TestValidateInherentScore(t *testing.T) {
 				t.Fatalf("expected %v, got %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestNormalizeFairScoreJSON(t *testing.T) {
+	t.Parallel()
+	got, err := risk.NormalizeFairScoreJSON([]byte(`{"lef":2,"lm":50000}`))
+	if err != nil {
+		t.Fatalf("NormalizeFairScoreJSON: %v", err)
+	}
+	want := `{"loss_event_frequency":2,"loss_magnitude":50000,"annualized_loss_exposure":100000}`
+	if string(got) != want {
+		t.Fatalf("NormalizeFairScoreJSON = %s, want %s", got, want)
 	}
 }
 

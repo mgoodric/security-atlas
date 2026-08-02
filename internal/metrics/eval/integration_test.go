@@ -14,12 +14,16 @@
 //   - evidenceFreshnessPctEvaluator.Compute            — total==0 + populated
 //   - auditReadinessScoreEvaluator.Compute             — fwTotal==0 + populated
 //   - openRiskFinancialExposureEvaluator.Compute       — empty + populated
-//   - policyAttestationRateEvaluator.Compute           — error path (the
-//     evaluator queries a `policy_versions` table that does not exist in
-//     v1; the wrapped error return covers that branch)
+//   - policyAttestationRateEvaluator.Compute           — empty + populated
 //   - vendorRiskConcentrationEvaluator.Compute         — empty + populated
 //   - exceptionExpirationRunwayEvaluator.Compute       — empty + populated
 //   - criticalFindingsSLAEvaluator.Compute             — findings==0 + populated
+//
+// TestAllRegisteredEvaluators_NoSQLError is the per-evaluator schema smoke
+// test (OE-550): it walks Registry.Names() and asserts every registered
+// evaluator's query executes against the migrated schema without a SQL
+// error. A future evaluator whose SQL names a column or relation the schema
+// does not carry fails there rather than in the scheduler log.
 //
 // Strategy: pass the admin (BYPASSRLS) pool to NewRegistry so each
 // Compute() can see the seeded fixtures without tenant-GUC plumbing. The
@@ -39,7 +43,7 @@ package eval_test
 
 import (
 	"context"
-	"strings"
+	"math"
 	"testing"
 
 	"github.com/google/uuid"
@@ -76,6 +80,8 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 			`DELETE FROM risks              WHERE tenant_id = $1`,
 			`DELETE FROM vendors            WHERE tenant_id = $1`,
 			`DELETE FROM policy_acknowledgments WHERE tenant_id = $1`,
+			`DELETE FROM policies           WHERE tenant_id = $1`,
+			`DELETE FROM users              WHERE tenant_id = $1`,
 		} {
 			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
 				t.Logf("cleanup %s: %v", stmt, err)
@@ -144,14 +150,11 @@ func seedFreshness(t *testing.T, admin *pgxpool.Pool, tenant, ctrlID uuid.UUID, 
 // seedFrameworkAndPeriod ensures the tenant has at least one
 // framework_scope + an open audit_period referencing the same framework.
 // auditReadinessScoreEvaluator joins these via framework_versions.
-// NOTE: the v1 schema does NOT have a `current_version` column on
-// `frameworks` (only `latest_version_id`) and `framework_scopes.state`
-// is one of {draft,review,approved,activated,superseded} — NOT 'active'.
-// The audit_readiness_score evaluator's SQL references both
-// `frameworks.frameworks` and `framework_scopes.framework_id`
-// (a column that does not exist) — so its Compute always returns a
-// wrapped error in v1; that error-return code path is what the
-// audit_readiness_score test exercises (see TestAuditReadinessScore_...).
+// NOTE: `framework_scopes` carries `framework_version_id`, not
+// `framework_id`, and its lifecycle column is `state` with the vocabulary
+// {draft,review,approved,activated,superseded} — NOT 'active'. The
+// evaluator's in-scope predicate is `state = 'activated'`, so the scope
+// seeded here lands in the frameworks CTE (OE-550).
 func seedFrameworkAndPeriod(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID, withOpenPeriod bool) {
 	t.Helper()
 	ctx := context.Background()
@@ -262,6 +265,53 @@ func seedRisk(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) {
 	}
 }
 
+// seedPolicyAck inserts one user, one published policy, and one
+// acknowledgment of that policy dated inside the evaluator's 365-day
+// window. policyAttestationRateEvaluator's denominator is
+// (distinct recent ackers) × (published policies) and its numerator is
+// the ack count against those policies, so a single (user, policy, ack)
+// triple lands the evaluator on its populated branch with rate 1.0.
+//
+// Schema note: there is no `policy_versions` table — each publish writes
+// its own `policies` row, and policy_acknowledgments.policy_version_id
+// FKs to policies(tenant_id, id) (slice 023). `policies` requires
+// effective_date to be non-NULL once status is 'published'
+// (policies_effective_date_set_when_published).
+func seedPolicyAck(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	userID := uuid.New()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO users (id, tenant_id, email, display_name)
+		VALUES ($1, $2, $3, 'OE-550 metrics eval test user')
+	`, userID, tenant, "oe550-"+userID.String()+"@test.invalid"); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+	policyID := uuid.New()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO policies (
+			id, tenant_id, title, version, status, effective_date,
+			body_md, owner_role, approver_role, created_by,
+			published_at, published_by
+		)
+		VALUES ($1, $2, 'OE-550 acceptable use', '1.0.0', 'published', now()::date,
+		        '# body', 'security_lead', 'ciso', 'tester',
+		        now(), 'tester')
+	`, policyID, tenant); err != nil {
+		t.Fatalf("seed policy: %v", err)
+	}
+	ackID := uuid.New()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO policy_acknowledgments (
+			id, tenant_id, policy_id, policy_version_id, user_id,
+			acknowledged_at, ack_token
+		)
+		VALUES ($1, $2, $3, $3, $4, now() - INTERVAL '1 day', $5)
+	`, ackID, tenant, policyID, userID, "oe550-"+ackID.String()); err != nil {
+		t.Fatalf("seed policy_acknowledgment: %v", err)
+	}
+}
+
 // seedVendor inserts a vendor with criticality='high' so
 // vendorRiskConcentrationEvaluator's score sum is non-zero.
 func seedVendor(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) {
@@ -362,16 +412,20 @@ func TestEvidenceFreshnessPct_EmptyAndPopulated(t *testing.T) {
 
 // ===== auditReadinessScoreEvaluator =====
 //
-// The evaluator's SQL CTE references `framework_id` on
-// `framework_scopes` — but the v1 schema only carries
-// `framework_version_id` on that table (slice 002 + later migrations).
-// Compute() therefore returns a wrapped error. The error-return code
-// path is what this test exercises. A future schema-aligning fix would
-// flip this test to the populated-success shape; today the v1 reality
-// is that the query is broken.
+// Covers BOTH branches: fwTotal==0 (no activated framework_scope →
+// Value=0, dims=sample:empty) and populated (one activated scope whose
+// framework has an open audit period + one fresh evidence_freshness row →
+// periodFactor × freshFactor > 0).
+//
+// Before OE-550 the evaluator's SQL selected `framework_id` straight off
+// `framework_scopes` (which carries only `framework_version_id`) and
+// filtered on the non-existent state `'active'`, so Compute always
+// returned a wrapped 42703 error. The join through `framework_versions`
+// plus the `'activated'` predicate is what this test now pins.
 
-func TestAuditReadinessScore_ErrorsOnMissingColumn(t *testing.T) {
+func TestAuditReadinessScore_EmptyAndPopulated(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
 
 	r := eval.NewRegistry(admin)
 	e, ok := r.Get("audit_readiness_score")
@@ -379,15 +433,33 @@ func TestAuditReadinessScore_ErrorsOnMissingColumn(t *testing.T) {
 		t.Fatal("audit_readiness_score not registered")
 	}
 
-	_, err := e.Compute(context.Background())
-	if err == nil {
-		t.Fatal("Compute returned nil error; expected wrapped column-missing error (framework_scopes.framework_id does not exist in v1 schema)")
+	// Branch 1: no activated framework scopes anywhere → empty sample.
+	res, err := e.Compute(context.Background())
+	if err != nil {
+		t.Fatalf("Compute(empty): %v", err)
 	}
-	// The evaluator wraps every Compute failure with the metric name as
-	// prefix — assert on that contract so a future fix that renames the
-	// column would surface here rather than silently passing.
-	if !strings.Contains(err.Error(), "audit_readiness_score") {
-		t.Errorf("Compute err = %q; expected the metric name in the wrapped prefix", err.Error())
+	if res.Value != 0 || res.Dimensions["sample"] != "empty" {
+		t.Errorf("Compute(empty) = %v / dims %v; want Value=0 and sample=empty", res.Value, res.Dimensions)
+	}
+
+	// Branch 2: populated. An activated scope on a framework version that
+	// carries an open audit period, plus one fresh control.
+	seedFrameworkAndPeriod(t, admin, tenant, true)
+	ctrlID := seedControl(t, admin, tenant)
+	seedFreshness(t, admin, tenant, ctrlID, false)
+
+	res2, err := e.Compute(context.Background())
+	if err != nil {
+		t.Fatalf("Compute(populated): %v", err)
+	}
+	if res2.Value <= 0 || res2.Value > 1 {
+		t.Errorf("Compute(populated) Value = %v; want in (0,1]", res2.Value)
+	}
+	if res2.Dimensions["frameworks_total"] == "" || res2.Dimensions["frameworks_with_period"] == "" {
+		t.Errorf("Compute(populated) dims missing framework counts: %v", res2.Dimensions)
+	}
+	if res2.Dimensions["frameworks_with_period"] == "0" {
+		t.Errorf("Compute(populated) frameworks_with_period = 0; the open audit period should have joined through framework_versions")
 	}
 }
 
@@ -426,14 +498,19 @@ func TestOpenRiskFinancialExposure_EmptyAndPopulated(t *testing.T) {
 
 // ===== policyAttestationRateEvaluator =====
 //
-// The evaluator queries a `policy_versions` table that does NOT exist in
-// the v1 schema (the actual table is `policies`). Compute() therefore
-// returns a wrapped error — that error-return code path is what this
-// test covers. The slice 069 ratchet rule is "exercise real branches with
-// real assertions"; the error path is a real branch.
+// Covers BOTH branches: expected==0 (no acks in the 365-day window →
+// Value=0, dims=sample:empty) and populated (one recent acker × one
+// published policy, acknowledged → rate 1.0).
+//
+// Before OE-550 the evaluator's `current_policies` CTE selected from a
+// `policy_versions` relation that does not exist, so Compute always
+// returned a wrapped 42P01 error. The repoint at `policies` filtered to
+// status='published' — the table policy_acknowledgments.policy_version_id
+// actually FKs to — is what this test now pins.
 
-func TestPolicyAttestationRate_ErrorsOnMissingTable(t *testing.T) {
+func TestPolicyAttestationRate_EmptyAndPopulated(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
 
 	r := eval.NewRegistry(admin)
 	e, ok := r.Get("policy_attestation_rate")
@@ -441,15 +518,27 @@ func TestPolicyAttestationRate_ErrorsOnMissingTable(t *testing.T) {
 		t.Fatal("policy_attestation_rate not registered")
 	}
 
-	_, err := e.Compute(context.Background())
-	if err == nil {
-		t.Fatal("Compute returned nil error; expected wrapped relation-missing error (policy_versions table does not exist in v1 schema)")
+	// Branch 1: no acks in the window → expected==0 → empty sample.
+	res, err := e.Compute(context.Background())
+	if err != nil {
+		t.Fatalf("Compute(empty): %v", err)
 	}
-	// The evaluator wraps every Compute failure with the metric name as
-	// prefix — assert on that contract so a future fix that swaps to
-	// `policies` would surface here rather than silently passing.
-	if !strings.Contains(err.Error(), "policy_attestation_rate") {
-		t.Errorf("Compute err = %q; expected the metric name in the wrapped prefix", err.Error())
+	if res.Value != 0 || res.Dimensions["sample"] != "empty" {
+		t.Errorf("Compute(empty) = %v / dims %v; want Value=0 and sample=empty", res.Value, res.Dimensions)
+	}
+
+	// Branch 2: populated. One user, one published policy, one ack.
+	seedPolicyAck(t, admin, tenant)
+
+	res2, err := e.Compute(context.Background())
+	if err != nil {
+		t.Fatalf("Compute(populated): %v", err)
+	}
+	if res2.Value != 1.0 {
+		t.Errorf("Compute(populated) Value = %v; want 1.0 (one acker × one published policy, acknowledged)", res2.Value)
+	}
+	if res2.Dimensions["expected_acks"] != "1" || res2.Dimensions["got_acks"] != "1" {
+		t.Errorf("Compute(populated) dims = %v; want expected_acks=1 and got_acks=1", res2.Dimensions)
 	}
 }
 
@@ -553,5 +642,67 @@ func TestCriticalFindingsSLA_EmptyAndPopulated(t *testing.T) {
 	}
 	if res2.Dimensions["findings_in_window"] == "" {
 		t.Errorf("Compute(populated) dims missing findings_in_window: %v", res2.Dimensions)
+	}
+}
+
+// ===== per-evaluator schema smoke test (OE-550) =====
+//
+// The bug this test exists to catch: an evaluator whose SQL names a
+// column or relation the migrated schema does not carry. Two of the
+// eight starter evaluators shipped that way — audit_readiness_score
+// selected `framework_scopes.framework_id` (42703) and
+// policy_attestation_rate selected from `policy_versions` (42P01) — and
+// the only signal was an ERROR line in the metrics-scheduler log every
+// 15 minutes, forever. Per-evaluator unit tests cannot catch it (the SQL
+// is only parsed by Postgres) and the per-evaluator integration tests
+// above did not, because each one asserted the shape of ITS OWN
+// evaluator.
+//
+// So: walk Registry.Names() and Compute every registered evaluator
+// against the real migrated schema. Any SQL error fails the test, and a
+// newly-registered evaluator is enrolled automatically — there is no
+// per-evaluator list to forget to update. Fixtures are seeded first so
+// every evaluator runs its populated branch as well as parsing its SQL.
+
+func TestAllRegisteredEvaluators_NoSQLError(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+
+	// Seed one row for every primitive the starter evaluators read, so
+	// each Compute exercises its populated branch rather than short-
+	// circuiting on an empty sample before the interesting SQL runs.
+	ctrlID := seedControl(t, admin, tenant)
+	seedEvaluation(t, admin, tenant, ctrlID, "pass")
+	seedFreshness(t, admin, tenant, ctrlID, false)
+	// seedAuditFinding seeds its own framework + activated scope + open
+	// audit period before the finding, which is also what
+	// audit_readiness_score needs — calling seedFrameworkAndPeriod again
+	// here would collide on audit_periods_tenant_name_uniq.
+	seedAuditFinding(t, admin, tenant)
+	seedException(t, admin, tenant)
+	seedRisk(t, admin, tenant)
+	seedVendor(t, admin, tenant)
+	seedPolicyAck(t, admin, tenant)
+
+	r := eval.NewRegistry(admin)
+	names := r.Names()
+	if len(names) == 0 {
+		t.Fatal("Registry.Names() is empty; the smoke test would vacuously pass")
+	}
+
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			e, ok := r.Get(name)
+			if !ok {
+				t.Fatalf("Names() returned %q but Get(%q) failed", name, name)
+			}
+			res, err := e.Compute(context.Background())
+			if err != nil {
+				t.Fatalf("Compute against the migrated schema: %v", err)
+			}
+			if math.IsNaN(res.Value) || math.IsInf(res.Value, 0) {
+				t.Errorf("Compute Value = %v; want a finite number", res.Value)
+			}
+		})
 	}
 }

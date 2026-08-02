@@ -8,15 +8,6 @@
 // badge, and child-node count; clicking a node with children toggles
 // expand/collapse.
 //
-// Per-node risk-count chips are a labelled backend gap: the upstream
-// ListOrgUnits handler ignores `?include_risk_counts=true`, and the
-// slice-019 risk-list `riskWire` predates slice 052 (no `org_unit_id`,
-// `themes`, or severity field on a list row), so the counts cannot be
-// derived client-side either. Rather than fabricate zeros, each node
-// renders a single muted "counts pending" affordance that names the
-// missing query param (anti-criterion P0-1). AC-2 is PARTIAL — the tree
-// STRUCTURE is real and fully interactive.
-//
 // org_unit and scope_cell are deliberately NOT conflated here: this
 // panel renders only the org_unit hierarchy. scope_cell is an
 // orthogonal dimension surfaced elsewhere (canvas invariant 4,
@@ -72,6 +63,20 @@ function levelVariant(
   }
 }
 
+function riskCountTotal(counts: Record<string, number> | undefined): number {
+  if (!counts) return 0;
+  return Object.values(counts).reduce((sum, n) => sum + n, 0);
+}
+
+function formatDollars(n: number): string {
+  if (!Number.isFinite(n)) return "$0";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(n);
+}
+
 function TreeRow({
   node,
   depth,
@@ -85,6 +90,11 @@ function TreeRow({
 }) {
   const hasChildren = node.children.length > 0;
   const isOpen = expanded.has(node.id);
+  const fiveByFiveCount = riskCountTotal(node.risk_counts);
+  const fairExposure = node.fair_exposure;
+  const fairRiskCount = fairExposure?.risk_count ?? 0;
+  const fairAnnualizedLossExposure =
+    fairExposure?.annualized_loss_exposure ?? 0;
   return (
     <li data-testid="org-tree-node">
       <div
@@ -122,15 +132,26 @@ function TreeRow({
             {node.children.length === 1 ? "child" : "children"}
           </span>
         ) : null}
-        {/* Per-node risk-count chips are a labelled backend gap — see
-            the panel-level note. The platform never fabricates counts. */}
-        <span
-          className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground/70"
-          data-testid="org-tree-counts-pending"
-          title="Per-severity risk counts await GET /v1/org_units?include_risk_counts=true"
-        >
-          risk counts pending
-        </span>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <span
+            className="font-mono text-[10px] text-muted-foreground/80"
+            data-testid="org-tree-risk-counts"
+            title="5x5 methodology risk count"
+          >
+            5x5 {fiveByFiveCount}
+          </span>
+          {fairRiskCount > 0 ? (
+            <span
+              className="font-mono text-[10px] text-foreground"
+              data-testid="org-tree-fair-exposure"
+              title={`${fairRiskCount} FAIR ${
+                fairRiskCount === 1 ? "risk" : "risks"
+              }`}
+            >
+              FAIR {formatDollars(fairAnnualizedLossExposure)}
+            </span>
+          ) : null}
+        </div>
       </div>
       {hasChildren && isOpen ? (
         <ul>

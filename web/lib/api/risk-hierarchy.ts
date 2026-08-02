@@ -15,15 +15,9 @@ import { apiFetch, bffControlFetch } from "./_shared";
 // Endpoint inventory verified against main `internal/api/` at slice
 // time:
 //
-//   * Org tree structure   GET /v1/org_units            (slice 053) — bound
-//       The AC asks for `?include_risk_counts=true`. The ListOrgUnits
-//       handler ignores all query params and the slice-019 `riskWire`
-//       predates slice 052 — there is no `org_unit_id`, `themes`, or a
-//       severity field on a risk-list row, so per-node risk counts
-//       cannot be derived client-side either. The tree STRUCTURE binds
-//       and renders honestly; per-node count chips show a labelled
-//       "pending endpoint" affordance naming `?include_risk_counts=true`
-//       rather than fabricating zeros. AC-2 is PARTIAL.
+//   * Org tree structure   GET /v1/org_units?include_risk_counts=true
+//       Bound to real per-node 5x5 risk counts plus FAIR-only dollar
+//       exposure rollups. The two scales are displayed separately.
 //   * Theme vocabulary     GET /v1/themes               (slice 053) — bound
 //       Real heatmap columns (10 default + tenant-private). The
 //       `themes × org_units` cell-aggregation endpoint does NOT exist on
@@ -50,6 +44,11 @@ export type OrgUnit = {
   parent_id?: string | null;
   level: string;
   acceptance_authorities: unknown;
+  risk_counts?: Record<string, number>;
+  fair_exposure?: {
+    risk_count: number;
+    annualized_loss_exposure: number;
+  };
 };
 
 export type OrgUnitListResponse = { org_units: OrgUnit[]; count: number };
@@ -120,7 +119,7 @@ export type DecisionFilter = {
 // ----- server-side fns (called by the BFF route handlers) -----
 
 export async function getOrgUnits(bearer: string): Promise<OrgUnit[]> {
-  const res = await apiFetch(`/v1/org_units`, bearer);
+  const res = await apiFetch(`/v1/org_units?include_risk_counts=true`, bearer);
   const body = (await res.json()) as OrgUnitListResponse;
   return body.org_units;
 }
