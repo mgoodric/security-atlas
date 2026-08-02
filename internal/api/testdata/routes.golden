@@ -276,6 +276,9 @@ POST /v1/questionnaires/{id}/answers/{qid}/ai-approve
 POST /v1/questionnaires/{id}/answers/{qid}/ai-suggest
 POST /v1/questionnaires/{id}/export-pdf
 POST /v1/questionnaires/{id}/import-excel
+POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest
+POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve
+POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject
 POST /v1/risks
 POST /v1/risks/aggregate
 POST /v1/risks/{id}/controls
