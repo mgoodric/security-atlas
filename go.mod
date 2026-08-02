@@ -11,7 +11,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/organizations v1.53.0
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.106.0
 	github.com/aws/aws-sdk-go-v2/service/sts v1.45.0
-	github.com/aws/smithy-go v1.27.3
+	github.com/aws/smithy-go v1.27.4
 	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
 	github.com/chromedp/chromedp v0.15.1
 	github.com/coreos/go-oidc/v3 v3.19.0
