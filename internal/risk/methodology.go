@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
@@ -34,7 +35,9 @@ var ErrInherentScoreInvalid = errors.New("risk: inherent_score failed methodolog
 // them keeps the slice self-contained and easy to audit.
 //
 // nist_800_30 + qualitative_5x5 share the (likelihood, impact) 1..5 shape.
-// fair uses LEF + LM (loss-event frequency and loss magnitude, both numeric).
+// fair uses loss_event_frequency + loss_magnitude and stores the derived
+// annualized_loss_exposure (all numeric). The legacy lef/lm aliases are still
+// accepted on input and normalised before persistence.
 // cis_ram and iso_27005 accept a more permissive object until orgs that use
 // them onboard — the v1 schema enforces only "type=object with at least one
 // numeric field" so a placeholder cannot ship as `null`.
@@ -77,9 +80,15 @@ const qualitative5x5Schema = `{
 const fairSchema = `{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["lef", "lm"],
   "additionalProperties": true,
+  "anyOf": [
+    { "required": ["loss_event_frequency", "loss_magnitude"] },
+    { "required": ["lef", "lm"] }
+  ],
   "properties": {
+    "loss_event_frequency": { "type": "number", "minimum": 0 },
+    "loss_magnitude": { "type": "number", "minimum": 0 },
+    "annualized_loss_exposure": { "type": "number", "minimum": 0 },
     "lef": { "type": "number", "minimum": 0 },
     "lm":  { "type": "number", "minimum": 0 }
   }
@@ -132,7 +141,78 @@ func ValidateInherentScore(methodology dbx.RiskMethodology, inherentScore []byte
 	if err := schema.Validate(parsed); err != nil {
 		return fmt.Errorf("%w: %v", ErrInherentScoreInvalid, err)
 	}
+	if methodology == dbx.RiskMethodologyFair {
+		if _, err := FairScoreFromJSON(inherentScore); err != nil {
+			return fmt.Errorf("%w: %v", ErrInherentScoreInvalid, err)
+		}
+	}
 	return nil
+}
+
+// FairScore is the first-class FAIR quantitative score shape stored in
+// inherent_score and residual_score. AnnualizedLossExposure is derived as
+// LossEventFrequency * LossMagnitude and represented in dollars per year.
+type FairScore struct {
+	LossEventFrequency     float64 `json:"loss_event_frequency"`
+	LossMagnitude          float64 `json:"loss_magnitude"`
+	AnnualizedLossExposure float64 `json:"annualized_loss_exposure"`
+}
+
+// FairScoreFromJSON parses either the canonical FAIR shape or the legacy
+// {lef,lm} aliases and returns the canonical derived score.
+func FairScoreFromJSON(raw []byte) (FairScore, error) {
+	if len(raw) == 0 {
+		return FairScore{}, errors.New("empty fair score")
+	}
+	var score struct {
+		LossEventFrequency     *float64 `json:"loss_event_frequency"`
+		LossMagnitude          *float64 `json:"loss_magnitude"`
+		AnnualizedLossExposure *float64 `json:"annualized_loss_exposure"`
+		LEF                    *float64 `json:"lef"`
+		LM                     *float64 `json:"lm"`
+	}
+	if err := json.Unmarshal(raw, &score); err != nil {
+		return FairScore{}, err
+	}
+	lef := score.LossEventFrequency
+	if lef == nil {
+		lef = score.LEF
+	}
+	lm := score.LossMagnitude
+	if lm == nil {
+		lm = score.LM
+	}
+	if lef == nil || lm == nil {
+		return FairScore{}, errors.New("missing loss_event_frequency/loss_magnitude")
+	}
+	if !finiteNonNegative(*lef) || !finiteNonNegative(*lm) {
+		return FairScore{}, errors.New("loss_event_frequency and loss_magnitude must be finite non-negative numbers")
+	}
+	ale := *lef * *lm
+	if !finiteNonNegative(ale) {
+		return FairScore{}, errors.New("annualized_loss_exposure is not finite")
+	}
+	if score.AnnualizedLossExposure != nil && math.Abs(*score.AnnualizedLossExposure-ale) > 0.01 {
+		return FairScore{}, fmt.Errorf("annualized_loss_exposure must equal loss_event_frequency × loss_magnitude (got %.2f, want %.2f)", *score.AnnualizedLossExposure, ale)
+	}
+	return FairScore{
+		LossEventFrequency:     *lef,
+		LossMagnitude:          *lm,
+		AnnualizedLossExposure: ale,
+	}, nil
+}
+
+// NormalizeFairScoreJSON returns the canonical persisted FAIR score shape.
+func NormalizeFairScoreJSON(raw []byte) ([]byte, error) {
+	score, err := FairScoreFromJSON(raw)
+	if err != nil {
+		return nil, err
+	}
+	return json.Marshal(score)
+}
+
+func finiteNonNegative(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0
 }
 
 // AllowedMethodologies returns the closed set of methodology values the

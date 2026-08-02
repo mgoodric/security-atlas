@@ -11,6 +11,63 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const fairExposureByOrgUnit = `-- name: FairExposureByOrgUnit :many
+SELECT
+    org_unit_id,
+    COUNT(*)::int AS risk_count,
+    SUM(
+        COALESCE(
+            CASE WHEN jsonb_typeof(inherent_score->'annualized_loss_exposure') = 'number'
+                 THEN (inherent_score->>'annualized_loss_exposure')::numeric END,
+            CASE WHEN jsonb_typeof(inherent_score->'loss_event_frequency') = 'number'
+                  AND jsonb_typeof(inherent_score->'loss_magnitude') = 'number'
+                 THEN (inherent_score->>'loss_event_frequency')::numeric
+                      * (inherent_score->>'loss_magnitude')::numeric END,
+            CASE WHEN jsonb_typeof(inherent_score->'lef') = 'number'
+                  AND jsonb_typeof(inherent_score->'lm') = 'number'
+                 THEN (inherent_score->>'lef')::numeric
+                      * (inherent_score->>'lm')::numeric END,
+            0
+        )
+    )::numeric AS annualized_loss_exposure
+FROM risks
+WHERE tenant_id = $1
+  AND org_unit_id IS NOT NULL
+  AND methodology = 'fair'
+GROUP BY org_unit_id
+ORDER BY org_unit_id
+`
+
+type FairExposureByOrgUnitRow struct {
+	OrgUnitID              pgtype.UUID    `json:"org_unit_id"`
+	RiskCount              int32          `json:"risk_count"`
+	AnnualizedLossExposure pgtype.Numeric `json:"annualized_loss_exposure"`
+}
+
+// FAIR-only org-unit rollup. Annualized loss exposure is already dollars/year
+// on the canonical FAIR score shape; legacy lef/lm rows are tolerated so older
+// fixtures remain readable. This result must not be combined with the 5×5
+// severity scalar.
+func (q *Queries) FairExposureByOrgUnit(ctx context.Context, tenantID pgtype.UUID) ([]FairExposureByOrgUnitRow, error) {
+	rows, err := q.db.Query(ctx, fairExposureByOrgUnit, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FairExposureByOrgUnitRow
+	for rows.Next() {
+		var i FairExposureByOrgUnitRow
+		if err := rows.Scan(&i.OrgUnitID, &i.RiskCount, &i.AnnualizedLossExposure); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const riskCountsByOrgUnit = `-- name: RiskCountsByOrgUnit :many
 
 SELECT
@@ -28,6 +85,7 @@ SELECT
 FROM risks
 WHERE tenant_id = $1
   AND org_unit_id IS NOT NULL
+  AND methodology IN ('nist_800_30', 'qualitative_5x5')
 GROUP BY org_unit_id, severity
 ORDER BY org_unit_id, severity
 `
@@ -55,8 +113,10 @@ type RiskCountsByOrgUnitRow struct {
 // numeric severity component resolves to severity 0 — it is still counted
 // (constitutional invariant 9: malformed-score and rule-driven/manual
 // risks are peers, never filtered out), it just lands in the severity-0
-// bucket. The guarded-CASE expression is wrapped in COALESCE(..., 0) and
-// cast ::int so sqlc types the column as a clean non-null Go int.
+// bucket. FAIR risks are different: they are valid quantitative-dollar
+// risks, not malformed 5×5 risks, so they are deliberately excluded from
+// the severity rollups and surfaced through FairExposureByOrgUnit instead.
+// This keeps the hierarchy from silently mixing dollars into a 1..25 scalar.
 // AC-1: per-org-unit risk count broken down by severity scalar. ONE
 // GROUP BY query for the whole tenant — joined to the org-unit tree in Go,
 // never one query per node (anti-criterion: no N+1).
@@ -107,6 +167,7 @@ JOIN org_themes t
    AND (t.tenant_id IS NULL OR t.tenant_id = $1)
 WHERE r.tenant_id = $1
   AND r.org_unit_id IS NOT NULL
+  AND r.methodology IN ('nist_800_30', 'qualitative_5x5')
 GROUP BY t.theme_name, theme_builtin, r.org_unit_id
 ORDER BY theme_builtin DESC, t.theme_name, r.org_unit_id
 `
