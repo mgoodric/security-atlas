@@ -8,13 +8,22 @@ import (
 )
 
 // policyAttestationRateEvaluator computes the fraction of currently-
-// published policy_versions × in-scope users that have a corresponding
+// published policy versions × in-scope users that have a corresponding
 // policy_acknowledgments row in the last 365 days.
 //
 // v1 simplification: the "in-scope users" denominator is the count of
 // distinct user_ids that have acknowledged ANY policy in the last 365
 // days (a proxy for the active-user population). A connector-fed
 // "required ackers per policy" join is the follow-on.
+//
+// Schema note: there is no `policy_versions` table. Each publish writes a
+// fresh `policies` row (slice 022 InsertPublishedPolicy), so a policies row
+// IS a policy version — which is why `policy_acknowledgments.policy_version_id`
+// FKs to `policies (tenant_id, id)` (slice 023). The pre-fix query named a
+// `policy_versions` relation that never existed and errored 42P01 on every
+// scheduler tick; the currently-published set is `policies` filtered to
+// status = 'published' (the policies_status_chk vocabulary is
+// draft|under_review|approved|published|superseded).
 type policyAttestationRateEvaluator struct{ pool *pgxpool.Pool }
 
 func (e *policyAttestationRateEvaluator) Name() string { return "policy_attestation_rate" }
@@ -27,7 +36,7 @@ func (e *policyAttestationRateEvaluator) Compute(ctx context.Context) (Result, e
 			WHERE acknowledged_at >= now() - INTERVAL '365 days'
 		),
 		current_policies AS (
-			SELECT id FROM policy_versions WHERE status = 'published'
+			SELECT id FROM policies WHERE status = 'published'
 		),
 		needed AS (
 			SELECT (SELECT COUNT(*) FROM active_users) * (SELECT COUNT(*) FROM current_policies) AS expected
