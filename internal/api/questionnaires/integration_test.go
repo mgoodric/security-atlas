@@ -57,6 +57,7 @@ import (
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
+		"questionnaire_export_audit_log",
 		"questionnaire_answers",
 		"questionnaire_questions",
 		"questionnaires",
@@ -340,6 +341,96 @@ func TestExportPDF_SmokeTest(t *testing.T) {
 	assertQuestionnairePDFOrServiceUnavailable(t, resp, buf)
 }
 
+func TestExportPDF_ApprovalGateMixedStateAndAudit(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	_, body := doJSON(t, env, http.MethodPost, "/v1/questionnaires",
+		map[string]any{"name": "approval gate"})
+	id := body["id"].(string)
+
+	xlsx := makeXLSXBytes(t, [][]string{
+		{"Question ID", "Question", "Domain"},
+		{"M-1", "Manual question?", "IAM"},
+		{"A-1", "Approved AI question?", "IAM"},
+		{"D-1", "Draft question?", "IAM"},
+	})
+	resp, importBody := doMultipart(t, env, "/v1/questionnaires/"+id+"/import-excel", "gate.xlsx", xlsx)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("import = %d, want 201; body=%v", resp.StatusCode, importBody)
+	}
+	questions := importBody["questions"].([]any)
+	manualQID := questions[0].(map[string]any)["id"].(string)
+	approvedQID := questions[1].(map[string]any)["id"].(string)
+	draftQID := questions[2].(map[string]any)["id"].(string)
+
+	_, ansBody := doJSON(t, env, http.MethodPatch,
+		"/v1/questionnaires/"+id+"/answers/"+manualQID,
+		map[string]any{
+			"answer_value": "yes",
+			"narrative":    "Manual answer exports.",
+			"authored_by":  "manual-author",
+		})
+	if ansBody["answer_value"] != "yes" {
+		t.Fatalf("manual answer body = %v", ansBody)
+	}
+	seedAIAnswer(t, admin, tenant, approvedQID, true, "Approved AI answer exports.")
+	draftNarrative := "UNAPPROVED narrative must not appear in exported bytes"
+	seedAIAnswer(t, admin, tenant, draftQID, false, draftNarrative)
+
+	resp, pdfBytes := exportPDF(t, env, id)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("approval-gated export = %d, want 200; body=%q", resp.StatusCode, string(pdfBytes[:min(len(pdfBytes), 128)]))
+	}
+	if !bytes.HasPrefix(pdfBytes, []byte("%PDF-")) {
+		t.Fatalf("PDF magic byte missing; first 16: %q", string(pdfBytes[:min(16, len(pdfBytes))]))
+	}
+	if bytes.Contains(pdfBytes, []byte(draftNarrative)) {
+		t.Fatal("unapproved AI draft narrative reached exported PDF bytes")
+	}
+	if got := resp.Header.Get("X-Questionnaire-Excluded-Draft-Count"); got != "1" {
+		t.Fatalf("excluded draft header = %q, want 1", got)
+	}
+	if got := resp.Header.Get("X-Questionnaire-Export-Summary"); got != "1 drafted answers pending approval were excluded" {
+		t.Fatalf("summary header = %q", got)
+	}
+	assertLatestQuestionnaireExportAudit(t, admin, tenant, id, 1, 1, 1)
+
+	approveAIAnswerForQuestion(t, admin, tenant, draftQID)
+	resp, pdfBytes = exportPDF(t, env, id)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("approved re-export = %d, want 200; body=%q", resp.StatusCode, string(pdfBytes[:min(len(pdfBytes), 128)]))
+	}
+	if got := resp.Header.Get("X-Questionnaire-Excluded-Draft-Count"); got != "0" {
+		t.Fatalf("excluded draft header after approval = %q, want 0", got)
+	}
+	assertLatestQuestionnaireExportAudit(t, admin, tenant, id, 1, 2, 0)
+}
+
+func TestExportPDF_TenantBCannotExportTenantAQuestionnaire(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+	envA := testServer(t, app, tenantA)
+	envB := testServer(t, app, tenantB)
+
+	_, body := doJSON(t, envA, http.MethodPost, "/v1/questionnaires",
+		map[string]any{"name": "tenant A export target"})
+	id := body["id"].(string)
+
+	resp, pdfBytes := exportPDF(t, envB, id)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("tenant B export tenant A questionnaire = %d, want 404; body=%q",
+			resp.StatusCode, string(pdfBytes[:min(len(pdfBytes), 128)]))
+	}
+}
+
 // exportPDF POSTs the export-pdf endpoint and returns the response + body.
 func exportPDF(t *testing.T, env testEnv, id string) (*http.Response, []byte) {
 	t.Helper()
@@ -438,6 +529,64 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func seedAIAnswer(t *testing.T, admin *pgxpool.Pool, tenant, questionID string, approved bool, narrative string) {
+	t.Helper()
+	_, err := admin.Exec(context.Background(), `
+INSERT INTO questionnaire_answers (
+    id, tenant_id, question_id, answer_value, narrative, citations, authored_by,
+    ai_assisted, human_approved, human_approver,
+    prompt_version, model_name, model_version, model_provider
+) VALUES (gen_random_uuid(), $1, $2, 'yes', $3, '[]'::jsonb, 'ai-suggest:test',
+    TRUE, $4, CASE WHEN $4 THEN 'human-approver:test' ELSE NULL END,
+    'slice-758-test', 'stub-model', 'test-version', 'local-test')`,
+		tenant, questionID, narrative, approved)
+	if err != nil {
+		t.Fatalf("seed AI answer: %v", err)
+	}
+}
+
+func approveAIAnswerForQuestion(t *testing.T, admin *pgxpool.Pool, tenant, questionID string) {
+	t.Helper()
+	tag, err := admin.Exec(context.Background(), `
+UPDATE questionnaire_answers
+SET human_approved = TRUE,
+    human_approver = 'human-approver:test',
+    updated_at = now()
+WHERE tenant_id = $1 AND question_id = $2 AND ai_assisted = TRUE`,
+		tenant, questionID)
+	if err != nil {
+		t.Fatalf("approve AI answer: %v", err)
+	}
+	if tag.RowsAffected() != 1 {
+		t.Fatalf("approve AI answer rows = %d, want 1", tag.RowsAffected())
+	}
+}
+
+func assertLatestQuestionnaireExportAudit(t *testing.T, admin *pgxpool.Pool, tenant, questionnaireID string, manual, approvedAI, excluded int) {
+	t.Helper()
+	var gotManual, gotApprovedAI, gotExcluded, gotExported int
+	var actor string
+	err := admin.QueryRow(context.Background(), `
+SELECT actor, manual_count, approved_ai_count, excluded_draft_count, exported_answer_count
+FROM questionnaire_export_audit_log
+WHERE tenant_id = $1 AND questionnaire_id = $2
+ORDER BY occurred_at DESC
+LIMIT 1`, tenant, questionnaireID).Scan(&actor, &gotManual, &gotApprovedAI, &gotExcluded, &gotExported)
+	if err != nil {
+		t.Fatalf("query latest questionnaire export audit: %v", err)
+	}
+	if actor == "" {
+		t.Fatal("audit actor is empty")
+	}
+	if gotManual != manual || gotApprovedAI != approvedAI || gotExcluded != excluded {
+		t.Fatalf("audit counts = manual=%d approved_ai=%d excluded=%d, want %d/%d/%d",
+			gotManual, gotApprovedAI, gotExcluded, manual, approvedAI, excluded)
+	}
+	if gotExported != manual+approvedAI {
+		t.Fatalf("audit exported_answer_count = %d, want %d", gotExported, manual+approvedAI)
+	}
 }
 
 // ===== oversize upload =====

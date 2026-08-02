@@ -22,6 +22,8 @@ export interface Answer {
   narrative: string;
   citations: Citation[];
   authored_by?: string;
+  ai_assisted?: boolean;
+  human_approved?: boolean;
 }
 
 export interface Question {

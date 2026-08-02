@@ -14,7 +14,7 @@
 // also `undefined` for older deployments that predate slice 129 — the page
 // MUST gracefully degrade to the actor_id truncation in that case (P0-A6).
 //
-// `kind` is the canonical 9-value enum from the platform side
+// `kind` is the canonical enum from the platform side
 // (see `internal/audit/unifiedlog/Kind`); the union is kept loose (`string`)
 // here because adding a 10th kind backend-side must NOT break the typed
 // client at compile time.
@@ -29,6 +29,7 @@ export const AUDIT_LOG_KINDS = [
   "feature_flag",
   "me",
   "walkthrough",
+  "questionnaire_export",
 ] as const;
 
 export type AuditLogKind = (typeof AUDIT_LOG_KINDS)[number];

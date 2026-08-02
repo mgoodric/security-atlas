@@ -43,8 +43,19 @@ export async function POST(
   const contentType =
     upstream.headers.get("Content-Type") ?? "application/octet-stream";
   const buf = await upstream.arrayBuffer();
+  const headers = new Headers({ "Content-Type": contentType });
+  const excludedDraftCount = upstream.headers.get(
+    "X-Questionnaire-Excluded-Draft-Count",
+  );
+  if (excludedDraftCount) {
+    headers.set("X-Questionnaire-Excluded-Draft-Count", excludedDraftCount);
+  }
+  const exportSummary = upstream.headers.get("X-Questionnaire-Export-Summary");
+  if (exportSummary) {
+    headers.set("X-Questionnaire-Export-Summary", exportSummary);
+  }
   return new NextResponse(buf, {
     status: upstream.status,
-    headers: { "Content-Type": contentType },
+    headers,
   });
 }

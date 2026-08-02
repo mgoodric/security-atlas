@@ -65,11 +65,13 @@ type Question struct {
 
 // Answer is the API-shaped projection of a questionnaire_answers row.
 type Answer struct {
-	ID          string `json:"id"`
-	AnswerValue string `json:"answer_value"`
-	Narrative   string `json:"narrative"`
-	Citations   []any  `json:"citations"`
-	AuthoredBy  string `json:"authored_by"`
+	ID            string `json:"id"`
+	AnswerValue   string `json:"answer_value"`
+	Narrative     string `json:"narrative"`
+	Citations     []any  `json:"citations"`
+	AuthoredBy    string `json:"authored_by"`
+	AIAssisted    bool   `json:"ai_assisted"`
+	HumanApproved bool   `json:"human_approved"`
 }
 
 // CreateQuestionnaireParams is the input for CreateQuestionnaire.
@@ -401,11 +403,13 @@ func rowToAnswer(r dbx.QuestionnaireAnswer) *Answer {
 		_ = json.Unmarshal(r.Citations, &citations)
 	}
 	return &Answer{
-		ID:          uuidToString(r.ID),
-		AnswerValue: r.AnswerValue,
-		Narrative:   r.Narrative,
-		Citations:   citations,
-		AuthoredBy:  r.AuthoredBy,
+		ID:            uuidToString(r.ID),
+		AnswerValue:   r.AnswerValue,
+		Narrative:     r.Narrative,
+		Citations:     citations,
+		AuthoredBy:    r.AuthoredBy,
+		AIAssisted:    r.AiAssisted,
+		HumanApproved: r.HumanApproved,
 	}
 }
 

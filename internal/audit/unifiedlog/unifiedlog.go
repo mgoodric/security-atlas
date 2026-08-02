@@ -1,8 +1,9 @@
 // Package unifiedlog is the read-only aggregator for the slice-124 unified
-// audit-log endpoint. It UNION-ALLs across the nine per-domain audit-log tables
+// audit-log endpoint. It UNION-ALLs across the ten per-domain audit-log tables
 // (`decision_audit_log`, `evidence_audit_log`, `exception_audit_log`,
 // `sample_audit_log`, `audit_period_audit_log`, `aggregation_rule_audit_log`,
-// `feature_flag_audit_log`, `me_audit_log`, `walkthrough_audit_log`) and
+// `feature_flag_audit_log`, `me_audit_log`, `walkthrough_audit_log`,
+// `questionnaire_export_audit_log`) and
 // projects each row to the canonical [Entry] shape.
 //
 // # Read-only contract
@@ -51,20 +52,21 @@ import (
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
-// Kind is the canonical kind enum. Each value maps 1:1 to one of the nine
+// Kind is the canonical kind enum. Each value maps 1:1 to one of the ten
 // underlying audit-log tables.
 type Kind string
 
 const (
-	KindDecision        Kind = "decision"
-	KindEvidence        Kind = "evidence"
-	KindException       Kind = "exception"
-	KindSample          Kind = "sample"
-	KindAuditPeriod     Kind = "audit_period"
-	KindAggregationRule Kind = "aggregation_rule"
-	KindFeatureFlag     Kind = "feature_flag"
-	KindMe              Kind = "me"
-	KindWalkthrough     Kind = "walkthrough"
+	KindDecision            Kind = "decision"
+	KindEvidence            Kind = "evidence"
+	KindException           Kind = "exception"
+	KindSample              Kind = "sample"
+	KindAuditPeriod         Kind = "audit_period"
+	KindAggregationRule     Kind = "aggregation_rule"
+	KindFeatureFlag         Kind = "feature_flag"
+	KindMe                  Kind = "me"
+	KindWalkthrough         Kind = "walkthrough"
+	KindQuestionnaireExport Kind = "questionnaire_export"
 )
 
 // SubjectModule constants (slice 180). The module identifier tagged onto
@@ -93,9 +95,10 @@ var AllKinds = []Kind{
 	KindFeatureFlag,
 	KindMe,
 	KindWalkthrough,
+	KindQuestionnaireExport,
 }
 
-// IsCanonical reports whether k is one of the nine canonical kinds.
+// IsCanonical reports whether k is one of the ten canonical kinds.
 func IsCanonical(k Kind) bool {
 	for _, candidate := range AllKinds {
 		if candidate == k {

@@ -169,6 +169,23 @@ WITH unified AS (
         (to_jsonb(w) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'walkthrough_id' - 'subject_module')::jsonb AS payload_json
     FROM walkthrough_audit_log w
+
+    UNION ALL
+
+    -- 10. questionnaire_export_audit_log
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'questionnaire_export'::text AS kind,
+        'questionnaire'::text AS target_type,
+        questionnaire_id::text AS target_id,
+        'questionnaire_exported'::text AS action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(qe) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'questionnaire_id' - 'subject_module')::jsonb AS payload_json
+    FROM questionnaire_export_audit_log qe
 )
 SELECT
     unified.occurred_at,
