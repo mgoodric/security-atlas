@@ -58,7 +58,12 @@ func (s *Server) registerQuestionnaire(root *chi.Mux) {
 		qmapStore,
 		llm.NewAuditWriter(s.dbPool),
 	)
-	questionnairesH := questionnairesapi.NewWithAI(questionnaireStore, qaiSvc, qmapSvc)
+	// Slice 756: batch answer-drafting run — sequentially drives the slice-441
+	// qaisuggest service per unanswered mapped question under the same RLS
+	// tenant context; every produced draft stays unapproved.
+	answerRunStore := questionnaire.NewAnswerRunStore(s.dbPool)
+	answerRunSvc := questionnaire.NewAnswerRunService(answerRunStore, qaiSvc)
+	questionnairesH := questionnairesapi.NewWithAIAndAnswerRuns(questionnaireStore, qaiSvc, qmapSvc, answerRunSvc)
 	questionnairesH.RegisterRoutes(root)
 	// Slice 471: role-scoped control-implementation checklist generator v0
 	// (cited, non-binding). The which-control -> which-role split is

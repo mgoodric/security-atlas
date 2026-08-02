@@ -4077,6 +4077,76 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answer-runs:
+    post:
+      summary: POST /v1/questionnaires/{id}/answer-runs
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answer-runs
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answer-runs/{runId}:
+    get:
+      summary: GET /v1/questionnaires/{id}/answer-runs/{runId}
+      tags: [questionnaires]
+      operationId: get-v1-questionnaires-id-answer-runs-runId
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answer-runs/{runId}/cancel:
+    post:
+      summary: POST /v1/questionnaires/{id}/answer-runs/{runId}/cancel
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answer-runs-runId-cancel
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/questionnaires/{id}/answers/{qid}:
     patch:
       summary: PATCH /v1/questionnaires/{id}/answers/{qid}

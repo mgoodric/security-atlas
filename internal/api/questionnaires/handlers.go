@@ -10,6 +10,9 @@
 //	PATCH  /v1/questionnaires/{id}/answers/{qid}    upsert one answer
 //	GET    /v1/questionnaires/{id}/suggestions      AnswerLibrary suggestion lookup
 //	POST   /v1/questionnaires/{id}/export-pdf       render PDF
+//	POST   /v1/questionnaires/{id}/answer-runs      run batch AI drafts
+//	GET    /v1/questionnaires/{id}/answer-runs/{runId}
+//	POST   /v1/questionnaires/{id}/answer-runs/{runId}/cancel
 //
 // Tenant scoping is enforced by RLS via the Store; every handler
 // requires a TenantFromContext OK before any DB call.
@@ -45,6 +48,7 @@ type Handler struct {
 	store          *questionnaire.Store
 	suggest        *qaisuggest.Service
 	mappingSuggest *qmapsuggest.Service
+	answerRuns     *questionnaire.AnswerRunService
 }
 
 // New constructs a Handler without the AI-suggestion surface (slice 155 only).
@@ -64,6 +68,13 @@ func NewWithAI(store *questionnaire.Store, suggest *qaisuggest.Service, mappingS
 	return &Handler{store: store, suggest: suggest, mappingSuggest: mappingSuggest}
 }
 
+// NewWithAIAndAnswerRuns constructs a Handler wired with every questionnaire
+// AI surface: answer drafting (slice 441), SCF mapping proposals (slice 755),
+// and the slice-756 batch answer-run driver.
+func NewWithAIAndAnswerRuns(store *questionnaire.Store, suggest *qaisuggest.Service, mappingSuggest *qmapsuggest.Service, answerRuns *questionnaire.AnswerRunService) *Handler {
+	return &Handler{store: store, suggest: suggest, mappingSuggest: mappingSuggest, answerRuns: answerRuns}
+}
+
 // RegisterRoutes attaches the slice-155 routes directly onto the
 // supplied chi.Router — the Mount-append convention from
 // internal/api/httpserver.go. NEVER wrap with a second
@@ -76,6 +87,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/v1/questionnaires/{id}/import-excel", h.ImportExcel)
 	r.Get("/v1/questionnaires/{id}/suggestions", h.Suggestions)
 	r.Post("/v1/questionnaires/{id}/export-pdf", h.ExportPDF)
+	r.Post("/v1/questionnaires/{id}/answer-runs", h.StartAnswerRun)
+	r.Get("/v1/questionnaires/{id}/answer-runs/{runId}", h.GetAnswerRun)
+	r.Post("/v1/questionnaires/{id}/answer-runs/{runId}/cancel", h.CancelAnswerRun)
 	// Slice 441 — AI-answer suggestion v0. The longest-literal-suffix routes
 	// (answers/{qid}/ai-suggest, answers/{qid}/ai-approve) are declared before
 	// the bare answers/{qid} PATCH so chi's declaration-order match resolves
@@ -466,6 +480,112 @@ func (h *Handler) AIApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, approved)
+}
+
+// ===== POST /v1/questionnaires/{id}/answer-runs =====
+//
+// Slice 756 — request-scoped batch driver over qaisuggest.Service.Suggest.
+// The run is role-gated identically to single-row AI suggestion and persists
+// only unapproved drafts.
+func (h *Handler) StartAnswerRun(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to start a questionnaire answer run")
+		return
+	}
+	if h.answerRuns == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		return
+	}
+	qnID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a uuid")
+		return
+	}
+	out, err := h.answerRuns.Start(ctx, qnID, cred.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, questionnaire.ErrActiveAnswerRun):
+			httpresp.WriteError(w, http.StatusConflict, "questionnaire already has an active answer run")
+		case errors.Is(err, questionnaire.ErrQuestionnaireNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "questionnaire not found")
+		default:
+			httperr.WriteInternal(w, r, "questionnaires", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusCreated, out)
+}
+
+// ===== GET /v1/questionnaires/{id}/answer-runs/{runId} =====
+func (h *Handler) GetAnswerRun(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := h.tenantCred(r); !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if h.answerRuns == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		return
+	}
+	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "runId must be a uuid")
+		return
+	}
+	out, err := h.answerRuns.Get(r.Context(), runID)
+	if err != nil {
+		if errors.Is(err, questionnaire.ErrAnswerRunNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "answer run not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "questionnaires", err)
+		return
+	}
+	if out.Run.QuestionnaireID != chi.URLParam(r, "id") {
+		httpresp.WriteError(w, http.StatusNotFound, "answer run not found")
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+// ===== POST /v1/questionnaires/{id}/answer-runs/{runId}/cancel =====
+func (h *Handler) CancelAnswerRun(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to cancel a questionnaire answer run")
+		return
+	}
+	if h.answerRuns == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		return
+	}
+	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "runId must be a uuid")
+		return
+	}
+	out, err := h.answerRuns.Cancel(ctx, runID)
+	if err != nil {
+		if errors.Is(err, questionnaire.ErrAnswerRunNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "answer run not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "questionnaires", err)
+		return
+	}
+	if out.Run.QuestionnaireID != chi.URLParam(r, "id") {
+		httpresp.WriteError(w, http.StatusNotFound, "answer run not found")
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
 }
 
 type aiApproveRequest struct {
