@@ -1,8 +1,8 @@
 # atlas-mcp
 
 Model Context Protocol (MCP) server for security-atlas — stdio transport,
-six read-only tools (slice 172) plus five write tools (slice 173) that
-wrap the platform's existing HTTP API.
+ten read-only tools (slice 172, widened by the program-reads slice) plus
+five write tools (slice 173) that wrap the platform's existing HTTP API.
 
 **Status: EXPERIMENTAL (slices 172 + 173).** The tool surface, input
 schemas, and response shapes are subject to change while the surface is
@@ -25,21 +25,28 @@ client (Claude Desktop, Claude Code, or any other MCP-aware tool)
 launches it as a subprocess, passes credentials via env, and consumes
 JSON-RPC responses from stdout.
 
-All eleven tools wrap existing security-atlas HTTP endpoints; nothing
+All fifteen tools wrap existing security-atlas HTTP endpoints; nothing
 new is mutated at the platform layer without a corresponding handler.
 RLS-based tenant isolation is enforced by the platform; the MCP server
 is a 1-tenant-per-process veneer over that surface.
 
-### Read tools (slice 172)
+### Read tools
 
-| Tool                 | Wraps endpoint                                              | Returns                                                   |
-| -------------------- | ----------------------------------------------------------- | --------------------------------------------------------- |
-| `list_controls`      | `GET /v1/controls`                                          | Tenant's active controls (canonical row shape)            |
-| `get_control`        | `GET /v1/anchors/{shortcode}` or list-then-filter for UUIDs | One control row                                           |
-| `list_risks`         | `GET /v1/risks`                                             | Tenant risks; status filter forwarded as `?treatment=`    |
-| `get_risk`           | `GET /v1/risks/{id}`                                        | One risk + linked controls + (optional) residual derive   |
-| `list_evidence`      | `GET /v1/evidence`                                          | Evidence ledger window; **never includes `payload_json`** |
-| `list_audit_periods` | `GET /v1/audit-periods`                                     | Tenant audit periods with freeze metadata                 |
+The first six shipped in slice 172; the last four widened the read surface
+to the rest of the program (see `docs-site/docs/mcp.md`).
+
+| Tool                 | Wraps endpoint                                              | Returns                                                    |
+| -------------------- | ----------------------------------------------------------- | ---------------------------------------------------------- |
+| `list_controls`      | `GET /v1/controls`                                          | Tenant's active controls (canonical row shape)             |
+| `get_control`        | `GET /v1/anchors/{shortcode}` or list-then-filter for UUIDs | One control row                                            |
+| `list_risks`         | `GET /v1/risks`                                             | Tenant risks; status filter forwarded as `?treatment=`     |
+| `get_risk`           | `GET /v1/risks/{id}`                                        | One risk + linked controls + (optional) residual derive    |
+| `list_evidence`      | `GET /v1/evidence`                                          | Evidence ledger window; **never includes `payload_json`**  |
+| `list_audit_periods` | `GET /v1/audit-periods`                                     | Tenant audit periods with freeze metadata                  |
+| `list_policies`      | `GET /v1/policies`                                          | The policy library with acknowledgment state               |
+| `list_vendors`       | `GET /v1/vendors`                                           | The vendor register with review cadence                    |
+| `list_exceptions`    | `GET /v1/exceptions`                                        | Accepted non-compliance + compensating controls and expiry |
+| `list_action_plans`  | `GET /v1/action-plans`                                      | Forward-looking remediation commitments (OSCAL POA&M)      |
 
 Defaults: every list tool returns up to 100 results; pass `limit=N`
 (max 500) to override. Asking for more than 500 returns a tool error
@@ -91,7 +98,7 @@ Or use the release binary (when released — slice 172 ships from
 source only):
 
 ```bash
-# Future: gh release download v0.X.0 --pattern 'atlas-mcp_*'
+# Future: gh release download vX.Y.Z --pattern 'atlas-mcp_*'
 ```
 
 ## Configure credentials
@@ -195,8 +202,9 @@ follow-on (see [`docs/audit-log/172-mcp-server-decisions.md`](../../docs/audit-l
 
 Slice 172 ships the foundation as **experimental**. While in soak:
 
-- The set of six tools is fixed. New tools require a follow-on slice
-  (currently slice 174 is the spillover number — see the slice doc).
+- The tool set is fixed per release. New tools require their own slice —
+  the read surface has already been widened once this way (the four
+  program-read tools above).
 - Input schemas are governed by the snapshot at
   `internal/mcp/testdata/tools.golden.json`. The CI gate (slice 172
   AC-15) blocks unintentional drift; intentional changes must
@@ -207,8 +215,8 @@ Slice 172 ships the foundation as **experimental**. While in soak:
   do not change `(mcp; ai_assisted=read-only)` without coordinating
   with the platform-side log filter that consumes it.
 
-Write tools land in slice 173 (gated on this slice merging + a fresh
-STRIDE pass + HITL approval flow per CLAUDE.md "AI-assist boundary").
+Write tools shipped in slice 173, gated behind the HITL approval flow
+per CLAUDE.md "AI-assist boundary" — see the write-tool table above.
 
 ## Security posture (slice 172 anti-criteria)
 

@@ -41,11 +41,11 @@ pin to a **minor** tag until you have run a few upgrade cycles and trust
 the release pipeline; this gets you patches without an unattended jump
 to a new minor.
 
-| Tag pattern      | Behavior                                               | Use when                                                        |
-| ---------------- | ------------------------------------------------------ | --------------------------------------------------------------- |
-| `:latest`        | Every release auto-applies                             | You trust the release discipline and run non-production         |
-| `:0.3` (minor)   | Auto-updates within `0.3.x`, never auto-jumps to `0.4` | **Recommended for production** — patches yes, new minors opt-in |
-| `:0.3.5` (patch) | Fully manual; no auto-update                           | You want complete control over every upgrade                    |
+| Tag pattern       | Behavior                                                 | Use when                                                        |
+| ----------------- | -------------------------------------------------------- | --------------------------------------------------------------- |
+| `:latest`         | Every release auto-applies                               | You trust the release discipline and run non-production         |
+| `:1.18` (minor)   | Auto-updates within `1.18.x`, never auto-jumps to `1.19` | **Recommended for production** — patches yes, new minors opt-in |
+| `:1.18.0` (patch) | Fully manual; no auto-update                             | You want complete control over every upgrade                    |
 
 Set the tag in your `.env` / compose override and keep it under version
 control alongside the rest of your deployment config.

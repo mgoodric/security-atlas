@@ -49,14 +49,19 @@ docker compose -f deploy/docker/docker-compose.yml \
 
 ## Step 2 — load SOC 2 v2017
 
-The SOC 2 framework version and its STRM crosswalk ship as a JSON
-bundle. The bootstrap container loads it automatically; on a clean
-re-import:
+The SOC 2 framework version and its STRM crosswalk ship as a YAML
+crosswalk at `data/crosswalks/soc2-tsc-2017.yaml`. The bootstrap
+container loads it automatically; on a clean re-import, point
+`DATABASE_URL` at the `atlas_migrate` role and run:
 
 ```sh
-just atlas-cli framework-import \
-  --bundle controls/frameworks/soc2-v2017.json
+just import-soc2 data/crosswalks/soc2-tsc-2017.yaml
+
+# equivalently, without `just`:
+security-atlas-cli catalog import-crosswalk data/crosswalks/soc2-tsc-2017.yaml
 ```
+
+The import is idempotent — re-running the same file is a no-op.
 
 Confirm the framework version is registered:
 

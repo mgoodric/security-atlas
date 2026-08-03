@@ -72,11 +72,17 @@ The default install seeds the SCF catalog and SOC 2 v2017. To add
 another framework version:
 
 ```sh
-# Import the OSCAL catalog (NIST IR 8477 mappings included if present).
-just atlas-cli catalog import \
-  --framework iso_27001 \
-  --version 2022 \
-  --catalog ./catalogs/iso-27001-2022.oscal.json
+# Import the framework→SCF crosswalk (STRM mappings). DATABASE_URL must
+# point at the atlas_migrate role.
+security-atlas-cli catalog import-crosswalk data/crosswalks/iso27001-2022.yaml
+
+# Or import an OSCAL catalog directly (NIST IR 8477 mappings included
+# if present) — see [OSCAL catalog import](../oscal-catalog-import.md).
+atlas-oscal import-catalog ./iso-27001-2022.oscal.json \
+  --dsn "$DATABASE_URL_APP" \
+  --tenant-id <tenant uuid> \
+  --source-label "ISO/IEC 27001:2022" \
+  --imported-by "you@example.com"
 ```
 
 The importer:

@@ -170,18 +170,31 @@ The bootstrap-token file is **deleted atomically on first successful sign-in**. 
 ```sh
 # 1. start the platform locally
 just db-up && just migrate-up
-just build-go
-./bin/atlas serve &
+export DATABASE_URL_APP="postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable"
+go build -o ./bin/ ./cmd/atlas ./cmd/atlas-cli
+./bin/atlas &
 
-# 2. push a hello-world evidence record
-./bin/atlas-cli evidence push \
-  --evidence-kind=hello.world.v1 \
-  --observed-at="$(date -Iseconds)" \
-  --payload='{"message":"first record"}'
+# 2. push a hello-world evidence record (the CLI speaks gRPC on :50051)
+export SECURITY_ATLAS_ENDPOINT=localhost:50051
+export SECURITY_ATLAS_TOKEN="<a credential from \`atlas-cli credentials issue\`>"
+./bin/atlas-cli evidence push --insecure \
+  --kind hello.world.v1 \
+  --control CTL-001 \
+  --scope '{"environment":"dev"}' \
+  --observed-at "$(date -u +%FT%TZ)" \
+  --result pass \
+  --payload '{"message":"first record"}' \
+  --idempotency-key quickstart-1 \
+  --actor-id quickstart
 
-# 3. read it back
-./bin/atlas-cli evidence list --evidence-kind=hello.world.v1
+# 3. read it back over the HTTP API
+curl -fsS http://localhost:8080/v1/evidence \
+  -H "Authorization: Bearer $SECURITY_ATLAS_TOKEN"
 ```
+
+`just build-go` runs `go build ./...` as a compile check — it does not write
+binaries. Use the explicit `go build -o ./bin/` above (or `go run ./cmd/atlas-cli`)
+when you want something to execute.
 
 For a connector-driven walkthrough (AWS S3 encryption posture, GitHub branch-protection, osquery host posture), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md).
 
