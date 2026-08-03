@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/change.verification/1.0.0.json",
+  "x-evidence-kind": "change.verification.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["CHG-02", "CFG-04"],
+  "title": "Change verification evidence",
+  "description": "Evidence that an operational change was verified after implementation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["change_id", "title", "status", "source", "action"],
+  "properties": {
+    "change_id": { "type": "string", "format": "uuid" },
+    "title": { "type": "string", "minLength": 1 },
+    "status": { "type": "string", "const": "verified" },
+    "source": { "type": "string", "enum": ["manual", "jira", "csv"] },
+    "source_ref": { "type": "string" },
+    "risk_notes": { "type": "string" },
+    "rollback_notes": { "type": "string" },
+    "action": { "type": "string", "const": "verified" }
+  }
+}

@@ -1487,6 +1487,48 @@ type BoardPack struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Change struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	Title         string             `json:"title"`
+	Description   string             `json:"description"`
+	Source        string             `json:"source"`
+	SourceRef     string             `json:"source_ref"`
+	SourceUrl     string             `json:"source_url"`
+	Status        string             `json:"status"`
+	ProposedBy    pgtype.UUID        `json:"proposed_by"`
+	ProposedAt    pgtype.Timestamptz `json:"proposed_at"`
+	ApproverID    pgtype.UUID        `json:"approver_id"`
+	ApprovedAt    pgtype.Timestamptz `json:"approved_at"`
+	ImplementedBy pgtype.UUID        `json:"implemented_by"`
+	ImplementedAt pgtype.Timestamptz `json:"implemented_at"`
+	VerifiedBy    pgtype.UUID        `json:"verified_by"`
+	VerifiedAt    pgtype.Timestamptz `json:"verified_at"`
+	RiskNotes     string             `json:"risk_notes"`
+	RollbackNotes string             `json:"rollback_notes"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ChangeAuditLog struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	ChangeID    pgtype.UUID        `json:"change_id"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+	ActionType  string             `json:"action_type"`
+	BeforeState []byte             `json:"before_state"`
+	AfterState  []byte             `json:"after_state"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type ChangeControl struct {
+	ChangeID  pgtype.UUID        `json:"change_id"`
+	ControlID pgtype.UUID        `json:"control_id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	LinkedAt  pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy  pgtype.UUID        `json:"linked_by"`
+}
+
 type ChannelDeliveryLog struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`
