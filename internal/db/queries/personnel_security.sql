@@ -82,6 +82,24 @@ WHERE tenant_id = $1
   AND due_at < $2
 ORDER BY due_at ASC, id ASC;
 
+-- name: ListPersonnelChecklists :many
+-- OE-663: the checklist-index read behind GET /v1/personnel-security/
+-- checklists. Optional filters compose via the sqlc.narg NULL-collapse
+-- pattern (see control_detail.sql): a NULL arg keeps the predicate
+-- vacuously true. overdue_only narrows to open checklists whose due_at
+-- has passed, mirroring ListOverdueOffboardingChecklists but across
+-- both workflow kinds.
+SELECT *
+FROM personnel_security_checklists
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND (sqlc.narg('workflow_kind')::text IS NULL
+       OR workflow_kind = sqlc.narg('workflow_kind')::text)
+  AND (sqlc.narg('status')::text IS NULL
+       OR status = sqlc.narg('status')::text)
+  AND (NOT sqlc.arg('overdue_only')::boolean
+       OR (status = 'open' AND due_at < sqlc.arg('now_ts')::timestamptz))
+ORDER BY due_at ASC, id ASC;
+
 -- name: CountPersonnelChecklistsForTenant :one
 SELECT count(*)
 FROM personnel_security_checklists

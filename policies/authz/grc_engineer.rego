@@ -50,6 +50,12 @@ grc_writable_resources := {
     # Write surface includes create + attach + finalize; read surface
     # is implicit from the action == "read" allow rule above.
     "walkthroughs",
+    # OE-663: personnel-security checklists (onboarding/offboarding).
+    # The operator creates manual checklists and completes items —
+    # completing an item writes the CC1 evidence record. Evidence +
+    # task tracking only; no route provisions or deprovisions access
+    # (the OE-630 boundary).
+    "personnel-security",
 }
 
 grc_actions := {

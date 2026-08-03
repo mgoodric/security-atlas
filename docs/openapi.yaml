@@ -90,6 +90,7 @@ tags:
   - name: me
   - name: oauth
   - name: oscal
+  - name: personnel-security
   - name: policies
   - name: questionnaires
   - name: risks
@@ -3814,6 +3815,73 @@ paths:
       summary: GET /v1/oscal/imported-profiles/{id}/provenance
       tags: [oscal]
       operationId: get-v1-oscal-imported-profiles-id-provenance
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/personnel-security/checklist-items/{id}/complete:
+    post:
+      summary: POST /v1/personnel-security/checklist-items/{id}/complete — complete an item (completed_by, evidence_uri, notes); writes the personnel_security.workflow.v1 CC1 evidence record (OE-663)
+      tags: [personnel-security]
+      operationId: post-v1-personnel-security-checklist-items-id-complete
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/personnel-security/checklists:
+    get:
+      summary: GET /v1/personnel-security/checklists — onboarding/offboarding checklist index (?kind= ?status= ?overdue=true filters; OE-663)
+      tags: [personnel-security]
+      operationId: get-v1-personnel-security-checklists
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/personnel-security/checklists — create a manual checklist (kind, person, control_id, due_at; OE-663)
+      tags: [personnel-security]
+      operationId: post-v1-personnel-security-checklists
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/personnel-security/checklists/{id}:
+    get:
+      summary: GET /v1/personnel-security/checklists/{id} — one checklist with its items (OE-663)
+      tags: [personnel-security]
+      operationId: get-v1-personnel-security-checklists-id
       security:
         - bearer: []
       parameters:

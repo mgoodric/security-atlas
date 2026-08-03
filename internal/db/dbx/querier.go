@@ -2186,6 +2186,13 @@ type Querier interface {
 	// Sort by title ASC, created_at DESC for deterministic ordering.
 	ListPendingAcksForUser(ctx context.Context, arg ListPendingAcksForUserParams) ([]ListPendingAcksForUserRow, error)
 	ListPersonnelChecklistItems(ctx context.Context, arg ListPersonnelChecklistItemsParams) ([]PersonnelSecurityChecklistItem, error)
+	// OE-663: the checklist-index read behind GET /v1/personnel-security/
+	// checklists. Optional filters compose via the sqlc.narg NULL-collapse
+	// pattern (see control_detail.sql): a NULL arg keeps the predicate
+	// vacuously true. overdue_only narrows to open checklists whose due_at
+	// has passed, mirroring ListOverdueOffboardingChecklists but across
+	// both workflow kinds.
+	ListPersonnelChecklists(ctx context.Context, arg ListPersonnelChecklistsParams) ([]PersonnelSecurityChecklist, error)
 	// Returns every policy for the tenant, newest first. Handler applies
 	// status filter in-memory (cardinality is small per canvas v1 scope).
 	ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error)
