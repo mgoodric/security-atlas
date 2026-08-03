@@ -69,6 +69,15 @@ type vendorWire struct {
 	OwnerUser      string    `json:"owner_user"`
 	LinkedSOWURI   *string   `json:"linked_sow_uri,omitempty"`
 	Notes          string    `json:"notes"`
+	AnnualCost     *float64  `json:"annual_cost,omitempty"`
+	Currency       *string   `json:"currency,omitempty"`
+	RenewalDate    *string   `json:"renewal_date,omitempty"`
+	AutoRenew      bool      `json:"auto_renew"`
+	LicenseCount   *int32    `json:"license_count,omitempty"`
+	ToolCategory   *string   `json:"tool_category,omitempty"`
+	CostOwner      string    `json:"cost_owner"`
+	Status         string    `json:"status"`
+	BillingCadence *string   `json:"billing_cadence,omitempty"`
 	ScopeCellIDs   []string  `json:"scope_cell_ids"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
@@ -87,6 +96,15 @@ type writeReq struct {
 	OwnerUser      string   `json:"owner_user"`
 	LinkedSOWURI   *string  `json:"linked_sow_uri"`
 	Notes          string   `json:"notes"`
+	AnnualCost     *float64 `json:"annual_cost"`
+	Currency       *string  `json:"currency"`
+	RenewalDate    *string  `json:"renewal_date"`
+	AutoRenew      bool     `json:"auto_renew"`
+	LicenseCount   *int32   `json:"license_count"`
+	ToolCategory   *string  `json:"tool_category"`
+	CostOwner      string   `json:"cost_owner"`
+	Status         string   `json:"status"`
+	BillingCadence *string  `json:"billing_cadence"`
 	ScopeCellIDs   []string `json:"scope_cell_ids"`
 }
 
@@ -122,6 +140,13 @@ type burndownWire struct {
 	AsOf  time.Time          `json:"as_of"`
 	Bands []burndownBandWire `json:"bands"`
 	Total burndownBandWire   `json:"total"`
+}
+
+type spendRollupWire struct {
+	ToolCategory *string `json:"tool_category"`
+	Currency     string  `json:"currency"`
+	AnnualCost   float64 `json:"annual_cost"`
+	VendorCount  int64   `json:"vendor_count"`
 }
 
 // ----- handlers -----
@@ -166,6 +191,14 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 		}
 		f.Criticality = &crit
 	}
+	if c := strings.TrimSpace(r.URL.Query().Get("tool_category")); c != "" {
+		cat := vendor.ToolCategory(c)
+		if !cat.Valid() {
+			httpresp.WriteError(w, http.StatusBadRequest, "tool_category is invalid")
+			return
+		}
+		f.ToolCategory = &cat
+	}
 	if r.URL.Query().Get("overdue") == "true" {
 		f.OverdueOnly = true
 		if v := strings.TrimSpace(r.URL.Query().Get("as_of")); v != "" {
@@ -189,6 +222,35 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 		out = append(out, h.toWire(v))
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendors": out})
+}
+
+// SpendRollup handles GET /v1/vendors/spend.
+func (h *Handler) SpendRollup(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	rows, err := h.store.SpendRollup(ctx)
+	if err != nil {
+		h.writeStoreErr(w, r, "vendor spend rollup", err)
+		return
+	}
+	out := make([]spendRollupWire, 0, len(rows))
+	for _, row := range rows {
+		var cat *string
+		if row.ToolCategory != nil {
+			v := string(*row.ToolCategory)
+			cat = &v
+		}
+		out = append(out, spendRollupWire{
+			ToolCategory: cat,
+			Currency:     row.Currency,
+			AnnualCost:   row.AnnualCost,
+			VendorCount:  row.VendorCount,
+		})
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"rollup": out})
 }
 
 // GetVendor handles GET /v1/vendors/{id}.
@@ -397,6 +459,20 @@ func decodeWrite(r *http.Request) (vendor.CreateVendorInput, *httpErr) {
 		OwnerUser:     req.OwnerUser,
 		LinkedSOWURI:  req.LinkedSOWURI,
 		Notes:         req.Notes,
+		AnnualCost:    req.AnnualCost,
+		Currency:      req.Currency,
+		AutoRenew:     req.AutoRenew,
+		LicenseCount:  req.LicenseCount,
+		CostOwner:     req.CostOwner,
+		Status:        vendor.CommercialStatus(strings.TrimSpace(req.Status)),
+	}
+	if req.ToolCategory != nil && strings.TrimSpace(*req.ToolCategory) != "" {
+		c := vendor.ToolCategory(strings.TrimSpace(*req.ToolCategory))
+		in.ToolCategory = &c
+	}
+	if req.BillingCadence != nil && strings.TrimSpace(*req.BillingCadence) != "" {
+		c := vendor.BillingCadence(strings.TrimSpace(*req.BillingCadence))
+		in.BillingCadence = &c
 	}
 	var err error
 	if in.ContractStart, err = parseOptDate(req.ContractStart); err != nil {
@@ -410,6 +486,9 @@ func decodeWrite(r *http.Request) (vendor.CreateVendorInput, *httpErr) {
 	}
 	if in.LastReviewDate, err = parseOptDate(req.LastReviewDate); err != nil {
 		return vendor.CreateVendorInput{}, &httpErr{http.StatusBadRequest, "last_review_date: " + err.Error()}
+	}
+	if in.RenewalDate, err = parseOptDate(req.RenewalDate); err != nil {
+		return vendor.CreateVendorInput{}, &httpErr{http.StatusBadRequest, "renewal_date: " + err.Error()}
 	}
 	for _, s := range req.ScopeCellIDs {
 		id, err := uuid.Parse(s)
@@ -451,6 +530,12 @@ func (h *Handler) toWire(v vendor.Vendor) vendorWire {
 		OwnerUser:     v.OwnerUser,
 		LinkedSOWURI:  v.LinkedSOWURI,
 		Notes:         v.Notes,
+		AnnualCost:    v.AnnualCost,
+		Currency:      v.Currency,
+		AutoRenew:     v.AutoRenew,
+		LicenseCount:  v.LicenseCount,
+		CostOwner:     v.CostOwner,
+		Status:        string(v.Status),
 		ScopeCellIDs:  cellIDs,
 		CreatedAt:     v.CreatedAt,
 		UpdatedAt:     v.UpdatedAt,
@@ -460,6 +545,15 @@ func (h *Handler) toWire(v vendor.Vendor) vendorWire {
 	w.ContractEnd = dateString(v.ContractEnd)
 	w.DPASignedAt = dateString(v.DPASignedAt)
 	w.LastReviewDate = dateString(v.LastReviewDate)
+	w.RenewalDate = dateString(v.RenewalDate)
+	if v.ToolCategory != nil {
+		s := string(*v.ToolCategory)
+		w.ToolCategory = &s
+	}
+	if v.BillingCadence != nil {
+		s := string(*v.BillingCadence)
+		w.BillingCadence = &s
+	}
 	return w
 }
 

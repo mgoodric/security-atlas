@@ -75,6 +75,15 @@ func TestCreateVendor_FullPayload(t *testing.T) {
 		OwnerUser:      "alice@example.com",
 		LinkedSOWURI:   ptr("s3://contracts/datadog-2025.pdf"),
 		Notes:          "Observability vendor",
+		AnnualCost:     ptr(120000.00),
+		Currency:       ptr("USD"),
+		RenewalDate:    ptr(parseDate(t, "2025-12-15")),
+		AutoRenew:      true,
+		LicenseCount:   ptr[int32](150),
+		ToolCategory:   ptr(vendor.ToolCategorySIEM),
+		CostOwner:      "security-finance@example.com",
+		Status:         vendor.StatusActive,
+		BillingCadence: ptr(vendor.BillingAnnual),
 	}
 	got, err := store.Create(ctx, in)
 	if err != nil {
@@ -91,6 +100,18 @@ func TestCreateVendor_FullPayload(t *testing.T) {
 	}
 	if got.LinkedSOWURI == nil || *got.LinkedSOWURI != "s3://contracts/datadog-2025.pdf" {
 		t.Fatalf("SOW URI not preserved: %v", got.LinkedSOWURI)
+	}
+	if got.AnnualCost == nil || *got.AnnualCost != 120000 || got.Currency == nil || *got.Currency != "USD" {
+		t.Fatalf("commercial cost not preserved: %+v", got)
+	}
+	if got.RenewalDate == nil || got.LicenseCount == nil || *got.LicenseCount != 150 || !got.AutoRenew {
+		t.Fatalf("renewal/license fields not preserved: %+v", got)
+	}
+	if got.ToolCategory == nil || *got.ToolCategory != vendor.ToolCategorySIEM || got.Status != vendor.StatusActive {
+		t.Fatalf("tool category/status not preserved: %+v", got)
+	}
+	if got.CostOwner != "security-finance@example.com" || got.BillingCadence == nil || *got.BillingCadence != vendor.BillingAnnual {
+		t.Fatalf("cost owner/billing cadence not preserved: %+v", got)
 	}
 }
 
@@ -130,6 +151,90 @@ func TestCreateVendor_RejectsBadCriticality(t *testing.T) {
 	})
 	if !errors.Is(err, vendor.ErrInvalidInput) {
 		t.Fatalf("want ErrInvalidInput; got %v", err)
+	}
+}
+
+func TestCreateVendor_RejectsInvalidCommercialFields(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	store := vendor.NewStore(app)
+	ctx := tenantCtx(t, tenant)
+
+	cases := []struct {
+		name string
+		in   vendor.CreateVendorInput
+	}{
+		{
+			name: "negative annual cost",
+			in: vendor.CreateVendorInput{
+				Name:          "BadCost",
+				Criticality:   vendor.CriticalityLow,
+				ReviewCadence: vendor.CadenceAnnual,
+				AnnualCost:    ptr(-1.0),
+				Status:        vendor.StatusActive,
+			},
+		},
+		{
+			name: "bad currency",
+			in: vendor.CreateVendorInput{
+				Name:          "BadCurrency",
+				Criticality:   vendor.CriticalityLow,
+				ReviewCadence: vendor.CadenceAnnual,
+				Currency:      ptr("US"),
+				Status:        vendor.StatusActive,
+			},
+		},
+		{
+			name: "negative license count",
+			in: vendor.CreateVendorInput{
+				Name:          "BadSeats",
+				Criticality:   vendor.CriticalityLow,
+				ReviewCadence: vendor.CadenceAnnual,
+				LicenseCount:  ptr[int32](-1),
+				Status:        vendor.StatusActive,
+			},
+		},
+		{
+			name: "bad category",
+			in: vendor.CreateVendorInput{
+				Name:          "BadCategory",
+				Criticality:   vendor.CriticalityLow,
+				ReviewCadence: vendor.CadenceAnnual,
+				ToolCategory:  ptr(vendor.ToolCategory("endpoint-ish")),
+				Status:        vendor.StatusActive,
+			},
+		},
+		{
+			name: "renewal before contract start",
+			in: vendor.CreateVendorInput{
+				Name:          "BadRenewal",
+				Criticality:   vendor.CriticalityLow,
+				ReviewCadence: vendor.CadenceAnnual,
+				ContractStart: ptr(parseDate(t, "2026-01-01")),
+				RenewalDate:   ptr(parseDate(t, "2025-12-31")),
+				Status:        vendor.StatusActive,
+			},
+		},
+		{
+			name: "renewal after contract end",
+			in: vendor.CreateVendorInput{
+				Name:          "LateRenewal",
+				Criticality:   vendor.CriticalityLow,
+				ReviewCadence: vendor.CadenceAnnual,
+				ContractEnd:   ptr(parseDate(t, "2026-12-31")),
+				RenewalDate:   ptr(parseDate(t, "2027-01-01")),
+				Status:        vendor.StatusActive,
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := store.Create(ctx, tc.in)
+			if !errors.Is(err, vendor.ErrInvalidInput) {
+				t.Fatalf("want ErrInvalidInput; got %v", err)
+			}
+		})
 	}
 }
 
@@ -452,6 +557,36 @@ func TestRLS_OtherTenantCannotSeeVendors(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("tenant B saw %d vendors from tenant A; RLS bypassed", len(rows))
+	}
+}
+
+func TestRLS_OtherTenantCannotSeeCommercialSpend(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+	store := vendor.NewStore(app)
+
+	ctxA := tenantCtx(t, tenantA)
+	if _, err := store.Create(ctxA, vendor.CreateVendorInput{
+		Name:          "Cost Secret",
+		Criticality:   vendor.CriticalityHigh,
+		ReviewCadence: vendor.CadenceAnnual,
+		AnnualCost:    ptr(50000.0),
+		Currency:      ptr("USD"),
+		ToolCategory:  ptr(vendor.ToolCategoryEDR),
+		Status:        vendor.StatusActive,
+	}); err != nil {
+		t.Fatalf("create A: %v", err)
+	}
+
+	ctxB := tenantCtx(t, tenantB)
+	rows, err := store.SpendRollup(ctxB)
+	if err != nil {
+		t.Fatalf("spend B: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("tenant B saw tenant A spend rows: %+v", rows)
 	}
 }
 

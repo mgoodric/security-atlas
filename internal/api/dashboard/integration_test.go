@@ -270,6 +270,21 @@ func seedVendor(t *testing.T, admin *pgxpool.Pool, tenant, name string, lastRevi
 	}
 }
 
+func seedVendorRenewal(t *testing.T, admin *pgxpool.Pool, tenant, name string, renewalDate time.Time) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO vendors (
+			id, tenant_id, name, criticality, review_cadence, renewal_date,
+			annual_cost, currency, tool_category, commercial_status
+		)
+		VALUES ($1, $2, $3, 'medium', 'annual', $4, 25000, 'USD', 'iam', 'active')
+	`, id, tenant, name, renewalDate); err != nil {
+		t.Fatalf("seed vendor renewal: %v", err)
+	}
+	return id
+}
+
 // seedUserAndAck inserts a user + one policy + one policy_acknowledgments
 // row. The ack's due_date in the rollup is acknowledged_at + 365 days.
 func seedUserAndAck(t *testing.T, admin *pgxpool.Pool, tenant string, ackedAt time.Time) {
@@ -616,6 +631,34 @@ func TestUpcoming_CategoryFilter(t *testing.T) {
 	}
 	if cat := rows[0].(map[string]any)["category"].(string); cat != "exception" {
 		t.Fatalf("ISC-21 filter: category = %q, want exception", cat)
+	}
+}
+
+func TestUpcoming_IncludesVendorRenewal(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	renewalID := seedVendorRenewal(t, admin, tenant, "Okta", time.Now().UTC().Add(20*24*time.Hour))
+
+	resp, body := get(t, env, "/v1/upcoming?category=vendor_renewal")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET upcoming vendor_renewal: status %d", resp.StatusCode)
+	}
+	rows, _ := body["upcoming"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 vendor renewal row, got %d; body=%v", len(rows), body)
+	}
+	first := rows[0].(map[string]any)
+	if first["category"] != "vendor_renewal" {
+		t.Fatalf("category=%v want vendor_renewal", first["category"])
+	}
+	if first["resource_id"] != renewalID.String() {
+		t.Fatalf("resource_id=%v want %s", first["resource_id"], renewalID)
+	}
+	if !strings.Contains(first["title"].(string), "Okta") {
+		t.Fatalf("title=%v want vendor name", first["title"])
 	}
 }
 

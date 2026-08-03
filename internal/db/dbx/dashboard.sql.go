@@ -396,6 +396,28 @@ FROM (
 
     UNION ALL
 
+    -- vendor contract renewals: explicit renewal_date from the commercial
+    -- tooling register. This is intentionally separate from vendor reviews:
+    -- review cadence is risk work; renewal_date is commercial spend work.
+    SELECT
+        v.renewal_date::timestamptz                 AS due_date,
+        'vendor_renewal'::text                      AS category,
+        ('Vendor renewal: ' || v.name)              AS title,
+        'vendor'::text                              AS resource_type,
+        v.id::text                                  AS resource_id
+    FROM vendors v
+    WHERE v.tenant_id = $1
+      AND v.renewal_date IS NOT NULL
+      AND v.commercial_status <> 'churned'
+      AND ($2::text = '' OR $2::text = 'vendor_renewal')
+      AND (
+            v.renewal_date::timestamptz > $3::timestamptz
+            OR (v.renewal_date::timestamptz = $3::timestamptz
+                AND v.id::text > $4::text)
+          )
+
+    UNION ALL
+
     -- audit-period milestones: open periods, ordered by when they close.
     SELECT
         ap.period_end::timestamptz                 AS due_date,
@@ -435,7 +457,7 @@ type ListUpcomingItemsRow struct {
 
 // AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
 // sources — expiring exceptions (021), policy-ack expirations (023), vendor
-// reviews (024), audit-period milestones (028) — projected to the AC-4 row
+// reviews and contract renewals (024/OE-623), audit-period milestones (028) — projected to the AC-4 row
 // shape {due_date, category, title, resource_type, resource_id}. NOT four
 // round-trips (anti-criterion P0: no N+1).
 //
@@ -456,6 +478,7 @@ type ListUpcomingItemsRow struct {
 //	                   (policy_version, user) is considered
 //	vendor_review    — last_review_date + the cadence interval (next review
 //	                   falls due)
+//	vendor_renewal   — renewal_date (contract renewal falls due)
 //	audit_period     — period_end (the audit period closes)
 //
 // All four are tenant-scoped; RLS fires on each underlying SELECT and the

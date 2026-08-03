@@ -186,6 +186,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/upcoming", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/upcoming"},
 	{Method: "GET", Path: "/v1/vendors", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors"},
 	{Method: "GET", Path: "/v1/vendors/burndown", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors/burndown"},
+	{Method: "GET", Path: "/v1/vendors/spend", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors/spend"},
 	{Method: "GET", Path: "/v1/vendors/{id}", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors/{id}"},
 	{Method: "GET", Path: "/v1/vendors/{id}/reviews", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors/{id}/reviews"},
 	{Method: "GET", Path: "/v1/version", Tag: "system", Tier: "none", Internal: true, Summary: "GET /v1/version"},

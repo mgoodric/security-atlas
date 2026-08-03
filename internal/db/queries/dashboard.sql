@@ -192,7 +192,7 @@ LIMIT sqlc.arg(row_limit);
 -- name: ListUpcomingItems :many
 -- AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
 -- sources — expiring exceptions (021), policy-ack expirations (023), vendor
--- reviews (024), audit-period milestones (028) — projected to the AC-4 row
+-- reviews and contract renewals (024/OE-623), audit-period milestones (028) — projected to the AC-4 row
 -- shape {due_date, category, title, resource_type, resource_id}. NOT four
 -- round-trips (anti-criterion P0: no N+1).
 --
@@ -212,6 +212,7 @@ LIMIT sqlc.arg(row_limit);
 --                      (policy_version, user) is considered
 --   vendor_review    — last_review_date + the cadence interval (next review
 --                      falls due)
+--   vendor_renewal   — renewal_date (contract renewal falls due)
 --   audit_period     — period_end (the audit period closes)
 --
 -- All four are tenant-scoped; RLS fires on each underlying SELECT and the
@@ -325,6 +326,28 @@ FROM (
                 WHEN 'biannual'  THEN INTERVAL '6 months'
                 WHEN 'annual'    THEN INTERVAL '12 months'
              END)::timestamptz = sqlc.arg(cursor_date)::timestamptz
+                AND v.id::text > sqlc.arg(cursor_id)::text)
+          )
+
+    UNION ALL
+
+    -- vendor contract renewals: explicit renewal_date from the commercial
+    -- tooling register. This is intentionally separate from vendor reviews:
+    -- review cadence is risk work; renewal_date is commercial spend work.
+    SELECT
+        v.renewal_date::timestamptz                 AS due_date,
+        'vendor_renewal'::text                      AS category,
+        ('Vendor renewal: ' || v.name)              AS title,
+        'vendor'::text                              AS resource_type,
+        v.id::text                                  AS resource_id
+    FROM vendors v
+    WHERE v.tenant_id = $1
+      AND v.renewal_date IS NOT NULL
+      AND v.commercial_status <> 'churned'
+      AND (sqlc.arg(category_filter)::text = '' OR sqlc.arg(category_filter)::text = 'vendor_renewal')
+      AND (
+            v.renewal_date::timestamptz > sqlc.arg(cursor_date)::timestamptz
+            OR (v.renewal_date::timestamptz = sqlc.arg(cursor_date)::timestamptz
                 AND v.id::text > sqlc.arg(cursor_id)::text)
           )
 

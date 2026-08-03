@@ -937,6 +937,94 @@ func (ns NullStrmRelationshipType) Value() (driver.Value, error) {
 	return string(ns.StrmRelationshipType), nil
 }
 
+type VendorBillingCadence string
+
+const (
+	VendorBillingCadenceMonthly   VendorBillingCadence = "monthly"
+	VendorBillingCadenceQuarterly VendorBillingCadence = "quarterly"
+	VendorBillingCadenceAnnual    VendorBillingCadence = "annual"
+	VendorBillingCadenceMultiYear VendorBillingCadence = "multi_year"
+	VendorBillingCadenceOneTime   VendorBillingCadence = "one_time"
+)
+
+func (e *VendorBillingCadence) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VendorBillingCadence(s)
+	case string:
+		*e = VendorBillingCadence(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VendorBillingCadence: %T", src)
+	}
+	return nil
+}
+
+type NullVendorBillingCadence struct {
+	VendorBillingCadence VendorBillingCadence `json:"vendor_billing_cadence"`
+	Valid                bool                 `json:"valid"` // Valid is true if VendorBillingCadence is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVendorBillingCadence) Scan(value interface{}) error {
+	if value == nil {
+		ns.VendorBillingCadence, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VendorBillingCadence.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVendorBillingCadence) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VendorBillingCadence), nil
+}
+
+type VendorCommercialStatus string
+
+const (
+	VendorCommercialStatusActive   VendorCommercialStatus = "active"
+	VendorCommercialStatusTrialing VendorCommercialStatus = "trialing"
+	VendorCommercialStatusChurned  VendorCommercialStatus = "churned"
+)
+
+func (e *VendorCommercialStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VendorCommercialStatus(s)
+	case string:
+		*e = VendorCommercialStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VendorCommercialStatus: %T", src)
+	}
+	return nil
+}
+
+type NullVendorCommercialStatus struct {
+	VendorCommercialStatus VendorCommercialStatus `json:"vendor_commercial_status"`
+	Valid                  bool                   `json:"valid"` // Valid is true if VendorCommercialStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVendorCommercialStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.VendorCommercialStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VendorCommercialStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVendorCommercialStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VendorCommercialStatus), nil
+}
+
 type VendorCriticality string
 
 const (
@@ -1066,6 +1154,55 @@ func (ns NullVendorReviewOutcome) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.VendorReviewOutcome), nil
+}
+
+type VendorToolCategory string
+
+const (
+	VendorToolCategoryEdr           VendorToolCategory = "edr"
+	VendorToolCategorySiem          VendorToolCategory = "siem"
+	VendorToolCategoryIam           VendorToolCategory = "iam"
+	VendorToolCategoryVulnMgmt      VendorToolCategory = "vuln_mgmt"
+	VendorToolCategoryCloudSecurity VendorToolCategory = "cloud_security"
+	VendorToolCategoryAppsec        VendorToolCategory = "appsec"
+	VendorToolCategoryGrc           VendorToolCategory = "grc"
+	VendorToolCategoryMonitoring    VendorToolCategory = "monitoring"
+	VendorToolCategoryOther         VendorToolCategory = "other"
+)
+
+func (e *VendorToolCategory) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = VendorToolCategory(s)
+	case string:
+		*e = VendorToolCategory(s)
+	default:
+		return fmt.Errorf("unsupported scan type for VendorToolCategory: %T", src)
+	}
+	return nil
+}
+
+type NullVendorToolCategory struct {
+	VendorToolCategory VendorToolCategory `json:"vendor_tool_category"`
+	Valid              bool               `json:"valid"` // Valid is true if VendorToolCategory is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullVendorToolCategory) Scan(value interface{}) error {
+	if value == nil {
+		ns.VendorToolCategory, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.VendorToolCategory.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullVendorToolCategory) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.VendorToolCategory), nil
 }
 
 type ActionPlan struct {
@@ -2446,22 +2583,31 @@ type UserRole struct {
 }
 
 type Vendor struct {
-	ID             pgtype.UUID         `json:"id"`
-	TenantID       pgtype.UUID         `json:"tenant_id"`
-	Name           string              `json:"name"`
-	Domain         *string             `json:"domain"`
-	Criticality    VendorCriticality   `json:"criticality"`
-	ContractStart  pgtype.Date         `json:"contract_start"`
-	ContractEnd    pgtype.Date         `json:"contract_end"`
-	DpaSigned      bool                `json:"dpa_signed"`
-	DpaSignedAt    pgtype.Date         `json:"dpa_signed_at"`
-	ReviewCadence  VendorReviewCadence `json:"review_cadence"`
-	LastReviewDate pgtype.Date         `json:"last_review_date"`
-	OwnerUser      string              `json:"owner_user"`
-	LinkedSowUri   *string             `json:"linked_sow_uri"`
-	Notes          string              `json:"notes"`
-	CreatedAt      pgtype.Timestamptz  `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz  `json:"updated_at"`
+	ID               pgtype.UUID            `json:"id"`
+	TenantID         pgtype.UUID            `json:"tenant_id"`
+	Name             string                 `json:"name"`
+	Domain           *string                `json:"domain"`
+	Criticality      VendorCriticality      `json:"criticality"`
+	ContractStart    pgtype.Date            `json:"contract_start"`
+	ContractEnd      pgtype.Date            `json:"contract_end"`
+	DpaSigned        bool                   `json:"dpa_signed"`
+	DpaSignedAt      pgtype.Date            `json:"dpa_signed_at"`
+	ReviewCadence    VendorReviewCadence    `json:"review_cadence"`
+	LastReviewDate   pgtype.Date            `json:"last_review_date"`
+	OwnerUser        string                 `json:"owner_user"`
+	LinkedSowUri     *string                `json:"linked_sow_uri"`
+	Notes            string                 `json:"notes"`
+	CreatedAt        pgtype.Timestamptz     `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz     `json:"updated_at"`
+	AnnualCost       *float64               `json:"annual_cost"`
+	Currency         *string                `json:"currency"`
+	RenewalDate      pgtype.Date            `json:"renewal_date"`
+	AutoRenew        bool                   `json:"auto_renew"`
+	LicenseCount     *int32                 `json:"license_count"`
+	ToolCategory     *VendorToolCategory    `json:"tool_category"`
+	CostOwner        string                 `json:"cost_owner"`
+	CommercialStatus VendorCommercialStatus `json:"commercial_status"`
+	BillingCadence   *VendorBillingCadence  `json:"billing_cadence"`
 }
 
 type VendorReview struct {
