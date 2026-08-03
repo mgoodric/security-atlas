@@ -87,6 +87,7 @@ func DefaultSeed() []KindVersion {
 	return []KindVersion{
 		{Kind: "sast.scan_result.v1", Version: "1.0.0"},
 		{Kind: "access_review.completion.v1", Version: "1.0.0"},
+		{Kind: "personnel_security.workflow.v1", Version: "1.0.0"},
 		{Kind: "manual.attestation.v1", Version: "1.0.0"},
 		{Kind: "aws.s3.bucket_encryption_state.v1", Version: "1.0.0"},
 		{Kind: "github.repo_protection.v1", Version: "1.0.0"},

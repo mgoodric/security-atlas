@@ -2208,6 +2208,41 @@ type OrgUnit struct {
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
+type PersonnelSecurityChecklist struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	WorkflowKind      string             `json:"workflow_kind"`
+	Source            string             `json:"source"`
+	SourceEventID     *string            `json:"source_event_id"`
+	PersonExternalID  string             `json:"person_external_id"`
+	PersonWorkEmail   string             `json:"person_work_email"`
+	PersonDisplayName string             `json:"person_display_name"`
+	ControlID         pgtype.UUID        `json:"control_id"`
+	DueAt             pgtype.Timestamptz `json:"due_at"`
+	Status            string             `json:"status"`
+	CreatedBy         string             `json:"created_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+}
+
+type PersonnelSecurityChecklistItem struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	ChecklistID      pgtype.UUID        `json:"checklist_id"`
+	Slug             string             `json:"slug"`
+	Title            string             `json:"title"`
+	Category         string             `json:"category"`
+	SortOrder        int32              `json:"sort_order"`
+	CompletedAt      pgtype.Timestamptz `json:"completed_at"`
+	CompletedBy      *string            `json:"completed_by"`
+	EvidenceRecordID pgtype.UUID        `json:"evidence_record_id"`
+	EvidenceUri      string             `json:"evidence_uri"`
+	Notes            string             `json:"notes"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Policy struct {
 	ID                          pgtype.UUID        `json:"id"`
 	TenantID                    pgtype.UUID        `json:"tenant_id"`

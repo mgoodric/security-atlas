@@ -150,6 +150,7 @@ type Querier interface {
 	ClaimStalenessRollup(ctx context.Context, arg ClaimStalenessRollupParams) (pgtype.UUID, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
+	CompletePersonnelChecklistItem(ctx context.Context, arg CompletePersonnelChecklistItemParams) (PersonnelSecurityChecklistItem, error)
 	// Per-item existence + tenant check (AC-6 / AC-7): does this control id
 	// exist and is it visible to the calling tenant? Run inside the tenant-GUC
 	// tx so RLS hides cross-tenant rows — a control in another tenant returns
@@ -197,6 +198,8 @@ type Querier interface {
 	CountFreshAcksForVersion(ctx context.Context, arg CountFreshAcksForVersionParams) (int64, error)
 	// Audit query — exposed for integration tests + the audit log.
 	CountFwToScfEdgesBySourceAttribution(ctx context.Context, sourceAttribution CrosswalkSourceAttribution) (int64, error)
+	CountOpenPersonnelChecklistItems(ctx context.Context, arg CountOpenPersonnelChecklistItemsParams) (int64, error)
+	CountPersonnelChecklistsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// AC-1 + AC-5: count evidence records that match the population's filter.
 	// AC-5 forward-compat: `observed_at <= COALESCE(frozen_at, 'infinity')`
 	// is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
@@ -837,6 +840,9 @@ type Querier interface {
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
 	GetOrgUnitByID(ctx context.Context, arg GetOrgUnitByIDParams) (OrgUnit, error)
+	GetPersonnelChecklist(ctx context.Context, arg GetPersonnelChecklistParams) (PersonnelSecurityChecklist, error)
+	GetPersonnelChecklistBySourceEvent(ctx context.Context, arg GetPersonnelChecklistBySourceEventParams) (PersonnelSecurityChecklist, error)
+	GetPersonnelChecklistItem(ctx context.Context, arg GetPersonnelChecklistItemParams) (PersonnelSecurityChecklistItem, error)
 	GetPolicyByID(ctx context.Context, arg GetPolicyByIDParams) (Policy, error)
 	// Single-row lookup used by POST /v1/policies/{id}/acknowledge. The
 	// handler checks status='published' itself so it can return a precise
@@ -1209,6 +1215,9 @@ type Querier interface {
 	// distinguishes a bulk event (control_ids carries the whole applied set)
 	// from a single-item event (one id). Append-only by RLS construction.
 	InsertOwnerAssignmentAudit(ctx context.Context, arg InsertOwnerAssignmentAuditParams) (InsertOwnerAssignmentAuditRow, error)
+	// Personnel-security onboarding/offboarding workflow queries.
+	InsertPersonnelChecklist(ctx context.Context, arg InsertPersonnelChecklistParams) (PersonnelSecurityChecklist, error)
+	InsertPersonnelChecklistItem(ctx context.Context, arg InsertPersonnelChecklistItemParams) (PersonnelSecurityChecklistItem, error)
 	// Slice 023 — policy acknowledgment queries.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -1633,8 +1642,10 @@ type Querier interface {
 	//      cadence (derived from freshness_class) places their next review
 	//      between $from and $to. last_evaluated_at = MAX(evaluated_at) over
 	//      the append-only control_evaluations ledger.
+	//   6. personnel_security_checklists — open offboarding due dates, so overdue
+	//      leaver access-removal tasks surface on the compliance calendar.
 	//
-	// All four are tenant-scoped; RLS fires on each underlying SELECT, and the
+	// All event sources are tenant-scoped; RLS fires on each underlying SELECT, and the
 	// explicit tenant_id predicates are the primary guarantee.
 	//
 	// Date filter is a half-open window [from, to). The window is computed in
@@ -2135,6 +2146,7 @@ type Querier interface {
 	// "today" (a DATE). Powers GET /v1/decisions/overdue and the daily
 	// overdue-notification job.
 	ListOverdueDecisions(ctx context.Context, arg ListOverdueDecisionsParams) ([]Decision, error)
+	ListOverdueOffboardingChecklists(ctx context.Context, arg ListOverdueOffboardingChecklistsParams) ([]PersonnelSecurityChecklist, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
 	// the cutoff date. NULL last_review_date means "never reviewed" which always
 	// counts as overdue (a vendor with no review on file is by definition past
@@ -2173,6 +2185,7 @@ type Querier interface {
 	//
 	// Sort by title ASC, created_at DESC for deterministic ordering.
 	ListPendingAcksForUser(ctx context.Context, arg ListPendingAcksForUserParams) ([]ListPendingAcksForUserRow, error)
+	ListPersonnelChecklistItems(ctx context.Context, arg ListPersonnelChecklistItemsParams) ([]PersonnelSecurityChecklistItem, error)
 	// Returns every policy for the tenant, newest first. Handler applies
 	// status filter in-memory (cardinality is small per canvas v1 scope).
 	ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error)
@@ -2765,6 +2778,7 @@ type Querier interface {
 	// notification preserves the original read_at (COALESCE keeps the
 	// earliest timestamp).
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
+	MarkPersonnelChecklistCompleted(ctx context.Context, arg MarkPersonnelChecklistCompletedParams) (PersonnelSecurityChecklist, error)
 	// Slice 135 AC-12: the earliest `frozen_at` across all FROZEN
 	// audit_periods whose [period_start, period_end] intersects the
 	// supplied [from_ts, to_ts] export window. Used by the audit-log
