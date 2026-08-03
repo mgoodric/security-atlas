@@ -140,6 +140,8 @@ GET /v1/org_units/{id} 8
 GET /v1/oscal/component-definitions 9
 GET /v1/oscal/component-definitions/{id} 9
 GET /v1/oscal/imported-profiles/{id}/provenance 8
+GET /v1/personnel-security/checklists 8
+GET /v1/personnel-security/checklists/{id} 8
 GET /v1/policies 8
 GET /v1/policies/{id} 8
 GET /v1/policies/{id}/acknowledgment-rate 8
@@ -269,6 +271,8 @@ POST /v1/org_units 8
 POST /v1/oscal/component-claims/{id}:accept 9
 POST /v1/oscal/component-claims/{id}:needs-info 9
 POST /v1/oscal/component-claims/{id}:reject 9
+POST /v1/personnel-security/checklist-items/{id}/complete 8
+POST /v1/personnel-security/checklists 8
 POST /v1/policies 8
 POST /v1/policies/{id}/acknowledge 8
 POST /v1/policies/{id}/publish 8

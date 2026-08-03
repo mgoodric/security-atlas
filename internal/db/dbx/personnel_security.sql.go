@@ -413,6 +413,75 @@ func (q *Queries) ListPersonnelChecklistItems(ctx context.Context, arg ListPerso
 	return items, nil
 }
 
+const listPersonnelChecklists = `-- name: ListPersonnelChecklists :many
+SELECT id, tenant_id, workflow_kind, source, source_event_id, person_external_id, person_work_email, person_display_name, control_id, due_at, status, created_by, created_at, updated_at, completed_at
+FROM personnel_security_checklists
+WHERE tenant_id = $1
+  AND ($2::text IS NULL
+       OR workflow_kind = $2::text)
+  AND ($3::text IS NULL
+       OR status = $3::text)
+  AND (NOT $4::boolean
+       OR (status = 'open' AND due_at < $5::timestamptz))
+ORDER BY due_at ASC, id ASC
+`
+
+type ListPersonnelChecklistsParams struct {
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	WorkflowKind *string            `json:"workflow_kind"`
+	Status       *string            `json:"status"`
+	OverdueOnly  bool               `json:"overdue_only"`
+	NowTs        pgtype.Timestamptz `json:"now_ts"`
+}
+
+// OE-663: the checklist-index read behind GET /v1/personnel-security/
+// checklists. Optional filters compose via the sqlc.narg NULL-collapse
+// pattern (see control_detail.sql): a NULL arg keeps the predicate
+// vacuously true. overdue_only narrows to open checklists whose due_at
+// has passed, mirroring ListOverdueOffboardingChecklists but across
+// both workflow kinds.
+func (q *Queries) ListPersonnelChecklists(ctx context.Context, arg ListPersonnelChecklistsParams) ([]PersonnelSecurityChecklist, error) {
+	rows, err := q.db.Query(ctx, listPersonnelChecklists,
+		arg.TenantID,
+		arg.WorkflowKind,
+		arg.Status,
+		arg.OverdueOnly,
+		arg.NowTs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PersonnelSecurityChecklist
+	for rows.Next() {
+		var i PersonnelSecurityChecklist
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkflowKind,
+			&i.Source,
+			&i.SourceEventID,
+			&i.PersonExternalID,
+			&i.PersonWorkEmail,
+			&i.PersonDisplayName,
+			&i.ControlID,
+			&i.DueAt,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CompletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markPersonnelChecklistCompleted = `-- name: MarkPersonnelChecklistCompleted :one
 UPDATE personnel_security_checklists
 SET status = 'completed',
