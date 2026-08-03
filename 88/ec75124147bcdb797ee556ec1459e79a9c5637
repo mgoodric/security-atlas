@@ -1,0 +1,207 @@
+.github/branch-protection.json
+  s_4e0405f572a6c4::t_c2e5e5bafce6c8 48-75
+.github/workflows/ci.yml
+  s_4e0405f572a6c4::t_f205d10a4a3b68 7-22,24-25,30-37,39,64-68,77-83,101-123,179-259
+.github/workflows/codeql.yml
+  s_4e0405f572a6c4::t_2e70ed448fa3d0 8-18,29-31,33
+.release-please-manifest.json
+  s_4e0405f572a6c4::t_8407aa3de82dd9 2
+CHANGELOG.md
+  s_4e0405f572a6c4::t_50b89e90be4add 16-17,29-32,2941-2962
+CLAUDE.md
+  s_4e0405f572a6c4::t_c601e6522a70ca 365-379
+docs/audit-log/415-merge-queue-decisions.md
+  s_4e0405f572a6c4::t_298039761b5dbc 1-302
+docs/audit-log/596-fair-risk-methodology-decisions.md
+  s_4e0405f572a6c4::t_9380fb3ea733ad 1-39
+docs/audit-log/755-questionnaire-scf-mapping-decisions.md
+  s_4e0405f572a6c4::t_afbe9979bb185a 1-57
+docs/audit-log/756-questionnaire-batch-run-decisions.md
+  s_4e0405f572a6c4::t_aa51279ce52514 1-50
+docs/audit-log/757-questionnaire-review-queue-decisions.md
+  s_4e0405f572a6c4::t_7648ccf9f2e356 1-139
+docs/ci/MERGE_QUEUE.md
+  s_4e0405f572a6c4::t_1782aaf89ba6f7 1-210
+docs/ci/PATH_FILTERING.md
+  s_4e0405f572a6c4::t_5a38b078edcc79 82-110
+docs/openapi.yaml
+  s_4e0405f572a6c4::t_e12833a7ff6341 4080-4149,4200-4224,4286-4370
+go.mod
+  s_4e0405f572a6c4::t_700989ccf91217 14,46-47
+go.sum
+  s_4e0405f572a6c4::t_bd39a2b5095536 52-53,293-296
+internal/api/openapi/routes.go
+  s_4e0405f572a6c4::t_ec2114651e96eb 166,293-294,296,300-302
+internal/api/orgunits/handlers.go
+  s_4e0405f572a6c4::t_26bb9236f9f25f 59-67,195-214
+internal/api/questionnaires/handlers.go
+  s_4e0405f572a6c4::t_0c9bb6ce6fdfd0 13-16,38,49-52,66-78,91-93,100-103,487-645,652-761
+internal/api/questionnaires/handlers_ai_reject_integration_test.go
+  s_4e0405f572a6c4::t_c13800d7aba049 1-225
+internal/api/questionnaires/handlers_ai_reject_test.go
+  s_4e0405f572a6c4::t_2a46ac984b3ecb 1-48
+internal/api/questionnaires/handlers_answerrun_test.go
+  s_4e0405f572a6c4::t_6542ced327b95b 1-117
+internal/api/questionnaires/handlers_mapping_test.go
+  s_4e0405f572a6c4::t_f950051f9cd6f0 1-312
+internal/api/register_questionnaire.go
+  s_4e0405f572a6c4::t_50e25e2cd7ee99 11,50-66
+internal/api/risks/hierarchy_integration_test.go
+  s_4e0405f572a6c4::t_5fec702553e17c 107-125,193-194,197,225-234,240-243,370
+internal/api/testdata/routes.golden
+  s_4e0405f572a6c4::t_3ff8ef4efb1885 150,277-278,280,284-286
+internal/api/testdata/routes_mw.golden
+  s_4e0405f572a6c4::t_2e476dc119786d 150,277-278,280,284-286
+internal/db/dbx/querier.go
+  s_4e0405f572a6c4::t_33d317d02f47ec 528-532,2873-2876
+internal/db/dbx/risk_hierarchy.sql.go
+  s_4e0405f572a6c4::t_e53576ce398540 14-70,88,116-119,170
+internal/db/queries/risk_hierarchy.sql
+  s_4e0405f572a6c4::t_973185c00783c3 18-21,45,49-78,121
+internal/metrics/eval/audit_readiness_score.go
+  s_4e0405f572a6c4::t_43660efddfd143 21-28,41-44
+internal/metrics/eval/integration_test.go
+  s_4e0405f572a6c4::t_89c6d1d13d6379 17,22-27,46,83-84,153-157,268-314,415-426,428,436-453,455-462,501-509,511,513,521-524,526-541,647-708
+internal/metrics/eval/policy_attestation_rate.go
+  s_4e0405f572a6c4::t_bb2a0da2f3c640 11,18-26,39
+internal/metrics/scheduler/integration_test.go
+  s_4e0405f572a6c4::t_5ebf20b1140b54 17-19,36,138-151,391-479
+internal/metrics/scheduler/worker.go
+  s_4e0405f572a6c4::t_4288370bae4982 33-48,53,78
+internal/qaisuggest/qaisuggest.go
+  s_4e0405f572a6c4::t_46eae9e6638854 172-180,206-215
+internal/qaisuggest/service.go
+  s_4e0405f572a6c4::t_bf65b172b06baa 38-39,43,206-221
+internal/qaisuggest/service_test.go
+  s_4e0405f572a6c4::t_9460d0d7f2501c 39-41,60-68,260-290
+internal/qaisuggest/store.go
+  s_4e0405f572a6c4::t_3a1aebdfec9027 369-434
+internal/qmapsuggest/integration_test.go
+  s_4e0405f572a6c4::t_7c760d66114e6d 1-213
+internal/qmapsuggest/prompt.go
+  s_4e0405f572a6c4::t_c215a3a4a96570 1-39
+internal/qmapsuggest/qmapsuggest.go
+  s_4e0405f572a6c4::t_51fc6f3a6c3d1a 1-79
+internal/qmapsuggest/retrieve.go
+  s_4e0405f572a6c4::t_01b77f83c10477 1-91
+internal/qmapsuggest/service.go
+  s_4e0405f572a6c4::t_02f837ab26a0aa 1-226
+internal/qmapsuggest/service_test.go
+  s_4e0405f572a6c4::t_a8e7581ddc0adf 1-169
+internal/qmapsuggest/store.go
+  s_4e0405f572a6c4::t_dca6bdb47f1e72 1-386
+internal/questionnaire/answerrun.go
+  s_4e0405f572a6c4::t_287ca715886609 1-495
+internal/questionnaire/answerrun_integration_test.go
+  s_4e0405f572a6c4::t_e3a1b4bbbf6659 1-286
+internal/questionnaire/store.go
+  s_4e0405f572a6c4::t_51a40d144994cd 66-69,71-82,413-416,418-429
+internal/risk/hierarchy.go
+  s_4e0405f572a6c4::t_eeea5a3d3dfe3b 39-48,82-105
+internal/risk/integration_test.go
+  s_4e0405f572a6c4::t_128b120351d68c 13,131-200
+internal/risk/methodology.go
+  s_4e0405f572a6c4::t_ae8067e4a51e29 15,38-40,84-87,89-91,144-148,152-217
+internal/risk/methodology_test.go
+  s_4e0405f572a6c4::t_ffd9cf9f239546 52-58,75-80,147-158
+internal/risk/residual_store.go
+  s_4e0405f572a6c4::t_3a8aac2c94bf9d 346-353,355
+internal/risk/store.go
+  s_4e0405f572a6c4::t_dde8760ed0bdcc 103-118
+migrations/sql/20260612110000_questionnaire_answer_runs.down.sql
+  s_4e0405f572a6c4::t_feeb004b11a29b 1-8
+migrations/sql/20260612110000_questionnaire_answer_runs.sql
+  s_4e0405f572a6c4::t_09bcf989930fd7 1-168
+migrations/sql/20260612110000_questionnaire_mapping_proposals.down.sql
+  s_4e0405f572a6c4::t_f96455cf3b9f30 1-5
+migrations/sql/20260612110000_questionnaire_mapping_proposals.sql
+  s_4e0405f572a6c4::t_abc06e4abfd1d5 1-150
+migrations/sql/20260612120000_questionnaire_answer_reject_audit.down.sql
+  s_4e0405f572a6c4::t_739cf56e8f3a1b 1-2
+migrations/sql/20260612120000_questionnaire_answer_reject_audit.sql
+  s_4e0405f572a6c4::t_233859b5db7a1b 1-59
+package-lock.json
+  s_4e0405f572a6c4::t_33243cf90337c3 1599-1601,1843-1845,1849,1855,2191-2193,2198,2203,2207-2209,2216-2227,2231-2233,2248-2250,2265-2267,2282-2284,2299-2301,2316-2318,2336-2338,2356-2358,2376-2378,2396-2398,2492-2494,2509-2511,2526-2528,2533-2536,4412-4414,4713-4715,4719,7259-7261,7863-7865,7869,7875,7882-7884,7891,7905-7907,7924,8543-8545,9151-9153,10050,10053,10057-10058,10064
+scripts/integration-shards.txt
+  s_4e0405f572a6c4::t_7888259c1b925f 186
+web/app/(authed)/questionnaires/[id]/page.tsx
+  s_4e0405f572a6c4::t_ac2721ae5e449c 12-17,21,28,33-36,80-99,105,108-109,112-113,120-163,217,244-285,304-314,326-330,332-343,345-363,365-380,382-396
+web/app/(authed)/risks/[id]/page.tsx
+  s_4e0405f572a6c4::t_da6acd83270517 40-41,114-117,187-225,235-237
+web/app/(authed)/risks/filters.test.ts
+  s_4e0405f572a6c4::t_cc183eab1352bc 19-20,418-473,490-495,522-531
+web/app/(authed)/risks/filters.ts
+  s_4e0405f572a6c4::t_4b010f0325c7f3 194-195,206-255,286
+web/app/(authed)/risks/new/risk-form.tsx
+  s_4e0405f572a6c4::t_10d412d984c5fa 16-17,71-72,95-96,101-107,109-116,124,148-156,205,305-306,370-422,424-481,483-484
+web/app/(authed)/risks/new/validate.test.ts
+  s_4e0405f572a6c4::t_ffa9435b72cd29 151,155,159,161-166
+web/app/(authed)/risks/new/validate.ts
+  s_4e0405f572a6c4::t_867e2a1c1bbe7a 18-21,24
+web/app/(authed)/risks/page.tsx
+  s_4e0405f572a6c4::t_22d34dc829cbd0 90-91,603-615
+web/app/api/questionnaires/[id]/answer-runs/[runId]/route.test.ts
+  s_4e0405f572a6c4::t_7138789e5c4a5a 1-76
+web/app/api/questionnaires/[id]/answer-runs/[runId]/route.ts
+  s_4e0405f572a6c4::t_1691659c424a68 1-39
+web/app/api/questionnaires/[id]/answer-runs/route.test.ts
+  s_4e0405f572a6c4::t_961ecc06464cc1 1-73
+web/app/api/questionnaires/[id]/answer-runs/route.ts
+  s_4e0405f572a6c4::t_8ec324be875aab 1-42
+web/app/api/questionnaires/[id]/answers/[qid]/ai-reject/route.test.ts
+  s_4e0405f572a6c4::t_728645a3e99742 1-105
+web/app/api/questionnaires/[id]/answers/[qid]/ai-reject/route.ts
+  s_4e0405f572a6c4::t_e89056ad4b2228 1-58
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/[proposalID]/approve/route.test.ts
+  s_4e0405f572a6c4::t_a5972151cdf5be 1-55
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/[proposalID]/approve/route.ts
+  s_4e0405f572a6c4::t_2f956a86e16e84 1-36
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/[proposalID]/reject/route.test.ts
+  s_4e0405f572a6c4::t_9b787c5b58c718 1-55
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/[proposalID]/reject/route.ts
+  s_4e0405f572a6c4::t_6b76414018c4c1 1-36
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/ai-suggest/route.test.ts
+  s_4e0405f572a6c4::t_fe7fdbfd62e83f 1-61
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/ai-suggest/route.ts
+  s_4e0405f572a6c4::t_97879834e6450d 1-32
+web/components/questionnaire/answer-editor.tsx
+  s_4e0405f572a6c4::t_53489cd9da6ff7 22,98-101,116-117,121-126,148,174,181,217-236,238-250,344
+web/components/questionnaire/mapping-suggest-panel.tsx
+  s_4e0405f572a6c4::t_280ffa06e0a44c 1-187
+web/components/questionnaire/review-queue.tsx
+  s_4e0405f572a6c4::t_99e91567764bcf 1-431
+web/components/questionnaire/types.ts
+  s_4e0405f572a6c4::t_5a9dda3f638b03 25-34
+web/components/risk-hierarchy/org-tree-panel.tsx
+  s_4e0405f572a6c4::t_bd6acab773cd7d 66-79,93-97,135-154
+web/e2e/questionnaire-review-queue.spec.ts
+  s_4e0405f572a6c4::t_49ea0443c4568a 1-551
+web/lib/api/risk-hierarchy.ts
+  s_4e0405f572a6c4::t_6382fac62403b7 18-20,47-51,122
+web/lib/questionnaire/mapping-suggest.test.ts
+  s_4e0405f572a6c4::t_da113ac27997c0 1-76
+web/lib/questionnaire/mapping-suggest.ts
+  s_4e0405f572a6c4::t_2cbfb519917735 1-155
+web/lib/questionnaire/review-queue.test.ts
+  s_4e0405f572a6c4::t_3512398b850672 1-283
+web/lib/questionnaire/review-queue.ts
+  s_4e0405f572a6c4::t_0acdf28ea34a55 1-273
+web/package.json
+  s_4e0405f572a6c4::t_1196e454a5fdf7 29,33-34,40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "88ec75124147bcdb797ee556ec1459e79a9c5637",
+  "prompts": {},
+  "sessions": {
+    "s_4e0405f572a6c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ee417c2-0250-4209-8878-c8f60f6afcae",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
