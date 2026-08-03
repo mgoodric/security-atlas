@@ -10,6 +10,10 @@
 //	PATCH  /v1/questionnaires/{id}/answers/{qid}    upsert one answer
 //	GET    /v1/questionnaires/{id}/suggestions      AnswerLibrary suggestion lookup
 //	POST   /v1/questionnaires/{id}/export-pdf       render PDF
+//	POST   /v1/questionnaires/{id}/answer-runs      run batch AI drafts
+//	GET    /v1/questionnaires/{id}/answer-runs/{runId}
+//	POST   /v1/questionnaires/{id}/answer-runs/{runId}/cancel
+//	POST   /v1/questionnaires/{id}/answers/{qid}/ai-reject   discard unapproved draft
 //
 // Tenant scoping is enforced by RLS via the Store; every handler
 // requires a TenantFromContext OK before any DB call.
@@ -31,6 +35,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
+	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -41,8 +46,10 @@ import (
 // wired local inference) the suggest/approve routes return 503 rather than
 // panicking, so the rest of the questionnaire surface is unaffected.
 type Handler struct {
-	store   *questionnaire.Store
-	suggest *qaisuggest.Service
+	store          *questionnaire.Store
+	suggest        *qaisuggest.Service
+	mappingSuggest *qmapsuggest.Service
+	answerRuns     *questionnaire.AnswerRunService
 }
 
 // New constructs a Handler without the AI-suggestion surface (slice 155 only).
@@ -54,6 +61,19 @@ func New(store *questionnaire.Store) *Handler {
 // service. When suggest is non-nil the suggest + approve routes are live.
 func NewWithSuggest(store *questionnaire.Store, suggest *qaisuggest.Service) *Handler {
 	return &Handler{store: store, suggest: suggest}
+}
+
+// NewWithAI constructs a Handler wired with both questionnaire AI surfaces:
+// answer drafting (slice 441) and SCF mapping proposals (slice 755).
+func NewWithAI(store *questionnaire.Store, suggest *qaisuggest.Service, mappingSuggest *qmapsuggest.Service) *Handler {
+	return &Handler{store: store, suggest: suggest, mappingSuggest: mappingSuggest}
+}
+
+// NewWithAIAndAnswerRuns constructs a Handler wired with every questionnaire
+// AI surface: answer drafting (slice 441), SCF mapping proposals (slice 755),
+// and the slice-756 batch answer-run driver.
+func NewWithAIAndAnswerRuns(store *questionnaire.Store, suggest *qaisuggest.Service, mappingSuggest *qmapsuggest.Service, answerRuns *questionnaire.AnswerRunService) *Handler {
+	return &Handler{store: store, suggest: suggest, mappingSuggest: mappingSuggest, answerRuns: answerRuns}
 }
 
 // RegisterRoutes attaches the slice-155 routes directly onto the
@@ -68,12 +88,19 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/v1/questionnaires/{id}/import-excel", h.ImportExcel)
 	r.Get("/v1/questionnaires/{id}/suggestions", h.Suggestions)
 	r.Post("/v1/questionnaires/{id}/export-pdf", h.ExportPDF)
+	r.Post("/v1/questionnaires/{id}/answer-runs", h.StartAnswerRun)
+	r.Get("/v1/questionnaires/{id}/answer-runs/{runId}", h.GetAnswerRun)
+	r.Post("/v1/questionnaires/{id}/answer-runs/{runId}/cancel", h.CancelAnswerRun)
 	// Slice 441 — AI-answer suggestion v0. The longest-literal-suffix routes
 	// (answers/{qid}/ai-suggest, answers/{qid}/ai-approve) are declared before
 	// the bare answers/{qid} PATCH so chi's declaration-order match resolves
 	// them first.
 	r.Post("/v1/questionnaires/{id}/answers/{qid}/ai-suggest", h.AISuggest)
 	r.Post("/v1/questionnaires/{id}/answers/{qid}/ai-approve", h.AIApprove)
+	r.Post("/v1/questionnaires/{id}/answers/{qid}/ai-reject", h.AIReject)
+	r.Post("/v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest", h.MappingSuggest)
+	r.Post("/v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve", h.MappingApprove)
+	r.Post("/v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject", h.MappingReject)
 	r.Patch("/v1/questionnaires/{id}/answers/{qid}", h.UpsertAnswer)
 	r.Get("/v1/questionnaires/{id}", h.Get)
 }
@@ -457,10 +484,279 @@ func (h *Handler) AIApprove(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, approved)
 }
 
+// ===== POST /v1/questionnaires/{id}/answers/{qid}/ai-reject =====
+//
+// Slice 757 — discard an UNAPPROVED AI draft: the question returns to
+// unanswered and the rejection is audit-logged with the draft's model
+// provenance. Reject never touches an approved or manual answer (P0-757-4) —
+// those targets are 409; an absent or cross-tenant answer id is 404
+// (RLS-invisible). Role-gated identically to AISuggest/AIApprove. One call
+// rejects exactly one answer — there is no bulk variant.
+func (h *Handler) AIReject(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to reject an AI answer")
+		return
+	}
+	if h.suggest == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI suggestion is not enabled on this deployment")
+		return
+	}
+	var req aiRejectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "request body must be JSON")
+		return
+	}
+	answerID, err := uuid.Parse(req.AnswerID)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "answer_id must be a uuid")
+		return
+	}
+	rejected, err := h.suggest.Reject(ctx, qaisuggest.RejectParams{
+		AnswerID: answerID,
+		// The actor is the authenticated credential — NEVER client-supplied.
+		Actor: cred.ID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, qaisuggest.ErrAnswerNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "ai-suggested answer not found")
+		case errors.Is(err, qaisuggest.ErrAnswerApproved):
+			httpresp.WriteError(w, http.StatusConflict, "answer is approved and cannot be rejected")
+		case errors.Is(err, qaisuggest.ErrAnswerManual):
+			httpresp.WriteError(w, http.StatusConflict, "answer is manually authored and cannot be rejected")
+		default:
+			httperr.WriteInternal(w, r, "questionnaires", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, rejected)
+}
+
+// ===== POST /v1/questionnaires/{id}/answer-runs =====
+//
+// Slice 756 — request-scoped batch driver over qaisuggest.Service.Suggest.
+// The run is role-gated identically to single-row AI suggestion and persists
+// only unapproved drafts.
+func (h *Handler) StartAnswerRun(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to start a questionnaire answer run")
+		return
+	}
+	if h.answerRuns == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		return
+	}
+	qnID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a uuid")
+		return
+	}
+	out, err := h.answerRuns.Start(ctx, qnID, cred.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, questionnaire.ErrActiveAnswerRun):
+			httpresp.WriteError(w, http.StatusConflict, "questionnaire already has an active answer run")
+		case errors.Is(err, questionnaire.ErrQuestionnaireNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "questionnaire not found")
+		default:
+			httperr.WriteInternal(w, r, "questionnaires", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusCreated, out)
+}
+
+// ===== GET /v1/questionnaires/{id}/answer-runs/{runId} =====
+func (h *Handler) GetAnswerRun(w http.ResponseWriter, r *http.Request) {
+	if _, _, ok := h.tenantCred(r); !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if h.answerRuns == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		return
+	}
+	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "runId must be a uuid")
+		return
+	}
+	out, err := h.answerRuns.Get(r.Context(), runID)
+	if err != nil {
+		if errors.Is(err, questionnaire.ErrAnswerRunNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "answer run not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "questionnaires", err)
+		return
+	}
+	if out.Run.QuestionnaireID != chi.URLParam(r, "id") {
+		httpresp.WriteError(w, http.StatusNotFound, "answer run not found")
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+// ===== POST /v1/questionnaires/{id}/answer-runs/{runId}/cancel =====
+func (h *Handler) CancelAnswerRun(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to cancel a questionnaire answer run")
+		return
+	}
+	if h.answerRuns == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "questionnaire answer runs are not enabled on this deployment")
+		return
+	}
+	runID, err := uuid.Parse(chi.URLParam(r, "runId"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "runId must be a uuid")
+		return
+	}
+	out, err := h.answerRuns.Cancel(ctx, runID)
+	if err != nil {
+		if errors.Is(err, questionnaire.ErrAnswerRunNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "answer run not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "questionnaires", err)
+		return
+	}
+	if out.Run.QuestionnaireID != chi.URLParam(r, "id") {
+		httpresp.WriteError(w, http.StatusNotFound, "answer run not found")
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
 type aiApproveRequest struct {
 	AnswerID    string `json:"answer_id"`
 	Narrative   string `json:"narrative"`
 	AnswerValue string `json:"answer_value"`
+}
+
+type aiRejectRequest struct {
+	AnswerID string `json:"answer_id"`
+}
+
+// ===== POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest =====
+
+func (h *Handler) MappingSuggest(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to suggest an SCF mapping")
+		return
+	}
+	if h.mappingSuggest == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		return
+	}
+	qid, err := uuid.Parse(chi.URLParam(r, "qid"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "qid must be a uuid")
+		return
+	}
+	out, err := h.mappingSuggest.Suggest(ctx, qmapsuggest.SuggestParams{
+		QuestionID: qid,
+		Actor:      cred.ID,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, qmapsuggest.ErrQuestionNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "needs_mapping question not found")
+		case errors.Is(err, qmapsuggest.ErrQuestionCanonical):
+			httpresp.WriteError(w, http.StatusConflict, "question is already mapped")
+		default:
+			httperr.WriteInternal(w, r, "questionnaires", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) MappingApprove(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to approve an SCF mapping")
+		return
+	}
+	if h.mappingSuggest == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		return
+	}
+	proposalID, err := uuid.Parse(chi.URLParam(r, "proposalID"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "proposalID must be a uuid")
+		return
+	}
+	out, err := h.mappingSuggest.Approve(ctx, proposalID, cred.ID)
+	if err != nil {
+		switch {
+		case errors.Is(err, qmapsuggest.ErrApproverRequired):
+			httpresp.WriteError(w, http.StatusBadRequest, "approver is required")
+		case errors.Is(err, qmapsuggest.ErrProposalNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "mapping proposal not found")
+		case errors.Is(err, qmapsuggest.ErrQuestionCanonical):
+			httpresp.WriteError(w, http.StatusConflict, "question is already mapped")
+		default:
+			httperr.WriteInternal(w, r, "questionnaires", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
+}
+
+func (h *Handler) MappingReject(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCred(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "grc_engineer role required to reject an SCF mapping")
+		return
+	}
+	if h.mappingSuggest == nil {
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "AI mapping suggestion is not enabled on this deployment")
+		return
+	}
+	proposalID, err := uuid.Parse(chi.URLParam(r, "proposalID"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "proposalID must be a uuid")
+		return
+	}
+	out, err := h.mappingSuggest.Reject(ctx, proposalID, cred.ID)
+	if err != nil {
+		if errors.Is(err, qmapsuggest.ErrProposalNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "mapping proposal not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "questionnaires", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, out)
 }
 
 // tenantCred resolves the tenant context + the authenticated credential. Both

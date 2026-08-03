@@ -45,24 +45,36 @@ func (s *Store) Create(ctx context.Context, in CreateVendorInput) (Vendor, error
 	if err := validateInput(in); err != nil {
 		return Vendor{}, err
 	}
+	if in.Status == "" {
+		in.Status = StatusActive
+	}
 	var out Vendor
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		vendorID := uuid.New()
 		row, err := q.CreateVendor(ctx, dbx.CreateVendorParams{
-			ID:             pgUUID(vendorID),
-			TenantID:       pgUUID(tenantID),
-			Name:           strings.TrimSpace(in.Name),
-			Domain:         normalizeDomain(in.Domain),
-			Criticality:    dbx.VendorCriticality(in.Criticality),
-			ContractStart:  pgDate(in.ContractStart),
-			ContractEnd:    pgDate(in.ContractEnd),
-			DpaSigned:      in.DPASigned,
-			DpaSignedAt:    pgDate(in.DPASignedAt),
-			ReviewCadence:  dbx.VendorReviewCadence(in.ReviewCadence),
-			LastReviewDate: pgDate(in.LastReviewDate),
-			OwnerUser:      in.OwnerUser,
-			LinkedSowUri:   normalizeOpt(in.LinkedSOWURI),
-			Notes:          in.Notes,
+			ID:               pgUUID(vendorID),
+			TenantID:         pgUUID(tenantID),
+			Name:             strings.TrimSpace(in.Name),
+			Domain:           normalizeDomain(in.Domain),
+			Criticality:      dbx.VendorCriticality(in.Criticality),
+			ContractStart:    pgDate(in.ContractStart),
+			ContractEnd:      pgDate(in.ContractEnd),
+			DpaSigned:        in.DPASigned,
+			DpaSignedAt:      pgDate(in.DPASignedAt),
+			ReviewCadence:    dbx.VendorReviewCadence(in.ReviewCadence),
+			LastReviewDate:   pgDate(in.LastReviewDate),
+			OwnerUser:        in.OwnerUser,
+			LinkedSowUri:     normalizeOpt(in.LinkedSOWURI),
+			Notes:            in.Notes,
+			AnnualCost:       in.AnnualCost,
+			Currency:         normalizeCurrency(in.Currency),
+			RenewalDate:      pgDate(in.RenewalDate),
+			AutoRenew:        in.AutoRenew,
+			LicenseCount:     in.LicenseCount,
+			ToolCategory:     pgToolCategory(in.ToolCategory),
+			CostOwner:        strings.TrimSpace(in.CostOwner),
+			CommercialStatus: dbx.VendorCommercialStatus(in.Status),
+			BillingCadence:   pgBillingCadence(in.BillingCadence),
 		})
 		if err != nil {
 			var pgErr *pgconn.PgError
@@ -92,23 +104,35 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateVendorInput) 
 	if err := validateInput(in); err != nil {
 		return Vendor{}, err
 	}
+	if in.Status == "" {
+		in.Status = StatusActive
+	}
 	var out Vendor
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		row, err := q.UpdateVendor(ctx, dbx.UpdateVendorParams{
-			TenantID:       pgUUID(tenantID),
-			ID:             pgUUID(id),
-			Name:           strings.TrimSpace(in.Name),
-			Domain:         normalizeDomain(in.Domain),
-			Criticality:    dbx.VendorCriticality(in.Criticality),
-			ContractStart:  pgDate(in.ContractStart),
-			ContractEnd:    pgDate(in.ContractEnd),
-			DpaSigned:      in.DPASigned,
-			DpaSignedAt:    pgDate(in.DPASignedAt),
-			ReviewCadence:  dbx.VendorReviewCadence(in.ReviewCadence),
-			LastReviewDate: pgDate(in.LastReviewDate),
-			OwnerUser:      in.OwnerUser,
-			LinkedSowUri:   normalizeOpt(in.LinkedSOWURI),
-			Notes:          in.Notes,
+			TenantID:         pgUUID(tenantID),
+			ID:               pgUUID(id),
+			Name:             strings.TrimSpace(in.Name),
+			Domain:           normalizeDomain(in.Domain),
+			Criticality:      dbx.VendorCriticality(in.Criticality),
+			ContractStart:    pgDate(in.ContractStart),
+			ContractEnd:      pgDate(in.ContractEnd),
+			DpaSigned:        in.DPASigned,
+			DpaSignedAt:      pgDate(in.DPASignedAt),
+			ReviewCadence:    dbx.VendorReviewCadence(in.ReviewCadence),
+			LastReviewDate:   pgDate(in.LastReviewDate),
+			OwnerUser:        in.OwnerUser,
+			LinkedSowUri:     normalizeOpt(in.LinkedSOWURI),
+			Notes:            in.Notes,
+			AnnualCost:       in.AnnualCost,
+			Currency:         normalizeCurrency(in.Currency),
+			RenewalDate:      pgDate(in.RenewalDate),
+			AutoRenew:        in.AutoRenew,
+			LicenseCount:     in.LicenseCount,
+			ToolCategory:     pgToolCategory(in.ToolCategory),
+			CostOwner:        strings.TrimSpace(in.CostOwner),
+			CommercialStatus: dbx.VendorCommercialStatus(in.Status),
+			BillingCadence:   pgBillingCadence(in.BillingCadence),
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -178,9 +202,10 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 
 // ListFilter narrows the result set of List. Zero value = no filter.
 type ListFilter struct {
-	Criticality *Criticality
-	OverdueOnly bool
-	Cutoff      time.Time // only consulted when OverdueOnly = true
+	Criticality  *Criticality
+	ToolCategory *ToolCategory
+	OverdueOnly  bool
+	Cutoff       time.Time // only consulted when OverdueOnly = true
 }
 
 // List returns the active tenant's vendors. AC-2: filter by criticality;
@@ -205,8 +230,9 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]Vendor, error) {
 			})
 		} else {
 			rows, err = q.ListVendors(ctx, dbx.ListVendorsParams{
-				TenantID:    pgUUID(tenantID),
-				Criticality: critArg,
+				TenantID:     pgUUID(tenantID),
+				Criticality:  critArg,
+				ToolCategory: pgToolCategory(f.ToolCategory),
 			})
 		}
 		if err != nil {
@@ -219,6 +245,35 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]Vendor, error) {
 				return err
 			}
 			out = append(out, v)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// SpendRollup returns annualized current spend overall and by category. Rows
+// are grouped by currency so the platform never pretends unlike currencies are
+// directly additive.
+func (s *Store) SpendRollup(ctx context.Context) ([]SpendRollupRow, error) {
+	var out []SpendRollupRow
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		rows, err := q.ListVendorSpendRollup(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("list vendor spend rollup: %w", err)
+		}
+		out = make([]SpendRollupRow, 0, len(rows))
+		for _, r := range rows {
+			var cat *ToolCategory
+			if r.ToolCategory != nil {
+				v := ToolCategory(*r.ToolCategory)
+				cat = &v
+			}
+			out = append(out, SpendRollupRow{
+				ToolCategory: cat,
+				Currency:     derefString(r.Currency),
+				AnnualCost:   r.AnnualCost,
+				VendorCount:  r.VendorCount,
+			})
 		}
 		return nil
 	})
@@ -308,6 +363,15 @@ func hydrate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, r dbx.Vend
 		OwnerUser:      r.OwnerUser,
 		LinkedSOWURI:   r.LinkedSowUri,
 		Notes:          r.Notes,
+		AnnualCost:     r.AnnualCost,
+		Currency:       r.Currency,
+		RenewalDate:    fromPgDate(r.RenewalDate),
+		AutoRenew:      r.AutoRenew,
+		LicenseCount:   r.LicenseCount,
+		ToolCategory:   fromToolCategory(r.ToolCategory),
+		CostOwner:      r.CostOwner,
+		Status:         CommercialStatus(r.CommercialStatus),
+		BillingCadence: fromBillingCadence(r.BillingCadence),
 		ScopeCellIDs:   cellIDs,
 		CreatedAt:      r.CreatedAt.Time,
 		UpdatedAt:      r.UpdatedAt.Time,
@@ -329,6 +393,36 @@ func validateInput(in CreateVendorInput) error {
 	}
 	if in.ContractStart != nil && in.ContractEnd != nil && in.ContractEnd.Before(*in.ContractStart) {
 		return fmt.Errorf("%w: contract_end is before contract_start", ErrInvalidInput)
+	}
+	if in.AnnualCost != nil && *in.AnnualCost < 0 {
+		return fmt.Errorf("%w: annual_cost must be non-negative", ErrInvalidInput)
+	}
+	if in.Currency != nil && strings.TrimSpace(*in.Currency) != "" {
+		c := strings.ToUpper(strings.TrimSpace(*in.Currency))
+		if len(c) != 3 || c[0] < 'A' || c[0] > 'Z' || c[1] < 'A' || c[1] > 'Z' || c[2] < 'A' || c[2] > 'Z' {
+			return fmt.Errorf("%w: currency must be a 3-letter uppercase ISO code", ErrInvalidInput)
+		}
+	}
+	if in.LicenseCount != nil && *in.LicenseCount < 0 {
+		return fmt.Errorf("%w: license_count must be non-negative", ErrInvalidInput)
+	}
+	if in.RenewalDate != nil && in.ContractStart != nil && in.RenewalDate.Before(*in.ContractStart) {
+		return fmt.Errorf("%w: renewal_date is before contract_start", ErrInvalidInput)
+	}
+	if in.RenewalDate != nil && in.ContractEnd != nil && in.RenewalDate.After(*in.ContractEnd) {
+		return fmt.Errorf("%w: renewal_date is after contract_end", ErrInvalidInput)
+	}
+	if in.ToolCategory != nil && !in.ToolCategory.Valid() {
+		return fmt.Errorf("%w: tool_category %q is invalid", ErrInvalidInput, *in.ToolCategory)
+	}
+	if in.Status == "" {
+		in.Status = StatusActive
+	}
+	if !in.Status.Valid() {
+		return fmt.Errorf("%w: status %q is invalid", ErrInvalidInput, in.Status)
+	}
+	if in.BillingCadence != nil && !in.BillingCadence.Valid() {
+		return fmt.Errorf("%w: billing_cadence %q is invalid", ErrInvalidInput, *in.BillingCadence)
 	}
 	return nil
 }
@@ -400,6 +494,38 @@ func pgCriticality(c *Criticality) *dbx.VendorCriticality {
 	return &v
 }
 
+func pgToolCategory(c *ToolCategory) *dbx.VendorToolCategory {
+	if c == nil {
+		return nil
+	}
+	v := dbx.VendorToolCategory(*c)
+	return &v
+}
+
+func fromToolCategory(c *dbx.VendorToolCategory) *ToolCategory {
+	if c == nil {
+		return nil
+	}
+	v := ToolCategory(*c)
+	return &v
+}
+
+func pgBillingCadence(c *BillingCadence) *dbx.VendorBillingCadence {
+	if c == nil {
+		return nil
+	}
+	v := dbx.VendorBillingCadence(*c)
+	return &v
+}
+
+func fromBillingCadence(c *dbx.VendorBillingCadence) *BillingCadence {
+	if c == nil {
+		return nil
+	}
+	v := BillingCadence(*c)
+	return &v
+}
+
 func normalizeDomain(d *string) *string {
 	if d == nil {
 		return nil
@@ -420,4 +546,22 @@ func normalizeOpt(s *string) *string {
 		return nil
 	}
 	return &v
+}
+
+func normalizeCurrency(s *string) *string {
+	if s == nil {
+		return nil
+	}
+	v := strings.ToUpper(strings.TrimSpace(*s))
+	if v == "" {
+		return nil
+	}
+	return &v
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

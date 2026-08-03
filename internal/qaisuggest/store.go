@@ -366,6 +366,72 @@ func (s *Store) GetAnswer(ctx context.Context, answerID uuid.UUID) (dbx.Question
 	return out, nil
 }
 
+// RejectDraft discards an UNAPPROVED AI draft in one transaction (slice 757):
+// it loads the target answer's state + provenance under the caller's RLS
+// context, refuses approved or manual targets, writes the append-only
+// questionnaire_answer_reject_audit row (actor + snapshot-at-rejection
+// provenance), and deletes the draft so the question returns to unanswered.
+// A cross-tenant or absent id is RLS-invisible and yields ErrAnswerNotFound.
+func (s *Store) RejectDraft(ctx context.Context, answerID uuid.UUID, actor string) (RejectedAnswer, error) {
+	var out RejectedAnswer
+	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ *dbx.Queries, tenantID uuid.UUID) error {
+		var (
+			questionID uuid.UUID
+			aiAssisted bool
+			approved   bool
+			prov       Provenance
+		)
+		err := tx.QueryRow(ctx, `
+			SELECT question_id, ai_assisted, human_approved,
+			       prompt_version, model_name, model_version, model_provider
+			FROM questionnaire_answers
+			WHERE tenant_id = $1 AND id = $2
+		`, pgUUID(tenantID), pgUUID(answerID)).Scan(
+			&questionID, &aiAssisted, &approved,
+			&prov.PromptVersion, &prov.ModelName, &prov.ModelVersion, &prov.ModelProvider,
+		)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAnswerNotFound
+		}
+		if err != nil {
+			return fmt.Errorf("qaisuggest: read answer for reject: %w", err)
+		}
+		// P0-757-4: reject never touches approved or manual answers.
+		if !aiAssisted {
+			return ErrAnswerManual
+		}
+		if approved {
+			return ErrAnswerApproved
+		}
+		// The audit row is written BEFORE the delete (same tx) so the event
+		// record carries the answer id + provenance the delete erases.
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO questionnaire_answer_reject_audit
+				(tenant_id, answer_id, question_id, actor, action,
+				 prompt_version, model_name, model_version, model_provider, payload_json)
+			VALUES ($1, $2, $3, $4, 'rejected', $5, $6, $7, $8, '{"reason": "operator_rejected"}'::jsonb)
+		`, pgUUID(tenantID), pgUUID(answerID), pgUUID(questionID), actor,
+			prov.PromptVersion, prov.ModelName, prov.ModelVersion, prov.ModelProvider); err != nil {
+			return fmt.Errorf("qaisuggest: insert reject audit: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM questionnaire_answers WHERE tenant_id = $1 AND id = $2
+		`, pgUUID(tenantID), pgUUID(answerID)); err != nil {
+			return fmt.Errorf("qaisuggest: delete draft: %w", err)
+		}
+		out = RejectedAnswer{
+			AnswerID:   answerID.String(),
+			QuestionID: questionID.String(),
+			Status:     "rejected",
+		}
+		return nil
+	})
+	if err != nil {
+		return RejectedAnswer{}, err
+	}
+	return out, nil
+}
+
 // Approve is the ApprovalStore-shaped wrapper over ApproveDraft: it approves
 // the draft and projects the stored row into the API-shaped ApprovedAnswer
 // (proving human_approved=TRUE + the recorded approver).

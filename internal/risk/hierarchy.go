@@ -36,6 +36,16 @@ type OrgUnitRiskCounts struct {
 	Counts    map[int]int
 }
 
+// OrgUnitFairExposure is the FAIR-only per-org-unit rollup. Exposure is the
+// sum of annualized_loss_exposure dollars/year for FAIR risks attributed to the
+// org unit. It is intentionally separate from OrgUnitRiskCounts because FAIR
+// dollars are not comparable to the 5x5 severity scalar.
+type OrgUnitFairExposure struct {
+	OrgUnitID              uuid.UUID
+	RiskCount              int
+	AnnualizedLossExposure float64
+}
+
 // RiskCountsByOrgUnit returns, for every org_unit in the active tenant
 // that has at least one risk attributed to it, the count of those risks
 // broken down by severity scalar. AC-1.
@@ -63,6 +73,30 @@ func (s *Store) RiskCountsByOrgUnit(ctx context.Context) ([]OrgUnitRiskCounts, e
 				out = append(out, OrgUnitRiskCounts{OrgUnitID: ou, Counts: make(map[int]int)})
 			}
 			out[len(out)-1].Counts[int(r.Severity)] += int(r.RiskCount)
+		}
+		return nil
+	})
+	return out, err
+}
+
+// FairExposureByOrgUnit returns FAIR-only annualized loss exposure by org unit.
+// It is the quantitative companion to RiskCountsByOrgUnit and must not be
+// folded into the 5x5 severity buckets.
+func (s *Store) FairExposureByOrgUnit(ctx context.Context) ([]OrgUnitFairExposure, error) {
+	var out []OrgUnitFairExposure
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		rows, err := q.FairExposureByOrgUnit(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("fair exposure by org_unit: %w", err)
+		}
+		out = make([]OrgUnitFairExposure, len(rows))
+		for i, r := range rows {
+			exposure, _ := r.AnnualizedLossExposure.Float64Value()
+			out[i] = OrgUnitFairExposure{
+				OrgUnitID:              uuid.UUID(r.OrgUnitID.Bytes),
+				RiskCount:              int(r.RiskCount),
+				AnnualizedLossExposure: exposure.Float64,
+			}
 		}
 		return nil
 	})

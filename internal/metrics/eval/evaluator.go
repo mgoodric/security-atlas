@@ -53,7 +53,7 @@ func NewRegistry(pool *pgxpool.Pool) *Registry {
 	return r
 }
 
-// registerStarters wires the 8 slice-076 starter evaluators. Adding a
+// registerStarters wires the starter evaluators. Adding a
 // new evaluator requires (a) a new file in this package implementing the
 // interface, (b) a r.register(...) call here, AND (c) a corresponding
 // catalog YAML entry with compute_evaluator matching Name().
@@ -63,6 +63,7 @@ func (r *Registry) registerStarters() {
 	r.register(&auditReadinessScoreEvaluator{pool: r.pool})
 	r.register(&openRiskFinancialExposureEvaluator{pool: r.pool})
 	r.register(&policyAttestationRateEvaluator{pool: r.pool})
+	r.register(&trainingCompletionRateEvaluator{pool: r.pool})
 	r.register(&vendorRiskConcentrationEvaluator{pool: r.pool})
 	r.register(&exceptionExpirationRunwayEvaluator{pool: r.pool})
 	r.register(&criticalFindingsSLAEvaluator{pool: r.pool})

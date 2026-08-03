@@ -99,6 +99,15 @@ func TestHTTP_CreateVendor(t *testing.T) {
 		"last_review_date": "2026-04-01",
 		"owner_user": "alice@example.com",
 		"linked_sow_uri": "s3://contracts/datadog.pdf",
+		"annual_cost": 125000,
+		"currency": "USD",
+		"renewal_date": "2025-12-01",
+		"auto_renew": true,
+		"license_count": 150,
+		"tool_category": "siem",
+		"cost_owner": "security-finance@example.com",
+		"status": "active",
+		"billing_cadence": "annual",
 		"notes": "obs"
 	}`
 	resp, payload := doJSON(t, http.MethodPost, ts.URL+"/v1/vendors", bearer, body)
@@ -116,6 +125,12 @@ func TestHTTP_CreateVendor(t *testing.T) {
 	}
 	if got.Vendor["domain"] != "datadoghq.com" {
 		t.Fatalf("domain = %v", got.Vendor["domain"])
+	}
+	if got.Vendor["annual_cost"] != float64(125000) || got.Vendor["currency"] != "USD" {
+		t.Fatalf("commercial cost fields = %+v", got.Vendor)
+	}
+	if got.Vendor["tool_category"] != "siem" || got.Vendor["status"] != "active" {
+		t.Fatalf("software fields = %+v", got.Vendor)
 	}
 }
 
@@ -190,6 +205,47 @@ func TestHTTP_Burndown(t *testing.T) {
 	want := 2.0 / 3.0
 	if abs(got.Bands[0].OnTimeFraction-want) > 1e-9 {
 		t.Fatalf("OnTimeFraction = %v; want %v", got.Bands[0].OnTimeFraction, want)
+	}
+}
+
+func TestHTTP_SpendRollup(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ts, bearer := setupHTTPServer(t, tenant)
+
+	for _, body := range []string{
+		`{"name":"edr-a","criticality":"high","review_cadence":"annual","annual_cost":10000,"currency":"USD","tool_category":"edr","status":"active"}`,
+		`{"name":"edr-b","criticality":"high","review_cadence":"annual","annual_cost":5000,"currency":"USD","tool_category":"edr","status":"trialing"}`,
+		`{"name":"siem-churned","criticality":"medium","review_cadence":"annual","annual_cost":999,"currency":"USD","tool_category":"siem","status":"churned"}`,
+	} {
+		resp, payload := doJSON(t, http.MethodPost, ts.URL+"/v1/vendors", bearer, body)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("seed: %d %s", resp.StatusCode, payload)
+		}
+	}
+
+	resp, payload := doJSON(t, http.MethodGet, ts.URL+"/v1/vendors/spend", bearer, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("spend status = %d; body = %s", resp.StatusCode, payload)
+	}
+	var got struct {
+		Rollup []struct {
+			ToolCategory *string `json:"tool_category"`
+			Currency     string  `json:"currency"`
+			AnnualCost   float64 `json:"annual_cost"`
+			VendorCount  int64   `json:"vendor_count"`
+		} `json:"rollup"`
+	}
+	if err := json.Unmarshal(payload, &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got.Rollup) != 2 {
+		t.Fatalf("want overall + edr rows, got %+v", got.Rollup)
+	}
+	for _, row := range got.Rollup {
+		if row.Currency != "USD" || row.AnnualCost != 15000 || row.VendorCount != 2 {
+			t.Fatalf("unexpected row: %+v", row)
+		}
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/checklist"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
+	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 )
 
@@ -46,7 +47,23 @@ func (s *Server) registerQuestionnaire(root *chi.Mux) {
 		qaiStore,
 		qaiStore,
 	)
-	questionnairesH := questionnairesapi.NewWithSuggest(questionnaireStore, qaiSvc)
+	// Slice 755: AI SCF-mapping proposal v0. The qmapsuggest.Store reads the
+	// global SCF catalog, persists tenant-scoped unapproved proposals under the
+	// shared AI-assist approver guard, and writes the canonical scf_anchor_id
+	// only from the explicit human approve endpoint.
+	qmapStore := qmapsuggest.NewStore(s.dbPool)
+	qmapSvc := qmapsuggest.NewService(
+		qmapStore,
+		s.inferenceClient(),
+		qmapStore,
+		llm.NewAuditWriter(s.dbPool),
+	)
+	// Slice 756: batch answer-drafting run — sequentially drives the slice-441
+	// qaisuggest service per unanswered mapped question under the same RLS
+	// tenant context; every produced draft stays unapproved.
+	answerRunStore := questionnaire.NewAnswerRunStore(s.dbPool)
+	answerRunSvc := questionnaire.NewAnswerRunService(answerRunStore, qaiSvc)
+	questionnairesH := questionnairesapi.NewWithAIAndAnswerRuns(questionnaireStore, qaiSvc, qmapSvc, answerRunSvc)
 	questionnairesH.RegisterRoutes(root)
 	// Slice 471: role-scoped control-implementation checklist generator v0
 	// (cited, non-binding). The which-control -> which-role split is

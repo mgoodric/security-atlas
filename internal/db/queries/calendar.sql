@@ -8,6 +8,7 @@
 --   4. vendors                 — last_review_date + review_cadence interval is
 --      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
 --      vendor branch so the two surfaces cannot drift (slice 675).
+--      Also includes renewal_date as a separate vendor renewal event (OE-623).
 --   5. controls + control_evaluations — periodic-review controls whose
 --      cadence (derived from freshness_class) places their next review
 --      between $from and $to. last_evaluated_at = MAX(evaluated_at) over
@@ -185,6 +186,30 @@ FROM (
             WHEN 'biannual'  THEN INTERVAL '6 months'
             WHEN 'annual'    THEN INTERVAL '12 months'
            END)::timestamptz <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR position('vendor' IN sqlc.arg(type_filter)::text) > 0)
+
+    UNION ALL
+
+    -- vendor contract renewals: renewal_date from the commercial tooling
+    -- register. Event type stays `vendor` so existing calendar filters and
+    -- links continue to work; the title distinguishes review vs renewal.
+    SELECT
+        ('renewal-' || v.id::text)                                  AS event_id,
+        'vendor'::text                                               AS event_type,
+        ('Vendor renewal: ' || v.name)::text                         AS title,
+        v.renewal_date::timestamptz                                  AS starts_at,
+        NULL::timestamptz                                            AS ends_at,
+        v.id::text                                                   AS related_entity_id,
+        'vendor'::text                                               AS related_entity_kind,
+        COALESCE(v.currency || ' ' || v.annual_cost::text, v.commercial_status::text) AS summary,
+        v.commercial_status::text                                    AS status,
+        v.billing_cadence::text                                      AS cadence
+    FROM vendors v
+    WHERE v.tenant_id = $1
+      AND v.renewal_date IS NOT NULL
+      AND v.commercial_status <> 'churned'
+      AND v.renewal_date::timestamptz >= sqlc.arg(from_ts)::timestamptz
+      AND v.renewal_date::timestamptz <  sqlc.arg(to_ts)::timestamptz
       AND (sqlc.arg(type_filter)::text = '' OR position('vendor' IN sqlc.arg(type_filter)::text) > 0)
 
     UNION ALL

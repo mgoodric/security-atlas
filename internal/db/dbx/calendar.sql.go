@@ -154,6 +154,30 @@ FROM (
 
     UNION ALL
 
+    -- vendor contract renewals: renewal_date from the commercial tooling
+    -- register. Event type stays ` + "`" + `vendor` + "`" + ` so existing calendar filters and
+    -- links continue to work; the title distinguishes review vs renewal.
+    SELECT
+        ('renewal-' || v.id::text)                                  AS event_id,
+        'vendor'::text                                               AS event_type,
+        ('Vendor renewal: ' || v.name)::text                         AS title,
+        v.renewal_date::timestamptz                                  AS starts_at,
+        NULL::timestamptz                                            AS ends_at,
+        v.id::text                                                   AS related_entity_id,
+        'vendor'::text                                               AS related_entity_kind,
+        COALESCE(v.currency || ' ' || v.annual_cost::text, v.commercial_status::text) AS summary,
+        v.commercial_status::text                                    AS status,
+        v.billing_cadence::text                                      AS cadence
+    FROM vendors v
+    WHERE v.tenant_id = $1
+      AND v.renewal_date IS NOT NULL
+      AND v.commercial_status <> 'churned'
+      AND v.renewal_date::timestamptz >= $2::timestamptz
+      AND v.renewal_date::timestamptz <  $3::timestamptz
+      AND ($4::text = '' OR position('vendor' IN $4::text) > 0)
+
+    UNION ALL
+
     -- periodic control reviews: manual_periodic / manual_attested controls
     -- whose next_due_at falls in the window. Two cases:
     --   (a) never evaluated   -> next_due_at = now()        status=overdue
@@ -314,6 +338,7 @@ type ListCalendarEventsRow struct {
 //  4. vendors                 — last_review_date + review_cadence interval is
 //     the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
 //     vendor branch so the two surfaces cannot drift (slice 675).
+//     Also includes renewal_date as a separate vendor renewal event (OE-623).
 //  5. controls + control_evaluations — periodic-review controls whose
 //     cadence (derived from freshness_class) places their next review
 //     between $from and $to. last_evaluated_at = MAX(evaluated_at) over

@@ -280,6 +280,11 @@ func DefaultSeed() []KindVersion {
 		// POST /v1/policies/{id}/acknowledge emits one record of this
 		// kind through the slice-013 evidence ledger.
 		{Kind: "policy.acknowledgment.v1", Version: "1.0.0"},
+		// OPENENGINE-626: security-awareness training completion evidence.
+		// Manual and CSV entries are first-class; future LMS connector imports
+		// feed the same kind. Anchors HRS-04, mapped by the bundled crosswalks
+		// to SOC 2 CC1.4 and ISO 27001 A.6.3.
+		{Kind: "security_awareness.training_completion.v1", Version: "1.0.0"},
 		// Slice 443: Slack connector — three high-signal evidence surfaces for
 		// the SaaS-startup persona that runs operations in Slack. Read-only
 		// least-privilege OAuth token; membership / admin / retention METADATA

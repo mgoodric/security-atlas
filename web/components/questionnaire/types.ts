@@ -22,6 +22,16 @@ export interface Answer {
   narrative: string;
   citations: Citation[];
   authored_by?: string;
+  // Slice 757 — AI-assist boundary columns projected by the platform GET so
+  // the review queue can render draft state + model provenance. An unapproved
+  // AI draft is ai_assisted=true, human_approved=false.
+  ai_assisted?: boolean;
+  human_approved?: boolean;
+  human_approver?: string;
+  prompt_version?: string;
+  model_name?: string;
+  model_version?: string;
+  model_provider?: string;
 }
 
 export interface Question {
