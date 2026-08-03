@@ -224,6 +224,23 @@ func (s *Store) SurfaceOverdueOffboarding(ctx context.Context, now time.Time, re
 			if recipientUserID == "" {
 				continue
 			}
+			// Idempotency (OE-661): the notification row itself is the dedup
+			// marker — one offboarding-overdue notification per (checklist,
+			// recipient), ever. A re-run of the sweep re-lists the overdue
+			// checklists (the return value is unchanged) but never
+			// double-notifies. Probe + insert share this tx, so the marker
+			// and the notification cannot diverge.
+			already, err := q.CountPersonnelOverdueNotificationsForChecklist(ctx, dbx.CountPersonnelOverdueNotificationsForChecklistParams{
+				TenantID:        pgUUID(tenantID),
+				RecipientUserID: recipientUserID,
+				ChecklistID:     c.ID.String(),
+			})
+			if err != nil {
+				return err
+			}
+			if already > 0 {
+				continue
+			}
 			payload, _ := json.Marshal(map[string]any{
 				"checklist_id":       c.ID.String(),
 				"person_external_id": c.PersonExternalID,
@@ -231,14 +248,13 @@ func (s *Store) SurfaceOverdueOffboarding(ctx context.Context, now time.Time, re
 				"due_at":             c.DueAt.UTC().Format(time.RFC3339Nano),
 				"priority":           "high",
 			})
-			_, err := q.CreateNotification(ctx, dbx.CreateNotificationParams{
+			if _, err := q.CreateNotification(ctx, dbx.CreateNotificationParams{
 				ID:              pgUUID(uuid.New()),
 				TenantID:        pgUUID(tenantID),
 				RecipientUserID: recipientUserID,
-				Type:            "personnel_security.offboarding_overdue",
+				Type:            NotificationTypeOffboardingOverdue,
 				Payload:         payload,
-			})
-			if err != nil {
+			}); err != nil {
 				return err
 			}
 		}

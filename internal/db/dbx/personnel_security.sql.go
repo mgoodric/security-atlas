@@ -98,6 +98,32 @@ func (q *Queries) CountPersonnelChecklistsForTenant(ctx context.Context, tenantI
 	return count, err
 }
 
+const countPersonnelOverdueNotificationsForChecklist = `-- name: CountPersonnelOverdueNotificationsForChecklist :one
+SELECT count(*)
+FROM notifications
+WHERE tenant_id = $1
+  AND recipient_user_id = $2
+  AND type = 'personnel_security.offboarding_overdue'
+  AND payload->>'checklist_id' = $3::text
+`
+
+type CountPersonnelOverdueNotificationsForChecklistParams struct {
+	TenantID        pgtype.UUID `json:"tenant_id"`
+	RecipientUserID string      `json:"recipient_user_id"`
+	ChecklistID     string      `json:"checklist_id"`
+}
+
+// Dedup probe for SurfaceOverdueOffboarding: has this recipient already been
+// notified about this overdue checklist? The notification row itself is the
+// authoritative marker (payload->>'checklist_id' is set by the store), so a
+// re-run of the sweep never double-notifies (decision-overdue P0 pattern).
+func (q *Queries) CountPersonnelOverdueNotificationsForChecklist(ctx context.Context, arg CountPersonnelOverdueNotificationsForChecklistParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPersonnelOverdueNotificationsForChecklist, arg.TenantID, arg.RecipientUserID, arg.ChecklistID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const getPersonnelChecklist = `-- name: GetPersonnelChecklist :one
 SELECT id, tenant_id, workflow_kind, source, source_event_id, person_external_id, person_work_email, person_display_name, control_id, due_at, status, created_by, created_at, updated_at, completed_at
 FROM personnel_security_checklists
@@ -475,6 +501,39 @@ func (q *Queries) ListPersonnelChecklists(ctx context.Context, arg ListPersonnel
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTenantsWithOverdueOffboardingChecklists = `-- name: ListTenantsWithOverdueOffboardingChecklists :many
+SELECT DISTINCT tenant_id
+FROM personnel_security_checklists
+WHERE workflow_kind = 'offboarding'
+  AND status = 'open'
+  AND due_at < $1
+ORDER BY tenant_id
+`
+
+// Cross-tenant enumeration for the OE-661 overdue-offboarding sweep. Runs as
+// the migrator role (BYPASSRLS) and returns ONLY tenant ids — never checklist
+// content — mirroring ListTenantsWithOverdueDecisions. The per-tenant surfacing
+// then runs under that tenant's own GUC through the app-role store.
+func (q *Queries) ListTenantsWithOverdueOffboardingChecklists(ctx context.Context, dueAt pgtype.Timestamptz) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listTenantsWithOverdueOffboardingChecklists, dueAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var tenant_id pgtype.UUID
+		if err := rows.Scan(&tenant_id); err != nil {
+			return nil, err
+		}
+		items = append(items, tenant_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

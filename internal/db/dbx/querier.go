@@ -204,6 +204,11 @@ type Querier interface {
 	CountFwToScfEdgesBySourceAttribution(ctx context.Context, sourceAttribution CrosswalkSourceAttribution) (int64, error)
 	CountOpenPersonnelChecklistItems(ctx context.Context, arg CountOpenPersonnelChecklistItemsParams) (int64, error)
 	CountPersonnelChecklistsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// Dedup probe for SurfaceOverdueOffboarding: has this recipient already been
+	// notified about this overdue checklist? The notification row itself is the
+	// authoritative marker (payload->>'checklist_id' is set by the store), so a
+	// re-run of the sweep never double-notifies (decision-overdue P0 pattern).
+	CountPersonnelOverdueNotificationsForChecklist(ctx context.Context, arg CountPersonnelOverdueNotificationsForChecklistParams) (int64, error)
 	// AC-1 + AC-5: count evidence records that match the population's filter.
 	// AC-5 forward-compat: `observed_at <= COALESCE(frozen_at, 'infinity')`
 	// is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
@@ -2555,6 +2560,11 @@ type Querier interface {
 	// by the daily overdue-notification job as the migrator role (BYPASSRLS)
 	// to enumerate tenants before applying each tenant's GUC. $1 is "today".
 	ListTenantsWithOverdueDecisions(ctx context.Context, revisitBy pgtype.Date) ([]pgtype.UUID, error)
+	// Cross-tenant enumeration for the OE-661 overdue-offboarding sweep. Runs as
+	// the migrator role (BYPASSRLS) and returns ONLY tenant ids — never checklist
+	// content — mirroring ListTenantsWithOverdueDecisions. The per-tenant surfacing
+	// then runs under that tenant's own GUC through the app-role store.
+	ListTenantsWithOverdueOffboardingChecklists(ctx context.Context, dueAt pgtype.Timestamptz) ([]pgtype.UUID, error)
 	// Slice 029 notification dispatch helper. Returns the distinct authors
 	// of every note in the thread (shared OR private, all variants), used
 	// to compute who should receive a notification when a new reply lands.
