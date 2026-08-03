@@ -6,6 +6,7 @@
 **Product under audit:** release **1.18.0** (`.release-please-manifest.json`, tag `v1.18.0`)
 **Scope:** the user-facing, operator, and developer doc surfaces — README, `docs-site/docs/**`, `docs/SELF_HOSTING.md`, `cmd/*/README.md`, top-level `*.md`, `CLAUDE.md` / `CONTEXT.md`, plus a contradiction-only read of `Plans/canvas/**` and `docs/adr/**`
 **Disposition:** clear mechanical fixes applied in this PR. Design-intent contradictions and one shipped-code defect are flagged, not edited.
+**Post-audit note (2026-08-03):** after this audit ran, `main` made `AGENTS.md` the canonical agent context with `CLAUDE.md` as a symlink to it (OE-644, #1550). The `CLAUDE.md` fixes described below were ported into `AGENTS.md` when this branch merged `main`; the `CLAUDE.md` references below are the pre-rename surface.
 
 ---
 
