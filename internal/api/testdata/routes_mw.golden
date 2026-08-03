@@ -276,6 +276,7 @@ POST /v1/questionnaires 8
 POST /v1/questionnaires/{id}/answer-runs 8
 POST /v1/questionnaires/{id}/answer-runs/{runId}/cancel 8
 POST /v1/questionnaires/{id}/answers/{qid}/ai-approve 8
+POST /v1/questionnaires/{id}/answers/{qid}/ai-reject 8
 POST /v1/questionnaires/{id}/answers/{qid}/ai-suggest 8
 POST /v1/questionnaires/{id}/export-pdf 8
 POST /v1/questionnaires/{id}/import-excel 8
