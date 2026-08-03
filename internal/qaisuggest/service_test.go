@@ -36,6 +36,9 @@ type fakeStore struct {
 	persistedText string
 	approveCalls  int
 	approver      string
+	rejectCalls   int
+	rejectActor   string
+	rejectErr     error
 }
 
 func (f *fakeStore) PersistDraft(_ context.Context, _ uuid.UUID, narrative string, _ []byte, _ Provenance) (string, error) {
@@ -52,6 +55,15 @@ func (f *fakeStore) Approve(_ context.Context, _ uuid.UUID, narrative, _ string,
 		HumanApproved: true,
 		HumanApprover: approver,
 	}, nil
+}
+
+func (f *fakeStore) RejectDraft(_ context.Context, answerID uuid.UUID, actor string) (RejectedAnswer, error) {
+	f.rejectCalls++
+	f.rejectActor = actor
+	if f.rejectErr != nil {
+		return RejectedAnswer{}, f.rejectErr
+	}
+	return RejectedAnswer{AnswerID: answerID.String(), QuestionID: "question-id-1", Status: "rejected"}, nil
 }
 
 func newSvc(t *testing.T, ret Retriever, draft string, res CitationResolver, st ApprovalStore) *Service {
@@ -243,5 +255,36 @@ func TestApprove_RecordsApprover(t *testing.T) {
 	}
 	if st.approveCalls != 1 || st.approver != "key_grc" {
 		t.Errorf("store approve not called correctly: calls=%d approver=%q", st.approveCalls, st.approver)
+	}
+}
+
+// ----- Reject (slice 757): one call, one answer; sentinel pass-through -----
+
+func TestReject_CallsStoreWithActor(t *testing.T) {
+	t.Parallel()
+	st := &fakeStore{}
+	svc := newSvc(t, fakeRetriever{}, "x", fakeResolver{}, st)
+	id := uuid.New()
+	got, err := svc.Reject(context.Background(), RejectParams{AnswerID: id, Actor: "key_grc"})
+	if err != nil {
+		t.Fatalf("Reject: %v", err)
+	}
+	if got.AnswerID != id.String() || got.Status != "rejected" {
+		t.Fatalf("unexpected rejected answer: %+v", got)
+	}
+	if st.rejectCalls != 1 || st.rejectActor != "key_grc" {
+		t.Errorf("store reject not called correctly: calls=%d actor=%q", st.rejectCalls, st.rejectActor)
+	}
+}
+
+func TestReject_PropagatesSentinels(t *testing.T) {
+	t.Parallel()
+	for _, sentinel := range []error{ErrAnswerNotFound, ErrAnswerApproved, ErrAnswerManual} {
+		st := &fakeStore{rejectErr: sentinel}
+		svc := newSvc(t, fakeRetriever{}, "x", fakeResolver{}, st)
+		_, err := svc.Reject(context.Background(), RejectParams{AnswerID: uuid.New(), Actor: "key_grc"})
+		if !errors.Is(err, sentinel) {
+			t.Errorf("want %v, got %v", sentinel, err)
+		}
 	}
 }

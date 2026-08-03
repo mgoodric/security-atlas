@@ -4197,6 +4197,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answers/{qid}/ai-reject:
+    post:
+      summary: POST /v1/questionnaires/{id}/answers/{qid}/ai-reject
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answers-qid-ai-reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/questionnaires/{id}/answers/{qid}/ai-suggest:
     post:
       summary: POST /v1/questionnaires/{id}/answers/{qid}/ai-suggest
