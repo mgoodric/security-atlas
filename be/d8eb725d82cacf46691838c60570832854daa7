@@ -1,0 +1,33 @@
+sqlc.yaml
+  s_a7589909ac14d1::t_8c17883b9ed217 87
+scripts/integration-shards.txt
+  s_a7589909ac14d1::t_f11c235a68c1d5 132
+internal/accessreview/store_test.go
+  s_a7589909ac14d1::t_f11c235a68c1d5 1-75
+internal/accessreview/store.go
+  s_a7589909ac14d1::t_f11c235a68c1d5 1-632
+internal/db/dbx/models.go
+  s_a7589909ac14d1::t_f11c235a68c1d5 1208-1252
+migrations/sql/20260612110000_access_review_campaigns.down.sql
+  s_a7589909ac14d1::t_f11c235a68c1d5 1-3
+internal/accessreview/integration_test.go
+  s_a7589909ac14d1::t_f11c235a68c1d5 1-223
+migrations/sql/20260612110000_access_review_campaigns.sql
+  s_a7589909ac14d1::t_f11c235a68c1d5 1-137
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "bed8eb725d82cacf46691838c60570832854daa7",
+  "prompts": {},
+  "sessions": {
+    "s_a7589909ac14d1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "96ede17c-c2e8-4839-8072-72d91af0bf5d",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
