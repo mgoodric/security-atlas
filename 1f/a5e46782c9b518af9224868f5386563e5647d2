@@ -1,0 +1,94 @@
+web/lib/questionnaire/review-queue.ts
+  s_053f677b159aea::t_8ad21a4acdb697 197-199
+  s_053f677b159aea::t_3f17f262b186fc 1-196,200-271
+docs/audit-log/757-questionnaire-review-queue-decisions.md
+  s_6fa9c03787a378::t_68b4d43501ba58 1-139
+internal/api/testdata/routes.golden
+  s_c3b6f43a7ed9ef::t_20c819b4e41afe 279
+internal/api/testdata/routes_mw.golden
+  s_c3b6f43a7ed9ef::t_2a9402e5f7c40e 279
+internal/qaisuggest/service_test.go
+  s_a4f2a54fee65d8::t_4f5c8fb74c9fb2 39-41,60-68,260-290
+internal/qaisuggest/store.go
+  s_a4f2a54fee65d8::t_0728e84d5be3e8 369-434
+web/app/(authed)/questionnaires/[id]/page.tsx
+  s_a4f2a54fee65d8::t_cc5ae80a2f0236 12-17,21,28,33-36,80-99,105,108-109,112-113,120-163,217,244-285,304-314,326-330,332-343,345-363,365-380,382-396
+web/e2e/questionnaire-review-queue.spec.ts
+  s_c3b6f43a7ed9ef::t_40e391c581562d 1-551
+web/lib/questionnaire/review-queue.test.ts
+  s_a4f2a54fee65d8::t_fb0fdd451d9dad 1-283
+CHANGELOG.md
+  s_a4f2a54fee65d8::t_bae6d4983e550c 29-30
+internal/api/questionnaires/handlers.go
+  s_a4f2a54fee65d8::t_0795428c3fdd34 16,100,487-539,652-655
+internal/api/questionnaires/handlers_ai_reject_integration_test.go
+  s_a4f2a54fee65d8::t_69b39d4a82fac2 1-225
+internal/api/questionnaires/handlers_ai_reject_test.go
+  s_a4f2a54fee65d8::t_1ab6d333712b0f 1-48
+internal/qaisuggest/qaisuggest.go
+  s_a4f2a54fee65d8::t_21c05874b61b07 172-180,206-215
+internal/qaisuggest/service.go
+  s_a4f2a54fee65d8::t_6c0d65f4043044 38-39,43,206-221
+internal/questionnaire/store.go
+  s_a4f2a54fee65d8::t_e0bc9472d8dc2d 66-69,71-82,413-416,418-429
+migrations/sql/20260612120000_questionnaire_answer_reject_audit.down.sql
+  s_a4f2a54fee65d8::t_55b83f5d76ab9b 1-2
+migrations/sql/20260612120000_questionnaire_answer_reject_audit.sql
+  s_a4f2a54fee65d8::t_8c4c4e3d7bdd88 1-59
+web/app/api/questionnaires/[id]/answer-runs/[runId]/route.test.ts
+  s_a4f2a54fee65d8::t_2fca445aa18d4e 1-76
+web/app/api/questionnaires/[id]/answer-runs/[runId]/route.ts
+  s_a4f2a54fee65d8::t_87be1028e91102 1-39
+web/app/api/questionnaires/[id]/answer-runs/route.test.ts
+  s_a4f2a54fee65d8::t_f2d849a45e0b40 1-73
+web/app/api/questionnaires/[id]/answer-runs/route.ts
+  s_a4f2a54fee65d8::t_197ea869af5ad0 1-42
+web/app/api/questionnaires/[id]/answers/[qid]/ai-reject/route.test.ts
+  s_a4f2a54fee65d8::t_d612358f81c9d5 1-105
+web/app/api/questionnaires/[id]/answers/[qid]/ai-reject/route.ts
+  s_a4f2a54fee65d8::t_ac0e10368c909d 1-58
+web/components/questionnaire/review-queue.tsx
+  s_a4f2a54fee65d8::t_2c0b857f30847d 1-431
+web/components/questionnaire/types.ts
+  s_a4f2a54fee65d8::t_62af27312bc0db 25-34
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "1fa5e46782c9b518af9224868f5386563e5647d2",
+  "prompts": {},
+  "sessions": {
+    "s_053f677b159aea": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7aa79543-61b0-4e8c-813b-8ccdb2e319ab",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_6fa9c03787a378": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fc529-b879-7b42-9f1f-845419e5cce6",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_a4f2a54fee65d8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ef82675-db3b-4a2d-bb11-ad98c60035d1",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_c3b6f43a7ed9ef": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1945f0ee-b943-42ca-b07b-a7d6d45ef107",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
