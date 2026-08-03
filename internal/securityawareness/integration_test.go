@@ -4,9 +4,11 @@ package securityawareness_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/dbtest"
@@ -202,5 +204,278 @@ func TestRLSIsolationAcrossTenants(t *testing.T) {
 	}
 	if len(eventsB) != 0 {
 		t.Fatalf("cross-tenant calendar leakage: %+v", eventsB)
+	}
+}
+
+// seedCampaignFixture creates a course + campaign plus two assigned people
+// (one keyed by work_email, one by hris source_person_id) and returns their
+// assignment ids keyed by first name.
+func seedCampaignFixture(t *testing.T, ctx context.Context, store *securityawareness.Store, emailDomain string) map[string]uuid.UUID {
+	t.Helper()
+	alice, err := store.UpsertPerson(ctx, securityawareness.UpsertPersonInput{
+		Source:      securityawareness.PersonSourceManual,
+		DisplayName: "Alice Example",
+		WorkEmail:   strptr("alice@" + emailDomain),
+		Active:      boolptr(true),
+	})
+	if err != nil {
+		t.Fatalf("UpsertPerson alice: %v", err)
+	}
+	bob, err := store.UpsertPerson(ctx, securityawareness.UpsertPersonInput{
+		Source:         securityawareness.PersonSourceHRIS,
+		SourcePersonID: strptr("rippling:worker-2"),
+		DisplayName:    "Bob Example",
+		WorkEmail:      strptr("bob@" + emailDomain),
+		Active:         boolptr(true),
+	})
+	if err != nil {
+		t.Fatalf("UpsertPerson bob: %v", err)
+	}
+	course, err := store.CreateCourse(ctx, securityawareness.CreateCourseInput{
+		Code: "SAT-2026", Title: "Annual security awareness", Required: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateCourse: %v", err)
+	}
+	campaign, err := store.CreateCampaign(ctx, securityawareness.CreateCampaignInput{
+		CourseID: course.ID,
+		Name:     "2026 annual",
+		StartsAt: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		DueAt:    time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("CreateCampaign: %v", err)
+	}
+	assignments := map[string]uuid.UUID{}
+	for name, person := range map[string]securityawareness.Person{"alice": alice, "bob": bob} {
+		a, err := store.Assign(ctx, securityawareness.AssignInput{CampaignID: campaign.ID, PersonID: person.ID})
+		if err != nil {
+			t.Fatalf("Assign %s: %v", name, err)
+		}
+		assignments[name] = a.ID
+	}
+	return assignments
+}
+
+const completionCSVHeader = "work_email,source_person_id,person_source,course_code,campaign_name,completed_at,phishing_simulation_id,phishing_sent_at,phishing_outcome,phishing_reported_at"
+
+func assignmentState(t *testing.T, admin *pgxpool.Pool, tenant string, id uuid.UUID) (completedAt *time.Time, source *string) {
+	t.Helper()
+	err := admin.QueryRow(context.Background(), `
+SELECT completed_at, completion_source FROM security_training_assignments WHERE tenant_id = $1 AND id = $2`,
+		tenant, id).Scan(&completedAt, &source)
+	if err != nil {
+		t.Fatalf("assignment state: %v", err)
+	}
+	return completedAt, source
+}
+
+func TestImportCompletionsCSVHappyPath(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := tenantCtx(t, tenant)
+	store := securityawareness.NewStore(app)
+	fx := seedCampaignFixture(t, ctx, store, "happy.test")
+
+	csv := strings.Join([]string{
+		completionCSVHeader,
+		"ALICE@happy.test,,,sat-2026,2026 ANNUAL,2026-07-10T09:00:00Z,sim-2026-07,2026-07-01,reported,2026-07-02T08:00:00Z",
+		",rippling:worker-2,hris,SAT-2026,2026 annual,2026-07-11,,,,",
+	}, "\n")
+	report, err := store.ImportCompletionsCSV(ctx, strings.NewReader(csv), "importer-1", securityawareness.DefaultCSVImportLimits)
+	if err != nil {
+		t.Fatalf("ImportCompletionsCSV: %v", err)
+	}
+	if report.Imported != 2 || report.AlreadyComplete != 0 || report.Failed != 0 {
+		t.Fatalf("report = %+v, want 2 imported", report)
+	}
+	for _, res := range report.Results {
+		if res.Status != securityawareness.RowImported {
+			t.Fatalf("row %d status = %s: %s", res.Row, res.Status, res.Error)
+		}
+		if res.Evidence == nil {
+			t.Fatalf("row %d missing evidence record", res.Row)
+		}
+		if res.Evidence.GetEvidenceKind() != securityawareness.EvidenceKindTrainingCompletion {
+			t.Fatalf("row %d evidence kind = %q", res.Row, res.Evidence.GetEvidenceKind())
+		}
+		if got := res.Evidence.GetPayload().AsMap()["completion_source"]; got != securityawareness.CompletionSourceCSV {
+			t.Fatalf("row %d evidence completion_source = %v, want csv", res.Row, got)
+		}
+	}
+	for name, id := range fx {
+		completedAt, source := assignmentState(t, admin, tenant, id)
+		if completedAt == nil || source == nil || *source != securityawareness.CompletionSourceCSV {
+			t.Fatalf("%s assignment not csv-completed: completed_at=%v source=%v", name, completedAt, source)
+		}
+	}
+	var phishCount int
+	if err := admin.QueryRow(context.Background(), `
+SELECT COUNT(*) FROM security_training_phishing_results WHERE tenant_id = $1 AND assignment_id = $2 AND simulation_id = 'sim-2026-07'`,
+		tenant, fx["alice"]).Scan(&phishCount); err != nil {
+		t.Fatalf("count phishing: %v", err)
+	}
+	if phishCount != 1 {
+		t.Fatalf("phishing rows = %d, want 1", phishCount)
+	}
+}
+
+func TestImportCompletionsCSVUnresolvableRowsDoNotFailBatch(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := tenantCtx(t, tenant)
+	store := securityawareness.NewStore(app)
+	fx := seedCampaignFixture(t, ctx, store, "unresolvable.test")
+
+	csv := strings.Join([]string{
+		completionCSVHeader,
+		"alice@unresolvable.test,,,SAT-2026,2026 annual,2026-07-10T09:00:00Z,,,,", // good
+		"ghost@unresolvable.test,,,SAT-2026,2026 annual,2026-07-10,,,,",           // unknown person
+		"bob@unresolvable.test,,,NO-SUCH-COURSE,2026 annual,2026-07-10,,,,",       // unknown course
+		"bob@unresolvable.test,,,SAT-2026,2026 annual,not-a-timestamp,,,,",        // invalid row
+	}, "\n")
+	report, err := store.ImportCompletionsCSV(ctx, strings.NewReader(csv), "importer-1", securityawareness.DefaultCSVImportLimits)
+	if err != nil {
+		t.Fatalf("ImportCompletionsCSV: %v", err)
+	}
+	if report.Imported != 1 || report.Failed != 3 {
+		t.Fatalf("report = %+v, want 1 imported / 3 failed", report)
+	}
+	wantErrs := map[int]string{
+		2: "no person with work_email",
+		3: "no assignment for person in course",
+		4: "invalid completed_at",
+	}
+	for _, res := range report.Results {
+		want, isErr := wantErrs[res.Row]
+		if !isErr {
+			continue
+		}
+		if res.Status != securityawareness.RowError || !strings.Contains(res.Error, want) {
+			t.Fatalf("row %d = %+v, want error containing %q", res.Row, res, want)
+		}
+	}
+	if completedAt, source := assignmentState(t, admin, tenant, fx["alice"]); completedAt == nil || *source != securityawareness.CompletionSourceCSV {
+		t.Fatalf("good row not committed alongside failing rows")
+	}
+	if completedAt, _ := assignmentState(t, admin, tenant, fx["bob"]); completedAt != nil {
+		t.Fatalf("bob unexpectedly completed by failing rows")
+	}
+}
+
+func TestImportCompletionsCSVIdempotentReimport(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := tenantCtx(t, tenant)
+	store := securityawareness.NewStore(app)
+	fx := seedCampaignFixture(t, ctx, store, "idem.test")
+
+	csv := strings.Join([]string{
+		completionCSVHeader,
+		"alice@idem.test,,,SAT-2026,2026 annual,2026-07-10T09:00:00Z,sim-2026-07,2026-07-01,no_click,",
+		"bob@idem.test,,,SAT-2026,2026 annual,2026-07-11,,,,",
+	}, "\n")
+	first, err := store.ImportCompletionsCSV(ctx, strings.NewReader(csv), "importer-1", securityawareness.DefaultCSVImportLimits)
+	if err != nil {
+		t.Fatalf("first import: %v", err)
+	}
+	if first.Imported != 2 || first.Failed != 0 {
+		t.Fatalf("first report = %+v", first)
+	}
+	aliceCompleted1, _ := assignmentState(t, admin, tenant, fx["alice"])
+
+	second, err := store.ImportCompletionsCSV(ctx, strings.NewReader(csv), "importer-1", securityawareness.DefaultCSVImportLimits)
+	if err != nil {
+		t.Fatalf("second import: %v", err)
+	}
+	if second.Imported != 0 || second.AlreadyComplete != 2 || second.Failed != 0 {
+		t.Fatalf("second report = %+v, want all already_complete", second)
+	}
+	aliceCompleted2, source := assignmentState(t, admin, tenant, fx["alice"])
+	if !aliceCompleted1.Equal(*aliceCompleted2) || *source != securityawareness.CompletionSourceCSV {
+		t.Fatalf("re-import mutated completion state: %v -> %v (%s)", aliceCompleted1, aliceCompleted2, *source)
+	}
+	var phishCount int
+	if err := admin.QueryRow(context.Background(), `
+SELECT COUNT(*) FROM security_training_phishing_results WHERE tenant_id = $1 AND assignment_id = $2`,
+		tenant, fx["alice"]).Scan(&phishCount); err != nil {
+		t.Fatalf("count phishing: %v", err)
+	}
+	if phishCount != 1 {
+		t.Fatalf("phishing rows after re-import = %d, want 1", phishCount)
+	}
+
+	// A conflicting completed_at must be a per-row refusal, not an overwrite.
+	conflicting := strings.Join([]string{
+		completionCSVHeader,
+		"alice@idem.test,,,SAT-2026,2026 annual,2026-07-12T10:00:00Z,,,,",
+	}, "\n")
+	third, err := store.ImportCompletionsCSV(ctx, strings.NewReader(conflicting), "importer-1", securityawareness.DefaultCSVImportLimits)
+	if err != nil {
+		t.Fatalf("third import: %v", err)
+	}
+	if third.Failed != 1 || !strings.Contains(third.Results[0].Error, "refusing to overwrite") {
+		t.Fatalf("conflicting import report = %+v, want per-row refusal", third)
+	}
+	aliceCompleted3, _ := assignmentState(t, admin, tenant, fx["alice"])
+	if !aliceCompleted1.Equal(*aliceCompleted3) {
+		t.Fatalf("conflicting import overwrote completed_at: %v -> %v", aliceCompleted1, aliceCompleted3)
+	}
+}
+
+func TestImportCompletionsCSVRLSIsolation(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+	store := securityawareness.NewStore(app)
+	ctxA := tenantCtx(t, tenantA)
+	ctxB := tenantCtx(t, tenantB)
+	fxA := seedCampaignFixture(t, ctxA, store, "tenant-a.test")
+
+	// Tenant B runs an import naming tenant A's people/course/campaign. RLS
+	// must make every row unresolvable and leave tenant A untouched.
+	csv := strings.Join([]string{
+		completionCSVHeader,
+		"alice@tenant-a.test,,,SAT-2026,2026 annual,2026-07-10T09:00:00Z,,,,",
+		",rippling:worker-2,hris,SAT-2026,2026 annual,2026-07-11,,,,",
+	}, "\n")
+	report, err := store.ImportCompletionsCSV(ctxB, strings.NewReader(csv), "importer-b", securityawareness.DefaultCSVImportLimits)
+	if err != nil {
+		t.Fatalf("tenant B import: %v", err)
+	}
+	if report.Imported != 0 || report.Failed != 2 {
+		t.Fatalf("tenant B report = %+v, want all rows unresolvable", report)
+	}
+	for name, id := range fxA {
+		if completedAt, _ := assignmentState(t, admin, tenantA, id); completedAt != nil {
+			t.Fatalf("cross-tenant import completed tenant A assignment %s", name)
+		}
+	}
+
+	// A same-keyed person in tenant B without an assignment still cannot
+	// reach across: the row fails at assignment resolution inside tenant B.
+	if _, err := store.UpsertPerson(ctxB, securityawareness.UpsertPersonInput{
+		Source:      securityawareness.PersonSourceManual,
+		DisplayName: "Tenant B Alice",
+		WorkEmail:   strptr("alice@tenant-a.test"),
+		Active:      boolptr(true),
+	}); err != nil {
+		t.Fatalf("seed tenant B person: %v", err)
+	}
+	report2, err := store.ImportCompletionsCSV(ctxB, strings.NewReader(csv), "importer-b", securityawareness.DefaultCSVImportLimits)
+	if err != nil {
+		t.Fatalf("tenant B second import: %v", err)
+	}
+	if report2.Imported != 0 {
+		t.Fatalf("tenant B second report = %+v, want zero imports", report2)
+	}
+	for _, id := range fxA {
+		if completedAt, _ := assignmentState(t, admin, tenantA, id); completedAt != nil {
+			t.Fatalf("cross-tenant import mutated tenant A after same-key seed")
+		}
 	}
 }
