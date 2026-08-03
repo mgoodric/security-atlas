@@ -147,6 +147,7 @@ GET /v1/policies/{id}/pdf 8
 GET /v1/populations/{id} 8
 GET /v1/questionnaires 8
 GET /v1/questionnaires/{id} 8
+GET /v1/questionnaires/{id}/answer-runs/{runId} 8
 GET /v1/questionnaires/{id}/suggestions 8
 GET /v1/requirements/{id}/anchors 8
 GET /v1/requirements/{id}/coverage 8
@@ -167,6 +168,7 @@ GET /v1/themes 8
 GET /v1/upcoming 8
 GET /v1/vendors 8
 GET /v1/vendors/burndown 8
+GET /v1/vendors/spend 8
 GET /v1/vendors/{id} 8
 GET /v1/vendors/{id}/reviews 8
 GET /v1/version 8
@@ -272,10 +274,16 @@ POST /v1/policies/{id}/acknowledge 8
 POST /v1/policies/{id}/publish 8
 POST /v1/populations 8
 POST /v1/questionnaires 8
+POST /v1/questionnaires/{id}/answer-runs 8
+POST /v1/questionnaires/{id}/answer-runs/{runId}/cancel 8
 POST /v1/questionnaires/{id}/answers/{qid}/ai-approve 8
+POST /v1/questionnaires/{id}/answers/{qid}/ai-reject 8
 POST /v1/questionnaires/{id}/answers/{qid}/ai-suggest 8
 POST /v1/questionnaires/{id}/export-pdf 8
 POST /v1/questionnaires/{id}/import-excel 8
+POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest 8
+POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve 8
+POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject 8
 POST /v1/risks 8
 POST /v1/risks/aggregate 8
 POST /v1/risks/{id}/controls 8

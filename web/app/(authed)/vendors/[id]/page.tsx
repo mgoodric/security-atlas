@@ -238,6 +238,45 @@ export default function VendorDetailPage({
                 {formatDetailDate(vendor.contract_end)}
               </span>
             </Field>
+            <Field label="Renewal date" testid="vendor-detail-renewal-date">
+              <span className="font-mono">
+                {formatDetailDate(vendor.renewal_date)}
+              </span>
+            </Field>
+            <Field label="Auto-renew" testid="vendor-detail-auto-renew">
+              <span>{vendor.auto_renew ? "Enabled" : "Disabled"}</span>
+            </Field>
+            <Field label="Annual cost" testid="vendor-detail-annual-cost">
+              <span className="font-mono">
+                {formatMoney(vendor.annual_cost, vendor.currency)}
+              </span>
+            </Field>
+            <Field
+              label="Licenses / seats"
+              testid="vendor-detail-license-count"
+            >
+              <span className="font-mono">
+                {vendor.license_count ?? "untracked"}
+              </span>
+            </Field>
+            <Field label="Tool category" testid="vendor-detail-tool-category">
+              <span>{vendor.tool_category?.replace("_", " ") ?? "none"}</span>
+            </Field>
+            <Field label="Cost owner" testid="vendor-detail-cost-owner">
+              <span>{vendor.cost_owner?.trim() || "unassigned"}</span>
+            </Field>
+            <Field
+              label="Commercial status"
+              testid="vendor-detail-commercial-status"
+            >
+              <span className="capitalize">{vendor.status ?? "active"}</span>
+            </Field>
+            <Field
+              label="Billing cadence"
+              testid="vendor-detail-billing-cadence"
+            >
+              <span>{vendor.billing_cadence?.replace("_", " ") ?? "none"}</span>
+            </Field>
             <Field label="DPA status" testid="vendor-detail-dpa">
               <span>
                 {dpaStatusLabel(vendor.dpa_signed, vendor.dpa_signed_at)}
@@ -391,6 +430,13 @@ function CriticalityBadge({ value }: { value: string }) {
       {value}
     </Badge>
   );
+}
+
+function formatMoney(amount?: number | null, currency?: string | null): string {
+  if (amount == null || !currency) return "—";
+  return `${currency} ${amount.toLocaleString(undefined, {
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function Field({

@@ -148,21 +148,22 @@ describe("DEFAULT_TREATMENT — slice 663 fresh-tenant dead-end", () => {
 });
 
 describe("OFFERED_METHODOLOGIES — OE-592 savable-options-only", () => {
-  // The backend scores/aggregates only the two 5x5-shaped methodologies
-  // (internal/risk/severity.go), and the form always submits a
-  // {likelihood, impact} inherent_score. Any option outside this set is
-  // a guaranteed validation error, so the form must not offer it.
-  const BACKEND_SAVABLE = ["nist_800_30", "qualitative_5x5"];
+  const FORM_SAVABLE = ["nist_800_30", "fair", "qualitative_5x5"];
 
   test("every offered methodology is backend-savable", () => {
     for (const m of OFFERED_METHODOLOGIES) {
-      expect(BACKEND_SAVABLE).toContain(m);
+      expect(FORM_SAVABLE).toContain(m);
     }
   });
 
-  test("unsupported enum values are not offered", () => {
+  test("FAIR is offered now that the form has quantitative scoring inputs", () => {
     const offered: readonly string[] = OFFERED_METHODOLOGIES;
-    for (const m of ["fair", "cis_ram", "iso_27005"]) {
+    expect(offered).toContain("fair");
+  });
+
+  test("unsupported enum values are still not offered", () => {
+    const offered: readonly string[] = OFFERED_METHODOLOGIES;
+    for (const m of ["cis_ram", "iso_27005"]) {
       expect(offered).not.toContain(m);
     }
   });

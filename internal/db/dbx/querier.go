@@ -525,6 +525,11 @@ type Querier interface {
 	// run on the same threshold finds zero active rows that have already
 	// expired, so it is a no-op.
 	ExpireActiveExceptionsBefore(ctx context.Context, arg ExpireActiveExceptionsBeforeParams) ([]Exception, error)
+	// FAIR-only org-unit rollup. Annualized loss exposure is already dollars/year
+	// on the canonical FAIR score shape; legacy lef/lm rows are tolerated so older
+	// fixtures remain readable. This result must not be combined with the 5×5
+	// severity scalar.
+	FairExposureByOrgUnit(ctx context.Context, tenantID pgtype.UUID) ([]FairExposureByOrgUnitRow, error)
 	// Flip status draft->finalized + stamp the as-finalized canonical_hash.
 	// The hash on this row is the commitment auditors verify against; once
 	// the row is finalized, the slice's tamper-detection re-compute compares
@@ -1623,6 +1628,7 @@ type Querier interface {
 	//   4. vendors                 — last_review_date + review_cadence interval is
 	//      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
 	//      vendor branch so the two surfaces cannot drift (slice 675).
+	//      Also includes renewal_date as a separate vendor renewal event (OE-623).
 	//   5. controls + control_evaluations — periodic-review controls whose
 	//      cadence (derived from freshness_class) places their next review
 	//      between $from and $to. last_evaluated_at = MAX(evaluated_at) over
@@ -2634,7 +2640,7 @@ type Querier interface {
 	ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditLogParams) ([]ListUnifiedAuditLogRow, error)
 	// AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
 	// sources — expiring exceptions (021), policy-ack expirations (023), vendor
-	// reviews (024), audit-period milestones (028) — projected to the AC-4 row
+	// reviews and contract renewals (024/OE-623), audit-period milestones (028) — projected to the AC-4 row
 	// shape {due_date, category, title, resource_type, resource_id}. NOT four
 	// round-trips (anti-criterion P0: no N+1).
 	//
@@ -2654,6 +2660,7 @@ type Querier interface {
 	//                      (policy_version, user) is considered
 	//   vendor_review    — last_review_date + the cadence interval (next review
 	//                      falls due)
+	//   vendor_renewal   — renewal_date (contract renewal falls due)
 	//   audit_period     — period_end (the audit period closes)
 	//
 	// All four are tenant-scoped; RLS fires on each underlying SELECT and the
@@ -2687,6 +2694,11 @@ type Querier interface {
 	ListVendorReviews(ctx context.Context, arg ListVendorReviewsParams) ([]VendorReview, error)
 	// Cells attached to one vendor.
 	ListVendorScopeCells(ctx context.Context, arg ListVendorScopeCellsParams) ([]pgtype.UUID, error)
+	// Commercial spend rollup for purchased security tooling. Aggregates only
+	// rows with annual_cost + currency and excludes churned tools from current
+	// spend. category NULL is the overall rollup for that currency; non-NULL
+	// rows are category subtotals.
+	ListVendorSpendRollup(ctx context.Context, tenantID pgtype.UUID) ([]ListVendorSpendRollupRow, error)
 	// AC-2 filter by criticality. NULL criticality_filter means "all" — the
 	// (sqlc.narg('criticality')::vendor_criticality IS NULL OR criticality = sqlc.narg('criticality'))
 	// pattern keeps the query plan stable and lets sqlc emit a *VendorCriticality
@@ -2858,8 +2870,10 @@ type Querier interface {
 	// numeric severity component resolves to severity 0 — it is still counted
 	// (constitutional invariant 9: malformed-score and rule-driven/manual
 	// risks are peers, never filtered out), it just lands in the severity-0
-	// bucket. The guarded-CASE expression is wrapped in COALESCE(..., 0) and
-	// cast ::int so sqlc types the column as a clean non-null Go int.
+	// bucket. FAIR risks are different: they are valid quantitative-dollar
+	// risks, not malformed 5×5 risks, so they are deliberately excluded from
+	// the severity rollups and surfaced through FairExposureByOrgUnit instead.
+	// This keeps the hierarchy from silently mixing dollars into a 1..25 scalar.
 	// AC-1: per-org-unit risk count broken down by severity scalar. ONE
 	// GROUP BY query for the whole tenant — joined to the org-unit tree in Go,
 	// never one query per node (anti-criterion: no N+1).

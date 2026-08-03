@@ -18,6 +18,14 @@ import (
 //
 // A tenant with zero framework_scopes returns 0 with sample=empty.
 //
+// Schema note: `framework_scopes` carries `framework_version_id`, not
+// `framework_id` — the framework id lives one hop away on
+// `framework_versions` (slice 018 reshaped the table; ADR-0001). The
+// lifecycle column is `state` (draft|review|approved|activated|superseded),
+// so "in scope" is `state = 'activated'`, not the slice-002 `'active'`.
+// The pre-fix query selected `framework_id` straight off `framework_scopes`
+// and filtered on `'active'`, which errored 42703 on every scheduler tick.
+//
 // Note on canvas §8.4 freezing: this evaluator reads `audit_periods` but
 // does NOT filter by frozen_at. The board-pack consumer reads the live
 // audit_readiness value alongside the frozen-period snapshot's own
@@ -30,9 +38,10 @@ func (e *auditReadinessScoreEvaluator) Name() string { return "audit_readiness_s
 func (e *auditReadinessScoreEvaluator) Compute(ctx context.Context) (Result, error) {
 	const query = `
 		WITH frameworks AS (
-			SELECT DISTINCT framework_id
-			FROM framework_scopes
-			WHERE state = 'active'
+			SELECT DISTINCT fv.framework_id
+			FROM framework_scopes fs
+			JOIN framework_versions fv ON fv.id = fs.framework_version_id
+			WHERE fs.state = 'activated'
 		),
 		periods AS (
 			SELECT DISTINCT fv.framework_id

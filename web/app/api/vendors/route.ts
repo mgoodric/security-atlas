@@ -23,6 +23,20 @@ export async function GET(req: NextRequest) {
   if (c === "low" || c === "medium" || c === "high") {
     filter.criticality = c;
   }
+  const tc = req.nextUrl.searchParams.get("tool_category");
+  if (
+    tc === "edr" ||
+    tc === "siem" ||
+    tc === "iam" ||
+    tc === "vuln_mgmt" ||
+    tc === "cloud_security" ||
+    tc === "appsec" ||
+    tc === "grc" ||
+    tc === "monitoring" ||
+    tc === "other"
+  ) {
+    filter.tool_category = tc;
+  }
   if (req.nextUrl.searchParams.get("overdue") === "true") {
     filter.overdue = true;
   }

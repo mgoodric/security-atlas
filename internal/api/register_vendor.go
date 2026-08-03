@@ -28,6 +28,7 @@ func (s *Server) registerVendor(root *chi.Mux, vendorStore *vendor.Store) {
 	root.Post("/v1/vendors", vendorsH.CreateVendor)
 	root.Get("/v1/vendors", vendorsH.ListVendors)
 	root.Get("/v1/vendors/burndown", vendorsH.Burndown)
+	root.Get("/v1/vendors/spend", vendorsH.SpendRollup)
 	root.Get("/v1/vendors/{id}", vendorsH.GetVendor)
 	root.Patch("/v1/vendors/{id}", vendorsH.UpdateVendor)
 	root.Delete("/v1/vendors/{id}", vendorsH.DeleteVendor)

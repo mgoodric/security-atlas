@@ -35,11 +35,12 @@ type Service struct {
 }
 
 // ApprovalStore is the narrow persistence seam the Service needs: persist a
-// draft, approve a draft. Production is *Store; the interface keeps the Service
-// testable.
+// draft, approve a draft, reject (discard) a draft. Production is *Store; the
+// interface keeps the Service testable.
 type ApprovalStore interface {
 	PersistDraft(ctx context.Context, questionID uuid.UUID, narrative string, citationsJSON []byte, prov Provenance) (string, error)
 	Approve(ctx context.Context, answerID uuid.UUID, finalNarrative, answerValue, approver string) (ApprovedAnswer, error)
+	RejectDraft(ctx context.Context, answerID uuid.UUID, actor string) (RejectedAnswer, error)
 }
 
 // NewService wires the retriever, the local-inference client (Ollama in
@@ -200,6 +201,22 @@ func (s *Service) Approve(ctx context.Context, p ApproveParams) (ApprovedAnswer,
 		return ApprovedAnswer{}, err
 	}
 	return approved, nil
+}
+
+// RejectParams carries the reject action: which draft to discard + the
+// operator performing the rejection (recorded on the audit row).
+type RejectParams struct {
+	AnswerID uuid.UUID
+	Actor    string
+}
+
+// Reject discards an unapproved AI draft (slice 757). The question returns to
+// unanswered; the rejection is audit-logged with the draft's model provenance.
+// Reject NEVER touches approved or manual answers — the store refuses them
+// with ErrAnswerApproved / ErrAnswerManual (P0-757-4), which the API surfaces
+// as 409. There is no bulk reject: one call, one answer.
+func (s *Service) Reject(ctx context.Context, p RejectParams) (RejectedAnswer, error) {
+	return s.store.RejectDraft(ctx, p.AnswerID, p.Actor)
 }
 
 // candidateContext builds the structured context map recorded on the

@@ -10,6 +10,23 @@ export type VendorReviewCadence =
   | "quarterly"
   | "biannual"
   | "annual";
+export type VendorToolCategory =
+  | "edr"
+  | "siem"
+  | "iam"
+  | "vuln_mgmt"
+  | "cloud_security"
+  | "appsec"
+  | "grc"
+  | "monitoring"
+  | "other";
+export type VendorCommercialStatus = "active" | "trialing" | "churned";
+export type VendorBillingCadence =
+  | "monthly"
+  | "quarterly"
+  | "annual"
+  | "multi_year"
+  | "one_time";
 
 export type Vendor = {
   id: string;
@@ -26,6 +43,15 @@ export type Vendor = {
   owner_user: string;
   linked_sow_uri?: string | null;
   notes: string;
+  annual_cost?: number | null;
+  currency?: string | null;
+  renewal_date?: string | null;
+  auto_renew: boolean;
+  license_count?: number | null;
+  tool_category?: VendorToolCategory | null;
+  cost_owner: string;
+  status: VendorCommercialStatus;
+  billing_cadence?: VendorBillingCadence | null;
   scope_cell_ids: string[];
   created_at: string;
   updated_at: string;
@@ -44,7 +70,23 @@ export type VendorWrite = {
   owner_user: string;
   linked_sow_uri?: string | null;
   notes: string;
+  annual_cost?: number | null;
+  currency?: string | null;
+  renewal_date?: string | null;
+  auto_renew: boolean;
+  license_count?: number | null;
+  tool_category?: VendorToolCategory | null;
+  cost_owner: string;
+  status: VendorCommercialStatus;
+  billing_cadence?: VendorBillingCadence | null;
   scope_cell_ids: string[];
+};
+
+export type VendorSpendRollupRow = {
+  tool_category?: VendorToolCategory | null;
+  currency: string;
+  annual_cost: number;
+  vendor_count: number;
 };
 
 // Slice 688 — vendor_reviews ledger. One row per completed review,
@@ -87,6 +129,7 @@ export type VendorBurndown = {
 
 export type VendorListFilter = {
   criticality?: VendorCriticality;
+  tool_category?: VendorToolCategory;
   overdue?: boolean;
   as_of?: string;
 };
@@ -95,6 +138,7 @@ function vendorQuery(filter?: VendorListFilter): string {
   if (!filter) return "";
   const qs = new URLSearchParams();
   if (filter.criticality) qs.set("criticality", filter.criticality);
+  if (filter.tool_category) qs.set("tool_category", filter.tool_category);
   if (filter.overdue) qs.set("overdue", "true");
   if (filter.as_of) qs.set("as_of", filter.as_of);
   const s = qs.toString();
@@ -224,4 +268,12 @@ export async function getVendorBurndown(
     bearer,
   );
   return (await res.json()) as VendorBurndown;
+}
+
+export async function getVendorSpendRollup(
+  bearer: string,
+): Promise<VendorSpendRollupRow[]> {
+  const res = await apiFetch(`/v1/vendors/spend`, bearer);
+  const body = (await res.json()) as { rollup: VendorSpendRollupRow[] };
+  return body.rollup;
 }
