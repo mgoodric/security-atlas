@@ -60,6 +60,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/scim"
+	"github.com/mgoodric/security-atlas/internal/securityawareness"
 	stalenesssched "github.com/mgoodric/security-atlas/internal/staleness"
 )
 
@@ -928,6 +929,44 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: decision overdue notifier ticking every %s\n", interval.String())
 				if err := notifier.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("decision overdue notifier: %w", err)
+				}
+			}()
+		}
+	}
+
+	// OPENENGINE-658: security-awareness roster sync tick loop. Enumerates
+	// tenants with HRIS worker-lifecycle evidence (the ledger is the
+	// platform's only view of the HRIS roster -- connectors are push-only,
+	// invariant #3) or SCIM-managed users from the migrator pool (BYPASSRLS
+	// -- cross-tenant enumeration has no single tenant context), then
+	// upserts each tenant's roster into security_training_people under the
+	// app pool with tenancy.WithTenant so writes stay RLS-honest. Source
+	// deactivations propagate as active=false, which drops people from
+	// overdue training reminders. Default cadence is 24h;
+	// ATLAS_ROSTER_SYNC_INTERVAL overrides for dev loops.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		rsCtx, rsCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		rsPool, err := atlasotel.NewTracedPool(rsCtx, migratorURL)
+		rsCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: roster sync pool: %v\n", err)
+		} else {
+			interval := securityawareness.DefaultRosterSyncInterval
+			if raw := os.Getenv("ATLAS_ROSTER_SYNC_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_ROSTER_SYNC_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			rs := securityawareness.NewRosterSyncer(rsPool, pool, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer rsPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: security awareness roster sync ticking every %s\n", interval.String())
+				if err := rs.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("security awareness roster sync: %w", err)
 				}
 			}()
 		}
