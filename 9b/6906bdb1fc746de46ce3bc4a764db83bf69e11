@@ -1,0 +1,84 @@
+web/app/(authed)/vendors/[id]/page.tsx
+  s_4e0405f572a6c4::t_11a14956f14197 266
+  s_4e0405f572a6c4::t_3c317f6668ac70 272
+  s_4e0405f572a6c4::t_0c6891a02f395c 263-265
+  s_4e0405f572a6c4::t_9e36252dee3791 267-271
+  s_4e0405f572a6c4::t_8ee3bbbcd3e5f4 273-275
+  s_4e0405f572a6c4::t_c2493b07cb6420 241-262,276-279,435-441
+internal/db/dbx/calendar.sql.go
+  s_749aed80c6b291::t_b0828484dea95e 157-180,315
+internal/db/dbx/dashboard.sql.go
+  s_749aed80c6b291::t_5d10827e597ba3 399-420,460,481
+internal/db/dbx/models.go
+  s_749aed80c6b291::t_331222be0a3fc1 940-1027,1159-1207,2586-2610
+internal/db/dbx/querier.go
+  s_749aed80c6b291::t_b89a7bd7c5e84d 1626,2638,2658,2692-2696
+internal/db/dbx/vendors.sql.go
+  s_749aed80c6b291::t_6480e9a981bb96 111-112,115-116,118,122-144,166-174,194-202,222,251-259,265,322-330,374-439,441,445-446,451-453,461,486-494,542-550,553,557-579,601-609,629-637
+web/app/(authed)/vendors/page.tsx
+  s_749aed80c6b291::t_4b8b114a5aeba4 29-33,39,59-67,72,77,81,90-94,139-144,167-191,229-248,252-256,258-342,344-353,357-363
+web/lib/api/vendors.ts
+  s_749aed80c6b291::t_f1795d8b15ad85 13-29,46-54,73-81,85-91,132,141,272-279
+docs/adr/0021-vendor-register-security-software-commercials.md
+  s_4e0405f572a6c4::t_49161be22038b0 1-47
+internal/api/dashboard/handler.go
+  s_4e0405f572a6c4::t_7d92afa7c60d9b 190,197,212,279,284
+internal/api/dashboard/integration_test.go
+  s_4e0405f572a6c4::t_28441ed3cad294 273-287,637-664
+internal/api/register_vendor.go
+  s_4e0405f572a6c4::t_c5cedd61e02b6f 31
+internal/api/vendors/handlers.go
+  s_4e0405f572a6c4::t_1fce8cce645bfd 72-80,99-107,145-151,194-201,227-255,462-475,490-492,533-538,548-556
+internal/api/vendors/integration_test.go
+  s_4e0405f572a6c4::t_ec309ea8314f4d 102-110,129-134,211-251
+internal/db/queries/calendar.sql
+  s_4e0405f572a6c4::t_61e36ef042ca21 11,191-214
+internal/db/queries/dashboard.sql
+  s_4e0405f572a6c4::t_577ba2f135096d 195,215,329-350
+internal/db/queries/vendors.sql
+  s_4e0405f572a6c4::t_fb3d4162363fa7 8-9,12-13,34-42,63-64,117-149
+internal/db/sqlc-schema/_enums.sql
+  s_4e0405f572a6c4::t_d44a15d0ef017f 156-183
+internal/vendor/integration_test.go
+  s_4e0405f572a6c4::t_ae14f624616ffa 78-86,104-115,157-240,563-592
+internal/vendor/store.go
+  s_4e0405f572a6c4::t_28116439c74551 48-50,55-77,107-109,113-135,205-208,233-235,254-282,366-374,397-426,497-528,550-567
+internal/vendor/types.go
+  s_4e0405f572a6c4::t_74bf2db2282dfd 41-88,149-175,197-205,242-250,275-283
+migrations/sql/20260730000000_vendor_commercial_fields.down.sql
+  s_4e0405f572a6c4::t_3839e264472543 1-25
+migrations/sql/20260730000000_vendor_commercial_fields.sql
+  s_4e0405f572a6c4::t_2d88bc36641855 1-92
+sqlc.yaml
+  s_4e0405f572a6c4::t_1908b89e66ea9a 87
+web/app/(authed)/vendors/vendor-form.tsx
+  s_4e0405f572a6c4::t_61e37ec73639be 24-42,58-66,89-95,223-321
+web/app/api/vendors/route.ts
+  s_4e0405f572a6c4::t_772dcbca527355 26-39
+web/app/api/vendors/spend/route.ts
+  s_4e0405f572a6c4::t_ebc0063a933cae 1-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "9b6906bdb1fc746de46ce3bc4a764db83bf69e11",
+  "prompts": {},
+  "sessions": {
+    "s_4e0405f572a6c4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2ee417c2-0250-4209-8878-c8f60f6afcae",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_749aed80c6b291": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb4ce-077b-7ad0-8495-3b3da2e563d0",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
