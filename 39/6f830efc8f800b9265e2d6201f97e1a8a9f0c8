@@ -1,0 +1,39 @@
+cmd/atlas/main.go
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 60,291-309,883-896,970-1002,1005
+internal/personnelsecurity/runtime_integration_test.go
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 1-277
+internal/db/dbx/personnel_security.sql.go
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 101-126,511-537,539-540,542
+docs/audit-log/661-personnel-security-runtime-wiring-decisions.md
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 1-146
+internal/personnelsecurity/store.go
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 227-243,251,255,257
+internal/db/queries/personnel_security.sql
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 107-130
+internal/personnelsecurity/subscriber.go
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 1-333
+internal/personnelsecurity/subscriber_test.go
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 1-428
+internal/personnelsecurity/workflow.go
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 17-22
+internal/personnelsecurity/overdue.go
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 1-170
+internal/db/dbx/querier.go
+  s_0f1ec5ea6ce4a1::t_00234038bccedc 207-211,2563-2567
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "396f830efc8f800b9265e2d6201f97e1a8a9f0c8",
+  "prompts": {},
+  "sessions": {
+    "s_0f1ec5ea6ce4a1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4482bf22-fd7b-4403-bb32-39b271d92216",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
