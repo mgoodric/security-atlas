@@ -12,17 +12,24 @@
 // destination.
 //
 // Destination choice (decision D1 in docs/audit-log/233-decisions.md):
-// `/docs/primitives/evidence#pushing-evidence-from-your-own-tools` — the
-// section heading "Pushing evidence from your own tools" in the evidence
-// primitive doc carries the canonical `just atlas-cli evidence push`
-// example. The spec offered `/admin/credentials` as an alternative; that
-// route is itself unimplemented (a separate honesty gap), so anchoring
-// to the CLI doc is the truthful pick.
+// the section heading "Pushing evidence from your own tools" in the
+// evidence primitive doc carries the canonical
+// `just atlas-cli evidence push` example. The spec offered
+// `/admin/credentials` as an alternative; that route is itself
+// unimplemented (a separate honesty gap), so anchoring to the CLI doc
+// is the truthful pick.
+//
+// The href is the PUBLISHED docs-site URL (mkdocs `site_url`), not a
+// same-origin `/docs/...` path: the web app serves no `/docs` route, so
+// a relative path resolves to the app's 404 page (OE-555 finding G-3;
+// same defect class as PR #1521). Because the link is cross-origin and
+// rendered with `target="_blank"`, the render sites must carry
+// `rel="noopener noreferrer"`.
 
 export const PUSH_CTA_LABEL = "Push evidence →" as const;
 
 export const PUSH_CTA_HREF =
-  "/docs/primitives/evidence#pushing-evidence-from-your-own-tools" as const;
+  "https://mgoodric.github.io/security-atlas/primitives/evidence/#pushing-evidence-from-your-own-tools" as const;
 
 // The page subtitle gets a second sentence. The literal text below is the
 // non-linked prefix; the JSX in page.tsx wraps the trailing "Push evidence
