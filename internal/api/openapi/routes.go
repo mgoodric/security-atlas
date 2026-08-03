@@ -292,6 +292,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/questionnaires/{id}/answer-runs", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/answer-runs"},
 	{Method: "POST", Path: "/v1/questionnaires/{id}/answer-runs/{runId}/cancel", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/answer-runs/{runId}/cancel"},
 	{Method: "POST", Path: "/v1/questionnaires/{id}/answers/{qid}/ai-approve", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/answers/{qid}/ai-approve"},
+	{Method: "POST", Path: "/v1/questionnaires/{id}/answers/{qid}/ai-reject", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/answers/{qid}/ai-reject"},
 	{Method: "POST", Path: "/v1/questionnaires/{id}/answers/{qid}/ai-suggest", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/answers/{qid}/ai-suggest"},
 	{Method: "POST", Path: "/v1/questionnaires/{id}/export-pdf", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/export-pdf"},
 	{Method: "POST", Path: "/v1/questionnaires/{id}/import-excel", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "POST /v1/questionnaires/{id}/import-excel"},
