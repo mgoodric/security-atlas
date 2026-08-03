@@ -104,3 +104,27 @@ ORDER BY due_at ASC, id ASC;
 SELECT count(*)
 FROM personnel_security_checklists
 WHERE tenant_id = $1;
+
+-- name: ListTenantsWithOverdueOffboardingChecklists :many
+-- Cross-tenant enumeration for the OE-661 overdue-offboarding sweep. Runs as
+-- the migrator role (BYPASSRLS) and returns ONLY tenant ids — never checklist
+-- content — mirroring ListTenantsWithOverdueDecisions. The per-tenant surfacing
+-- then runs under that tenant's own GUC through the app-role store.
+SELECT DISTINCT tenant_id
+FROM personnel_security_checklists
+WHERE workflow_kind = 'offboarding'
+  AND status = 'open'
+  AND due_at < $1
+ORDER BY tenant_id;
+
+-- name: CountPersonnelOverdueNotificationsForChecklist :one
+-- Dedup probe for SurfaceOverdueOffboarding: has this recipient already been
+-- notified about this overdue checklist? The notification row itself is the
+-- authoritative marker (payload->>'checklist_id' is set by the store), so a
+-- re-run of the sweep never double-notifies (decision-overdue P0 pattern).
+SELECT count(*)
+FROM notifications
+WHERE tenant_id = $1
+  AND recipient_user_id = $2
+  AND type = 'personnel_security.offboarding_overdue'
+  AND payload->>'checklist_id' = sqlc.arg(checklist_id)::text;

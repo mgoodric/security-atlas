@@ -14,6 +14,12 @@ const (
 	EvidenceKind      = "personnel_security.workflow.v1"
 	SchemaVersion     = "1.0.0"
 	DefaultControlRef = "soc2:cc1/access-controls"
+
+	// NotificationTypeOffboardingOverdue is the notifications.type value the
+	// overdue-offboarding surfacing emits. The dedup probe in
+	// SurfaceOverdueOffboarding keys on this same string (it is baked into the
+	// CountPersonnelOverdueNotificationsForChecklist query).
+	NotificationTypeOffboardingOverdue = "personnel_security.offboarding_overdue"
 )
 
 type WorkflowKind string
