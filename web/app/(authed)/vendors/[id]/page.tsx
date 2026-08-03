@@ -263,13 +263,13 @@ export default function VendorDetailPage({
               <span>{vendor.tool_category?.replace("_", " ") ?? "none"}</span>
             </Field>
             <Field label="Cost owner" testid="vendor-detail-cost-owner">
-              <span>{vendor.cost_owner.trim() || "unassigned"}</span>
+              <span>{vendor.cost_owner?.trim() || "unassigned"}</span>
             </Field>
             <Field
               label="Commercial status"
               testid="vendor-detail-commercial-status"
             >
-              <span className="capitalize">{vendor.status}</span>
+              <span className="capitalize">{vendor.status ?? "active"}</span>
             </Field>
             <Field
               label="Billing cadence"

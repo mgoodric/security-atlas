@@ -167,6 +167,7 @@ GET /v1/themes 8
 GET /v1/upcoming 8
 GET /v1/vendors 8
 GET /v1/vendors/burndown 8
+GET /v1/vendors/spend 8
 GET /v1/vendors/{id} 8
 GET /v1/vendors/{id}/reviews 8
 GET /v1/version 8
