@@ -1,0 +1,287 @@
+.github/branch-protection.json
+  s_767b052857fee4::t_d50a6b43621fb1 48-75
+.github/workflows/ci.yml
+  s_767b052857fee4::t_192ea51a1d48e1 7-22,24-25,30-37,39,64-68,77-83,101-123,179-259
+.github/workflows/codeql.yml
+  s_767b052857fee4::t_9d77f9316259f2 8-18,29-31,33
+.release-please-manifest.json
+  s_767b052857fee4::t_f10220ea5f178f 2
+CHANGELOG.md
+  s_767b052857fee4::t_99b25c7642f765 16-17,29-32,2941-2962
+CLAUDE.md
+  s_767b052857fee4::t_972f29ac0201ab 365-379
+catalogs/metrics/policy-attestation.yaml
+  s_767b052857fee4::t_c57db30cff66f2 27,31-32,35-37,39-41
+controls/soc2/soc2_cc1_4_competence_training/control.yaml
+  s_767b052857fee4::t_f8912f59e0bd15 45-58
+docs/adr/0021-vendor-register-security-software-commercials.md
+  s_767b052857fee4::t_cd839062f73637 1-47
+docs/audit-log/415-merge-queue-decisions.md
+  s_767b052857fee4::t_9e09729c7188aa 1-302
+docs/audit-log/596-fair-risk-methodology-decisions.md
+  s_767b052857fee4::t_7a07f058efaf4e 1-39
+docs/audit-log/755-questionnaire-scf-mapping-decisions.md
+  s_767b052857fee4::t_1a0f2259780934 1-57
+docs/audit-log/756-questionnaire-batch-run-decisions.md
+  s_767b052857fee4::t_502a4a109cc1d2 1-50
+docs/audit-log/757-questionnaire-review-queue-decisions.md
+  s_767b052857fee4::t_7dcbf4df82a751 1-139
+docs/ci/MERGE_QUEUE.md
+  s_767b052857fee4::t_1d38b0f8bb3399 1-210
+docs/ci/PATH_FILTERING.md
+  s_767b052857fee4::t_954183cc41081d 82-110
+docs/openapi.yaml
+  s_767b052857fee4::t_81c97538581fc4 4080-4149,4200-4224,4290-4374,5028-5041
+go.mod
+  s_767b052857fee4::t_2661664d74808b 14,46-47
+go.sum
+  s_767b052857fee4::t_bbcc7830d9ad72 52-53,293-296
+internal/api/dashboard/handler.go
+  s_767b052857fee4::t_a210334a519b24 190,197,212,279,284
+internal/api/dashboard/integration_test.go
+  s_767b052857fee4::t_b9160e163897ba 273-287,637-664
+internal/api/openapi/routes.go
+  s_767b052857fee4::t_27cb81f4014953 166,189,293-294,296,300-302
+internal/api/orgunits/handlers.go
+  s_767b052857fee4::t_879b6c902293e2 59-67,195-214
+internal/api/questionnaires/handlers.go
+  s_767b052857fee4::t_3c722be469133c 13-16,38,49-52,66-78,91-93,100-103,487-645,652-761
+internal/api/questionnaires/handlers_ai_reject_integration_test.go
+  s_767b052857fee4::t_13976c1676d75c 1-225
+internal/api/questionnaires/handlers_ai_reject_test.go
+  s_767b052857fee4::t_e0aed71806eb77 1-48
+internal/api/questionnaires/handlers_answerrun_test.go
+  s_767b052857fee4::t_cf29bdcc5ab9e4 1-117
+internal/api/questionnaires/handlers_mapping_test.go
+  s_767b052857fee4::t_f9e4ae368afc8c 1-312
+internal/api/register_questionnaire.go
+  s_767b052857fee4::t_4499b1aa749d6b 11,50-66
+internal/api/register_vendor.go
+  s_767b052857fee4::t_ae39c71240f732 31
+internal/api/risks/hierarchy_integration_test.go
+  s_767b052857fee4::t_c03c1b9cebae80 107-125,193-194,197,225-234,240-243,370
+internal/api/schemaregistry/registry.go
+  s_767b052857fee4::t_013ba4ae6b41a7 283-287
+internal/api/schemaregistry/schemas/security_awareness.training_completion/1.0.0.json
+  s_767b052857fee4::t_3ef4f482d4d18a 1-39
+internal/api/testdata/routes.golden
+  s_767b052857fee4::t_f139592aec0868 150,171,277-278,280,284-286
+internal/api/testdata/routes_mw.golden
+  s_767b052857fee4::t_e68b09b98ff52f 150,171,277-278,280,284-286
+internal/api/vendors/handlers.go
+  s_767b052857fee4::t_c7f6b7f2d15d7f 72-80,99-107,145-151,194-201,227-255,462-475,490-492,533-538,548-556
+internal/api/vendors/integration_test.go
+  s_767b052857fee4::t_b7aab836a51a93 102-110,129-134,211-251
+internal/catalog/metrics/loader_test.go
+  s_767b052857fee4::t_64acdc920541a2 220-221,229,242
+internal/db/dbx/calendar.sql.go
+  s_767b052857fee4::t_c79fa531113205 157-180,341
+internal/db/dbx/dashboard.sql.go
+  s_767b052857fee4::t_6163dea94ce7f5 399-420,460,481
+internal/db/dbx/models.go
+  s_767b052857fee4::t_6c332d56f992c9 940-1027,1159-1207,2527-2588,2683-2707
+internal/db/dbx/querier.go
+  s_767b052857fee4::t_3856fb298b4b6c 531-535,1640,2656,2676,2710-2714,2887-2890
+internal/db/dbx/risk_hierarchy.sql.go
+  s_767b052857fee4::t_74136f39068e5b 14-70,88,116-119,170
+internal/db/dbx/vendors.sql.go
+  s_767b052857fee4::t_d123204a7ddfd0 111-112,115-116,118,122-144,166-174,194-202,222,251-259,265,322-330,374-439,441,445-446,451-453,461,486-494,542-550,553,557-579,601-609,629-637
+internal/db/queries/calendar.sql
+  s_767b052857fee4::t_1ae1acc6ca2376 11,190-213
+internal/db/queries/dashboard.sql
+  s_767b052857fee4::t_0a054e63e7f980 195,215,329-350
+internal/db/queries/risk_hierarchy.sql
+  s_767b052857fee4::t_4dd6fe4c6e0ab3 18-21,45,49-78,121
+internal/db/queries/vendors.sql
+  s_767b052857fee4::t_ae0030ebd7fd21 8-9,12-13,34-42,63-64,117-149
+internal/db/sqlc-schema/_enums.sql
+  s_767b052857fee4::t_db19ea5c08984e 156-183
+internal/metrics/eval/audit_readiness_score.go
+  s_767b052857fee4::t_ab148ecd67fccb 21-28,41-44
+internal/metrics/eval/evaluator.go
+  s_767b052857fee4::t_19e809cc2ce903 56,66
+internal/metrics/eval/integration_test.go
+  s_767b052857fee4::t_fe26c00d44cc6d 17,22-27,46,83-84,153-157,268-314,415-426,428,436-453,455-462,501-509,511,513,521-524,526-541,647-708
+internal/metrics/eval/policy_attestation_rate.go
+  s_767b052857fee4::t_8289d1aa683860 11,18-26,39
+internal/metrics/eval/registry_test.go
+  s_767b052857fee4::t_05bed7f05ce930 10,21
+internal/metrics/eval/training_completion_rate.go
+  s_767b052857fee4::t_56d93f9a77bb79 1-33
+internal/metrics/scheduler/integration_test.go
+  s_767b052857fee4::t_2ca789bc8e468d 17-19,36,138-151,391-479
+internal/metrics/scheduler/worker.go
+  s_767b052857fee4::t_74f3fd317e3a94 33-48,53,78
+internal/qaisuggest/qaisuggest.go
+  s_767b052857fee4::t_b0c8203ca674bb 172-180,206-215
+internal/qaisuggest/service.go
+  s_767b052857fee4::t_8490db08f36bb3 38-39,43,206-221
+internal/qaisuggest/service_test.go
+  s_767b052857fee4::t_c3c360b2b516b0 39-41,60-68,260-290
+internal/qaisuggest/store.go
+  s_767b052857fee4::t_874d95159be16d 369-434
+internal/qmapsuggest/integration_test.go
+  s_767b052857fee4::t_4abad2031a46d5 1-213
+internal/qmapsuggest/prompt.go
+  s_767b052857fee4::t_c85dedc71576c2 1-39
+internal/qmapsuggest/qmapsuggest.go
+  s_767b052857fee4::t_a7cc0f43fdbe68 1-79
+internal/qmapsuggest/retrieve.go
+  s_767b052857fee4::t_d0996ead77e39e 1-91
+internal/qmapsuggest/service.go
+  s_767b052857fee4::t_6e33b87ac87c1a 1-226
+internal/qmapsuggest/service_test.go
+  s_767b052857fee4::t_1d542cb6a17a38 1-169
+internal/qmapsuggest/store.go
+  s_767b052857fee4::t_380198d1bd544c 1-386
+internal/questionnaire/answerrun.go
+  s_767b052857fee4::t_052bae8ad810a6 1-495
+internal/questionnaire/answerrun_integration_test.go
+  s_767b052857fee4::t_f2b6f029fc83ab 1-286
+internal/questionnaire/store.go
+  s_767b052857fee4::t_48bdc5503da434 66-69,71-82,413-416,418-429
+internal/risk/hierarchy.go
+  s_767b052857fee4::t_795689b519a397 39-48,82-105
+internal/risk/integration_test.go
+  s_767b052857fee4::t_951f8cc3b946a3 13,131-200
+internal/risk/methodology.go
+  s_767b052857fee4::t_9e49ceb2d51e2a 15,38-40,84-87,89-91,144-148,152-217
+internal/risk/methodology_test.go
+  s_767b052857fee4::t_92ab69f8343c72 52-58,75-80,147-158
+internal/risk/residual_store.go
+  s_767b052857fee4::t_b2f182db95e12c 346-353,355
+internal/risk/store.go
+  s_767b052857fee4::t_a5cc849981cea3 103-118
+internal/securityawareness/integration_test.go
+  s_767b052857fee4::t_7d00b4198920b4 1-206
+internal/securityawareness/store.go
+  s_767b052857fee4::t_c6ea00d6d5d85b 1-535
+internal/securityawareness/store_test.go
+  s_767b052857fee4::t_2c422a49a8fef4 1-76
+internal/securityawareness/types.go
+  s_767b052857fee4::t_ff2f540ee8a492 1-164
+internal/vendor/integration_test.go
+  s_767b052857fee4::t_923a74a4d513d2 78-86,104-115,157-240,563-592
+internal/vendor/store.go
+  s_767b052857fee4::t_f81c9f590f212a 48-50,55-77,107-109,113-135,205-208,233-235,254-282,366-374,397-426,497-528,550-567
+internal/vendor/types.go
+  s_767b052857fee4::t_669de49547a6ac 41-88,149-175,197-205,242-250,275-283
+migrations/sql/20260612110000_questionnaire_answer_runs.down.sql
+  s_767b052857fee4::t_dd1a7deac6e7d9 1-8
+migrations/sql/20260612110000_questionnaire_answer_runs.sql
+  s_767b052857fee4::t_b4008c53ca2085 1-168
+migrations/sql/20260612110000_questionnaire_mapping_proposals.down.sql
+  s_767b052857fee4::t_65845a22ea11e3 1-5
+migrations/sql/20260612110000_questionnaire_mapping_proposals.sql
+  s_767b052857fee4::t_a0c3eaf43eb624 1-150
+migrations/sql/20260612120000_questionnaire_answer_reject_audit.down.sql
+  s_767b052857fee4::t_a9732f3533a66c 1-2
+migrations/sql/20260612120000_questionnaire_answer_reject_audit.sql
+  s_767b052857fee4::t_6a5c985a15c36c 1-59
+migrations/sql/20260730000000_security_awareness_training.down.sql
+  s_767b052857fee4::t_213e13aff5e58d 1-5
+migrations/sql/20260730000000_security_awareness_training.sql
+  s_767b052857fee4::t_0f76bf079f943d 1-208
+migrations/sql/20260730000000_vendor_commercial_fields.down.sql
+  s_767b052857fee4::t_f37879fd840a4f 1-25
+migrations/sql/20260730000000_vendor_commercial_fields.sql
+  s_767b052857fee4::t_62b83fe51ffef2 1-92
+package-lock.json
+  s_767b052857fee4::t_b2d87238d2cd6e 1599-1601,1843-1845,1849,1855,2191-2193,2198,2203,2207-2209,2216-2227,2231-2233,2248-2250,2265-2267,2282-2284,2299-2301,2316-2318,2336-2338,2356-2358,2376-2378,2396-2398,2492-2494,2509-2511,2526-2528,2533-2536,4412-4414,4713-4715,4719,7259-7261,7863-7865,7869,7875,7882-7884,7891,7905-7907,7924,8543-8545,9151-9153,10050,10053,10057-10058,10064
+scripts/integration-shards.txt
+  s_767b052857fee4::t_de11ef0632cf75 161,187
+sqlc.yaml
+  s_767b052857fee4::t_3d9fdf17e66d70 88-89
+web/app/(authed)/questionnaires/[id]/page.tsx
+  s_767b052857fee4::t_6336360c33b9d8 12-17,21,28,33-36,80-99,105,108-109,112-113,120-163,217,244-285,304-314,326-330,332-343,345-363,365-380,382-396
+web/app/(authed)/risks/[id]/page.tsx
+  s_767b052857fee4::t_74f3f44b9621c8 40-41,114-117,187-225,235-237
+web/app/(authed)/risks/filters.test.ts
+  s_767b052857fee4::t_8acaca5ba16627 19-20,418-473,490-495,522-531
+web/app/(authed)/risks/filters.ts
+  s_767b052857fee4::t_0b498fa9277d39 194-195,206-255,286
+web/app/(authed)/risks/new/risk-form.tsx
+  s_767b052857fee4::t_0b6109f58ba5b4 16-17,71-72,95-96,101-107,109-116,124,148-156,205,305-306,370-422,424-481,483-484
+web/app/(authed)/risks/new/validate.test.ts
+  s_767b052857fee4::t_014246a9e0bc7b 151,155,159,161-166
+web/app/(authed)/risks/new/validate.ts
+  s_767b052857fee4::t_77b82a694eed28 18-21,24
+web/app/(authed)/risks/page.tsx
+  s_767b052857fee4::t_f50d4b79ea6a77 90-91,603-615
+web/app/(authed)/vendors/[id]/page.tsx
+  s_767b052857fee4::t_7328d67bb6e6e4 241-279,435-441
+web/app/(authed)/vendors/page.tsx
+  s_767b052857fee4::t_74ea59e28dcf93 29-33,39,59-67,72,77,81,90-94,139-144,167-191,229-248,252-256,258-342,344-353,357-363
+web/app/(authed)/vendors/vendor-form.tsx
+  s_767b052857fee4::t_0edf836ad07737 24-42,58-66,89-95,223-321
+web/app/api/questionnaires/[id]/answer-runs/[runId]/route.test.ts
+  s_767b052857fee4::t_1f05903aa61700 1-76
+web/app/api/questionnaires/[id]/answer-runs/[runId]/route.ts
+  s_767b052857fee4::t_2e14d29fc5fe4a 1-39
+web/app/api/questionnaires/[id]/answer-runs/route.test.ts
+  s_767b052857fee4::t_18f6bfc06f3aa0 1-73
+web/app/api/questionnaires/[id]/answer-runs/route.ts
+  s_767b052857fee4::t_3421b448639c3e 1-42
+web/app/api/questionnaires/[id]/answers/[qid]/ai-reject/route.test.ts
+  s_767b052857fee4::t_a24aa5223ba679 1-105
+web/app/api/questionnaires/[id]/answers/[qid]/ai-reject/route.ts
+  s_767b052857fee4::t_edfea5503612b0 1-58
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/[proposalID]/approve/route.test.ts
+  s_767b052857fee4::t_b10fee165db0a5 1-55
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/[proposalID]/approve/route.ts
+  s_767b052857fee4::t_e671cf6c1a787a 1-36
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/[proposalID]/reject/route.test.ts
+  s_767b052857fee4::t_2bff9828e80784 1-55
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/[proposalID]/reject/route.ts
+  s_767b052857fee4::t_d7d8001d354392 1-36
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/ai-suggest/route.test.ts
+  s_767b052857fee4::t_b75e433e476eed 1-61
+web/app/api/questionnaires/[id]/questions/[qid]/scf-mapping/ai-suggest/route.ts
+  s_767b052857fee4::t_14eb837ee5569f 1-32
+web/app/api/vendors/route.ts
+  s_767b052857fee4::t_7766019bbd3f51 26-39
+web/app/api/vendors/spend/route.ts
+  s_767b052857fee4::t_03b2935a33c0c6 1-23
+web/components/questionnaire/answer-editor.tsx
+  s_767b052857fee4::t_14206a8e6d806d 22,98-101,116-117,121-126,148,174,181,217-236,238-250,344
+web/components/questionnaire/mapping-suggest-panel.tsx
+  s_767b052857fee4::t_fe72a1af66e6a6 1-187
+web/components/questionnaire/review-queue.tsx
+  s_767b052857fee4::t_974c3a31fd3f98 1-431
+web/components/questionnaire/types.ts
+  s_767b052857fee4::t_07f1b8f8278597 25-34
+web/components/risk-hierarchy/org-tree-panel.tsx
+  s_767b052857fee4::t_2b32ec51d0f050 66-79,93-97,135-154
+web/e2e/questionnaire-review-queue.spec.ts
+  s_767b052857fee4::t_f020df9f6a2f65 1-551
+web/lib/api/risk-hierarchy.ts
+  s_767b052857fee4::t_ac9e50121a311b 18-20,47-51,122
+web/lib/api/vendors.ts
+  s_767b052857fee4::t_6dbb8ce7643e0a 13-29,46-54,73-81,85-91,132,141,272-279
+web/lib/questionnaire/mapping-suggest.test.ts
+  s_767b052857fee4::t_8b87e9bf545b57 1-76
+web/lib/questionnaire/mapping-suggest.ts
+  s_767b052857fee4::t_da65d5c34942c0 1-155
+web/lib/questionnaire/review-queue.test.ts
+  s_767b052857fee4::t_ce4bcf3dd8076a 1-283
+web/lib/questionnaire/review-queue.ts
+  s_767b052857fee4::t_fedcda994a77f9 1-273
+web/package.json
+  s_767b052857fee4::t_1ee23c693de7fe 29,33-34,40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "7a9b922b493c2cb354b61dd2e393c8ba53ca62ce",
+  "prompts": {},
+  "sessions": {
+    "s_767b052857fee4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a5ef1285-02b4-42ff-9a83-033bc2148367",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
