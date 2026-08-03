@@ -169,6 +169,15 @@ type ApprovedAnswer struct {
 	HumanApprover string `json:"human_approver"`
 }
 
+// RejectedAnswer is the result of Service.Reject (slice 757): the discarded
+// draft's identity. The answer row is gone — the question is unanswered again —
+// and the rejection event lives on the questionnaire_answer_reject_audit row.
+type RejectedAnswer struct {
+	AnswerID   string `json:"answer_id"`
+	QuestionID string `json:"question_id"`
+	Status     string `json:"status"`
+}
+
 // Suppression / outcome reasons (fixed vocabulary — safe to render in the UI;
 // never carry model text or backend error detail, slice-367 leak discipline).
 const (
@@ -194,4 +203,14 @@ var (
 	// blank — the Go mirror of the DB CHECK (P0-441-8). Re-exported from
 	// internal/llm so callers match one error.
 	ErrApproverRequired = errors.New("qaisuggest: approval requires a human_approver")
+
+	// ErrAnswerApproved is returned by Reject when the target answer is an
+	// approved AI answer. Deleting approved content is a different, deliberate
+	// operation that does not belong to the reject surface (P0-757-4).
+	ErrAnswerApproved = errors.New("qaisuggest: answer is approved and cannot be rejected")
+
+	// ErrAnswerManual is returned by Reject when the target answer is
+	// manually authored (ai_assisted=FALSE). Reject only ever discards AI
+	// drafts (P0-757-4).
+	ErrAnswerManual = errors.New("qaisuggest: answer is manually authored and cannot be rejected")
 )

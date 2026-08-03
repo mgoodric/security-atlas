@@ -525,6 +525,11 @@ type Querier interface {
 	// run on the same threshold finds zero active rows that have already
 	// expired, so it is a no-op.
 	ExpireActiveExceptionsBefore(ctx context.Context, arg ExpireActiveExceptionsBeforeParams) ([]Exception, error)
+	// FAIR-only org-unit rollup. Annualized loss exposure is already dollars/year
+	// on the canonical FAIR score shape; legacy lef/lm rows are tolerated so older
+	// fixtures remain readable. This result must not be combined with the 5×5
+	// severity scalar.
+	FairExposureByOrgUnit(ctx context.Context, tenantID pgtype.UUID) ([]FairExposureByOrgUnitRow, error)
 	// Flip status draft->finalized + stamp the as-finalized canonical_hash.
 	// The hash on this row is the commitment auditors verify against; once
 	// the row is finalized, the slice's tamper-detection re-compute compares
@@ -2865,8 +2870,10 @@ type Querier interface {
 	// numeric severity component resolves to severity 0 — it is still counted
 	// (constitutional invariant 9: malformed-score and rule-driven/manual
 	// risks are peers, never filtered out), it just lands in the severity-0
-	// bucket. The guarded-CASE expression is wrapped in COALESCE(..., 0) and
-	// cast ::int so sqlc types the column as a clean non-null Go int.
+	// bucket. FAIR risks are different: they are valid quantitative-dollar
+	// risks, not malformed 5×5 risks, so they are deliberately excluded from
+	// the severity rollups and surfaced through FairExposureByOrgUnit instead.
+	// This keeps the hierarchy from silently mixing dollars into a 1..25 scalar.
 	// AC-1: per-org-unit risk count broken down by severity scalar. ONE
 	// GROUP BY query for the whole tenant — joined to the org-unit tree in Go,
 	// never one query per node (anti-criterion: no N+1).

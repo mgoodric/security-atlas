@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { AISuggestPanel } from "./ai-suggest-panel";
 import { CitationChips, CitationPicker } from "./citation-picker";
+import { MappingSuggestPanel } from "./mapping-suggest-panel";
 import { SuggestionsPanel } from "./suggestions-panel";
 import type { Citation, Question } from "./types";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -94,6 +95,10 @@ export function AnswerEditor({ questionnaireID, question }: AnswerEditorProps) {
   const [saveToLibrary, setSaveToLibrary] = useState(false); // AC-18 default OFF
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [currentAnchorID, setCurrentAnchorID] = useState(
+    question.scf_anchor_id,
+  );
+  const [needsMapping, setNeedsMapping] = useState(question.needs_mapping);
 
   // When the selected question changes, reset local state to match.
   // The set-state-in-effect rule (react-hooks/set-state-in-effect)
@@ -108,10 +113,17 @@ export function AnswerEditor({ questionnaireID, question }: AnswerEditorProps) {
       setSaveToLibrary(false);
       setSaveError(null);
       setSavedAt(null);
+      setCurrentAnchorID(question.scf_anchor_id);
+      setNeedsMapping(question.needs_mapping);
       dirtyRef.current = false;
     }, 0);
     return () => clearTimeout(t);
-  }, [question.id, question.answer]);
+  }, [
+    question.id,
+    question.answer,
+    question.needs_mapping,
+    question.scf_anchor_id,
+  ]);
 
   // Autosave: debounced PATCH on narrative/answerValue/citations changes.
   // We do NOT autosave save_to_library — that's an explicit toggle
@@ -133,7 +145,7 @@ export function AnswerEditor({ questionnaireID, question }: AnswerEditorProps) {
       narrative,
       citations,
       save_to_library: saveToLibrary,
-      scf_anchor_id: question.scf_anchor_id,
+      scf_anchor_id: currentAnchorID,
     };
     try {
       await patchAnswer(questionnaireID, question.id, body);
@@ -159,14 +171,14 @@ export function AnswerEditor({ questionnaireID, question }: AnswerEditorProps) {
           <span className="font-mono text-muted-foreground">
             {question.code}
           </span>
-          {question.scf_anchor_id ? (
+          {currentAnchorID ? (
             <>
               <span className="text-border">·</span>
               <span
                 data-testid="answer-editor-anchor"
                 className="font-mono px-1.5 py-0.5 bg-primary/10 text-primary rounded font-semibold"
               >
-                SCF:{question.scf_anchor_id}
+                SCF:{currentAnchorID}
               </span>
             </>
           ) : null}
@@ -202,27 +214,40 @@ export function AnswerEditor({ questionnaireID, question }: AnswerEditorProps) {
           </Alert>
         ) : null}
 
-        {/* Suggestions panel — deterministic SCF-anchor priors (slice 155) */}
-        <SuggestionsPanel
-          questionnaireID={questionnaireID}
-          anchor={question.scf_anchor_id}
-          onUseAnswer={(text) => {
-            markDirty();
-            setNarrative(text); // AC-13 REPLACE (no append)
-          }}
-        />
+        {needsMapping ? (
+          <MappingSuggestPanel
+            questionnaireID={questionnaireID}
+            questionID={question.id}
+            onApproved={(anchorID) => {
+              setCurrentAnchorID(anchorID);
+              setNeedsMapping(false);
+            }}
+          />
+        ) : (
+          <>
+            {/* Suggestions panel — deterministic SCF-anchor priors (slice 155) */}
+            <SuggestionsPanel
+              questionnaireID={questionnaireID}
+              anchor={currentAnchorID}
+              onUseAnswer={(text) => {
+                markDirty();
+                setNarrative(text); // AC-13 REPLACE (no append)
+              }}
+            />
 
-        {/* Slice 441 — AI answer suggestion (cited draft, one-click approve).
-            The draft is NOT binding until the operator approves it; on approve
-            the approved text becomes the stored narrative. */}
-        <AISuggestPanel
-          questionnaireID={questionnaireID}
-          questionID={question.id}
-          onApproved={(text) => {
-            markDirty();
-            setNarrative(text);
-          }}
-        />
+            {/* Slice 441 — AI answer suggestion (cited draft, one-click approve).
+                The draft is NOT binding until the operator approves it; on approve
+                the approved text becomes the stored narrative. */}
+            <AISuggestPanel
+              questionnaireID={questionnaireID}
+              questionID={question.id}
+              onApproved={(text) => {
+                markDirty();
+                setNarrative(text);
+              }}
+            />
+          </>
+        )}
 
         {/* yes / no / n.a. quick chips */}
         {question.answer_type === "yes_no" ||
@@ -316,7 +341,7 @@ export function AnswerEditor({ questionnaireID, question }: AnswerEditorProps) {
               data-testid="answer-editor-save-to-library-checkbox"
               className="rounded border-border"
             />
-            Save as canonical for SCF:{question.scf_anchor_id || "—"}
+            Save as canonical for SCF:{currentAnchorID || "—"}
           </label>
           <span className="text-xs text-muted-foreground">
             {savedAt ? `Saved · ${new Date(savedAt).toLocaleTimeString()}` : ""}
