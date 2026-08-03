@@ -141,18 +141,30 @@ func (s *Store) Complete(ctx context.Context, in CompleteInput) (AssignmentDetai
 	}
 	var out AssignmentDetail
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
-		row := tx.QueryRow(ctx, `
+		var err error
+		out, err = completeAssignment(ctx, tx, tenantID, in)
+		return err
+	})
+	return out, translateErr(err)
+}
+
+// completeAssignment is the tx-level core of Complete, shared with the CSV
+// completion importer so both paths write identical completion state.
+func completeAssignment(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, in CompleteInput) (AssignmentDetail, error) {
+	var out AssignmentDetail
+	row := tx.QueryRow(ctx, `
 UPDATE security_training_assignments
 SET completed_at = $3, completion_source = $4, updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING id, campaign_id, person_id, due_at, assigned_at, completed_at, completion_source, evidence_record_id`,
-			tenantID, in.AssignmentID, in.CompletedAt.UTC(), in.Source)
-		if err := scanAssignment(row, &out.Assignment); err != nil {
-			return err
-		}
-		return loadAssignmentDetail(ctx, tx, tenantID, &out)
-	})
-	return out, translateErr(err)
+		tenantID, in.AssignmentID, in.CompletedAt.UTC(), in.Source)
+	if err := scanAssignment(row, &out.Assignment); err != nil {
+		return AssignmentDetail{}, err
+	}
+	if err := loadAssignmentDetail(ctx, tx, tenantID, &out); err != nil {
+		return AssignmentDetail{}, err
+	}
+	return out, nil
 }
 
 func (s *Store) SetEvidenceRecordID(ctx context.Context, assignmentID, evidenceRecordID uuid.UUID) error {
@@ -180,18 +192,28 @@ func (s *Store) RecordPhishing(ctx context.Context, in PhishingInput) (PhishingR
 	}
 	var out PhishingResult
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
-		id := uuid.New()
-		row := tx.QueryRow(ctx, `
+		var err error
+		out, err = upsertPhishing(ctx, tx, tenantID, in)
+		return err
+	})
+	return out, translateErr(err)
+}
+
+// upsertPhishing is the tx-level core of RecordPhishing, shared with the
+// CSV completion importer. The (tenant, assignment, simulation_id) conflict
+// target makes re-recording the same simulation idempotent.
+func upsertPhishing(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, in PhishingInput) (PhishingResult, error) {
+	var out PhishingResult
+	row := tx.QueryRow(ctx, `
 INSERT INTO security_training_phishing_results
     (id, tenant_id, assignment_id, simulation_id, sent_at, outcome, clicked_at, reported_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (tenant_id, assignment_id, simulation_id)
 DO UPDATE SET outcome = EXCLUDED.outcome, clicked_at = EXCLUDED.clicked_at, reported_at = EXCLUDED.reported_at, updated_at = now()
 RETURNING id, assignment_id, simulation_id, sent_at, outcome, clicked_at, reported_at`,
-			id, tenantID, in.AssignmentID, strings.TrimSpace(in.SimulationID), in.SentAt.UTC(), in.Outcome, timePtrUTC(in.ClickedAt), timePtrUTC(in.ReportedAt))
-		return row.Scan(&out.ID, &out.AssignmentID, &out.SimulationID, &out.SentAt, &out.Outcome, &out.ClickedAt, &out.ReportedAt)
-	})
-	return out, translateErr(err)
+		uuid.New(), tenantID, in.AssignmentID, strings.TrimSpace(in.SimulationID), in.SentAt.UTC(), in.Outcome, timePtrUTC(in.ClickedAt), timePtrUTC(in.ReportedAt))
+	err := row.Scan(&out.ID, &out.AssignmentID, &out.SimulationID, &out.SentAt, &out.Outcome, &out.ClickedAt, &out.ReportedAt)
+	return out, err
 }
 
 func (s *Store) Rollup(ctx context.Context, campaignID uuid.UUID, asOf time.Time) (Rollup, error) {
