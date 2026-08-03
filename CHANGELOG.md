@@ -2938,6 +2938,35 @@ assertions` subsection so future spec authors avoid the same
   Production compose unchanged. Both `bundled` and `external`
   matrix modes use the staged shape.
 
+## [1.20.0](https://github.com/mgoodric/security-atlas/compare/v1.19.0...v1.20.0) (2026-08-03)
+
+
+### Features
+
+* **personnelsecurity:** joiner/leaver checklists with HRIS triggers + CC1 evidence (OE-630) ([#1547](https://github.com/mgoodric/security-atlas/issues/1547)) ([7f65c5b](https://github.com/mgoodric/security-atlas/commit/7f65c5be47b1429591fea2b059e3900d01299ed0))
+* **questionnaires:** batch answer-drafting run ([#1538](https://github.com/mgoodric/security-atlas/issues/1538)) ([6ea49c3](https://github.com/mgoodric/security-atlas/commit/6ea49c3da2a30f85755662cfbb82d0ea3510c5bd))
+* **questionnaires:** batch review + per-answer approval queue ([#757](https://github.com/mgoodric/security-atlas/issues/757)) ([#1551](https://github.com/mgoodric/security-atlas/issues/1551)) ([9b69df5](https://github.com/mgoodric/security-atlas/commit/9b69df518f5d1158edd2f86d1f8e522cdcda912c))
+* **risk:** OE-596 — FAIR quantitative risk methodology (LEF x LM scoring + separate rollup lane) ([#1532](https://github.com/mgoodric/security-atlas/issues/1532)) ([52f4009](https://github.com/mgoodric/security-atlas/commit/52f40093e28b80bec9912b954c692962f72e5259))
+* **securityawareness:** CSV completion import with per-row reporting + LMS-connector decision (OE-659) ([#1555](https://github.com/mgoodric/security-atlas/issues/1555)) ([14de41f](https://github.com/mgoodric/security-atlas/commit/14de41fa62f4f9d2d181cab88100ddcda6ed61d6))
+* **securityawareness:** training campaigns, completion + phishing-sim tracking (OE-626) ([#1544](https://github.com/mgoodric/security-atlas/issues/1544)) ([577c011](https://github.com/mgoodric/security-atlas/commit/577c0118a80f1d09970cd469ac521680a4a2ea39))
+
+
+### Bug Fixes
+
+* **metrics:** repoint two evaluator queries at the real schema (OPENENGINE-550) ([#1525](https://github.com/mgoodric/security-atlas/issues/1525)) ([3c91f6b](https://github.com/mgoodric/security-atlas/commit/3c91f6b0dcd18cfc59215648d996b3aa74f47086))
+
+
+### Dependencies
+
+* **deps:** Bump github.com/aws/smithy-go in the go-aws group ([#1517](https://github.com/mgoodric/security-atlas/issues/1517)) ([eee4e85](https://github.com/mgoodric/security-atlas/commit/eee4e855a3e2abf4ee5c5be97717137293c13ecc))
+* **deps:** Bump the npm-minor-patch group with 4 updates ([#1515](https://github.com/mgoodric/security-atlas/issues/1515)) ([1ddb852](https://github.com/mgoodric/security-atlas/commit/1ddb852df3a584e55e22cb0d40330ec6440a3627))
+
+
+### CI / CD
+
+* adopt GitHub merge queue on main (slice 415) ([#1455](https://github.com/mgoodric/security-atlas/issues/1455)) ([b3e77cc](https://github.com/mgoodric/security-atlas/commit/b3e77cc56a1e900174b6dce9361558787b417d3b))
+* trim structurally-broken required checks from main merge gate (OE-651) ([#1549](https://github.com/mgoodric/security-atlas/issues/1549)) ([7196126](https://github.com/mgoodric/security-atlas/commit/7196126d454052484e75b4dfded66b2fcc382df4))
+
 ## [1.19.0](https://github.com/mgoodric/security-atlas/compare/v1.18.0...v1.19.0) (2026-07-29)
 
 
