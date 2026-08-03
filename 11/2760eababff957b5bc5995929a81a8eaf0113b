@@ -1,0 +1,59 @@
+internal/api/schemaregistry/schemas/security_awareness.training_completion/1.0.0.json
+  s_81011d308f39e1::t_2f0722b2abb86c 1-39
+internal/db/dbx/models.go
+  s_81011d308f39e1::t_7be91e5377e38c 2355-2416
+catalogs/metrics/policy-attestation.yaml
+  s_29da307fbd0d15::t_4a9fddca1dd025 27,31-32,35-37,39-41
+controls/soc2/soc2_cc1_4_competence_training/control.yaml
+  s_29da307fbd0d15::t_e917869fc596e5 45-58
+internal/api/schemaregistry/registry.go
+  s_29da307fbd0d15::t_181d4bc1bc1044 282-286
+internal/catalog/metrics/loader_test.go
+  s_29da307fbd0d15::t_225ca859536d78 220-221,229,242
+internal/metrics/eval/evaluator.go
+  s_29da307fbd0d15::t_d5e984d483a789 56,66
+internal/metrics/eval/registry_test.go
+  s_29da307fbd0d15::t_87e5394df457e9 10,21
+internal/metrics/eval/training_completion_rate.go
+  s_29da307fbd0d15::t_39ee6abaa53dd2 1-33
+internal/securityawareness/integration_test.go
+  s_29da307fbd0d15::t_c3d8c47b374194 1-206
+internal/securityawareness/store.go
+  s_29da307fbd0d15::t_f950596b51e8d7 1-535
+internal/securityawareness/store_test.go
+  s_29da307fbd0d15::t_a305354e7fc8f0 1-76
+internal/securityawareness/types.go
+  s_29da307fbd0d15::t_49bcbacffa51b0 1-164
+migrations/sql/20260730000000_security_awareness_training.down.sql
+  s_29da307fbd0d15::t_8754d6ca7419be 1-5
+migrations/sql/20260730000000_security_awareness_training.sql
+  s_29da307fbd0d15::t_a2bbcb1077f0fe 1-208
+scripts/integration-shards.txt
+  s_29da307fbd0d15::t_d03954e11329b2 161
+sqlc.yaml
+  s_29da307fbd0d15::t_1306203deb6c14 87
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "112760eababff957b5bc5995929a81a8eaf0113b",
+  "prompts": {},
+  "sessions": {
+    "s_29da307fbd0d15": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "42f4b758-3233-4351-97ef-757ccece2f71",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_81011d308f39e1": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb508-454f-76f1-9325-12e23977dc58",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
