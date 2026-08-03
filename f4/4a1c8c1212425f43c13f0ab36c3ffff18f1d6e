@@ -1,0 +1,55 @@
+internal/db/dbx/personnel_security.sql.go
+  s_70d48f4a987327::t_faf9ce9dcc6d61 1-454
+migrations/sql/20260612110000_personnel_security_workflows.sql
+  s_acd81aa5165d16::t_5c62b72afa3c0b 1-103
+migrations/sql/20260612110000_personnel_security_workflows.down.sql
+  s_acd81aa5165d16::t_5242d9d0378148 1-2
+internal/db/dbx/calendar.sql.go
+  s_70d48f4a987327::t_ba232e04decc37 254-279,321-322,324
+internal/db/queries/calendar.sql
+  s_acd81aa5165d16::t_1eff51156e7bed 15-16,18,289-314
+sqlc.yaml
+  s_acd81aa5165d16::t_31524cd404254e 87
+internal/personnelsecurity/store.go
+  s_acd81aa5165d16::t_bd0212e9477215 1-487
+internal/api/schemaregistry/schemas/personnel_security.workflow/1.0.0.json
+  s_70d48f4a987327::t_ba10d2fb3e7145 1-34
+internal/personnelsecurity/integration_test.go
+  s_acd81aa5165d16::t_fccd620c276cea 1-262
+internal/personnelsecurity/workflow.go
+  s_70d48f4a987327::t_123419f9e3a8e7 1-162
+internal/db/dbx/querier.go
+  s_70d48f4a987327::t_9a9c36416811ec 153,201-202,838-840,1213-1215,1639-1640,1642,2143,2182,2769
+internal/api/schemaregistry/registry.go
+  s_70d48f4a987327::t_e7c7998a654d6b 90
+internal/db/dbx/models.go
+  s_70d48f4a987327::t_9c01d067976a99 2074-2108
+internal/db/queries/personnel_security.sql
+  s_acd81aa5165d16::t_4669b588b02edc 1-88
+internal/personnelsecurity/workflow_test.go
+  s_acd81aa5165d16::t_ddcc4479080f4c 1-41
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "f44a1c8c1212425f43c13f0ab36c3ffff18f1d6e",
+  "prompts": {},
+  "sessions": {
+    "s_70d48f4a987327": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019fb546-7ab7-7182-8f5a-6ea39486eea5",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_acd81aa5165d16": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fc213678-4db2-4ca1-a4f4-ced7f39a1f29",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
