@@ -2938,6 +2938,19 @@ assertions` subsection so future spec authors avoid the same
   Production compose unchanged. Both `bundled` and `external`
   matrix modes use the staged shape.
 
+## [1.21.0](https://github.com/mgoodric/security-atlas/compare/v1.20.0...v1.21.0) (2026-08-03)
+
+
+### Features
+
+* **change:** OE-629 — change-management register (lifecycle + approval, Jira/CSV intake, CC8 evidence) ([#1546](https://github.com/mgoodric/security-atlas/issues/1546)) ([d9490a8](https://github.com/mgoodric/security-atlas/commit/d9490a8d98be95a8675b89e9a1951b6d7430bead))
+* **personnelsecurity:** RLS-scoped HTTP API over the OE-630 checklist store (OE-663) ([#1559](https://github.com/mgoodric/security-atlas/issues/1559)) ([7f945f0](https://github.com/mgoodric/security-atlas/commit/7f945f00ccc7fa2c79f68145b488d5411782f810))
+
+
+### Documentation
+
+* **agents:** make AGENTS.md the canonical agent context, symlink CLAUDE.md (OE-644) ([#1550](https://github.com/mgoodric/security-atlas/issues/1550)) ([032d8e5](https://github.com/mgoodric/security-atlas/commit/032d8e53e17612e30f27d29dc7ba6ee376d48bf7))
+
 ## [1.20.0](https://github.com/mgoodric/security-atlas/compare/v1.19.0...v1.20.0) (2026-08-03)
 
 
