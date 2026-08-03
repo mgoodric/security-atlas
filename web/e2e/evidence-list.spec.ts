@@ -185,7 +185,7 @@ test.describe("/evidence list view", () => {
     //    await expect(cta).toBeEnabled();
     //    await expect(cta).toHaveAttribute(
     //      "href",
-    //      "/docs/primitives/evidence#pushing-evidence-from-your-own-tools",
+    //      "https://mgoodric.github.io/security-atlas/primitives/evidence/#pushing-evidence-from-your-own-tools",
     //    );
     //    await expect(cta).toHaveAttribute("target", "_blank");
     //    // The subtitle ALSO carries an inline link to the same destination.
@@ -193,7 +193,7 @@ test.describe("/evidence list view", () => {
     //    await expect(inline).toBeVisible();
     //    await expect(inline).toHaveAttribute(
     //      "href",
-    //      "/docs/primitives/evidence#pushing-evidence-from-your-own-tools",
+    //      "https://mgoodric.github.io/security-atlas/primitives/evidence/#pushing-evidence-from-your-own-tools",
     //    );
   });
 });

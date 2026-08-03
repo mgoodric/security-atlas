@@ -630,7 +630,7 @@ function EvidencePageInner() {
       <a
         href={PUSH_CTA_HREF}
         target="_blank"
-        rel="noreferrer"
+        rel="noopener noreferrer"
         className={buttonVariants({ size: "sm" })}
         data-testid="evidence-push-cta"
       >
@@ -664,7 +664,7 @@ function EvidencePageInner() {
       <a
         href={PUSH_CTA_HREF}
         target="_blank"
-        rel="noreferrer"
+        rel="noopener noreferrer"
         className="underline hover:text-foreground"
         data-testid="evidence-push-cta-inline"
       >
