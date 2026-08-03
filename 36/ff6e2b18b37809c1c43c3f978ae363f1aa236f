@@ -1,0 +1,41 @@
+internal/api/schemaregistry/schemas/change.approval/1.0.0.json
+  s_0492d2ce9a0825::t_046b95d823673d 1-23
+internal/db/dbx/changes.sql.go
+  s_0492d2ce9a0825::t_046b95d823673d 1-588
+internal/change/lifecycle.go
+  s_0492d2ce9a0825::t_046b95d823673d 1-141
+internal/change/store.go
+  s_0492d2ce9a0825::t_046b95d823673d 1-699
+internal/db/queries/changes.sql
+  s_0492d2ce9a0825::t_046b95d823673d 1-110
+internal/db/dbx/models.go
+  s_0492d2ce9a0825::t_046b95d823673d 1490-1531
+internal/api/schemaregistry/registry.go
+  s_0492d2ce9a0825::t_046b95d823673d 101-102
+sqlc.yaml
+  s_0492d2ce9a0825::t_e7a6d2d3bfdc5b 89
+internal/db/dbx/querier.go
+  s_0492d2ce9a0825::t_046b95d823673d 57,133-135,313-314,687-688,997,1285,1695-1697,3218,3269
+internal/change/lifecycle_test.go
+  s_0492d2ce9a0825::t_046b95d823673d 1-24
+internal/api/schemaregistry/schemas/change.verification/1.0.0.json
+  s_0492d2ce9a0825::t_046b95d823673d 1-23
+internal/change/integration_test.go
+  s_0492d2ce9a0825::t_046b95d823673d 1-205
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.20",
+  "base_commit_sha": "36ff6e2b18b37809c1c43c3f978ae363f1aa236f",
+  "prompts": {},
+  "sessions": {
+    "s_0492d2ce9a0825": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "33c2a3c7-d06c-4cb4-9fbe-0a2cb9f24aa1",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
