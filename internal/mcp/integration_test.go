@@ -219,8 +219,8 @@ func TestIntegration_EndToEndStdioSession(t *testing.T) {
 	})
 
 	// AC-13 (a): tools/list returns all read tools.
-	if len(gotA[1].Result.Tools) != 10 {
-		t.Errorf("tenant A tools/list returned %d tools, want 10", len(gotA[1].Result.Tools))
+	if len(gotA[1].Result.Tools) != 11 {
+		t.Errorf("tenant A tools/list returned %d tools, want 11", len(gotA[1].Result.Tools))
 	}
 	// AC-13 (b): list_controls returns tenant-A's row.
 	if !strings.Contains(gotA[2].rawResultText(), "Tenant A control 1") {

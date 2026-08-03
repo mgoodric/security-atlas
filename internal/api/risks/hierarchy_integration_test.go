@@ -104,6 +104,25 @@ func seedHierRisk(t *testing.T, admin *pgxpool.Pool, tenant string, orgUnit *uui
 	return id
 }
 
+func seedFairHierRisk(t *testing.T, admin *pgxpool.Pool, tenant string, orgUnit *uuid.UUID, themes []string, lef, lm int) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	ale := lef * lm
+	inherent := `{"loss_event_frequency":` + itoa(lef) + `,"loss_magnitude":` + itoa(lm) + `,"annualized_loss_exposure":` + itoa(ale) + `}`
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO risks (
+			id, tenant_id, title, description, category, methodology,
+			inherent_score, treatment, treatment_owner, residual_score,
+			org_unit_id, themes
+		)
+		VALUES ($1, $2, 'slice 596 fair risk', '', 'financial', 'fair',
+		        $3::jsonb, 'avoid', 'owner', $3::jsonb, $4, $5::text[])
+	`, id, tenant, inherent, orgUnit, themes); err != nil {
+		t.Fatalf("seed fair hier risk: %v", err)
+	}
+	return id
+}
+
 // itoa is a tiny strconv.Itoa shim kept local so the seed-string helpers
 // stay dependency-free.
 func itoa(n int) string {
@@ -171,8 +190,11 @@ func TestOrgUnitRiskCounts_AggregateBySeverity(t *testing.T) {
 	seedHierRisk(t, admin, tenant, &ouA, []string{"ownership"}, 4, 5)
 	seedHierRisk(t, admin, tenant, &ouA, []string{"ownership"}, 5, 4)
 	seedHierRisk(t, admin, tenant, &ouA, []string{"tech-debt"}, 2, 3)
+	// FAIR is reported separately as dollars/year, not bucketed into severity 0.
+	seedFairHierRisk(t, admin, tenant, &ouA, []string{"ownership"}, 2, 50000)
 	// ouB: one risk at severity 25 (5x5).
 	seedHierRisk(t, admin, tenant, &ouB, []string{"availability"}, 5, 5)
+	seedFairHierRisk(t, admin, tenant, &ouB, []string{"availability"}, 1, 250000)
 	// An unbound risk — must NOT appear in any org_unit's counts.
 	seedHierRisk(t, admin, tenant, nil, []string{"monitoring"}, 3, 3)
 
@@ -200,10 +222,24 @@ func TestOrgUnitRiskCounts_AggregateBySeverity(t *testing.T) {
 	if aCounts["6"] != float64(1) {
 		t.Fatalf("ISC-26: ouA severity-6 count = %v, want 1", aCounts["6"])
 	}
+	if _, ok := aCounts["0"]; ok {
+		t.Fatalf("ISC-26: FAIR risk was mixed into 5x5 severity counts: %v", aCounts)
+	}
+	aFair := byID[ouA.String()]["fair_exposure"].(map[string]any)
+	if aFair["risk_count"] != float64(1) {
+		t.Fatalf("ISC-26: ouA FAIR count = %v, want 1", aFair["risk_count"])
+	}
+	if aFair["annualized_loss_exposure"] != float64(100000) {
+		t.Fatalf("ISC-26: ouA FAIR exposure = %v, want 100000", aFair["annualized_loss_exposure"])
+	}
 	// ouB: {"25": 1}
 	bCounts := byID[ouB.String()]["risk_counts"].(map[string]any)
 	if bCounts["25"] != float64(1) {
 		t.Fatalf("ISC-26: ouB severity-25 count = %v, want 1", bCounts["25"])
+	}
+	bFair := byID[ouB.String()]["fair_exposure"].(map[string]any)
+	if bFair["annualized_loss_exposure"] != float64(250000) {
+		t.Fatalf("ISC-26: ouB FAIR exposure = %v, want 250000", bFair["annualized_loss_exposure"])
 	}
 }
 
@@ -331,6 +367,7 @@ func TestThemeHeatmap_AggregatesGridBuiltinsFirst(t *testing.T) {
 	// (ownership, ouA): two risks, severities 20 and 6 -> count 2, max 20.
 	seedHierRisk(t, admin, tenant, &ouA, []string{"ownership"}, 4, 5)
 	seedHierRisk(t, admin, tenant, &ouA, []string{"ownership"}, 2, 3)
+	seedFairHierRisk(t, admin, tenant, &ouA, []string{"ownership"}, 2, 50000)
 	// (ownership, ouB): one risk severity 25.
 	seedHierRisk(t, admin, tenant, &ouB, []string{"ownership"}, 5, 5)
 	// (zzz-private-theme, ouA): one risk severity 9.

@@ -15,6 +15,18 @@
 
 export type RiskTreatment = "mitigate" | "transfer" | "accept" | "avoid";
 
+// OFFERED_METHODOLOGIES lists only methodologies this form can save with a
+// matching score widget. FAIR is offered because the form renders its
+// loss_event_frequency/loss_magnitude dollar inputs; CIS RAM and ISO 27005 stay
+// out of scope until they have real methodology-specific score widgets.
+export const OFFERED_METHODOLOGIES = [
+  "nist_800_30",
+  "fair",
+  "qualitative_5x5",
+] as const;
+
+export type RiskMethodology = (typeof OFFERED_METHODOLOGIES)[number];
+
 // DEFAULT_TREATMENT — slice 663.
 //
 // The risk-create form (risk-form.tsx) opens on this treatment. It is

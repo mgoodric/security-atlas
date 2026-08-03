@@ -54,6 +54,7 @@ type Querier interface {
 	// service rejects a blank approver before this call. Scoped to the tenant +
 	// the AI-assisted draft; an absent/cross-tenant id returns no row.
 	ApproveBoardNarrativeSection(ctx context.Context, arg ApproveBoardNarrativeSectionParams) (BoardNarrativeSection, error)
+	ApproveChange(ctx context.Context, arg ApproveChangeParams) (Change, error)
 	// One-click per-section approval (AC-10): flip human_approved=TRUE + record the
 	// approver on an AI-assisted, currently-unapproved section. The
 	// ai_assisted=TRUE AND human_approver IS NOT NULL guard in the WHERE means an
@@ -129,6 +130,9 @@ type Querier interface {
 	// The COALESCE start chain mirrors the lifecycle: effective_from is set at
 	// activation, approved_at at approval, requested_at always.
 	BoardBriefExceptionAggregate(ctx context.Context, arg BoardBriefExceptionAggregateParams) (BoardBriefExceptionAggregateRow, error)
+	ChangeControlExistsInTenant(ctx context.Context, arg ChangeControlExistsInTenantParams) (bool, error)
+	ChangeRollup(ctx context.Context, tenantID pgtype.UUID) (ChangeRollupRow, error)
+	ChangeUserExistsInTenant(ctx context.Context, arg ChangeUserExistsInTenantParams) (bool, error)
 	// Idempotency claim: insert a pending delivery-log row for
 	// (tenant, channel, recipient, digest_key). ON CONFLICT DO NOTHING means a
 	// second claim returns no row — the caller skips the send (no double-send /
@@ -150,6 +154,7 @@ type Querier interface {
 	ClaimStalenessRollup(ctx context.Context, arg ClaimStalenessRollupParams) (pgtype.UUID, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
+	CompletePersonnelChecklistItem(ctx context.Context, arg CompletePersonnelChecklistItemParams) (PersonnelSecurityChecklistItem, error)
 	// Per-item existence + tenant check (AC-6 / AC-7): does this control id
 	// exist and is it visible to the calling tenant? Run inside the tenant-GUC
 	// tx so RLS hides cross-tenant rows — a control in another tenant returns
@@ -197,6 +202,8 @@ type Querier interface {
 	CountFreshAcksForVersion(ctx context.Context, arg CountFreshAcksForVersionParams) (int64, error)
 	// Audit query — exposed for integration tests + the audit log.
 	CountFwToScfEdgesBySourceAttribution(ctx context.Context, sourceAttribution CrosswalkSourceAttribution) (int64, error)
+	CountOpenPersonnelChecklistItems(ctx context.Context, arg CountOpenPersonnelChecklistItemsParams) (int64, error)
+	CountPersonnelChecklistsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// AC-1 + AC-5: count evidence records that match the population's filter.
 	// AC-5 forward-compat: `observed_at <= COALESCE(frozen_at, 'infinity')`
 	// is a no-op until slice 028 sets frozen_at. The COALESCE-to-infinity is
@@ -306,6 +313,8 @@ type Querier interface {
 	// Insert a period with status='open'. frozen_at / frozen_hash / frozen_by
 	// are NULL on create (enforced by audit_periods_frozen_coherent CHECK).
 	CreateAuditPeriod(ctx context.Context, arg CreateAuditPeriodParams) (AuditPeriod, error)
+	// Change-management register queries for OE-629.
+	CreateChange(ctx context.Context, arg CreateChangeParams) (Change, error)
 	// Insert a new Decision Log entry (canvas §6.7). Slice 052 ships the table
 	// + queries; slice 055 adds the HTTP CRUD surface. decision_id is the
 	// tenant-visible identifier ("DL-2026-04-12"); the application generates it.
@@ -525,6 +534,11 @@ type Querier interface {
 	// run on the same threshold finds zero active rows that have already
 	// expired, so it is a no-op.
 	ExpireActiveExceptionsBefore(ctx context.Context, arg ExpireActiveExceptionsBeforeParams) ([]Exception, error)
+	// FAIR-only org-unit rollup. Annualized loss exposure is already dollars/year
+	// on the canonical FAIR score shape; legacy lef/lm rows are tolerated so older
+	// fixtures remain readable. This result must not be combined with the 5×5
+	// severity scalar.
+	FairExposureByOrgUnit(ctx context.Context, tenantID pgtype.UUID) ([]FairExposureByOrgUnitRow, error)
 	// Flip status draft->finalized + stamp the as-finalized canonical_hash.
 	// The hash on this row is the commitment auditors verify against; once
 	// the row is finalized, the slice's tamper-detection re-compute compares
@@ -673,6 +687,8 @@ type Querier interface {
 	// cross-tenant id returns ErrNoRows (the handler maps that to 404). Works
 	// for both draft and published packs.
 	GetBoardPackByID(ctx context.Context, arg GetBoardPackByIDParams) (BoardPack, error)
+	GetChangeByID(ctx context.Context, arg GetChangeByIDParams) (Change, error)
+	GetChangeBySourceRef(ctx context.Context, arg GetChangeBySourceRefParams) (Change, error)
 	// Read a delivery-log row by id (tests + outcome inspection).
 	GetChannelDeliveryLog(ctx context.Context, arg GetChannelDeliveryLogParams) (ChannelDeliveryLog, error)
 	// Fetch one section by id within the caller's tenant. Used by the approval flow
@@ -832,6 +848,9 @@ type Querier interface {
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
 	GetOrgUnitByID(ctx context.Context, arg GetOrgUnitByIDParams) (OrgUnit, error)
+	GetPersonnelChecklist(ctx context.Context, arg GetPersonnelChecklistParams) (PersonnelSecurityChecklist, error)
+	GetPersonnelChecklistBySourceEvent(ctx context.Context, arg GetPersonnelChecklistBySourceEventParams) (PersonnelSecurityChecklist, error)
+	GetPersonnelChecklistItem(ctx context.Context, arg GetPersonnelChecklistItemParams) (PersonnelSecurityChecklistItem, error)
 	GetPolicyByID(ctx context.Context, arg GetPolicyByIDParams) (Policy, error)
 	// Single-row lookup used by POST /v1/policies/{id}/acknowledge. The
 	// handler checks status='published' itself so it can return a precise
@@ -981,6 +1000,7 @@ type Querier interface {
 	// The CAST chain (jsonb -> text -> int) is necessary because pgx cannot
 	// read jsonb-number values directly as int4 without an explicit cast.
 	HeatmapBuckets(ctx context.Context, tenantID pgtype.UUID) ([]HeatmapBucketsRow, error)
+	ImplementChange(ctx context.Context, arg ImplementChangeParams) (Change, error)
 	// Persist a new API key. token_hash is HMAC-SHA256(plaintext, BEARER_HASH_KEY)
 	// per ADR 0002 — computed by the application layer before this call. last4 is
 	// the last four characters of the plaintext bearer (safe to surface).
@@ -1204,6 +1224,9 @@ type Querier interface {
 	// distinguishes a bulk event (control_ids carries the whole applied set)
 	// from a single-item event (one id). Append-only by RLS construction.
 	InsertOwnerAssignmentAudit(ctx context.Context, arg InsertOwnerAssignmentAuditParams) (InsertOwnerAssignmentAuditRow, error)
+	// Personnel-security onboarding/offboarding workflow queries.
+	InsertPersonnelChecklist(ctx context.Context, arg InsertPersonnelChecklistParams) (PersonnelSecurityChecklist, error)
+	InsertPersonnelChecklistItem(ctx context.Context, arg InsertPersonnelChecklistItemParams) (PersonnelSecurityChecklistItem, error)
 	// Slice 023 — policy acknowledgment queries.
 	//
 	// All queries are tenant-scoped via the (tenant_id, ...) prefix; RLS is the
@@ -1268,6 +1291,7 @@ type Querier interface {
 	// Idempotent at the handler layer (it checks existence first); the PK makes
 	// a duplicate INSERT a unique-violation the store maps to 409.
 	LinkActionPlanRisk(ctx context.Context, arg LinkActionPlanRiskParams) error
+	LinkChangeControl(ctx context.Context, arg LinkChangeControlParams) error
 	// ===== decision_controls =====
 	LinkDecisionControl(ctx context.Context, arg LinkDecisionControlParams) error
 	// ===== decision_exceptions =====
@@ -1623,12 +1647,15 @@ type Querier interface {
 	//   4. vendors                 — last_review_date + review_cadence interval is
 	//      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
 	//      vendor branch so the two surfaces cannot drift (slice 675).
+	//      Also includes renewal_date as a separate vendor renewal event (OE-623).
 	//   5. controls + control_evaluations — periodic-review controls whose
 	//      cadence (derived from freshness_class) places their next review
 	//      between $from and $to. last_evaluated_at = MAX(evaluated_at) over
 	//      the append-only control_evaluations ledger.
+	//   6. personnel_security_checklists — open offboarding due dates, so overdue
+	//      leaver access-removal tasks surface on the compliance calendar.
 	//
-	// All four are tenant-scoped; RLS fires on each underlying SELECT, and the
+	// All event sources are tenant-scoped; RLS fires on each underlying SELECT, and the
 	// explicit tenant_id predicates are the primary guarantee.
 	//
 	// Date filter is a half-open window [from, to). The window is computed in
@@ -1676,6 +1703,9 @@ type Querier interface {
 	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
 	// inside an ARRAY[] constructor.
 	ListCandidateRisksForRule(ctx context.Context, arg ListCandidateRisksForRuleParams) ([]Risk, error)
+	ListChangeAuditLog(ctx context.Context, arg ListChangeAuditLogParams) ([]ChangeAuditLog, error)
+	ListChangeControls(ctx context.Context, arg ListChangeControlsParams) ([]ListChangeControlsRow, error)
+	ListChanges(ctx context.Context, arg ListChangesParams) ([]Change, error)
 	// The cited task items in one section, render order. Tenant-scoped.
 	ListChecklistItemsBySection(ctx context.Context, arg ListChecklistItemsBySectionParams) ([]ChecklistItem, error)
 	// Load all sections of one generation for the caller's tenant, role order
@@ -2129,6 +2159,7 @@ type Querier interface {
 	// "today" (a DATE). Powers GET /v1/decisions/overdue and the daily
 	// overdue-notification job.
 	ListOverdueDecisions(ctx context.Context, arg ListOverdueDecisionsParams) ([]Decision, error)
+	ListOverdueOffboardingChecklists(ctx context.Context, arg ListOverdueOffboardingChecklistsParams) ([]PersonnelSecurityChecklist, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
 	// the cutoff date. NULL last_review_date means "never reviewed" which always
 	// counts as overdue (a vendor with no review on file is by definition past
@@ -2167,6 +2198,14 @@ type Querier interface {
 	//
 	// Sort by title ASC, created_at DESC for deterministic ordering.
 	ListPendingAcksForUser(ctx context.Context, arg ListPendingAcksForUserParams) ([]ListPendingAcksForUserRow, error)
+	ListPersonnelChecklistItems(ctx context.Context, arg ListPersonnelChecklistItemsParams) ([]PersonnelSecurityChecklistItem, error)
+	// OE-663: the checklist-index read behind GET /v1/personnel-security/
+	// checklists. Optional filters compose via the sqlc.narg NULL-collapse
+	// pattern (see control_detail.sql): a NULL arg keeps the predicate
+	// vacuously true. overdue_only narrows to open checklists whose due_at
+	// has passed, mirroring ListOverdueOffboardingChecklists but across
+	// both workflow kinds.
+	ListPersonnelChecklists(ctx context.Context, arg ListPersonnelChecklistsParams) ([]PersonnelSecurityChecklist, error)
 	// Returns every policy for the tenant, newest first. Handler applies
 	// status filter in-memory (cardinality is small per canvas v1 scope).
 	ListPolicies(ctx context.Context, tenantID pgtype.UUID) ([]Policy, error)
@@ -2634,7 +2673,7 @@ type Querier interface {
 	ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditLogParams) ([]ListUnifiedAuditLogRow, error)
 	// AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
 	// sources — expiring exceptions (021), policy-ack expirations (023), vendor
-	// reviews (024), audit-period milestones (028) — projected to the AC-4 row
+	// reviews and contract renewals (024/OE-623), audit-period milestones (028) — projected to the AC-4 row
 	// shape {due_date, category, title, resource_type, resource_id}. NOT four
 	// round-trips (anti-criterion P0: no N+1).
 	//
@@ -2654,6 +2693,7 @@ type Querier interface {
 	//                      (policy_version, user) is considered
 	//   vendor_review    — last_review_date + the cadence interval (next review
 	//                      falls due)
+	//   vendor_renewal   — renewal_date (contract renewal falls due)
 	//   audit_period     — period_end (the audit period closes)
 	//
 	// All four are tenant-scoped; RLS fires on each underlying SELECT and the
@@ -2687,6 +2727,11 @@ type Querier interface {
 	ListVendorReviews(ctx context.Context, arg ListVendorReviewsParams) ([]VendorReview, error)
 	// Cells attached to one vendor.
 	ListVendorScopeCells(ctx context.Context, arg ListVendorScopeCellsParams) ([]pgtype.UUID, error)
+	// Commercial spend rollup for purchased security tooling. Aggregates only
+	// rows with annual_cost + currency and excludes churned tools from current
+	// spend. category NULL is the overall rollup for that currency; non-NULL
+	// rows are category subtotals.
+	ListVendorSpendRollup(ctx context.Context, tenantID pgtype.UUID) ([]ListVendorSpendRollupRow, error)
 	// AC-2 filter by criticality. NULL criticality_filter means "all" — the
 	// (sqlc.narg('criticality')::vendor_criticality IS NULL OR criticality = sqlc.narg('criticality'))
 	// pattern keeps the query plan stable and lets sqlc emit a *VendorCriticality
@@ -2753,6 +2798,7 @@ type Querier interface {
 	// notification preserves the original read_at (COALESCE keeps the
 	// earliest timestamp).
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (Notification, error)
+	MarkPersonnelChecklistCompleted(ctx context.Context, arg MarkPersonnelChecklistCompletedParams) (PersonnelSecurityChecklist, error)
 	// Slice 135 AC-12: the earliest `frozen_at` across all FROZEN
 	// audit_periods whose [period_start, period_end] intersects the
 	// supplied [from_ts, to_ts] export window. Used by the audit-log
@@ -2858,8 +2904,10 @@ type Querier interface {
 	// numeric severity component resolves to severity 0 — it is still counted
 	// (constitutional invariant 9: malformed-score and rule-driven/manual
 	// risks are peers, never filtered out), it just lands in the severity-0
-	// bucket. The guarded-CASE expression is wrapped in COALESCE(..., 0) and
-	// cast ::int so sqlc types the column as a clean non-null Go int.
+	// bucket. FAIR risks are different: they are valid quantitative-dollar
+	// risks, not malformed 5×5 risks, so they are deliberately excluded from
+	// the severity rollups and surfaced through FairExposureByOrgUnit instead.
+	// This keeps the hierarchy from silently mixing dollars into a 1..25 scalar.
 	// AC-1: per-org-unit risk count broken down by severity scalar. ONE
 	// GROUP BY query for the whole tenant — joined to the org-unit tree in Go,
 	// never one query per node (anti-criterion: no N+1).
@@ -3188,6 +3236,7 @@ type Querier interface {
 	// active user in the calling tenant? RLS hides cross-tenant users; the
 	// status gate rejects a disabled user as an assignment target.
 	UserExistsInTenant(ctx context.Context, arg UserExistsInTenantParams) (bool, error)
+	VerifyChange(ctx context.Context, arg VerifyChangeParams) (Change, error)
 	// Slice 464: keyset-paginated ledger walk for `atlas evidence verify`.
 	// Read-only integrity walk — recomputes each record's canonical hash and
 	// compares to the stored `hash`. Ordered by id ASC so the caller can page
@@ -3238,6 +3287,7 @@ type Querier interface {
 	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 	// the DB layer; explicit-is-clearer per AC-5).
 	WriteAuditPeriodLog(ctx context.Context, arg WriteAuditPeriodLogParams) (AuditPeriodAuditLog, error)
+	WriteChangeAuditLog(ctx context.Context, arg WriteChangeAuditLogParams) (ChangeAuditLog, error)
 	// Decision Log audit log (slice 055, migration _030).
 	//
 	// decisions_audit is an append-only mutation log: every PATCH, supersede,

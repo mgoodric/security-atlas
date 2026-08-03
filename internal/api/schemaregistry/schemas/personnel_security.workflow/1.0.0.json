@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/personnel_security.workflow/1.0.0.json",
+  "x-evidence-kind": "personnel_security.workflow.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["HRS-01", "IAC-06", "IAC-15"],
+  "title": "Personnel security workflow completion",
+  "description": "Evidence that a joiner or leaver personnel-security checklist item was completed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "checklist_id",
+    "item_id",
+    "workflow_kind",
+    "person_external_id",
+    "item_slug",
+    "completed_by"
+  ],
+  "properties": {
+    "checklist_id": { "type": "string", "minLength": 1 },
+    "item_id": { "type": "string", "minLength": 1 },
+    "workflow_kind": {
+      "type": "string",
+      "enum": ["onboarding", "offboarding"]
+    },
+    "person_external_id": { "type": "string", "minLength": 1 },
+    "person_work_email": { "type": "string" },
+    "item_slug": { "type": "string", "minLength": 1 },
+    "completed_by": { "type": "string", "minLength": 1 },
+    "evidence_uri": { "type": "string" },
+    "notes": { "type": "string" }
+  }
+}

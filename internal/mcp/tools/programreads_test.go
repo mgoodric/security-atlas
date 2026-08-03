@@ -84,6 +84,41 @@ func TestProgramList_RejectsUnknownArgs(t *testing.T) {
 	}
 }
 
+func TestListFrameworkPosture_DispatchAndPassthrough(t *testing.T) {
+	t.Parallel()
+
+	client, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/frameworks/posture" {
+			t.Errorf("path = %q, want /v1/frameworks/posture", r.URL.Path)
+		}
+		_, _ = fmt.Fprint(w, `{"frameworks":[{"framework_id":"11111111-1111-4111-8111-111111111111","framework_version":"2017","coverage_pct":87.5,"freshness_composite":0.92,"trend_delta_90d":3}],"count":1}`)
+	})
+	defer srv.Close()
+
+	out, err := tools.NewListFrameworkPosture(client).Handle(context.Background(), json.RawMessage(`{}`))
+	if err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	m := out.(map[string]any)
+	if m["count"].(int) != 1 {
+		t.Errorf("count = %v, want 1", m["count"])
+	}
+	// Every posture field survives verbatim — the passthrough must not
+	// drop the endpoint's coverage/freshness/trend columns.
+	rows := m["frameworks"].([]json.RawMessage)
+	if len(rows) != 1 {
+		t.Fatalf("frameworks = %d rows, want 1", len(rows))
+	}
+	for _, field := range []string{
+		`"framework_id"`, `"framework_version"`, `"coverage_pct"`,
+		`"freshness_composite"`, `"trend_delta_90d"`,
+	} {
+		if !strings.Contains(string(rows[0]), field) {
+			t.Errorf("passthrough row dropped %s: %s", field, rows[0])
+		}
+	}
+}
+
 func TestListActionPlans_DispatchesToEndpoint(t *testing.T) {
 	t.Parallel()
 

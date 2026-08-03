@@ -5,6 +5,17 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # Slice 415 — `Analyze (go)` and `Analyze (javascript-typescript)` are
+  # BOTH in `.github/branch-protection.json`'s
+  # `required_status_checks.contexts`. GitHub's merge queue evaluates the
+  # required checks on the merge-group commit, so without this trigger the
+  # two CodeQL contexts would never report on a `merge_group` event and
+  # every queue entry would sit pending until the check-response timeout
+  # evicted it — the queue would be wedged from the moment it is enabled.
+  # This adds no check to and removes none from the required set (slice
+  # 415 P0-1); it only lets the existing required checks report on the new
+  # event. See docs/ci/MERGE_QUEUE.md.
+  merge_group:
   schedule:
     # Weekly, Monday 09:00 UTC
     - cron: "0 9 * * 1"
@@ -15,8 +26,11 @@ permissions:
   actions: read
 
 concurrency:
+  # Slice 415: same rule as ci.yml — never cancel a `merge_group` run. A
+  # cancelled queue run reports its required checks as `cancelled`, which
+  # the merge queue treats as a failure and evicts the entry on.
   group: codeql-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 jobs:
   analyze:
@@ -56,7 +70,7 @@ jobs:
           cache: true
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        uses: github/codeql-action/init@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
@@ -64,9 +78,9 @@ jobs:
 
       - name: Autobuild (Go)
         if: matrix.build-mode == 'autobuild'
-        uses: github/codeql-action/autobuild@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        uses: github/codeql-action/autobuild@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        uses: github/codeql-action/analyze@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
           category: "/language:${{ matrix.language }}"

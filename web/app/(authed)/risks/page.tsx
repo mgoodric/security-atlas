@@ -87,6 +87,8 @@ import {
   applyFilters,
   clearFilters,
   DEFAULT_FILTERS,
+  fairScore,
+  formatDollars,
   formatResidualScore,
   residualClass,
   residualState,
@@ -598,6 +600,19 @@ function RisksPageInner() {
         />
       ),
       cell: (row) => {
+        const fair =
+          row.methodology === "fair" ? fairScore(row.inherent_score) : null;
+        if (fair) {
+          return (
+            <span
+              className="font-mono text-xs text-foreground"
+              data-testid="risks-row-fair-exposure"
+              title="FAIR annualized loss exposure"
+            >
+              {formatDollars(fair.annualized_loss_exposure)}
+            </span>
+          );
+        }
         const band = severityBand(row.severity);
         return (
           <span

@@ -14,8 +14,9 @@
 //     write N observations → aggregate the report
 //   - sweepTenant — Begin/ApplyTenant/Compute-loop/Insert/Commit lifecycle
 //     against the real app role (RLS-enforced), plus the
-//     evaluator-failure-recovery branch when an evaluator's read returns a
-//     real error
+//     evaluator-failure-recovery branch, driven by an injected
+//     always-failing evaluator (OE-550) rather than by a starter evaluator
+//     that happens to be broken
 //
 // Required env (matches the pattern from internal/freshnessdrift and
 // internal/catalog/metrics):
@@ -32,6 +33,7 @@ package scheduler_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -133,15 +135,20 @@ func countObservations(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID) int 
 
 // ===== AC-1 + AC-2: SweepOnce iterates registered evaluators for every
 // tenant that has any primitive presence. With a minimally-seeded tenant
-// (one control + no other primitives), most evaluators succeed (empty
-// result sets are not an error — they yield Value=0) and write one
-// observation each. Evaluators whose queries touch tables that hold no
-// rows for this tenant may legitimately fail their pre-conditions and
-// hit the per-evaluator failure-recovery branch (rep.EvaluatorFailures
-// counts them; the sweep does NOT abort — slice doc AC-13). We assert
-// the load-bearing invariants: tenant was swept, AT LEAST ONE
-// observation landed, and successes + failures sum to the registered
-// evaluator count.
+// (one control + no other primitives), every evaluator succeeds — an
+// empty result set is not an error, it yields Value=0 — and writes one
+// observation each.
+//
+// Post-OE-550 note: this test's assertions are deliberately inequalities
+// (>= 1 observation; successes + failures >= the registered count) rather
+// than exact equalities, because it is a sweep-mechanics test, not a
+// per-evaluator one. Until OE-550 two starter evaluators errored on every
+// call (42703 / 42P01) and this test silently absorbed those failures into
+// rep.EvaluatorFailures. The failure branch is now asserted on purpose in
+// TestSweepOnce_FailingEvaluatorDoesNotAbortTheSweep, and the "no
+// registered evaluator fails against the real schema" invariant is pinned
+// by that test's baseline sweep plus eval's
+// TestAllRegisteredEvaluators_NoSQLError.
 // =====
 
 func TestSweepOnce_WritesObservationsForOurTenant(t *testing.T) {
@@ -379,5 +386,94 @@ func TestRun_InlineSweepStress(t *testing.T) {
 			t.Fatalf("iteration %d: this tenant's observation count = %d; want > %d (append-only growth)", i, got, prev)
 		}
 		prev = got
+	}
+}
+
+// ===== AC-13: one failing evaluator does NOT abort the sweep (OE-550) =====
+//
+// sweepTenant's per-evaluator try/log/continue branch counts a failing
+// evaluator into rep.EvaluatorFailures and moves on to the next one. Before
+// OE-550 that branch was covered only BY ACCIDENT: audit_readiness_score and
+// policy_attestation_rate errored on every call (42703 / 42P01), so every
+// sweep in this suite happened to walk the failure path. Repointing those two
+// queries at the real schema removed the accidental coverage — and would have
+// left the AC-13 contract with no test at all.
+//
+// So the contract now gets asserted on purpose: wrap the real registry with
+// one extra evaluator that always errors, and assert the sweep still writes
+// every healthy evaluator's observation while tallying exactly one failure.
+// A regression that turned try/log/continue into abort-the-tenant fails here.
+
+// failingEvaluator always returns an error from Compute. Its Name is not in
+// metrics_catalog on purpose — it never gets far enough to insert.
+type failingEvaluator struct{}
+
+func (failingEvaluator) Name() string { return "oe550_always_fails" }
+
+func (failingEvaluator) Compute(context.Context) (metricseval.Result, error) {
+	return metricseval.Result{}, errors.New("oe550: deliberate evaluator failure")
+}
+
+// registryWithFailure decorates a real *metricseval.Registry with one
+// always-failing evaluator, satisfying scheduler.EvaluatorRegistry.
+type registryWithFailure struct {
+	inner *metricseval.Registry
+	bad   failingEvaluator
+}
+
+func (r registryWithFailure) Names() []string {
+	return append(r.inner.Names(), r.bad.Name())
+}
+
+func (r registryWithFailure) Get(name string) (metricseval.Evaluator, bool) {
+	if name == r.bad.Name() {
+		return r.bad, true
+	}
+	return r.inner.Get(name)
+}
+
+func TestSweepOnce_FailingEvaluatorDoesNotAbortTheSweep(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	seedCatalog(t, admin, app)
+	tenant := freshTenant(t, admin)
+	seedAnchorControl(t, admin, tenant)
+
+	healthy := metricseval.NewRegistry(app)
+
+	// Baseline: how many observations the healthy registry alone lands for
+	// this tenant. Every starter evaluator is schema-clean post-OE-550, so
+	// this is the full registered count.
+	base := scheduler.New(admin, app, healthy, nil)
+	baseRep, err := base.SweepOnce(context.Background())
+	if err != nil {
+		t.Fatalf("baseline SweepOnce: %v", err)
+	}
+	if baseRep.EvaluatorFailures != 0 {
+		t.Fatalf("baseline EvaluatorFailures = %d; want 0 — every registered evaluator must be schema-clean (OE-550)", baseRep.EvaluatorFailures)
+	}
+	if baseRep.ObservationsWritten < 1 {
+		t.Fatalf("baseline ObservationsWritten = %d; want >= 1", baseRep.ObservationsWritten)
+	}
+
+	// Now sweep with the failing evaluator spliced in.
+	s := scheduler.New(admin, app, registryWithFailure{inner: healthy}, nil)
+	rep, err := s.SweepOnce(context.Background())
+	if err != nil {
+		t.Fatalf("SweepOnce with a failing evaluator returned err=%v; want nil — a single evaluator failure must NOT abort the sweep (AC-13)", err)
+	}
+	if rep.EvaluatorFailures != 1 {
+		t.Errorf("EvaluatorFailures = %d; want exactly 1 (only the injected evaluator should fail)", rep.EvaluatorFailures)
+	}
+	if rep.TenantsSwept < 1 {
+		t.Errorf("TenantsSwept = %d; want >= 1 — the tenant must still be marked swept despite the failure", rep.TenantsSwept)
+	}
+	// The healthy evaluators must be entirely unaffected: the failure is
+	// logged and skipped, not propagated, and the tenant transaction still
+	// commits every successful observation.
+	if rep.ObservationsWritten != baseRep.ObservationsWritten {
+		t.Errorf("ObservationsWritten = %d; want %d (same as the baseline sweep — the failing evaluator must not cost a healthy one its row)",
+			rep.ObservationsWritten, baseRep.ObservationsWritten)
 	}
 }

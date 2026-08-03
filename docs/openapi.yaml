@@ -90,6 +90,7 @@ tags:
   - name: me
   - name: oauth
   - name: oscal
+  - name: personnel-security
   - name: policies
   - name: questionnaires
   - name: risks
@@ -3829,6 +3830,73 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/personnel-security/checklist-items/{id}/complete:
+    post:
+      summary: POST /v1/personnel-security/checklist-items/{id}/complete — complete an item (completed_by, evidence_uri, notes); writes the personnel_security.workflow.v1 CC1 evidence record (OE-663)
+      tags: [personnel-security]
+      operationId: post-v1-personnel-security-checklist-items-id-complete
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/personnel-security/checklists:
+    get:
+      summary: GET /v1/personnel-security/checklists — onboarding/offboarding checklist index (?kind= ?status= ?overdue=true filters; OE-663)
+      tags: [personnel-security]
+      operationId: get-v1-personnel-security-checklists
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/personnel-security/checklists — create a manual checklist (kind, person, control_id, due_at; OE-663)
+      tags: [personnel-security]
+      operationId: post-v1-personnel-security-checklists
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/personnel-security/checklists/{id}:
+    get:
+      summary: GET /v1/personnel-security/checklists/{id} — one checklist with its items (OE-663)
+      tags: [personnel-security]
+      operationId: get-v1-personnel-security-checklists-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/policies:
     get:
       summary: GET /v1/policies
@@ -4077,6 +4145,76 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answer-runs:
+    post:
+      summary: POST /v1/questionnaires/{id}/answer-runs
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answer-runs
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answer-runs/{runId}:
+    get:
+      summary: GET /v1/questionnaires/{id}/answer-runs/{runId}
+      tags: [questionnaires]
+      operationId: get-v1-questionnaires-id-answer-runs-runId
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answer-runs/{runId}/cancel:
+    post:
+      summary: POST /v1/questionnaires/{id}/answer-runs/{runId}/cancel
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answer-runs-runId-cancel
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/questionnaires/{id}/answers/{qid}:
     patch:
       summary: PATCH /v1/questionnaires/{id}/answers/{qid}
@@ -4107,6 +4245,31 @@ paths:
       summary: POST /v1/questionnaires/{id}/answers/{qid}/ai-approve
       tags: [questionnaires]
       operationId: post-v1-questionnaires-id-answers-qid-ai-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answers/{qid}/ai-reject:
+    post:
+      summary: POST /v1/questionnaires/{id}/answers/{qid}/ai-reject
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answers-qid-ai-reject
       security:
         - bearer: []
       parameters:
@@ -4181,6 +4344,91 @@ paths:
         - bearer: []
       parameters:
         - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest:
+    post:
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-ai-suggest
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve:
+    post:
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-proposalID-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: proposalID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject:
+    post:
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-proposalID-reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: proposalID
           in: path
           required: true
           schema:
@@ -4836,6 +5084,20 @@ paths:
       summary: GET /v1/vendors/burndown
       tags: [vendors]
       operationId: get-v1-vendors-burndown
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/vendors/spend:
+    get:
+      summary: GET /v1/vendors/spend
+      tags: [vendors]
+      operationId: get-v1-vendors-spend
       security:
         - bearer: []
       responses:

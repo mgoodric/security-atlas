@@ -10,6 +10,7 @@ package risk_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -124,6 +125,76 @@ func TestCreate_RejectsFairMissingLM(t *testing.T) {
 	})
 	if !errors.Is(err, risk.ErrInherentScoreInvalid) {
 		t.Fatalf("want ErrInherentScoreInvalid; got %v", err)
+	}
+}
+
+func TestCreate_FairPersistsCanonicalDollarExposure(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	store := risk.NewStore(app)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	created, err := store.Create(ctx, risk.CreateInput{
+		Title:         "FAIR-style risk",
+		Category:      dbx.RiskCategoryFinancial,
+		Methodology:   dbx.RiskMethodologyFair,
+		InherentScore: []byte(`{"loss_event_frequency":2,"loss_magnitude":50000}`),
+		Treatment:     dbx.RiskTreatmentAvoid,
+	})
+	if err != nil {
+		t.Fatalf("Create FAIR: %v", err)
+	}
+	got, err := risk.FairScoreFromJSON(created.InherentScore)
+	if err != nil {
+		t.Fatalf("created FAIR score: %v", err)
+	}
+	if got.AnnualizedLossExposure != 100000 {
+		t.Fatalf("annualized loss exposure = %v, want 100000", got.AnnualizedLossExposure)
+	}
+	residual, err := risk.FairScoreFromJSON(created.ResidualScore)
+	if err != nil {
+		t.Fatalf("created FAIR residual score: %v", err)
+	}
+	if residual.AnnualizedLossExposure != got.AnnualizedLossExposure {
+		t.Fatalf("residual FAIR exposure = %v, want %v", residual.AnnualizedLossExposure, got.AnnualizedLossExposure)
+	}
+}
+
+func TestCreate_FairAcceptsLegacyAliasesAndNormalizes(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, migrate)
+	store := risk.NewStore(app)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	created, err := store.Create(ctx, risk.CreateInput{
+		Title:         "FAIR aliases",
+		Category:      dbx.RiskCategoryFinancial,
+		Methodology:   dbx.RiskMethodologyFair,
+		InherentScore: []byte(`{"lef":1.5,"lm":40000}`),
+		Treatment:     dbx.RiskTreatmentAvoid,
+	})
+	if err != nil {
+		t.Fatalf("Create FAIR aliases: %v", err)
+	}
+	// Postgres JSONB does not preserve key order or byte layout, so assert
+	// the canonical shape semantically rather than as a raw string.
+	got, err := risk.FairScoreFromJSON(created.InherentScore)
+	if err != nil {
+		t.Fatalf("parse canonical FAIR inherent_score %s: %v", created.InherentScore, err)
+	}
+	if got.LossEventFrequency != 1.5 || got.LossMagnitude != 40000 || got.AnnualizedLossExposure != 60000 {
+		t.Fatalf("canonical FAIR inherent_score = %s", created.InherentScore)
+	}
+	var keys map[string]any
+	if err := json.Unmarshal(created.InherentScore, &keys); err != nil {
+		t.Fatalf("unmarshal persisted FAIR score: %v", err)
+	}
+	for _, alias := range []string{"lef", "lm"} {
+		if _, present := keys[alias]; present {
+			t.Fatalf("legacy alias %q survived normalization: %s", alias, created.InherentScore)
+		}
 	}
 }
 

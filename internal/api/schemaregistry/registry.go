@@ -87,6 +87,7 @@ func DefaultSeed() []KindVersion {
 	return []KindVersion{
 		{Kind: "sast.scan_result.v1", Version: "1.0.0"},
 		{Kind: "access_review.completion.v1", Version: "1.0.0"},
+		{Kind: "personnel_security.workflow.v1", Version: "1.0.0"},
 		{Kind: "manual.attestation.v1", Version: "1.0.0"},
 		{Kind: "aws.s3.bucket_encryption_state.v1", Version: "1.0.0"},
 		{Kind: "github.repo_protection.v1", Version: "1.0.0"},
@@ -98,6 +99,8 @@ func DefaultSeed() []KindVersion {
 		{Kind: "1password.org_policy.v1", Version: "1.0.0"},
 		{Kind: "osquery.host_posture.v1", Version: "1.0.0"},
 		{Kind: "jira.ticket_evidence.v1", Version: "1.0.0"},
+		{Kind: "change.approval.v1", Version: "1.0.0"},
+		{Kind: "change.verification.v1", Version: "1.0.0"},
 		{Kind: "manual.upload.v1", Version: "1.0.0"},
 		// Slice 486: Azure connector (Entra ID + Storage).
 		{Kind: "azure.entra_role_assignment.v1", Version: "1.0.0"},
@@ -279,6 +282,11 @@ func DefaultSeed() []KindVersion {
 		// POST /v1/policies/{id}/acknowledge emits one record of this
 		// kind through the slice-013 evidence ledger.
 		{Kind: "policy.acknowledgment.v1", Version: "1.0.0"},
+		// OPENENGINE-626: security-awareness training completion evidence.
+		// Manual and CSV entries are first-class; future LMS connector imports
+		// feed the same kind. Anchors HRS-04, mapped by the bundled crosswalks
+		// to SOC 2 CC1.4 and ISO 27001 A.6.3.
+		{Kind: "security_awareness.training_completion.v1", Version: "1.0.0"},
 		// Slice 443: Slack connector — three high-signal evidence surfaces for
 		// the SaaS-startup persona that runs operations in Slack. Read-only
 		// least-privilege OAuth token; membership / admin / retention METADATA
