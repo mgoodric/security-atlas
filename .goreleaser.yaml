@@ -9,8 +9,9 @@
 #   See `signs:` block. No private key material is stored in the repo or
 #   in GitHub secrets — Sigstore Fulcio issues short-lived certificates
 #   bound to the workflow's OIDC token.
-# - Five OS/arch targets exactly: darwin/{amd64,arm64}, linux/{amd64,arm64},
-#   windows/amd64. AC-1 of slice 039.
+# - Core server/CLI targets: darwin/{amd64,arm64}, linux/{amd64,arm64},
+#   windows/amd64. atlas-mcp ships as a separate operator binary for
+#   darwin/{amd64,arm64} and linux/{amd64,arm64}.
 # - Conventional Commit filter feeds release notes (AC-6).
 # - No coupling to non-permissive package channels. Homebrew tap is
 #   self-hosted at github.com/mgoodric/homebrew-tap (anti-criterion).
@@ -64,11 +65,27 @@ builds:
       - goos: windows
         goarch: arm64
 
+  - id: atlas-mcp
+    main: ./cmd/atlas-mcp
+    binary: atlas-mcp
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.CommitDate}}
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+
 archives:
-  # Two archives: one bundles BOTH binaries (server + CLI) for users who
-  # self-host; the cli-only archive feeds the Homebrew formula and keeps
-  # the brew install small. Naming pattern matches what scripts/install.sh
-  # and the Homebrew formula expect.
+  # Three archive families: one bundles BOTH core binaries (server + CLI) for
+  # users who self-host; cli-only feeds the security-atlas-cli Homebrew formula;
+  # mcp-only feeds direct MCP installs and the atlas-mcp Homebrew formula.
+  # Naming pattern matches what scripts/install.sh, docs, and the formulas
+  # expect.
   - id: bundle
     ids: [atlas, atlas-cli]
     name_template: >-
@@ -92,6 +109,14 @@ archives:
     files:
       - LICENSE*
       - README*
+  - id: mcp-only
+    ids: [atlas-mcp]
+    name_template: >-
+      atlas-mcp_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    formats: [tar.gz]
+    files:
+      - LICENSE*
+      - cmd/atlas-mcp/README.md
 
 checksum:
   # SHA-256 over every released artifact. cosign signs THIS file; the install
@@ -171,7 +196,8 @@ release:
     ## security-atlas {{ .Version }}
 
     Signed binaries for macOS (Intel + Apple Silicon), Linux (x86_64 + arm64),
-    and Windows (x86_64). Each archive is checksummed in
+    and Windows (x86_64), plus atlas-mcp archives for macOS and Linux
+    (Intel/x86_64 + arm64). Each archive is checksummed in
     `{{ .ProjectName }}_{{ .Version }}_checksums.txt` and that checksum file
     is cosign-signed (Sigstore keyless OIDC). The signature is published as
     a single Sigstore protobuf bundle (`*.sigstore.json`) containing the
@@ -257,6 +283,25 @@ brews:
       assert_match "security-atlas-cli", shell_output("#{bin}/security-atlas-cli --version")
     install: |
       bin.install "security-atlas-cli"
+
+  - name: atlas-mcp
+    ids: [mcp-only]
+    repository:
+      owner: mgoodric
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/mgoodric/security-atlas/tree/main/cmd/atlas-mcp"
+    description: "Model Context Protocol server for security-atlas"
+    license: "Apache-2.0"
+    skip_upload: auto
+    commit_author:
+      name: security-atlas-bot
+      email: bot@security-atlas.io
+    test: |
+      assert_match "atlas-mcp", shell_output("#{bin}/atlas-mcp --version")
+    install: |
+      bin.install "atlas-mcp"
 
 snapshot:
   version_template: "{{ incpatch .Version }}-snapshot-{{ .ShortCommit }}"
