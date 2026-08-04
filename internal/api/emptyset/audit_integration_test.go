@@ -28,41 +28,18 @@
 package emptyset_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
-
-// openAppPool returns a connection pool for the application role, which
-// the integration suite uses to exercise RLS-bound handlers exactly as
-// production does. Tests skip when DATABASE_URL_APP is unset (CI sets
-// both, local dev typically uses just-up's bootstrap).
-func openAppPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL_APP")
-	if dsn == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // TestAllListEndpoints_EmptyTenant_NeverReturn5xx is the slice-150
 // cross-cutting sweep. The audit set was chosen by the slice-150
@@ -84,7 +61,9 @@ func openAppPool(t *testing.T) *pgxpool.Pool {
 // invariant is "never crash on empty"; an authorization decision is a
 // separate concern.
 func TestAllListEndpoints_EmptyTenant_NeverReturn5xx(t *testing.T) {
-	app := openAppPool(t)
+	// The app-role pool exercises RLS-bound handlers exactly as production
+	// does; dbtest.NewAppPool skips when DATABASE_URL_APP is unset.
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
 	tenant := uuid.NewString()
