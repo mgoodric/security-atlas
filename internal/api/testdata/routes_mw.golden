@@ -112,6 +112,8 @@ GET /v1/exceptions 8
 GET /v1/exceptions/expiring 8
 GET /v1/exceptions/{id} 8
 GET /v1/exceptions/{id}/audit-log 8
+GET /v1/incidents 8
+GET /v1/incidents/{id} 8
 GET /v1/features/enabled 8
 GET /v1/framework-scopes 8
 GET /v1/framework-scopes/{id} 8
@@ -191,6 +193,7 @@ PATCH /v1/decisions/{id} 8
 PATCH /v1/exceptions/{id}/activate 8
 PATCH /v1/exceptions/{id}/approve 8
 PATCH /v1/exceptions/{id}/deny 8
+PATCH /v1/incidents/{id}/transition 8
 PATCH /v1/framework-scopes/{id} 8
 PATCH /v1/framework-scopes/{id}/activate 8
 PATCH /v1/framework-scopes/{id}/approve 8
@@ -263,6 +266,8 @@ POST /v1/decisions/{id}/links/{kind} 8
 POST /v1/decisions/{id}/supersede 8
 POST /v1/evidence:push 8
 POST /v1/exceptions 8
+POST /v1/incidents 8
+POST /v1/incidents/{id}/close 8
 POST /v1/framework-scopes 8
 POST /v1/install/mark-first-signin 8
 POST /v1/mcp/write-proposals 8

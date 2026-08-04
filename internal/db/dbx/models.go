@@ -2159,6 +2159,77 @@ type ImportedComponentClaimDisposition struct {
 	ToScfAnchorID   *string            `json:"to_scf_anchor_id"`
 }
 
+type Incident struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	Status             string             `json:"status"`
+	OperatorSeverity   string             `json:"operator_severity"`
+	Severity           string             `json:"severity"`
+	AffectedSystemTier *string            `json:"affected_system_tier"`
+	AffectedSystems    []byte             `json:"affected_systems"`
+	DetectedBy         string             `json:"detected_by"`
+	DetectedAt         pgtype.Timestamptz `json:"detected_at"`
+	TriagedBy          *string            `json:"triaged_by"`
+	TriagedAt          pgtype.Timestamptz `json:"triaged_at"`
+	ContainedBy        *string            `json:"contained_by"`
+	ContainedAt        pgtype.Timestamptz `json:"contained_at"`
+	ResolvedBy         *string            `json:"resolved_by"`
+	ResolvedAt         pgtype.Timestamptz `json:"resolved_at"`
+	ClosedBy           *string            `json:"closed_by"`
+	ClosedAt           pgtype.Timestamptz `json:"closed_at"`
+	PostmortemSummary  *string            `json:"postmortem_summary"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type IncidentControl struct {
+	IncidentID pgtype.UUID        `json:"incident_id"`
+	ControlID  pgtype.UUID        `json:"control_id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	LinkedAt   pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy   string             `json:"linked_by"`
+}
+
+type IncidentEvidenceLink struct {
+	IncidentID pgtype.UUID        `json:"incident_id"`
+	EvidenceID pgtype.UUID        `json:"evidence_id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	LinkedAt   pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy   string             `json:"linked_by"`
+}
+
+type IncidentRisk struct {
+	IncidentID pgtype.UUID        `json:"incident_id"`
+	RiskID     pgtype.UUID        `json:"risk_id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	LinkedAt   pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy   string             `json:"linked_by"`
+}
+
+type IncidentTimeline struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	IncidentID    pgtype.UUID        `json:"incident_id"`
+	Action        string             `json:"action"`
+	Actor         string             `json:"actor"`
+	FromState     *string            `json:"from_state"`
+	ToState       string             `json:"to_state"`
+	Summary       string             `json:"summary"`
+	Detail        []byte             `json:"detail"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
+type IncidentVendor struct {
+	IncidentID pgtype.UUID        `json:"incident_id"`
+	VendorID   pgtype.UUID        `json:"vendor_id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	LinkedAt   pgtype.Timestamptz `json:"linked_at"`
+	LinkedBy   string             `json:"linked_by"`
+}
+
 type LocalCredential struct {
 	UserID       pgtype.UUID        `json:"user_id"`
 	TenantID     pgtype.UUID        `json:"tenant_id"`

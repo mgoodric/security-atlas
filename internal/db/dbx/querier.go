@@ -41,6 +41,10 @@ type Querier interface {
 	// statements run inside one tx so the partial unique index never sees
 	// two `activated` rows at once.
 	ActivateFrameworkScope(ctx context.Context, arg ActivateFrameworkScopeParams) (FrameworkScope, error)
+	AddIncidentControlLink(ctx context.Context, arg AddIncidentControlLinkParams) (IncidentControl, error)
+	AddIncidentEvidenceLink(ctx context.Context, arg AddIncidentEvidenceLinkParams) (IncidentEvidenceLink, error)
+	AddIncidentRiskLink(ctx context.Context, arg AddIncidentRiskLinkParams) (IncidentRisk, error)
+	AddIncidentVendorLink(ctx context.Context, arg AddIncidentVendorLinkParams) (IncidentVendor, error)
 	// ===== scim_group_members edge CRUD =====
 	// Adds a (group, user) membership edge. Idempotent on the unique index: a
 	// duplicate add is a no-op (the SCIM `add members` op is idempotent).
@@ -154,6 +158,7 @@ type Querier interface {
 	ClaimStalenessRollup(ctx context.Context, arg ClaimStalenessRollupParams) (pgtype.UUID, error)
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
+	CloseIncident(ctx context.Context, arg CloseIncidentParams) (Incident, error)
 	CompletePersonnelChecklistItem(ctx context.Context, arg CompletePersonnelChecklistItemParams) (PersonnelSecurityChecklistItem, error)
 	// Per-item existence + tenant check (AC-6 / AC-7): does this control id
 	// exist and is it visible to the calling tenant? Run inside the tenant-GUC
@@ -348,6 +353,8 @@ type Querier interface {
 	// the same JSON (the application computes and passes both to keep the DB
 	// trigger comparison cheap).
 	CreateFrameworkScope(ctx context.Context, arg CreateFrameworkScopeParams) (FrameworkScope, error)
+	// OE-631 incident register queries.
+	CreateIncident(ctx context.Context, arg CreateIncidentParams) (Incident, error)
 	// Slice 029 -- notifications spine.
 	//
 	// In-app notifications. Slice 029 dispatches a row per distinct prior
@@ -833,6 +840,7 @@ type Querier interface {
 	// caller's tenant; a cross-tenant or non-component-definition id returns
 	// ErrNoRows.
 	GetImportedComponentDefinitionByID(ctx context.Context, arg GetImportedComponentDefinitionByIDParams) (ImportedCatalog, error)
+	GetIncidentByID(ctx context.Context, arg GetIncidentByIDParams) (Incident, error)
 	// The engine's "when did this rule last fire, and into which window"
 	// lookup. Used to decide whether the current write falls inside an
 	// existing window. Returns the most recent 'fired' row for the rule.
@@ -2126,6 +2134,12 @@ type Querier interface {
 	// satisfied). RLS scopes the read to the tenant; the WHERE tenant_id clause is
 	// belt-and-suspenders. Ordered for stable rendering.
 	ListInScopeControlsForChecklist(ctx context.Context, tenantID pgtype.UUID) ([]ListInScopeControlsForChecklistRow, error)
+	ListIncidentControlLinks(ctx context.Context, arg ListIncidentControlLinksParams) ([]IncidentControl, error)
+	ListIncidentEvidenceLinks(ctx context.Context, arg ListIncidentEvidenceLinksParams) ([]IncidentEvidenceLink, error)
+	ListIncidentRiskLinks(ctx context.Context, arg ListIncidentRiskLinksParams) ([]IncidentRisk, error)
+	ListIncidentTimeline(ctx context.Context, arg ListIncidentTimelineParams) ([]IncidentTimeline, error)
+	ListIncidentVendorLinks(ctx context.Context, arg ListIncidentVendorLinksParams) ([]IncidentVendor, error)
+	ListIncidents(ctx context.Context, tenantID pgtype.UUID) ([]Incident, error)
 	// Every (control, scope_cell)'s latest state for one control. DISTINCT ON
 	// collapses the append-only history to the current row per cell. Used by
 	// GET /v1/controls/:id/state when no scope filter is supplied.
@@ -3038,6 +3052,7 @@ type Querier interface {
 	// Update last_seen_at and (when given) bump expires_at. Caller computes the
 	// new expires_at — sliding-window logic lives in the sessions package.
 	TouchSession(ctx context.Context, arg TouchSessionParams) error
+	TransitionIncident(ctx context.Context, arg TransitionIncidentParams) (Incident, error)
 	UnlinkActionPlanControl(ctx context.Context, arg UnlinkActionPlanControlParams) (int64, error)
 	UnlinkActionPlanRisk(ctx context.Context, arg UnlinkActionPlanRiskParams) (int64, error)
 	UnlinkDecisionControl(ctx context.Context, arg UnlinkDecisionControlParams) error
@@ -3338,6 +3353,7 @@ type Querier interface {
 	// Slice 180: explicit `subject_module='core'` (column defaults to 'core' at
 	// the DB layer; explicit-is-clearer per AC-5).
 	WriteFeatureFlagAuditLog(ctx context.Context, arg WriteFeatureFlagAuditLogParams) (FeatureFlagAuditLog, error)
+	WriteIncidentTimeline(ctx context.Context, arg WriteIncidentTimelineParams) (IncidentTimeline, error)
 	// Every sample pull writes one row here. The seed -> sample_id mapping
 	// captured in (seed, sample_id) is the re-audit trail (AC-6).
 	//

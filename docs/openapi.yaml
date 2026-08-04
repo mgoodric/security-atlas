@@ -85,6 +85,7 @@ tags:
   - name: feature-flags
   - name: framework-scopes
   - name: frameworks
+  - name: incidents
   - name: install
   - name: mcp
   - name: me
@@ -3124,6 +3125,93 @@ paths:
       operationId: get-v1-frameworks-scf-versions
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/incidents:
+    get:
+      summary: GET /v1/incidents
+      tags: [incidents]
+      operationId: get-v1-incidents
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/incidents
+      tags: [incidents]
+      operationId: post-v1-incidents
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/incidents/{id}:
+    get:
+      summary: GET /v1/incidents/{id}
+      tags: [incidents]
+      operationId: get-v1-incidents-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/incidents/{id}/close:
+    post:
+      summary: POST /v1/incidents/{id}/close
+      tags: [incidents]
+      operationId: post-v1-incidents-id-close
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/incidents/{id}/transition:
+    patch:
+      summary: PATCH /v1/incidents/{id}/transition
+      tags: [incidents]
+      operationId: patch-v1-incidents-id-transition
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
