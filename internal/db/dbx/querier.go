@@ -1522,6 +1522,14 @@ type Querier interface {
 	// optional status filter in-memory; cardinality is small (a solo security
 	// lead runs a handful of rules).
 	ListAggregationRules(ctx context.Context, tenantID pgtype.UUID) ([]AggregationRule, error)
+	// Load-at-boot scan for the credstore persistence layer (OE-435): every
+	// non-revoked key across ALL tenants, so a process restart can rehydrate
+	// the in-memory credstore. Runs once at startup under the BYPASSRLS
+	// atlas_migrate pool — the same pre-tenant-context posture as
+	// GetAPIKeyByHash (the row's tenant_id is what the credential CARRIES;
+	// per-request authorization still happens against it). Expired and
+	// past-grace rows are filtered by the caller, which owns the clock.
+	ListAllActiveAPIKeys(ctx context.Context) ([]ApiKey, error)
 	// Bypass-RLS path used at boot by the platform-schema importer running as
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.

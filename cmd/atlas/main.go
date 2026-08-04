@@ -541,6 +541,14 @@ func main() {
 	// authz audit writer; there is no BeginTx/ApplyTenant treatment to
 	// apply here. No change is needed on this startup-time issuance path.
 	//
+	// (OE-435 note: this memory-only property is now specific to THESE
+	// bootstrap issuances, which deliberately run before the credstore
+	// persistence attach in the pool block below — they are re-minted from
+	// the environment on every boot, so persistence would add nothing but
+	// api_keys clutter. Credentials issued after startup via the
+	// AdminCredentials service DO write through to api_keys and survive
+	// restarts.)
+	//
 	// (Slice 068 correction: an earlier revision of this comment claimed
 	// that "phase 6 completing populates api_keys as designed." That is
 	// wrong — nothing in the bootstrap flow writes api_keys. The bootstrap
@@ -634,6 +642,28 @@ func main() {
 		apikeySvc := apikeystore.NewStore(pool, authPool, hasher, 0)
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
+
+		// OE-435 (slice 356b chaos gap G-1): persist the in-memory
+		// credstore through the api_keys table and rehydrate it now, so
+		// push credentials issued to connectors and CI jobs survive a
+		// process restart. This attach runs AFTER the bootstrap issuance
+		// block above by design — bootstrap credentials are re-minted
+		// from the environment on every boot and stay memory-only. Note
+		// the authPool caveat: without DATABASE_URL the boot scan runs on
+		// the FORCE-RLS app pool and sees zero rows, so previously
+		// persisted credentials cannot be rehydrated.
+		if authPool == nil {
+			fmt.Fprintf(os.Stderr, "atlas: WARNING: DATABASE_URL unset — persisted push credentials cannot be loaded at boot; credentials issued now still persist, but will only be rehydrated on a boot with DATABASE_URL set\n")
+		}
+		credsLoaded, cpErr := srv.AttachCredstorePersistence(apikeystore.NewPersister(pool, authPool, hasher))
+		if cpErr != nil {
+			// Booting without the rehydrated credstore silently reproduces
+			// the exact chaos-run failure (every issued credential rejected
+			// as Unauthenticated), so fail loud instead of degrading.
+			fmt.Fprintf(os.Stderr, "atlas: credstore persistence: %v\n", cpErr)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "atlas: credstore persistence wired (%d credential(s) rehydrated from api_keys)\n", credsLoaded)
 
 		// Slice 508: SCIM provisioning credential store. Same hasher +
 		// BYPASSRLS authPool as api_keys (the lookup-by-hash auth path runs

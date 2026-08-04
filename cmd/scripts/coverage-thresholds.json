@@ -200,7 +200,7 @@
     "internal/api/connectors": 86,
     "internal/api/controldetail": 90,
     "internal/api/controls": 75,
-    "internal/api/credstore": 69,
+    "internal/api/credstore": 73,
     "internal/api/decisions": 37,
     "internal/api/evidencesummary": 88,
     "internal/api/freshnessdrift": 81,

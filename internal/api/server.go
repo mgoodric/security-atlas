@@ -374,6 +374,18 @@ func (s *Server) AttachAPIKeyStore(store *apikeystore.Store) {
 	s.apikeyStore = store
 }
 
+// AttachCredstorePersistence wires a durability backend into the
+// credential store and rehydrates it (OE-435, chaos gap G-1): credentials
+// issued via the AdminCredentials service persist to api_keys and survive
+// a process restart. Returns the number of credentials loaded. cmd/atlas
+// wires it once at startup, AFTER the bootstrap issuance block — bootstrap
+// credentials are re-minted from the environment each boot and stay
+// memory-only by design. Unit servers leave it unattached and keep the
+// pure in-memory behavior.
+func (s *Server) AttachCredstorePersistence(p credstore.Persister) (int, error) {
+	return s.credStore.AttachPersistence(p)
+}
+
 // AttachSCIM wires the slice-508 SCIM provisioning credential store. When set,
 // the inbound /scim/v2/* endpoints mount behind the SCIM auth middleware and
 // the admin /v1/admin/scim-credentials issuance/revocation routes mount.
