@@ -81,10 +81,21 @@ records. Both are first-class objects with append-only audit logs;
 nothing is deleted.
 
 ```sh
-just atlas-cli walkthrough record \
-  --period <id> --control <id> \
-  --narrative "Quarterly change review demo" \
-  --attachment ./change-review.pdf
+# Record the walkthrough (the web UI does the same thing).
+curl -fsS -X POST http://localhost:8080/v1/walkthroughs \
+  -H "Authorization: Bearer $ATLAS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"control_id":"<control id>","audit_period_id":"<period id>",
+       "narrative":"Quarterly change review demo"}'
+
+# Attach the supporting artifact (multipart upload).
+curl -fsS -X POST http://localhost:8080/v1/walkthroughs/<id>/attachments \
+  -H "Authorization: Bearer $ATLAS_TOKEN" \
+  -F file=@./change-review.pdf
+
+# Seal it — after finalize the narrative and attachments are immutable.
+curl -fsS -X POST http://localhost:8080/v1/walkthroughs/<id>:finalize \
+  -H "Authorization: Bearer $ATLAS_TOKEN"
 ```
 
 ## Step 4 — freeze the period
@@ -93,7 +104,7 @@ When the auditor is ready for a fixed evidence universe, freeze the
 period:
 
 ```sh
-curl -fsS -X POST http://localhost:8080/v1/audit-periods/<id>:freeze \
+curl -fsS -X POST http://localhost:8080/v1/audit-periods/<id>/freeze \
   -H "Authorization: Bearer $ATLAS_TOKEN"
 ```
 
@@ -145,9 +156,14 @@ without leaving the bundle.
 
 Export the full bundle:
 
+The export runs against a **frozen** period only, and needs the
+`oscal-bridge` sidecar running (see
+[`oscal-bridge/README.md`](https://github.com/mgoodric/security-atlas/blob/main/oscal-bridge/README.md)):
+
 ```sh
-just atlas-cli oscal-export \
-  --period <id> \
+security-atlas-cli oscal-export \
+  --tenant-id <tenant id> \
+  --period-id <period id> \
   --out ./oscal-soc2-q2-2026/
 ```
 

@@ -343,7 +343,7 @@ The AI-assist boundary is preserved structurally: `internal/oscal/` and `oscal-b
 ### Where to read more
 
 - **Canvas:** [`Plans/canvas/03-ucf.md`](../../Plans/canvas/03-ucf.md) §3.4 — OSCAL is the wire format; [`Plans/canvas/08-audit-workflow.md`](../../Plans/canvas/08-audit-workflow.md) §8.4 — freeze horizon
-- **ADR:** [`docs/adr/0003-audit-period-freeze-hash.md`](../adr/0003-audit-period-freeze-hash.md) — what the freeze hash commits
+- **ADR:** [`docs/adr/0003-audit-period-freeze-hash-inputs.md`](../adr/0003-audit-period-freeze-hash-inputs.md) — what the freeze hash commits
 - **Slice docs:** [`docs/issues/030-oscal-ssp-poam-export.md`](../issues/030-oscal-ssp-poam-export.md) (export pipeline), [`docs/issues/028-audit-period-freezing.md`](../issues/028-audit-period-freezing.md) (the freeze gate this depends on)
 - **Go packages:** [`internal/oscal/`](../../internal/oscal/) — `Exporter.Export`, `Aggregate`, `Bundle`, `BridgeClient`
 - **Python bridge:** [`oscal-bridge/`](../../oscal-bridge/) — compliance-trestle wrapping

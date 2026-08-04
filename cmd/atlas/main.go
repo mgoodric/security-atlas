@@ -57,6 +57,7 @@ import (
 	notifywebhook "github.com/mgoodric/security-atlas/internal/notify/webhook"
 	atlasotel "github.com/mgoodric/security-atlas/internal/observability/otel"
 	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/personnelsecurity"
 	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/scim"
@@ -285,6 +286,25 @@ func main() {
 			logger,
 		)
 		fmt.Fprintf(os.Stderr, "atlas: risk residual subscriber ready (slice 020)\n")
+	}
+
+	// OE-661: the personnel-security worker-event subscriber binds another
+	// durable JetStream consumer to the same evidence-ingest stream. On every
+	// hris.worker_lifecycle.v1 record it creates the joiner/leaver checklist
+	// via personnelsecurity.Store.HandleWorkerEvent (idempotent per
+	// tenant+source+source-event-id), so HRIS events flowing through the
+	// Rippling/BambooHR connector path open onboarding/offboarding checklists
+	// without manual entry. Only wired when NATS + the DB pool are both
+	// available.
+	var personnelSubscriber *personnelsecurity.WorkerEventSubscriber
+	if streamConn != nil && pool != nil {
+		personnelSubscriber = personnelsecurity.NewWorkerEventSubscriber(
+			streamConn.Stream(),
+			streamConn.Cfg().Subject,
+			personnelsecurity.NewStore(pool),
+			logger,
+		)
+		fmt.Fprintf(os.Stderr, "atlas: personnel security worker-event subscriber ready (OE-661)\n")
 	}
 
 	cfg := api.Config{
@@ -860,6 +880,20 @@ func main() {
 		}()
 	}
 
+	// OE-661: drive the personnel-security worker-event subscriber alongside
+	// the other consumers. Shares the same stop signal so SIGTERM tears it
+	// down with everything else.
+	if personnelSubscriber != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "atlas: personnel security worker-event subscriber starting\n")
+			if err := personnelSubscriber.Start(ctx); err != nil {
+				errCh <- fmt.Errorf("personnel security worker-event subscriber: %w", err)
+			}
+		}()
+	}
+
 	// Slice 021: exception auto-expiry tick loop. Runs as the migrator
 	// role (BYPASSRLS) so the sweep can cross tenants -- the per-tenant
 	// transaction inside applies the GUC for RLS-honest writes. Default
@@ -928,6 +962,43 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: decision overdue notifier ticking every %s\n", interval.String())
 				if err := notifier.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("decision overdue notifier: %w", err)
+				}
+			}()
+		}
+	}
+
+	// OE-661: personnel-security overdue-offboarding sweep. Runs as the
+	// migrator role (BYPASSRLS) to enumerate the tenant ids with overdue open
+	// offboarding checklists; each tenant's surfacing runs through the
+	// app-role Store under that tenant's GUC (RLS-honest) and notifies the
+	// tenant's active users, one notification per (checklist, recipient) ever
+	// (the store's dedup probe). Default cadence is 24h, matching the
+	// decision-overdue notifier; ATLAS_PERSONNEL_OVERDUE_INTERVAL overrides
+	// for dev loops. Only mounts when the migrator URL + the app pool are
+	// both available.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		psCtx, psCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		psPool, err := atlasotel.NewTracedPool(psCtx, migratorURL)
+		psCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: personnel overdue pool: %v\n", err)
+		} else {
+			interval := personnelsecurity.DefaultOverdueSweepInterval
+			if raw := os.Getenv("ATLAS_PERSONNEL_OVERDUE_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_PERSONNEL_OVERDUE_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			psNotifier := personnelsecurity.NewOverdueNotifier(psPool, personnelsecurity.NewStore(pool), logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer psPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: personnel overdue notifier ticking every %s\n", interval.String())
+				if err := psNotifier.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("personnel overdue notifier: %w", err)
 				}
 			}()
 		}

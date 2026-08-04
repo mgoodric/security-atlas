@@ -87,6 +87,10 @@ const NAV_BASE: NavItem[] = [
   { href: "/audits", label: "Audits" },
   { href: "/policies", label: "Policies" },
   { href: "/vendors", label: "Vendors" },
+  // OE-664 — personnel-security checklists sit in the Operations cluster
+  // (Calendar / Vendors / Questionnaires). All authed users see the
+  // entry; the API layer enforces the program-read role gate (OE-663).
+  { href: "/personnel-security", label: "Personnel" },
   // Slice 263 — Questionnaires sits in the Operations cluster (matches
   // Calendar / Vendors). All authed users see the entry; per-tenant
   // write authz is enforced at the API layer (slice 155).
