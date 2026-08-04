@@ -11,9 +11,11 @@ package oidc_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -133,6 +135,43 @@ func TestBeginLoginPropagatesResolverError(t *testing.T) {
 	}, false)
 	if err != oidc.ErrUnknownIdp {
 		t.Fatalf("BeginLogin returned %v, want ErrUnknownIdp", err)
+	}
+}
+
+func TestBeginLoginDiscoveryFailureIsProviderUnavailableAndTimeoutBounded(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done()
+	})
+	idp := httptest.NewServer(mux)
+	t.Cleanup(idp.Close)
+
+	tenantID := uuid.New()
+	a := oidc.NewWithDiscoveryTimeout(unitStubResolver{cfg: oidc.IdpConfig{
+		ID:           uuid.New(),
+		TenantID:     tenantID,
+		Name:         "primary",
+		IssuerURL:    idp.URL,
+		ClientID:     "test-client",
+		ClientSecret: "test-secret",
+		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
+	}}, 25*time.Millisecond)
+
+	start := time.Now()
+	_, err := a.BeginLogin(context.Background(), oidc.LoginInput{
+		TenantID: tenantID,
+		IdpName:  "primary",
+	}, false)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, oidc.ErrProviderUnavailable) {
+		t.Fatalf("BeginLogin error = %v, want ErrProviderUnavailable", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("BeginLogin took %v; discovery timeout path is not bounded", elapsed)
+	}
+	if strings.Contains(err.Error(), idp.URL) {
+		t.Fatalf("provider-unavailable error leaked issuer URL: %v", err)
 	}
 }
 
