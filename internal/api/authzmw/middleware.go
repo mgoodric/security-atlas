@@ -32,11 +32,19 @@
 package authzmw
 
 import (
+	"encoding/json"
+	"errors"
+	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 
+	"github.com/google/uuid"
+
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/requestidmw"
 	"github.com/mgoodric/security-atlas/internal/authz"
 )
 
@@ -72,7 +80,21 @@ func Middleware(engine *authz.Engine, audit *authz.AuditWriter, exempt ...string
 
 			decision, err := engine.Decide(r.Context(), in)
 			if err != nil {
-				httpresp.WriteError(w, http.StatusInternalServerError, "authorization engine error")
+				// OE-432 (slice 356a G-1/G-2): distinguish a dependency
+				// outage from a genuine policy-engine failure, and never
+				// drop err on the floor unlogged.
+				//
+				//   - DB unreachable → 503 database_unavailable with a
+				//     retry_after hint (slice 335 Experiment 3 shape),
+				//     logged here with request context.
+				//   - anything else → generic 500 via httperr, which
+				//     logs the full error keyed by request_id (slice
+				//     367 CWE-209 discipline).
+				if errors.Is(err, authz.ErrDependencyUnavailable) {
+					writeDatabaseUnavailable(w, r, in, err)
+					return
+				}
+				httperr.WriteInternal(w, r, "authz decide", err)
 				return
 			}
 
@@ -115,6 +137,60 @@ func Middleware(engine *authz.Engine, audit *authz.AuditWriter, exempt ...string
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// dbUnavailableRetryAfterSeconds is the client back-off hint carried in
+// both the Retry-After header and the JSON retry_after field of the 503
+// dependency-outage response. 5s per the slice 335 Experiment 3 design
+// (the measured recovery after Postgres restart was ~1s, so 5s is a
+// comfortable client-side backoff).
+const dbUnavailableRetryAfterSeconds = 5
+
+// writeDatabaseUnavailable emits the dependency-outage response for an
+// authz decision that failed because the database was unreachable
+// (authz.ErrDependencyUnavailable): HTTP 503 with the structured body
+//
+//	{"error":"database_unavailable","retry_after":5,"request_id":"<id>"}
+//
+// plus a Retry-After header, and logs the full underlying error at
+// error level with request context (request_id, method, path, tenant,
+// user). The body carries no driver text, SQLSTATE, or internal detail
+// — that stays in the server-side log, keyed by request_id, matching
+// the slice 367 error-shape discipline.
+//
+// Not routed through httperr.WriteStatus because that helper
+// deliberately genericises every 5xx body to "internal error"; this
+// response's whole point is to name the unavailable dependency and
+// carry a retry hint (slice 356a gap G-1).
+func writeDatabaseUnavailable(w http.ResponseWriter, r *http.Request, in authz.Input, err error) {
+	id := requestidmw.RequestIDFromContext(r.Context())
+	if id == "" {
+		// Same fallback as httperr: mint an ID when the middleware is
+		// exercised without requestidmw in the chain (direct handler
+		// tests) so the client always gets a correlatable ID.
+		id = uuid.NewString()
+	}
+
+	slog.Error("authz decide failed: database dependency unavailable",
+		slog.String("request_id", id),
+		slog.String("op", "authz decide"),
+		slog.String("method", r.Method),
+		slog.String("path", r.URL.Path),
+		slog.String("tenant_id", in.TenantID),
+		slog.String("user_id", in.User.ID),
+		slog.Int("status", http.StatusServiceUnavailable),
+		slog.String("error", err.Error()),
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set(requestidmw.HeaderName, id)
+	w.Header().Set("Retry-After", strconv.Itoa(dbUnavailableRetryAfterSeconds))
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":       "database_unavailable",
+		"retry_after": dbUnavailableRetryAfterSeconds,
+		"request_id":  id,
+	})
 }
 
 // IsCredentialPresent is exported for the matrix integration test to
