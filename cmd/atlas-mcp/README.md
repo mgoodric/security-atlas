@@ -88,17 +88,48 @@ existing proposals before filing more.
 
 ## Install
 
-Build from source:
+Download the signed release binary:
+
+```bash
+version="vX.Y.Z"
+os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+arch="$(uname -m)"
+case "$arch" in
+  x86_64) arch="amd64" ;;
+  aarch64|arm64) arch="arm64" ;;
+esac
+
+gh release download "$version" \
+  --repo mgoodric/security-atlas \
+  --pattern "atlas-mcp_${version#v}_${os}_${arch}.tar.gz" \
+  --pattern "security-atlas_${version#v}_checksums.txt" \
+  --pattern "security-atlas_${version#v}_checksums.txt.sigstore.json"
+
+cosign verify-blob \
+  --certificate-identity-regexp 'https://github.com/mgoodric/security-atlas/\.github/workflows/release\.yml@.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --bundle "security-atlas_${version#v}_checksums.txt.sigstore.json" \
+  "security-atlas_${version#v}_checksums.txt"
+
+if command -v sha256sum >/dev/null 2>&1; then
+  sha256sum -c --ignore-missing "security-atlas_${version#v}_checksums.txt"
+else
+  grep "atlas-mcp_${version#v}_${os}_${arch}.tar.gz" "security-atlas_${version#v}_checksums.txt" | shasum -a 256 -c -
+fi
+tar -xzf "atlas-mcp_${version#v}_${os}_${arch}.tar.gz"
+install -m 0755 atlas-mcp /usr/local/bin/atlas-mcp
+```
+
+Or install from the Homebrew tap:
+
+```bash
+brew install mgoodric/tap/atlas-mcp
+```
+
+Fallback: build from source from a checked-out release tag:
 
 ```bash
 go build -o /usr/local/bin/atlas-mcp ./cmd/atlas-mcp
-```
-
-Or use the release binary (when released — slice 172 ships from
-source only):
-
-```bash
-# Future: gh release download vX.Y.Z --pattern 'atlas-mcp_*'
 ```
 
 ## Configure credentials

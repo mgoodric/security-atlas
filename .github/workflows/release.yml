@@ -1,8 +1,9 @@
 # Release pipeline — security-atlas
 #
-# Triggered by tags matching v*. Builds 5 OS/arch targets via GoReleaser,
-# signs the checksums file with cosign (keyless OIDC via Sigstore Fulcio),
-# publishes to GitHub Releases, pushes the Homebrew formula to the tap.
+# Triggered by tags matching v*. Builds the core security-atlas archives plus
+# atlas-mcp for darwin/linux amd64/arm64 via GoReleaser, signs the checksums
+# file with cosign (keyless OIDC via Sigstore Fulcio), publishes to GitHub
+# Releases, pushes the Homebrew formulas to the tap.
 #
 # Run locally (dry, requires goreleaser + cosign + a temp PAT):
 #   GORELEASER_CURRENT_TAG=v0.0.0-dev goreleaser release --snapshot --clean --skip=publish,sign
@@ -189,8 +190,8 @@ jobs:
 
       - name: Attest build provenance (SLSA) for release artifacts
         # AC-2 / P0-451-2: bind EACH released artifact's digest (the binary
-        # archives, the cli-only archives, the checksums file, and the
-        # per-archive SBOMs) to this exact GitHub Actions workflow identity
+        # archives, the cli-only and mcp-only archives, the checksums file, and
+        # the per-archive SBOMs) to this exact GitHub Actions workflow identity
         # via SLSA build-provenance. `subject-path` globs every release asset
         # so provenance covers each artifact digest individually — NOT only
         # the aggregate checksums.txt. Mirrors container-publish.yml's proven
