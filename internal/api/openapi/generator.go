@@ -197,6 +197,24 @@ components:
         Generic error envelope. Specific operations may return richer
         error shapes (validation details, field-level messages); this
         is the lowest-common-denominator contract.
+    SchemaRegistryUnavailableError:
+      type: object
+      required: [error, code, request_id]
+      properties:
+        error:
+          type: string
+          description: Generic 5xx message. Internal detail is logged server-side only.
+        code:
+          type: string
+          enum: [schema_registry_unavailable]
+          description: Branchable dependency-failure code for schema-registry read outages.
+        request_id:
+          type: string
+          description: Correlates the client response with server-side logs.
+      description: |
+        Retryable schema-registry dependency failure. The response does not
+        include SQLSTATE, table names, role names, filesystem paths, or other
+        internal error detail.
     Ack:
       type: object
       description: |
@@ -376,6 +394,12 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 		}
 		return nil
 	}
+	if isSchemaRegistryReadOperation(r) {
+		if err := writeSchemaRegistryReadOperationDetails(w); err != nil {
+			return err
+		}
+		return nil
+	}
 	// Responses — single `default` ref to the Ack envelope. v1 spec
 	// does not commit to per-operation response schemas; follow-on
 	// slice will refine. Operations that genuinely return bodies (most
@@ -408,6 +432,35 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 
 func isSearchOperation(r RouteSpec) bool {
 	return r.Method == "GET" && r.Path == "/v1/search"
+}
+
+func isSchemaRegistryReadOperation(r RouteSpec) bool {
+	return r.Method == "GET" && (r.Path == "/v1/schemas" || r.Path == "/v1/schemas/{kind}/{semver}")
+}
+
+func writeSchemaRegistryReadOperationDetails(w io.Writer) error {
+	if _, err := io.WriteString(w, `      responses:
+        "503":
+          description: Schema registry dependency unavailable. Retryable; no internal database detail is exposed.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchemaRegistryUnavailableError"
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+`); err != nil {
+		return err
+	}
+	return nil
 }
 
 func writeSearchOperationDetails(w io.Writer) error {
