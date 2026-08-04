@@ -42,8 +42,17 @@ const (
 	DecisionRevoke = "revoke"
 
 	ReminderNotificationType = "access_review_due"
-	EvidenceKind             = "access_review.recertification.v1"
-	CC6ControlRef            = "soc2_cc6_3_periodic_access_review"
+	// EvidenceKind must stay aligned with the registered platform schema
+	// (internal/api/schemaregistry/schemas/access_review.completion/1.0.0.json)
+	// and with the CC6.3 bundle's evidence query, both keyed on this kind —
+	// an unregistered kind would never satisfy the control it certifies.
+	EvidenceKind          = "access_review.completion.v1"
+	EvidenceSchemaVersion = "1.0.0"
+	CC6ControlRef         = "soc2_cc6_3_periodic_access_review"
+	// evidenceReviewerRole is the reviewer_role reported in completion
+	// evidence. Campaign reviewers are assigned per campaign, not drawn from
+	// a role table, so the role is the campaign-reviewer designation itself.
+	evidenceReviewerRole = "campaign_reviewer"
 )
 
 var (
@@ -144,6 +153,25 @@ type Rollup struct {
 	RevokeDecisions  int        `json:"revoke_decisions"`
 	ReviewerCount    int        `json:"reviewer_count"`
 	EvidenceRecordID *uuid.UUID `json:"evidence_record_id,omitempty"`
+}
+
+// CompletionEvidencePayload shapes a completed campaign's rollup into the
+// registered access_review.completion/1.0.0 schema (additionalProperties is
+// false there, so only its declared fields may appear). users_terminated
+// counts revoke DECISIONS by distinct principal — enforcement remains the
+// operator's action via the revoke-list export, never this module's.
+func CompletionEvidencePayload(r Rollup, campaignName, completedBy string, usersReviewed, usersTerminated int) map[string]any {
+	return map[string]any{
+		"review_id":          r.CampaignID.String(),
+		"completed_by":       completedBy,
+		"reviewer_role":      evidenceReviewerRole,
+		"users_reviewed":     usersReviewed,
+		"users_terminated":   usersTerminated,
+		"users_role_changed": 0,
+		"notes": fmt.Sprintf(
+			"campaign %q: %d items reviewed by %d reviewer(s); %d keep, %d revoke decisions. Revoke decisions are recorded for operator enforcement, not auto-applied.",
+			campaignName, r.TotalItems, r.ReviewerCount, r.KeepDecisions, r.RevokeDecisions),
+	}
 }
 
 type RevokeDecision struct {
@@ -343,9 +371,41 @@ func (s *Store) Complete(ctx context.Context, campaignID uuid.UUID) (Rollup, err
 		if out.EvidenceRecordID != nil {
 			return nil
 		}
-		payload, err := json.Marshal(out)
+		var campaignName, createdBy string
+		var usersReviewed, usersTerminated int
+		if err := tx.QueryRow(ctx, `
+			SELECT c.name, c.created_by,
+				COALESCE(COUNT(DISTINCT i.principal_user_id), 0)::int,
+				COALESCE(COUNT(DISTINCT i.principal_user_id) FILTER (WHERE i.decision = 'revoke'), 0)::int
+			FROM access_review_campaigns c
+			LEFT JOIN access_review_items i
+				ON i.tenant_id = c.tenant_id AND i.campaign_id = c.id
+			WHERE c.tenant_id = $1 AND c.id = $2
+			GROUP BY c.name, c.created_by
+		`, tenantID, campaignID).Scan(&campaignName, &createdBy, &usersReviewed, &usersTerminated); err != nil {
+			return fmt.Errorf("access_review: completion stats: %w", err)
+		}
+		payload, err := json.Marshal(CompletionEvidencePayload(out, campaignName, createdBy, usersReviewed, usersTerminated))
 		if err != nil {
 			return err
+		}
+		// Best-effort control resolution: if the tenant imported the SOC 2
+		// kit, attach the CC6.3 control's UUID so the eval engine (which
+		// matches control_id, or control_ref as a UUID string) picks the
+		// record up. Without the kit the record still lands with the bundle
+		// slug in control_ref for traceability.
+		var controlID *uuid.UUID
+		var resolved uuid.UUID
+		switch err := tx.QueryRow(ctx, `
+			SELECT id FROM controls
+			WHERE tenant_id = $1 AND bundle_id = $2 AND superseded_by IS NULL
+		`, tenantID, CC6ControlRef).Scan(&resolved); {
+		case err == nil:
+			controlID = &resolved
+		case errors.Is(err, pgx.ErrNoRows):
+			// kit not imported; leave control_id NULL
+		default:
+			return fmt.Errorf("access_review: resolve control: %w", err)
 		}
 		evidenceID := uuid.New()
 		hash := sha256.Sum256(payload)
@@ -358,15 +418,15 @@ func (s *Store) Complete(ctx context.Context, campaignID uuid.UUID) (Rollup, err
 				ingestion_path, source_attribution, scope_canonical, observed_at_nanos
 			)
 			VALUES (
-				$1, $2, NULL, $3, $4,
+				$1, $2, $11, $3, $4,
 				'{"source":"access_review_campaign"}'::jsonb,
 				'pass', $5, $6, 'quarterly', $7,
-				$8, $9, '1.0.0', 'access_review_campaign',
+				$8, $9, $12, 'access_review_campaign',
 				'manual_upload', '{"producer":"access_review"}'::jsonb, '{}'::jsonb, $10
 			)
 		`, evidenceID, tenantID, CC6ControlRef, now, payload, hex.EncodeToString(hash[:]),
 			now.Add(400*24*time.Hour), "access-review:"+campaignID.String()+":completion",
-			EvidenceKind, now.UnixNano())
+			EvidenceKind, now.UnixNano(), controlID, EvidenceSchemaVersion)
 		if err != nil {
 			return fmt.Errorf("access_review: insert evidence: %w", err)
 		}

@@ -191,16 +191,23 @@ func seedMember(t *testing.T, pool *pgxpool.Pool, tenant string, groupID, userID
 
 func assertEvidence(t *testing.T, pool *pgxpool.Pool, tenant string, evidenceID uuid.UUID) {
 	t.Helper()
-	var controlRef, kind string
+	var controlRef, kind, schemaVersion string
+	var payload map[string]any
 	if err := pool.QueryRow(context.Background(), `
-		SELECT control_ref, evidence_kind
+		SELECT control_ref, evidence_kind, schema_version, payload
 		FROM evidence_records
 		WHERE tenant_id = $1 AND id = $2
-	`, tenant, evidenceID).Scan(&controlRef, &kind); err != nil {
+	`, tenant, evidenceID).Scan(&controlRef, &kind, &schemaVersion, &payload); err != nil {
 		t.Fatalf("query evidence: %v", err)
 	}
-	if controlRef != CC6ControlRef || kind != EvidenceKind {
-		t.Fatalf("evidence = (%s, %s), want (%s, %s)", controlRef, kind, CC6ControlRef, EvidenceKind)
+	if controlRef != CC6ControlRef || kind != EvidenceKind || schemaVersion != EvidenceSchemaVersion {
+		t.Fatalf("evidence = (%s, %s, %s), want (%s, %s, %s)",
+			controlRef, kind, schemaVersion, CC6ControlRef, EvidenceKind, EvidenceSchemaVersion)
+	}
+	for _, field := range []string{"review_id", "completed_by", "reviewer_role", "users_reviewed"} {
+		if _, ok := payload[field]; !ok {
+			t.Fatalf("evidence payload missing required schema field %q: %v", field, payload)
+		}
 	}
 }
 

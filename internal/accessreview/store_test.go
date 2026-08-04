@@ -2,12 +2,77 @@ package accessreview
 
 import (
 	"bytes"
+	"encoding/json"
+	"io/fs"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/santhosh-tekuri/jsonschema/v6"
+
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 )
+
+// TestCompletionEvidenceMatchesRegisteredSchema pins the evidence emission to
+// the platform-registered access_review.completion schema. The original
+// emission used an unregistered kind with a payload the CC6.3 evidence query
+// could never consume; this is the unit-tier guard against that regressing.
+func TestCompletionEvidenceMatchesRegisteredSchema(t *testing.T) {
+	t.Parallel()
+	raw, err := fs.ReadFile(schemaregistry.PlatformSchemasFS(), "access_review.completion/1.0.0.json")
+	if err != nil {
+		t.Fatalf("read embedded schema: %v", err)
+	}
+
+	var meta struct {
+		Kind   string `json:"x-evidence-kind"`
+		Semver string `json:"x-semver"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		t.Fatalf("decode schema metadata: %v", err)
+	}
+	if meta.Kind != EvidenceKind {
+		t.Fatalf("EvidenceKind = %q, want registered kind %q", EvidenceKind, meta.Kind)
+	}
+	if meta.Semver != EvidenceSchemaVersion {
+		t.Fatalf("EvidenceSchemaVersion = %q, want registered semver %q", EvidenceSchemaVersion, meta.Semver)
+	}
+
+	c := jsonschema.NewCompiler()
+	doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(raw))
+	if err != nil {
+		t.Fatalf("unmarshal schema: %v", err)
+	}
+	if err := c.AddResource("mem://schema", doc); err != nil {
+		t.Fatalf("add schema resource: %v", err)
+	}
+	sch, err := c.Compile("mem://schema")
+	if err != nil {
+		t.Fatalf("compile schema: %v", err)
+	}
+
+	payload := CompletionEvidencePayload(Rollup{
+		CampaignID:      uuid.New(),
+		TotalItems:      3,
+		KeepDecisions:   2,
+		RevokeDecisions: 1,
+		ReviewerCount:   2,
+	}, "Q3 2026 quarterly review", "matt", 3, 1)
+
+	// Round-trip through JSON exactly as Complete does before inserting.
+	b, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if err := sch.Validate(v); err != nil {
+		t.Fatalf("payload rejected by registered schema: %v", err)
+	}
+}
 
 func TestParseManualCSVAppliesScope(t *testing.T) {
 	csv := strings.NewReader(`system,entitlement,user_id,email,source_ref
