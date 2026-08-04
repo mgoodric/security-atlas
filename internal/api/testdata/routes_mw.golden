@@ -23,6 +23,7 @@ GET /auth/oidc/login 8
 GET /health 8
 GET /metrics 8
 GET /oauth/authorize 8
+GET /ready 8
 GET /scim/v2/Groups 9
 GET /scim/v2/Groups/{id} 9
 GET /scim/v2/ResourceTypes 9
