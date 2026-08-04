@@ -178,6 +178,18 @@ type Receipt struct {
 	Deduplicated bool
 }
 
+// ReceiptStatus is the pusher-visible terminal status for a publish receipt.
+// It is read from evidence_audit_log, not inferred from ledger presence.
+type ReceiptStatus struct {
+	RecordID       string
+	CredentialID   string
+	Decision       string
+	ReasonCode     string
+	IdempotencyKey *string
+	EvidenceKind   *string
+	ReceivedAt     time.Time
+}
+
 // Service holds the dependencies of the ingestion stage. The pool MUST
 // be the application-role pool (atlas_app NOSUPERUSER NOBYPASSRLS) so
 // RLS policies are enforced; the migration role can BYPASSRLS and would
@@ -229,6 +241,45 @@ func New(pool *pgxpool.Pool, validator SchemaValidator) *Service {
 		path:          "push",
 		marshalLedger: protojson.Marshal,
 	}
+}
+
+// LookupReceiptStatus returns the latest audit decision for recordID scoped to
+// the caller's tenant and credential. pgx.ErrNoRows means either the consumer
+// has not reached a terminal decision yet or the receipt belongs to a different
+// tenant/credential; callers should not distinguish those cases at the wire.
+func (s *Service) LookupReceiptStatus(ctx context.Context, cred credstore.Credential, recordID uuid.UUID) (ReceiptStatus, error) {
+	if cred.TenantID == "" {
+		return ReceiptStatus{}, fmt.Errorf("ingest: credential has no tenant")
+	}
+	tenantCtx, err := tenancy.WithTenant(ctx, cred.TenantID)
+	if err != nil {
+		return ReceiptStatus{}, fmt.Errorf("ingest: tenant context: %w", err)
+	}
+	tx, err := s.pool.Begin(tenantCtx)
+	if err != nil {
+		return ReceiptStatus{}, err
+	}
+	defer tx.Rollback(tenantCtx)
+	if err := tenancy.ApplyTenant(tenantCtx, tx); err != nil {
+		return ReceiptStatus{}, err
+	}
+	row, err := dbx.New(tx).GetEvidenceAuditEntryByReceipt(tenantCtx, dbx.GetEvidenceAuditEntryByReceiptParams{
+		TenantID:     pgUUID(cred.TenantID),
+		CredentialID: cred.ID,
+		RecordID:     pgtype.UUID{Bytes: recordID, Valid: true},
+	})
+	if err != nil {
+		return ReceiptStatus{}, err
+	}
+	return ReceiptStatus{
+		RecordID:       uuid.UUID(row.RecordID.Bytes).String(),
+		CredentialID:   row.CredentialID,
+		Decision:       row.Decision,
+		ReasonCode:     row.ReasonCode,
+		IdempotencyKey: row.IdempotencyKey,
+		EvidenceKind:   row.EvidenceKind,
+		ReceivedAt:     row.ReceivedAt.Time,
+	}, nil
 }
 
 // withLedgerMarshaler returns a copy of s using the supplied marshal
@@ -284,10 +335,17 @@ func (s *Service) WithPath(path string) *Service {
 // Process is the boundary slice 015 will preserve. The function does NOT
 // call into any transport layer or any evaluation code.
 func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential) (Receipt, Decision, error) {
+	return s.ProcessWithRecordID(ctx, rec, cred, pgtype.UUID{})
+}
+
+// ProcessWithRecordID runs Process using recordID as the ledger/audit id when
+// it is valid. The stream-buffer consumer uses this to make the publish-time
+// receipt id the same id a pusher later polls for terminal status.
+func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential, recordID pgtype.UUID) (Receipt, Decision, error) {
 	receivedAt := s.clock()
 
 	if rec == nil {
-		s.writeAudit(ctx, cred, "", "", DecisionRejectedValidation, "nil record", pgtype.UUID{})
+		s.writeAudit(ctx, cred, "", "", DecisionRejectedValidation, "nil record", recordID)
 		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: record is nil", ErrMissingField)
 	}
 
@@ -299,7 +357,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	}
 
 	if msg := missingField(rec); msg != "" {
-		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), rec.GetEvidenceKind(), DecisionRejectedValidation, msg, pgtype.UUID{})
+		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), rec.GetEvidenceKind(), DecisionRejectedValidation, msg, recordID)
 		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: %s", ErrMissingField, msg)
 	}
 
@@ -308,7 +366,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	skew := observed.Sub(receivedAt)
 	if skew < -MaxObservedAtSkew || skew > MaxObservedAtSkew {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedObservedAtSkew,
-			fmt.Sprintf("observed_at skew %s > %s", skew, MaxObservedAtSkew), pgtype.UUID{})
+			fmt.Sprintf("observed_at skew %s > %s", skew, MaxObservedAtSkew), recordID)
 		return Receipt{}, DecisionRejectedObservedAtSkew, fmt.Errorf("%w: skew=%s limit=%s", ErrObservedAtSkew, skew, MaxObservedAtSkew)
 	}
 
@@ -333,12 +391,12 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	// post-redact size check is needed.
 	payloadJSON, err := protojson.Marshal(rec.GetPayload())
 	if err != nil {
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, "payload marshal: "+err.Error(), pgtype.UUID{})
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, "payload marshal: "+err.Error(), recordID)
 		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: payload marshal: %v", ErrValidation, err)
 	}
 	if len(payloadJSON) > MaxPayloadBytes && rec.PayloadUri == nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedOversized,
-			fmt.Sprintf("payload %d > %d bytes", len(payloadJSON), MaxPayloadBytes), pgtype.UUID{})
+			fmt.Sprintf("payload %d > %d bytes", len(payloadJSON), MaxPayloadBytes), recordID)
 		return Receipt{}, DecisionRejectedOversized, fmt.Errorf("%w: %d > %d bytes", ErrOversized, len(payloadJSON), MaxPayloadBytes)
 	}
 
@@ -355,11 +413,11 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	}
 	if !registered {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedUnknownKind,
-			fmt.Sprintf("kind=%s version=%s", rec.EvidenceKind, rec.SchemaVersion), pgtype.UUID{})
+			fmt.Sprintf("kind=%s version=%s", rec.EvidenceKind, rec.SchemaVersion), recordID)
 		return Receipt{}, DecisionRejectedUnknownKind, fmt.Errorf("%w: %s/%s", ErrUnknownKind, rec.EvidenceKind, rec.SchemaVersion)
 	}
 	if err := s.valid.ValidatePayload(ctx, cred.TenantID, rec.EvidenceKind, rec.SchemaVersion, payloadJSON); err != nil {
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, err.Error(), pgtype.UUID{})
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, err.Error(), recordID)
 		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
@@ -386,14 +444,14 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 		rules, rerr := lookup.RedactionRulesFor(ctx, cred.TenantID, rec.EvidenceKind, rec.SchemaVersion)
 		if rerr != nil {
 			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
-				"redaction lookup: "+rerr.Error(), pgtype.UUID{})
+				"redaction lookup: "+rerr.Error(), recordID)
 			return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction lookup: %w", rerr)
 		}
 		if len(rules) > 0 {
 			redacted, aerr := redact.Apply(rec.Payload, rules)
 			if aerr != nil {
 				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
-					"redaction apply: "+aerr.Error(), pgtype.UUID{})
+					"redaction apply: "+aerr.Error(), recordID)
 				return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction apply: %w", aerr)
 			}
 			rec.Payload = redacted
@@ -407,7 +465,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 			redactedJSON, merr := s.marshalLedger(redacted)
 			if merr != nil {
 				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
-					"payload re-marshal after redact", pgtype.UUID{})
+					"payload re-marshal after redact", recordID)
 				return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redacted re-marshal: %w", merr)
 			}
 			payloadJSON = redactedJSON
@@ -420,7 +478,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	// (legacy bootstrap credential).
 	if len(cred.Kinds) > 0 && !contains(cred.Kinds, rec.EvidenceKind) {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
-			fmt.Sprintf("credential %s not authorized for kind %s", cred.ID, rec.EvidenceKind), pgtype.UUID{})
+			fmt.Sprintf("credential %s not authorized for kind %s", cred.ID, rec.EvidenceKind), recordID)
 		return Receipt{}, DecisionRejectedScopeViolation, fmt.Errorf("%w: kind=%s", ErrScopeViolation, rec.EvidenceKind)
 	}
 
@@ -431,7 +489,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	if cred.ScopePredicate != "" {
 		if !scopeSatisfiesPredicate(rec.GetScope(), cred.ScopePredicate) {
 			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
-				fmt.Sprintf("scope_predicate %q not satisfied", cred.ScopePredicate), pgtype.UUID{})
+				fmt.Sprintf("scope_predicate %q not satisfied", cred.ScopePredicate), recordID)
 			return Receipt{}, DecisionRejectedScopeViolation, fmt.Errorf("%w: predicate=%q", ErrScopeViolation, cred.ScopePredicate)
 		}
 	}
@@ -442,7 +500,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	// reproduce, and it is unchanged by slice 474.
 	hash, err := canonjson.HashRecord(rec)
 	if err != nil {
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson: "+err.Error(), pgtype.UUID{})
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson: "+err.Error(), recordID)
 		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: hash: %w", err)
 	}
 
@@ -455,7 +513,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	// input so the verify is faithful.
 	scopeCanonical, err := canonjson.MarshalCanonicalScope(rec.GetScope())
 	if err != nil {
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson scope: "+err.Error(), pgtype.UUID{})
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson scope: "+err.Error(), recordID)
 		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: canonical scope: %w", err)
 	}
 
@@ -501,7 +559,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	resultEnum, ok := protoResultToEnum(rec.Result)
 	if !ok {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation,
-			"unrecognized result enum", pgtype.UUID{})
+			"unrecognized result enum", recordID)
 		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: result=%s", ErrMissingField, rec.Result)
 	}
 
@@ -511,7 +569,7 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	// either observes the existing row OR trips the UNIQUE index.
 	tenantCtx, terr := tenancy.WithTenant(ctx, cred.TenantID)
 	if terr != nil {
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "WithTenant: "+terr.Error(), pgtype.UUID{})
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "WithTenant: "+terr.Error(), recordID)
 		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: tenant context: %w", terr)
 	}
 
@@ -545,11 +603,14 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 		}
 
 		// AC-1: append the record.
-		recordID := pgUUID(uuid.New().String())
+		insertRecordID := recordID
+		if !insertRecordID.Valid {
+			insertRecordID = pgUUID(uuid.New().String())
+		}
 		validUntil := pgtype.Timestamptz{}
 
 		params := dbx.InsertEvidenceRecordParams{
-			ID:                recordID,
+			ID:                insertRecordID,
 			TenantID:          pgUUID(cred.TenantID),
 			ControlID:         controlID,
 			ControlRef:        rec.ControlId,
@@ -599,10 +660,10 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	if err != nil {
 		if errors.Is(err, ErrIdempotencyMismatch) {
 			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedIdempotencyMismatch,
-				"hash mismatch for idempotency_key", pgtype.UUID{})
+				"hash mismatch for idempotency_key", recordID)
 			return Receipt{}, DecisionRejectedIdempotencyMismatch, ErrIdempotencyMismatch
 		}
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, err.Error(), pgtype.UUID{})
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, err.Error(), recordID)
 		return Receipt{}, DecisionRejectedInternalError, err
 	}
 

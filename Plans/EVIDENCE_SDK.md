@@ -133,6 +133,7 @@ Two transport options, same semantics, both authenticated and tenant-scoped:
 | Endpoint                                                        | Use                                                       | Body                                 |
 | --------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------------ |
 | `POST /v1/evidence:push` (REST/JSON)                            | Maximum reach — works from cURL, any language, CI scripts | One `EvidenceRecord` or batch (≤100) |
+| `GET /v1/evidence/receipts/{record_id}` (REST/JSON)             | Poll the terminal ingest decision for a push receipt      | n/a                                  |
 | `Push(stream<EvidenceRecord>) → stream<EvidenceReceipt>` (gRPC) | High-throughput push from connectors and middleware       | Streamed records                     |
 
 Both wrap the same internal `IngestEvidence` call. The REST endpoint is the public-facing surface for external pushers.
@@ -222,6 +223,8 @@ Push endpoints are rate-limited per credential and per tenant:
 - **429 with `Retry-After`** on overage. The reference SDK respects this and exponential-backs-off.
 
 The ingestion stage between the push endpoint and the ledger uses NATS JetStream (canvas §9.3) for durable buffering — pushes acknowledge as soon as the record is committed to the stream, not after evaluation. This decouples write latency from any downstream evaluation cost.
+
+That means an HTTP `201` from `POST /v1/evidence:push` is a durable stream-commit acknowledgement, not proof that the record has landed in the evidence ledger. The receipt's `record_id` is stable for the pushed record and can be polled at `GET /v1/evidence/receipts/{record_id}`. Once the consumer reaches a terminal decision, the lookup returns the credential-scoped audit decision, including `accepted`, `deduplicated`, or a terminal rejection such as `rejected_unknown_kind` plus `reason_code`. A `404` means the authenticated credential cannot see a terminal decision for that receipt yet; callers must treat that as either "still queued/not consumed" or "not a receipt issued to this credential", without relying on ledger absence.
 
 ### 4.7 Provenance and the audit trail
 

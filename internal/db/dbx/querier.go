@@ -735,6 +735,9 @@ type Querier interface {
 	// means OPTED-OUT (P0-445-7) — the application layer treats no-row as
 	// enabled=false.
 	GetEmailOptIn(ctx context.Context, arg GetEmailOptInParams) (bool, error)
+	// Pusher-visible receipt lookup. Scoped to tenant + credential so a
+	// credential can only see decisions for its own pushed records.
+	GetEvidenceAuditEntryByReceipt(ctx context.Context, arg GetEvidenceAuditEntryByReceiptParams) (EvidenceAuditLog, error)
 	// Single-control freshness lookup — used by tests and by future per-control
 	// detail surfaces.
 	GetEvidenceFreshnessByControl(ctx context.Context, arg GetEvidenceFreshnessByControlParams) (EvidenceFreshness, error)
