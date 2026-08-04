@@ -29,6 +29,7 @@ grc_writable_resources := {
     "risks",
     "framework-scopes",
     "exceptions",
+    "incidents",
     "samples",
     "populations",
     "vendors",
