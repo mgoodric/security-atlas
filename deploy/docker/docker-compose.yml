@@ -11,7 +11,8 @@
 #                    exits 0 (slice 473)
 #   atlas-bootstrap  first-boot one-shot: seed + SCF import + control
 #                    bundle upload, then exits 0 (slice 037)
-#   atlas            platform server — gRPC :50051 + HTTP :8080 (/health)
+#   atlas            platform server — gRPC :50051 + HTTP :8080
+#                    (/health liveness, /ready readiness)
 #   web              Next.js frontend — :3000
 #
 # Startup ordering (enforced by depends_on conditions):
@@ -23,6 +24,7 @@
 #        partial schema) AND atlas-bootstrap starts (seed + SCF import)
 #        run in parallel
 #     -> atlas-bootstrap phase 5 uploads control bundles once /health is up
+#        (/health is liveness; traffic routers should use /ready)
 #     -> web starts
 #
 # Slice 473 — migrate-on-upgrade (confirmed production incident). The
