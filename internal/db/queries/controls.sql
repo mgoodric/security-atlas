@@ -187,22 +187,64 @@ LIMIT $2;
 -- A NULL narg disables that filter clause, so the three modes compose to "AND
 -- of the supplied filters"; in v1 the handler supplies at most one.
 --
--- Ordering is bundle_id ASC, id ASC — deterministic, matching ListActiveControls,
--- so the controls-per-summary cap selects a STABLE subset (not a random one).
+-- Ordering is a deterministic relevance ranking (slice OPENENGINE-407): controls
+-- with no live evidence first, then controls with failing evidence, then stale
+-- freshness read-model rows, then stronger evidence coverage and freshest
+-- observation. bundle_id/id remain the final tie-breakers so the
+-- controls-per-summary cap selects a reproducible subset, not a random one.
 --
 -- RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders alongside
 -- the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant upstream pins the
 -- GUC so the read is tenant-scoped (invariant #6).
-SELECT id, scf_anchor_id, title, control_family
-FROM controls
-WHERE tenant_id = $1
-  AND superseded_by IS NULL
-  AND (sqlc.narg('family')::text IS NULL OR control_family = sqlc.narg('family')::text)
-  AND (
-        sqlc.narg('anchor_ids')::uuid[] IS NULL
-        OR scf_anchor_id = ANY(sqlc.narg('anchor_ids')::uuid[])
-      )
-ORDER BY bundle_id ASC, id ASC
+WITH matched_controls AS (
+    SELECT c.id, c.scf_anchor_id, c.title, c.control_family, c.bundle_id
+    FROM controls c
+    WHERE c.tenant_id = $1
+      AND c.superseded_by IS NULL
+      AND (sqlc.narg('family')::text IS NULL OR c.control_family = sqlc.narg('family')::text)
+      AND (
+            sqlc.narg('anchor_ids')::uuid[] IS NULL
+            OR c.scf_anchor_id = ANY(sqlc.narg('anchor_ids')::uuid[])
+          )
+),
+ranked_controls AS (
+    SELECT
+        c.id,
+        c.scf_anchor_id,
+        c.title,
+        c.control_family,
+        c.bundle_id,
+        count(e.id)::bigint AS evidence_count,
+        count(e.id) FILTER (WHERE e.result = 'fail')::bigint AS failing_evidence_count,
+        max(e.observed_at)::timestamptz AS latest_observed_at,
+        COALESCE(ef.is_stale, false)::bool AS is_stale
+    FROM matched_controls c
+    LEFT JOIN evidence_records e
+        ON e.tenant_id = $1
+       AND (e.control_id = c.id OR e.control_ref = c.id::text)
+    LEFT JOIN evidence_freshness ef
+        ON ef.tenant_id = $1
+       AND ef.control_id = c.id
+    GROUP BY c.id, c.scf_anchor_id, c.title, c.control_family, c.bundle_id, ef.is_stale
+)
+SELECT
+    id,
+    scf_anchor_id,
+    title,
+    control_family,
+    (
+        CASE WHEN evidence_count = 0 THEN 10000 ELSE 0 END +
+        CASE WHEN failing_evidence_count > 0 THEN 1000 ELSE 0 END +
+        CASE WHEN is_stale THEN 100 ELSE 0 END +
+        LEAST(evidence_count, 99)
+    )::bigint AS relevance_score,
+    evidence_count,
+    failing_evidence_count,
+    latest_observed_at,
+    is_stale,
+    count(*) OVER ()::bigint AS total_matched
+FROM ranked_controls
+ORDER BY relevance_score DESC, latest_observed_at DESC NULLS LAST, bundle_id ASC, id ASC
 LIMIT $2;
 
 -- name: InsertControlVersion :one

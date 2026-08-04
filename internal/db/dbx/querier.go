@@ -1422,8 +1422,11 @@ type Querier interface {
 	// A NULL narg disables that filter clause, so the three modes compose to "AND
 	// of the supplied filters"; in v1 the handler supplies at most one.
 	//
-	// Ordering is bundle_id ASC, id ASC — deterministic, matching ListActiveControls,
-	// so the controls-per-summary cap selects a STABLE subset (not a random one).
+	// Ordering is a deterministic relevance ranking (slice OPENENGINE-407): controls
+	// with no live evidence first, then controls with failing evidence, then stale
+	// freshness read-model rows, then stronger evidence coverage and freshest
+	// observation. bundle_id/id remain the final tie-breakers so the
+	// controls-per-summary cap selects a reproducible subset, not a random one.
 	//
 	// RLS posture: the WHERE tenant_id = $1 clause is belt-and-suspenders alongside
 	// the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant upstream pins the

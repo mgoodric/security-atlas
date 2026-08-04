@@ -75,15 +75,14 @@ loose it blows the token budget is the failure the slice doc warns about).
   multiply by controls, so each control contributes fewer. The single-control
   surface can afford 8 because it has only one control.
 
-**Ordering / relevance rule.** Controls are resolved deterministically (`bundle_id
-ASC, id ASC` in `ListActiveControlsForPortfolio`) and the first
-`MaxControlsPerSummary` enter the corpus — a STABLE subset, not a random one. The
-store reads `MaxControlsPerSummary + 1` rows so `TotalControls` is honest (the "K
-of N" label reflects whether the filter matched MORE than the cap) without a
-second COUNT round-trip. Records are ordered `observed_at DESC` (recency, mirroring
-502). "Most-relevant" in v1 == "most-recent within a deterministically-ordered
-control set"; a smarter relevance ranking (coverage-gap-weighted, freshness-
-weighted) is a documented follow-on (see Revisit #2). Both bounds are stated
+**Ordering / relevance rule.** The original slice-750 cut selected controls by
+deterministic catalog order (`bundle_id ASC, id ASC`) and recorded richer
+relevance ranking as follow-on work. OE-407 replaces that selection rule in the
+same `ListActiveControlsForPortfolio` resolver with D6's deterministic
+evidence-risk score before applying `MaxControlsPerSummary`. The resolver now
+returns the exact matched-control count via a window count, so `TotalControls` is
+the true "N" in "K of N" while the corpus remains capped. Records are still
+ordered `observed_at DESC` (recency, mirroring 502). Both bounds are stated
 honestly in the prompt AND the UI ("summarizing the K most-relevant of N controls;
 up to M records each").
 
@@ -197,6 +196,49 @@ fires nothing on first paint, and (ii) a new test proving the BFF request fires
 ONLY after the trigger click. The detection-tier classification above is set to
 `playwright`/`playwright` accordingly.
 
+### D6 — OE-407 relevance ranking: deterministic evidence-risk score, not bundle order. `HIGH`
+
+**The problem.** Slice 750 bounded a framework/family/program summary to 12
+controls, but selected those controls by deterministic catalog order
+(`bundle_id ASC, id ASC`). That was reproducible, but it made "most-relevant" too
+blunt when a filter matched more than the cap: an early catalog control with a
+quiet passing record could displace a later control with no evidence or active
+failure.
+
+**Chosen.** The existing `ListActiveControlsForPortfolio` resolver now ranks the
+same matched control set before the cap using a deterministic weighted score:
+
+- `+10000` when the control has **no current live evidence**.
+- `+1000` when any current live evidence record is `fail`.
+- `+100` when the existing `evidence_freshness` read model marks the control
+  stale.
+- `+min(evidence_count, 99)` for coverage strength.
+- `latest_observed_at DESC`, then `bundle_id ASC`, then `id ASC` break ties.
+
+**Rationale.** Decision relevance is primarily about what the operator must decide
+or investigate next. A no-evidence control is the strongest signal because the
+portfolio summary cannot support any coverage claim for it. A failing record is
+next because it indicates a current negative condition. Staleness follows because
+it is drift risk, but it comes after explicit failure. Coverage strength is a
+smaller positive weight so controls with richer evidence win among otherwise
+similar controls, and freshest observation breaks remaining evidence-backed ties.
+The final catalog/id tie-breakers preserve reproducibility.
+
+**Inputs not used.** Control criticality is not included because the portfolio
+summary path has no canonical control-criticality field. Pulling risk-link weights
+or vendor criticality into this read would conflate separate domains and would
+make this OE larger than the ready relevance leg. Once a first-class control
+criticality signal exists, it can be added as another explicit deterministic
+weight.
+
+**Boundary.** Ranking happens only in the existing `PortfolioStore` /
+`PortfolioFilter` path. It does not create a parallel summary path, and it does
+not touch citation resolution: the selected controls and evidence records still
+form the exact `portfolioAllowedIDs` grounding set. Ranking therefore cannot drop
+or fabricate citations; a model citation outside that ranked set still suppresses
+the whole draft. The scope-cell filter remains deliberately out of scope for this
+OE and stays gated on the FrameworkScope ownership/intersection UX.
+
 ## Inherited 502/749 calls (re-affirmed, unchanged)
 
 - **No fabricated coverage or counts** — strict citation gate over the LARGER
@@ -219,14 +261,10 @@ ONLY after the trigger click. The detection-tier classification above is set to
 1. **Scope-cell portfolio filter.** Add the `applicability_expr ∩
 framework_scope.predicate` intersection as a third filter dimension once the
    PCI/HIPAA scope-ownership UX lands. Captured as the spillover slice (see below).
-2. **Richer relevance ranking.** "Most-relevant of N controls" is currently
-   "most-recent within a deterministic order". A coverage-gap-weighted or
-   freshness-weighted ranking would make the bounded subset more useful when a
-   framework matches far more than 12 controls. Captured as the spillover slice.
-3. **Period-scoped portfolio summary (#749 ∩ #750).** A frozen-audit-period
+2. **Period-scoped portfolio summary (#749 ∩ #750).** A frozen-audit-period
    portfolio rollup — bounded cross-control corpus drawn ONLY from a frozen sample
    population. A further follow-on; not built here (out of scope per the slice doc).
-4. **Bound tuning.** Re-evaluate 12×4 once real operators use it: if a framework
+3. **Bound tuning.** Re-evaluate 12×4 once real operators use it: if a framework
    routinely matches 30+ controls, a "show more" pagination or a larger cap behind
    a per-tenant config may read better. The numbers are a starting point, not a
    constitutional commitment.
