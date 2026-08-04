@@ -83,6 +83,10 @@ type IdpResolver interface {
 // ErrUnknownIdp is the sentinel for "no such IdP configured."
 var ErrUnknownIdp = errors.New("oidc: unknown IdP")
 
+// ErrProviderUnavailable is the sentinel for a configured IdP whose discovery
+// endpoint cannot be reached or does not answer in time.
+var ErrProviderUnavailable = errors.New("oidc: provider unavailable")
+
 // ErrStateMismatch is the CSRF guard's sentinel. The callback returns 400
 // when this fires.
 var ErrStateMismatch = errors.New("oidc: state mismatch (CSRF guard)")
@@ -98,6 +102,7 @@ var ErrNonceMismatch = errors.New("oidc: nonce mismatch (ID-token replay guard)"
 // Authenticator drives the RP-side OIDC flow.
 type Authenticator struct {
 	resolver         IdpResolver
+	discoveryTimeout time.Duration
 	mu               sync.Mutex
 	cache            map[string]cachedProvider // keyed by issuer URL
 	providerCacheTTL time.Duration
@@ -109,10 +114,23 @@ type cachedProvider struct {
 	discoveredAt time.Time
 }
 
+const defaultDiscoveryTimeout = 5 * time.Second
+
 // New constructs an Authenticator over a per-tenant IdP resolver.
 func New(resolver IdpResolver) *Authenticator {
+	return NewWithDiscoveryTimeout(resolver, defaultDiscoveryTimeout)
+}
+
+// NewWithDiscoveryTimeout constructs an Authenticator with an explicit OIDC
+// discovery timeout. Tests use this to prove the outage path is bounded without
+// waiting on the production timeout.
+func NewWithDiscoveryTimeout(resolver IdpResolver, discoveryTimeout time.Duration) *Authenticator {
+	if discoveryTimeout <= 0 {
+		discoveryTimeout = defaultDiscoveryTimeout
+	}
 	return &Authenticator{
 		resolver:         resolver,
+		discoveryTimeout: discoveryTimeout,
 		cache:            map[string]cachedProvider{},
 		providerCacheTTL: ProviderCacheTTL,
 		now:              time.Now,
@@ -358,12 +376,14 @@ func (a *Authenticator) provider(ctx context.Context, issuer string) (*coreos.Pr
 		return entry.provider, nil
 	}
 	a.mu.Unlock()
-	p, err := coreos.NewProvider(ctx, issuer)
+	discoveryCtx, cancel := context.WithTimeout(ctx, a.discoveryTimeout)
+	defer cancel()
+	p, err := coreos.NewProvider(discoveryCtx, issuer)
 	if err != nil {
 		a.mu.Lock()
 		delete(a.cache, issuer)
 		a.mu.Unlock()
-		return nil, fmt.Errorf("oidc: discover %s: %w", issuer, err)
+		return nil, ErrProviderUnavailable
 	}
 	a.mu.Lock()
 	a.cache[issuer] = cachedProvider{
