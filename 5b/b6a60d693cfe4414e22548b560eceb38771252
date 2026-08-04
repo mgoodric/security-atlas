@@ -1,0 +1,23 @@
+docs/openapi.yaml
+  s_69be33a2d6507e::t_54dcb844516c70 479-505
+internal/api/dashboard/store.go
+  s_69be33a2d6507e::t_17278fdd7b1a1e 35,46-60,114-162,197-198,213-238
+web/lib/contracts/activity.golden.json
+  s_69be33a2d6507e::t_da8d0b588838d3 24,26
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.21",
+  "base_commit_sha": "5bb6a60d693cfe4414e22548b560eceb38771252",
+  "prompts": {},
+  "sessions": {
+    "s_69be33a2d6507e": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019f9c4e-3571-7b60-995f-565d48c200f3",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
