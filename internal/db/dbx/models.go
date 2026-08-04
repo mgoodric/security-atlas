@@ -1205,6 +1205,51 @@ func (ns NullVendorToolCategory) Value() (driver.Value, error) {
 	return string(ns.VendorToolCategory), nil
 }
 
+type AccessReviewCampaign struct {
+	ID                pgtype.UUID        `json:"id"`
+	TenantID          pgtype.UUID        `json:"tenant_id"`
+	Name              string             `json:"name"`
+	Source            string             `json:"source"`
+	ScopeSystems      []string           `json:"scope_systems"`
+	ScopeEntitlements []string           `json:"scope_entitlements"`
+	ScopeUserIds      []string           `json:"scope_user_ids"`
+	Status            string             `json:"status"`
+	DueAt             pgtype.Timestamptz `json:"due_at"`
+	CreatedBy         string             `json:"created_by"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	EvidenceRecordID  pgtype.UUID        `json:"evidence_record_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AccessReviewItem struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	CampaignID      pgtype.UUID        `json:"campaign_id"`
+	System          string             `json:"system"`
+	Entitlement     string             `json:"entitlement"`
+	PrincipalUserID string             `json:"principal_user_id"`
+	PrincipalEmail  string             `json:"principal_email"`
+	ReviewerID      string             `json:"reviewer_id"`
+	Status          string             `json:"status"`
+	Decision        *string            `json:"decision"`
+	Reason          string             `json:"reason"`
+	AttestedBy      *string            `json:"attested_by"`
+	AttestedAt      pgtype.Timestamptz `json:"attested_at"`
+	Source          string             `json:"source"`
+	SourceRef       string             `json:"source_ref"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AccessReviewReviewerAssignment struct {
+	ID         pgtype.UUID        `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	CampaignID pgtype.UUID        `json:"campaign_id"`
+	ReviewerID string             `json:"reviewer_id"`
+	AssignedAt pgtype.Timestamptz `json:"assigned_at"`
+}
+
 type ActionPlan struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`
