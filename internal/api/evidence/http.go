@@ -11,6 +11,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -126,6 +129,17 @@ type pushResponse struct {
 	Receipts []receiptWire `json:"receipts"`
 }
 
+type receiptStatusWire struct {
+	RecordID       string  `json:"record_id"`
+	CredentialID   string  `json:"credential_id"`
+	Decision       string  `json:"decision"`
+	ReasonCode     string  `json:"reason_code"`
+	IdempotencyKey *string `json:"idempotency_key,omitempty"`
+	EvidenceKind   *string `json:"evidence_kind,omitempty"`
+	ReceivedAt     string  `json:"received_at"`
+	Terminal       bool    `json:"terminal"`
+}
+
 type errorBody struct {
 	Error string `json:"error"`
 	Code  string `json:"code,omitempty"`
@@ -213,6 +227,41 @@ func (h *HTTPHandler) PushHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, pushResponse{Receipts: receipts})
+}
+
+// ReceiptStatusHTTP returns the terminal ingest decision for a publish
+// receipt. It is scoped to the authenticated tenant and credential; a receipt
+// for another credential is indistinguishable from one not yet consumed.
+func (h *HTTPHandler) ReceiptStatusHTTP(w http.ResponseWriter, r *http.Request) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		httpresp.WriteJSON(w, http.StatusUnauthorized, errorBody{Error: "authentication required"})
+		return
+	}
+	recordID, err := uuid.Parse(chi.URLParam(r, "record_id"))
+	if err != nil {
+		httpresp.WriteJSON(w, http.StatusBadRequest, errorBody{Error: "record_id must be a UUID", Code: "bad_record_id"})
+		return
+	}
+	status, err := h.svc.LookupReceiptStatus(r.Context(), cred, recordID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			httpresp.WriteJSON(w, http.StatusNotFound, errorBody{Error: "receipt status not found", Code: "receipt_status_not_found"})
+			return
+		}
+		httpresp.WriteJSON(w, http.StatusInternalServerError, errorBody{Error: "receipt status lookup failed", Code: "internal_error"})
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, receiptStatusWire{
+		RecordID:       status.RecordID,
+		CredentialID:   status.CredentialID,
+		Decision:       status.Decision,
+		ReasonCode:     status.ReasonCode,
+		IdempotencyKey: status.IdempotencyKey,
+		EvidenceKind:   status.EvidenceKind,
+		ReceivedAt:     status.ReceivedAt.Format(time.RFC3339Nano),
+		Terminal:       true,
+	})
 }
 
 // dispatch routes a single record through either the slice-015

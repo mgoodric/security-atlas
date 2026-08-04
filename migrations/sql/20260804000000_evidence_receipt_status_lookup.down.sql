@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_evidence_audit_log_receipt_lookup;
