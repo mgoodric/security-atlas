@@ -22,6 +22,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/accessreview"
 	"github.com/mgoodric/security-atlas/internal/api"
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
@@ -1115,6 +1116,40 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: metrics scheduler ticking every %s\n", interval.String())
 				if err := ms.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("metrics scheduler: %w", err)
+				}
+			}()
+		}
+	}
+
+	// OE-669: access-review due-reminder producer. Delivery is handled by
+	// the notification digest scheduler; this loop creates the due reminder
+	// rows once campaigns become due. Like metrics, it enumerates candidate
+	// tenants with the migrator role and performs each tenant's writes through
+	// the app pool under tenancy.WithTenant. ATLAS_ACCESS_REVIEW_REMINDER_INTERVAL
+	// overrides the daily cadence for dev loops.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		arCtx, arCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		arPool, err := atlasotel.NewTracedPool(arCtx, migratorURL)
+		arCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: access-review reminder scheduler pool: %v\n", err)
+		} else {
+			interval := accessreview.DefaultReminderInterval
+			if raw := os.Getenv("ATLAS_ACCESS_REVIEW_REMINDER_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_ACCESS_REVIEW_REMINDER_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			ars := accessreview.NewReminderScheduler(arPool, pool, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer arPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: access-review reminder scheduler ticking every %s\n", interval.String())
+				if err := ars.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("access-review reminder scheduler: %w", err)
 				}
 			}()
 		}
