@@ -30,6 +30,9 @@ GET /scim/v2/Schemas
 GET /scim/v2/ServiceProviderConfig
 GET /scim/v2/Users
 GET /scim/v2/Users/{id}
+GET /v1/access-reviews
+GET /v1/access-reviews/{id}
+GET /v1/access-reviews/{id}/revoke-list.csv
 GET /v1/action-plans
 GET /v1/action-plans/{id}
 GET /v1/activity
@@ -213,6 +216,9 @@ POST /oauth/revoke
 POST /oauth/token
 POST /scim/v2/Groups
 POST /scim/v2/Users
+POST /v1/access-reviews
+POST /v1/access-reviews/{id}/complete
+POST /v1/access-reviews/{id}/items/{itemID}/attest
 POST /v1/action-plans
 POST /v1/action-plans/{id}/controls/{control_id}
 POST /v1/action-plans/{id}/risks/{risk_id}

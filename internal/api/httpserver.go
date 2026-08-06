@@ -238,6 +238,7 @@ func (s *Server) buildRouter() *chi.Mux {
 	s.registerAdmin(root, featureFlagStore)
 	s.registerMetrics(root)
 	s.registerPersonnelSecurity(root)
+	s.registerAccessReview(root)
 	return root
 }
 
