@@ -153,3 +153,77 @@ SELECT *
 FROM fw_to_scf_edge_tier_transitions
 WHERE edge_id = $1
 ORDER BY created_at DESC;
+
+-- ===== slice 536b-1: crosswalk review surface + content editing =====
+
+-- name: ListFwToScfEdgesForFrameworkVersion :many
+-- The review-queue listing: every STRM edge under one framework version,
+-- joined through framework_requirements (for the code the reviewer reads) and
+-- scf_anchors (for the family-scoped conflict heuristics). Bounded by the
+-- framework_version_id predicate (slice 536 threat-model D); ordered by
+-- requirement code then anchor scf_id so the queue is stable between calls.
+SELECT
+    e.id,
+    e.framework_requirement_id,
+    fr.code  AS requirement_code,
+    fr.title AS requirement_title,
+    e.scf_anchor_id,
+    a.scf_id,
+    a.family,
+    a.title  AS anchor_title,
+    e.relationship_type,
+    e.strength,
+    e.source_attribution,
+    e.mapping_tier,
+    e.rationale
+FROM fw_to_scf_edges e
+JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+JOIN scf_anchors a ON a.id = e.scf_anchor_id
+WHERE fr.framework_version_id = $1
+ORDER BY fr.code, a.scf_id, e.id;
+
+-- name: GetFwToScfEdgeContentForUpdate :one
+-- Row-lock the edge's content + tier inside the edit transaction so a
+-- concurrent edit or tier transition cannot race the read-validate-write
+-- window. Returns ErrNoRows for an unknown edge (the handler maps to 404).
+SELECT id, relationship_type, strength, rationale, mapping_tier
+FROM fw_to_scf_edges
+WHERE id = $1
+FOR UPDATE;
+
+-- name: UpdateFwToScfEdgeContent :exec
+-- Rewrite ONLY the reviewer-curated content columns (the D-536b-2 widened
+-- column-level grant — migration 20260804000000). source_attribution and the
+-- edge-endpoint FKs are not writable through atlas_app's grants; tier
+-- editability is enforced in Go (internal/crosswalkedit) BEFORE this runs;
+-- this query is the unconditional write inside the same tx that also inserts
+-- the content-edit audit row.
+UPDATE fw_to_scf_edges
+SET relationship_type = $2,
+    strength          = $3,
+    rationale         = $4,
+    updated_at        = now()
+WHERE id = $1;
+
+-- name: InsertFwToScfEdgeContentEdit :one
+-- Append the immutable before/after audit row for a content edit
+-- (threat-model R — the content twin of InsertFwToScfEdgeTierTransition).
+-- Written in the SAME transaction as UpdateFwToScfEdgeContent.
+INSERT INTO fw_to_scf_edge_content_edits (
+    edge_id, editor_id,
+    from_relationship_type, to_relationship_type,
+    from_strength, to_strength,
+    from_rationale, to_rationale,
+    note
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: ListFwToScfEdgeContentEdits :many
+-- Admin/maintainer-scoped read of an edge's content-edit history (newest
+-- first). Editor identity stays behind the admin boundary, mirroring the
+-- tier-transition trail (threat-model I / P0-483-6).
+SELECT *
+FROM fw_to_scf_edge_content_edits
+WHERE edge_id = $1
+ORDER BY created_at DESC;

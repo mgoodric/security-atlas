@@ -2055,6 +2055,20 @@ type FwToScfEdge struct {
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
 }
 
+type FwToScfEdgeContentEdit struct {
+	ID                   pgtype.UUID          `json:"id"`
+	EdgeID               pgtype.UUID          `json:"edge_id"`
+	EditorID             pgtype.UUID          `json:"editor_id"`
+	FromRelationshipType StrmRelationshipType `json:"from_relationship_type"`
+	ToRelationshipType   StrmRelationshipType `json:"to_relationship_type"`
+	FromStrength         float64              `json:"from_strength"`
+	ToStrength           float64              `json:"to_strength"`
+	FromRationale        string               `json:"from_rationale"`
+	ToRationale          string               `json:"to_rationale"`
+	Note                 string               `json:"note"`
+	CreatedAt            pgtype.Timestamptz   `json:"created_at"`
+}
+
 type FwToScfEdgeTierTransition struct {
 	ID         pgtype.UUID          `json:"id"`
 	EdgeID     pgtype.UUID          `json:"edge_id"`

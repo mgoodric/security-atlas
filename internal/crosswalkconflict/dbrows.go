@@ -40,6 +40,31 @@ func RequirementsFromDB(rows []dbx.FrameworkRequirement) []Requirement {
 	return out
 }
 
+// EdgesFromFrameworkVersionRows converts the slice-536b-1 review-surface
+// listing (ListFwToScfEdgesForFrameworkVersion) to Edges. Unlike the
+// per-requirement query, this row joins framework_requirements, so the
+// requirement code rides along in the row itself.
+//
+// mapping_tier and source_attribution are deliberately dropped, same as
+// EdgesFromDBRows: a finding is about mapping CONTENT, not trust state or
+// provenance.
+func EdgesFromFrameworkVersionRows(rows []dbx.ListFwToScfEdgesForFrameworkVersionRow) []Edge {
+	out := make([]Edge, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, Edge{
+			ID:               uuid.UUID(r.ID.Bytes),
+			RequirementID:    uuid.UUID(r.FrameworkRequirementID.Bytes),
+			RequirementCode:  r.RequirementCode,
+			AnchorID:         uuid.UUID(r.ScfAnchorID.Bytes),
+			AnchorSCFID:      r.ScfID,
+			AnchorFamily:     r.Family,
+			RelationshipType: RelationshipTypeFromDB(r.RelationshipType),
+			Strength:         r.Strength,
+		})
+	}
+	return out
+}
+
 // EdgesFromDBRows converts one requirement's edge listing
 // (ListFwToScfEdgesForRequirement) to Edges. requirementCode is supplied by the
 // caller because that query joins scf_anchors, not framework_requirements, so
