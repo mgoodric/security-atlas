@@ -81,17 +81,28 @@ func (t Tier) DBTier() dbx.CrosswalkMappingTier {
 func TierFromDB(d dbx.CrosswalkMappingTier) Tier { return Tier(d) }
 
 // legalTransitions is the adjacency map of the tier state machine (ADR 0018
-// §1). It models the OPERATOR-DRIVEN transitions only:
+// §1, amended by slice 536b-1). It models the OPERATOR-DRIVEN transitions
+// only:
 //
 //	draft        -> under_review | rejected
 //	under_review -> verified     | rejected
-//	verified     -> (none — a verified mapping is not demoted via this API)
+//	verified     -> under_review (demotion — slice 536b-1, D-536b-1)
 //	rejected     -> (none — terminal)
 //
 // The scf_official seed-to-verified path is NOT an operator transition: it is a
 // load/seed-time data step (the migration sets it), so it is deliberately
 // absent here. There is intentionally NO draft -> verified edge: a community
 // draft must pass through under_review (the load-bearing P0-483 guard).
+//
+// The verified -> under_review demotion edge was added by slice 536b-1
+// (536a decisions-log D-536b-1): content edits are gated to draft /
+// under_review (internal/crosswalkedit), so without a demotion edge a
+// verified mapping's content could never be corrected. Demotion is the same
+// human, admin-gated, audited act as every other transition — it extends the
+// ONE state machine rather than growing a second lifecycle. verified ->
+// rejected stays illegal: a verified mapping is demoted back into review
+// first, so the audit trail shows WHY trust was withdrawn before the
+// rejection verdict.
 var legalTransitions = map[Tier]map[Tier]bool{
 	TierDraft: {
 		TierUnderReview: true,
@@ -101,7 +112,9 @@ var legalTransitions = map[Tier]map[Tier]bool{
 		TierVerified: true,
 		TierRejected: true,
 	},
-	TierVerified: {},
+	TierVerified: {
+		TierUnderReview: true,
+	},
 	TierRejected: {},
 }
 

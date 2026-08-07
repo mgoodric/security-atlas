@@ -235,6 +235,8 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/admin/credentials/{id}/revoke", Tag: "admin-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/credentials/{id}/revoke"},
 	{Method: "POST", Path: "/v1/admin/credentials/{id}/rotate", Tag: "admin-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/credentials/{id}/rotate"},
 	{Method: "POST", Path: "/v1/admin/crosswalk-edges/{id}/tier", Tag: "admin-crosswalk-tier", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/crosswalk-edges/{id}/tier — transition a crosswalk mapping's trust tier (slice 483)"},
+	{Method: "GET", Path: "/v1/admin/crosswalk-review", Tag: "admin-crosswalk-review", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/crosswalk-review — one framework version's STRM edges plus conflict findings for the review queue (slice 536b-1)"},
+	{Method: "PATCH", Path: "/v1/admin/crosswalk-edges/{id}", Tag: "admin-crosswalk-review", Tier: "adminBearer", Internal: false, Summary: "PATCH /v1/admin/crosswalk-edges/{id} — edit a crosswalk mapping's content with a same-transaction audit row (slice 536b-1)"},
 	{Method: "POST", Path: "/v1/admin/demo/seed", Tag: "admin-demo", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/demo/seed"},
 	{Method: "POST", Path: "/v1/admin/demo/teardown", Tag: "admin-demo", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/demo/teardown"},
 	{Method: "POST", Path: "/v1/admin/framework-versions/migrations/{id}/decision", Tag: "admin-framework-versions", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/framework-versions/migrations/{id}/decision — approve/reject one migration suggestion (slice 484)"},

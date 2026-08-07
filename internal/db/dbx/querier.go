@@ -806,6 +806,10 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// Row-lock the edge's content + tier inside the edit transaction so a
+	// concurrent edit or tier transition cannot race the read-validate-write
+	// window. Returns ErrNoRows for an unknown edge (the handler maps to 404).
+	GetFwToScfEdgeContentForUpdate(ctx context.Context, id pgtype.UUID) (GetFwToScfEdgeContentForUpdateRow, error)
 	// ===== slice 483: crosswalk mapping-tier governance =====
 	// Read the current trust tier of one edge by id. The transition store calls
 	// this FOR UPDATE (see GetFwToScfEdgeTierForUpdate) inside the tx; this plain
@@ -1131,6 +1135,10 @@ type Querier interface {
 	// ON CONFLICT DO NOTHING leaves a previously-decided row untouched.
 	InsertFrameworkVersionMigration(ctx context.Context, arg InsertFrameworkVersionMigrationParams) (FrameworkVersionMigration, error)
 	InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error)
+	// Append the immutable before/after audit row for a content edit
+	// (threat-model R — the content twin of InsertFwToScfEdgeTierTransition).
+	// Written in the SAME transaction as UpdateFwToScfEdgeContent.
+	InsertFwToScfEdgeContentEdit(ctx context.Context, arg InsertFwToScfEdgeContentEditParams) (FwToScfEdgeContentEdit, error)
 	// Append the immutable audit row for a tier transition (threat-model R /
 	// P0-483-4). Written in the SAME transaction as SetFwToScfEdgeTier.
 	InsertFwToScfEdgeTierTransition(ctx context.Context, arg InsertFwToScfEdgeTierTransitionParams) (FwToScfEdgeTierTransition, error)
@@ -2053,10 +2061,21 @@ type Querier interface {
 	// catalog (`tenant_id IS NULL`) and any tenant-private frameworks. Drives
 	// the per-framework posture rows in the brief (one row per framework).
 	ListFrameworksForTenant(ctx context.Context, tenantID pgtype.UUID) ([]Framework, error)
+	// Admin/maintainer-scoped read of an edge's content-edit history (newest
+	// first). Editor identity stays behind the admin boundary, mirroring the
+	// tier-transition trail (threat-model I / P0-483-6).
+	ListFwToScfEdgeContentEdits(ctx context.Context, edgeID pgtype.UUID) ([]FwToScfEdgeContentEdit, error)
 	// Admin/maintainer-scoped read of an edge's transition history (newest first).
 	// NOT on the public /anchors payload — reviewer identity stays behind the admin
 	// boundary (threat-model I / P0-483-6).
 	ListFwToScfEdgeTierTransitions(ctx context.Context, edgeID pgtype.UUID) ([]FwToScfEdgeTierTransition, error)
+	// ===== slice 536b-1: crosswalk review surface + content editing =====
+	// The review-queue listing: every STRM edge under one framework version,
+	// joined through framework_requirements (for the code the reviewer reads) and
+	// scf_anchors (for the family-scoped conflict heuristics). Bounded by the
+	// framework_version_id predicate (slice 536 threat-model D); ordered by
+	// requirement code then anchor scf_id so the queue is stable between calls.
+	ListFwToScfEdgesForFrameworkVersion(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFwToScfEdgesForFrameworkVersionRow, error)
 	// Reverse traversal — given a requirement, return all SCF anchors it maps
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
@@ -3065,6 +3084,13 @@ type Querier interface {
 	// Update an existing edge in place. Importer decides whether to call this
 	// based on a content-equality check.
 	UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgeParams) (FwToScfEdge, error)
+	// Rewrite ONLY the reviewer-curated content columns (the D-536b-2 widened
+	// column-level grant — migration 20260804000000). source_attribution and the
+	// edge-endpoint FKs are not writable through atlas_app's grants; tier
+	// editability is enforced in Go (internal/crosswalkedit) BEFORE this runs;
+	// this query is the unconditional write inside the same tx that also inserts
+	// the content-edit audit row.
+	UpdateFwToScfEdgeContent(ctx context.Context, arg UpdateFwToScfEdgeContentParams) error
 	// Recompute path: the engine recomputes the meta-risk's severity blob when
 	// new children join the window. Only inherent_score is touched — title,
 	// level, treatment, and lifecycle are frozen at create time (canvas §6.6:

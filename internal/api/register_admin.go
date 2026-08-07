@@ -7,6 +7,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminauditperiods"
 	"github.com/mgoodric/security-atlas/internal/api/adminauthzbundle"
 	"github.com/mgoodric/security-atlas/internal/api/admincreds"
+	"github.com/mgoodric/security-atlas/internal/api/admincrosswalkreview"
 	"github.com/mgoodric/security-atlas/internal/api/admincrosswalktier"
 	"github.com/mgoodric/security-atlas/internal/api/admindemo"
 	"github.com/mgoodric/security-atlas/internal/api/adminframeworkversions"
@@ -24,6 +25,7 @@ import (
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	scimapi "github.com/mgoodric/security-atlas/internal/api/scim"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
+	"github.com/mgoodric/security-atlas/internal/crosswalkedit"
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkversion"
@@ -163,6 +165,17 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// parallel-batch convention (chi.Mux rejects two Mounts at "/").
 	crosswalkTierH := admincrosswalktier.New(crosswalktier.NewStore(s.dbPool))
 	root.Post("/v1/admin/crosswalk-edges/{id}/tier", crosswalkTierH.Transition)
+
+	// Slice 536b-1: crosswalk-review surface (list edges + slice-536a conflict
+	// findings) and content editing (relationship_type / strength / rationale,
+	// with an immutable before/after audit row in the same transaction —
+	// internal/crosswalkedit). Admin-gated like the 483 tier route; approve/
+	// reject stays the 483 tier endpoint above (no second approval workflow).
+	// Catalog tables (no tenant RLS). Routes appended per the parallel-batch
+	// convention.
+	crosswalkReviewH := admincrosswalkreview.New(s.dbPool, crosswalkedit.NewStore(s.dbPool))
+	root.Get("/v1/admin/crosswalk-review", crosswalkReviewH.Review)
+	root.Patch("/v1/admin/crosswalk-edges/{id}", crosswalkReviewH.EditContent)
 
 	// Slice 484: framework-versioning capability (ADR 0019). Admin-gated
 	// (cred.IsAdmin; a non-admin promotion is 403 — threat-model E /
