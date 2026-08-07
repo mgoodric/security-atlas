@@ -147,6 +147,10 @@ new client.
 
 ## Verifying your install
 
+Before running a downloaded binary or published container image, verify
+its release signature. See [Verify release artifacts](release-verification.md)
+for the cosign and provenance commands.
+
 The build version, commit, and build time are baked into the binary at
 release time and surface in three places. All three report the same
 value (single source of truth: Go ldflags).
