@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"google.golang.org/protobuf/proto"
@@ -78,6 +79,7 @@ const (
 	HeaderCredentialScope  = "X-Atlas-Credential-Scope"
 	HeaderIdempotencyKey   = "X-Atlas-Idempotency-Key"
 	HeaderEvidenceKind     = "X-Atlas-Evidence-Kind"
+	HeaderReceiptRecordID  = "X-Atlas-Receipt-Record-Id"
 )
 
 // Config is the streambuf wiring. Zero values are filled with sensible
@@ -317,6 +319,7 @@ func (p *JetStreamPublisher) Publish(ctx context.Context, rec *evidencev1.Eviden
 	msg.Header.Set(HeaderCredentialTenant, cred.TenantID)
 	msg.Header.Set(HeaderIdempotencyKey, rec.IdempotencyKey)
 	msg.Header.Set(HeaderEvidenceKind, rec.EvidenceKind)
+	msg.Header.Set(HeaderReceiptRecordID, recordID)
 	if len(cred.Kinds) > 0 {
 		msg.Header.Set(HeaderCredentialKinds, strings.Join(cred.Kinds, ","))
 	}
@@ -517,7 +520,8 @@ func (c *Consumer) handle(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	_, decision, perr := c.svc.Process(ctx, &rec, cred)
+	receiptRecordID := pgUUIDFromHeader(hdr.Get(HeaderReceiptRecordID))
+	_, decision, perr := c.svc.ProcessWithRecordID(ctx, &rec, cred, receiptRecordID)
 	if perr != nil {
 		consumeErr = perr
 		// On idempotency mismatch or validation error, the message is
@@ -581,6 +585,14 @@ func isPoison(d ingest.Decision) bool {
 }
 
 // ---- helpers ----
+
+func pgUUIDFromHeader(s string) pgtype.UUID {
+	u, err := uuid.Parse(s)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: u, Valid: true}
+}
 
 // redactURL strips the user:pass portion of a NATS URL so we can log
 // the host without leaking credentials. Anti-criterion P0.
