@@ -56,6 +56,13 @@ func WriteInternal(w http.ResponseWriter, r *http.Request, op string, err error)
 	WriteStatus(w, r, http.StatusInternalServerError, op, err)
 }
 
+// WriteCodedStatus emits a generic 5xx response with a stable machine code.
+// The code is branchable by clients; the human-facing error string remains
+// generic and concrete failure detail still only appears in the server log.
+func WriteCodedStatus(w http.ResponseWriter, r *http.Request, status int, op string, err error, code string) {
+	writeStatus(w, r, status, op, err, code)
+}
+
 // WriteStatus is identical to WriteInternal but lets the caller pick a
 // non-500 5xx status (e.g. 502 Bad Gateway for downstream-fetch failures
 // in the adminsso discovery flow). The client-facing body is the same
@@ -66,6 +73,10 @@ func WriteInternal(w http.ResponseWriter, r *http.Request, op string, err error)
 // if used for 4xx. (Enforced at runtime: a non-5xx status falls through
 // to 500 with a slog.Warn so the bug surfaces in logs.)
 func WriteStatus(w http.ResponseWriter, r *http.Request, status int, op string, err error) {
+	writeStatus(w, r, status, op, err, "")
+}
+
+func writeStatus(w http.ResponseWriter, r *http.Request, status int, op string, err error, code string) {
 	if status < 500 || status > 599 {
 		slog.Warn("httperr.WriteStatus called with non-5xx status; coercing to 500",
 			slog.Int("requested_status", status),
@@ -108,8 +119,12 @@ func WriteStatus(w http.ResponseWriter, r *http.Request, status int, op string, 
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set(requestidmw.HeaderName, id)
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	body := map[string]string{
 		"error":      genericInternalMessage,
 		"request_id": id,
-	})
+	}
+	if code != "" {
+		body["code"] = code
+	}
+	_ = json.NewEncoder(w).Encode(body)
 }
