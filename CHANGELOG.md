@@ -2938,6 +2938,31 @@ assertions` subsection so future spec authors avoid the same
   Production compose unchanged. Both `bundled` and `external`
   matrix modes use the staged shape.
 
+## [1.22.0](https://github.com/mgoodric/security-atlas/compare/v1.21.0...v1.22.0) (2026-08-07)
+
+
+### Features
+
+* **release:** publish atlas-mcp binaries (OE-597) ([#1536](https://github.com/mgoodric/security-atlas/issues/1536)) ([60ea1d8](https://github.com/mgoodric/security-atlas/commit/60ea1d8b52655eeaf41dbcffe2fda81426264841))
+
+
+### Bug Fixes
+
+* reconcile audit subject module drift ([#1586](https://github.com/mgoodric/security-atlas/issues/1586)) ([7a69720](https://github.com/mgoodric/security-atlas/commit/7a69720fca58977ab7c18f273e720116446eb3c2))
+* **web:** point /evidence Push CTA at the published docs site (OE-665) ([#1568](https://github.com/mgoodric/security-atlas/issues/1568)) ([d06d53b](https://github.com/mgoodric/security-atlas/commit/d06d53b54bde890f53f9d314f69df07f774724d4))
+
+
+### Dependencies
+
+* **deps:** Bump brace-expansion ([#1560](https://github.com/mgoodric/security-atlas/issues/1560)) ([350d044](https://github.com/mgoodric/security-atlas/commit/350d0447ec0114a55aa82a543849a3e8dbdc5abc))
+
+
+### Documentation
+
+* correct retention erasure posture ([#1585](https://github.com/mgoodric/security-atlas/issues/1585)) ([3b2420b](https://github.com/mgoodric/security-atlas/commit/3b2420b882e8fcf4a920a8a821813a4dc4f1e66c))
+* **governance:** author Records of Processing Activities (RoPA) for project (OE-449) ([#1584](https://github.com/mgoodric/security-atlas/issues/1584)) ([38cbfb3](https://github.com/mgoodric/security-atlas/commit/38cbfb3331bb3da83283f485f324b8032e050130))
+* **governance:** publish personal data inventory (PRIV-4, PRIV-1) ([#1583](https://github.com/mgoodric/security-atlas/issues/1583)) ([9aee76b](https://github.com/mgoodric/security-atlas/commit/9aee76bd710826b333f6fa66f3416c51747ba6c7))
+
 ## [1.21.0](https://github.com/mgoodric/security-atlas/compare/v1.20.0...v1.21.0) (2026-08-03)
 
 
