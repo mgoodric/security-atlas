@@ -89,6 +89,7 @@ sql:
       - "migrations/sql/20260730000000_security_awareness_training.sql"
       - "migrations/sql/20260730000000_vendor_commercial_fields.sql"
       - "migrations/sql/20260802000000_change_management.sql"
+      - "migrations/sql/20260804000000_incident_register.sql"
     queries: "internal/db/queries"
     gen:
       go:
