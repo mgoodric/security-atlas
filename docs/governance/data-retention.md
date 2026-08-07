@@ -334,6 +334,16 @@ a hardening item where one exists.
 | Issue-tracker state (§2.7) — Issues, PRs, Discussions, advisories                     | **Indefinite**                                                                     | None — never disposed                         | None (project commitment)                                        | GitHub repository persistence                                                                                                                                                  |
 | Issue-tracker state (§2.7) — private PVR advisories                                   | **Indefinite once published; private until disclosure**                            | None                                          | None (coordinated disclosure per `SECURITY.md`)                  | GitHub Advisory machinery                                                                                                                                                      |
 
+### 3.0 Candidate Sub-processors for Cloud-LLM Routing (GDPR Art. 28 / Art. 30)
+
+When an operator opts a tenant into cloud LLM inference (`tenant_llm_routing`), prompt context (including cited evidence excerpts) is transmitted to third-party sub-processors. The platform names the three candidate cloud providers:
+
+1. **Anthropic, PBC (US)** — Third-party AI inference (Opt-in per tenant). Transfer mechanism: DPF / SCCs + TIA.
+2. **OpenAI, L.L.C. (US)** — Third-party AI inference (Opt-in per tenant). Transfer mechanism: DPF / SCCs + TIA.
+3. **Amazon Web Services, Inc. / AWS Bedrock (US/EU)** — Third-party AI inference (Opt-in per tenant). Transfer mechanism: EEA region selection (no transfer) or AWS GDPR DPA + SCCs.
+
+See [ADR 0022](../adr/0022-chapter-v-transfer-analysis-cloud-llm.md) and [`docs/ai-assist/cloud-routing.md`](../ai-assist/cloud-routing.md) for full Chapter V transfer details.
+
 ### 3.1 Enforcement gaps named honestly
 
 Two retention durations in §3 are **stated intent that the project's
