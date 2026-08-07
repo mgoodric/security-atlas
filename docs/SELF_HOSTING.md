@@ -495,6 +495,19 @@ Once telemetry is enabled, see [`docs/operator/observability-tuning.md`](operato
 
 ---
 
+## Data Protection & Privacy Governance
+
+If you are standing up security-atlas in an EU, UK, or California regulatory context (GDPR / UK GDPR / CCPA / CPRA), your Data Protection Officer (DPO) or compliance team can review the [Personal Data Inventory](governance/personal-data-inventory.md) for a full accounting of data categories collected, controller/processor determinations, and database table/column anchors.
+
+Related governance documents for operators:
+
+- [Personal Data Inventory](governance/personal-data-inventory.md) — complete catalog of personal data fields and schema locations
+- [Data Retention and Disposal Policy](governance/data-retention.md) — retention windows and disposal procedures
+- [Access Review Cadence](governance/access-review.md) — logical access review schedule
+- [Business Continuity Plan](governance/business-continuity.md) — backup and DR posture
+
+---
+
 ## Upgrading from an older release
 
 See [`CHANGELOG.md`](../CHANGELOG.md) for breaking-change notes per release. When a release notes a breaking change, the upgrade path is documented in that release's notes.
