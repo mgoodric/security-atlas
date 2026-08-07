@@ -106,13 +106,16 @@ This policy is about retention and disposal of artifacts the
   the project's policy for the project's own surfaces; it is **not**
   a template for operators to adopt verbatim.
 - **GDPR Article 17 ("right to erasure") per-data-subject workflows.**
-  The platform supports per-record deletion via tenant-controlled
-  operations; the workflow shape is product surface, not governance
-  policy, and is tracked through the privacy module (slice 180
-  foundation; v0 deferred per OQ #7). This document references the
+  The evidence ledger is append-only today: the shipped database
+  policies allow the app role to read and insert evidence records but
+  not update or delete them, and no per-subject erasure capability ships
+  yet. The ratified Article 17 / CCPA deletion design is
+  [ADR-0020](../adr/0020-right-to-erasure-vs-append-only-ledger.md);
+  implementation is tracked by slice 504 / OE-376 and remains gated on
+  the privacy-v0 greenlight (OQ #7). This document references the
   Article 5(1)(e) storage-limitation principle that **does** apply to
-  the project's own surfaces; it does not pretend GDPR compliance
-  more broadly.
+  the project's own surfaces; it does not pretend GDPR compliance more
+  broadly.
 - **GDPR Article 33 breach-notification workflow.** Open Question #10
   in the canvas explicitly defers this to phase 3.
 - **The platform-product's customer-facing audit-period freezing
@@ -157,6 +160,13 @@ Disposal under this policy means **any of the following**:
    the original as superseded, lost, or artifact-lost (per BCP §6
    Scenario C). This is the disposal posture for the evidence
    ledger and the unified audit log.
+6. **Field-level redaction-in-place** — ratified by
+   [ADR-0020](../adr/0020-right-to-erasure-vs-append-only-ledger.md)
+   but **not yet shipped**. Under a recorded lawful erasure request,
+   allow-listed personal-data columns are overwritten with the
+   `<<ERASED>>` sentinel while the row is retained and an erasure
+   record is appended. This is distinct from §4.5's supersede
+   tombstone, which redacts no fields.
 
 The disposal method per data category is named explicitly in §3.
 
@@ -529,6 +539,45 @@ gives the project a disposal posture that respects the invariant.
 **Constitutional load-bearing reference.** Canvas invariant #3 is
 the constitutional commitment; this document operationalizes the
 disposal posture compatible with it.
+
+**Not erasure.** This mechanism is append-only-with-supersede: it
+adds a record that marks the original as superseded, but the original
+record's fields are not redacted. Do not read §4.5 as an Article 17
+erasure mechanism; the ratified but not-yet-shipped erasure mode is
+§4.5b.
+
+### 4.5b Ledger field-level erasure (redaction-in-place under a recorded lawful request)
+
+**Status.** Ratified by
+[ADR-0020](../adr/0020-right-to-erasure-vs-append-only-ledger.md),
+but **not yet implemented or shipped**. Slice 504 / OE-376 owns the
+implementation and remains gated on the privacy-v0 greenlight (OQ #7).
+
+**Used for.** Future GDPR Article 17 / CCPA deletion workflows where
+personal data must stop being present in allow-listed evidence-ledger
+fields while the ledger row, its identity, and its temporal anchors
+remain available for audit-period freezing and replay.
+
+**Procedure.**
+
+1. A lawful erasure request is recorded and authorized through the
+   privacy module's future workflow.
+2. A separately-credentialed `atlas_erase` database role performs the
+   redaction under the request context; `atlas_app` does not gain
+   evidence-record update or delete privileges.
+3. Only allow-listed personal-data columns or JSONB paths are
+   overwritten, using the request-invariant `<<ERASED>>` sentinel.
+4. The row is retained. `id`, `tenant_id`, `observed_at`, and the
+   stored `hash` remain immutable; `hash` is not recomputed.
+5. A separate erasure record is appended, naming the affected record,
+   the lawful request, the basis, the sentinel version, and the
+   pre- and post-redaction verification commitments.
+
+**Relationship to §4.5.** §4.5 is a supersede tombstone: it appends
+metadata and redacts no fields. §4.5b is the erasure half ADR-0020
+ratifies: it mutates only allow-listed personal-data fields while
+also appending an erasure record. The two mechanisms are paired in the
+future Article 17 design, but they are not interchangeable.
 
 ---
 
