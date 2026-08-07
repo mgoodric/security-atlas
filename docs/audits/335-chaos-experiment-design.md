@@ -236,11 +236,13 @@ discipline)
 
 **Hypothesis.** When the Postgres primary becomes unavailable, the
 platform returns structured 5xx responses (not stack traces, not raw
-pgx errors) within 5 seconds of request arrival. The `/healthz`
-endpoint flips to a degraded state. No request hangs indefinitely.
+pgx errors) within 5 seconds of request arrival. The `/ready` endpoint
+flips to a non-ready state while `/health` remains liveness-only. No
+request hangs indefinitely.
 
 **Steady state.** All API endpoints return 2xx for valid requests;
-`/healthz` returns `{status: "ok"}`; pool reports healthy connections.
+`/health` returns `{status: "ok"}`, `/ready` returns
+`{status: "ready"}`, and the pool reports healthy connections.
 
 **Variable.** Postgres container running vs stopped, perturbed via
 `docker-compose stop postgres`.
@@ -252,7 +254,8 @@ endpoint flips to a degraded state. No request hangs indefinitely.
 3. For the next 60 seconds, fire synthetic requests:
    - `GET /v1/anchors` (read)
    - `POST /v1/evidence:push` (write)
-   - `GET /healthz` (health)
+   - `GET /health` (liveness)
+   - `GET /ready` (readiness)
 4. Capture: status code, latency, response body shape, OTEL trace.
 5. Restart postgres (`docker-compose start postgres`); measure
    recovery time.
@@ -270,8 +273,9 @@ degradation" claim if it does).
 
 - API responses: 503 with body
   `{error: "database_unavailable", retry_after: 5}` within 5s.
-- `/healthz`: returns 503 with degraded sub-status field within 1s
-  (since the health-check should probe the DB).
+- `/health`: remains 200 with degraded DB sub-status, preserving the
+  slice-037 liveness decision.
+- `/ready`: returns 503 with degraded DB sub-status within 1s.
 - No stack traces in response bodies.
 - After postgres restarts: full recovery within 30s; no orphaned
   connections.
