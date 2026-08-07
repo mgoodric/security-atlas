@@ -36,6 +36,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
+	"github.com/mgoodric/security-atlas/internal/auth/retention"
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
@@ -929,6 +930,48 @@ func main() {
 		}
 	}
 
+	// OE-452: bounded retention for identity/session security metadata.
+	// Runs as the migrator role (BYPASSRLS), because the purge crosses
+	// tenants and touches append-only OAuth audit tables that atlas_app
+	// cannot DELETE from. Operators explicitly enable the job when ready
+	// for the first purge; after that, default cadence is daily. The job enforces:
+	//   - sessions: revoked/expired rows after 90 days
+	//   - oauth_token_exchanges: rows after 400 days
+	//   - oauth_revocation_events: rows after 400 days
+	//   - oauth_revoked_tokens: expires_at + 24h grace
+	if enabled, err := strconv.ParseBool(os.Getenv("ATLAS_IDENTITY_RETENTION_SWEEP_ENABLED")); err == nil && enabled {
+		migratorURL := os.Getenv("DATABASE_URL")
+		if migratorURL == "" {
+			fmt.Fprintln(os.Stderr, "atlas: identity retention sweeper enabled but DATABASE_URL is not set")
+		} else {
+			retentionCtx, retentionCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			retentionPool, err := atlasotel.NewTracedPool(retentionCtx, migratorURL)
+			retentionCancel()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "atlas: identity retention pool: %v\n", err)
+			} else {
+				interval := retention.DefaultSweepInterval
+				if raw := os.Getenv("ATLAS_IDENTITY_RETENTION_SWEEP_INTERVAL"); raw != "" {
+					if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+						interval = d
+					} else {
+						fmt.Fprintf(os.Stderr, "atlas: ATLAS_IDENTITY_RETENTION_SWEEP_INTERVAL=%q invalid: %v\n", raw, perr)
+					}
+				}
+				runner := retention.NewRunner(retention.New(retentionPool), logger, interval)
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					defer retentionPool.Close()
+					fmt.Fprintf(os.Stderr, "atlas: identity retention sweeper ticking every %s\n", interval.String())
+					if err := runner.Run(ctx); err != nil {
+						errCh <- fmt.Errorf("identity retention sweeper: %w", err)
+					}
+				}()
+			}
+		}
+	}
+
 	// Slice 055: Decision Log overdue-notification tick loop (AC-6). Runs as
 	// the migrator role (BYPASSRLS) so the sweep can cross tenants -- the
 	// per-tenant transaction inside applies the GUC for RLS-honest writes.
@@ -1451,10 +1494,11 @@ func doSweep(ctx context.Context, store *oauthcode.Store, grace time.Duration, l
 
 // runRevokedTokenSweeper is the slice-190 revocation-list sweeper.
 // Every 5 minutes it DELETEs oauth_revoked_tokens rows whose
-// expires_at < now() — those tokens have already failed the JWT
-// validator's exp check, so the revocation row is dead weight. The
-// goroutine runs until ctx is cancelled (process shutdown). Decision
-// D4 in docs/audit-log/190-jwt-middleware-r2-decisions.md.
+// expires_at is older than revocation.SweepExpiryGrace — those tokens
+// have already failed the JWT validator's exp check, and the grace
+// prevents clock skew from pruning at the expiry boundary. The goroutine
+// runs until ctx is cancelled (process shutdown). Decision D4 in
+// docs/audit-log/190-jwt-middleware-r2-decisions.md, narrowed by OE-452.
 func runRevokedTokenSweeper(ctx context.Context, store *revocation.Store, logger *slog.Logger) {
 	const interval = 5 * time.Minute
 	ticker := time.NewTicker(interval)
