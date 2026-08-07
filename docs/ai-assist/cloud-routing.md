@@ -24,6 +24,14 @@ higher-quality drafts. Cloud routing is:
 > the actual provider for every generation, so you can always prove which
 > generations used a cloud backend and which stayed local.
 
+> **EU / GDPR Chapter V Transfer Guard.** > **EU operators: do not enable cloud routing without executing a Data Processing Agreement (DPA) incorporating Standard Contractual Clauses (SCCs) and conducting a Transfer Impact Assessment (TIA).**
+> Enabling cloud LLM routing transmits prompt context—which may include evidence excerpts containing personal data such as workforce names, emails, and titles—to third-party providers.
+>
+> - **Anthropic (US):** Transmits prompt context to US infrastructure. Transfer relies on the EU-US Data Privacy Framework (DPF) adequacy decision or Anthropic Commercial DPA with SCCs (GDPR Art. 46(2)(c)). Requires a TIA.
+> - **OpenAI (US):** Transmits prompt context to US infrastructure. Transfer relies on DPF adequacy or OpenAI Business DPA with SCCs. Requires a TIA.
+> - **AWS Bedrock (Region-scoped / EU option):** Transmits prompt context to the selected AWS Bedrock region. EU operators should select an EEA region endpoint (e.g., `eu-central-1` Frankfurt or `eu-west-1` Ireland) to avoid cross-border transfers under Chapter V entirely. If using US Bedrock endpoints, AWS GDPR DPA with SCCs applies.
+>   See [ADR 0022](../adr/0022-chapter-v-transfer-analysis-cloud-llm.md) for full Chapter V transfer analysis details.
+
 ## Enabling cloud routing on a deployment
 
 Cloud routing requires a **deployment-level master key** that encrypts the
