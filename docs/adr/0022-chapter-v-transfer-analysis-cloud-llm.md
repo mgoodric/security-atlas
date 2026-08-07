@@ -8,11 +8,13 @@
 
 **Resolves:** OPENENGINE-450 / Follow-up F-4 from slice 330 privacy audit ([`docs/audits/330-privacy-gdpr-ccpa-audit.md`](../audits/330-privacy-gdpr-ccpa-audit.md) finding PRIV-5).
 
-**Implements in code/docs:**
+**Shipped in this change (docs/analysis):**
 
 - Transfer analysis for Anthropic, OpenAI, and AWS Bedrock (§2 below and [`docs/ai-assist/cloud-routing.md`](../ai-assist/cloud-routing.md)).
-- Copy-only transfer guard in admin endpoint API documentation ([`docs/openapi.yaml`](../openapi.yaml), [`internal/api/openapi/routes.go`](../api/openapi/routes.go)), operator docs ([`docs/ai-assist/cloud-routing.md`](../ai-assist/cloud-routing.md)), and UI opt-in flow components (`web/app/api/admin/llm-routing/route.ts`).
+- Copy-only transfer guard in **operator docs** ([`docs/ai-assist/cloud-routing.md`](../ai-assist/cloud-routing.md)) and this ADR.
 - Candidate sub-processor listing for RoPA cross-border transfers ([`docs/governance/data-retention.md`](../governance/data-retention.md) and candidate RoPA pointers).
+
+**Not yet implemented (follow-up — OPENENGINE-683):** the same copy-only guard has **not** yet been added to the admin endpoint API spec ([`docs/openapi.yaml`](../openapi.yaml), [`internal/api/openapi/routes.go`](../api/openapi/routes.go)) or the UI opt-in flow (`web/app/api/admin/llm-routing/route.ts`). Those surfaces still need the disclosure copy; this ADR records the decision, not a completed API/UI implementation.
 
 ---
 
