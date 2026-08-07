@@ -2687,9 +2687,9 @@ type Session struct {
 	UserAgent *string `json:"user_agent"`
 	// Slice 162: client IP captured at session create. TEXT not INET — see migration header decisions log. Honors X-Forwarded-For only when TRUST_FORWARDED_HEADERS=1.
 	IpAddress *string `json:"ip_address"`
-	// Slice 162: ISO 3166-1 alpha-2 country code. Populated by a future enrichment slice; ships NULL.
+	// OE-452: optional ISO 3166-1 alpha-2 country code for tenant-enabled login anomaly triage and incident response. Not populated by default; future enrichment must be explicitly configured by the operator.
 	GeoCountry *string `json:"geo_country"`
-	// Slice 162: city name. Populated by a future enrichment slice; ships NULL.
+	// OE-452: optional city label for tenant-enabled login anomaly triage and incident response. Not populated by default; future enrichment must be explicitly configured by the operator.
 	GeoCity *string `json:"geo_city"`
 }
 

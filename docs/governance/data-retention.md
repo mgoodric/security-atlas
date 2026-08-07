@@ -352,7 +352,7 @@ keeps the policy honest per P0-375-1 (no claims about retention the
 platform does not actually enforce) and surfaces them for §9
 hardening prioritization.
 
-#### Gap 1: 7-year unified audit log retention is intent, not enforced
+#### Gap 1: runtime audit retention is partly enforced after OE-452
 
 The unified audit log table on the maintainer-operated SaaS instance
 (per `migrations/sql/20260517000000_unified_audit_log.sql`) is
@@ -360,8 +360,55 @@ The unified audit log table on the maintainer-operated SaaS instance
 intended 7-year floor; the table grows monotonically. SOC 2 CC7.2 and
 ISO 27001 8.15 expect audit logs to be retained "for a defined
 period" and the 7-year floor is the common Type II auditor
-expectation; the policy commits to that floor. Closing the
-enforcement gap requires:
+expectation; the policy commits to that floor.
+
+OE-452 closes the adjacent identity-surface portion of this gap for
+security-audit tables that carry IP addresses, User-Agents, and OIDC
+subject identifiers. These records are retained under GDPR Article
+6(1)(f) legitimate interests and Recital 49 network-security purposes,
+but Article 5(1)(e) still requires storage limitation. The previous
+reasoning error was treating "over-retention is acceptable" as a
+general compliance posture: that is defensible for SOC 2 and ISO 27001
+audit completeness, but it does **not** transfer to GDPR Art. 5(1)(e),
+where retaining online identifiers forever is itself the finding.
+
+The enforced OE-452 windows are:
+
+- `sessions`: revoked or expired rows are purged after **90 days**.
+  Basis: Art. 6(1)(f) legitimate interests / Recital 49. Security
+  rationale: one quarter of login IP/User-Agent history supports account
+  compromise triage, access-review follow-up, and user-reported session
+  anomalies without retaining stale session metadata indefinitely.
+- `oauth_token_exchanges`: rows are purged after **400 days**. Basis:
+  Art. 6(1)(f) legitimate interests / Recital 49. Security rationale:
+  cross-tenant token-exchange forensics need to cover annual access
+  review and audit lookback, plus investigation slack.
+- `oauth_revocation_events`: rows are purged after **400 days**. Basis:
+  Art. 6(1)(f) legitimate interests / Recital 49. Security rationale:
+  revocation-attempt forensics, including source IP, need the same annual
+  lookback as token exchange events.
+- `oauth_revoked_tokens`: hot revocation-list rows are purged only after
+  the token's own `expires_at` plus **24 hours**. Basis: Art. 6(1)(f)
+  legitimate interests / Recital 49. Security rationale: the row must
+  outlive the token or revocation can be silently defeated; the 24-hour
+  grace is 24x the default 1-hour access-token lifetime documented in
+  ADR-0003 and covers clock skew / delayed validators.
+
+The mechanism is `internal/auth/retention`, mounted by `cmd/atlas` as
+the `ATLAS_IDENTITY_RETENTION_SWEEP_ENABLED=true` maintenance job
+through the migrate/BYPASSRLS role. Once enabled, it runs on
+`ATLAS_IDENTITY_RETENTION_SWEEP_INTERVAL` (daily by default) and runs
+one sweep immediately, so the first real purge remains an explicit
+operator decision rather than a side effect of deploying the code.
+`oauth_revoked_tokens` is also enforced by the existing five-minute
+revocation-list sweeper, now using the same expiry-plus-grace
+relationship. `sessions.geo_country` and `sessions.geo_city` remain
+nullable and unpopulated by default; their stated purpose is optional
+tenant-enabled login anomaly triage and incident response, and a future
+enrichment hook must be explicitly operator-configured before those
+columns are populated.
+
+Closing the remaining unified-audit-log enforcement gap requires:
 
 1. Documenting the rotation cadence (daily / weekly / monthly job).
 2. Implementing a scheduled purge of rows older than the floor while
@@ -371,11 +418,13 @@ enforcement gap requires:
 3. Adding integration test coverage that asserts the purge respects
    audit-period freezing per canvas §8.4.
 
-Until these items ship, the unified audit log retention is **"all
+Until those items ship, the unified audit log retention is **"all
 records since the table was created (2026-05-17, slice 040), retained
 indefinitely"**, which **over-retains** relative to the 7-year intent
-rather than under-retaining. Over-retention is acceptable from a
-compliance posture; under-retention would be the policy violation.
+rather than under-retaining. That over-retention is a SOC 2 / ISO 27001
+audit-completeness posture only; it is not a GDPR Art. 5(1)(e) answer
+for identity fields, which is why OE-452 bounds the identity/session
+surfaces separately.
 
 Named in §9 as a hardening item.
 
@@ -501,6 +550,11 @@ artifact uploads (90-day rolling); edge-tag container images
 (30-day rolling per BCP §5 Tier 3); Unraid offsite parity-aware
 backups (7-day rolling); observability stack data (30-day rolling
 on Tempo + Loki).
+For runtime identity/security tables, `internal/auth/retention` is the
+configured rolling-window mechanism: when explicitly enabled with
+`ATLAS_IDENTITY_RETENTION_SWEEP_ENABLED=true`, it runs on
+`ATLAS_IDENTITY_RETENTION_SWEEP_INTERVAL` (daily by default) and deletes
+only rows older than each surface's documented cutoff.
 
 **Procedure.**
 

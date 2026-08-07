@@ -21,9 +21,10 @@
 //     of an existing jti is a silent no-op on the hot-path table
 //     (ON CONFLICT DO NOTHING) but the audit log still receives a
 //     fresh row.
-//   - P0-190-8 (sweeper integrity): Sweep deletes rows where
-//     `expires_at < now()` using the (expires_at) index; the
-//     revocation list cannot grow unbounded.
+//   - P0-190-8 (sweeper integrity): Sweep deletes rows only after
+//     `expires_at` plus a retention grace using the (expires_at) index;
+//     the revocation list cannot grow unbounded and cannot be pruned
+//     before the token's own expiry.
 //
 // GRANT shape: the revocation list grants SELECT + INSERT + DELETE
 // only — no UPDATE. The application role cannot mutate revocation
@@ -165,20 +166,31 @@ func (s *Store) IsRevoked(ctx context.Context, jti string) (bool, error) {
 	}
 }
 
-// Sweep deletes oauth_revoked_tokens rows whose expires_at is in the
-// past. Returns the number of rows deleted. The audit-log rows in
-// oauth_revocation_events are NOT swept — the forensic trail outlives
-// the hot-path lookup table.
+const SweepExpiryGrace = 24 * time.Hour
+
+// Sweep deletes oauth_revoked_tokens rows whose expires_at is more than
+// SweepExpiryGrace in the past. Returns the number of rows deleted. The
+// audit-log rows in oauth_revocation_events are swept by the bounded
+// identity-retention job, not this hot-path list sweeper.
 //
 // Called by the cmd/atlas sweeper goroutine on a 5-minute interval
-// (decision D4). The DELETE uses the (expires_at) index for an
-// index-range scan rather than a seq scan.
+// (decision D4). The 24h grace is 24x the default 1h access-token lifetime,
+// so pruning cannot silently defeat revocation before natural token expiry.
+// The DELETE uses the (expires_at) index for an index-range scan rather than
+// a seq scan.
 func (s *Store) Sweep(ctx context.Context) (int64, error) {
+	return s.SweepExpiredBefore(ctx, time.Now().UTC().Add(-SweepExpiryGrace))
+}
+
+// SweepExpiredBefore deletes hot-list rows whose expires_at is earlier than
+// cutoff. Exposed for deterministic tests and for the broader identity
+// retention job, which uses the same token-expiry relationship.
+func (s *Store) SweepExpiredBefore(ctx context.Context, cutoff time.Time) (int64, error) {
 	if s.pool == nil {
 		return 0, ErrNoPool
 	}
-	const q = `DELETE FROM oauth_revoked_tokens WHERE expires_at < now()`
-	tag, err := s.pool.Exec(ctx, q)
+	const q = `DELETE FROM oauth_revoked_tokens WHERE expires_at < $1`
+	tag, err := s.pool.Exec(ctx, q, cutoff)
 	if err != nil {
 		return 0, fmt.Errorf("revocation: sweep: %w", err)
 	}

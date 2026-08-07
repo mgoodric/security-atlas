@@ -122,7 +122,7 @@ func TestSweepDeletesExpiredRows(t *testing.T) {
 	pastJTI := uniqueJTI("ut-sweep-past")
 	futureJTI := uniqueJTI("ut-sweep-future")
 
-	if err := s.Revoke(ctx, pastJTI, time.Now().Add(-time.Hour), "user:test", ""); err != nil {
+	if err := s.Revoke(ctx, pastJTI, time.Now().Add(-(revocation.SweepExpiryGrace + time.Hour)), "user:test", ""); err != nil {
 		t.Fatalf("Revoke past: %v", err)
 	}
 	if err := s.Revoke(ctx, futureJTI, time.Now().Add(time.Hour), "user:test", ""); err != nil {
@@ -144,6 +144,32 @@ func TestSweepDeletesExpiredRows(t *testing.T) {
 	}
 	if !gotFuture {
 		t.Fatalf("IsRevoked future: want true after Sweep")
+	}
+}
+
+// TestSweepRetainsRecentlyExpiredRows covers the OE-452 retention guard:
+// physical pruning must not run before token expiry plus the skew cushion.
+func TestSweepRetainsRecentlyExpiredRows(t *testing.T) {
+	pool := dbtest.NewAppPool(t)
+	s := revocation.New(pool)
+	ctx := context.Background()
+
+	jti := uniqueJTI("ut-sweep-recent")
+	if err := s.Revoke(ctx, jti, time.Now().Add(-time.Hour), "user:test", ""); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	if _, err := s.Sweep(ctx); err != nil {
+		t.Fatalf("Sweep: %v", err)
+	}
+
+	const q = `SELECT count(*) FROM oauth_revoked_tokens WHERE jti = $1`
+	var count int
+	if err := pool.QueryRow(ctx, q, jti).Scan(&count); err != nil {
+		t.Fatalf("count revoked row: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("revoked row count = %d, want 1 retained inside grace", count)
 	}
 }
 
