@@ -138,7 +138,13 @@ docker-compose tear-down restores from scratch.
       `deploy/helm/` or atlas-edge.
 - [ ] Confirm no other developer is using the same docker-compose env.
 - [ ] Snapshot the `evidence_records` table row-count BEFORE the
-      experiment; verify identical AFTER (proves no data loss).
+      experiment and sample it throughout; verify monotonic
+      non-decrease with no gap — the count must never fall and
+      `MAX(observed_at)` must never regress across the run (proves
+      no data loss and no rollback; before-vs-after equality is
+      unsatisfiable here because Method step 4 keeps synthetic
+      writes landing in `evidence_records` throughout — see
+      Amendments).
 - [ ] Snapshot the `evidence_records.observed_at` MAX value BEFORE
       and AFTER; verify monotonic increase (no rollback).
 - [ ] Have `docker-compose down -v` ready in a second terminal as
@@ -283,8 +289,13 @@ hung on connection-retry loops, restart it too.
 
 - [ ] Confirm no in-flight evidence pushes that would orphan
       (idempotency key registry should make this safe; verify).
-- [ ] Snapshot `evidence_records` row count BEFORE; verify identical
-      AFTER (no partial-write recovery state).
+- [ ] Snapshot `evidence_records` row count BEFORE; verify it is
+      unchanged at the moment Postgres restarts and never decreases
+      afterwards (no partial-write recovery state, no rollback —
+      the writes fired during the outage must leave no rows; growth
+      after restart from successful recovery-window pushes is
+      expected, so plain before/after equality stops holding once
+      Method step 5's recovery traffic resumes — see Amendments).
 
 **Execution-deferral note.** Deferred to slice **356** (bundled with
 experiment 5 as "data-tier outage chaos round 1" —
@@ -756,6 +767,25 @@ single-slice value-density in the spillover set.
 
 Five spillover slices, eight experiments — bundle ratio honors the
 slice 335 cap-at-5 anti-criterion.
+
+---
+
+## Amendments
+
+- **2026-08-04 — OE-427 (defect filed by the slice 354 execution,
+  OE-382).** Experiment 1 checklist item 3 and Experiment 3 checklist
+  item 2 originally required an identical `evidence_records` row count
+  before and after the run, while the same experiments mandate traffic
+  that lands writes (Experiment 1: continuous synthetic writes
+  throughout the injection window; Experiment 3: successful pushes
+  during the recovery measurement). Both are reworded to the
+  monotonic-non-decrease / no-regression formulation that slice 354
+  executed under
+  (`docs/audit-log/354-db-pool-exhaustion-execution-decisions.md` D4)
+  — the property the checks were reaching for: append-only durability,
+  no loss, no rollback. Experiments 2, 4, 5, 6, 7, and 8 carry no
+  row-count equality checklist item, so no sibling instance exists
+  there. No Hypothesis, Variable, or Method was changed.
 
 ---
 
