@@ -3216,6 +3216,9 @@ jobs:
       - name: Run audit-integration-enrolment.sh
         run: bash scripts/audit-integration-enrolment.sh
 
+      - name: Run check-audit-log-subject-module.sh
+        run: bash scripts/check-audit-log-subject-module.sh
+
       # Slice 461: offline self-test for the seed order-independence guard
       # (exercises the env-misconfig exit-2 paths; the exit-0/1 paths run in
       # the integration job, which has a live Postgres).
