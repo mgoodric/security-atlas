@@ -292,6 +292,67 @@ No tenth table surfaced. The migration touches exactly nine
 
 ---
 
+## D-180-10. OE-451 drift reconciliation extends, rather than narrows
+
+**Decision.** OE-451 extends `subject_module TEXT NOT NULL DEFAULT 'core'`
+to the post-slice-180 audit-log-family tables that had drifted from the
+pre-commitment, using the same `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`
+shape as slice 180. It does NOT narrow the pre-commitment.
+
+**Re-verification against the branch's `origin/main` baseline.** The
+slice-330 audit listed eleven post-2026-05-20 audit-log-family tables
+without the column. At OE-451 pickup, those eleven still exist and still
+lacked `subject_module`. Three newer audit-log-family tables had also
+landed since that audit and likewise lacked the column, so the corrected
+verified list is fourteen:
+
+| Table                                  | Creating migration                                     |
+| -------------------------------------- | ------------------------------------------------------ |
+| `super_admin_audit_log`                | `20260521030000_super_admins_full.sql`                 |
+| `imported_catalog_audit_log`           | `20260606010000_oscal_imported_catalogs.sql`           |
+| `email_delivery_log`                   | `20260607020000_email_delivery_channel.sql`            |
+| `channel_delivery_log`                 | `20260608000000_slack_webhook_channels.sql`            |
+| `csf_assessment_audit`                 | `20260608080000_csf_tier_profile.sql`                  |
+| `staleness_rollup_log`                 | `20260609000000_staleness_rollup_log.sql`              |
+| `scim_audit_log`                       | `20260612020000_scim_provisioning.sql`                 |
+| `group_role_audit_log`                 | `20260612030000_idp_group_role_mappings.sql`           |
+| `control_owner_assignment_audit_log`   | `20260612060000_control_owner_assign_saved_views.sql`  |
+| `action_plan_audit_log`                | `20260612070000_action_plans.sql`                      |
+| `framework_version_audit`              | `20260612090000_framework_versioning.sql`              |
+| `questionnaire_mapping_proposal_audit` | `20260612110000_questionnaire_mapping_proposals.sql`   |
+| `questionnaire_answer_reject_audit`    | `20260612120000_questionnaire_answer_reject_audit.sql` |
+| `change_audit_log`                     | `20260802000000_change_management.sql`                 |
+
+The three pre-slice-180 tables remain deliberately excluded:
+`artifact_access_log`, `decisions_audit`, and `audit_sink_failures`.
+They predate the privacy-module foundation and were not silently drifted
+new work.
+
+**Rationale.** Slice 180's rationale was that the marker is cheap to add
+before privacy-side writes exist and expensive to retrofit later. The
+drift finding proved the narrowing-by-accident failure mode. Extending
+honors the original architectural call without creating privacy
+primitives, without creating the `privacy` schema, and without
+pre-deciding OQ #7 implementation details beyond the already-ratified
+audit attribution column.
+
+**Guard.** OE-451 adds `scripts/check-audit-log-subject-module.sh`, a
+slice-345-shaped discovery primitive wired through `just
+check-audit-log-subject-module` and CI. It derives audit-log-family
+tables from migrations, subtracts only the three explicit pre-180
+exclusions, and fails if any remaining table lacks the column. Future
+contributors adding a new audit-log table must add the column in the
+creating PR or deliberately change the allowlist with a decision record.
+
+**OE-376 / slice 504 interaction.** Slice 504's AC-5 expects every
+right-to-erasure redaction to write an append-only audit row with
+`subject_module='privacy'`. After OE-451, any post-180 audit-log-family
+table that slice 504 chooses for those rows can carry that marker. This
+does not unblock or implement slice 504; it only restores the foundation
+that slice 504 depends on.
+
+---
+
 ## Anti-criteria honored
 
 | Anti-criterion | Honored? | Note                                                                                                               |

@@ -251,6 +251,12 @@ audit-rls:
 audit-integration-enrolment:
     ./scripts/audit-integration-enrolment.sh
 
+# Assert every audit-log-family table created by migrations carries the
+# slice-180 subject_module marker, except the three pre-slice-180 tables
+# deliberately scoped out. OE-451 / PRIV-7.
+check-audit-log-subject-module:
+    bash scripts/check-audit-log-subject-module.sh
+
 # Assert the sharded integration matrix (scripts/integration-shards.txt) is
 # COMPLETE + DISJOINT + correctly pinned: the union of all legs == the
 # integration-tagged package set EXACTLY (no package dropped — T-1), no
