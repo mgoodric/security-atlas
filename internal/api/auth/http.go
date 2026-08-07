@@ -216,6 +216,10 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 		IdpName:  idpName,
 	}, h.secureCookies)
 	if err != nil {
+		if errors.Is(err, oidc.ErrProviderUnavailable) {
+			writeOIDCProviderUnavailable(w)
+			return
+		}
 		writeAuthError(w, http.StatusBadRequest, "OIDC begin: "+err.Error())
 		return
 	}
@@ -377,6 +381,15 @@ func writeAuthError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func writeOIDCProviderUnavailable(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":       "auth_provider_unavailable",
+		"retry_after": 30,
+	})
 }
 
 // ResolveSession is a helper for middleware: given a request, parse the

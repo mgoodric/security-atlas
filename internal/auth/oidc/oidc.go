@@ -78,6 +78,10 @@ type IdpResolver interface {
 // ErrUnknownIdp is the sentinel for "no such IdP configured."
 var ErrUnknownIdp = errors.New("oidc: unknown IdP")
 
+// ErrProviderUnavailable is the sentinel for a configured IdP whose discovery
+// endpoint cannot be reached or does not answer in time.
+var ErrProviderUnavailable = errors.New("oidc: provider unavailable")
+
 // ErrStateMismatch is the CSRF guard's sentinel. The callback returns 400
 // when this fires.
 var ErrStateMismatch = errors.New("oidc: state mismatch (CSRF guard)")
@@ -92,16 +96,40 @@ var ErrNonceMismatch = errors.New("oidc: nonce mismatch (ID-token replay guard)"
 
 // Authenticator drives the RP-side OIDC flow.
 type Authenticator struct {
-	resolver IdpResolver
-	mu       sync.Mutex
-	cache    map[string]*coreos.Provider // keyed by issuer URL
+	resolver         IdpResolver
+	discoveryTimeout time.Duration
+	providerCacheTTL time.Duration
+	mu               sync.Mutex
+	cache            map[string]cachedProvider // keyed by issuer URL
 }
+
+type cachedProvider struct {
+	provider  *coreos.Provider
+	expiresAt time.Time
+}
+
+const (
+	defaultDiscoveryTimeout = 5 * time.Second
+	defaultProviderCacheTTL = 30 * time.Second
+)
 
 // New constructs an Authenticator over a per-tenant IdP resolver.
 func New(resolver IdpResolver) *Authenticator {
+	return NewWithDiscoveryTimeout(resolver, defaultDiscoveryTimeout)
+}
+
+// NewWithDiscoveryTimeout constructs an Authenticator with an explicit OIDC
+// discovery timeout. Tests use this to prove the outage path is bounded without
+// waiting on the production timeout.
+func NewWithDiscoveryTimeout(resolver IdpResolver, discoveryTimeout time.Duration) *Authenticator {
+	if discoveryTimeout <= 0 {
+		discoveryTimeout = defaultDiscoveryTimeout
+	}
 	return &Authenticator{
-		resolver: resolver,
-		cache:    map[string]*coreos.Provider{},
+		resolver:         resolver,
+		discoveryTimeout: discoveryTimeout,
+		providerCacheTTL: defaultProviderCacheTTL,
+		cache:            map[string]cachedProvider{},
 	}
 }
 
@@ -337,17 +365,22 @@ func ClearFlowCookies(w http.ResponseWriter, secure bool) {
 
 func (a *Authenticator) provider(ctx context.Context, issuer string) (*coreos.Provider, error) {
 	a.mu.Lock()
-	if p, ok := a.cache[issuer]; ok {
+	if p, ok := a.cache[issuer]; ok && time.Now().Before(p.expiresAt) {
 		a.mu.Unlock()
-		return p, nil
+		return p.provider, nil
 	}
 	a.mu.Unlock()
-	p, err := coreos.NewProvider(ctx, issuer)
+	discoveryCtx, cancel := context.WithTimeout(ctx, a.discoveryTimeout)
+	defer cancel()
+	p, err := coreos.NewProvider(discoveryCtx, issuer)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: discover %s: %w", issuer, err)
+		return nil, ErrProviderUnavailable
 	}
 	a.mu.Lock()
-	a.cache[issuer] = p
+	a.cache[issuer] = cachedProvider{
+		provider:  p,
+		expiresAt: time.Now().Add(a.providerCacheTTL),
+	}
 	a.mu.Unlock()
 	return p, nil
 }
