@@ -2,9 +2,9 @@
 
 // Slice 094 — event-type filter sidebar.
 //
-// Five checkboxes — audit / exception / policy / vendor / control. State
-// lives in the parent (URL query string). Clicking a checkbox toggles its
-// type in the selection.
+// Six checkboxes — audit / exception / policy / vendor / access review /
+// control. State lives in the parent (URL query string). Clicking a checkbox
+// toggles its type in the selection.
 //
 // Slice 675 added the "Vendor reviews" entry so the legend includes every
 // type the agenda surfaces (it previously lacked vendor, even though the
@@ -29,6 +29,10 @@ const TYPE_LABELS: Record<CalendarEventType, { label: string; color: string }> =
     vendor: {
       label: "Vendor reviews",
       color: "bg-rose-500",
+    },
+    access_review: {
+      label: "Access reviews",
+      color: "bg-cyan-600",
     },
     control: {
       label: "Control reviews",

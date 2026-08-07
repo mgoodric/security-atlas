@@ -70,12 +70,22 @@ describe("linkFor", () => {
     }
   });
 
+  it("access review event returns a static result until campaign detail exists", () => {
+    const result = linkFor(makeEvent({ type: "access_review" }));
+    expect(result.kind).toBe("static");
+    if (result.kind === "static") {
+      expect(result.reason).toMatch(/access-review/i);
+      expect(result.reason).toMatch(/not available yet/i);
+    }
+  });
+
   it("does NOT return a `#` href for any of the event types (AC-1)", () => {
     const types: CalendarEvent["type"][] = [
       "audit",
       "exception",
       "policy",
       "vendor",
+      "access_review",
       "control",
     ];
     for (const t of types) {

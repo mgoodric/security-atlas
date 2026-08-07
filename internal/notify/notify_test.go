@@ -28,6 +28,9 @@ func TestTypeLabel_ClosedMap(t *testing.T) {
 	if got := TypeLabel("control.drift"); got != "Control-drift alerts" {
 		t.Errorf("known label = %q", got)
 	}
+	if got := TypeLabel("access_review_due"); got != "Access-review reminders" {
+		t.Errorf("access_review_due label = %q", got)
+	}
 	// An unknown / attacker-controlled type never echoes raw — falls back.
 	if got := TypeLabel("evil<script>"); got != "Other notifications" {
 		t.Errorf("unknown type must fall back, got %q", got)

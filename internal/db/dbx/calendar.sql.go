@@ -111,6 +111,33 @@ FROM (
 
     UNION ALL
 
+    -- access-review campaigns: active recertification campaigns due in the
+    -- window. Completion/cancellation removes the event from the calendar;
+    -- the campaign itself remains the related entity for future detail links.
+    SELECT
+        arc.id::text                                                  AS event_id,
+        'access_review'::text                                         AS event_type,
+        ('Access review due: ' || arc.name)::text                     AS title,
+        arc.due_at                                                    AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        arc.id::text                                                  AS related_entity_id,
+        'access_review_campaign'::text                                AS related_entity_kind,
+        arc.source::text                                              AS summary,
+        CASE
+            WHEN arc.due_at < $5::timestamptz THEN 'overdue'
+            WHEN arc.due_at <= $5::timestamptz + INTERVAL '14 days' THEN 'due-soon'
+            ELSE 'upcoming'
+        END                                                           AS status,
+        NULL::text                                                    AS cadence
+    FROM access_review_campaigns arc
+    WHERE arc.tenant_id = $1
+      AND arc.status = 'active'
+      AND arc.due_at >= $2::timestamptz
+      AND arc.due_at <  $3::timestamptz
+      AND ($4::text = '' OR position('access_review' IN $4::text) > 0)
+
+    UNION ALL
+
     -- vendor reviews: last_review_date + cadence interval is the next-review
     -- date. Mirrors the dashboard "Upcoming" rollup's vendor branch
     -- (internal/db/queries/dashboard.sql ListUpcomingItems) so the two
@@ -330,7 +357,7 @@ type ListCalendarEventsRow struct {
 
 // Slice 094 — compliance calendar backend read query.
 //
-// ONE UNION ALL across five event sources:
+// ONE UNION ALL across seven event sources:
 //
 //  1. audit_periods           — period_end is the audit's "report due" date
 //  2. exceptions              — expires_at is the waiver-lapse date
@@ -345,6 +372,8 @@ type ListCalendarEventsRow struct {
 //     the append-only control_evaluations ledger.
 //  6. personnel_security_checklists — open offboarding due dates, so overdue
 //     leaver access-removal tasks surface on the compliance calendar.
+//  7. access_review_campaigns — active access-review campaign due dates, so
+//     upcoming reviewer certifications appear beside other compliance work.
 //
 // All event sources are tenant-scoped; RLS fires on each underlying SELECT, and the
 // explicit tenant_id predicates are the primary guarantee.
@@ -354,7 +383,7 @@ type ListCalendarEventsRow struct {
 // timestamptz bounds.
 //
 // Type filter (`type_filter`) is a CSV string. Empty string (”) means
-// "all five sources." A non-empty filter narrows to the subset by checking
+// "all sources." A non-empty filter narrows to the subset by checking
 // membership on the per-branch literal type discriminator.
 //
 // Cadence math for the controls branch:
