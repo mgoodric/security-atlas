@@ -56,6 +56,13 @@ grc_writable_resources := {
     # task tracking only; no route provisions or deprovisions access
     # (the OE-630 boundary).
     "personnel-security",
+    # OE-670: access-review campaigns (recertification). The operator
+    # creates campaigns, attests keep/revoke items (the handler further
+    # binds attestation to the item's assigned reviewer), and completes
+    # campaigns — completing emits the CC6.3 completion evidence. The
+    # revoke-list endpoint EXPORTS decisions; no route revokes access
+    # (the OE-628 boundary).
+    "access-reviews",
 }
 
 grc_actions := {

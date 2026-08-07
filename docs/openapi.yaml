@@ -46,6 +46,7 @@ servers:
     description: Self-hosted deployment (replace with your atlas host)
 
 tags:
+  - name: access-reviews
   - name: action-plans
   - name: activity
   - name: admin-audit-log
@@ -280,6 +281,118 @@ paths:
       summary: POST /oauth/token — token endpoint, dispatches the supported grants (RFC 6749)
       tags: [oauth]
       operationId: post-oauth-token
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/access-reviews:
+    get:
+      summary: GET /v1/access-reviews — campaign index (?status= filter; OE-670)
+      tags: [access-reviews]
+      operationId: get-v1-access-reviews
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/access-reviews — create a campaign (JSON = SCIM-sourced snapshot, multipart/form-data = manual entitlement CSV; OE-670)
+      tags: [access-reviews]
+      operationId: post-v1-access-reviews
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/access-reviews/{id}:
+    get:
+      summary: GET /v1/access-reviews/{id} — one campaign + completion rollup + review items (OE-670)
+      tags: [access-reviews]
+      operationId: get-v1-access-reviews-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/access-reviews/{id}/complete:
+    post:
+      summary: POST /v1/access-reviews/{id}/complete — complete a campaign; emits the access_review.completion.v1 CC6.3 evidence record (OE-670)
+      tags: [access-reviews]
+      operationId: post-v1-access-reviews-id-complete
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/access-reviews/{id}/items/{itemID}/attest:
+    post:
+      summary: POST /v1/access-reviews/{id}/items/{itemID}/attest — keep/revoke attestation by the assigned reviewer (OE-670)
+      tags: [access-reviews]
+      operationId: post-v1-access-reviews-id-items-itemID-attest
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: itemID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/access-reviews/{id}/revoke-list.csv:
+    get:
+      summary: GET /v1/access-reviews/{id}/revoke-list.csv — revoke-decision CSV export; the operator enforcement handoff, no route revokes access (OE-670)
+      tags: [access-reviews]
+      operationId: get-v1-access-reviews-id-revoke-list_csv
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
