@@ -70,14 +70,14 @@ carrying a `retry_after` hint, no stack trace leaks to the client."
 
 Observed, and now asserted by the test:
 
-| Contract dimension           | Slice 335 claim        | Actual (pinned)                                                                 |
-| ---------------------------- | ---------------------- | ------------------------------------------------------------------------------- |
-| Fail fast                    | yes                    | **No.** Acquisition queues until the request context is done; with a patient client the request waits indefinitely (no server-side handler deadline — `httpserver.go` sets only `ReadHeaderTimeout`). |
-| Status code                  | 4xx                    | **500** on both read and write paths once the caller's deadline expires.        |
-| Structured body              | yes                    | **Yes.** Read: slice-367 generic envelope with `request_id`. Write: `errorBody` with `code:"internal_error"` and the `rejected_internal_error` decision token. |
-| `retry_after` hint           | present                | **Absent.** No `Retry-After` header, no body field, on either path. (The push rate limiter's 429 does send `Retry-After`, but that is a different, unsaturated code path.) |
-| No stack/credential/path leak | yes                   | **Holds.** Asserted against stack-trace markers, `file.go:` frames, DSN forms, and the live DSN's user/password/host/database. |
-| Ledger integrity             | (implied)              | **Holds.** Saturated pushes land zero rows; the append-only count is unchanged and recovery pushes land normally. |
+| Contract dimension            | Slice 335 claim | Actual (pinned)                                                                                                                                                                                       |
+| ----------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Fail fast                     | yes             | **No.** Acquisition queues until the request context is done; with a patient client the request waits indefinitely (no server-side handler deadline — `httpserver.go` sets only `ReadHeaderTimeout`). |
+| Status code                   | 4xx             | **500** on both read and write paths once the caller's deadline expires.                                                                                                                              |
+| Structured body               | yes             | **Yes.** Read: slice-367 generic envelope with `request_id`. Write: `errorBody` with `code:"internal_error"` and the `rejected_internal_error` decision token.                                        |
+| `retry_after` hint            | present         | **Absent.** No `Retry-After` header, no body field, on either path. (The push rate limiter's 429 does send `Retry-After`, but that is a different, unsaturated code path.)                            |
+| No stack/credential/path leak | yes             | **Holds.** Asserted against stack-trace markers, `file.go:` frames, DSN forms, and the live DSN's user/password/host/database.                                                                        |
+| Ledger integrity              | (implied)       | **Holds.** Saturated pushes land zero rows; the append-only count is unchanged and recovery pushes land normally.                                                                                     |
 
 The two claims that FAIL are fail-fast-4xx and the retry hint. Whether the
 platform SHOULD fail fast with a 429/503 + `Retry-After` under pool
@@ -157,13 +157,13 @@ holds).
 
 ## Acceptance-criteria trace
 
-| AC                                                                | Where satisfied                                                                                     |
-| ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Integration test exercises pool saturation deterministically       | `internal/api/evidence/integration_test.go` (held-slot saturation, D3); passes `go test -tags=integration -p 1` locally 6/6 |
-| Asserts status code, body shape, leak absence                      | Both tests: status pin, JSON-shape pin, `assertNoLeakage` (stack/DSN/credential/path), `assertNoRetryHint` |
-| Divergence recorded in a decisions log                             | D2 (fail-fast-4xx and `retry_after` both diverge)                                                    |
-| Bounded — no held connections, no flaky wall-clock sleeps          | D3 (cleanup-released slots, `AcquiredConns()==0` assertion, deadlines as bounds not races)           |
-| Q-7 enrolment                                                      | D5                                                                                                   |
+| AC                                                           | Where satisfied                                                                                                             |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------- |
+| Integration test exercises pool saturation deterministically | `internal/api/evidence/integration_test.go` (held-slot saturation, D3); passes `go test -tags=integration -p 1` locally 6/6 |
+| Asserts status code, body shape, leak absence                | Both tests: status pin, JSON-shape pin, `assertNoLeakage` (stack/DSN/credential/path), `assertNoRetryHint`                  |
+| Divergence recorded in a decisions log                       | D2 (fail-fast-4xx and `retry_after` both diverge)                                                                           |
+| Bounded — no held connections, no flaky wall-clock sleeps    | D3 (cleanup-released slots, `AcquiredConns()==0` assertion, deadlines as bounds not races)                                  |
+| Q-7 enrolment                                                | D5                                                                                                                          |
 
 ---
 
