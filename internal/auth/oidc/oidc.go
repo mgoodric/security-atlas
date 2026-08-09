@@ -53,6 +53,11 @@ const (
 	// is generous for a user to authenticate but short enough that an
 	// abandoned tab does not leave persistent verifier material around.
 	FlowCookieMaxAge = 10 * time.Minute
+
+	// ProviderCacheTTL bounds how long the RP serves a discovered IdP provider
+	// before re-running OIDC discovery. Slice 335's chaos design expected new
+	// logins to observe IdP outage/recovery within roughly this window.
+	ProviderCacheTTL = 30 * time.Second
 )
 
 // IdpConfig is one OIDC IdP relationship — what we received at provisioning
@@ -92,16 +97,25 @@ var ErrNonceMismatch = errors.New("oidc: nonce mismatch (ID-token replay guard)"
 
 // Authenticator drives the RP-side OIDC flow.
 type Authenticator struct {
-	resolver IdpResolver
-	mu       sync.Mutex
-	cache    map[string]*coreos.Provider // keyed by issuer URL
+	resolver         IdpResolver
+	mu               sync.Mutex
+	cache            map[string]cachedProvider // keyed by issuer URL
+	providerCacheTTL time.Duration
+	now              func() time.Time
+}
+
+type cachedProvider struct {
+	provider     *coreos.Provider
+	discoveredAt time.Time
 }
 
 // New constructs an Authenticator over a per-tenant IdP resolver.
 func New(resolver IdpResolver) *Authenticator {
 	return &Authenticator{
-		resolver: resolver,
-		cache:    map[string]*coreos.Provider{},
+		resolver:         resolver,
+		cache:            map[string]cachedProvider{},
+		providerCacheTTL: ProviderCacheTTL,
+		now:              time.Now,
 	}
 }
 
@@ -336,18 +350,26 @@ func ClearFlowCookies(w http.ResponseWriter, secure bool) {
 // --- helpers ---
 
 func (a *Authenticator) provider(ctx context.Context, issuer string) (*coreos.Provider, error) {
+	now := a.now()
 	a.mu.Lock()
-	if p, ok := a.cache[issuer]; ok {
+	entry, ok := a.cache[issuer]
+	if ok && now.Sub(entry.discoveredAt) < a.providerCacheTTL {
 		a.mu.Unlock()
-		return p, nil
+		return entry.provider, nil
 	}
 	a.mu.Unlock()
 	p, err := coreos.NewProvider(ctx, issuer)
 	if err != nil {
+		a.mu.Lock()
+		delete(a.cache, issuer)
+		a.mu.Unlock()
 		return nil, fmt.Errorf("oidc: discover %s: %w", issuer, err)
 	}
 	a.mu.Lock()
-	a.cache[issuer] = p
+	a.cache[issuer] = cachedProvider{
+		provider:     p,
+		discoveredAt: a.now(),
+	}
 	a.mu.Unlock()
 	return p, nil
 }
