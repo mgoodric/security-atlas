@@ -238,6 +238,29 @@ func TestSearchOperationDocumentsContract(t *testing.T) {
 	}
 }
 
+func TestSchemaRegistryReadDocumentsUnavailableContract(t *testing.T) {
+	var out bytes.Buffer
+	if err := Generate(&out, RouteSpecs); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	yaml := out.String()
+	for _, want := range []string{
+		"  /v1/schemas:",
+		"  /v1/schemas/{kind}/{semver}:",
+		"        \"503\":",
+		"            Retry-After:",
+		"                $ref: \"#/components/schemas/SchemaRegistryUnavailableError\"",
+		"    SchemaRegistryUnavailableError:",
+		"          enum: [schema_registry_unavailable]",
+		"        request_id:",
+		"        internal error detail.",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Errorf("schema-registry unavailable contract missing marker: %q", want)
+		}
+	}
+}
+
 // opMarker returns a stable substring uniquely identifying a route in
 // the YAML output. Used by the security-block presence test.
 func opMarker(r RouteSpec) string {
