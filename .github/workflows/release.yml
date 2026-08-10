@@ -62,7 +62,7 @@ jobs:
       attestations: write
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
         with:
           egress-policy: audit
           disable-sudo: true
@@ -198,7 +198,7 @@ jobs:
         # attest-build-provenance pattern; pinned to the same SHA. The
         # `attestations: write` + `id-token: write` this needs are scoped at
         # the job level (see this job's `permissions:` block — P0-451-5).
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4
         with:
           subject-path: |
             dist/*.tar.gz
