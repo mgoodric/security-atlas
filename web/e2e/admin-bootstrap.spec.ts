@@ -51,87 +51,95 @@ test.describe("admin bootstrap", () => {
     seedFromFixture("admin-bootstrap");
   });
 
-  test("admin bootstrap end-to-end", async () => {
+  test("admin bootstrap end-to-end", async ({ page }) => {
     // 1. Sign in with the test admin bearer.
-    //    await page.goto("/login");
-    //    await page.fill('input[name="token"]', process.env.TEST_ADMIN_BEARER!);
-    //    await page.click("button[type=submit]");
-    //    await page.waitForURL("/dashboard");
-    //
+    await page.goto("/login");
+    await page.fill('input[name="token"]', process.env.TEST_ADMIN_BEARER!);
+    await page.click("button[type=submit]");
+    await page.waitForURL("/dashboard");
+
     // 2. Land on /admin overview.
-    //    await page.goto("/admin");
-    //    await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
-    //    for (const tile of ["SSO", "Users", "API keys", "Features", "Audit log"]) {
-    //      await expect(page.getByText(tile, { exact: true })).toBeVisible();
-    //    }
-    //
+    await page.goto("/admin");
+    await expect(page.getByRole("heading", { name: "Admin" })).toBeVisible();
+    for (const tile of ["SSO", "Users", "API keys", "Features", "Audit log"]) {
+      await expect(page.getByText(tile, { exact: true })).toBeVisible();
+    }
+
     // 3. SSO discovery preflight + save (slice 063 extension).
-    //    await page.goto("/admin/sso");
-    //    await page.fill('input#preflight-issuer', "https://accounts.google.com");
-    //    await page.click("text=Run preflight");
-    //    await expect(page.getByText("Discovery OK")).toBeVisible();
-    //
+    await page.goto("/admin/sso");
+    await page.fill('input#preflight-issuer', "https://accounts.google.com");
+    await page.click("text=Run preflight");
+    await expect(page.getByText("Discovery OK")).toBeVisible();
+
     // 3b. Fill the OIDC configuration form and submit (slice 063).
-    //    await page.fill('input#sso-issuer-url', "https://idp.example.com");
-    //    await page.fill('input#sso-client-id', "platform-rp-client");
-    //    await page.fill('input#sso-client-secret', "test-secret-placeholder");
-    //    await page.fill('input#sso-redirect-url', "https://your-deployment.example/auth/oidc/callback");
-    //    await page.fill('input#sso-allowed-domains', "example.com");
-    //    await page.click('[data-testid="sso-save-button"]');
-    //    await expect(page.locator('[data-testid="sso-save-success"]')).toBeVisible();
-    //
+    await page.fill('input#sso-issuer-url', "https://idp.example.com");
+    await page.fill('input#sso-client-id', "platform-rp-client");
+    await page.fill('input#sso-client-secret', "test-secret-placeholder");
+    await page.fill('input#sso-redirect-url', "https://your-deployment.example/auth/oidc/callback");
+    await page.fill('input#sso-allowed-domains', "example.com");
+    await page.click('[data-testid="sso-save-button"]');
+    await expect(page.locator('[data-testid="sso-save-success"]')).toBeVisible();
+
     // 3c. Reload and assert the GET re-render shows the saved fields
     //     and DOES NOT show client_secret (slice 034 AC-9 / write-once).
-    //    await page.reload();
-    //    await expect(page.locator('input#sso-issuer-url')).toHaveValue(
-    //      "https://idp.example.com",
-    //    );
-    //    await expect(page.locator('input#sso-client-id')).toHaveValue(
-    //      "platform-rp-client",
-    //    );
-    //    await expect(page.locator('input#sso-redirect-url')).toHaveValue(
-    //      "https://your-deployment.example/auth/oidc/callback",
-    //    );
-    //    // Critically: client_secret input is empty after the reload.
-    //    // The backend never returns it; the UI never re-renders it.
-    //    await expect(page.locator('input#sso-client-secret')).toHaveValue(
-    //      "",
-    //    );
-    //
+    await page.reload();
+    await expect(page.locator('input#sso-issuer-url')).toHaveValue(
+      "https://idp.example.com",
+    );
+    await expect(page.locator('input#sso-client-id')).toHaveValue(
+      "platform-rp-client",
+    );
+    await expect(page.locator('input#sso-redirect-url')).toHaveValue(
+      "https://your-deployment.example/auth/oidc/callback",
+    );
+    // Critically: client_secret input is empty after the reload.
+    // The backend never returns it; the UI never re-renders it.
+    await expect(page.locator('input#sso-client-secret')).toHaveValue(
+      "",
+    );
+
     // 3d. Re-submit with an empty client_secret — slice 062 contract
     //     treats this as "leave existing", so the save must succeed.
-    //    await page.fill('input#sso-allowed-domains', "example.com, sub.example.com");
-    //    await page.click('[data-testid="sso-save-button"]');
-    //    await expect(page.locator('[data-testid="sso-save-success"]')).toBeVisible();
-    //
+    await page.fill('input#sso-allowed-domains', "example.com, sub.example.com");
+    await page.click('[data-testid="sso-save-button"]');
+    await expect(page.locator('[data-testid="sso-save-success"]')).toBeVisible();
+
     // 4. Toggle a feature flag.
-    //    await page.goto("/admin/features");
-    //    const firstFlag = page.locator("text=Enable").first();
-    //    await firstFlag.click();
-    //    await expect(page.getByText("Confirm enable")).toBeVisible();
-    //    await page.click("text=Confirm enable");
-    //
+    await page.goto("/admin/features");
+    const firstFlag = page.locator("text=Enable").first();
+    await firstFlag.click();
+    await expect(page.getByText("Confirm enable")).toBeVisible();
+    await page.click("text=Confirm enable");
+
     // 5. Issue an API key + confirm write-once disclosure.
-    //    await page.goto("/admin/api-keys");
-    //    await page.fill('input[placeholder^="{\\"connector\\"}"]', '{}');
-    //    await page.click("text=Issue credential");
-    //    const callout = page.locator('[data-testid="fresh-secret-callout"]');
-    //    await expect(callout).toBeVisible();
-    //    await expect(callout).toContainText("This is the only time");
-    //
+    await page.goto("/admin/api-keys");
+    await page.fill('input[placeholder^="{\\"connector\\"}"]', '{}');
+    await page.click("text=Issue credential");
+    const callout = page.locator('[data-testid="fresh-secret-callout"]');
+    await expect(callout).toBeVisible();
+    await expect(callout).toContainText("This is the only time");
+
     // 6. Verify the role-permission matrix.
-    //    await page.goto("/admin/users");
-    //    for (const role of ["admin", "grc_engineer", "control_owner", "auditor", "viewer"]) {
-    //      await expect(page.getByText(role)).toBeVisible();
-    //    }
+    await page.goto("/admin/users");
+    for (const role of ["admin", "grc_engineer", "control_owner", "auditor", "viewer"]) {
+      await expect(page.getByText(role)).toBeVisible();
+    }
   });
 
-  test("non-admin sees 403 on /admin", async () => {
+  test("non-admin sees 403 on /admin", async ({ page }) => {
     // 1. Sign in with a non-admin bearer (TEST_VIEWER_BEARER).
+    await page.goto("/login");
+    await page.fill('input[name="token"]', process.env.TEST_VIEWER_BEARER!);
+    await page.click("button[type=submit]");
+    await page.waitForURL("/dashboard");
+
     // 2. Navigate to /admin.
+    await page.goto("/admin");
+
     // 3. Assert the "This section is admin-only" alert renders, and the
     //    response was 200 (NOT a 404 — the page exists; this user lacks
     //    the role).
+    await expect(page.getByText(/admin.only|not authorized/i)).toBeVisible();
   });
 
   // Slice 186 (F-178-6 closure) — AC-3: the sidebar "Admin" entry is
@@ -143,38 +151,38 @@ test.describe("admin bootstrap", () => {
   // harness wiring of TEST_ADMIN_BEARER + TEST_VIEWER_BEARER fixtures
   // (the same harness gate the rest of this spec waits on). The test
   // bodies are preserved verbatim as a reviewable contract.
-  test("admin bearer sees the sidebar Admin entry", async () => {
+  test("admin bearer sees the sidebar Admin entry", async ({ page }) => {
     // 1. Sign in with the admin bearer (TEST_ADMIN_BEARER).
-    //    await page.goto("/login");
-    //    await page.fill('input[name="token"]', process.env.TEST_ADMIN_BEARER!);
-    //    await page.click("button[type=submit]");
-    //    await page.waitForURL("/dashboard");
-    //
+    await page.goto("/login");
+    await page.fill('input[name="token"]', process.env.TEST_ADMIN_BEARER!);
+    await page.click("button[type=submit]");
+    await page.waitForURL("/dashboard");
+
     // 2. Assert the sidebar Admin link is visible.
-    //    await expect(
-    //      page.locator('aside nav a[href="/admin"]'),
-    //    ).toBeVisible();
-    //    await expect(
-    //      page.locator('aside nav a[href="/admin"]'),
-    //    ).toHaveText("Admin");
+    await expect(
+      page.locator('aside nav a[href="/admin"]'),
+    ).toBeVisible();
+    await expect(
+      page.locator('aside nav a[href="/admin"]'),
+    ).toHaveText("Admin");
   });
 
-  test("non-admin bearer does NOT see the sidebar Admin entry", async () => {
+  test("non-admin bearer does NOT see the sidebar Admin entry", async ({ page }) => {
     // 1. Sign in with a non-admin bearer (TEST_VIEWER_BEARER).
-    //    await page.goto("/login");
-    //    await page.fill('input[name="token"]', process.env.TEST_VIEWER_BEARER!);
-    //    await page.click("button[type=submit]");
-    //    await page.waitForURL("/dashboard");
-    //
+    await page.goto("/login");
+    await page.fill('input[name="token"]', process.env.TEST_VIEWER_BEARER!);
+    await page.click("button[type=submit]");
+    await page.waitForURL("/dashboard");
+
     // 2. Assert the sidebar renders without an Admin link.
-    //    await expect(
-    //      page.locator('aside nav a[href="/admin"]'),
-    //    ).toHaveCount(0);
-    //
+    await expect(
+      page.locator('aside nav a[href="/admin"]'),
+    ).toHaveCount(0);
+
     // 3. Confirm the other canonical entries DO render — verifies the
     //    role-gate is surgical, not blanket-hiding.
-    //    for (const href of ["/dashboard", "/controls", "/risks", "/settings"]) {
-    //      await expect(page.locator(`aside nav a[href="${href}"]`)).toBeVisible();
-    //    }
+    for (const href of ["/dashboard", "/controls", "/risks", "/settings"]) {
+      await expect(page.locator(`aside nav a[href="${href}"]`)).toBeVisible();
+    }
   });
 });

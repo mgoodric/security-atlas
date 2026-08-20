@@ -57,29 +57,25 @@ function atlasBaseURL(): string {
 }
 
 /**
- * issueTestJWT POSTs to /v1/test/issue-jwt with the demo tenant + user
- * + admin claim shape that the Playwright fixtures need. Returns the
- * minted JWT.
+ * issueTestJWT POSTs to /v1/test/issue-jwt with the given tenant + user
+ * + roles claim shape. Returns the minted JWT.
  *
  * Throws on any non-200 — the e2e suite cannot proceed without a
  * working credential, so loud failure is the right semantics. A 404
  * almost certainly means `ATLAS_TEST_MODE=1` is unset on the atlas
  * server; the error message surfaces that hypothesis to the operator.
  */
-async function issueTestJWT(): Promise<string> {
+async function issueTestJWT(
+  tenant_id: string,
+  user_id: string,
+  roles: string[],
+): Promise<string> {
   const url = `${atlasBaseURL()}/v1/test/issue-jwt`;
   const body = {
-    tenant_id: DEMO_TENANT_ID,
-    // Subject = DEMO_USER_ID so PATCH /v1/me + /v1/me/preferences
-    // resolve to the real users row inserted by
-    // fixtures/e2e/settings.sql (slice 164 — required for AC-3
-    // round-trip + AC-8 timezone + the broader settings spec body).
-    user_id: DEMO_USER_ID,
-    // Admin + grc_engineer roles cover both AC-10 multi-role tail
-    // badge (settings) AND every admin-gated route the dashboard
-    // suite touches.
-    roles: ["admin", "grc_engineer"],
-    super_admin: true,
+    tenant_id,
+    user_id,
+    roles,
+    super_admin: roles.includes("admin"),
   };
 
   let res: Response;
@@ -122,12 +118,32 @@ async function issueTestJWT(): Promise<string> {
 /**
  * Playwright invokes this default export exactly once per test
  * invocation, BEFORE the webServer step and BEFORE any spec runs.
- * Writes the minted JWT into `process.env.TEST_BEARER` so the
- * existing `web/e2e/fixtures.ts` worker-scoped fixture picks it up
- * unchanged.
+ * Writes the minted JWTs into `process.env.TEST_BEARER`,
+ * `process.env.TEST_ADMIN_BEARER`, and `process.env.TEST_VIEWER_BEARER`
+ * so the e2e specs can use them as needed.
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default async function globalSetup(_config: FullConfig): Promise<void> {
-  const token = await issueTestJWT();
+  // Mint a generic test bearer (admin) for backward compatibility
+  const token = await issueTestJWT(DEMO_TENANT_ID, DEMO_USER_ID, [
+    "admin",
+    "grc_engineer",
+  ]);
   process.env.TEST_BEARER = token;
+
+  // Mint an explicit admin bearer for admin-bootstrap spec
+  const adminToken = await issueTestJWT(
+    "00000000-0000-0000-0000-00000000d3a0",
+    "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaa001",
+    ["admin"],
+  );
+  process.env.TEST_ADMIN_BEARER = adminToken;
+
+  // Mint a viewer bearer for admin-bootstrap spec
+  const viewerToken = await issueTestJWT(
+    "00000000-0000-0000-0000-00000000d3a0",
+    "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01",
+    ["viewer", "grc_engineer"],
+  );
+  process.env.TEST_VIEWER_BEARER = viewerToken;
 }
