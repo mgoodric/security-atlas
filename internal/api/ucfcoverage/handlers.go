@@ -15,6 +15,11 @@
 //     given a control, return the framework requirements its SCF anchor
 //     satisfies. (control_coverage.go)
 //
+//   - GET /v1/coverage-strength/matrix     — cross-framework read-model:
+//     rows are SCF anchors, columns are current framework versions, and
+//     each cell carries the anchor's coverage-strength contribution to
+//     that framework. (matrix.go)
+//
 // Per-endpoint handlers + their endpoint-specific helpers live in the
 // three files named above (slice 381 F-UCF-2 — split out of a single
 // 932-LOC handlers.go to keep each endpoint reviewable in isolation).
@@ -142,6 +147,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/v1/requirements/{id}/coverage", h.RequirementCoverage)
 	r.Get("/v1/anchors/{id}/requirements", h.AnchorRequirements)
 	r.Get("/v1/controls/{id}/coverage", h.ControlCoverage)
+	r.Get("/v1/coverage-strength/matrix", h.CoverageStrengthMatrix)
 }
 
 // ===== shared helpers =====
