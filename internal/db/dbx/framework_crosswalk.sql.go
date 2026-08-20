@@ -174,6 +174,37 @@ func (q *Queries) GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) 
 	return i, err
 }
 
+const getFwToScfEdgeContentForUpdate = `-- name: GetFwToScfEdgeContentForUpdate :one
+SELECT id, relationship_type, strength, rationale, mapping_tier
+FROM fw_to_scf_edges
+WHERE id = $1
+FOR UPDATE
+`
+
+type GetFwToScfEdgeContentForUpdateRow struct {
+	ID               pgtype.UUID          `json:"id"`
+	RelationshipType StrmRelationshipType `json:"relationship_type"`
+	Strength         float64              `json:"strength"`
+	Rationale        string               `json:"rationale"`
+	MappingTier      CrosswalkMappingTier `json:"mapping_tier"`
+}
+
+// Row-lock the edge's content + tier inside the edit transaction so a
+// concurrent edit or tier transition cannot race the read-validate-write
+// window. Returns ErrNoRows for an unknown edge (the handler maps to 404).
+func (q *Queries) GetFwToScfEdgeContentForUpdate(ctx context.Context, id pgtype.UUID) (GetFwToScfEdgeContentForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, getFwToScfEdgeContentForUpdate, id)
+	var i GetFwToScfEdgeContentForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.RelationshipType,
+		&i.Strength,
+		&i.Rationale,
+		&i.MappingTier,
+	)
+	return i, err
+}
+
 const getFwToScfEdgeTier = `-- name: GetFwToScfEdgeTier :one
 
 SELECT id, mapping_tier, source_attribution
@@ -266,6 +297,62 @@ func (q *Queries) InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgePa
 	return i, err
 }
 
+const insertFwToScfEdgeContentEdit = `-- name: InsertFwToScfEdgeContentEdit :one
+INSERT INTO fw_to_scf_edge_content_edits (
+    edge_id, editor_id,
+    from_relationship_type, to_relationship_type,
+    from_strength, to_strength,
+    from_rationale, to_rationale,
+    note
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, edge_id, editor_id, from_relationship_type, to_relationship_type, from_strength, to_strength, from_rationale, to_rationale, note, created_at
+`
+
+type InsertFwToScfEdgeContentEditParams struct {
+	EdgeID               pgtype.UUID          `json:"edge_id"`
+	EditorID             pgtype.UUID          `json:"editor_id"`
+	FromRelationshipType StrmRelationshipType `json:"from_relationship_type"`
+	ToRelationshipType   StrmRelationshipType `json:"to_relationship_type"`
+	FromStrength         float64              `json:"from_strength"`
+	ToStrength           float64              `json:"to_strength"`
+	FromRationale        string               `json:"from_rationale"`
+	ToRationale          string               `json:"to_rationale"`
+	Note                 string               `json:"note"`
+}
+
+// Append the immutable before/after audit row for a content edit
+// (threat-model R — the content twin of InsertFwToScfEdgeTierTransition).
+// Written in the SAME transaction as UpdateFwToScfEdgeContent.
+func (q *Queries) InsertFwToScfEdgeContentEdit(ctx context.Context, arg InsertFwToScfEdgeContentEditParams) (FwToScfEdgeContentEdit, error) {
+	row := q.db.QueryRow(ctx, insertFwToScfEdgeContentEdit,
+		arg.EdgeID,
+		arg.EditorID,
+		arg.FromRelationshipType,
+		arg.ToRelationshipType,
+		arg.FromStrength,
+		arg.ToStrength,
+		arg.FromRationale,
+		arg.ToRationale,
+		arg.Note,
+	)
+	var i FwToScfEdgeContentEdit
+	err := row.Scan(
+		&i.ID,
+		&i.EdgeID,
+		&i.EditorID,
+		&i.FromRelationshipType,
+		&i.ToRelationshipType,
+		&i.FromStrength,
+		&i.ToStrength,
+		&i.FromRationale,
+		&i.ToRationale,
+		&i.Note,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertFwToScfEdgeTierTransition = `-- name: InsertFwToScfEdgeTierTransition :one
 INSERT INTO fw_to_scf_edge_tier_transitions (
     edge_id, reviewer_id, from_tier, to_tier, note
@@ -340,6 +427,48 @@ func (q *Queries) ListFrameworkRequirementsForVersion(ctx context.Context, frame
 	return items, nil
 }
 
+const listFwToScfEdgeContentEdits = `-- name: ListFwToScfEdgeContentEdits :many
+SELECT id, edge_id, editor_id, from_relationship_type, to_relationship_type, from_strength, to_strength, from_rationale, to_rationale, note, created_at
+FROM fw_to_scf_edge_content_edits
+WHERE edge_id = $1
+ORDER BY created_at DESC
+`
+
+// Admin/maintainer-scoped read of an edge's content-edit history (newest
+// first). Editor identity stays behind the admin boundary, mirroring the
+// tier-transition trail (threat-model I / P0-483-6).
+func (q *Queries) ListFwToScfEdgeContentEdits(ctx context.Context, edgeID pgtype.UUID) ([]FwToScfEdgeContentEdit, error) {
+	rows, err := q.db.Query(ctx, listFwToScfEdgeContentEdits, edgeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FwToScfEdgeContentEdit
+	for rows.Next() {
+		var i FwToScfEdgeContentEdit
+		if err := rows.Scan(
+			&i.ID,
+			&i.EdgeID,
+			&i.EditorID,
+			&i.FromRelationshipType,
+			&i.ToRelationshipType,
+			&i.FromStrength,
+			&i.ToStrength,
+			&i.FromRationale,
+			&i.ToRationale,
+			&i.Note,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFwToScfEdgeTierTransitions = `-- name: ListFwToScfEdgeTierTransitions :many
 SELECT id, edge_id, reviewer_id, from_tier, to_tier, note, created_at
 FROM fw_to_scf_edge_tier_transitions
@@ -367,6 +496,85 @@ func (q *Queries) ListFwToScfEdgeTierTransitions(ctx context.Context, edgeID pgt
 			&i.ToTier,
 			&i.Note,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFwToScfEdgesForFrameworkVersion = `-- name: ListFwToScfEdgesForFrameworkVersion :many
+
+SELECT
+    e.id,
+    e.framework_requirement_id,
+    fr.code  AS requirement_code,
+    fr.title AS requirement_title,
+    e.scf_anchor_id,
+    a.scf_id,
+    a.family,
+    a.title  AS anchor_title,
+    e.relationship_type,
+    e.strength,
+    e.source_attribution,
+    e.mapping_tier,
+    e.rationale
+FROM fw_to_scf_edges e
+JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+JOIN scf_anchors a ON a.id = e.scf_anchor_id
+WHERE fr.framework_version_id = $1
+ORDER BY fr.code, a.scf_id, e.id
+`
+
+type ListFwToScfEdgesForFrameworkVersionRow struct {
+	ID                     pgtype.UUID                `json:"id"`
+	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`
+	RequirementCode        string                     `json:"requirement_code"`
+	RequirementTitle       string                     `json:"requirement_title"`
+	ScfAnchorID            pgtype.UUID                `json:"scf_anchor_id"`
+	ScfID                  string                     `json:"scf_id"`
+	Family                 string                     `json:"family"`
+	AnchorTitle            string                     `json:"anchor_title"`
+	RelationshipType       StrmRelationshipType       `json:"relationship_type"`
+	Strength               float64                    `json:"strength"`
+	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Rationale              string                     `json:"rationale"`
+}
+
+// ===== slice 536b-1: crosswalk review surface + content editing =====
+// The review-queue listing: every STRM edge under one framework version,
+// joined through framework_requirements (for the code the reviewer reads) and
+// scf_anchors (for the family-scoped conflict heuristics). Bounded by the
+// framework_version_id predicate (slice 536 threat-model D); ordered by
+// requirement code then anchor scf_id so the queue is stable between calls.
+func (q *Queries) ListFwToScfEdgesForFrameworkVersion(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFwToScfEdgesForFrameworkVersionRow, error) {
+	rows, err := q.db.Query(ctx, listFwToScfEdgesForFrameworkVersion, frameworkVersionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFwToScfEdgesForFrameworkVersionRow
+	for rows.Next() {
+		var i ListFwToScfEdgesForFrameworkVersionRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrameworkRequirementID,
+			&i.RequirementCode,
+			&i.RequirementTitle,
+			&i.ScfAnchorID,
+			&i.ScfID,
+			&i.Family,
+			&i.AnchorTitle,
+			&i.RelationshipType,
+			&i.Strength,
+			&i.SourceAttribution,
+			&i.MappingTier,
+			&i.Rationale,
 		); err != nil {
 			return nil, err
 		}
@@ -528,6 +736,38 @@ func (q *Queries) UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgePa
 		&i.MappingTier,
 	)
 	return i, err
+}
+
+const updateFwToScfEdgeContent = `-- name: UpdateFwToScfEdgeContent :exec
+UPDATE fw_to_scf_edges
+SET relationship_type = $2,
+    strength          = $3,
+    rationale         = $4,
+    updated_at        = now()
+WHERE id = $1
+`
+
+type UpdateFwToScfEdgeContentParams struct {
+	ID               pgtype.UUID          `json:"id"`
+	RelationshipType StrmRelationshipType `json:"relationship_type"`
+	Strength         float64              `json:"strength"`
+	Rationale        string               `json:"rationale"`
+}
+
+// Rewrite ONLY the reviewer-curated content columns (the D-536b-2 widened
+// column-level grant — migration 20260804000000). source_attribution and the
+// edge-endpoint FKs are not writable through atlas_app's grants; tier
+// editability is enforced in Go (internal/crosswalkedit) BEFORE this runs;
+// this query is the unconditional write inside the same tx that also inserts
+// the content-edit audit row.
+func (q *Queries) UpdateFwToScfEdgeContent(ctx context.Context, arg UpdateFwToScfEdgeContentParams) error {
+	_, err := q.db.Exec(ctx, updateFwToScfEdgeContent,
+		arg.ID,
+		arg.RelationshipType,
+		arg.Strength,
+		arg.Rationale,
+	)
+	return err
 }
 
 const upsertFrameworkRequirement = `-- name: UpsertFrameworkRequirement :one

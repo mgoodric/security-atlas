@@ -40,6 +40,7 @@ GET /v1/admin/audit-log/export
 GET /v1/admin/audit-log/unified
 GET /v1/admin/audit-periods/export
 GET /v1/admin/credentials
+GET /v1/admin/crosswalk-review
 GET /v1/admin/demo/status
 GET /v1/admin/evidence/export
 GET /v1/admin/exceptions/export
@@ -181,6 +182,7 @@ GET /v1/walkthroughs/{id}/export
 PATCH /scim/v2/Groups/{id}
 PATCH /scim/v2/Users/{id}
 PATCH /v1/action-plans/{id}
+PATCH /v1/admin/crosswalk-edges/{id}
 PATCH /v1/admin/features/{key}
 PATCH /v1/admin/sso
 PATCH /v1/admin/users/{id}/roles

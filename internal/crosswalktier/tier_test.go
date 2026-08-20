@@ -71,6 +71,10 @@ func TestValidateTransition_LegalMoves(t *testing.T) {
 		{TierDraft, TierRejected},
 		{TierUnderReview, TierVerified},
 		{TierUnderReview, TierRejected},
+		// Slice 536b-1 (D-536b-1): demotion back into review, so a verified
+		// mapping's content can be corrected (edits are gated to draft /
+		// under_review) and then re-verified through the same machine.
+		{TierVerified, TierUnderReview},
 	}
 	for _, m := range legal {
 		m := m
@@ -95,9 +99,10 @@ func TestValidateTransition_IllegalMoves(t *testing.T) {
 		{TierRejected, TierDraft},
 		{TierRejected, TierUnderReview},
 		{TierRejected, TierVerified},
-		// verified is not demoted via this API.
+		// verified demotes ONLY to under_review (slice 536b-1): never straight
+		// back to draft, and never straight to rejected — trust is withdrawn
+		// into review first so the trail shows why.
 		{TierVerified, TierDraft},
-		{TierVerified, TierUnderReview},
 		{TierVerified, TierRejected},
 		// Backwards / skip moves.
 		{TierUnderReview, TierDraft},
