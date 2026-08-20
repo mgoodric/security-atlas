@@ -1666,7 +1666,7 @@ type Querier interface {
 	ListBoardPacks(ctx context.Context, tenantID pgtype.UUID) ([]BoardPack, error)
 	// Slice 094 — compliance calendar backend read query.
 	//
-	// ONE UNION ALL across five event sources:
+	// ONE UNION ALL across seven event sources:
 	//
 	//   1. audit_periods           — period_end is the audit's "report due" date
 	//   2. exceptions              — expires_at is the waiver-lapse date
@@ -1681,6 +1681,8 @@ type Querier interface {
 	//      the append-only control_evaluations ledger.
 	//   6. personnel_security_checklists — open offboarding due dates, so overdue
 	//      leaver access-removal tasks surface on the compliance calendar.
+	//   7. access_review_campaigns — active access-review campaign due dates, so
+	//      upcoming reviewer certifications appear beside other compliance work.
 	//
 	// All event sources are tenant-scoped; RLS fires on each underlying SELECT, and the
 	// explicit tenant_id predicates are the primary guarantee.
@@ -1690,7 +1692,7 @@ type Querier interface {
 	// timestamptz bounds.
 	//
 	// Type filter (`type_filter`) is a CSV string. Empty string ('') means
-	// "all five sources." A non-empty filter narrows to the subset by checking
+	// "all sources." A non-empty filter narrows to the subset by checking
 	// membership on the per-branch literal type discriminator.
 	//
 	// Cadence math for the controls branch:
