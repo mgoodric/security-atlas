@@ -1,0 +1,21 @@
+internal/evidence/ingest/ingest.go
+  s_02016be009df3b::t_5c0ea74365dc07 262
+docs/openapi.yaml
+  s_02016be009df3b::t_34937d7cfd838b 2764-2783
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "27eaeb66a30c10433cf696b07c85166133d3fbfc",
+  "prompts": {},
+  "sessions": {
+    "s_02016be009df3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a01cab-63d4-7603-bc10-176170d14848",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
