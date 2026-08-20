@@ -154,6 +154,58 @@ func TestPortfolioAllowedIDs_UnionAcrossControls(t *testing.T) {
 	}
 }
 
+func TestPortfolioSummarize_PreservesRankedOrderAndCitations(t *testing.T) {
+	gap := ControlEvidence{
+		ControlID:      uuid.New(),
+		ControlTitle:   "gap",
+		RelevanceScore: 10000,
+		TotalCount:     0,
+	}
+	failing := controlWith(uuid.New(), uuid.New())
+	failing.RelevanceScore = 1001
+	passing := controlWith(uuid.New(), uuid.New())
+	passing.RelevanceScore = 1
+	set := PortfolioSet{
+		Controls:      []ControlEvidence{gap, failing, passing},
+		TotalControls: 3,
+	}
+	draft := fmt.Sprintf(
+		"Across 3 controls, 2 have current live evidence, 1 has no current live evidence, and 2 records are on record. Control (%s) cites (%s); control (%s) cites (%s).",
+		failing.ControlID, failing.Records[0].EvidenceID, passing.ControlID, passing.Records[0].EvidenceID)
+	svc := portfolioSvcWith(fakePortfolioReader{set: set}, draft, ownedFromSet(set))
+
+	sum, err := svc.PortfolioSummarize(context.Background(), PortfolioFilter{})
+	if err != nil {
+		t.Fatalf("PortfolioSummarize: %v", err)
+	}
+	if sum.Suppressed {
+		t.Fatalf("expected rendered, got suppressed (reason %q)", sum.Reason)
+	}
+	gotOrder := []uuid.UUID{
+		sum.PortfolioSet.Controls[0].ControlID,
+		sum.PortfolioSet.Controls[1].ControlID,
+		sum.PortfolioSet.Controls[2].ControlID,
+	}
+	wantOrder := []uuid.UUID{gap.ControlID, failing.ControlID, passing.ControlID}
+	for i := range wantOrder {
+		if gotOrder[i] != wantOrder[i] {
+			t.Fatalf("ranked control order changed at %d: got %v want %v", i, gotOrder, wantOrder)
+		}
+	}
+	cited := map[string]bool{}
+	for _, c := range sum.Citations {
+		cited[c.ID] = true
+	}
+	for _, id := range []uuid.UUID{failing.ControlID, failing.Records[0].EvidenceID, passing.ControlID, passing.Records[0].EvidenceID} {
+		if !cited[id.String()] {
+			t.Fatalf("citation %s was dropped after ranking; citations=%+v", id, sum.Citations)
+		}
+	}
+	if cited[uuid.New().String()] {
+		t.Fatal("invented citation resolved")
+	}
+}
+
 // ----- service: valid cross-control summary renders -----
 
 func TestPortfolioSummarize_ValidRenders(t *testing.T) {
@@ -322,7 +374,7 @@ func TestBuildPortfolioPrompt_StatesBoundsAndRollup(t *testing.T) {
 	prompt := buildPortfolioPrompt(set, rollup)
 	for _, want := range []string{
 		"control family IAC",
-		fmt.Sprintf("%d most-relevant of %d matched controls", rollup.ControlsInSummary, 17),
+		fmt.Sprintf("%d relevance-ranked of %d matched controls", rollup.ControlsInSummary, 17),
 		fmt.Sprintf("up to %d most-recent", MaxRecordsPerControl),
 		"Deterministic rollup",
 		c1.ControlID.String(),

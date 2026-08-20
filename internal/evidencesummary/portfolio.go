@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -74,13 +73,14 @@ Rules you must follow:
 
 // MaxControlsPerSummary bounds how many controls enter one portfolio summary —
 // the FIRST level of the two-level bound (P0-750-2, AC-1). The control set is
-// resolved deterministically (bundle_id ASC, id ASC) and capped here, so a
-// framework/family slice with hundreds of controls still produces a bounded
-// prompt and a bounded citable-id set. The number is the headline JUDGMENT call
-// (decisions-log D1): 12 controls is enough to read as a portfolio-level picture
-// for the solo-security-leader persona's framework/family slice, while
-// 12 * MaxRecordsPerControl cited excerpts + 12 control ids = 60 citable ids keeps
-// the prompt well inside MaxSummaryTokens headroom and the citation gate fast.
+// relevance-ranked deterministically (OPENENGINE-407; see decisions-log D6) and
+// capped here, so a framework/family slice with hundreds of controls still
+// produces a bounded prompt and a bounded citable-id set. The number is the
+// headline JUDGMENT call (decisions-log D1): 12 controls is enough to read as a
+// portfolio-level picture for the solo-security-leader persona's
+// framework/family slice, while 12 * MaxRecordsPerControl cited excerpts + 12
+// control ids = 60 citable ids keeps the prompt well inside MaxSummaryTokens
+// headroom and the citation gate fast.
 const MaxControlsPerSummary = 12
 
 // MaxRecordsPerControl bounds how many CURRENT LIVE evidence records per control
@@ -99,6 +99,12 @@ const MaxRecordsPerControl = 4
 type ControlEvidence struct {
 	ControlID    uuid.UUID
 	ControlTitle string
+
+	// RelevanceScore is the deterministic control-selection score assigned by
+	// PortfolioStore before the controls-per-summary cap. It is metadata for
+	// reproducibility/testing only; citations remain the real control/evidence IDs
+	// below.
+	RelevanceScore int64
 
 	// Records is the bounded set of CURRENT LIVE cited excerpts for THIS control
 	// (newest-first, capped at MaxRecordsPerControl).
@@ -421,15 +427,6 @@ func extractPortfolioNumbers(text string) []int {
 	return out
 }
 
-// sortControlsForDeterminism keeps the per-control corpus stable for the prompt +
-// rollup regardless of reader iteration order. The store already orders by
-// bundle_id; this guards the fake reader + any future reader from a flaky order.
-func sortControlsForDeterminism(controls []ControlEvidence) {
-	sort.SliceStable(controls, func(i, j int) bool {
-		return controls[i].ControlID.String() < controls[j].ControlID.String()
-	})
-}
-
 // buildPortfolioPrompt assembles the deterministic cross-control context block the
 // model sees (AC-2). It states the bounded scope honestly ("K of N controls; up
 // to M records each"), the deterministic rollup counts (so the model phrases them
@@ -446,7 +443,7 @@ func buildPortfolioPrompt(set PortfolioSet, rollup Rollup) string {
 	}
 	fmt.Fprintf(&b, "Portfolio scope: %s.\n", scope)
 	fmt.Fprintf(&b,
-		"Summarizing the %d most-relevant of %d matched controls; up to %d most-recent CURRENT LIVE records per control.\n",
+		"Summarizing the %d relevance-ranked of %d matched controls; up to %d most-recent CURRENT LIVE records per control.\n",
 		rollup.ControlsInSummary, rollup.TotalMatched, MaxRecordsPerControl)
 	fmt.Fprintf(&b,
 		"Deterministic rollup (state these numbers, do not invent others): %d controls in this summary, %d with current live evidence, %d with no current live evidence, %d evidence records total.\n",
