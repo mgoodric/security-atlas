@@ -1829,6 +1829,7 @@ type DriftFreshnessAlertLog struct {
 	StateKey        string             `json:"state_key"`
 	NotificationID  pgtype.UUID        `json:"notification_id"`
 	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+	SubjectModule   string             `json:"subject_module"`
 }
 
 type EmailChannelOptin struct {
