@@ -3,9 +3,9 @@ package oidc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -84,8 +84,8 @@ func TestBeginLoginRefreshesExpiredProviderCacheAndRecovers(t *testing.T) {
 	if err == nil {
 		t.Fatalf("BeginLogin after cache expiry succeeded while IdP was unavailable")
 	}
-	if !strings.Contains(err.Error(), "oidc: discover") {
-		t.Fatalf("BeginLogin after cache expiry error = %v, want discovery error", err)
+	if !errors.Is(err, ErrProviderUnavailable) {
+		t.Fatalf("BeginLogin after cache expiry error = %v, want ErrProviderUnavailable", err)
 	}
 	if discoveryCalls != 2 {
 		t.Fatalf("discoveryCalls after expired-cache failure = %d, want 2", discoveryCalls)
