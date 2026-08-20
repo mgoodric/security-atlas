@@ -1,0 +1,21 @@
+scripts/check-openapi-drift.sh
+  s_02016be009df3b::t_4550cf919b2073 123
+docs/openapi.yaml
+  s_02016be009df3b::t_fdf9f1fb9f4924 290-302
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "58760ae361c6d73ed22b68159cdbfe255f2e0205",
+  "prompts": {},
+  "sessions": {
+    "s_02016be009df3b": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a01cab-63d4-7603-bc10-176170d14848",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
