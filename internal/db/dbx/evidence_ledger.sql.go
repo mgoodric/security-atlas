@@ -79,6 +79,42 @@ func (q *Queries) CountEvidenceRecordsByTenant(ctx context.Context, tenantID pgt
 	return count, err
 }
 
+const getEvidenceAuditEntryByReceipt = `-- name: GetEvidenceAuditEntryByReceipt :one
+SELECT id, tenant_id, credential_id, decision, reason_code, idempotency_key, evidence_kind, record_id, received_at, subject_module
+FROM evidence_audit_log
+WHERE tenant_id = $1
+  AND credential_id = $2
+  AND record_id = $3
+ORDER BY received_at DESC
+LIMIT 1
+`
+
+type GetEvidenceAuditEntryByReceiptParams struct {
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	CredentialID string      `json:"credential_id"`
+	RecordID     pgtype.UUID `json:"record_id"`
+}
+
+// Pusher-visible receipt lookup. Scoped to tenant + credential so a
+// credential can only see decisions for its own pushed records.
+func (q *Queries) GetEvidenceAuditEntryByReceipt(ctx context.Context, arg GetEvidenceAuditEntryByReceiptParams) (EvidenceAuditLog, error) {
+	row := q.db.QueryRow(ctx, getEvidenceAuditEntryByReceipt, arg.TenantID, arg.CredentialID, arg.RecordID)
+	var i EvidenceAuditLog
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.CredentialID,
+		&i.Decision,
+		&i.ReasonCode,
+		&i.IdempotencyKey,
+		&i.EvidenceKind,
+		&i.RecordID,
+		&i.ReceivedAt,
+		&i.SubjectModule,
+	)
+	return i, err
+}
+
 const getEvidenceRecordByID = `-- name: GetEvidenceRecordByID :one
 SELECT id, tenant_id, evidence_query_id, control_id, scope_id, observed_at, ingested_at, provenance, result, payload, payload_uri, hash, freshness_class, valid_until, created_at, idempotency_key, evidence_kind, schema_version, credential_id, ingestion_path, source_attribution, control_ref, scope_canonical, observed_at_nanos
 FROM evidence_records

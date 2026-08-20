@@ -17,17 +17,21 @@
 package streambuf_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,7 +41,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	apievidence "github.com/mgoodric/security-atlas/internal/api/evidence"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
@@ -493,6 +499,116 @@ func TestAtLeastOnce_PoisonGetsTermedNotDropped(t *testing.T) {
 	// the rejection row (slice-013 invariant).
 	if got := countEvidence(t, f.pool, f.tenant); got != 0 {
 		t.Fatalf("ledger count = %d, want 0 for poison record", got)
+	}
+}
+
+func TestReceiptStatusHTTP_ReportsTerminalConsumerRejection(t *testing.T) {
+	f := boot(t)
+	pub := streambuf.NewJetStreamPublisher(f.conn)
+	cred := mkCred(f.tenant)
+	router := chi.NewRouter()
+	h := apievidence.NewHTTPHandler(f.svc, 0).WithPublisher(pub)
+	router.Post("/v1/evidence:push", h.PushHTTP)
+	router.Get("/v1/evidence/receipts/{record_id}", h.ReceiptStatusHTTP)
+
+	idem := "oe444-" + uuid.NewString()[:8]
+	body := map[string]any{"record": map[string]any{
+		"idempotency_key": idem,
+		"evidence_kind":   "does.not.exist.v1",
+		"schema_version":  "1.0.0",
+		"control_id":      "scf:VPM-04",
+		"scope": []map[string]any{
+			{"key": "environment", "values": []string{"prod"}},
+		},
+		"observed_at": time.Now().UTC().Add(-1 * time.Minute).Format(time.RFC3339Nano),
+		"result":      "pass",
+		"payload":     map[string]any{"tool": "unknown-kind-test"},
+		"source_attribution": map[string]any{
+			"actor_type": "service_account",
+			"actor_id":   "oe-444-test",
+		},
+	}}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal push body: %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/evidence:push", bytes.NewReader(raw))
+	req = req.WithContext(authctx.WithCredential(req.Context(), cred))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST status = %d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	var receipt struct {
+		RecordID string `json:"record_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &receipt); err != nil {
+		t.Fatalf("decode receipt: %v", err)
+	}
+	if receipt.RecordID == "" {
+		t.Fatalf("receipt missing record_id: %s", rec.Body.String())
+	}
+
+	consumer := streambuf.NewConsumer(f.conn, f.svc)
+	consumerCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = consumer.Start(consumerCtx) }()
+	waitFor(t, 10*time.Second, func() bool {
+		entries := listAuditEntries(t, f.pool, f.tenant, cred.ID)
+		for _, e := range entries {
+			if e.Decision == "rejected_unknown_kind" && e.RecordID.Valid {
+				return uuid.UUID(e.RecordID.Bytes).String() == receipt.RecordID
+			}
+		}
+		return false
+	})
+	consumer.Stop()
+	if got := countEvidence(t, f.pool, f.tenant); got != 0 {
+		t.Fatalf("ledger count = %d, want 0 for terminal rejection", got)
+	}
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/v1/evidence/receipts/"+receipt.RecordID, nil)
+	statusReq = statusReq.WithContext(authctx.WithCredential(statusReq.Context(), cred))
+	statusRec := httptest.NewRecorder()
+	router.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200; body=%s", statusRec.Code, statusRec.Body.String())
+	}
+	var status struct {
+		RecordID       string `json:"record_id"`
+		CredentialID   string `json:"credential_id"`
+		Decision       string `json:"decision"`
+		ReasonCode     string `json:"reason_code"`
+		IdempotencyKey string `json:"idempotency_key"`
+		EvidenceKind   string `json:"evidence_kind"`
+		Terminal       bool   `json:"terminal"`
+	}
+	if err := json.Unmarshal(statusRec.Body.Bytes(), &status); err != nil {
+		t.Fatalf("decode status: %v", err)
+	}
+	if status.RecordID != receipt.RecordID {
+		t.Fatalf("status record_id = %q, want %q", status.RecordID, receipt.RecordID)
+	}
+	if status.CredentialID != cred.ID {
+		t.Fatalf("status credential_id = %q, want %q", status.CredentialID, cred.ID)
+	}
+	if status.Decision != "rejected_unknown_kind" {
+		t.Fatalf("decision = %q, want rejected_unknown_kind", status.Decision)
+	}
+	if !strings.Contains(status.ReasonCode, "does.not.exist.v1") {
+		t.Fatalf("reason_code = %q, want kind detail", status.ReasonCode)
+	}
+	if status.IdempotencyKey != idem || status.EvidenceKind != "does.not.exist.v1" || !status.Terminal {
+		t.Fatalf("unexpected status body: %+v", status)
+	}
+
+	otherCred := mkCred(f.tenant)
+	otherReq := httptest.NewRequest(http.MethodGet, "/v1/evidence/receipts/"+receipt.RecordID, nil)
+	otherReq = otherReq.WithContext(authctx.WithCredential(otherReq.Context(), otherCred))
+	otherRec := httptest.NewRecorder()
+	router.ServeHTTP(otherRec, otherReq)
+	if otherRec.Code != http.StatusNotFound {
+		t.Fatalf("cross-credential GET status = %d, want 404; body=%s", otherRec.Code, otherRec.Body.String())
 	}
 }
 

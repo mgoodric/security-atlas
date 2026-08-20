@@ -2774,6 +2774,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/evidence/receipts/{record_id}:
+    get:
+      summary: GET /v1/evidence/receipts/{record_id}
+      tags: [evidence]
+      operationId: get-v1-evidence-receipts-record_id
+      security:
+        - bearer: []
+      parameters:
+        - name: record_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/evidence:push:
     post:
       summary: POST /v1/evidence:push
