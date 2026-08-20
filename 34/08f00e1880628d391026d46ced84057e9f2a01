@@ -1,0 +1,25 @@
+internal/api/testdata/routes_mw.golden
+  s_089f3584e72839::t_1ab34d8c04d5f6 99
+internal/api/testdata/routes.golden
+  s_089f3584e72839::t_1ab34d8c04d5f6 99
+internal/api/openapi/routes.go
+  s_089f3584e72839::t_065508a8d9860d 118
+docs/openapi.yaml
+  s_089f3584e72839::t_4b50294c93a727 104,2422-2435
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "3408f00e1880628d391026d46ced84057e9f2a01",
+  "prompts": {},
+  "sessions": {
+    "s_089f3584e72839": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a01ccc-31df-7c12-ac6f-ddb2a4c5c25d",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
