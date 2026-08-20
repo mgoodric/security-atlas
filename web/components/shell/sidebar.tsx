@@ -83,6 +83,7 @@ const NAV_BASE: NavItem[] = [
   { href: "/controls", label: "Controls", slot: <ControlsCountBadge /> },
   { href: "/evidence", label: "Evidence" },
   { href: "/risks", label: "Risks", slot: <RisksCountBadge /> },
+  { href: "/incidents", label: "Incidents" },
   { href: "/action-plans", label: "Action Plans" },
   { href: "/audits", label: "Audits" },
   { href: "/policies", label: "Policies" },
