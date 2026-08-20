@@ -36,6 +36,11 @@ func (s *Server) registerPlatform(root *chi.Mux, queries *dbx.Queries) {
 	// panic. It is bearer- and authz-exempt via the exemption lists
 	// passed to the middleware above, so it answers with no credential.
 	root.Get("/health", s.handleHealth)
+	// Slice 433: /ready readiness probe. This is distinct from /health:
+	// it returns 503 when Postgres is unavailable because the replica
+	// cannot serve authenticated traffic. It is also bearer- and
+	// authz-exempt so load balancers and k8s readiness gates can call it.
+	root.Get("/ready", s.handleReady)
 	// Slice 121 (AC-15/16): opt-in Prometheus `/metrics` fallback.
 	// Mounted only when cmd/atlas has wired the handler in via
 	// AttachMetricsHandler (driven by ATLAS_METRICS_FALLBACK_ENABLE=true).

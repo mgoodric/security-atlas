@@ -64,7 +64,7 @@ func (s *Server) httpHandler() http.Handler {
 	// {http.method, http.route, http.status_code, http.target, net.peer.ip}
 	// — it does NOT capture Authorization / Cookie headers, request
 	// body, or response body (P0-A7 / P0-A8). AC-7: high-frequency
-	// probes (/health, /metrics, /v1/version, /v1/install-state) are
+	// probes (/health, /ready, /metrics, /v1/version, /v1/install-state) are
 	// excluded via WithFilter so they don't drown out useful spans.
 	//
 	// AC-2: when OTel is in no-op mode (OTEL_EXPORTER_OTLP_ENDPOINT
@@ -138,7 +138,7 @@ func (s *Server) buildRouter() *chi.Mux {
 			ExpectedIssuer:   s.jwtIssuer,
 			ExpectedAudience: s.jwtAudience,
 			CookieName:       jwtmw.DefaultCookieName,
-		}), "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state",
+		}), "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
 			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/"))
@@ -163,7 +163,7 @@ func (s *Server) buildRouter() *chi.Mux {
 		// MUST be bearer-exempt because its purpose is to issue the
 		// first JWT — a circular dependency would prevent the Playwright
 		// global-setup from ever obtaining a token.
-		root.Use(requireCredential("/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state",
+		root.Use(requireCredential("/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
 			"/oauth/device_authorization", "/v1/test/issue-jwt", "/scim/"))
@@ -179,8 +179,9 @@ func (s *Server) buildRouter() *chi.Mux {
 	// request reaches authz.Decide; every decision (allow or deny)
 	// writes one row to decision_audit_log. Attaches AFTER tenancymw
 	// so the audit-log INSERT runs under the right tenant GUC.
-	// Exempt prefixes mirror the bearer-auth exempt set; /health is
-	// added because a liveness probe shouldn't require credentials.
+	// Exempt prefixes mirror the bearer-auth exempt set; /health and
+	// /ready are added because operator probes shouldn't require
+	// credentials or a healthy authz DB read path.
 	if s.authzEngine != nil {
 		// Slice 072: /v1/version is added to the authz-exempt set for the
 		// same reason as /health — a metadata probe shouldn't reach OPA.
@@ -190,7 +191,7 @@ func (s *Server) buildRouter() *chi.Mux {
 		// (mounted only when ATLAS_TEST_MODE=1) — same rationale as the
 		// bearer-exempt above: the endpoint mints the first JWT, so it
 		// cannot be gated by OPA on a credential it has not yet produced.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
+		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context
@@ -247,7 +248,7 @@ func (s *Server) buildRouter() *chi.Mux {
 // install-state SSR fetch; tracing them is noise without signal.
 func spanFilter(r *http.Request) bool {
 	switch r.URL.Path {
-	case "/health", "/metrics", "/v1/version", "/v1/install-state":
+	case "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state":
 		return false
 	}
 	return true
@@ -363,8 +364,8 @@ func corsMiddleware(next http.Handler) http.Handler {
 // non-exempt path whose request context lacks
 // `authctx.CredentialFromContext`. Exempt prefixes mirror the JWT
 // middleware's bypass list: unauthenticated paths by design
-// (`/oauth/token`, `/.well-known/*`, `/auth/*`, `/health`, `/metrics`,
-// `/v1/version`, `/v1/install-state`, `/v1/calendar.ics`,
+// (`/oauth/token`, `/.well-known/*`, `/auth/*`, `/health`, `/ready`,
+// `/metrics`, `/v1/version`, `/v1/install-state`, `/v1/calendar.ics`,
 // `/oauth/device_authorization`).
 //
 // Exact-vs-prefix semantic mirrors jwtBypass: entries ending in `/`
@@ -404,8 +405,8 @@ func requireCredential(exempt ...string) func(http.Handler) http.Handler {
 // whose path matches any exempt prefix skip the middleware entirely.
 // The exempt set mirrors the legacy bearer middleware's exemption
 // list — `/oauth/*` (authenticates itself), `/.well-known/*` (RFC
-// 8414 §3 mandates unauth access), `/health` (liveness), `/metrics`
-// (opt-in scrape endpoint), and the public metadata routes
+// 8414 §3 mandates unauth access), `/health` (liveness), `/ready`
+// (readiness), `/metrics` (opt-in scrape endpoint), and the public metadata routes
 // (`/v1/version`, `/v1/install-state`, `/v1/calendar.ics`, `/auth/`).
 // On a non-exempt path, the JWT middleware runs; on an exempt path,
 // the chain proceeds directly to the next middleware.
@@ -549,6 +550,41 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(`{"status":"ok","db":"` + db + `"}`))
+}
+
+// handleReady is the readiness probe for traffic routing decisions.
+//
+// Readiness is narrower than full dependency inventory on purpose: this
+// slice closes the measured black-hole condition where Postgres outage made
+// every authenticated request fail while liveness stayed 200. Postgres is the
+// dependency required before a replica can serve the API's authenticated read
+// and write paths because tenancy, authz inputs, feature flags, and handlers
+// all depend on DB access. NATS and object storage retain their existing
+// compose startup gates and can grow dependency-specific readiness checks when
+// their user-facing failure modes are measured; folding them in here would
+// make a targeted DB readiness signal harder to interpret.
+func (s *Server) handleReady(w http.ResponseWriter, r *http.Request) {
+	db := "ok"
+	status := "ready"
+	code := http.StatusOK
+
+	if s.dbPool == nil {
+		db = "absent"
+		status = "not_ready"
+		code = http.StatusServiceUnavailable
+	} else {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.dbPool.Ping(ctx); err != nil {
+			db = "degraded"
+			status = "not_ready"
+			code = http.StatusServiceUnavailable
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_, _ = w.Write([]byte(`{"status":"` + status + `","db":"` + db + `"}`))
 }
 
 // vendorBurndownAdapter wires the slice-273 board.VendorBurndownReader

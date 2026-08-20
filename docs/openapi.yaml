@@ -287,6 +287,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /ready:
+    get:
+      summary: GET /ready
+      tags: [system]
+      operationId: get-ready
+      x-internal: true
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/action-plans:
     get:
       summary: GET /v1/action-plans

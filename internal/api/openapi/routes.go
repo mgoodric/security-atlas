@@ -45,6 +45,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/health", Tag: "system", Tier: "none", Internal: true, Summary: "GET /health"},
 	{Method: "GET", Path: "/metrics", Tag: "system", Tier: "none", Internal: true, Summary: "GET /metrics"},
 	{Method: "GET", Path: "/oauth/authorize", Tag: "oauth", Tier: "none", Internal: false, Summary: "GET /oauth/authorize — authorization endpoint (RFC 6749 §4.1.1 + PKCE RFC 7636)"},
+	{Method: "GET", Path: "/ready", Tag: "system", Tier: "none", Internal: true, Summary: "GET /ready"},
 	{Method: "GET", Path: "/v1/action-plans", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "GET /v1/action-plans"},
 	{Method: "GET", Path: "/v1/action-plans/{id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "GET /v1/action-plans/{id}"},
 	{Method: "GET", Path: "/v1/activity", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/activity"},

@@ -40,7 +40,7 @@ func TestGenerateDeterministic(t *testing.T) {
 
 // TestEverySpecRouteHasSecurity enforces slice 140 P0-A1: no operation
 // ships with an empty `security` block unless the route's Tier is
-// explicitly "none" (the genuinely-public set: /health, /metrics,
+// explicitly "none" (the genuinely-public set: /health, /ready, /metrics,
 // /v1/version, /v1/install-state, /v1/calendar.ics, /auth/*).
 func TestEverySpecRouteHasSecurity(t *testing.T) {
 	var out bytes.Buffer
