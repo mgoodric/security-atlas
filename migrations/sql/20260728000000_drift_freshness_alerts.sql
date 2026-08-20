@@ -45,6 +45,9 @@ CREATE TABLE drift_freshness_alert_log (
     state_key          TEXT NOT NULL,
     notification_id    UUID NULL,
     delivered_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- slice-180 module-isolation marker (OE-451 / PRIV-7). Required on every
+    -- audit-log-family table; enforced by scripts/check-audit-log-subject-module.sh.
+    subject_module     TEXT NOT NULL DEFAULT 'core',
 
     CONSTRAINT drift_freshness_alert_log_recipient_nonempty
         CHECK (length(recipient_user_id) > 0),
