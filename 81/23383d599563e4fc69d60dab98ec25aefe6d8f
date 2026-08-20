@@ -1,0 +1,21 @@
+internal/securityawareness/integration_test.go
+  s_089f3584e72839::t_61deb4df6db486 7,161-426
+cmd/atlas/main.go
+  s_089f3584e72839::t_879a05cb85f384 64,1038-1071
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "8123383d599563e4fc69d60dab98ec25aefe6d8f",
+  "prompts": {},
+  "sessions": {
+    "s_089f3584e72839": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a01ccc-31df-7c12-ac6f-ddb2a4c5c25d",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
