@@ -153,6 +153,34 @@ CREATE TYPE vendor_review_cadence AS ENUM (
     'annual'
 );
 
+-- ===== From migrations/sql/20260730000000_vendor_commercial_fields.sql =====
+
+CREATE TYPE vendor_tool_category AS ENUM (
+    'edr',
+    'siem',
+    'iam',
+    'vuln_mgmt',
+    'cloud_security',
+    'appsec',
+    'grc',
+    'monitoring',
+    'other'
+);
+
+CREATE TYPE vendor_commercial_status AS ENUM (
+    'active',
+    'trialing',
+    'churned'
+);
+
+CREATE TYPE vendor_billing_cadence AS ENUM (
+    'monthly',
+    'quarterly',
+    'annual',
+    'multi_year',
+    'one_time'
+);
+
 -- ===== From migrations/sql/20260511000013_framework_requirements_and_edges.sql =====
 
 CREATE TYPE strm_relationship_type AS ENUM (

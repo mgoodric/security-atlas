@@ -218,9 +218,9 @@ func TestIntegration_EndToEndStdioSession(t *testing.T) {
 		`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_controls","arguments":{}}}`,
 	})
 
-	// AC-13 (a): tools/list returns all six.
-	if len(gotA[1].Result.Tools) != 6 {
-		t.Errorf("tenant A tools/list returned %d tools, want 6", len(gotA[1].Result.Tools))
+	// AC-13 (a): tools/list returns all read tools.
+	if len(gotA[1].Result.Tools) != 11 {
+		t.Errorf("tenant A tools/list returned %d tools, want 11", len(gotA[1].Result.Tools))
 	}
 	// AC-13 (b): list_controls returns tenant-A's row.
 	if !strings.Contains(gotA[2].rawResultText(), "Tenant A control 1") {

@@ -9,10 +9,10 @@
 // harness lands).
 //
 // What this suite guards:
-//   AC-1 — the CTA is a real, non-disabled affordance (its href is a
-//   non-empty string starting with `/docs/`, so the link points at
-//   the canonical CLI quickstart and is navigable — the previous
-//   permanently-disabled `<Button>` is gone).
+//   AC-1 — the CTA is a real, non-disabled affordance (its href is
+//   the published docs-site URL for the CLI push section, so the link
+//   is navigable — the previous permanently-disabled `<Button>` is
+//   gone).
 //   AC-2 — the subtitle suffix concatenates the prefix + label that
 //   the JSX renders into the `<p>` second sentence.
 
@@ -34,17 +34,20 @@ describe("slice 233 — /evidence Push CTA constants", () => {
     expect(PUSH_CTA_LABEL).toBe("Push evidence →");
   });
 
-  test("PUSH_CTA_HREF points at the canonical CLI push doc", () => {
+  test("PUSH_CTA_HREF points at the published CLI push doc", () => {
     // Destination decision D1 in docs/audit-log/233-decisions.md:
-    // the /docs/primitives/evidence anchor section "Pushing evidence
-    // from your own tools" carries the canonical
-    // `just atlas-cli evidence push` example. The leading `/docs/`
-    // segment is required (mkdocs-material docs site is mounted
-    // under that prefix in the atlas-edge deployment).
+    // the anchor section "Pushing evidence from your own tools" in the
+    // evidence primitive doc carries the canonical
+    // `just atlas-cli evidence push` example. The href MUST be the
+    // absolute published docs-site URL (mkdocs `site_url`) — the web
+    // app serves no `/docs` route, so a same-origin path 404s
+    // (OE-555 finding G-3).
     expect(PUSH_CTA_HREF).toBe(
-      "/docs/primitives/evidence#pushing-evidence-from-your-own-tools",
+      "https://mgoodric.github.io/security-atlas/primitives/evidence/#pushing-evidence-from-your-own-tools",
     );
-    expect(PUSH_CTA_HREF.startsWith("/docs/")).toBe(true);
+    expect(
+      PUSH_CTA_HREF.startsWith("https://mgoodric.github.io/security-atlas/"),
+    ).toBe(true);
   });
 
   test("PUSH_CTA_HREF is a non-empty, navigable path (not '#' / not empty)", () => {

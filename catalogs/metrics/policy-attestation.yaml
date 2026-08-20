@@ -24,21 +24,21 @@ metrics:
       losing prior-version evidence.
 
   - id: training_completion_rate
-    level: team
+    level: board
     category: people
     name: Security training completion rate
     description: |
-      Fraction of staff with current security-training completion
-      (annual cadence). Manual input until a training-platform
-      connector lands (Lessonly / KnowBe4 / etc.).
+      Fraction of assigned security-awareness trainings completed by
+      the rostered people in the current tenant.
     unit: percent
     cadence: quarterly
-    compute_strategy: external_integration
-    source_slices: []
+    compute_strategy: computed
+    compute_evaluator: training_completion_rate
+    source_slices: ["626"]
     notes: |
-      External integration placeholder; v1 treats it like manual_input.
-      The maintainer enters the rollup quarterly until the connector
-      lands as a follow-on slice.
+      Reads security_training_assignments. Manual and CSV completion
+      entry are first-class; an LMS connector can feed the same table
+      later without changing the metric contract.
     parents:
       - parent_id: policy_attestation_rate
         weight: 1.0

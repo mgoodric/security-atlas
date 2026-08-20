@@ -15,8 +15,10 @@
 -- numeric severity component resolves to severity 0 — it is still counted
 -- (constitutional invariant 9: malformed-score and rule-driven/manual
 -- risks are peers, never filtered out), it just lands in the severity-0
--- bucket. The guarded-CASE expression is wrapped in COALESCE(..., 0) and
--- cast ::int so sqlc types the column as a clean non-null Go int.
+-- bucket. FAIR risks are different: they are valid quantitative-dollar
+-- risks, not malformed 5×5 risks, so they are deliberately excluded from
+-- the severity rollups and surfaced through FairExposureByOrgUnit instead.
+-- This keeps the hierarchy from silently mixing dollars into a 1..25 scalar.
 
 -- name: RiskCountsByOrgUnit :many
 -- AC-1: per-org-unit risk count broken down by severity scalar. ONE
@@ -40,8 +42,39 @@ SELECT
 FROM risks
 WHERE tenant_id = $1
   AND org_unit_id IS NOT NULL
+  AND methodology IN ('nist_800_30', 'qualitative_5x5')
 GROUP BY org_unit_id, severity
 ORDER BY org_unit_id, severity;
+
+-- name: FairExposureByOrgUnit :many
+-- FAIR-only org-unit rollup. Annualized loss exposure is already dollars/year
+-- on the canonical FAIR score shape; legacy lef/lm rows are tolerated so older
+-- fixtures remain readable. This result must not be combined with the 5×5
+-- severity scalar.
+SELECT
+    org_unit_id,
+    COUNT(*)::int AS risk_count,
+    SUM(
+        COALESCE(
+            CASE WHEN jsonb_typeof(inherent_score->'annualized_loss_exposure') = 'number'
+                 THEN (inherent_score->>'annualized_loss_exposure')::numeric END,
+            CASE WHEN jsonb_typeof(inherent_score->'loss_event_frequency') = 'number'
+                  AND jsonb_typeof(inherent_score->'loss_magnitude') = 'number'
+                 THEN (inherent_score->>'loss_event_frequency')::numeric
+                      * (inherent_score->>'loss_magnitude')::numeric END,
+            CASE WHEN jsonb_typeof(inherent_score->'lef') = 'number'
+                  AND jsonb_typeof(inherent_score->'lm') = 'number'
+                 THEN (inherent_score->>'lef')::numeric
+                      * (inherent_score->>'lm')::numeric END,
+            0
+        )
+    )::numeric AS annualized_loss_exposure
+FROM risks
+WHERE tenant_id = $1
+  AND org_unit_id IS NOT NULL
+  AND methodology = 'fair'
+GROUP BY org_unit_id
+ORDER BY org_unit_id;
 
 -- name: RiskThemeOrgUnitGrid :many
 -- AC-3: the themes × org_units aggregation — the heatmap panel's central
@@ -85,5 +118,6 @@ JOIN org_themes t
    AND (t.tenant_id IS NULL OR t.tenant_id = $1)
 WHERE r.tenant_id = $1
   AND r.org_unit_id IS NOT NULL
+  AND r.methodology IN ('nist_800_30', 'qualitative_5x5')
 GROUP BY t.theme_name, theme_builtin, r.org_unit_id
 ORDER BY theme_builtin DESC, t.theme_name, r.org_unit_id;

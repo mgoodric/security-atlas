@@ -68,6 +68,41 @@ type Brief struct {
 	// TopRisks is the top-3 risks aging, ranked by residual severity then
 	// age (AC-2).
 	TopRisks []RiskAging `json:"top_risks"`
+	// Exceptions is the deterministic exception-status aggregate (slice 751).
+	Exceptions ExceptionSummary `json:"exceptions"`
+}
+
+// ExceptionSummary is the brief's DETERMINISTIC, RLS-scoped exception-status
+// aggregate (slice 751) — the ground truth an exception-status board narrative
+// claim is checked against. It carries exactly the three numbers judged
+// board-grade (decisions log D1 in
+// docs/audit-log/751-board-narrative-exception-status-decisions.md); every
+// other exception fact the register holds is deliberately absent, so a number
+// outside these three cannot be grounded and therefore cannot reach the board.
+//
+// The aggregate is computed under the caller's tenant GUC over the slice-021
+// `exceptions` table, which carries FORCE ROW LEVEL SECURITY — cross-tenant
+// waivers are invisible to the count, not filtered out of it (invariant #6).
+//
+// A frozen pre-slice-751 brief deserializes this as the zero value. That is
+// indistinguishable from a genuinely empty exception register in the STORED
+// content; the AI-narrative surface never reads a stored brief — it grounds on
+// a live Generator.Assemble, which always populates the aggregate (decisions
+// log D4).
+type ExceptionSummary struct {
+	// ActiveCount is how many exceptions are in force (status='active') as of
+	// the brief's generation time. THE headline number: accepted risk the
+	// program is currently carrying under an explicit waiver.
+	ActiveCount int `json:"active_count"`
+	// PastDueCount is how many of those active exceptions are already past
+	// their own `expires_at` — a waiver still in force beyond the sunset date
+	// it was granted under. The governance-hygiene number.
+	PastDueCount int `json:"past_due_count"`
+	// OldestActiveAgeDays is the age in days of the longest-standing active
+	// exception, measured from when the waiver started applying
+	// (effective_from, falling back to approved_at then requested_at). Zero
+	// when no exception is active.
+	OldestActiveAgeDays int `json:"oldest_active_age_days"`
 }
 
 // FrameworkPosture is one framework's posture row in the brief.

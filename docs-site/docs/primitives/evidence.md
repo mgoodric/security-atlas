@@ -104,15 +104,23 @@ SDK](https://github.com/mgoodric/security-atlas/blob/main/Plans/EVIDENCE_SDK.md)
 A minimal push via the CLI:
 
 ```sh
-just atlas-cli evidence push \
+export SECURITY_ATLAS_ENDPOINT=atlas.example.com:50051
+export SECURITY_ATLAS_TOKEN="<bearer token>"
+
+security-atlas-cli evidence push \
   --kind sast.scan_result.v1 \
-  --control-id <control id> \
-  --scope-id <scope id> \
+  --control <control id> \
+  --scope '{"environment":"prod"}' \
   --observed-at "$(date -u +%FT%TZ)" \
   --result pass \
-  --payload ./scan-result.json \
-  --idempotency-key "ci-$GITHUB_RUN_ID"
+  --payload @./scan-result.json \
+  --idempotency-key "ci-$GITHUB_RUN_ID" \
+  --actor-id "github-actions"
 ```
+
+`--scope` takes the scope predicate as JSON, and `--payload` takes either a
+JSON literal or `@path/to/file.json`. Run `security-atlas-cli evidence push
+--help` for the full flag set.
 
 The CLI handles:
 

@@ -4,13 +4,39 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Slice 415 — GitHub native merge queue. The queue speculatively builds
+  # each queued PR on top of the latest `main` (and the PRs ahead of it)
+  # and dispatches a `merge_group` event against a temporary
+  # `refs/heads/gh-readonly-queue/main/pr-<n>-<sha>` ref. Every check in
+  # `.github/branch-protection.json`'s `required_status_checks.contexts`
+  # must therefore be able to report on THIS event too — a required check
+  # that never reports on `merge_group` leaves the entry pending until the
+  # queue's check-response timeout evicts it.
+  #
+  # No `branches:` filter: `main` is the only protected branch, and the
+  # filter would match the gh-readonly-queue ref rather than the target
+  # branch. Bare `merge_group:` is unambiguous.
+  #
+  # See docs/ci/MERGE_QUEUE.md and
+  # docs/audit-log/415-merge-queue-decisions.md.
+  merge_group:
 
+# Slice 415 P0-3: NOT widened for the `merge_group` trigger. The queue run
+# gets the same `contents: read` GITHUB_TOKEN scope as `push`/`pull_request`.
 permissions:
   contents: read
 
 concurrency:
+  # `github.ref` on a `merge_group` event is the unique per-entry
+  # gh-readonly-queue ref, so a queue run never shares a group with a PR
+  # run or a `main` push run. `cancel-in-progress` is nonetheless forced
+  # OFF for `merge_group` (slice 415 "sharp edge"): a cancelled queue run
+  # reports its required checks as `cancelled`, which the queue treats as
+  # a failure and evicts the entry on. Queue runs are short-lived and
+  # self-terminating — GitHub cancels them itself when the group is
+  # re-formed — so we never need `cancel-in-progress` to reclaim them.
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
 # Slice 061 — path-based filtering for docs-only PRs.
 #
@@ -35,6 +61,11 @@ concurrency:
 # filtering is a cost optimization for build/test/lint, never a security
 # exemption.
 #
+# Slice 415 — the same pattern now also runs on `merge_group` (GitHub
+# merge queue) events. The `changes` job's `merge_group` correctness is
+# the load-bearing risk there: see the fail-closed `resolve` step below
+# and `docs/ci/MERGE_QUEUE.md`.
+#
 # Full docs: `docs/ci/PATH_FILTERING.md`.
 
 jobs:
@@ -43,7 +74,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      # Slice 415 (T-1 / P0-2): the `code` output is the RESOLVED value from
+      # the fail-closed `resolve` step below, NOT the raw paths-filter
+      # output. On a `merge_group` event a wrong `code=false` would let the
+      # slice-061 stub-twins satisfy the required checks and land untested
+      # code on `main`; `resolve` forces `code=true` whenever the queue diff
+      # base cannot be trusted.
+      code: ${{ steps.resolve.outputs.code }}
       # Slice 179 — narrow filter for the schema-removal-age check. The
       # check only runs when a PR touches the canonical
       # `internal/api/schemaregistry/schemas/` tree, so we gate the job
@@ -52,15 +89,38 @@ jobs:
       schemas: ${{ steps.filter.outputs.schemas }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: dorny/paths-filter@fbd0ab8f3e69293af611ebaee6363fc25e6d187d # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4
         id: filter
         with:
+          # Slice 415 AC-4 — explicit diff base for `merge_group` events.
+          #
+          # On `pull_request` this stays empty, so paths-filter keeps its
+          # native PR-diff behaviour (the slice-061 semantics — unchanged).
+          # On `push` it stays empty too (paths-filter uses the push's
+          # `before` SHA).
+          #
+          # On `merge_group` there is no PR context: `github.ref` is the
+          # temporary `refs/heads/gh-readonly-queue/main/pr-<n>-<sha>` ref
+          # and paths-filter would fall back to the repository default
+          # branch — a base it infers rather than one the event states.
+          # We pass the base the event ITSELF carries,
+          # `merge_group.base_ref` (= `refs/heads/main`), so the diff is
+          # `merge-base(main, <queue head>)..<queue head>` — exactly the
+          # union of the changes the queue entry is about to land. A
+          # branch ref (not `base_sha`) is used deliberately: paths-filter
+          # resolves ref names through its normal fetch/merge-base path,
+          # which is the well-trodden code path.
+          #
+          # The union-not-just-this-PR framing is the SAFE direction: if
+          # any PR in the group touches code, `code=true` and the real
+          # jobs run for the whole group.
+          base: ${{ github.event_name == 'merge_group' && github.event.merge_group.base_ref || '' }}
           # `code: true` if ANY of these patterns match the PR diff (or the
           # push commit on main). Anything else — markdown, plan docs,
           # license, changelog — is `code: false` and the expensive jobs
@@ -116,6 +176,87 @@ jobs:
               - 'buf.gen.yaml'
               - 'scripts/**'
 
+      # ================================================================
+      # Slice 415 (threat T-1 / anti-criterion P0-2) — fail-closed
+      # resolution of the `code` output.
+      #
+      # THE THREAT. The slice-061 pattern fires a REAL job or a stub-twin
+      # under the SAME required-check name, gated on this boolean. A
+      # wrong `code=false` on a code-touching change means the stub posts
+      # a green required check in ~30 s and untested code lands on `main`.
+      # On `pull_request` the diff base is unambiguous (the PR base). On
+      # `merge_group` it is not — hence this guard.
+      #
+      # THE RULE. On `merge_group`, trust the filter ONLY when the event
+      # actually carried a base ref for it to diff against AND the filter
+      # produced a value. Otherwise force `code=true`: the real jobs run,
+      # the queue entry pays full CI, and NOTHING lands unvalidated. The
+      # failure mode of this guard is "spent CI minutes", never "shipped
+      # untested code".
+      #
+      # `push` / `pull_request` behaviour is unchanged — the filter's
+      # value passes straight through (the empty-value backstop at the
+      # end can only fire if paths-filter emitted no output at all, which
+      # is itself a fail-closed case).
+      # ================================================================
+      - name: Resolve the `code` output (slice 415 — merge_group fail-closed)
+        id: resolve
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          MQ_BASE_REF: ${{ github.event.merge_group.base_ref }}
+          MQ_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          FILTER_CODE: ${{ steps.filter.outputs.code }}
+        run: |
+          set -euo pipefail
+          code="${FILTER_CODE:-}"
+          reason="paths-filter (${EVENT_NAME} diff)"
+
+          if [ "$EVENT_NAME" = "merge_group" ]; then
+            echo "merge_group head_ref: ${MQ_HEAD_REF:-<none>}"
+            echo "merge_group base_ref: ${MQ_BASE_REF:-<none>}"
+            if [ -z "${MQ_BASE_REF:-}" ]; then
+              code=true
+              reason="FAIL-CLOSED: merge_group payload carried no base_ref, so the path filter had no trustworthy diff base (slice 415 T-1/P0-2)"
+            elif [ -z "$code" ]; then
+              code=true
+              reason="FAIL-CLOSED: paths-filter produced no 'code' output on a merge_group event (slice 415 T-1/P0-2)"
+            else
+              reason="paths-filter diffed against ${MQ_BASE_REF} (slice 415 AC-4)"
+            fi
+          fi
+
+          # Universal backstop: an empty value is never a licence to run
+          # the stub-twins.
+          if [ -z "$code" ]; then
+            code=true
+            reason="FAIL-CLOSED: paths-filter emitted an empty 'code' output"
+          fi
+
+          echo "resolved code=${code} — ${reason}"
+          echo "code=${code}" >> "$GITHUB_OUTPUT"
+
+          # Job summary so the merge_group run's path-filter decision is
+          # inspectable without digging through step logs — this is the
+          # artifact slice 415 AC-5 / AC-6 are verified against.
+          {
+            echo "### Path filter — \`code=${code}\`"
+            echo
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| event | \`${EVENT_NAME}\` |"
+            echo "| merge_group base_ref | \`${MQ_BASE_REF:-n/a}\` |"
+            echo "| merge_group head_ref | \`${MQ_HEAD_REF:-n/a}\` |"
+            echo "| raw paths-filter \`code\` | \`${FILTER_CODE:-<empty>}\` |"
+            echo "| resolved \`code\` | \`${code}\` |"
+            echo "| basis | ${reason} |"
+            echo
+            if [ "$code" = "true" ]; then
+              echo "Real build/test/lint jobs run; the slice-061 stub-twins are skipped."
+            else
+              echo "Docs-only fast path: the slice-061 stub-twins post the required checks."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
   build-go:
     name: Go · build + test
     needs: changes
@@ -124,13 +265,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
@@ -184,7 +325,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -215,13 +356,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
@@ -333,13 +474,13 @@ jobs:
       NATS_URL: nats://localhost:4222
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
@@ -400,57 +541,17 @@ jobs:
             echo "ATLAS_COSIGN_KMS_LOCALSTACK=1"
             echo "ATLAS_COSIGN_KMS_LOCALSTACK_ENDPOINT=http://localhost:4566"
           } >> "$GITHUB_ENV"
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-          # Wait for readiness (up to ~60s).
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then
-              echo "minio ready"; break
-            fi
-            sleep 2
-          done
-          # Create the test bucket using a short-lived mc container. The
-          # MinIO admin client (`mc`) is the canonical bucket-bootstrap
-          # tool. We inject the alias via the MC_HOST_<alias> env var so
-          # the single `mc mb` invocation has the alias without needing a
-          # separate `mc alias set` call (which would write config to
-          # ~/.mc/ that doesn't persist across `docker run` invocations).
-          docker run --rm --network host \
-            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-            minio/mc mb -p local/atlas-artifacts-test
-      - name: Start NATS JetStream
-        run: |
-          docker run -d --name nats \
-            -p 4222:4222 \
-            -p 8222:8222 \
-            nats:2.10-alpine -js -sd /data --http_port 8222
-          # Wait for readiness via the monitoring endpoint (up to ~60s).
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8222/healthz; then
-              echo "nats ready"; break
-            fi
-            sleep 2
-          done
-      - name: Bootstrap roles
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-      - name: Set role passwords (CI-scoped)
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
-          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
-      - name: Apply forward migrations
-        run: |
-          for f in migrations/sql/*.sql; do
-            case "$f" in
-              *.down.sql) ;;
-              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
-            esac
-          done
+      # Slice 418 — shared bring-up, one canonical copy. `start-atlas:
+      # 'false'` is this call-site's genuine divergence: the Go
+      # integration shards drive the handlers in-process and never boot
+      # the HTTP server. Inputs are explicit (P0-2). Equivalence diff:
+      # docs/audit-log/418-composite-stack-up-decisions.md.
+      - name: Bring up the atlas CI stack (MinIO + NATS + Postgres)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "true"
+          start-atlas: "false"
+          minio-bucket: atlas-artifacts-test
       - name: Audit RLS coverage (slice 033)
         # Constitutional invariant 6: every tenant-scoped table must carry
         # an RLS policy + FORCE. Audit runs against atlas_migrate (DATABASE_URL)
@@ -628,7 +729,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -643,8 +744,8 @@ jobs:
           echo "The required check 'Go · integration (Postgres RLS)' is RED because a shard leg failed." >&2
           exit 1
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
@@ -712,7 +813,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -727,17 +828,17 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
-      - uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           # Pinned golangci-lint binary version (slice 416). `Go · lint` is a
           # required check; a floating `version: latest` lets an upstream
@@ -777,7 +878,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -799,13 +900,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
@@ -846,7 +947,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -861,13 +962,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: bufbuild/buf-action@fd21066df7214747548607aaa45548ba2b9bc1ff # v1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: bufbuild/buf-action@8c6a16e16f12ba20b6470afa9c2ba9b5ba8c97c3 # v1
         with:
           setup_only: true
       - name: Lint protos
@@ -885,7 +986,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -900,13 +1001,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: "22"
           cache: "npm"
@@ -925,7 +1026,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -940,12 +1041,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Slice 697 — run ruff via `uv tool run` (the pattern the oscal-bridge
       # job already uses) so setup-uv's enable-cache keys the ruff install on
       # the runner. A bare `cache: pip` on setup-python would no-op here:
@@ -953,7 +1054,7 @@ jobs:
       # 0.7.0 and the check/format-check commands keep their whole-repo `.`
       # scope.
       - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
       - run: uv tool run ruff@0.7.0 check .
@@ -967,7 +1068,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -983,20 +1084,20 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.11"
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: "22"
           cache: "npm"
@@ -1076,14 +1177,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install uv
-        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           enable-cache: true
           cache-dependency-glob: oscal-bridge/uv.lock
@@ -1108,7 +1209,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1163,12 +1264,12 @@ jobs:
         mode: [bundled, external, proxy, migrate]
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Run self-host bundle smoke test (${{ matrix.mode }})
         run: deploy/docker/test-self-host-bundle.sh ${{ matrix.mode }}
       - name: Dump compose logs on failure
@@ -1226,7 +1327,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1259,12 +1360,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5
         with:
           version: v3.16.2
@@ -1285,7 +1386,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1317,13 +1418,13 @@ jobs:
         working-directory: web
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: "22"
           cache: "npm"
@@ -1348,7 +1449,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1374,13 +1475,13 @@ jobs:
         working-directory: web
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: "22"
           cache: "npm"
@@ -1398,7 +1499,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1489,7 +1590,7 @@ jobs:
       BEARER_HASH_KEY: test-bearer-hash-key-32-bytes-ok!!
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           # Slice 117 per-job exception: Playwright's `npx playwright
@@ -1501,55 +1602,24 @@ jobs:
           # decision D5 for the rationale.
           disable-sudo: false
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: "22"
           cache: "npm"
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then
-              echo "minio ready"; break
-            fi
-            sleep 2
-          done
-          docker run --rm --network host \
-            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-            minio/mc mb -p local/atlas-artifacts-test
-      - name: Start NATS JetStream
-        run: |
-          docker run -d --name nats \
-            -p 4222:4222 \
-            -p 8222:8222 \
-            nats:2.10-alpine -js -sd /data --http_port 8222
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8222/healthz; then
-              echo "nats ready"; break
-            fi
-            sleep 2
-          done
-      - name: Bootstrap Postgres roles + migrations
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
-          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
-          for f in migrations/sql/*.sql; do
-            case "$f" in
-              *.down.sql) ;;
-              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
-            esac
-          done
+      # Slice 418 — shared bring-up, one canonical copy. The atlas server
+      # is started by the SECOND call below (after the web build), which
+      # keeps the original step ordering byte-for-byte.
+      - name: Bring up the atlas CI stack (MinIO + NATS + Postgres)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "true"
+          start-atlas: "false"
+          minio-bucket: atlas-artifacts-test
       # Slice 695 — download the prebuilt atlas binary from build-atlas instead
       # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
       # Unix executable bit, so `install -m 0755` is REQUIRED to make the
@@ -1572,25 +1642,21 @@ jobs:
       - name: Install Playwright chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
-      - name: Start atlas server
-        # Slice 201: ATLAS_KEYSTORE_PATH + ATLAS_DATA_DIR point at /tmp (the
-        # CI runner cannot write to the default /var/lib/security-atlas/).
-        # Without these, fsstore.Open fails with EACCES, the OAuth keystore
-        # never wires, s.jwtSigner stays nil, and the /v1/test/issue-jwt
-        # endpoint returns 404 — breaking the Playwright global-setup.
-        env:
-          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
-          ATLAS_DATA_DIR: /tmp/atlas-ci
-        run: |
-          mkdir -p /tmp/atlas-ci/keys
-          atlas serve > /tmp/atlas.log 2>&1 &
-          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/health; then
-              echo "atlas ready"; break
-            fi
-            sleep 2
-          done
+      # Slice 418 — same action, services off / atlas on, sitting exactly
+      # where the inlined `Start atlas server` step did. atlas-test-mode
+      # mirrors this job's job-level env and is EXPLICIT (P0-2/P0-3): '1'
+      # mounts /v1/test/issue-jwt for the Playwright globalSetup mint
+      # (slice 201); atlas-issuer-url wires the signer it needs (187/190).
+      - name: Start the atlas server (test-mint path on)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "false"
+          start-atlas: "true"
+          atlas-test-mode: "1"
+          atlas-issuer-url: http://localhost:8080
+          keystore-path: /tmp/atlas-ci/keys
+          data-dir: /tmp/atlas-ci
+          atlas-health-url: http://localhost:8080/health
       - name: Start web server
         working-directory: web
         run: |
@@ -1630,7 +1696,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1739,7 +1805,7 @@ jobs:
       ATLAS_PROD_BUILD: "1"
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           # Same slice 069 / 117 D5 exception: Playwright's
@@ -1748,55 +1814,24 @@ jobs:
           # permitted on this one job.
           disable-sudo: false
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: "22"
           cache: "npm"
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then
-              echo "minio ready"; break
-            fi
-            sleep 2
-          done
-          docker run --rm --network host \
-            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-            minio/mc mb -p local/atlas-artifacts-test
-      - name: Start NATS JetStream
-        run: |
-          docker run -d --name nats \
-            -p 4222:4222 \
-            -p 8222:8222 \
-            nats:2.10-alpine -js -sd /data --http_port 8222
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8222/healthz; then
-              echo "nats ready"; break
-            fi
-            sleep 2
-          done
-      - name: Bootstrap Postgres roles + migrations
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
-          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
-          for f in migrations/sql/*.sql; do
-            case "$f" in
-              *.down.sql) ;;
-              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
-            esac
-          done
+      # Slice 418 — shared bring-up, one canonical copy; same stack as the
+      # dev-server Playwright leg. The atlas server is started by the
+      # SECOND call below, after the standalone web build.
+      - name: Bring up the atlas CI stack (MinIO + NATS + Postgres)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "true"
+          start-atlas: "false"
+          minio-bucket: atlas-artifacts-test
       # Slice 695 — download the prebuilt atlas binary from build-atlas instead
       # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
       # Unix executable bit, so `install -m 0755` is REQUIRED. The web
@@ -1826,20 +1861,20 @@ jobs:
       - name: Install Playwright chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
-      - name: Start atlas server
-        env:
-          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
-          ATLAS_DATA_DIR: /tmp/atlas-ci
-        run: |
-          mkdir -p /tmp/atlas-ci/keys
-          atlas serve > /tmp/atlas.log 2>&1 &
-          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/health; then
-              echo "atlas ready"; break
-            fi
-            sleep 2
-          done
+      # Slice 418 — same action, services off / atlas on, sitting exactly
+      # where the inlined `Start atlas server` step did. atlas-test-mode /
+      # atlas-issuer-url mirror this job's job-level env, EXPLICIT per
+      # P0-2/P0-3.
+      - name: Start the atlas server (test-mint path on)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "false"
+          start-atlas: "true"
+          atlas-test-mode: "1"
+          atlas-issuer-url: http://localhost:8080
+          keystore-path: /tmp/atlas-ci/keys
+          data-dir: /tmp/atlas-ci
+          atlas-health-url: http://localhost:8080/health
       - name: Start web server (production-build standalone)
         # Slice 387 — boot the standalone Node server, NOT `npm start`.
         # The standalone entrypoint is `.next/standalone/web/server.js`
@@ -1897,7 +1932,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -1960,19 +1995,19 @@ jobs:
       BEARER_HASH_KEY: test-bearer-hash-key-32-bytes-ok!!
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           # Playwright's `--with-deps` still needs sudo for chromium's
           # system libs. Same exception as slice 069 / 117 D5.
           disable-sudo: false
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: "22"
           cache: "npm"
@@ -1985,46 +2020,14 @@ jobs:
         # mockup file, before the expensive bring-up below.
         working-directory: web
         run: npx vitest run e2e-audit/lib/manifest.test.ts
-      - name: Start MinIO
-        run: |
-          docker run -d --name minio \
-            -p 9000:9000 \
-            -e MINIO_ROOT_USER=minioadmin \
-            -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:9000/minio/health/live; then
-              echo "minio ready"; break
-            fi
-            sleep 2
-          done
-          docker run --rm --network host \
-            -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-            minio/mc mb -p local/atlas-artifacts-test
-      - name: Start NATS JetStream
-        run: |
-          docker run -d --name nats \
-            -p 4222:4222 \
-            -p 8222:8222 \
-            nats:2.10-alpine -js -sd /data --http_port 8222
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8222/healthz; then
-              echo "nats ready"; break
-            fi
-            sleep 2
-          done
-      - name: Bootstrap Postgres roles + migrations
-        run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
-          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
-          for f in migrations/sql/*.sql; do
-            case "$f" in
-              *.down.sql) ;;
-              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
-            esac
-          done
+      # Slice 418 — shared bring-up, one canonical copy. The atlas server
+      # is started by the SECOND call below, after the web build.
+      - name: Bring up the atlas CI stack (MinIO + NATS + Postgres)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "true"
+          start-atlas: "false"
+          minio-bucket: atlas-artifacts-test
       # Slice 695 — download the prebuilt atlas binary from build-atlas instead
       # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
       # Unix executable bit, so `install -m 0755` is REQUIRED.
@@ -2043,25 +2046,22 @@ jobs:
       - name: Install Playwright chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
-      - name: Start atlas server
-        # Slice 201: ATLAS_KEYSTORE_PATH + ATLAS_DATA_DIR point at /tmp (the
-        # CI runner cannot write to the default /var/lib/security-atlas/).
-        # Without these, fsstore.Open fails with EACCES, the OAuth keystore
-        # never wires, s.jwtSigner stays nil, and the /v1/test/issue-jwt
-        # endpoint returns 404 — breaking the Playwright global-setup.
-        env:
-          ATLAS_KEYSTORE_PATH: /tmp/atlas-ci/keys
-          ATLAS_DATA_DIR: /tmp/atlas-ci
-        run: |
-          mkdir -p /tmp/atlas-ci/keys
-          atlas serve > /tmp/atlas.log 2>&1 &
-          echo "ATLAS_PID=$!" >> "$GITHUB_ENV"
-          for i in $(seq 1 30); do
-            if curl -sf http://localhost:8080/health; then
-              echo "atlas ready"; break
-            fi
-            sleep 2
-          done
+      # Slice 418 — same action, services off / atlas on, sitting exactly
+      # where the inlined `Start atlas server` step did. atlas-test-mode /
+      # atlas-issuer-url are EXPLICITLY EMPTY (P0-2/P0-3) — this job's
+      # genuine divergence: the honesty harness authenticates with the
+      # static slice-069/178 TEST_BEARER, never the slice-201 runtime
+      # mint, so it never had these set and must NOT gain them.
+      - name: Start the atlas server (test-mint path OFF)
+        uses: ./.github/actions/atlas-stack-up
+        with:
+          start-services: "false"
+          start-atlas: "true"
+          atlas-test-mode: ""
+          atlas-issuer-url: ""
+          keystore-path: /tmp/atlas-ci/keys
+          data-dir: /tmp/atlas-ci
+          atlas-health-url: http://localhost:8080/health
       - name: Start web server
         working-directory: web
         run: |
@@ -2210,7 +2210,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2249,13 +2249,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
@@ -2304,7 +2304,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2339,13 +2339,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
@@ -2379,7 +2379,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2419,7 +2419,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install ripgrep
         # Required by scripts/audit-deps.sh — the ubuntu-latest runner
         # doesn't pre-bundle ripgrep as of 2026-05; install explicitly.
@@ -2576,12 +2576,12 @@ jobs:
       pull-requests: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Need full main history so `git log --diff-filter=A` can
           # resolve the introduction commit for every removed file.
@@ -2661,13 +2661,13 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
         with:
           node-version: "22"
           cache: "npm"
@@ -2711,7 +2711,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -2778,12 +2778,12 @@ jobs:
       pull-requests: write
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Validate .github/branch-protection.json shape
         id: validate
@@ -2882,12 +2882,12 @@ jobs:
       contents: read
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The elevated PAT is `env:`-scoped to ONLY this step. No other
       # step in the job sees `BRANCH_PROTECTION_READ_TOKEN`. If the
@@ -2953,12 +2953,12 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       # Slice 694: build via buildx + GitHub Actions layer cache so the
       # atlas multi-stage build (a full Go compile) is reused across runs.
       # `load: true` loads the built image into the local Docker daemon so
@@ -2969,14 +2969,14 @@ jobs:
       # Finding 1.1; SHA pins reused verbatim from container-publish.yml per
       # the slice 128 pin discipline).
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
       # Build the atlas image locally so Trivy has a target without
       # needing to push to a registry. The Dockerfile is the same one
       # release.yml uses; if a slice changes the Dockerfile, this job
       # picks the change up via the `changes.code` filter (which
       # includes deploy/**, Dockerfile*, and **/Dockerfile).
       - name: Build atlas image (local tag)
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
           file: deploy/docker/atlas.Dockerfile
@@ -3015,7 +3015,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -3055,12 +3055,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run check-action-pins.sh
         run: bash scripts/check-action-pins.sh
@@ -3106,12 +3106,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run check-staged-cache-paths.sh against the tracked tree
         run: bash scripts/check-staged-cache-paths.sh --all-tracked
@@ -3148,14 +3148,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true
@@ -3203,18 +3203,21 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run audit-integration-enrolment self-test
         run: bash scripts/audit-integration-enrolment_test.sh
 
       - name: Run audit-integration-enrolment.sh
         run: bash scripts/audit-integration-enrolment.sh
+
+      - name: Run check-audit-log-subject-module.sh
+        run: bash scripts/check-audit-log-subject-module.sh
 
       # Slice 461: offline self-test for the seed order-independence guard
       # (exercises the env-misconfig exit-2 paths; the exit-0/1 paths run in
@@ -3253,12 +3256,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Run check-coverage-excludes self-test
         run: bash scripts/check-coverage-excludes_test.sh
@@ -3298,7 +3301,7 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Slice 699: full history so `git diff origin/main...HEAD` can scope
           # the sticky comment to the test files THIS PR changed (the underlying
@@ -3499,26 +3502,96 @@ jobs:
   # protection via `bash scripts/apply-branch-protection.sh`. Until that
   # is done, this gate runs and reports but does NOT block — it is
   # advisory. See the decisions log "branch-protection hand-off" section.
+  #
+  # --------------------------------------------------------------------
+  # SLICE 701a (OE-370) — needs-completeness + single-source assertions.
+  #
+  # Slice 701 wants to delete the ~21 `-stub` jobs and let this gate be
+  # the single required check. That is only safe once this gate's
+  # `needs:` covers every name in `required_status_checks.contexts`.
+  # 701a closes that gap; the stub deletion is a SEPARATE slice that must
+  # not start until this one has soaked. NO `-stub` job is deleted here.
+  #
+  # Two structural changes:
+  #
+  #   1. `needs:` grew from 10 to 20 entries. Added (contexts-driven):
+  #      `frontend-vitest`, `frontend-playwright-prod-build`, `helm-lint`,
+  #      `precommit`, `actions-pin-check`, `openapi-drift-check`. Added
+  #      (slice-701 mandate — real legs that must be covered before the
+  #      stubs collapse): `oscal-bridge`, `fuzz`, `frontend-lint`,
+  #      `govulncheck`.
+  #
+  #   2. The `require()` assertion list is now DERIVED from
+  #      `toJSON(needs)` instead of being hand-maintained. There used to
+  #      be three lists that had to agree by hand (branch-protection
+  #      contexts / this `needs:` / the `require()` calls); the third is
+  #      gone. Adding a job to `needs:` above now automatically asserts
+  #      it — the drift mode where a leg sits in `needs:` but nobody
+  #      checks its result is structurally impossible.
+  #
+  # Four required contexts CANNOT appear in `needs:` and stay independent
+  # required checks: `Analyze (go)` and `Analyze (javascript-typescript)`
+  # come from `.github/workflows/codeql.yml` (GitHub Actions `needs:` is
+  # workflow-scoped — it cannot reference a job in another workflow), and
+  # `GitGuardian Security Checks` + `DCO` are GitHub Apps with no
+  # workflow job at all. They are NOT bricks (all four report today);
+  # they are simply out of this gate's reach. The slice-701 child that
+  # prunes per-job names from `contexts` MUST keep these four.
+  #
+  # Two masking holes closed as a side effect of deriving from `needs`:
+  #   * `changes` itself is now asserted. Previously a failed/cancelled
+  #     `changes` job left `CODE` empty, which fell through the
+  #     `!= 'true'` branch and PASSED the gate — the path-filter oracle
+  #     failing must fail the gate closed, not open it.
+  #   * The unconditional legs (`precommit`, `actions-pin-check`,
+  #     `openapi-drift-check`) are asserted on docs-only PRs too. Only a
+  #     `skipped` result is forgiven when `code != 'true'`; those jobs
+  #     have no `if:` so they never skip, and a RED one now reddens the
+  #     gate instead of being short-circuited past.
   # ====================================================================
   merge-gate:
     name: CI · merge-gate
+    # SINGLE SOURCE OF TRUTH for what this gate asserts. The step below
+    # derives its assertion set from `toJSON(needs)` — do NOT add a second
+    # list anywhere. Adding a job here is sufficient to have it asserted.
+    #
+    # Every entry must be a job whose `if:` is either unconditional or
+    # exactly `needs.changes.outputs.code == 'true'`. A job gated on a
+    # NARROWER filter (e.g. `changes.outputs.schemas`) would be `skipped`
+    # on an ordinary code PR and would brick the gate — verify the `if:`
+    # before adding one.
     needs:
+      # Path-filter oracle. Asserted unconditionally: if this job does not
+      # succeed, `code` is untrustworthy and the gate fails closed.
       - changes
-      - build-go
-      - tests-integration-shard
-      - tests-integration
-      - lint-go
-      - sqlc-drift
-      - proto
-      - build-frontend
-      - frontend-playwright
-      - lint-python
+      # --- backs a name in required_status_checks.contexts ---
+      - build-go # Go · build + test
+      - tests-integration # Go · integration (Postgres RLS)
+      - lint-go # Go · lint
+      - sqlc-drift # Go · sqlc generate diff
+      - proto # Proto · lint + generate diff
+      - build-frontend # Frontend · install + build
+      - frontend-playwright # Frontend · Playwright e2e
+      - frontend-playwright-prod-build # Frontend · Playwright e2e (prod-build standalone)
+      - frontend-vitest # Frontend · vitest
+      - helm-lint # Helm chart · lint + template
+      - lint-python # Python · ruff
+      - precommit # pre-commit · all hooks
+      - actions-pin-check # actions-pin-check
+      - openapi-drift-check # openapi-drift-check
+      # --- no required context of its own; covered here so the slice-701
+      #     stub collapse cannot drop them on the floor (slice 701 §AC-1) ---
+      - tests-integration-shard # Go · integration (shard A/B1/B2/B3/B4) — matrix aggregate
+      - oscal-bridge # OSCAL bridge · Python (ruff + pytest)
+      - fuzz # Go · fuzz (bounded)
+      - frontend-lint # Frontend · lint
+      - govulncheck # Go · govulncheck
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
@@ -3527,68 +3600,112 @@ jobs:
         env:
           # Whether this PR/push touches Go-affecting paths (dorny/paths-filter).
           CODE: ${{ needs.changes.outputs.code }}
-          # Per-leg results. For the matrix `tests-integration-shard`, this
-          # is the AGGREGATE result across legs A/B1/B2/B3 (failure if any
-          # leg failed, cancelled if any was cancelled, success only if all
-          # legs succeeded).
-          R_BUILD_GO: ${{ needs.build-go.result }}
-          R_SHARDS: ${{ needs.tests-integration-shard.result }}
-          R_INTEGRATION: ${{ needs.tests-integration.result }}
-          R_LINT_GO: ${{ needs.lint-go.result }}
-          R_SQLC: ${{ needs.sqlc-drift.result }}
-          R_PROTO: ${{ needs.proto.result }}
-          R_FRONTEND_BUILD: ${{ needs.build-frontend.result }}
-          R_PLAYWRIGHT: ${{ needs.frontend-playwright.result }}
-          R_PYTHON: ${{ needs.lint-python.result }}
+          # The path-filter oracle's own result. If this is not `success`,
+          # CODE cannot be trusted and the gate fails closed.
+          R_CHANGES: ${{ needs.changes.result }}
+          # THE assertion source (slice 701a). One expression, every leg.
+          # For the matrix `tests-integration-shard`, `.result` is the
+          # AGGREGATE across legs A/B1/B2/B3/B4 (failure if any leg failed,
+          # cancelled if any was cancelled, success only if all succeeded).
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           set -euo pipefail
 
-          # Docs/status-only PR: the real legs are legitimately `skipped`
-          # (their slice-061 stub-twins post the green named checks). Pass —
-          # we do NOT make a no-Go PR pay the full matrix (AC-2). This is
-          # the ONLY branch where a `skipped` leg is acceptable.
-          if [ "${CODE:-}" != "true" ]; then
-            echo "code='${CODE:-}' (no Go-affecting changes) — required legs legitimately skipped; merge-gate PASSES."
-            exit 0
+          # ----------------------------------------------------------------
+          # Slice 701a: the assertion set is DERIVED from `toJSON(needs)`.
+          # There is no hand-maintained list here to drift out of sync with
+          # the `needs:` block above. See the header comment for why.
+          # ----------------------------------------------------------------
+
+          # Fail closed if the derivation itself produced nothing sane —
+          # an empty/garbled `needs` context must never read as "all green".
+          leg_count="$(printf '%s' "$NEEDS_JSON" | jq -r 'keys | length')"
+          if [ "${leg_count:-0}" -lt 2 ]; then
+            echo "merge-gate is RED: toJSON(needs) yielded ${leg_count:-0} entries." >&2
+            echo "Refusing to pass a gate that asserts nothing." >&2
+            exit 1
           fi
 
-          echo "code='true' (Go-affecting PR) — every required leg MUST be 'success'."
-          echo "A leg that is failure/cancelled/skipped fails this gate CLOSED (slice 474 hole)."
+          # The `changes` job is unconditional and every other leg's `if:`
+          # reads its output. Anything other than `success` means CODE is
+          # untrustworthy — fail closed rather than fall through to the
+          # docs-only branch with an empty CODE (a masking hole).
+          if [ "${R_CHANGES:-}" != "success" ]; then
+            echo "merge-gate is RED: changes (path-filter oracle) = '${R_CHANGES:-<empty>}'." >&2
+            echo "CODE cannot be trusted, so skip-tolerance cannot be granted." >&2
+            exit 1
+          fi
+
+          if [ "${CODE:-}" = "true" ]; then
+            echo "code='true' (Go-affecting PR) — EVERY leg in needs MUST be 'success'."
+            echo "A leg that is failure/cancelled/skipped fails this gate CLOSED (slice 474 hole)."
+          else
+            echo "code='${CODE:-}' (no Go-affecting changes) — path-filtered legs may legitimately"
+            echo "be 'skipped' (their slice-061 stub-twins post the green named checks)."
+            echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check) still"
+            echo "MUST be 'success'. 'skipped' is the ONLY forgiven non-success result, and only here."
+          fi
+          echo "Asserting ${leg_count} legs derived from toJSON(needs)."
           echo
 
-          fail=0
-          # require <leg-display-name> <result>
-          # PASS only on exactly 'success'. Anything else — failure,
-          # cancelled, or skipped-while-Go-changes-present — is fail-closed.
-          require() {
-            local name="$1" result="$2"
-            if [ "$result" = "success" ]; then
-              echo "  OK    ${name}: ${result}"
-            else
-              echo "  BLOCK ${name}: ${result}  <-- not 'success' on a Go-affecting PR" >&2
-              fail=1
-            fi
+          # COSMETIC ONLY: job-id -> the branch-protection context name it
+          # backs, for readable logs. An unmapped job falls back to its id,
+          # so this map can NEVER cause a missed assertion — the assertion
+          # set comes from NEEDS_JSON alone.
+          display() {
+            case "$1" in
+              build-go)                       echo "Go · build + test" ;;
+              tests-integration)              echo "Go · integration (Postgres RLS)" ;;
+              tests-integration-shard)        echo "Go · integration (shard matrix)" ;;
+              lint-go)                        echo "Go · lint" ;;
+              sqlc-drift)                     echo "Go · sqlc generate diff" ;;
+              proto)                          echo "Proto · lint + generate diff" ;;
+              build-frontend)                 echo "Frontend · install + build" ;;
+              frontend-playwright)            echo "Frontend · Playwright e2e" ;;
+              frontend-playwright-prod-build) echo "Frontend · Playwright e2e (prod-build standalone)" ;;
+              frontend-vitest)                echo "Frontend · vitest" ;;
+              frontend-lint)                  echo "Frontend · lint" ;;
+              helm-lint)                      echo "Helm chart · lint + template" ;;
+              lint-python)                    echo "Python · ruff" ;;
+              precommit)                      echo "pre-commit · all hooks" ;;
+              oscal-bridge)                   echo "OSCAL bridge · Python (ruff + pytest)" ;;
+              fuzz)                           echo "Go · fuzz (bounded)" ;;
+              govulncheck)                    echo "Go · govulncheck" ;;
+              *)                              echo "$1" ;;
+            esac
           }
 
-          require "Go · build + test"                 "$R_BUILD_GO"
-          require "Go · integration (shard matrix)"    "$R_SHARDS"
-          require "Go · integration (Postgres RLS)"    "$R_INTEGRATION"
-          require "Go · lint"                          "$R_LINT_GO"
-          require "Go · sqlc generate diff"            "$R_SQLC"
-          require "Proto · lint + generate diff"       "$R_PROTO"
-          require "Frontend · install + build"         "$R_FRONTEND_BUILD"
-          require "Frontend · Playwright e2e"          "$R_PLAYWRIGHT"
-          require "Python · ruff"                      "$R_PYTHON"
+          pairs="$(printf '%s' "$NEEDS_JSON" | jq -r 'to_entries[] | "\(.key)\t\(.value.result)"' | sort)"
+
+          fail=0
+          while IFS="$(printf '\t')" read -r job result; do
+            if [ -z "${job:-}" ]; then continue; fi
+            # `changes` is asserted above (it must be `success` in BOTH
+            # worlds, so it does not participate in skip-tolerance).
+            if [ "$job" = "changes" ]; then
+              echo "  OK    changes (path-filter oracle): ${result}"
+              continue
+            fi
+            name="$(display "$job")"
+            if [ "$result" = "success" ]; then
+              echo "  OK    ${job} — ${name}: ${result}"
+            elif [ "$result" = "skipped" ] && [ "${CODE:-}" != "true" ]; then
+              echo "  SKIP  ${job} — ${name}: ${result}  (allowed: no Go-affecting changes)"
+            else
+              echo "  BLOCK ${job} — ${name}: ${result}  <-- not 'success'" >&2
+              fail=1
+            fi
+          done <<< "$pairs"
 
           if [ "$fail" -ne 0 ]; then
             echo >&2
-            echo "merge-gate is RED: a required leg did not succeed on a Go-affecting PR." >&2
+            echo "merge-gate is RED: a leg in needs did not succeed." >&2
             echo "This blocks the merge by design (slice 631). A RED/cancelled/skipped" >&2
             echo "required integration shard cannot slip through (the slice 474 regression)." >&2
             exit 1
           fi
           echo
-          echo "merge-gate PASSES: every required leg succeeded on this Go-affecting PR."
+          echo "merge-gate PASSES: every leg in needs resolved acceptably for code='${CODE:-}'."
 
   # ====================================================================
   # Slice 631 — post-merge main-branch shard CANARY (mechanism (c),
@@ -3712,13 +3829,13 @@ jobs:
       NATS_URL: nats://localhost:4222
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
           disable-sudo: true
 
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.26"
           cache: true

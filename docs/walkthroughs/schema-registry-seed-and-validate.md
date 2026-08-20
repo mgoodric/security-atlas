@@ -331,5 +331,5 @@ Tenant-private kinds (slice 015) ride the same paths with a tenant-scoped row. S
 ### Where to read more
 
 - **Canvas:** [`Plans/canvas/04-evidence-engine.md`](../../Plans/canvas/04-evidence-engine.md) §4 — Evidence SDK + schema registry, §4.5 — `.vN` versioning rule
-- **Slice docs:** [`docs/issues/014-schema-registry.md`](../issues/014-schema-registry.md) (registry introduced), [`docs/issues/015-redaction-rules.md`](../issues/015-redaction-rules.md) (`x-redaction-rules` + tenant-private kinds), [`docs/issues/068-schema-registry-evidence-kind-fix.md`](../issues/068-schema-registry-evidence-kind-fix.md) (retry-with-backoff)
+- **Slice docs:** [`docs/issues/014-schema-registry-service.md`](../issues/014-schema-registry-service.md) (registry introduced), [`docs/issues/015-nats-jetstream-ingestion-stage.md`](../issues/015-nats-jetstream-ingestion-stage.md) (`x-redaction-rules` + tenant-private kinds), [`docs/issues/068-schema-registry-evidence-kind-fix.md`](../issues/068-schema-registry-evidence-kind-fix.md) (retry-with-backoff)
 - **Go package:** [`internal/api/schemaregistry/`](../../internal/api/schemaregistry/) — `DefaultSeed`, `LoadFromDB`, `ValidatePayload`, `IsRegisteredForTenant`

@@ -1,9 +1,16 @@
 package authzmw_test
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/google/uuid"
@@ -172,6 +179,162 @@ func TestIsCredentialPresent(t *testing.T) {
 	// the per-request context.
 	if authzmw.IsCredentialPresent(bare) {
 		t.Fatalf("IsCredentialPresent = true on the original request after deriving a credentialed copy")
+	}
+}
+
+// failingResolver makes every DB-backed roles lookup fail with the
+// configured error, simulating the slice 356a chaos condition (Postgres
+// stopped) without a database in the loop. Unit-tier twin of the
+// integration test in integration_test.go.
+type failingResolver struct{ err error }
+
+func (f failingResolver) RolesFor(_ context.Context, _, _ string) ([]authz.Role, error) {
+	return nil, f.err
+}
+
+// captureSlog swaps slog's default handler for a buffer for the
+// duration of the test. Callers must NOT use t.Parallel — slog.Default
+// is process-global state (same pattern and reasoning as
+// httperr's TestWriteInternal_LogsFullErrorServerSide).
+func captureSlog(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	buf := &bytes.Buffer{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(buf, &slog.HandlerOptions{Level: slog.LevelError})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	return buf
+}
+
+func tenantCredRequest(method, path string) *http.Request {
+	req := httptest.NewRequest(method, path, nil)
+	cred := credstore.Credential{
+		ID:       "key_outage",
+		TenantID: uuid.NewString(),
+		UserID:   "key_outage",
+		IsAdmin:  true,
+	}
+	return req.WithContext(authctx.WithCredential(req.Context(), cred))
+}
+
+// assertNoLeak asserts the slice 367 error-leak bar on a response body:
+// no driver text, no SQLSTATE, no file:line frame, no internal import
+// path (OE-432 Do #5 / slice 356a check F-3).
+func assertNoLeak(t *testing.T, body string) {
+	t.Helper()
+	for _, leak := range []string{"pgx", "SQLSTATE", "connection refused", ".go:", "internal/", "dial tcp"} {
+		if strings.Contains(body, leak) {
+			t.Fatalf("response body leaks internal detail %q: %s", leak, body)
+		}
+	}
+}
+
+// TestMiddleware_DBUnavailableReturns503 is the OE-432 headline unit
+// test: with the DB-backed roles resolver failing connection-refused
+// (the measured slice 356a outage shape), the middleware must answer
+// 503 {"error":"database_unavailable","retry_after":5} — NOT the
+// pre-fix 500 {"error":"authorization engine error"} — and must write
+// an error-level log line carrying the request context and real cause.
+//
+// NOT t.Parallel: captures slog.Default (process-global).
+func TestMiddleware_DBUnavailableReturns503(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	dialErr := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	engine, err := authz.NewEngine(context.Background(), failingResolver{err: dialErr})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	mw := authzmw.Middleware(engine, nil, "/auth/", "/health")
+	called := false
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { called = true }))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, tenantCredRequest(http.MethodGet, "/v1/anchors"))
+
+	if called {
+		t.Fatalf("inner handler called during DB outage")
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+	if got := rec.Header().Get("Retry-After"); got != "5" {
+		t.Fatalf("Retry-After header = %q, want \"5\"", got)
+	}
+
+	var body struct {
+		Error      string `json:"error"`
+		RetryAfter int    `json:"retry_after"`
+		RequestID  string `json:"request_id"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not JSON: %v (%s)", err, rec.Body.String())
+	}
+	if body.Error != "database_unavailable" {
+		t.Fatalf("body.error = %q, want \"database_unavailable\"", body.Error)
+	}
+	if body.RetryAfter != 5 {
+		t.Fatalf("body.retry_after = %d, want 5", body.RetryAfter)
+	}
+	if body.RequestID == "" {
+		t.Fatalf("body.request_id empty; operators need it to pivot to the log line")
+	}
+	assertNoLeak(t, rec.Body.String())
+
+	// G-2: the underlying error must land server-side at error level
+	// with request context — the "120 5xx, 0 log lines" behaviour is
+	// the bug this slice kills.
+	logged := logBuf.String()
+	for _, want := range []string{
+		"database dependency unavailable",
+		body.RequestID,
+		`"path":"/v1/anchors"`,
+		"tenant_id",
+		"connection refused",
+	} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("slog output missing %q: %s", want, logged)
+		}
+	}
+}
+
+// TestMiddleware_GenuineEngineErrorStays500 covers the other half of
+// the OE-432 distinguishability AC: a Decide failure that is NOT a
+// dependency outage (here, a data-shaped resolver error) keeps
+// returning 500, with the generic slice-367 body, and is now logged
+// server-side (pre-fix this path was silent too).
+//
+// NOT t.Parallel: captures slog.Default (process-global).
+func TestMiddleware_GenuineEngineErrorStays500(t *testing.T) {
+	logBuf := captureSlog(t)
+
+	engine, err := authz.NewEngine(context.Background(), failingResolver{err: errors.New("user_roles row scan mismatch")})
+	if err != nil {
+		t.Fatalf("NewEngine: %v", err)
+	}
+	mw := authzmw.Middleware(engine, nil, "/auth/", "/health")
+	h := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, tenantCredRequest(http.MethodGet, "/v1/anchors"))
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500 for a non-outage engine error", rec.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("body is not JSON: %v (%s)", err, rec.Body.String())
+	}
+	if body["error"] == "database_unavailable" {
+		t.Fatalf("non-outage error mislabelled as database_unavailable")
+	}
+	if _, hasRetry := body["retry_after"]; hasRetry {
+		t.Fatalf("non-outage error carries a retry_after hint: %s", rec.Body.String())
+	}
+	assertNoLeak(t, rec.Body.String())
+
+	logged := logBuf.String()
+	if !strings.Contains(logged, "authz decide") || !strings.Contains(logged, "row scan mismatch") {
+		t.Fatalf("genuine engine error not logged server-side: %s", logged)
 	}
 }
 

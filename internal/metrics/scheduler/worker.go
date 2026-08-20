@@ -30,11 +30,27 @@ import (
 // ATLAS_METRICS_INTERVAL overrides for dev loops.
 const DefaultInterval = 15 * time.Minute
 
+// EvaluatorRegistry is the narrow slice of *eval.Registry the sweep
+// actually consumes: enumerate the registered names, then resolve each to
+// its Evaluator. *eval.Registry satisfies it, so production wiring is
+// unchanged (cmd/atlas passes the concrete registry as before).
+//
+// It exists as an interface so the AC-13 contract — "one failing
+// evaluator does NOT abort the run for the others" — can be tested with a
+// deliberately-failing evaluator. Until OE-550 that branch was only ever
+// covered by accident, because two starter evaluators errored on every
+// call against the real schema; fixing their SQL removed the accidental
+// coverage, so the contract now gets a test that asserts it on purpose.
+type EvaluatorRegistry interface {
+	Names() []string
+	Get(name string) (eval.Evaluator, bool)
+}
+
 // Scheduler runs the per-tenant × per-evaluator sweep on a fixed cadence.
 type Scheduler struct {
 	migratorPool *pgxpool.Pool
 	appPool      *pgxpool.Pool
-	registry     *eval.Registry
+	registry     EvaluatorRegistry
 	logger       *slog.Logger
 
 	// onInlineSweep, when non-nil, is invoked exactly once with the report
@@ -59,7 +75,7 @@ func (s *Scheduler) setInlineSweepHook(fn func(SweepReport, error)) {
 // (BYPASSRLS) — it enumerates every tenant. appPool MUST be the
 // atlas_app role — every evaluator's read query runs through it with
 // tenancy.WithTenant applied so RLS is honored.
-func New(migratorPool *pgxpool.Pool, appPool *pgxpool.Pool, registry *eval.Registry, logger *slog.Logger) *Scheduler {
+func New(migratorPool *pgxpool.Pool, appPool *pgxpool.Pool, registry EvaluatorRegistry, logger *slog.Logger) *Scheduler {
 	if logger == nil {
 		logger = slog.New(slog.NewTextHandler(discardWriter{}, nil))
 	}

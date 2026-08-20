@@ -112,6 +112,10 @@ func sectionContextInputs(section SectionKey, r Rollup) map[string]any {
 		base["drift_window_days"] = r.WindowDays
 		base["drift_delta_30d"] = r.Delta
 		base["controls_drifted_out"] = r.FlippedOutCount
+	case SectionExceptionStatus:
+		base["exceptions_in_force"] = r.ExceptionsActive
+		base["exceptions_past_expiry"] = r.ExceptionsPastDue
+		base["oldest_exception_age_days"] = r.OldestExceptionAgeDays
 	default: // coverage
 		base["control_coverage_pct"] = r.CoveragePct
 		base["evidence_freshness_pct"] = r.FreshnessPct

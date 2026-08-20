@@ -3,7 +3,7 @@
 **Cluster:** Quality / UI parity (frontend)
 **Estimate:** 0.25d
 **Type:** AFK
-**Status:** `not-ready` (depends on a public ledger route — see Dependencies)
+**Status:** `implemented` (slice OE-416; public `/activity` ledger route exists)
 
 ## Narrative
 
@@ -21,15 +21,18 @@ The dashboard mockup's activity-feed panel ends with a centered footer link (`Pl
 
 The mockup's intent is "the dashboard shows the 6 most recent events; click to see the full ledger". The live `ActivityFeedPanel` (`web/components/dashboard/activity-feed-panel.tsx`) renders zero footer link — once the operator has paged through the displayed events, there is no path to the full ledger from the dashboard.
 
-**Status: ship-gap, not mockup-stale.** The full activity ledger surface IS a real product concept — slice 062's `admin_audit_log_v` view is the backing data, and slice 067 (admin audit-log page at `/admin/audit-log`) ships an authz-gated full view. The dashboard simply lacks a navigation affordance to it.
+**Status: ship-gap, not mockup-stale.** OE-416 rechecked
+`Plans/_archive/mockups/README.md`: archived iteration-1 mockup divergence is
+expected and is not automatically fileable drift. This finding remains a
+ship-gap because the full activity ledger is a shipped product surface, not
+mockup-only chrome: slice 270 added a non-admin `/activity` ledger route backed
+by `/api/activity` -> `/v1/activity/unified`, and it is reachable to every
+signed-in tenant member. The dashboard simply lacked the navigation affordance
+to that real route.
 
-**Why `not-ready`.** The natural destination (`/admin/audit-log`) is admin-only — surfaceing a "View full activity ledger →" link from a dashboard panel that non-admin users see is a UX honesty problem (slice 186 precedent: don't advertise affordances the user can't use). The implementing slice must either:
-
-1. Ship a non-admin "activity ledger" view at `/activity` that mirrors the same data with the same RLS scope as the dashboard panel (recommended), OR
-2. Conditionally render the footer link based on the user's role (slice 186 pattern), OR
-3. Wait for the v2 admin/non-admin role split to mature before deciding.
-
-The implementing slice picks the path; this audit-spillover only records the gap.
+**Route resolution.** OE-416 uses `/activity`, not `/admin/audit-log`. The
+admin audit log remains role-gated; `/activity` is the dashboard-appropriate
+destination because it carries the non-admin row-visibility/OPA contract.
 
 ## Threat model
 
@@ -41,11 +44,11 @@ The implementing slice picks the path; this audit-spillover only records the gap
 
 ## Acceptance criteria
 
-- **AC-1.** The `ActivityFeedPanel` renders a centered footer link "View full activity ledger →" below the event list.
-- **AC-2.** The link target is a real route — either `/activity` (non-admin scope) or conditionally `/admin/audit-log` (admin scope) per the slice 186 pattern.
-- **AC-3.** If the user lacks access to the target route, the footer link is omitted (not rendered disabled — for a small affordance, omission is cleaner than a disabled link).
+- **AC-1.** The `ActivityFeedPanel` renders a centered footer link "View full activity ledger →" below the event list. **Implemented in OE-416.**
+- **AC-2.** The link target is a real route — either `/activity` (non-admin scope) or conditionally `/admin/audit-log` (admin scope) per the slice 186 pattern. **Implemented in OE-416 with `/activity`; `web/e2e/dashboard.spec.ts` asserts navigation reaches the page shell.**
+- **AC-3.** If the user lacks access to the target route, the footer link is omitted (not rendered disabled — for a small affordance, omission is cleaner than a disabled link). **Satisfied by choosing `/activity`, which is reachable to all signed-in tenant members.**
 - **AC-4.** The target route (whichever the implementing slice chooses) RLS-scopes to the active tenant, returns the same shape as the dashboard panel's events but unpaginated, and renders newest-first.
-- **AC-5.** Empty-state honesty: if the ledger is empty, the link is omitted (no point linking to a known-empty page from the empty-panel state).
+- **AC-5.** Empty-state honesty: if the ledger is empty, the link is omitted (no point linking to a known-empty page from the empty-panel state). **Implemented in OE-416 by rendering the footer only in the non-empty activity-list branch.**
 
 ## Constitutional invariants honored
 
@@ -58,9 +61,14 @@ The implementing slice picks the path; this audit-spillover only records the gap
 
 ## Dependencies
 
-- **A non-admin `/activity` view OR the slice 186 role-conditional rendering pattern.** Neither is shipped as a dashboard-linked surface today. The implementing slice picks one.
+- **A non-admin `/activity` view OR the slice 186 role-conditional rendering pattern.** Resolved by slice 270's `/activity` route; OE-416 links there.
 - **Slice 067** (admin audit-log page) — merged. Reusable as the admin-scoped destination.
 - **Slice 186** (role-conditional sidebar entry) — merged. Reusable as the role-gating pattern.
+- **Slice 685 relationship.** Slice 685 remains adjacent but separate. It needs
+  the dashboard `/v1/activity` endpoint widened beyond the evidence branch and
+  given a kind/source filter for dashboard chips. OE-416 does not need that
+  widening because the footer navigates to the already-shipped `/activity`
+  ledger, whose BFF uses `/v1/activity/unified`.
 
 ## Anti-criteria (P0 — block merge)
 

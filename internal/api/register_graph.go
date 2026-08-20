@@ -75,5 +75,6 @@ func (s *Server) registerGraph(root *chi.Mux) {
 			evidenceH = evidenceH.WithPublisher(s.evidencePublisher)
 		}
 		root.Post("/v1/evidence:push", evidenceH.PushHTTP)
+		root.Get("/v1/evidence/receipts/{record_id}", evidenceH.ReceiptStatusHTTP)
 	}
 }

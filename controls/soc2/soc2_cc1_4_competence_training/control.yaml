@@ -42,3 +42,17 @@ evidence_queries:
           time.parse_rfc3339_ns(t.resolution_date) > (time.now_ns() - (365 * 24 * 60 * 60 * 1000000000))
         }
       }
+  - id: training_completion_records_within_365d
+    language: rego
+    evidence_kind: security_awareness.training_completion.v1
+    description: "Every assigned security-awareness training completion is current within 365 days"
+    expression: |
+      package atlas.controls.soc2.cc1_4.training_records
+
+      default allow := false
+
+      allow if {
+        input.assignment_id
+        time.parse_rfc3339_ns(input.completed_at) > (time.now_ns() - (365 * 24 * 60 * 60 * 1000000000))
+        input.completion_source in {"manual", "csv", "lms_connector"}
+      }

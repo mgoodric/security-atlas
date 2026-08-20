@@ -40,7 +40,7 @@ func TestGenerateDeterministic(t *testing.T) {
 
 // TestEverySpecRouteHasSecurity enforces slice 140 P0-A1: no operation
 // ships with an empty `security` block unless the route's Tier is
-// explicitly "none" (the genuinely-public set: /health, /metrics,
+// explicitly "none" (the genuinely-public set: /health, /ready, /metrics,
 // /v1/version, /v1/install-state, /v1/calendar.ics, /auth/*).
 func TestEverySpecRouteHasSecurity(t *testing.T) {
 	var out bytes.Buffer
@@ -206,6 +206,57 @@ func TestParameterExtraction(t *testing.T) {
 	for _, name := range []string{"id", "kind", "targetID"} {
 		if !strings.Contains(yaml, "name: "+name) {
 			t.Errorf("spec missing path parameter %q", name)
+		}
+	}
+}
+
+func TestSearchOperationDocumentsContract(t *testing.T) {
+	var out bytes.Buffer
+	if err := Generate(&out, RouteSpecs); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	yaml := out.String()
+	for _, want := range []string{
+		"  /v1/search:",
+		"        - name: q",
+		"          in: query",
+		"            minLength: 2",
+		"        - name: types",
+		"            pattern: \"^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$\"",
+		"        - name: limit",
+		"            maximum: 50",
+		"        \"200\":",
+		"                $ref: \"#/components/schemas/SearchResponse\"",
+		"    SearchResponse:",
+		"    SearchHit:",
+		"          enum: [anchors, controls, risks, evidence]",
+		"        relevance_score:",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Errorf("search contract missing marker: %q", want)
+		}
+	}
+}
+
+func TestSchemaRegistryReadDocumentsUnavailableContract(t *testing.T) {
+	var out bytes.Buffer
+	if err := Generate(&out, RouteSpecs); err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+	yaml := out.String()
+	for _, want := range []string{
+		"  /v1/schemas:",
+		"  /v1/schemas/{kind}/{semver}:",
+		"        \"503\":",
+		"            Retry-After:",
+		"                $ref: \"#/components/schemas/SchemaRegistryUnavailableError\"",
+		"    SchemaRegistryUnavailableError:",
+		"          enum: [schema_registry_unavailable]",
+		"        request_id:",
+		"        internal error detail.",
+	} {
+		if !strings.Contains(yaml, want) {
+			t.Errorf("schema-registry unavailable contract missing marker: %q", want)
 		}
 	}
 }

@@ -8,12 +8,15 @@
 --   4. vendors                 — last_review_date + review_cadence interval is
 --      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
 --      vendor branch so the two surfaces cannot drift (slice 675).
+--      Also includes renewal_date as a separate vendor renewal event (OE-623).
 --   5. controls + control_evaluations — periodic-review controls whose
 --      cadence (derived from freshness_class) places their next review
 --      between $from and $to. last_evaluated_at = MAX(evaluated_at) over
 --      the append-only control_evaluations ledger.
+--   6. personnel_security_checklists — open offboarding due dates, so overdue
+--      leaver access-removal tasks surface on the compliance calendar.
 --
--- All four are tenant-scoped; RLS fires on each underlying SELECT, and the
+-- All event sources are tenant-scoped; RLS fires on each underlying SELECT, and the
 -- explicit tenant_id predicates are the primary guarantee.
 --
 -- Date filter is a half-open window [from, to). The window is computed in
@@ -187,6 +190,30 @@ FROM (
 
     UNION ALL
 
+    -- vendor contract renewals: renewal_date from the commercial tooling
+    -- register. Event type stays `vendor` so existing calendar filters and
+    -- links continue to work; the title distinguishes review vs renewal.
+    SELECT
+        ('renewal-' || v.id::text)                                  AS event_id,
+        'vendor'::text                                               AS event_type,
+        ('Vendor renewal: ' || v.name)::text                         AS title,
+        v.renewal_date::timestamptz                                  AS starts_at,
+        NULL::timestamptz                                            AS ends_at,
+        v.id::text                                                   AS related_entity_id,
+        'vendor'::text                                               AS related_entity_kind,
+        COALESCE(v.currency || ' ' || v.annual_cost::text, v.commercial_status::text) AS summary,
+        v.commercial_status::text                                    AS status,
+        v.billing_cadence::text                                      AS cadence
+    FROM vendors v
+    WHERE v.tenant_id = $1
+      AND v.renewal_date IS NOT NULL
+      AND v.commercial_status <> 'churned'
+      AND v.renewal_date::timestamptz >= sqlc.arg(from_ts)::timestamptz
+      AND v.renewal_date::timestamptz <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR position('vendor' IN sqlc.arg(type_filter)::text) > 0)
+
+    UNION ALL
+
     -- periodic control reviews: manual_periodic / manual_attested controls
     -- whose next_due_at falls in the window. Two cases:
     --   (a) never evaluated   -> next_due_at = now()        status=overdue
@@ -284,6 +311,32 @@ FROM (
             END
           ) <  sqlc.arg(to_ts)::timestamptz
       AND (sqlc.arg(type_filter)::text = '' OR position('control' IN sqlc.arg(type_filter)::text) > 0)
+
+    UNION ALL
+
+    SELECT
+        psc.id::text                                                  AS event_id,
+        'offboarding'::text                                           AS event_type,
+        ('Offboarding access removal: ' ||
+            COALESCE(NULLIF(psc.person_work_email, ''), psc.person_external_id))::text AS title,
+        psc.due_at                                                    AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        psc.id::text                                                  AS related_entity_id,
+        'personnel_security_checklist'::text                          AS related_entity_kind,
+        psc.source                                                    AS summary,
+        CASE
+            WHEN psc.due_at < sqlc.arg(now_ts)::timestamptz THEN 'overdue'
+            WHEN psc.due_at <= sqlc.arg(now_ts)::timestamptz + INTERVAL '1 day' THEN 'due-soon'
+            ELSE 'upcoming'
+        END                                                           AS status,
+        NULL::text                                                    AS cadence
+    FROM personnel_security_checklists psc
+    WHERE psc.tenant_id = $1
+      AND psc.workflow_kind = 'offboarding'
+      AND psc.status = 'open'
+      AND psc.due_at >= sqlc.arg(from_ts)::timestamptz
+      AND psc.due_at <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR position('offboarding' IN sqlc.arg(type_filter)::text) > 0)
 ) calendar_events
 ORDER BY starts_at ASC, event_id ASC
 LIMIT sqlc.arg(row_limit)::int;

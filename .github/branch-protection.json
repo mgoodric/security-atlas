@@ -45,8 +45,80 @@
     "fix_first_revisit": "Fix-first, then promote (P0-419-1 — a candidate with a dirty soak gets a fix-first note, never a forced promotion). Ordered: (1) harden `deploy/docker/test-self-host-bundle.sh` against registry flakiness (retry-with-backoff on image pull, and/or a GHCR pull-through mirror for the base images) so a Docker Hub blip stops reading as a bundle regression; (2) add the four matrix-named slice-061 stub-twins (`Self-host bundle · end-to-end (bundled|external|proxy|migrate)`); (3) verify both directions — one docs-only PR resolving the four stub contexts green AND one code PR resolving the four real contexts green; (4) re-soak ≥5 clean runs per leg post-hardening; (5) promote all four expanded contexts in ONE change (a partial promotion leaves the same hole). Tracked in `docs/audit-log/419-promote-advisory-checks-decisions.md` §Revisit list."
   },
 
+  "$merge_queue": {
+    "$slice": "415 — adopt GitHub's native merge queue on `main` so a green PR no longer needs a manual `gh pr update-branch` rebase that re-triggers the whole ~13-minute suite. Declared here because this file is the source of truth for the merge bar on `main`. See docs/ci/MERGE_QUEUE.md and docs/audit-log/415-merge-queue-decisions.md.",
+
+    "$why_this_key_is_dollar_prefixed": "The merge queue is NOT expressible through the classic branch-protection REST surface this file is PUT to. Verified 2026-07-24 against the live API: `GET /repos/mgoodric/security-atlas/branches/main/protection` returns no merge-queue field, and GraphQL introspection of `UpdateBranchProtectionRuleInput` returns no merge-queue input (the only match for /merge|queue/ is `lockAllowsFetchAndMerge`). Merge queue is configured through the branch-protection UI checkbox or a repository ruleset (`merge_queue` rule type). Following this file's `$`-prefix annotation convention therefore keeps `scripts/apply-branch-protection.sh` working unchanged — the script strips every `$`-prefixed top-level key before the PUT (slice 127), so this block is declared intent plus the apply ritual, not wire format. Teaching the apply script to reconcile the merge queue through the rulesets API is on the slice-415 revisit list.",
+
+    "enabled": true,
+    "branch": "main",
+
+    "configuration": {
+      "merge_method": "SQUASH",
+      "build_concurrency": 5,
+      "minimum_entries_to_merge": 1,
+      "minimum_entries_to_merge_wait_minutes": 5,
+      "maximum_entries_to_merge": 5,
+      "grouping_strategy": "ALLGREEN",
+      "check_response_timeout_minutes": 60,
+      "only_merge_non_failing_pull_requests": true
+    },
+
+    "$configuration_rationale": "Tuning defaults, each recorded with rationale + a revisit trigger in docs/audit-log/415-merge-queue-decisions.md (D3). SQUASH matches the repo's existing squash-merge-to-main convention (CLAUDE.md 'Branching') and is the only method compatible with `required_linear_history: true`. minimum_entries_to_merge=1 keeps a lone PR from waiting on a batch that will never form on a solo-maintainer repo; the 5-minute wait window lets a second PR join a batch when one is queued behind it. maximum_entries_to_merge=5 and build_concurrency=5 bound the speculative fan-out so a bad head cannot invalidate an unbounded amount of in-flight CI. ALLGREEN (every entry in the group must be green) over HEADGREEN because HEADGREEN merges the whole batch on the head entry's result — with the slice-061 path filter in play that is exactly the shape of threat T-1. check_response_timeout_minutes=60 exceeds the observed ~13-minute suite with headroom for the CodeQL leg.",
+
+    "$required_checks": "The queue gates on `required_status_checks.contexts` below, reused VERBATIM — slice 415 adds no check and removes none (P0-1).",
+
+    "$apply": "Not applied by `scripts/apply-branch-protection.sh` (see `$why_this_key_is_dollar_prefixed`). Maintainer apply: GitHub → Settings → Branches → the `main` protection rule → check 'Require merge queue' → set merge method SQUASH, 'Only merge non-failing pull requests', build concurrency 5, min entries 1 / wait 5 min, max entries to merge 5, grouping ALLGREEN, timeout 60 min → Save. Then re-run `bash scripts/apply-branch-protection.sh` so the contexts list stays reconciled, and confirm `required_linear_history` and `enforce_admins` are still on.",
+
+    "$strict_interaction": "`required_status_checks.strict` is RETAINED as `true` by slice 415 (AC-3): the queue subsumes the strict up-to-date requirement, but flipping the merge bar for every PR is the maintainer's call, not an agent's, and retaining it is the fail-safe direction (a PR can still not merge stale if the queue is never enabled). GitHub may itself disable 'Require branches to be up to date before merging' when the merge queue is turned on — the two are mutually exclusive in the UI. If it does, the live config will drift from this file's `strict: true` and `branch-protection-drift-live` will surface it; reconcile by setting `strict` to `false` here in a follow-up commit and noting that the queue now owns that guarantee. Tracked on the slice-415 revisit list."
+  },
+
+  "$additions_from_slice_701a": {
+    "ci_merge_gate_required": "PROMOTED. Exact `ci.yml` `name:` — `CI · merge-gate` (ci.yml job `merge-gate`). Added by slice 631 as the fail-closed aggregator that closes the slice-474 masking hole, and advisory-only ever since (the slice-631 header comment carried the maintainer hand-off note asking for exactly this promotion). Slice 701a performs the promotion together with the `needs:`-completeness fix that makes it trustworthy — the two are one change, because promoting an INCOMPLETE gate is worse than leaving it advisory (it reads as a single trustworthy signal while silently omitting legs).",
+    "needs_completeness": "The gate's `needs:` grew from 10 entries to 20. Contexts-driven additions (each backs a name already in `contexts`): `frontend-vitest`, `frontend-playwright-prod-build`, `helm-lint`, `precommit`, `actions-pin-check`, `openapi-drift-check`. Slice-701-mandated additions (real legs with no required context of their own, covered here so the stub collapse cannot drop them): `oscal-bridge`, `fuzz`, `frontend-lint`, `govulncheck`. The full contexts-vs-needs diff is tabulated in `docs/audit-log/701a-merge-gate-completeness-decisions.md`.",
+    "four_contexts_out_of_reach": "`Analyze (go)`, `Analyze (javascript-typescript)`, `GitGuardian Security Checks` and `DCO` CANNOT appear in merge-gate's `needs:`. The first two are jobs in `.github/workflows/codeql.yml` and GitHub Actions `needs:` is workflow-scoped; the last two are GitHub Apps with no workflow job at all. All four report today (verified against live branch protection), so none is a brick — they are simply out of the aggregator's reach and MUST remain independent required contexts. The slice-701 child that prunes per-job names from `contexts` must keep these four plus `CI · merge-gate`. SUPERSEDED IN PART (OE-651, 2026-08-02): the 'all four report today' claim was falsified after the 2026-07-23 CodeQL default-setup migration — see `$required_checks_hygiene_oe651`. The two Analyze contexts and GitGuardian are no longer in `contexts`; only `DCO` (plus `CI · merge-gate`) remains as an out-of-reach independent required context.",
+    "no_contexts_removed": "This slice REMOVES NOTHING from `contexts` and DELETES NO `-stub` job. Slice 701's AC-4 (drop the per-job names) and AC-5 (delete the 21 stubs) are the child slice's work and are gated on a real soak of the promoted gate. Promoting first and pruning later is the safe order; doing both at once would swap an enforced 18-name list for an unsoaked 1-name list in a single step.",
+    "maintainer_apply": "`bash scripts/apply-branch-protection.sh` is run as part of this slice (issue OE-370 step 7). Reversal, if needed, is `git revert` of this file's change followed by a re-run of the same script — the PUT is a full-replace and idempotent."
+  },
+
+  "$required_checks_hygiene_oe651": {
+    "$issue": "OPENENGINE-651 (2026-08-02) — required-checks hygiene. ~30 open PRs, many BLOCKED with every real check green. Root causes verified empirically against the live check-suites API over the currently-open PR set (fixtures: #1515 #1516 #1517 #1525 #1543 #1536), NOT assumed from the workflow files. Three contexts were structurally broken as merge gates and are removed below; every check with real signal is retained. Trimmed 19 → 16 contexts.",
+    "analyze_contexts_removed": "`Analyze (go)` + `Analyze (javascript-typescript)` REMOVED from `contexts` — skip-but-required brick. Evidence: `.github/workflows/codeql.yml` (the advanced-setup workflow these two names came from) has been `disabled_manually` since the 2026-06-29 → 2026-07-24 decommission window; its last run is 2026-06-29. CodeQL DEFAULT SETUP was configured 2026-07-23 (`GET /repos/mgoodric/security-atlas/code-scanning/default-setup` → state=configured, 7 languages) and now posts the `Analyze (…)` check runs via the `github-advanced-security` app. Default setup does NOT emit per-language check runs on a PR that touches no analyzable-language file: on dependabot manifest-only PRs #1515/#1516/#1517 (go.mod / package.json bumps) the github-advanced-security suite completed `neutral` with ZERO check runs, so the two required contexts never reported and the PRs sat BLOCKED-forever. Nearly every dependabot PR is manifest-only, so this bricked the entire class. No in-repo stub-twin can fix a context owned by an external app whose skip decision (which languages a merge commit 'touches') is not reproducible from a dorny/paths-filter expression.",
+    "analyze_replacement_ruleset": "The CodeQL merge gate is NOT dropped — it moves to a repository RULESET using GitHub's purpose-built 'code scanning results' merge protection, which has exactly the semantics the raw contexts lack: it blocks when CodeQL finds alerts ≥ threshold on the PR, and PASSES when no analysis is expected for the change (the neutral-pass-on-legitimate-skip the OE-651 spec asks for). Declared in `$code_scanning_ruleset` below ($-prefixed: rulesets are a different API surface than the classic-protection PUT this file feeds; same convention as `$merge_queue`).",
+    "gitguardian_removed": "`GitGuardian Security Checks` REMOVED from `contexts` (required → advisory) — chronically wedgeable external app. Evidence: on PR #1525 the gitguardian check suite sat `queued` with no conclusion for 5+ days, so the required context never reported and the PR was BLOCKED with everything else green; `POST /check-suites/{id}/rerequest` returns 404 for the GitGuardian app, so a hung suite has NO remediation path other than pushing an otherwise-pointless commit. Safety is not dropped: (1) GitHub NATIVE secret scanning AND push protection are enabled on this repo (verified via `security_and_analysis`), enforced at push time — a stronger control than a PR status; (2) the GitGuardian app continues to scan and report on every push, it just can no longer wedge a merge when its backend hangs.",
+    "dco_kept": "`DCO` KEPT required. It reports on every PR and fails only when a commit genuinely lacks `Signed-off-by` — that is the check working, not a broken gate. The 2026-07-31/08-01 engine-fire PRs (#1543 #1536 …) are blocked because their commits are actually unsigned (28 of the last 30 main commits ARE signed; the regression is in the PR authors' commit flow, not in the gate). Fix is engine-side (`--signoff`) + amending the open unsigned branches — follow-up filed under OPENENGINE-651, not a required-set change.",
+    "infra_flaky_checks_already_unrequired": "The two infra-flaky suspects named in OE-651 — `Container · Trivy scan` and `Self-host bundle · end-to-end` — were verified to be in NEITHER `contexts` NOR merge-gate's `needs:`. A Docker Hub blip on them cannot freeze merges today; no change needed. The `$retain_advisory_from_slice_419` fix-first plan (retry/backoff + GHCR mirror, then promote) still stands unchanged.",
+    "real_failures_left_blocking": "Verified NOT trimmed-around: the shard-A / `integration-enrolment-check` reds on #1544-#1547 are `check-integration-shard-coverage: FAIL (T-1)` — those PRs added integration-tagged packages without enrolling them in the shard matrix. Real defects in the PRs; the gate is doing its job and stays.",
+    "maintainer_apply": "`bash scripts/apply-branch-protection.sh` run as part of OE-651 to push the trimmed contexts list live, plus one-time `POST /repos/mgoodric/security-atlas/rulesets` to create the code-scanning ruleset (see `$code_scanning_ruleset.$apply`)."
+  },
+
+  "$code_scanning_ruleset": {
+    "$why_dollar_prefixed": "Same convention as `$merge_queue`: this is enforced through the repository RULESETS API, not the classic branch-protection PUT that `scripts/apply-branch-protection.sh` performs, so it is declared intent + apply ritual here. The apply script strips every `$`-prefixed top-level key before the PUT.",
+    "name": "code-scanning-merge-protection",
+    "target": "branch",
+    "enforcement": "active",
+    "conditions": {
+      "ref_name": { "include": ["refs/heads/main"], "exclude": [] }
+    },
+    "rules": [
+      {
+        "type": "code_scanning",
+        "parameters": {
+          "code_scanning_tools": [
+            {
+              "tool": "CodeQL",
+              "security_alerts_threshold": "high_or_higher",
+              "alerts_threshold": "errors"
+            }
+          ]
+        }
+      }
+    ],
+    "$apply": "gh api -X POST repos/mgoodric/security-atlas/rulesets --input <(jq '{name, target, enforcement, conditions, rules}' <this-block>) — created live 2026-08-02 as part of OE-651. To reconcile after editing this block: GET /repos/mgoodric/security-atlas/rulesets to find the id, then PUT /repos/mgoodric/security-atlas/rulesets/{id} with the same shape. No bypass actors: applies to the maintainer too, matching `enforce_admins: true`."
+  },
+
   "required_status_checks": {
-    "strict": true,
+    "strict": false,
     "contexts": [
       "Go · build + test",
       "Go · integration (Postgres RLS)",
@@ -60,11 +132,9 @@
       "Helm chart · lint + template",
       "Python · ruff",
       "pre-commit · all hooks",
-      "Analyze (go)",
-      "Analyze (javascript-typescript)",
-      "GitGuardian Security Checks",
       "actions-pin-check",
       "openapi-drift-check",
+      "CI · merge-gate",
       "DCO"
     ]
   },

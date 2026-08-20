@@ -200,6 +200,58 @@ func (q *Queries) ListAPIKeysByTenant(ctx context.Context, tenantID pgtype.UUID)
 	return items, nil
 }
 
+const listAllActiveAPIKeys = `-- name: ListAllActiveAPIKeys :many
+SELECT id, tenant_id, token_hash, scope_predicate, allowed_kinds, issued_by, issued_at, expires_at, last_used_at, revoked_at, rotated_from, retires_at, is_admin, is_approver, owner_roles, last4, ttl_seconds
+FROM api_keys
+WHERE revoked_at IS NULL
+ORDER BY issued_at
+`
+
+// Load-at-boot scan for the credstore persistence layer (OE-435): every
+// non-revoked key across ALL tenants, so a process restart can rehydrate
+// the in-memory credstore. Runs once at startup under the BYPASSRLS
+// atlas_migrate pool — the same pre-tenant-context posture as
+// GetAPIKeyByHash (the row's tenant_id is what the credential CARRIES;
+// per-request authorization still happens against it). Expired and
+// past-grace rows are filtered by the caller, which owns the clock.
+func (q *Queries) ListAllActiveAPIKeys(ctx context.Context) ([]ApiKey, error) {
+	rows, err := q.db.Query(ctx, listAllActiveAPIKeys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ApiKey
+	for rows.Next() {
+		var i ApiKey
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.TokenHash,
+			&i.ScopePredicate,
+			&i.AllowedKinds,
+			&i.IssuedBy,
+			&i.IssuedAt,
+			&i.ExpiresAt,
+			&i.LastUsedAt,
+			&i.RevokedAt,
+			&i.RotatedFrom,
+			&i.RetiresAt,
+			&i.IsAdmin,
+			&i.IsApprover,
+			&i.OwnerRoles,
+			&i.Last4,
+			&i.TtlSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const revokeAPIKey = `-- name: RevokeAPIKey :exec
 UPDATE api_keys
 SET revoked_at = now()

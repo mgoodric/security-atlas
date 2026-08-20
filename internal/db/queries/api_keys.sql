@@ -35,6 +35,19 @@ FROM api_keys
 WHERE tenant_id = $1 AND revoked_at IS NULL
 ORDER BY issued_at DESC;
 
+-- name: ListAllActiveAPIKeys :many
+-- Load-at-boot scan for the credstore persistence layer (OE-435): every
+-- non-revoked key across ALL tenants, so a process restart can rehydrate
+-- the in-memory credstore. Runs once at startup under the BYPASSRLS
+-- atlas_migrate pool — the same pre-tenant-context posture as
+-- GetAPIKeyByHash (the row's tenant_id is what the credential CARRIES;
+-- per-request authorization still happens against it). Expired and
+-- past-grace rows are filtered by the caller, which owns the clock.
+SELECT *
+FROM api_keys
+WHERE revoked_at IS NULL
+ORDER BY issued_at;
+
 -- name: TouchAPIKeyLastUsed :exec
 -- Best-effort timestamp bump. Failure here is logged but never blocks the
 -- authenticated request.

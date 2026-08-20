@@ -34,10 +34,11 @@ func ParseSemver(s string) (Semver, error) {
 		if len(raw) > 1 && raw[0] == '0' {
 			return Semver{}, fmt.Errorf("semver: leading zero in component %d of %q", i, s)
 		}
-		n, err := strconv.Atoi(raw)
-		if err != nil || n < 0 {
+		n64, err := strconv.ParseInt(raw, 10, 32)
+		if err != nil || n64 < 0 {
 			return Semver{}, fmt.Errorf("semver: component %d of %q is not a non-negative integer", i, s)
 		}
+		n := int(n64)
 		switch i {
 		case 0:
 			out.Major = n

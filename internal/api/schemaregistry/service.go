@@ -288,6 +288,11 @@ func (s *Service) ValidatePayload(ctx context.Context, tenantID, kind, version s
 // is not registered.
 var ErrUnknownKind = errors.New("schemaregistry: unknown (kind, semver)")
 
+// ErrRegistryReadFailed is returned when the backing registry table could
+// not be read. It is distinct from ErrUnknownKind so read-surface handlers
+// can return a retryable dependency-failure status without leaking DB detail.
+var ErrRegistryReadFailed = errors.New("schemaregistry: registry read failed")
+
 // ErrUnauthorized is returned by Register when the caller's credential is
 // not flagged admin. Translates to HTTP 403 at the handler.
 var ErrUnauthorized = errors.New("schemaregistry: admin credential required")
@@ -470,7 +475,7 @@ func (s *Service) List(ctx context.Context, tenantID string, limit, offset int32
 			Limit: limit, Offset: offset,
 		})
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", ErrRegistryReadFailed, err)
 		}
 		return toRegisteredSlice(rows), nil
 	}
@@ -492,7 +497,7 @@ func (s *Service) List(ctx context.Context, tenantID string, limit, offset int32
 			Limit:    limit, Offset: offset,
 		})
 		if lerr != nil {
-			return lerr
+			return fmt.Errorf("%w: %w", ErrRegistryReadFailed, lerr)
 		}
 		out = toRegisteredSlice(rows)
 		return nil
@@ -509,6 +514,9 @@ func (s *Service) Get(ctx context.Context, tenantID, kind, version string) (Regi
 			Kind: kind, Semver: version,
 		})
 		if err != nil {
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return RegisteredSchema{}, fmt.Errorf("%w: %w", ErrRegistryReadFailed, err)
+			}
 			return RegisteredSchema{}, ErrUnknownKind
 		}
 		return toRegistered(row), nil
@@ -532,6 +540,9 @@ func (s *Service) Get(ctx context.Context, tenantID, kind, version string) (Regi
 			Kind:     kind, Semver: version,
 		})
 		if gerr != nil {
+			if !errors.Is(gerr, pgx.ErrNoRows) {
+				return fmt.Errorf("%w: %w", ErrRegistryReadFailed, gerr)
+			}
 			unknown = true
 			return nil
 		}

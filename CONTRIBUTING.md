@@ -789,7 +789,7 @@ Both modules use the same:
 
 - **AuthN / AuthZ:** OIDC RP (slice 034) + RBAC (slice 014) + ABAC via OPA (slice 018). The privacy module does NOT ship its own auth stack.
 - **Tenancy:** `app.current_tenant` GUC + the slice 036 four-policy RLS pattern. Every privacy table will carry `tenant_id UUID NOT NULL` + the four policies (`tenant_read` / `tenant_write` / `tenant_update` / `tenant_delete`) verbatim.
-- **Audit-log ledger:** the nine platform audit-log tables (`decision_audit_log` / `evidence_audit_log` / `exception_audit_log` / `sample_audit_log` / `audit_period_audit_log` / `aggregation_rule_audit_log` / `feature_flag_audit_log` / `me_audit_log` / `walkthrough_audit_log`) each carry a `subject_module TEXT NOT NULL DEFAULT 'core'` column (slice 180 migration). Core writes tag `'core'`; privacy writes tag `'privacy'`. The slice 124 unified-audit-log endpoint projects the column through.
+- **Audit-log ledger:** audit-log-family tables carry a `subject_module TEXT NOT NULL DEFAULT 'core'` column (slice 180 migration + OE-451 drift reconciliation), except the three pre-slice-180 tables deliberately scoped out by slice 180: `artifact_access_log`, `decisions_audit`, and `audit_sink_failures`. Core writes tag `'core'`; privacy writes tag `'privacy'`. The slice 124 unified-audit-log endpoint projects the column for its covered branches.
 - **Feature-flag system:** per-tenant module toggles (see B2.1 below).
 - **Evidence citation seam:** privacy records reference `evidence.id` (citation) and `policy.id` (governing policy) directly (see B3 for the constraint).
 
@@ -828,7 +828,7 @@ Slice 180 does NOT add the lint rule yet — with no `internal/api/privacy/` dir
 You probably don't write privacy code today (the module doesn't exist). The things to know:
 
 1. If you add a new audit-log INSERT call site, set `subject_module='core'` explicitly. The DB default also handles it, but explicit-is-clearer (slice 180 AC-5). The convention is documented inline in every sqlc query that writes an audit-log row.
-2. If you add a tenth audit-log table, extend slice 180's migration shape: `ALTER TABLE <new>_audit_log ADD COLUMN IF NOT EXISTS subject_module TEXT NOT NULL DEFAULT 'core'`. The slice 124 UNION query then needs the new branch projected through.
+2. If you add a new audit-log-family table, include `subject_module TEXT NOT NULL DEFAULT 'core'` in the creating migration or add the slice-180 shape in the same PR: `ALTER TABLE <new_table> ADD COLUMN IF NOT EXISTS subject_module TEXT NOT NULL DEFAULT 'core'`. `scripts/check-audit-log-subject-module.sh` runs in CI and fails when a new `*_audit_log`, `*_audit`, or `*_log` table silently omits the column. If the table should be excluded, record the reason in a decisions log and update the script's explicit allowlist.
 3. If a PR review surfaces a "should this be a privacy primitive?" question, surface it as a separate design-grill slice — do NOT introduce the primitive without OQ #7 → privacy v0 firing first.
 
 ## AI-assist boundary

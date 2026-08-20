@@ -57,9 +57,11 @@ import (
 	notifywebhook "github.com/mgoodric/security-atlas/internal/notify/webhook"
 	atlasotel "github.com/mgoodric/security-atlas/internal/observability/otel"
 	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/personnelsecurity"
 	"github.com/mgoodric/security-atlas/internal/platform"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/scim"
+	"github.com/mgoodric/security-atlas/internal/securityawareness"
 	stalenesssched "github.com/mgoodric/security-atlas/internal/staleness"
 )
 
@@ -285,6 +287,25 @@ func main() {
 			logger,
 		)
 		fmt.Fprintf(os.Stderr, "atlas: risk residual subscriber ready (slice 020)\n")
+	}
+
+	// OE-661: the personnel-security worker-event subscriber binds another
+	// durable JetStream consumer to the same evidence-ingest stream. On every
+	// hris.worker_lifecycle.v1 record it creates the joiner/leaver checklist
+	// via personnelsecurity.Store.HandleWorkerEvent (idempotent per
+	// tenant+source+source-event-id), so HRIS events flowing through the
+	// Rippling/BambooHR connector path open onboarding/offboarding checklists
+	// without manual entry. Only wired when NATS + the DB pool are both
+	// available.
+	var personnelSubscriber *personnelsecurity.WorkerEventSubscriber
+	if streamConn != nil && pool != nil {
+		personnelSubscriber = personnelsecurity.NewWorkerEventSubscriber(
+			streamConn.Stream(),
+			streamConn.Cfg().Subject,
+			personnelsecurity.NewStore(pool),
+			logger,
+		)
+		fmt.Fprintf(os.Stderr, "atlas: personnel security worker-event subscriber ready (OE-661)\n")
 	}
 
 	cfg := api.Config{
@@ -521,6 +542,14 @@ func main() {
 	// authz audit writer; there is no BeginTx/ApplyTenant treatment to
 	// apply here. No change is needed on this startup-time issuance path.
 	//
+	// (OE-435 note: this memory-only property is now specific to THESE
+	// bootstrap issuances, which deliberately run before the credstore
+	// persistence attach in the pool block below — they are re-minted from
+	// the environment on every boot, so persistence would add nothing but
+	// api_keys clutter. Credentials issued after startup via the
+	// AdminCredentials service DO write through to api_keys and survive
+	// restarts.)
+	//
 	// (Slice 068 correction: an earlier revision of this comment claimed
 	// that "phase 6 completing populates api_keys as designed." That is
 	// wrong — nothing in the bootstrap flow writes api_keys. The bootstrap
@@ -614,6 +643,28 @@ func main() {
 		apikeySvc := apikeystore.NewStore(pool, authPool, hasher, 0)
 		srv.AttachAPIKeyStore(apikeySvc)
 		fmt.Fprintf(os.Stderr, "atlas: api_keys store wired (BEARER_HASH_KEY ok)\n")
+
+		// OE-435 (slice 356b chaos gap G-1): persist the in-memory
+		// credstore through the api_keys table and rehydrate it now, so
+		// push credentials issued to connectors and CI jobs survive a
+		// process restart. This attach runs AFTER the bootstrap issuance
+		// block above by design — bootstrap credentials are re-minted
+		// from the environment on every boot and stay memory-only. Note
+		// the authPool caveat: without DATABASE_URL the boot scan runs on
+		// the FORCE-RLS app pool and sees zero rows, so previously
+		// persisted credentials cannot be rehydrated.
+		if authPool == nil {
+			fmt.Fprintf(os.Stderr, "atlas: WARNING: DATABASE_URL unset — persisted push credentials cannot be loaded at boot; credentials issued now still persist, but will only be rehydrated on a boot with DATABASE_URL set\n")
+		}
+		credsLoaded, cpErr := srv.AttachCredstorePersistence(apikeystore.NewPersister(pool, authPool, hasher))
+		if cpErr != nil {
+			// Booting without the rehydrated credstore silently reproduces
+			// the exact chaos-run failure (every issued credential rejected
+			// as Unauthenticated), so fail loud instead of degrading.
+			fmt.Fprintf(os.Stderr, "atlas: credstore persistence: %v\n", cpErr)
+			os.Exit(1)
+		}
+		fmt.Fprintf(os.Stderr, "atlas: credstore persistence wired (%d credential(s) rehydrated from api_keys)\n", credsLoaded)
 
 		// Slice 508: SCIM provisioning credential store. Same hasher +
 		// BYPASSRLS authPool as api_keys (the lookup-by-hash auth path runs
@@ -860,6 +911,20 @@ func main() {
 		}()
 	}
 
+	// OE-661: drive the personnel-security worker-event subscriber alongside
+	// the other consumers. Shares the same stop signal so SIGTERM tears it
+	// down with everything else.
+	if personnelSubscriber != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			fmt.Fprintf(os.Stderr, "atlas: personnel security worker-event subscriber starting\n")
+			if err := personnelSubscriber.Start(ctx); err != nil {
+				errCh <- fmt.Errorf("personnel security worker-event subscriber: %w", err)
+			}
+		}()
+	}
+
 	// Slice 021: exception auto-expiry tick loop. Runs as the migrator
 	// role (BYPASSRLS) so the sweep can cross tenants -- the per-tenant
 	// transaction inside applies the GUC for RLS-honest writes. Default
@@ -928,6 +993,81 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: decision overdue notifier ticking every %s\n", interval.String())
 				if err := notifier.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("decision overdue notifier: %w", err)
+				}
+			}()
+		}
+	}
+
+	// OE-661: personnel-security overdue-offboarding sweep. Runs as the
+	// migrator role (BYPASSRLS) to enumerate the tenant ids with overdue open
+	// offboarding checklists; each tenant's surfacing runs through the
+	// app-role Store under that tenant's GUC (RLS-honest) and notifies the
+	// tenant's active users, one notification per (checklist, recipient) ever
+	// (the store's dedup probe). Default cadence is 24h, matching the
+	// decision-overdue notifier; ATLAS_PERSONNEL_OVERDUE_INTERVAL overrides
+	// for dev loops. Only mounts when the migrator URL + the app pool are
+	// both available.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		psCtx, psCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		psPool, err := atlasotel.NewTracedPool(psCtx, migratorURL)
+		psCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: personnel overdue pool: %v\n", err)
+		} else {
+			interval := personnelsecurity.DefaultOverdueSweepInterval
+			if raw := os.Getenv("ATLAS_PERSONNEL_OVERDUE_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_PERSONNEL_OVERDUE_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			psNotifier := personnelsecurity.NewOverdueNotifier(psPool, personnelsecurity.NewStore(pool), logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer psPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: personnel overdue notifier ticking every %s\n", interval.String())
+				if err := psNotifier.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("personnel overdue notifier: %w", err)
+				}
+			}()
+		}
+	}
+
+	// OPENENGINE-658: security-awareness roster sync tick loop. Enumerates
+	// tenants with HRIS worker-lifecycle evidence (the ledger is the
+	// platform's only view of the HRIS roster -- connectors are push-only,
+	// invariant #3) or SCIM-managed users from the migrator pool (BYPASSRLS
+	// -- cross-tenant enumeration has no single tenant context), then
+	// upserts each tenant's roster into security_training_people under the
+	// app pool with tenancy.WithTenant so writes stay RLS-honest. Source
+	// deactivations propagate as active=false, which drops people from
+	// overdue training reminders. Default cadence is 24h;
+	// ATLAS_ROSTER_SYNC_INTERVAL overrides for dev loops.
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		rsCtx, rsCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		rsPool, err := atlasotel.NewTracedPool(rsCtx, migratorURL)
+		rsCancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: roster sync pool: %v\n", err)
+		} else {
+			interval := securityawareness.DefaultRosterSyncInterval
+			if raw := os.Getenv("ATLAS_ROSTER_SYNC_INTERVAL"); raw != "" {
+				if d, perr := time.ParseDuration(raw); perr == nil && d > 0 {
+					interval = d
+				} else {
+					fmt.Fprintf(os.Stderr, "atlas: ATLAS_ROSTER_SYNC_INTERVAL=%q invalid: %v\n", raw, perr)
+				}
+			}
+			rs := securityawareness.NewRosterSyncer(rsPool, pool, logger)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer rsPool.Close()
+				fmt.Fprintf(os.Stderr, "atlas: security awareness roster sync ticking every %s\n", interval.String())
+				if err := rs.Run(ctx, interval); err != nil {
+					errCh <- fmt.Errorf("security awareness roster sync: %w", err)
 				}
 			}()
 		}

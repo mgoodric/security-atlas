@@ -53,6 +53,11 @@ const (
 	// is generous for a user to authenticate but short enough that an
 	// abandoned tab does not leave persistent verifier material around.
 	FlowCookieMaxAge = 10 * time.Minute
+
+	// ProviderCacheTTL bounds how long the RP serves a discovered IdP provider
+	// before re-running OIDC discovery. Slice 335's chaos design expected new
+	// logins to observe IdP outage/recovery within roughly this window.
+	ProviderCacheTTL = 30 * time.Second
 )
 
 // IdpConfig is one OIDC IdP relationship — what we received at provisioning
@@ -78,6 +83,10 @@ type IdpResolver interface {
 // ErrUnknownIdp is the sentinel for "no such IdP configured."
 var ErrUnknownIdp = errors.New("oidc: unknown IdP")
 
+// ErrProviderUnavailable is the sentinel for a configured IdP whose discovery
+// endpoint cannot be reached or does not answer in time.
+var ErrProviderUnavailable = errors.New("oidc: provider unavailable")
+
 // ErrStateMismatch is the CSRF guard's sentinel. The callback returns 400
 // when this fires.
 var ErrStateMismatch = errors.New("oidc: state mismatch (CSRF guard)")
@@ -92,16 +101,39 @@ var ErrNonceMismatch = errors.New("oidc: nonce mismatch (ID-token replay guard)"
 
 // Authenticator drives the RP-side OIDC flow.
 type Authenticator struct {
-	resolver IdpResolver
-	mu       sync.Mutex
-	cache    map[string]*coreos.Provider // keyed by issuer URL
+	resolver         IdpResolver
+	discoveryTimeout time.Duration
+	mu               sync.Mutex
+	cache            map[string]cachedProvider // keyed by issuer URL
+	providerCacheTTL time.Duration
+	now              func() time.Time
 }
+
+type cachedProvider struct {
+	provider     *coreos.Provider
+	discoveredAt time.Time
+}
+
+const defaultDiscoveryTimeout = 5 * time.Second
 
 // New constructs an Authenticator over a per-tenant IdP resolver.
 func New(resolver IdpResolver) *Authenticator {
+	return NewWithDiscoveryTimeout(resolver, defaultDiscoveryTimeout)
+}
+
+// NewWithDiscoveryTimeout constructs an Authenticator with an explicit OIDC
+// discovery timeout. Tests use this to prove the outage path is bounded without
+// waiting on the production timeout.
+func NewWithDiscoveryTimeout(resolver IdpResolver, discoveryTimeout time.Duration) *Authenticator {
+	if discoveryTimeout <= 0 {
+		discoveryTimeout = defaultDiscoveryTimeout
+	}
 	return &Authenticator{
-		resolver: resolver,
-		cache:    map[string]*coreos.Provider{},
+		resolver:         resolver,
+		discoveryTimeout: discoveryTimeout,
+		cache:            map[string]cachedProvider{},
+		providerCacheTTL: ProviderCacheTTL,
+		now:              time.Now,
 	}
 }
 
@@ -336,18 +368,28 @@ func ClearFlowCookies(w http.ResponseWriter, secure bool) {
 // --- helpers ---
 
 func (a *Authenticator) provider(ctx context.Context, issuer string) (*coreos.Provider, error) {
+	now := a.now()
 	a.mu.Lock()
-	if p, ok := a.cache[issuer]; ok {
+	entry, ok := a.cache[issuer]
+	if ok && now.Sub(entry.discoveredAt) < a.providerCacheTTL {
 		a.mu.Unlock()
-		return p, nil
+		return entry.provider, nil
 	}
 	a.mu.Unlock()
-	p, err := coreos.NewProvider(ctx, issuer)
+	discoveryCtx, cancel := context.WithTimeout(ctx, a.discoveryTimeout)
+	defer cancel()
+	p, err := coreos.NewProvider(discoveryCtx, issuer)
 	if err != nil {
-		return nil, fmt.Errorf("oidc: discover %s: %w", issuer, err)
+		a.mu.Lock()
+		delete(a.cache, issuer)
+		a.mu.Unlock()
+		return nil, ErrProviderUnavailable
 	}
 	a.mu.Lock()
-	a.cache[issuer] = p
+	a.cache[issuer] = cachedProvider{
+		provider:     p,
+		discoveredAt: a.now(),
+	}
 	a.mu.Unlock()
 	return p, nil
 }

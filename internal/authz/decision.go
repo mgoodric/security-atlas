@@ -232,7 +232,11 @@ func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 	if in.TenantID != "" && in.User.ID != "" {
 		dbRoles, err := e.resolver.RolesFor(ctx, in.TenantID, in.User.ID)
 		if err != nil {
-			return Decision{}, fmt.Errorf("authz: resolve roles: %w", err)
+			// OE-432: the roles resolver is a DB-backed hop. A
+			// connectivity-shaped failure here is a dependency outage,
+			// not a policy-engine fault — mark it so the middleware can
+			// answer 503 + retry_after instead of a misleading 500.
+			return Decision{}, wrapIfDependencyUnavailable(fmt.Errorf("authz: resolve roles: %w", err))
 		}
 		if len(dbRoles) > 0 {
 			in.User.Roles = mergeRoles(in.User.Roles, dbRoles)
@@ -248,7 +252,10 @@ func (e *Engine) Decide(ctx context.Context, in Input) (Decision, error) {
 		!hasAuditPeriodIDsAttr(in.User.Attrs) {
 		extra, err := e.attrsResolver.AttrsFor(ctx, in.TenantID, in.User.ID, in.User.Roles)
 		if err != nil {
-			return Decision{}, fmt.Errorf("authz: resolve attrs: %w", err)
+			// OE-432: same dependency-vs-policy classification as the
+			// roles-resolver hop above — this is the other DB-backed
+			// input to the decision.
+			return Decision{}, wrapIfDependencyUnavailable(fmt.Errorf("authz: resolve attrs: %w", err))
 		}
 		if len(extra) > 0 {
 			if in.User.Attrs == nil {

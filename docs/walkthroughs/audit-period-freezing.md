@@ -227,6 +227,6 @@ The hash (section 3) is the durable content commitment — given the period id, 
 ### Where to read more
 
 - **Canvas:** [`Plans/canvas/08-audit-workflow.md`](../../Plans/canvas/08-audit-workflow.md) §8.4 — audit-period freezing
-- **ADR:** [`docs/adr/0003-audit-period-freeze-hash.md`](../adr/0003-audit-period-freeze-hash.md)
+- **ADR:** [`docs/adr/0003-audit-period-freeze-hash-inputs.md`](../adr/0003-audit-period-freeze-hash-inputs.md)
 - **Slice docs:** [`docs/issues/028-audit-period-freezing.md`](../issues/028-audit-period-freezing.md)
 - **Go package:** [`internal/audit/period/`](../../internal/audit/period/) — `Store.Freeze`, `computeFreezeHash`, freeze-hash-input plumbing

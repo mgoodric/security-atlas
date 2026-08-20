@@ -63,15 +63,29 @@ First boot pulls Postgres / NATS / MinIO and builds three images — budget
 `atlas-bootstrap` container exits 0 when seeding is done; the `atlas` and
 `web` services start once it has.
 
-## Step 3 — confirm it is healthy
+## Step 3 — confirm it is live and ready
 
 ```sh
 curl -fsS http://localhost:8080/health
 # {"status":"ok","db":"ok"}
+
+curl -fsS http://localhost:8080/ready
+# {"status":"ready","db":"ok"}
 ```
 
-If `/health` is not 200 after a few minutes, the failure is almost always
-visible in the bootstrap logs:
+Use `/health` as the liveness probe: it answers whether the atlas HTTP
+process is serving and stays 200 during transient Postgres warm-up, with
+`"db":"degraded"` in the body when the DB ping fails. The compose bundle
+and `atlas-bootstrap` intentionally poll `/health` so a database warm-up
+blip does not restart-loop atlas.
+
+Use `/ready` for traffic routing: load balancers and k8s readiness gates
+should stop sending traffic when it returns non-2xx. In v1 it checks
+Postgres, because authenticated API traffic depends on DB access for
+tenancy, authorization inputs, feature flags, and handlers.
+
+If `/health` or `/ready` is not 200 after a few minutes, the failure is
+almost always visible in the bootstrap logs:
 
 ```sh
 docker compose -f deploy/docker/docker-compose.yml logs atlas-bootstrap
@@ -146,6 +160,10 @@ new client.
   `evidence_query`. Forkable as-is.
 
 ## Verifying your install
+
+Before running a downloaded binary or published container image, verify
+its release signature. See [Verify release artifacts](release-verification.md)
+for the cosign and provenance commands.
 
 The build version, commit, and build time are baked into the binary at
 release time and surface in three places. All three report the same

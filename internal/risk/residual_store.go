@@ -343,10 +343,16 @@ func inherentScalar(methodology dbx.RiskMethodology, inherentJSON []byte) (float
 		}
 		return l * i, nil
 	case dbx.RiskMethodologyFair:
-		lef, lok := numField(raw, "lef")
-		lm, mok := numField(raw, "lm")
+		lef, lok := numField(raw, "loss_event_frequency")
+		if !lok {
+			lef, lok = numField(raw, "lef")
+		}
+		lm, mok := numField(raw, "loss_magnitude")
+		if !mok {
+			lm, mok = numField(raw, "lm")
+		}
 		if !lok || !mok {
-			return 0, errors.New("inherent_score missing numeric lef/lm")
+			return 0, errors.New("inherent_score missing numeric loss_event_frequency/loss_magnitude")
 		}
 		return lef * lm, nil
 	default:

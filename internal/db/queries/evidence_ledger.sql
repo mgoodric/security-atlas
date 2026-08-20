@@ -147,3 +147,14 @@ FROM evidence_audit_log
 WHERE tenant_id = $1 AND credential_id = $2
 ORDER BY received_at DESC
 LIMIT $3 OFFSET $4;
+
+-- name: GetEvidenceAuditEntryByReceipt :one
+-- Pusher-visible receipt lookup. Scoped to tenant + credential so a
+-- credential can only see decisions for its own pushed records.
+SELECT *
+FROM evidence_audit_log
+WHERE tenant_id = $1
+  AND credential_id = $2
+  AND record_id = $3
+ORDER BY received_at DESC
+LIMIT 1;

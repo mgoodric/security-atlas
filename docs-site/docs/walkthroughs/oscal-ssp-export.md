@@ -347,7 +347,7 @@ Once the signed bundle is on disk, you hand it to the auditor. They verify it in
 ### Where to read more
 
 - **Canvas:** [`Plans/canvas/03-ucf.md`](https://github.com/mgoodric/security-atlas/blob/main/Plans/canvas/03-ucf.md) §3.4 — OSCAL is the wire format; [`Plans/canvas/08-audit-workflow.md`](https://github.com/mgoodric/security-atlas/blob/main/Plans/canvas/08-audit-workflow.md) §8.4 — freeze horizon
-- **ADR:** [`docs/adr/0003-audit-period-freeze-hash.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/adr/0003-audit-period-freeze-hash.md) — what the freeze hash commits
+- **ADR:** [`docs/adr/0003-audit-period-freeze-hash-inputs.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/adr/0003-audit-period-freeze-hash-inputs.md) — what the freeze hash commits
 - **Slice docs:** [`docs/issues/030-oscal-ssp-poam-export.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/issues/030-oscal-ssp-poam-export.md) (export pipeline), [`docs/issues/028-audit-period-freezing.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/issues/028-audit-period-freezing.md) (the freeze gate this depends on)
 - **Go packages:** [`internal/oscal/`](https://github.com/mgoodric/security-atlas/blob/main/internal/oscal/) — `Exporter.Export`, `Aggregate`, `Bundle`, `BridgeClient`
 - **Python bridge:** [`oscal-bridge/`](https://github.com/mgoodric/security-atlas/blob/main/oscal-bridge/) — compliance-trestle wrapping

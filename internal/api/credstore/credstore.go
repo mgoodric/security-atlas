@@ -1,7 +1,16 @@
-// Package credstore is an in-memory credential store backing the
-// AdminCredentials service. Bearer tokens are hashed at rest; the plaintext
-// is only returned at Issue or Rotate time. The Store type is the only
-// surface callers need.
+// Package credstore is the credential store backing the AdminCredentials
+// service. Bearer tokens are hashed at rest; the plaintext is only returned
+// at Issue or Rotate time. The Store type is the only surface callers need.
+//
+// The store serves lookups from in-memory maps. By default that is ALL it
+// does — which is what slice 356b's chaos experiment measured as gap G-1
+// (OE-435): a process restart silently and permanently invalidated every
+// credential ever issued. Production wiring now attaches a Persister
+// (cmd/atlas → apikeystore.Persister over the slice-034 `api_keys` table):
+// issues, rotations and revocations write through to the table, and
+// AttachPersistence rehydrates the maps at boot, so a credential issued
+// before a restart authenticates after it. Stores without a Persister
+// (unit tests, in-memory servers) behave exactly as before.
 package credstore
 
 import (
@@ -86,6 +95,44 @@ func (c Credential) HasOwnerRole(role string) bool {
 	return false
 }
 
+// Persister is the optional durability backend for a Store (OE-435). When
+// attached, every issue/rotate/revoke writes through to it and
+// AttachPersistence rehydrates the in-memory maps from it at boot, so
+// credentials survive a process restart. The production implementation is
+// apikeystore.Persister over the slice-034 `api_keys` table (tenant-scoped,
+// RLS-enforced, HMAC-SHA256 token hashes per ADR 0002); this interface
+// exists so credstore does not import the DB stack.
+type Persister interface {
+	// NewID returns a fresh credential id ("key_..." form) whose suffix the
+	// backend can round-trip through its storage — the id a credential is
+	// issued under MUST be the id it reloads under.
+	NewID() (string, error)
+	// HashToken maps a bearer plaintext to the hex-encoded at-rest hash the
+	// backend persists. The Store keys its in-memory lookup map with the
+	// same value so loaded rows and live issues share one hash scheme.
+	HashToken(token string) string
+	// Insert durably records a newly issued credential.
+	Insert(rec PersistedCredential) error
+	// Rotate durably records a rotation: insert the successor and set the
+	// predecessor's retirement deadline, atomically.
+	Rotate(successor PersistedCredential, predecessorID, tenantID string, retiresAt time.Time) error
+	// Revoke durably marks the credential revoked.
+	Revoke(id, tenantID string) error
+	// LoadActive returns every credential that should authenticate right
+	// now: not revoked, not expired, not past its rotation grace.
+	LoadActive() ([]PersistedCredential, error)
+}
+
+// PersistedCredential is the wire shape between the Store and a Persister.
+// TokenHashHex is the Persister.HashToken output — never a plaintext.
+type PersistedCredential struct {
+	Cred         Credential
+	TokenHashHex string
+	// RetiresAt is non-zero on a rotated-out predecessor still inside its
+	// grace window.
+	RetiresAt time.Time
+}
+
 type state int
 
 const (
@@ -100,14 +147,21 @@ type record struct {
 	// retiresAt is non-zero on a predecessor after Rotate. The key
 	// authenticates until this timestamp; after, Authenticate rejects.
 	retiresAt time.Time
+	// persisted marks records the attached Persister holds a row for.
+	// Memory-only records (anything issued before AttachPersistence — the
+	// bootstrap credentials — plus every IssueFixedAdmin credential) skip
+	// the write-through on Rotate/Revoke.
+	persisted bool
 }
 
-// Store is the in-memory credential store.
+// Store is the credential store: in-memory maps, optionally write-through
+// persisted via an attached Persister.
 type Store struct {
 	mu            sync.Mutex
 	byID          map[string]*record
 	byTokenHash   map[string]*record
 	rotationGrace time.Duration
+	persist       Persister
 }
 
 // New returns a Store. rotationGrace controls how long a rotated-out
@@ -118,6 +172,77 @@ func New(rotationGrace time.Duration) *Store {
 		byTokenHash:   map[string]*record{},
 		rotationGrace: rotationGrace,
 	}
+}
+
+// AttachPersistence wires a Persister and rehydrates the in-memory maps
+// from it (load-at-boot). Returns the number of credentials loaded. From
+// this point on, issues/rotations/revocations write through to p and fail
+// closed on persistence errors — a credential that would silently die at
+// the next restart is worse than a failed issuance. Records already in
+// memory (bootstrap credentials issued before the attach) are left as
+// memory-only and keep authenticating via the legacy hash fallback.
+// Attach at most once, before the store serves traffic.
+func (s *Store) AttachPersistence(p Persister) (int, error) {
+	if p == nil {
+		return 0, errors.New("credstore: nil persister")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.persist != nil {
+		return 0, errors.New("credstore: persistence already attached")
+	}
+	rows, err := p.LoadActive()
+	if err != nil {
+		return 0, fmt.Errorf("credstore: load persisted credentials: %w", err)
+	}
+	s.persist = p
+	loaded := 0
+	for _, pc := range rows {
+		if _, exists := s.byID[pc.Cred.ID]; exists {
+			continue
+		}
+		if _, exists := s.byTokenHash[pc.TokenHashHex]; exists {
+			continue
+		}
+		r := &record{
+			cred:      pc.Cred,
+			tokenHash: pc.TokenHashHex,
+			state:     stateActive,
+			retiresAt: pc.RetiresAt,
+			persisted: true,
+		}
+		s.byID[pc.Cred.ID] = r
+		s.byTokenHash[r.tokenHash] = r
+		loaded++
+	}
+	return loaded, nil
+}
+
+// hash maps a bearer plaintext to the store's lookup-map key: the
+// Persister's at-rest hash when one is attached (HMAC-SHA256 per ADR 0002
+// in production), the legacy unkeyed SHA-256 otherwise.
+func (s *Store) hash(token string) string {
+	if s.persist != nil {
+		return s.persist.HashToken(token)
+	}
+	return hashToken(token)
+}
+
+// lookupTokenLocked resolves a plaintext to its record. Caller holds s.mu.
+// With persistence attached it first tries the Persister's hash scheme,
+// then falls back to the legacy SHA-256 keys — records issued before
+// AttachPersistence (the cmd/atlas bootstrap credentials) live under the
+// legacy scheme and must keep authenticating.
+func (s *Store) lookupTokenLocked(token string) (*record, bool) {
+	if r, ok := s.byTokenHash[s.hash(token)]; ok {
+		return r, true
+	}
+	if s.persist != nil {
+		if r, ok := s.byTokenHash[hashToken(token)]; ok {
+			return r, true
+		}
+	}
+	return nil, false
 }
 
 // Issue creates a new credential and returns the bearer plaintext. The
@@ -150,6 +275,12 @@ func (s *Store) IssueAdmin(tenantID string, ttl time.Duration) (Credential, stri
 // This is a self-host bootstrap convenience, not a production auth path:
 // the token is operator-supplied and the .env.example flags it as a
 // must-rotate value. Returns an error if token is empty.
+//
+// OE-435: fixed-admin credentials are NEVER written through to an attached
+// Persister. The token is re-minted from ATLAS_BOOTSTRAP_TOKEN on every
+// boot (it already survives restarts by construction), and persisting the
+// same deterministic token each boot would collide with the api_keys
+// token-hash uniqueness constraint.
 func (s *Store) IssueFixedAdmin(tenantID, token string) (Credential, error) {
 	if token == "" {
 		return Credential{}, errors.New("credstore: fixed admin token must not be empty")
@@ -170,7 +301,7 @@ func (s *Store) IssueFixedAdmin(tenantID, token string) (Credential, error) {
 		IsApprover: true,
 		UserID:     credID,
 	}
-	r := &record{cred: cred, tokenHash: hashToken(token), state: stateActive}
+	r := &record{cred: cred, tokenHash: s.hash(token), state: stateActive}
 	s.byID[cred.ID] = r
 	s.byTokenHash[r.tokenHash] = r
 	return cred, nil
@@ -221,24 +352,54 @@ func (s *Store) Rotate(id string) (successor Credential, bearer string, predeces
 		return
 	}
 
-	successor, bearer, err = s.issueLocked(pred.cred.TenantID, pred.cred.ScopePredicate, pred.cred.Kinds, pred.cred.TTL, id, pred.cred.IsAdmin, pred.cred.IsApprover, pred.cred.OwnerRoles)
+	var rec *record
+	successor, bearer, rec, err = s.buildLocked(pred.cred.TenantID, pred.cred.ScopePredicate, pred.cred.Kinds, pred.cred.TTL, id, pred.cred.IsAdmin, pred.cred.IsApprover, pred.cred.OwnerRoles)
 	if err != nil {
 		return
 	}
 
 	predecessorExpiresAt = time.Now().UTC().Add(s.rotationGrace)
+	if s.persist != nil {
+		pc := PersistedCredential{Cred: successor, TokenHashHex: rec.tokenHash}
+		if pred.persisted {
+			if perr := s.persist.Rotate(pc, id, pred.cred.TenantID, predecessorExpiresAt); perr != nil {
+				err = fmt.Errorf("credstore: persist rotate: %w", perr)
+				return
+			}
+		} else {
+			// The predecessor has no api_keys row (memory-only bootstrap
+			// credential), so its retirement is memory-only too and the
+			// successor's rotated_from must be cleared — the FK it names
+			// does not exist.
+			pc.Cred.RotatedFrom = ""
+			if perr := s.persist.Insert(pc); perr != nil {
+				err = fmt.Errorf("credstore: persist rotate successor: %w", perr)
+				return
+			}
+		}
+		rec.persisted = true
+	}
+	s.byID[successor.ID] = rec
+	s.byTokenHash[rec.tokenHash] = rec
 	pred.retiresAt = predecessorExpiresAt
 	return
 }
 
 // Revoke invalidates the key immediately. Subsequent Authenticate calls
-// with its bearer return ErrUnknownKey.
+// with its bearer return ErrUnknownKey. Fails closed when the durable
+// revocation cannot be recorded — an in-memory-only revoke would silently
+// resurrect the key at the next restart.
 func (s *Store) Revoke(id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.byID[id]
 	if !ok {
 		return ErrUnknownKey
+	}
+	if s.persist != nil && r.persisted {
+		if err := s.persist.Revoke(id, r.cred.TenantID); err != nil {
+			return fmt.Errorf("credstore: persist revoke: %w", err)
+		}
 	}
 	r.state = stateRevoked
 	return nil
@@ -275,7 +436,7 @@ func (s *Store) List(tenantID string) []Credential {
 func (s *Store) RebindUserIDForTests(token, userID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.byTokenHash[hashToken(token)]
+	r, ok := s.lookupTokenLocked(token)
 	if !ok || r.state == stateRevoked {
 		return ErrUnknownKey
 	}
@@ -284,11 +445,12 @@ func (s *Store) RebindUserIDForTests(token, userID string) error {
 }
 
 // Authenticate resolves a plaintext bearer to its credential. Updates
-// LastUsedAt on success.
+// LastUsedAt on success (in-memory only — the durable last_used_at column
+// is a cosmetic mirror the auth hot path deliberately does not touch).
 func (s *Store) Authenticate(token string) (Credential, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	r, ok := s.byTokenHash[hashToken(token)]
+	r, ok := s.lookupTokenLocked(token)
 	if !ok || r.state == stateRevoked {
 		return Credential{}, ErrUnknownKey
 	}
@@ -299,18 +461,51 @@ func (s *Store) Authenticate(token string) (Credential, error) {
 	return r.cred, nil
 }
 
-// issueLocked inserts a new credential. Caller must hold s.mu.
+// issueLocked inserts a new credential, writing through to the Persister
+// when one is attached. Caller must hold s.mu.
 func (s *Store) issueLocked(tenantID, scope string, kinds []string, ttl time.Duration, rotatedFrom string, isAdmin, isApprover bool, ownerRoles []string) (Credential, string, error) {
-	id, err := randomHex(16)
+	cred, token, r, err := s.buildLocked(tenantID, scope, kinds, ttl, rotatedFrom, isAdmin, isApprover, ownerRoles)
 	if err != nil {
 		return Credential{}, "", err
+	}
+	if s.persist != nil {
+		if err := s.persist.Insert(PersistedCredential{Cred: cred, TokenHashHex: r.tokenHash}); err != nil {
+			return Credential{}, "", fmt.Errorf("credstore: persist issue: %w", err)
+		}
+		r.persisted = true
+	}
+	s.byID[cred.ID] = r
+	s.byTokenHash[r.tokenHash] = r
+	return cred, token, nil
+}
+
+// buildLocked constructs a credential + record WITHOUT inserting it into
+// the maps or the Persister — callers (issueLocked, Rotate) own the commit
+// so the write-through can happen before the record becomes visible.
+// Caller must hold s.mu.
+func (s *Store) buildLocked(tenantID, scope string, kinds []string, ttl time.Duration, rotatedFrom string, isAdmin, isApprover bool, ownerRoles []string) (Credential, string, *record, error) {
+	var credID string
+	if s.persist != nil {
+		// Persister-issued ids round-trip through the backing table, so the
+		// id a credential authenticates under today is the id it reloads
+		// under after a restart.
+		id, err := s.persist.NewID()
+		if err != nil {
+			return Credential{}, "", nil, err
+		}
+		credID = id
+	} else {
+		id, err := randomHex(16)
+		if err != nil {
+			return Credential{}, "", nil, err
+		}
+		credID = "key_" + id
 	}
 	token, err := randomHex(32)
 	if err != nil {
-		return Credential{}, "", err
+		return Credential{}, "", nil, err
 	}
 
-	credID := "key_" + id
 	cred := Credential{
 		ID:             credID,
 		TenantID:       tenantID,
@@ -325,10 +520,8 @@ func (s *Store) issueLocked(tenantID, scope string, kinds []string, ttl time.Dur
 		UserID:         credID,
 		OwnerRoles:     append([]string(nil), ownerRoles...),
 	}
-	r := &record{cred: cred, tokenHash: hashToken(token), state: stateActive}
-	s.byID[cred.ID] = r
-	s.byTokenHash[r.tokenHash] = r
-	return cred, token, nil
+	r := &record{cred: cred, tokenHash: s.hash(token), state: stateActive}
+	return cred, token, r, nil
 }
 
 func hashToken(t string) string {

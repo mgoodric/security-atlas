@@ -479,7 +479,7 @@ gh attestation verify "oci://${IMAGE}@${DIGEST}" \
 
 # 2. cosign signature (stable tags only; :edge is deliberately unsigned).
 cosign verify "${IMAGE}:${TAG}" \
-  --certificate-identity-regexp "https://github.com/${REPO}/\.github/workflows/.*" \
+  --certificate-identity-regexp "https://github.com/${REPO}/\.github/workflows/container-publish\.yml@.*" \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 
 # 3. SBOM (SPDX, attached to the image by buildx sbom: true).

@@ -11,7 +11,8 @@
 #                    exits 0 (slice 473)
 #   atlas-bootstrap  first-boot one-shot: seed + SCF import + control
 #                    bundle upload, then exits 0 (slice 037)
-#   atlas            platform server — gRPC :50051 + HTTP :8080 (/health)
+#   atlas            platform server — gRPC :50051 + HTTP :8080
+#                    (/health liveness, /ready readiness)
 #   web              Next.js frontend — :3000
 #
 # Startup ordering (enforced by depends_on conditions):
@@ -23,6 +24,7 @@
 #        partial schema) AND atlas-bootstrap starts (seed + SCF import)
 #        run in parallel
 #     -> atlas-bootstrap phase 5 uploads control bundles once /health is up
+#        (/health is liveness; traffic routers should use /ready)
 #     -> web starts
 #
 # Slice 473 — migrate-on-upgrade (confirmed production incident). The
@@ -419,6 +421,28 @@ services:
       # list only your own proxy addresses; 0.0.0.0/0 reopens the spoofing
       # vector. See .env.example for the full warning.
       TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      # OE-553: demo-seed opt-in gate (slices 205 + 278). The server's
+      # admindemo handler and the atlas-cli `demo` commands both read this
+      # ONE variable and admit only the exact lowercase string "true"
+      # (internal/api/admindemo/handler.go DefaultEnabledFunc). Before this
+      # passthrough the bundle shipped a half-wired feature: /admin/demo told
+      # the operator to "set ATLAS_ENABLE_DEMO_SEED=true in the docker-compose
+      # env", but compose never forwarded it, so the seed endpoint returned
+      # 503 no matter what .env said.
+      #
+      # The `:-` empty default means an unset variable maps to empty — the
+      # exact-"true" check stays false, so the shipped bundle is unchanged
+      # (default OFF). Deliberately NOT `${...:-true}`: the edge channel
+      # (docker-compose.edge.yml) defaults it on because that is the
+      # maintainer's own throwaway deployment; a self-host bundle must not.
+      #
+      # SECURITY: enabling this exposes a DESTRUCTIVE surface — POST
+      # /v1/admin/demo/{seed,teardown} creates and drops a whole demo tenant.
+      # It stays admin-role gated (OPA admin.rego), rate-limited to one
+      # invocation per IP per 60s, and every invocation writes an audit row
+      # BEFORE the seeder runs. Leave it unset on any deployment holding real
+      # program data. See .env.example for the full warning.
+      ATLAS_ENABLE_DEMO_SEED: ${ATLAS_ENABLE_DEMO_SEED:-}
       # Slice 036: artifact store wiring.
       ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-atlas-artifacts}
       ARTIFACTS_S3_ENDPOINT: http://minio:9000

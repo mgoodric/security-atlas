@@ -21,12 +21,18 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { normalizeEnabledModules } from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 type EnabledBody = {
   modules: Record<string, boolean>;
 };
 
+// OE-549: the 200-body coercion moved to `normalizeEnabledModules` in
+// `lib/api/self.server.ts` so this route and `lib/feature-nav.server.ts`
+// (which now reads `/v1/features/enabled` directly rather than
+// self-fetching this route) share ONE definition of the fail-closed
+// shape. The status-code posture below is unchanged.
 function emptyBody(): EnabledBody {
   return { modules: {} };
 }
@@ -48,11 +54,7 @@ export async function GET() {
         status: upstream.status === 401 ? 401 : 200,
       });
     }
-    const body = (await upstream.json()) as Partial<EnabledBody>;
-    const modules =
-      body && typeof body.modules === "object" && body.modules !== null
-        ? body.modules
-        : {};
+    const modules = normalizeEnabledModules(await upstream.json());
     return NextResponse.json({ modules });
   } catch {
     return NextResponse.json(emptyBody(), { status: 200 });

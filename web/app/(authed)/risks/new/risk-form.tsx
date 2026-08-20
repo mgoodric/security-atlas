@@ -12,8 +12,9 @@
 // Enum option lists mirror `internal/db/dbx/models.go`:
 //   RiskCategory:    confidentiality | integrity | availability | privacy
 //                    | regulatory | operational | financial
-//   RiskMethodology: nist_800_30 (default) | fair | cis_ram | iso_27005
-//                    | qualitative_5x5
+//   RiskMethodology: OE-592 — deliberately NARROWER than the dbx enum.
+//                    The form offers only methodologies that have a matching
+//                    score widget here: nist_800_30, qualitative_5x5, and FAIR.
 //   RiskTreatment:   accept | mitigate (default) | transfer | avoid
 //
 // 5x5 inherent_score widget: two native `<select>` dropdowns (1..5 each)
@@ -40,6 +41,7 @@ import {
   DEFAULT_TREATMENT,
   FieldErrors,
   hasErrors,
+  OFFERED_METHODOLOGIES,
   validateRiskForm,
 } from "./validate";
 
@@ -53,14 +55,6 @@ const CATEGORIES = [
   "financial",
 ] as const;
 
-const METHODOLOGIES = [
-  "nist_800_30",
-  "fair",
-  "cis_ram",
-  "iso_27005",
-  "qualitative_5x5",
-] as const;
-
 const TREATMENTS = ["mitigate", "transfer", "accept", "avoid"] as const;
 
 const SCORE_LEVELS = [1, 2, 3, 4, 5] as const;
@@ -69,11 +63,13 @@ type FormState = {
   title: string;
   description: string;
   category: (typeof CATEGORIES)[number];
-  methodology: (typeof METHODOLOGIES)[number];
+  methodology: (typeof OFFERED_METHODOLOGIES)[number];
   treatment: (typeof TREATMENTS)[number];
   treatment_owner: string;
   likelihood: number;
   impact: number;
+  loss_event_frequency: string;
+  loss_magnitude: string;
   // Slice 151: linked_control_ids drives the ControlMultiSelect picker.
   // The form keeps the selection in state even when the picker is
   // hidden (treatment !== mitigate) so toggling treatment back to
@@ -96,11 +92,28 @@ function initialState(): FormState {
     treatment_owner: "",
     likelihood: 3,
     impact: 3,
+    loss_event_frequency: "1",
+    loss_magnitude: "50000",
     linked_control_ids: [],
   };
 }
 
+function fairNumbers(s: FormState) {
+  const lossEventFrequency = Number(s.loss_event_frequency);
+  const lossMagnitude = Number(s.loss_magnitude);
+  const annualizedLossExposure = lossEventFrequency * lossMagnitude;
+  return { lossEventFrequency, lossMagnitude, annualizedLossExposure };
+}
+
 function toCreateInput(s: FormState): RiskCreateInput {
+  const inherentScore =
+    s.methodology === "fair"
+      ? {
+          loss_event_frequency: fairNumbers(s).lossEventFrequency,
+          loss_magnitude: fairNumbers(s).lossMagnitude,
+          annualized_loss_exposure: fairNumbers(s).annualizedLossExposure,
+        }
+      : { likelihood: s.likelihood, impact: s.impact };
   const body: RiskCreateInput = {
     title: s.title.trim(),
     description: s.description.trim(),
@@ -108,7 +121,7 @@ function toCreateInput(s: FormState): RiskCreateInput {
     methodology: s.methodology,
     treatment: s.treatment,
     treatment_owner: s.treatment_owner.trim(),
-    inherent_score: { likelihood: s.likelihood, impact: s.impact },
+    inherent_score: inherentScore,
   };
   // Slice 151: only post linked_control_ids when treatment requires
   // them. Sending an empty array for non-mitigate is noise; the
@@ -131,6 +144,15 @@ const SELECT_CLASS =
 const LABEL_CLASS = "block text-sm font-medium text-foreground mb-1.5";
 
 const HELP_CLASS = "mt-1 text-xs text-muted-foreground";
+
+function formatDollars(n: number): string {
+  if (!Number.isFinite(n)) return "$0";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(n);
+}
 
 export function RiskForm({ onSubmit }: Props) {
   const [state, setState] = useState<FormState>(initialState());
@@ -180,6 +202,7 @@ export function RiskForm({ onSubmit }: Props) {
   }
 
   const severity = state.likelihood * state.impact;
+  const fair = fairNumbers(state);
 
   return (
     <form
@@ -271,7 +294,7 @@ export function RiskForm({ onSubmit }: Props) {
             className={SELECT_CLASS}
             data-testid="risks-create-methodology"
           >
-            {METHODOLOGIES.map((m) => (
+            {OFFERED_METHODOLOGIES.map((m) => (
               <option key={m} value={m}>
                 {m}
               </option>
@@ -279,7 +302,8 @@ export function RiskForm({ onSubmit }: Props) {
           </select>
           <p className={HELP_CLASS}>
             Default <span className="font-mono">nist_800_30</span> per canvas
-            §6.2.
+            §6.2. FAIR uses annualized dollar exposure; CIS RAM and ISO 27005
+            are not yet supported.
           </p>
         </div>
       </div>
@@ -343,64 +367,121 @@ export function RiskForm({ onSubmit }: Props) {
         />
       )}
 
-      <fieldset
-        className="rounded-md border border-input p-4"
-        data-testid="risks-create-inherent-score"
-      >
-        <legend className="px-2 text-sm font-medium text-foreground">
-          Inherent score (5×5)
-        </legend>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
-          <div>
-            <label className={LABEL_CLASS} htmlFor="risk-likelihood">
-              Likelihood
-            </label>
-            <select
-              id="risk-likelihood"
-              name="likelihood"
-              value={state.likelihood}
-              onChange={(e) => update("likelihood", Number(e.target.value))}
-              className={SELECT_CLASS}
-              data-testid="risks-create-likelihood"
-            >
-              {SCORE_LEVELS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+      {state.methodology === "fair" ? (
+        <fieldset
+          className="rounded-md border border-input p-4"
+          data-testid="risks-create-inherent-score"
+        >
+          <legend className="px-2 text-sm font-medium text-foreground">
+            FAIR inherent exposure
+          </legend>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <div>
+              <label
+                className={LABEL_CLASS}
+                htmlFor="risk-loss-event-frequency"
+              >
+                Loss event frequency
+              </label>
+              <Input
+                id="risk-loss-event-frequency"
+                name="loss_event_frequency"
+                type="number"
+                min="0"
+                step="0.01"
+                required
+                value={state.loss_event_frequency}
+                onChange={(e) => update("loss_event_frequency", e.target.value)}
+                data-testid="risks-create-loss-event-frequency"
+              />
+            </div>
+            <div>
+              <label className={LABEL_CLASS} htmlFor="risk-loss-magnitude">
+                Loss magnitude
+              </label>
+              <Input
+                id="risk-loss-magnitude"
+                name="loss_magnitude"
+                type="number"
+                min="0"
+                step="1000"
+                required
+                value={state.loss_magnitude}
+                onChange={(e) => update("loss_magnitude", e.target.value)}
+                data-testid="risks-create-loss-magnitude"
+              />
+            </div>
+            <div className="text-sm text-muted-foreground">
+              Annualized exposure{" "}
+              <span
+                className="font-mono text-foreground"
+                data-testid="risks-create-annualized-loss-exposure"
+              >
+                {formatDollars(fair.annualizedLossExposure)}
+              </span>
+            </div>
           </div>
-          <div>
-            <label className={LABEL_CLASS} htmlFor="risk-impact">
-              Impact
-            </label>
-            <select
-              id="risk-impact"
-              name="impact"
-              value={state.impact}
-              onChange={(e) => update("impact", Number(e.target.value))}
-              className={SELECT_CLASS}
-              data-testid="risks-create-impact"
-            >
-              {SCORE_LEVELS.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
-            </select>
+        </fieldset>
+      ) : (
+        <fieldset
+          className="rounded-md border border-input p-4"
+          data-testid="risks-create-inherent-score"
+        >
+          <legend className="px-2 text-sm font-medium text-foreground">
+            Inherent score (5×5)
+          </legend>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end">
+            <div>
+              <label className={LABEL_CLASS} htmlFor="risk-likelihood">
+                Likelihood
+              </label>
+              <select
+                id="risk-likelihood"
+                name="likelihood"
+                value={state.likelihood}
+                onChange={(e) => update("likelihood", Number(e.target.value))}
+                className={SELECT_CLASS}
+                data-testid="risks-create-likelihood"
+              >
+                {SCORE_LEVELS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className={LABEL_CLASS} htmlFor="risk-impact">
+                Impact
+              </label>
+              <select
+                id="risk-impact"
+                name="impact"
+                value={state.impact}
+                onChange={(e) => update("impact", Number(e.target.value))}
+                className={SELECT_CLASS}
+                data-testid="risks-create-impact"
+              >
+                {SCORE_LEVELS.map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              Severity{" "}
+              <span
+                className="font-mono text-foreground"
+                data-testid="risks-create-severity"
+              >
+                {severity}
+              </span>{" "}
+              (likelihood × impact)
+            </div>
           </div>
-          <div className="text-sm text-muted-foreground">
-            Severity{" "}
-            <span
-              className="font-mono text-foreground"
-              data-testid="risks-create-severity"
-            >
-              {severity}
-            </span>{" "}
-            (likelihood × impact)
-          </div>
-        </div>
-      </fieldset>
+        </fieldset>
+      )}
 
       <div className="flex items-center gap-3">
         <Button

@@ -21,6 +21,25 @@ type Props = {
 
 const CRITICALITIES = ["low", "medium", "high"] as const;
 const CADENCES = ["monthly", "quarterly", "biannual", "annual"] as const;
+const TOOL_CATEGORIES = [
+  "edr",
+  "siem",
+  "iam",
+  "vuln_mgmt",
+  "cloud_security",
+  "appsec",
+  "grc",
+  "monitoring",
+  "other",
+] as const;
+const STATUSES = ["active", "trialing", "churned"] as const;
+const BILLING_CADENCES = [
+  "monthly",
+  "quarterly",
+  "annual",
+  "multi_year",
+  "one_time",
+] as const;
 
 function fromVendor(v: Vendor | undefined): VendorWrite {
   return {
@@ -36,6 +55,15 @@ function fromVendor(v: Vendor | undefined): VendorWrite {
     owner_user: v?.owner_user ?? "",
     linked_sow_uri: v?.linked_sow_uri ?? "",
     notes: v?.notes ?? "",
+    annual_cost: v?.annual_cost ?? null,
+    currency: v?.currency ?? "",
+    renewal_date: v?.renewal_date ?? "",
+    auto_renew: v?.auto_renew ?? false,
+    license_count: v?.license_count ?? null,
+    tool_category: v?.tool_category ?? null,
+    cost_owner: v?.cost_owner ?? "",
+    status: v?.status ?? "active",
+    billing_cadence: v?.billing_cadence ?? null,
     scope_cell_ids: v?.scope_cell_ids ?? [],
   };
 }
@@ -58,6 +86,13 @@ function normalizeForSubmit(b: VendorWrite): VendorWrite {
     dpa_signed_at: b.dpa_signed ? clean(b.dpa_signed_at ?? null) : null,
     last_review_date: clean(b.last_review_date ?? null),
     linked_sow_uri: clean(b.linked_sow_uri ?? null),
+    currency: clean(b.currency ?? null)?.toUpperCase() ?? null,
+    renewal_date: clean(b.renewal_date ?? null),
+    tool_category: b.tool_category || null,
+    billing_cadence: b.billing_cadence || null,
+    annual_cost: b.annual_cost ?? null,
+    license_count: b.license_count ?? null,
+    cost_owner: b.cost_owner.trim(),
     owner_user: b.owner_user.trim(),
     notes: b.notes.trim(),
   };
@@ -183,6 +218,105 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
               value={body.linked_sow_uri ?? ""}
               onChange={(e) => update("linked_sow_uri", e.target.value)}
               placeholder="s3://contracts/vendor-2025.pdf"
+            />
+          </Field>
+          <Field label="Renewal date">
+            <Input
+              type="date"
+              value={body.renewal_date ?? ""}
+              onChange={(e) => update("renewal_date", e.target.value)}
+            />
+          </Field>
+          <Field label="Auto-renew">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={body.auto_renew}
+                onChange={(e) => update("auto_renew", e.target.checked)}
+              />
+              Enabled
+            </label>
+          </Field>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Commercial tracking</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          <Field label="Annual cost">
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={body.annual_cost ?? ""}
+              onChange={(e) =>
+                update(
+                  "annual_cost",
+                  e.target.value === "" ? null : Number(e.target.value),
+                )
+              }
+            />
+          </Field>
+          <Field label="Currency">
+            <Input
+              value={body.currency ?? ""}
+              maxLength={3}
+              onChange={(e) => update("currency", e.target.value.toUpperCase())}
+              placeholder="USD"
+            />
+          </Field>
+          <Field label="Licenses / seats">
+            <Input
+              type="number"
+              min="0"
+              step="1"
+              value={body.license_count ?? ""}
+              onChange={(e) =>
+                update(
+                  "license_count",
+                  e.target.value === "" ? null : Number(e.target.value),
+                )
+              }
+            />
+          </Field>
+          <Field label="Tool category">
+            <Select
+              value={body.tool_category ?? ""}
+              options={["", ...TOOL_CATEGORIES]}
+              onChange={(v) =>
+                update(
+                  "tool_category",
+                  v === "" ? null : (v as VendorWrite["tool_category"]),
+                )
+              }
+            />
+          </Field>
+          <Field label="Cost owner">
+            <Input
+              value={body.cost_owner}
+              onChange={(e) => update("cost_owner", e.target.value)}
+              placeholder="security-finance@example.com"
+            />
+          </Field>
+          <Field label="Status" required>
+            <Select
+              value={body.status}
+              options={STATUSES}
+              onChange={(v) => update("status", v as VendorWrite["status"])}
+            />
+          </Field>
+          <Field label="Billing cadence">
+            <Select
+              value={body.billing_cadence ?? ""}
+              options={["", ...BILLING_CADENCES]}
+              onChange={(v) =>
+                update(
+                  "billing_cadence",
+                  v === "" ? null : (v as VendorWrite["billing_cadence"]),
+                )
+              }
             />
           </Field>
         </CardContent>

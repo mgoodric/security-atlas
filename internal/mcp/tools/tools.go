@@ -75,7 +75,7 @@ func parseUUIDArg(name, raw string) (uuid.UUID, error) {
 	return id, nil
 }
 
-// All builds the canonical set of six read tools, wired against the
+// All builds the canonical set of read tools, wired against the
 // given mcp.Client. The order matches mcp.CanonicalToolOrder.
 func All(client *mcp.Client) []mcp.Tool {
 	return []mcp.Tool{
@@ -85,5 +85,10 @@ func All(client *mcp.Client) []mcp.Tool {
 		NewGetRisk(client),
 		NewListEvidence(client),
 		NewListAuditPeriods(client),
+		NewListPolicies(client),
+		NewListVendors(client),
+		NewListExceptions(client),
+		NewListActionPlans(client),
+		NewListFrameworkPosture(client),
 	}
 }

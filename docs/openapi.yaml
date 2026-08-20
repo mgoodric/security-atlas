@@ -85,11 +85,13 @@ tags:
   - name: feature-flags
   - name: framework-scopes
   - name: frameworks
+  - name: incidents
   - name: install
   - name: mcp
   - name: me
   - name: oauth
   - name: oscal
+  - name: personnel-security
   - name: policies
   - name: questionnaires
   - name: risks
@@ -279,6 +281,19 @@ paths:
       summary: POST /oauth/token — token endpoint, dispatches the supported grants (RFC 6749)
       tags: [oauth]
       operationId: post-oauth-token
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /ready:
+    get:
+      summary: GET /ready
+      tags: [system]
+      operationId: get-ready
+      x-internal: true
       responses:
         default:
           description: Default response envelope.
@@ -2760,6 +2775,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/evidence/receipts/{record_id}:
+    get:
+      summary: GET /v1/evidence/receipts/{record_id}
+      tags: [evidence]
+      operationId: get-v1-evidence-receipts-record_id
+      security:
+        - bearer: []
+      parameters:
+        - name: record_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/evidence:push:
     post:
       summary: POST /v1/evidence:push
@@ -3090,6 +3125,93 @@ paths:
       operationId: get-v1-frameworks-scf-versions
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/incidents:
+    get:
+      summary: GET /v1/incidents
+      tags: [incidents]
+      operationId: get-v1-incidents
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/incidents
+      tags: [incidents]
+      operationId: post-v1-incidents
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/incidents/{id}:
+    get:
+      summary: GET /v1/incidents/{id}
+      tags: [incidents]
+      operationId: get-v1-incidents-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/incidents/{id}/close:
+    post:
+      summary: POST /v1/incidents/{id}/close
+      tags: [incidents]
+      operationId: post-v1-incidents-id-close
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/incidents/{id}/transition:
+    patch:
+      summary: PATCH /v1/incidents/{id}/transition
+      tags: [incidents]
+      operationId: patch-v1-incidents-id-transition
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
@@ -3829,6 +3951,73 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/personnel-security/checklist-items/{id}/complete:
+    post:
+      summary: POST /v1/personnel-security/checklist-items/{id}/complete — complete an item (completed_by, evidence_uri, notes); writes the personnel_security.workflow.v1 CC1 evidence record (OE-663)
+      tags: [personnel-security]
+      operationId: post-v1-personnel-security-checklist-items-id-complete
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/personnel-security/checklists:
+    get:
+      summary: GET /v1/personnel-security/checklists — onboarding/offboarding checklist index (?kind= ?status= ?overdue=true filters; OE-663)
+      tags: [personnel-security]
+      operationId: get-v1-personnel-security-checklists
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/personnel-security/checklists — create a manual checklist (kind, person, control_id, due_at; OE-663)
+      tags: [personnel-security]
+      operationId: post-v1-personnel-security-checklists
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/personnel-security/checklists/{id}:
+    get:
+      summary: GET /v1/personnel-security/checklists/{id} — one checklist with its items (OE-663)
+      tags: [personnel-security]
+      operationId: get-v1-personnel-security-checklists-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/policies:
     get:
       summary: GET /v1/policies
@@ -4077,6 +4266,76 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answer-runs:
+    post:
+      summary: POST /v1/questionnaires/{id}/answer-runs
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answer-runs
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answer-runs/{runId}:
+    get:
+      summary: GET /v1/questionnaires/{id}/answer-runs/{runId}
+      tags: [questionnaires]
+      operationId: get-v1-questionnaires-id-answer-runs-runId
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answer-runs/{runId}/cancel:
+    post:
+      summary: POST /v1/questionnaires/{id}/answer-runs/{runId}/cancel
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answer-runs-runId-cancel
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/questionnaires/{id}/answers/{qid}:
     patch:
       summary: PATCH /v1/questionnaires/{id}/answers/{qid}
@@ -4107,6 +4366,31 @@ paths:
       summary: POST /v1/questionnaires/{id}/answers/{qid}/ai-approve
       tags: [questionnaires]
       operationId: post-v1-questionnaires-id-answers-qid-ai-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/answers/{qid}/ai-reject:
+    post:
+      summary: POST /v1/questionnaires/{id}/answers/{qid}/ai-reject
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-answers-qid-ai-reject
       security:
         - bearer: []
       parameters:
@@ -4181,6 +4465,91 @@ paths:
         - bearer: []
       parameters:
         - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest:
+    post:
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-ai-suggest
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve:
+    post:
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-proposalID-approve
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: proposalID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject:
+    post:
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject
+      tags: [questionnaires]
+      operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-proposalID-reject
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: qid
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: proposalID
           in: path
           required: true
           schema:
@@ -4607,6 +4976,17 @@ paths:
       security:
         - bearer: []
       responses:
+        "503":
+          description: Schema registry dependency unavailable. Retryable; no internal database detail is exposed.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchemaRegistryUnavailableError"
         default:
           description: Default response envelope.
           content:
@@ -4645,6 +5025,17 @@ paths:
           schema:
             type: string
       responses:
+        "503":
+          description: Schema registry dependency unavailable. Retryable; no internal database detail is exposed.
+          headers:
+            Retry-After:
+              description: Suggested retry delay in seconds.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SchemaRegistryUnavailableError"
         default:
           description: Default response envelope.
           content:
@@ -4699,13 +5090,50 @@ paths:
       operationId: get-v1-search
       security:
         - bearer: []
+      parameters:
+        - name: q
+          in: query
+          required: true
+          description: Free-text lexical query. Must be at least 2 characters after trimming.
+          schema:
+            type: string
+            minLength: 2
+        - name: types
+          in: query
+          required: false
+          description: Comma-separated result types. Omit for all supported types.
+          schema:
+            type: string
+            pattern: "^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$"
+            examples: ["controls,risks,evidence"]
+        - name: limit
+          in: query
+          required: false
+          description: Maximum number of merged hits to return. Defaults to 25; hard cap is 50.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 25
       responses:
-        default:
-          description: Default response envelope.
+        "200":
+          description: RLS-scoped merged search results across admitted result types.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Ack"
+                $ref: "#/components/schemas/SearchResponse"
+        "400":
+          description: Invalid q, limit, or types query parameter.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing tenant or bearer context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
   /v1/tenants/{id}:
     patch:
       summary: PATCH /v1/tenants/{id} — rename a tenant and/or set its control-bundle gate policy (per-tenant admin or super_admin)
@@ -4799,6 +5227,20 @@ paths:
       summary: GET /v1/vendors/burndown
       tags: [vendors]
       operationId: get-v1-vendors-burndown
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/vendors/spend:
+    get:
+      summary: GET /v1/vendors/spend
+      tags: [vendors]
+      operationId: get-v1-vendors-spend
       security:
         - bearer: []
       responses:
@@ -5058,9 +5500,73 @@ components:
         Generic error envelope. Specific operations may return richer
         error shapes (validation details, field-level messages); this
         is the lowest-common-denominator contract.
+    SchemaRegistryUnavailableError:
+      type: object
+      required: [error, code, request_id]
+      properties:
+        error:
+          type: string
+          description: Generic 5xx message. Internal detail is logged server-side only.
+        code:
+          type: string
+          enum: [schema_registry_unavailable]
+          description: Branchable dependency-failure code for schema-registry read outages.
+        request_id:
+          type: string
+          description: Correlates the client response with server-side logs.
+      description: |
+        Retryable schema-registry dependency failure. The response does not
+        include SQLSTATE, table names, role names, filesystem paths, or other
+        internal error detail.
     Ack:
       type: object
       description: |
         Empty acknowledgment envelope. Used by mutation endpoints that
         do not return a representation of the mutated resource (e.g.
         `POST /v1/policies/{id}/publish`).
+    SearchResponse:
+      type: object
+      required: [hits, count, partial_types]
+      properties:
+        hits:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchHit"
+        count:
+          type: integer
+          minimum: 0
+          description: Number of hits returned after relevance sorting and the global limit.
+        partial_types:
+          type: array
+          items:
+            type: string
+            enum: [anchors, controls, risks, evidence]
+          description: Requested types omitted because per-type authorization denied them.
+      description: |
+        Unified lexical search response for `GET /v1/search`. Controls,
+        risks, and evidence are tenant-confined by database RLS. Anchors are
+        bundled tenant-agnostic catalog rows.
+    SearchHit:
+      type: object
+      required: [id, type, title, snippet, relevance_score]
+      properties:
+        id:
+          type: string
+          description: Stable identifier for the matched row or bundled anchor.
+        type:
+          type: string
+          enum: [anchors, controls, risks, evidence]
+          description: Result discriminator used by clients for grouping and routing.
+        title:
+          type: string
+          description: Display title for the matched result.
+        snippet:
+          type: string
+          maxLength: 120
+          description: Short textual context for the match.
+        relevance_score:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+          description: Lexical token-overlap relevance score. Higher sorts first.

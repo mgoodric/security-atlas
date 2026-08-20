@@ -1,6 +1,7 @@
 package schemaregistry
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -23,10 +24,22 @@ import (
 // every handler additionally consults the credential in context to apply
 // admin or tenant-scope rules.
 type HTTPHandler struct {
-	svc          *Service
+	svc          registryHTTPService
 	defaultLimit int32
 	maxLimit     int32
 }
+
+type registryHTTPService interface {
+	List(ctx context.Context, tenantID string, limit, offset int32) ([]RegisteredSchema, error)
+	Get(ctx context.Context, tenantID, kind, version string) (RegisteredSchema, error)
+	Register(ctx context.Context, req RegisterRequest) (RegisteredSchema, error)
+	InvalidateTenant(tenantID string)
+}
+
+const (
+	schemaRegistryUnavailableCode       = "schema_registry_unavailable"
+	schemaRegistryUnavailableRetryAfter = "30"
+)
 
 // NewHTTPHandler constructs the handler.
 func NewHTTPHandler(svc *Service) *HTTPHandler {
@@ -55,6 +68,9 @@ func (h *HTTPHandler) ListHTTP(w http.ResponseWriter, r *http.Request) {
 	limit, offset := h.pagination(r)
 	rows, err := h.svc.List(r.Context(), cred.TenantID, limit, offset)
 	if err != nil {
+		if h.writeRegistryReadFailure(w, r, "list", err) {
+			return
+		}
 		httperr.WriteInternal(w, r, "list", err)
 		return
 	}
@@ -80,6 +96,9 @@ func (h *HTTPHandler) GetHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	row, err := h.svc.Get(r.Context(), cred.TenantID, kind, semver)
 	if err != nil {
+		if h.writeRegistryReadFailure(w, r, "get", err) {
+			return
+		}
 		if errors.Is(err, ErrUnknownKind) {
 			httpresp.WriteJSON(w, http.StatusNotFound, map[string]string{"error": "schema not found"})
 			return
@@ -161,7 +180,7 @@ func (h *HTTPHandler) pagination(r *http.Request) (int32, int32) {
 	limit := h.defaultLimit
 	offset := int32(0)
 	if v := r.URL.Query().Get("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n > 0 {
 			limit = int32(n)
 			if limit > h.maxLimit {
 				limit = h.maxLimit
@@ -169,11 +188,20 @@ func (h *HTTPHandler) pagination(r *http.Request) (int32, int32) {
 		}
 	}
 	if v := r.URL.Query().Get("offset"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil && n >= 0 {
 			offset = int32(n)
 		}
 	}
 	return limit, offset
+}
+
+func (h *HTTPHandler) writeRegistryReadFailure(w http.ResponseWriter, r *http.Request, op string, err error) bool {
+	if !errors.Is(err, ErrRegistryReadFailed) {
+		return false
+	}
+	w.Header().Set("Retry-After", schemaRegistryUnavailableRetryAfter)
+	httperr.WriteCodedStatus(w, r, http.StatusServiceUnavailable, op, err, schemaRegistryUnavailableCode)
+	return true
 }
 
 // wireListItem omits the schema body to keep the list endpoint compact;

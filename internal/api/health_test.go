@@ -30,3 +30,22 @@ func TestHandleHealth_ReturnsOK(t *testing.T) {
 		t.Fatalf("GET /health Content-Type = %q; want application/json", ct)
 	}
 }
+
+func TestHandleReady_NoDBPoolIsNotReady(t *testing.T) {
+	srv := New(Config{})
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	srv.handleReady(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("GET /ready status = %d; want 503", rec.Code)
+	}
+	body := rec.Body.String()
+	if !strings.Contains(body, `"status":"not_ready"`) || !strings.Contains(body, `"db":"absent"`) {
+		t.Fatalf("GET /ready body = %q; want not_ready absent", body)
+	}
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Fatalf("GET /ready Content-Type = %q; want application/json", ct)
+	}
+}

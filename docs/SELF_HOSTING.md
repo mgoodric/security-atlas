@@ -184,11 +184,11 @@ docker logs watchtower --tail=50
 
 ### What to pin
 
-| Tag pattern      | Behavior                                               | Use when                                            |
-| ---------------- | ------------------------------------------------------ | --------------------------------------------------- |
-| `:latest`        | Every release auto-applies                             | You trust the project's release discipline          |
-| `:0.3` (minor)   | Auto-updates within `0.3.x`, never auto-jumps to `0.4` | You want patches but explicit opt-in for new minors |
-| `:0.3.5` (patch) | No auto-updates; Watchtower is effectively a no-op     | You want fully manual upgrade control               |
+| Tag pattern       | Behavior                                                 | Use when                                            |
+| ----------------- | -------------------------------------------------------- | --------------------------------------------------- |
+| `:latest`         | Every release auto-applies                               | You trust the project's release discipline          |
+| `:1.18` (minor)   | Auto-updates within `1.18.x`, never auto-jumps to `1.19` | You want patches but explicit opt-in for new minors |
+| `:1.18.0` (patch) | No auto-updates; Watchtower is effectively a no-op       | You want fully manual upgrade control               |
 
 For production self-hosters, **pin to a minor** until you've done one or two upgrade cycles and built confidence in the release pipeline.
 
@@ -489,9 +489,22 @@ notifications (for the v1 solo-operator deployment, that is the operator).
 
 ## Monitoring
 
-The platform exports OTEL traces, metrics, and logs by default. Point `OTEL_EXPORTER_OTLP_ENDPOINT` at your collector of choice. The bundled docker-compose at [`deploy/docker/observability-compose.yml`](../deploy/docker/observability-compose.yml) brings up Prometheus + Grafana + Tempo + Loki for evaluation.
+OTEL export is **off by default** — when `OTEL_EXPORTER_OTLP_ENDPOINT` is unset the SDK initializes in no-op mode and nothing is exported. Set it to your collector's OTLP endpoint to turn traces and metrics on. The companion bundle at [`deploy/observability/docker-compose.yml`](../deploy/observability/docker-compose.yml) brings up the receive side — OTel Collector + Prometheus + Tempo — for evaluation. It expects an existing Grafana (and Loki, for logs) on the same Docker network; see that bundle's [`README.md`](../deploy/observability/README.md) for the data-source wiring.
 
 Once telemetry is enabled, see [`docs/operator/observability-tuning.md`](operator/observability-tuning.md) for keeping trace-emission overhead bounded under load — in particular the `OTEL_TRACES_SAMPLER` recipe for high database query rates.
+
+---
+
+## Data Protection & Privacy Governance
+
+If you are standing up security-atlas in an EU, UK, or California regulatory context (GDPR / UK GDPR / CCPA / CPRA), your Data Protection Officer (DPO) or compliance team can review the [Personal Data Inventory](governance/personal-data-inventory.md) for a full accounting of data categories collected, controller/processor determinations, and database table/column anchors.
+
+Related governance documents for operators:
+
+- [Personal Data Inventory](governance/personal-data-inventory.md) — complete catalog of personal data fields and schema locations
+- [Data Retention and Disposal Policy](governance/data-retention.md) — retention windows and disposal procedures
+- [Access Review Cadence](governance/access-review.md) — logical access review schedule
+- [Business Continuity Plan](governance/business-continuity.md) — backup and DR posture
 
 ---
 

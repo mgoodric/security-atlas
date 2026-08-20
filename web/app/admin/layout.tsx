@@ -7,15 +7,16 @@
 // they can tell "this exists, I just can't reach it." Per the slice spec.
 //
 // The gate runs server-side on every render so a stale client-side cache
-// can't bypass it. We hit the BFF /api/admin/me endpoint, which itself
-// proxies to /v1/admin/credentials and reads the response code.
+// can't bypass it. It reads `is_admin` off the caller's own /v1/me record
+// on the platform (OE-549 — previously via a self-fetch of the BFF's
+// /api/admin/me, which is a thin proxy to that same endpoint).
 //
 // Why two layouts (this + (authed)/layout.tsx)? Because the admin pages
 // live OUTSIDE the (authed) route group — the slice spec calls the path
 // `/admin/*` literally, not `/(authed)/admin/*`. We re-use the same
 // TopBar + Sidebar shell here.
 
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
@@ -30,42 +31,31 @@ import {
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { fetchAdminMe, fetchDemoSeedEnabled } from "@/lib/api/self.server";
+
+// OE-549: both probes below used to self-fetch this app's own BFF routes
+// at an origin rebuilt from the request Host header. That address does
+// not exist inside the web container (the Host carries the EXTERNAL
+// published port, and next-server binds the container IP rather than
+// loopback), so every /admin/* page 500'd with an ECONNREFUSED in the
+// shipped image while passing in `next dev`. They now reach the platform
+// through the same stable internal base the rest of the app uses
+// (`apiBaseURL()` -> ATLAS_HTTP_URL). See `lib/api/self.server.ts`.
 
 async function isAdmin(bearer: string): Promise<boolean> {
-  // Use the BFF self-introspection endpoint so the call resolves whether
-  // we're rendering on the server (where NEXT_PUBLIC_API_BASE_URL points
-  // at the platform) or in dev with the proxy. The BFF returns
-  // { is_admin: bool } and never throws on 403 (just returns false).
-  const h = await headers();
-  const host = h.get("host") ?? "localhost:3000";
-  const proto = h.get("x-forwarded-proto") ?? "http";
-  const res = await fetch(`${proto}://${host}/api/admin/me`, {
-    headers: { Cookie: `${ATLAS_JWT_COOKIE}=${bearer}` },
-    cache: "no-store",
-  });
-  if (!res.ok) return false;
-  const body = (await res.json()) as { is_admin?: boolean };
-  return body.is_admin === true;
+  // Read `is_admin` off the caller's own /v1/me record. Fail-closed: a
+  // 403, an unparseable body, or a transport error denies. Denying is
+  // the correct posture AND strictly safer than the pre-OE-549 behavior,
+  // which let the transport error escape and crashed the route.
+  const me = await fetchAdminMe(bearer);
+  return me.is_admin;
 }
 
 // Slice 278 — probe the demo-seed env-var gate so the breadcrumb
 // renders the "Demo" link only when the feature is actually enabled.
 // Fail-closed: any error returns false so the link doesn't appear.
 async function isDemoSeedEnabled(bearer: string): Promise<boolean> {
-  try {
-    const h = await headers();
-    const host = h.get("host") ?? "localhost:3000";
-    const proto = h.get("x-forwarded-proto") ?? "http";
-    const res = await fetch(`${proto}://${host}/api/admin/demo/status`, {
-      headers: { Cookie: `${ATLAS_JWT_COOKIE}=${bearer}` },
-      cache: "no-store",
-    });
-    if (!res.ok) return false;
-    const body = (await res.json()) as { enabled?: boolean };
-    return body.enabled === true;
-  } catch {
-    return false;
-  }
+  return fetchDemoSeedEnabled(bearer);
 }
 
 export default async function AdminLayout({

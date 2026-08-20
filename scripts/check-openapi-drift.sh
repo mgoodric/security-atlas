@@ -120,7 +120,7 @@ fi
 #
 # Output: sorted "METHOD PATH" lines.
 {
-  grep -rhE '(root|r)\.(Get|Post|Patch|Put|Delete)\("(/v1/|/auth/|/health)' \
+  grep -rhE '(root|r)\.(Get|Post|Patch|Put|Delete)\("(/v1/|/auth/|/health|/ready)' \
     "$ROOT/internal/api/" --include="*.go" --exclude="*_test.go" \
     | sed -E 's/.*\.(Get|Post|Patch|Put|Delete)\("([^"]+)".*/\1 \2/' \
     | awk '{print toupper($1)" "$2}'

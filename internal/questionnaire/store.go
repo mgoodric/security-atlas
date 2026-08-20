@@ -63,13 +63,23 @@ type Question struct {
 	Answer       *Answer `json:"answer,omitempty"`
 }
 
-// Answer is the API-shaped projection of a questionnaire_answers row.
+// Answer is the API-shaped projection of a questionnaire_answers row. The
+// AI-assist boundary columns (slice 441) are projected too so the slice-757
+// review queue can render draft state + model provenance without a second
+// endpoint: an unapproved AI draft is ai_assisted=TRUE, human_approved=FALSE.
 type Answer struct {
-	ID          string `json:"id"`
-	AnswerValue string `json:"answer_value"`
-	Narrative   string `json:"narrative"`
-	Citations   []any  `json:"citations"`
-	AuthoredBy  string `json:"authored_by"`
+	ID            string `json:"id"`
+	AnswerValue   string `json:"answer_value"`
+	Narrative     string `json:"narrative"`
+	Citations     []any  `json:"citations"`
+	AuthoredBy    string `json:"authored_by"`
+	AIAssisted    bool   `json:"ai_assisted"`
+	HumanApproved bool   `json:"human_approved"`
+	HumanApprover string `json:"human_approver,omitempty"`
+	PromptVersion string `json:"prompt_version,omitempty"`
+	ModelName     string `json:"model_name,omitempty"`
+	ModelVersion  string `json:"model_version,omitempty"`
+	ModelProvider string `json:"model_provider,omitempty"`
 }
 
 // CreateQuestionnaireParams is the input for CreateQuestionnaire.
@@ -400,12 +410,23 @@ func rowToAnswer(r dbx.QuestionnaireAnswer) *Answer {
 	if len(r.Citations) > 0 {
 		_ = json.Unmarshal(r.Citations, &citations)
 	}
+	approver := ""
+	if r.HumanApprover != nil {
+		approver = *r.HumanApprover
+	}
 	return &Answer{
-		ID:          uuidToString(r.ID),
-		AnswerValue: r.AnswerValue,
-		Narrative:   r.Narrative,
-		Citations:   citations,
-		AuthoredBy:  r.AuthoredBy,
+		ID:            uuidToString(r.ID),
+		AnswerValue:   r.AnswerValue,
+		Narrative:     r.Narrative,
+		Citations:     citations,
+		AuthoredBy:    r.AuthoredBy,
+		AIAssisted:    r.AiAssisted,
+		HumanApproved: r.HumanApproved,
+		HumanApprover: approver,
+		PromptVersion: r.PromptVersion,
+		ModelName:     r.ModelName,
+		ModelVersion:  r.ModelVersion,
+		ModelProvider: r.ModelProvider,
 	}
 }
 

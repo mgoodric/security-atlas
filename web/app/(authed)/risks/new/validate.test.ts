@@ -8,7 +8,12 @@
 
 import { describe, expect, test } from "vitest";
 
-import { DEFAULT_TREATMENT, hasErrors, validateRiskForm } from "./validate";
+import {
+  DEFAULT_TREATMENT,
+  hasErrors,
+  OFFERED_METHODOLOGIES,
+  validateRiskForm,
+} from "./validate";
 
 const baseValid = {
   title: "Vendor data breach exposure",
@@ -139,6 +144,33 @@ describe("DEFAULT_TREATMENT — slice 663 fresh-tenant dead-end", () => {
     });
     expect(e.linked_control_ids).toMatch(/at least one control/i);
     expect(hasErrors(e)).toBe(true);
+  });
+});
+
+describe("OFFERED_METHODOLOGIES — OE-592 savable-options-only", () => {
+  const FORM_SAVABLE = ["nist_800_30", "fair", "qualitative_5x5"];
+
+  test("every offered methodology is backend-savable", () => {
+    for (const m of OFFERED_METHODOLOGIES) {
+      expect(FORM_SAVABLE).toContain(m);
+    }
+  });
+
+  test("FAIR is offered now that the form has quantitative scoring inputs", () => {
+    const offered: readonly string[] = OFFERED_METHODOLOGIES;
+    expect(offered).toContain("fair");
+  });
+
+  test("unsupported enum values are still not offered", () => {
+    const offered: readonly string[] = OFFERED_METHODOLOGIES;
+    for (const m of ["cis_ram", "iso_27005"]) {
+      expect(offered).not.toContain(m);
+    }
+  });
+
+  test("the slice-105 default methodology is still offered", () => {
+    const offered: readonly string[] = OFFERED_METHODOLOGIES;
+    expect(offered).toContain("nist_800_30");
   });
 });
 

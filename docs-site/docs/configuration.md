@@ -94,6 +94,11 @@ a deployment vulnerability, not a convenience.
       trusting any proxy without a header-scrubbing reverse proxy in front
       is a **client-IP spoofing vector**. **Off by default** (shipped
       commented out). Prefer `TRUSTED_PROXY_CIDRS`.
+    - **`ATLAS_ENABLE_DEMO_SEED`** — when set to exactly `true`, exposes
+      the admin demo-seed surface (`POST /v1/admin/demo/{seed,teardown}`
+      and the `/admin/demo` page). Teardown **drops a whole tenant and
+      every row anchored to it**. **Off by default** (shipped commented
+      out). Do not enable it on a deployment holding real program data.
 <!-- prettier-ignore-end -->
 
 ## Required
@@ -240,6 +245,32 @@ logged.
 | Variable          | Default   | Required? | Scope       | Description                                                                                                                                   |
 | ----------------- | --------- | --------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ATLAS_TEST_MODE` | _(empty)_ | no        | server, web | When set to `1`, mounts the e2e JWT-issuance endpoint `POST /v1/test/issue-jwt` (slice 201). **DO NOT set in production — mints admin JWTs.** |
+
+## Demo seed
+
+Populates one dedicated demo tenant with a realistic dataset (~50
+controls, 20 risks, 200 evidence records, 3 audit periods, plus policies,
+vendors, and board packs) for screenshots, recorded walkthroughs, or
+handing an auditor a populated instance to explore. The same variable
+gates both the `/admin/demo` page and the `atlas-cli demo` commands.
+
+<!-- prettier-ignore-start -->
+!!! danger "Demo teardown drops a whole tenant — leave this off in production"
+
+    `ATLAS_ENABLE_DEMO_SEED=true` exposes `POST /v1/admin/demo/seed` and
+    `POST /v1/admin/demo/teardown`. Teardown deletes the demo tenant and
+    every row anchored to it. When enabled, the surface stays admin-role
+    gated (OPA `admin.rego`), rate-limited to one seed/teardown per client
+    IP per 60 seconds, and writes an audit row **before** the seeder runs —
+    but none of that substitutes for leaving it off on a deployment holding
+    real program data. The seeder also refuses to write into a tenant that
+    already holds data or that it did not itself create, so a slug typo
+    cannot clobber a real tenant.
+<!-- prettier-ignore-end -->
+
+| Variable                 | Default         | Required? | Scope  | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| ------------------------ | --------------- | --------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ATLAS_ENABLE_DEMO_SEED` | _(unset → off)_ | no        | server | Enables the demo-seed surface (slices 205 + 278). Only the exact lowercase string `true` counts — `1`, `yes`, and `TRUE` are all treated as off, deliberately. Shipped commented out; **off by default**, in which case the endpoints return `503` and the "Demo" link is absent from the admin breadcrumb. Restart the `atlas` service after changing it. See [demo seed](https://github.com/mgoodric/security-atlas/blob/main/docs/getting-started/demo-seed.md). |
 
 ## Ports
 

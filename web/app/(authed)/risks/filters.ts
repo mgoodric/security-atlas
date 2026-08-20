@@ -191,6 +191,8 @@ export function clearFilters(): RiskFilters {
  * the table without re-formatting.
  */
 export function formatResidualScore(score: unknown): string {
+  const fair = fairScore(score);
+  if (fair != null) return formatDollars(fair.annualized_loss_exposure);
   if (score == null || typeof score !== "object") return "—";
   const s = score as { likelihood?: unknown; impact?: unknown };
   const l = typeof s.likelihood === "number" ? s.likelihood : null;
@@ -199,6 +201,56 @@ export function formatResidualScore(score: unknown): string {
   const normalized = (l * i) / 25;
   if (!Number.isFinite(normalized)) return "—";
   return normalized.toFixed(2);
+}
+
+export type FairScore = {
+  loss_event_frequency: number;
+  loss_magnitude: number;
+  annualized_loss_exposure: number;
+};
+
+export function fairScore(score: unknown): FairScore | null {
+  if (score == null || typeof score !== "object") return null;
+  const s = score as {
+    loss_event_frequency?: unknown;
+    loss_magnitude?: unknown;
+    annualized_loss_exposure?: unknown;
+    lef?: unknown;
+    lm?: unknown;
+  };
+  const lossEventFrequency =
+    typeof s.loss_event_frequency === "number"
+      ? s.loss_event_frequency
+      : typeof s.lef === "number"
+        ? s.lef
+        : null;
+  const lossMagnitude =
+    typeof s.loss_magnitude === "number"
+      ? s.loss_magnitude
+      : typeof s.lm === "number"
+        ? s.lm
+        : null;
+  if (lossEventFrequency == null || lossMagnitude == null) return null;
+  const derived = lossEventFrequency * lossMagnitude;
+  const annualized =
+    typeof s.annualized_loss_exposure === "number"
+      ? s.annualized_loss_exposure
+      : derived;
+  if (!Number.isFinite(annualized)) return null;
+  return {
+    loss_event_frequency: lossEventFrequency,
+    loss_magnitude: lossMagnitude,
+    annualized_loss_exposure: annualized,
+  };
+}
+
+export function formatDollars(n: number): string {
+  if (!Number.isFinite(n)) return "—";
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(n);
 }
 
 /**
@@ -231,6 +283,7 @@ export function formatResidualScore(score: unknown): string {
 export type ResidualState = "pending" | "scored";
 
 export function residualState(score: unknown): ResidualState {
+  if (fairScore(score) != null) return "scored";
   if (score == null || typeof score !== "object") return "pending";
   const s = score as { likelihood?: unknown; impact?: unknown };
   const l = typeof s.likelihood === "number" ? s.likelihood : null;

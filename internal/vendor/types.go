@@ -38,6 +38,54 @@ const (
 // inbound filter strings without building a separate switch.
 var AllCriticalities = []Criticality{CriticalityLow, CriticalityMedium, CriticalityHigh}
 
+// ToolCategory classifies purchased security software/tooling. It is optional
+// on a vendor: only vendors tracked as security tooling need a category.
+type ToolCategory string
+
+const (
+	ToolCategoryEDR           ToolCategory = "edr"
+	ToolCategorySIEM          ToolCategory = "siem"
+	ToolCategoryIAM           ToolCategory = "iam"
+	ToolCategoryVulnMgmt      ToolCategory = "vuln_mgmt"
+	ToolCategoryCloudSecurity ToolCategory = "cloud_security"
+	ToolCategoryAppSec        ToolCategory = "appsec"
+	ToolCategoryGRC           ToolCategory = "grc"
+	ToolCategoryMonitoring    ToolCategory = "monitoring"
+	ToolCategoryOther         ToolCategory = "other"
+)
+
+var AllToolCategories = []ToolCategory{
+	ToolCategoryEDR, ToolCategorySIEM, ToolCategoryIAM, ToolCategoryVulnMgmt,
+	ToolCategoryCloudSecurity, ToolCategoryAppSec, ToolCategoryGRC,
+	ToolCategoryMonitoring, ToolCategoryOther,
+}
+
+// CommercialStatus is the lifecycle of the commercial relationship.
+type CommercialStatus string
+
+const (
+	StatusActive   CommercialStatus = "active"
+	StatusTrialing CommercialStatus = "trialing"
+	StatusChurned  CommercialStatus = "churned"
+)
+
+var AllCommercialStatuses = []CommercialStatus{StatusActive, StatusTrialing, StatusChurned}
+
+// BillingCadence records how the vendor bills for the annualized cost.
+type BillingCadence string
+
+const (
+	BillingMonthly   BillingCadence = "monthly"
+	BillingQuarterly BillingCadence = "quarterly"
+	BillingAnnual    BillingCadence = "annual"
+	BillingMultiYear BillingCadence = "multi_year"
+	BillingOneTime   BillingCadence = "one_time"
+)
+
+var AllBillingCadences = []BillingCadence{
+	BillingMonthly, BillingQuarterly, BillingAnnual, BillingMultiYear, BillingOneTime,
+}
+
 // ReviewCadence is the interval between vendor reviews.
 type ReviewCadence string
 
@@ -98,6 +146,33 @@ func (c Criticality) Valid() bool {
 	return false
 }
 
+func (c ToolCategory) Valid() bool {
+	for _, x := range AllToolCategories {
+		if x == c {
+			return true
+		}
+	}
+	return false
+}
+
+func (s CommercialStatus) Valid() bool {
+	for _, x := range AllCommercialStatuses {
+		if x == s {
+			return true
+		}
+	}
+	return false
+}
+
+func (c BillingCadence) Valid() bool {
+	for _, x := range AllBillingCadences {
+		if x == c {
+			return true
+		}
+	}
+	return false
+}
+
 // Vendor is the public API surface for a row in the vendors table. The
 // store hydrates it from sqlc-generated dbx.Vendor; the HTTP layer
 // serialises it to JSON.
@@ -119,6 +194,15 @@ type Vendor struct {
 	OwnerUser      string
 	LinkedSOWURI   *string
 	Notes          string
+	AnnualCost     *float64
+	Currency       *string
+	RenewalDate    *time.Time
+	AutoRenew      bool
+	LicenseCount   *int32
+	ToolCategory   *ToolCategory
+	CostOwner      string
+	Status         CommercialStatus
+	BillingCadence *BillingCadence
 	ScopeCellIDs   []uuid.UUID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
@@ -155,6 +239,15 @@ type CreateVendorInput struct {
 	OwnerUser      string
 	LinkedSOWURI   *string
 	Notes          string
+	AnnualCost     *float64
+	Currency       *string
+	RenewalDate    *time.Time
+	AutoRenew      bool
+	LicenseCount   *int32
+	ToolCategory   *ToolCategory
+	CostOwner      string
+	Status         CommercialStatus
+	BillingCadence *BillingCadence
 	ScopeCellIDs   []uuid.UUID
 }
 
@@ -177,6 +270,15 @@ type Burndown struct {
 	AsOf  time.Time
 	Bands []BurndownBand
 	Total BurndownBand // criticality=="" sentinel; aggregates every row
+}
+
+// SpendRollupRow is one annualized spend aggregate. ToolCategory is nil for
+// the overall row for a currency, and set for per-category subtotals.
+type SpendRollupRow struct {
+	ToolCategory *ToolCategory
+	Currency     string
+	AnnualCost   float64
+	VendorCount  int64
 }
 
 // ----- vendor_reviews ledger (slice 688) -----

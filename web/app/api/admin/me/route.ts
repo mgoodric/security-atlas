@@ -42,6 +42,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { emptyAdminMe, normalizeAdminMe } from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 type AdminMeBody = {
@@ -50,8 +51,14 @@ type AdminMeBody = {
   error?: string;
 };
 
+// OE-549: the 200-body coercion moved to `normalizeAdminMe` in
+// `lib/api/self.server.ts` so this route and the server components that
+// now call `/v1/me` directly (admin layout, audit-log layout, sidebar)
+// share ONE definition of the fail-closed wire shape. The status-code
+// posture documented above is unchanged and stays here — it is this
+// route's own contract with its browser callers.
 function emptyBody(): AdminMeBody {
-  return { is_admin: false, roles: [] };
+  return emptyAdminMe();
 }
 
 export async function GET() {
@@ -73,12 +80,7 @@ export async function GET() {
       // upstream proxy or partial-response.
       return NextResponse.json(emptyBody(), { status: 200 });
     }
-    const body = parsed as { is_admin?: unknown; roles?: unknown };
-    const isAdmin = body.is_admin === true;
-    const roles = Array.isArray(body.roles)
-      ? body.roles.filter((r): r is string => typeof r === "string")
-      : [];
-    return NextResponse.json({ is_admin: isAdmin, roles });
+    return NextResponse.json(normalizeAdminMe(parsed));
   }
   if (upstream.status === 403) {
     // Shouldn't normally happen on /v1/me (any signed-in caller can read
