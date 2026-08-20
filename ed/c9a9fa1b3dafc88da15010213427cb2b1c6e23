@@ -1,0 +1,21 @@
+internal/auth/oidc/oidc.go
+  s_089f3584e72839::t_76278720561fd0 86-89,105,117-118,121-130,133,379-381,386
+internal/auth/oidc/oidc_cache_internal_test.go
+  s_089f3584e72839::t_c4add56eefc8e0 6,87-88
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "edc9a9fa1b3dafc88da15010213427cb2b1c6e23",
+  "prompts": {},
+  "sessions": {
+    "s_089f3584e72839": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a01ccc-31df-7c12-ac6f-ddb2a4c5c25d",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
