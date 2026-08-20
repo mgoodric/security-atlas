@@ -5,11 +5,13 @@ import (
 
 	decisionsapi "github.com/mgoodric/security-atlas/internal/api/decisions"
 	exceptionsapi "github.com/mgoodric/security-atlas/internal/api/exceptions"
+	incidentsapi "github.com/mgoodric/security-atlas/internal/api/incidents"
 	mcpwriteproposalsapi "github.com/mgoodric/security-atlas/internal/api/mcpwriteproposals"
 	policiesapi "github.com/mgoodric/security-atlas/internal/api/policies"
 	policyacksapi "github.com/mgoodric/security-atlas/internal/api/policyacks"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/exception"
+	"github.com/mgoodric/security-atlas/internal/incident"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/policy"
 )
@@ -38,6 +40,15 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	root.Patch("/v1/exceptions/{id}/approve", exceptionsH.Approve)
 	root.Patch("/v1/exceptions/{id}/deny", exceptionsH.Deny)
 	root.Patch("/v1/exceptions/{id}/activate", exceptionsH.Activate)
+
+	// OE-631: incident register backend. Minimal writer/reader routes for
+	// log, list, detail, lifecycle transition, and post-mortem closure.
+	incidentsH := incidentsapi.New(incident.NewStore(s.dbPool))
+	root.Post("/v1/incidents", incidentsH.Create)
+	root.Get("/v1/incidents", incidentsH.List)
+	root.Get("/v1/incidents/{id}", incidentsH.Get)
+	root.Patch("/v1/incidents/{id}/transition", incidentsH.Transition)
+	root.Post("/v1/incidents/{id}/close", incidentsH.Close)
 	// Slice 173: MCP write tools + HITL approval flow. Routes appended per
 	// the parallel-batch convention (chi rejects two Mounts at "/"). The
 	// MCP write tools (running in the cmd/atlas-mcp binary) call POST
