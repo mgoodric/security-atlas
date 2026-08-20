@@ -1,0 +1,19 @@
+scripts/integration-shards.txt
+  s_089f3584e72839::t_82959e9d8c8664 161
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.22",
+  "base_commit_sha": "e4194c5d49553ff34c255d1058c4f6800224c796",
+  "prompts": {},
+  "sessions": {
+    "s_089f3584e72839": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "01a01ccc-31df-7c12-ac6f-ddb2a4c5c25d",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
