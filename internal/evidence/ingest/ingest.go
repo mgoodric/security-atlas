@@ -259,7 +259,7 @@ func (s *Service) LookupReceiptStatus(ctx context.Context, cred credstore.Creden
 	if err != nil {
 		return ReceiptStatus{}, err
 	}
-	defer tx.Rollback(tenantCtx)
+	defer func() { _ = tx.Rollback(tenantCtx) }()
 	if err := tenancy.ApplyTenant(tenantCtx, tx); err != nil {
 		return ReceiptStatus{}, err
 	}
