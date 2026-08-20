@@ -115,6 +115,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/oscal/component-definitions/{id}", Tag: "oscal", Tier: "bearer", Internal: false, Summary: "GET /v1/oscal/component-definitions/{id} — one import's components + vendor claims"},
 	{Method: "GET", Path: "/v1/oscal/imported-profiles/{id}/provenance", Tag: "oscal", Tier: "bearer", Internal: false, Summary: "GET /v1/oscal/imported-profiles/{id}/provenance"},
 	{Method: "GET", Path: "/v1/controls/{id}/state", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/state"},
+	{Method: "GET", Path: "/v1/coverage-strength/matrix", Tag: "ucf-coverage", Tier: "bearer", Internal: false, Summary: "GET /v1/coverage-strength/matrix — cross-framework coverage-strength matrix"},
 	{Method: "GET", Path: "/v1/csf/gap", Tag: "csf", Tier: "bearer", Internal: false, Summary: "GET /v1/csf/gap — NIST CSF 2.0 Current-vs-Target gap view"},
 	{Method: "GET", Path: "/v1/csf/profiles/{kind}", Tag: "csf", Tier: "bearer", Internal: false, Summary: "GET /v1/csf/profiles/{kind} — a CSF Current or Target profile + selections"},
 	{Method: "GET", Path: "/v1/csf/tier", Tag: "csf", Tier: "bearer", Internal: false, Summary: "GET /v1/csf/tier — the tenant's CSF 2.0 Tier rating"},
