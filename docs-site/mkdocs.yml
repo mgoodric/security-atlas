@@ -86,6 +86,7 @@ plugins:
 nav:
   - Intro: index.md
   - Install: install.md
+  - Verify release artifacts: release-verification.md
   - Connect an external IdP (OIDC): oidc-setup.md
   - Tenant membership and switching: tenant-membership.md
   - Configuration reference: configuration.md
