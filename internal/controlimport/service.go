@@ -50,8 +50,9 @@ type AnchorRetriever interface {
 }
 
 // MappingStore persists proposals and writes canonical mappings after human
-// approval. Approval writes must land no higher than community/draft
-// governance unless a separate review workflow promotes them.
+// approval. Implementations must apply the caller's tenant context to proposal
+// reads and approval/rejection writes. Approval writes must land no higher than
+// community/draft governance unless a separate review workflow promotes them.
 type MappingStore interface {
 	PersistProposal(ctx context.Context, proposal Proposal) (string, error)
 	ApproveProposal(ctx context.Context, proposalID, humanApprover string, editedSCFID *string) (ApprovedMapping, error)
@@ -198,20 +199,30 @@ type ApproveParams struct {
 // Approve is the one-click human approval path. It is the only method in this
 // package that asks the MappingStore to write a canonical mapping.
 func (s *Service) Approve(ctx context.Context, p ApproveParams) (ApprovedMapping, error) {
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		return ApprovedMapping{}, err
+	}
 	if strings.TrimSpace(p.HumanApprover) == "" {
 		return ApprovedMapping{}, ErrApproverRequired
 	}
-	if err := llm.EnforceApproval(llm.ApprovalState{
-		AIAssisted:    true,
-		HumanApproved: true,
-		HumanApprover: p.HumanApprover,
-	}); err != nil {
-		return ApprovedMapping{}, ErrApproverRequired
+	editedSCFID := p.EditedSCFID
+	if p.EditedSCFID != nil {
+		anchor, ok, err := s.retriever.ResolveAnchor(ctx, *p.EditedSCFID)
+		if err != nil {
+			return ApprovedMapping{}, fmt.Errorf("controlimport: resolve edited anchor: %w", err)
+		}
+		if !ok {
+			return ApprovedMapping{}, ErrUnresolvedAnchor
+		}
+		editedSCFID = &anchor.SCFID
 	}
-	return s.store.ApproveProposal(ctx, p.ProposalID, p.HumanApprover, p.EditedSCFID)
+	return s.store.ApproveProposal(ctx, p.ProposalID, p.HumanApprover, editedSCFID)
 }
 
 func (s *Service) Reject(ctx context.Context, proposalID, humanApprover, reason string) error {
+	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+		return err
+	}
 	if strings.TrimSpace(humanApprover) == "" {
 		return ErrApproverRequired
 	}
