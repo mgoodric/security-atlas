@@ -160,19 +160,50 @@ func TestSuggestLeavesLowConfidenceUnmapped(t *testing.T) {
 
 func TestApproveRequiresHumanApprover(t *testing.T) {
 	svc, _, store := testService(`{"scf_id":"IAC-06","confidence":0.86,"rationale":"MFA."}`)
-	_, err := svc.Approve(context.Background(), ApproveParams{ProposalID: "p1"})
+	ctx := tenantCtx(t, "00000000-0000-0000-0000-000000000001")
+	_, err := svc.Approve(ctx, ApproveParams{ProposalID: "p1"})
 	if !errors.Is(err, ErrApproverRequired) {
 		t.Fatalf("want ErrApproverRequired, got %v", err)
 	}
 	if len(store.approved) != 0 {
 		t.Fatalf("blank approver wrote canonical mapping")
 	}
-	got, err := svc.Approve(context.Background(), ApproveParams{ProposalID: "p1", HumanApprover: "user:security-lead"})
+	got, err := svc.Approve(ctx, ApproveParams{ProposalID: "p1", HumanApprover: "user:security-lead"})
 	if err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	if got.HumanApprover != "user:security-lead" || got.MappingTier != crosswalktier.TierDraft {
 		t.Fatalf("approved mapping mismatch: %+v", got)
+	}
+}
+
+func TestApproveRequiresTenantContext(t *testing.T) {
+	svc, _, store := testService(`{"scf_id":"IAC-06","confidence":0.86,"rationale":"MFA."}`)
+	_, err := svc.Approve(context.Background(), ApproveParams{
+		ProposalID:    "p1",
+		HumanApprover: "user:security-lead",
+	})
+	if !errors.Is(err, tenancy.ErrNoTenant) {
+		t.Fatalf("want ErrNoTenant, got %v", err)
+	}
+	if len(store.approved) != 0 {
+		t.Fatalf("tenantless approval wrote canonical mapping")
+	}
+}
+
+func TestApproveRejectsUnresolvedEditedSCFID(t *testing.T) {
+	svc, _, store := testService(`{"scf_id":"IAC-06","confidence":0.86,"rationale":"MFA."}`)
+	edited := "DNE-99"
+	_, err := svc.Approve(tenantCtx(t, "00000000-0000-0000-0000-000000000001"), ApproveParams{
+		ProposalID:    "p1",
+		HumanApprover: "user:security-lead",
+		EditedSCFID:   &edited,
+	})
+	if !errors.Is(err, ErrUnresolvedAnchor) {
+		t.Fatalf("want ErrUnresolvedAnchor, got %v", err)
+	}
+	if len(store.approved) != 0 {
+		t.Fatalf("unresolved edited SCF id wrote canonical mapping")
 	}
 }
 
