@@ -2938,6 +2938,48 @@ assertions` subsection so future spec authors avoid the same
   Production compose unchanged. Both `bundled` and `external`
   matrix modes use the staged shape.
 
+## [1.22.0](https://github.com/mgoodric/security-atlas/compare/v1.21.0...v1.22.0) (2026-08-21)
+
+
+### Features
+
+* a 201 from /v1/evidence:push is unfalsifiable ([#1576](https://github.com/mgoodric/security-atlas/issues/1576)) ([3b450ec](https://github.com/mgoodric/security-atlas/commit/3b450ec329359b08e30cdc7891f204f85da55a15))
+* Add a readiness probe distinct from liveness (356a G-3, G-4) ([#1572](https://github.com/mgoodric/security-atlas/issues/1572)) ([0edc8ca](https://github.com/mgoodric/security-atlas/commit/0edc8ca36e4907eddb9b84fb7141e300f6df6767))
+* **credstore:** persist push credentials through api_keys so a restart cannot invalidate them (OE-435) ([#1591](https://github.com/mgoodric/security-atlas/issues/1591)) ([d6142d4](https://github.com/mgoodric/security-atlas/commit/d6142d48690ebe87d72a23b0b99e9c9eb6a6ebec))
+* Incident register backend and lifecycle ([#1579](https://github.com/mgoodric/security-atlas/issues/1579)) ([bd712df](https://github.com/mgoodric/security-atlas/commit/bd712df99dfba72c6ee2f3b9aa85aeabbeb54ed0))
+* integration test: pin the API error shape under DB pool saturation ([#1592](https://github.com/mgoodric/security-atlas/issues/1592)) ([6d70698](https://github.com/mgoodric/security-atlas/commit/6d706981e9a26130d236f01aa9c5355a21f0652f))
+* **release:** publish atlas-mcp binaries (OE-597) ([#1536](https://github.com/mgoodric/security-atlas/issues/1536)) ([60ea1d8](https://github.com/mgoodric/security-atlas/commit/60ea1d8b52655eeaf41dbcffe2fda81426264841))
+* **release:** sign container release images ([#1533](https://github.com/mgoodric/security-atlas/issues/1533)) ([dbefed3](https://github.com/mgoodric/security-atlas/commit/dbefed3cf0537da18ed7cb424106062ba14fee42))
+* **securityawareness:** HRIS/SCIM roster sync into security_training_people (OE-658) ([#1552](https://github.com/mgoodric/security-atlas/issues/1552)) ([40de78a](https://github.com/mgoodric/security-atlas/commit/40de78ab02aded6b6252a0bce05c81b6e6efcca6))
+
+
+### Bug Fixes
+
+* **auth:** return 503 when OIDC provider is unavailable ([#1574](https://github.com/mgoodric/security-atlas/issues/1574)) ([8dceff4](https://github.com/mgoodric/security-atlas/commit/8dceff4ffeb94f599d7047b04d5e29a4783a56f5))
+* **authzmw:** answer DB outage as 503 database_unavailable and log the cause (OE-432) ([#1569](https://github.com/mgoodric/security-atlas/issues/1569)) ([4ac9e2c](https://github.com/mgoodric/security-atlas/commit/4ac9e2c9c94897bcb84692485a180e6a6e1fcbd7))
+* **controlimport:** guard human mapping approvals ([#1607](https://github.com/mgoodric/security-atlas/issues/1607)) ([8ff4c58](https://github.com/mgoodric/security-atlas/commit/8ff4c58f3cec7b2e8ef164e8786954b0cf170998))
+* reconcile audit subject module drift ([#1586](https://github.com/mgoodric/security-atlas/issues/1586)) ([7a69720](https://github.com/mgoodric/security-atlas/commit/7a69720fca58977ab7c18f273e720116446eb3c2))
+* **web:** point /evidence Push CTA at the published docs site (OE-665) ([#1568](https://github.com/mgoodric/security-atlas/issues/1568)) ([d06d53b](https://github.com/mgoodric/security-atlas/commit/d06d53b54bde890f53f9d314f69df07f774724d4))
+
+
+### Dependencies
+
+* **deps:** Bump brace-expansion ([#1560](https://github.com/mgoodric/security-atlas/issues/1560)) ([350d044](https://github.com/mgoodric/security-atlas/commit/350d0447ec0114a55aa82a543849a3e8dbdc5abc))
+* **deps:** Bump fast-uri from 3.1.4 to 3.1.5 ([#1567](https://github.com/mgoodric/security-atlas/issues/1567)) ([8dad07a](https://github.com/mgoodric/security-atlas/commit/8dad07a3617e1f7bad834475e6b3d84b9940050e))
+* **deps:** Bump hono from 4.12.32 to 4.13.1 ([#1588](https://github.com/mgoodric/security-atlas/issues/1588)) ([0a8140d](https://github.com/mgoodric/security-atlas/commit/0a8140dc5bd6c03723896f774d61cf68f24ddaa7))
+* **deps:** Bump ip-address from 10.2.0 to 10.4.0 ([#1565](https://github.com/mgoodric/security-atlas/issues/1565)) ([3ba5b3d](https://github.com/mgoodric/security-atlas/commit/3ba5b3d993889b5b4483afa9c346d1742fe35b59))
+* **deps:** Bump js-yaml from 4.1.1 to 4.3.1 ([#1589](https://github.com/mgoodric/security-atlas/issues/1589)) ([a457501](https://github.com/mgoodric/security-atlas/commit/a457501d82037ecb623c7c60b82b07868a46690a))
+* **deps:** Bump undici from 7.28.0 to 7.29.0 ([#1564](https://github.com/mgoodric/security-atlas/issues/1564)) ([2b59e49](https://github.com/mgoodric/security-atlas/commit/2b59e49df4577b5b98a8b2a1b9d53a6ce4d7cf3c))
+
+
+### Documentation
+
+* **audits:** reword 335 Exp 1/3 row-count equality checks to monotonic non-decrease ([#1571](https://github.com/mgoodric/security-atlas/issues/1571)) ([f208414](https://github.com/mgoodric/security-atlas/commit/f2084145eb45c80c92ceaf039fbfcbc96a98f584))
+* correct retention erasure posture ([#1585](https://github.com/mgoodric/security-atlas/issues/1585)) ([3b2420b](https://github.com/mgoodric/security-atlas/commit/3b2420b882e8fcf4a920a8a821813a4dc4f1e66c))
+* **governance:** author Records of Processing Activities (RoPA) for project (OE-449) ([#1584](https://github.com/mgoodric/security-atlas/issues/1584)) ([38cbfb3](https://github.com/mgoodric/security-atlas/commit/38cbfb3331bb3da83283f485f324b8032e050130))
+* **governance:** publish personal data inventory (PRIV-4, PRIV-1) ([#1583](https://github.com/mgoodric/security-atlas/issues/1583)) ([9aee76b](https://github.com/mgoodric/security-atlas/commit/9aee76bd710826b333f6fa66f3416c51747ba6c7))
+* **privacy:** Chapter V transfer analysis + EU opt-in guard for cloud LLM routing (OE-450) ([#1587](https://github.com/mgoodric/security-atlas/issues/1587)) ([db6ced9](https://github.com/mgoodric/security-atlas/commit/db6ced95eebf6c9b2038d11216d3337a89558263))
+
 ## [1.21.0](https://github.com/mgoodric/security-atlas/compare/v1.20.0...v1.21.0) (2026-08-03)
 
 
