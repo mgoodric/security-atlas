@@ -146,11 +146,11 @@ have marked them `manual` instead, which would be a false statement about
 ISC-2, ISC-3 and ISC-4 — all three are machine-checkable, they are simply
 unchecked today.
 
-| isc | tier | type | check | threshold | tool |
-|-----|------|------|-------|-----------|------|
-| ISC-2 | service | sql | no SCF anchor carries two controls with overlapping satisfactions | 0 | `bash isa/probes/no-duplicate-controls.sh` |
-| ISC-3 | service | bash | replay at T equals what was reported at T | 0 | `bash isa/probes/ledger-replay.sh` |
-| ISC-4 | service | sql | no published artifact has ai_assisted without a human_approver | 0 | `bash isa/probes/human-approver-guard.sh` |
+| isc   | tier    | type | check                                                             | threshold | tool                                       |
+| ----- | ------- | ---- | ----------------------------------------------------------------- | --------- | ------------------------------------------ |
+| ISC-2 | service | sql  | no SCF anchor carries two controls with overlapping satisfactions | 0         | `bash isa/probes/no-duplicate-controls.sh` |
+| ISC-3 | service | bash | replay at T equals what was reported at T                         | 0         | `bash isa/probes/ledger-replay.sh`         |
+| ISC-4 | service | sql  | no published artifact has ai_assisted without a human_approver    | 0         | `bash isa/probes/human-approver-guard.sh`  |
 
 ISC-1 and ISC-5 carry no row on purpose. Both are manual with a stated reason
 in the claim itself: ISC-1 is experiential (a whole audit cycle with a real
@@ -180,15 +180,15 @@ Ratified decisions live in `docs/adr/` and are not restated here. As of
 2026-08-21 there are 21, ADR-0001 through ADR-0021. The ones that most directly
 bound the claims above:
 
-| ADR | Bears on |
-|-----|----------|
-| 0012 | append-only evidence ledger (C2, ISC-3) |
-| 0013 | UCF graph, one control N satisfactions (C1, ISC-2) |
+| ADR  | Bears on                                                     |
+| ---- | ------------------------------------------------------------ |
+| 0012 | append-only evidence ledger (C2, ISC-3)                      |
+| 0013 | UCF graph, one control N satisfactions (C1, ISC-2)           |
 | 0014 | multidimensional scope, FrameworkScope intersection (C4, C5) |
-| 0011 | RLS tenant isolation (C6) |
-| 0003 | audit-period freeze hash inputs (C10) |
-| 0006 | board-narrative AI assist (C11) |
-| 0020 | right to erasure vs the append-only ledger (C2, ISC-3) |
+| 0011 | RLS tenant isolation (C6)                                    |
+| 0003 | audit-period freeze hash inputs (C10)                        |
+| 0006 | board-narrative AI assist (C11)                              |
+| 0020 | right to erasure vs the append-only ledger (C2, ISC-3)       |
 
 ADR-0020 is the one to read first when a claim here feels too absolute:
 append-only and erasure genuinely conflict, and that ADR is where the conflict
