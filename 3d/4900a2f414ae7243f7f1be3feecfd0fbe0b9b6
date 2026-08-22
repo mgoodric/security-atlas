@@ -1,0 +1,19 @@
+isa/ISA.md
+  s_c9ad260482d0ae::t_09646c0c2bd50f 149-153,183-186,188-191
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "3d4900a2f414ae7243f7f1be3feecfd0fbe0b9b6",
+  "prompts": {},
+  "sessions": {
+    "s_c9ad260482d0ae": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "480028c5-c100-4903-9d13-8f09eb3eff44",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
