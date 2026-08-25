@@ -99,6 +99,14 @@ the defect.
   approval. `ai_assisted=true` cannot carry `human_approved=true` without
   `human_approver` set, enforced in schema via the shared
   `ai_assist_human_approver_guard`.
+- C13 · These need a human before they merge: `migrations/*`, `isa/*`,
+  `.github/workflows/*`, `deploy/*`, `controls/*`, and `internal/auth/*`.
+  This repo is PUBLIC, so an unreviewed merge is a published one. A migration
+  runs once against real evidence, a workflow runs with the repo's
+  credentials, `controls/` is the catalog every framework view is computed
+  from, and `internal/auth/` is the tenant boundary C6 says lives in the
+  database rather than in application code. A fire may propose changes to any
+  of them; merge-on-green does not apply.
 - C12 · Local inference is the default. Cloud LLM routing is opt-in per tenant
   and visibly indicated.
 
