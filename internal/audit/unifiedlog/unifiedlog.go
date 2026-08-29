@@ -169,8 +169,8 @@ type QueryParams struct {
 	KindFilter []Kind
 
 	// Cursor, if non-nil, resumes from the given position. The cursor's
-	// (OccurredAt, Kind, TargetID) tuple is the strict-greater-than
-	// boundary in the WHERE clause.
+	// (OccurredAt, Kind, RowID) tuple is the strict-greater-than boundary
+	// in the WHERE clause.
 	Cursor *Cursor
 
 	// Limit caps the row count returned. The aggregator does NOT enforce

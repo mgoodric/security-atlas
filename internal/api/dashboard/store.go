@@ -32,6 +32,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -40,6 +41,21 @@ import (
 // query it issues is a SELECT.
 type Store struct {
 	pool *pgxpool.Pool
+}
+
+// ActivityRow is the dashboard `/v1/activity` row shape before JSON
+// rendering. It is intentionally dashboard-owned: the store now reads the
+// canonical unified audit ledger, while the dashboard endpoint keeps its
+// historical panel envelope.
+type ActivityRow struct {
+	Ts           pgtype.Timestamptz
+	Kind         string
+	RowID        uuid.UUID
+	EventType    string
+	Actor        string
+	ResourceType string
+	ResourceID   string
+	Summary      []byte
 }
 
 // NewStore wires a Store over the application pgx pool. The pool must be
@@ -95,19 +111,55 @@ func (s *Store) FrameworkPosture(ctx context.Context, trendCutoff pgtype.Timesta
 	return rows, err
 }
 
-// ActivityFeed reads one page of the evidence-ingest activity feed,
-// newest-first, bounded by the keyset cursor. It returns up to limit rows.
-func (s *Store) ActivityFeed(ctx context.Context, cursor keyset, pageRows int32) ([]dbx.ListEvidenceActivityRow, error) {
-	var rows []dbx.ListEvidenceActivityRow
-	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		var qerr error
-		rows, qerr = q.ListEvidenceActivity(ctx, dbx.ListEvidenceActivityParams{
-			TenantID: pgUUID(tenantID),
-			CursorTs: pgTimestamptz(cursor.ts),
-			CursorID: cursor.id,
-			RowLimit: pageRows + 1, // +1 probe row to detect a next page
-		})
-		return qerr
+// ActivityFeed reads one page of the dashboard activity feed, newest-first,
+// bounded by the keyset cursor and an optional canonical kind filter. It
+// projects the unified audit-ledger taxonomy into the historical dashboard
+// panel row shape.
+func (s *Store) ActivityFeed(ctx context.Context, kindFilter string, cursor keyset, pageRows int32) ([]ActivityRow, error) {
+	var rows []ActivityRow
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ uuid.UUID) error {
+		params := unifiedlog.QueryParams{
+			From:                 farPast,
+			To:                   farFuture,
+			KindFilter:           dashboardActivityKindFilter(kindFilter),
+			Limit:                int(pageRows + 1), // +1 probe row to detect a next page
+			ExcludeReadTelemetry: true,
+			CallerIsPrivileged:   false,
+			CallerUserID:         "",
+		}
+		if !cursor.ts.Equal(farFuture) {
+			rowID, err := uuid.Parse(cursor.id)
+			if err != nil {
+				return errBadCursor
+			}
+			k := unifiedlog.Kind(cursor.kind)
+			if !dashboardActivityKindAllowed(k) {
+				return errBadCursor
+			}
+			params.Cursor = &unifiedlog.Cursor{
+				OccurredAt: cursor.ts,
+				Kind:       k,
+				RowID:      rowID,
+			}
+		}
+		got, _, qerr := unifiedlog.Query(ctx, q, params)
+		if qerr != nil {
+			return qerr
+		}
+		rows = make([]ActivityRow, 0, len(got))
+		for _, ev := range got {
+			rows = append(rows, ActivityRow{
+				Ts:           pgTimestamptz(ev.OccurredAt),
+				Kind:         string(ev.Kind),
+				RowID:        ev.RowID,
+				EventType:    string(ev.Kind) + "." + ev.Action,
+				Actor:        ev.ActorID,
+				ResourceType: ev.TargetType,
+				ResourceID:   ev.TargetID,
+				Summary:      []byte(ev.PayloadJSON),
+			})
+		}
+		return nil
 	})
 	return rows, err
 }
@@ -142,8 +194,8 @@ func (s *Store) UpcomingItems(ctx context.Context, categoryFilter string, cursor
 // leaking the type.
 //
 // `limit` is the page size (the caller's responsibility to bound).
-func (s *Store) ActivityFeedFirstPage(ctx context.Context, limit int32) ([]dbx.ListEvidenceActivityRow, error) {
-	return s.ActivityFeed(ctx, firstPageActivity(), limit)
+func (s *Store) ActivityFeedFirstPage(ctx context.Context, limit int32) ([]ActivityRow, error) {
+	return s.ActivityFeed(ctx, "", firstPageActivity(), limit)
 }
 
 // UpcomingItemsFirstPage is the cross-package convenience wrapper for
@@ -157,4 +209,30 @@ func (s *Store) ActivityFeedFirstPage(ctx context.Context, limit int32) ([]dbx.L
 // specialise the call without a second wrapper.
 func (s *Store) UpcomingItemsFirstPage(ctx context.Context, categoryFilter string, limit int32) ([]dbx.ListUpcomingItemsRow, error) {
 	return s.UpcomingItems(ctx, categoryFilter, firstPageUpcoming(), limit)
+}
+
+var dashboardActivityKinds = []unifiedlog.Kind{
+	unifiedlog.KindDecision,
+	unifiedlog.KindEvidence,
+	unifiedlog.KindException,
+	unifiedlog.KindSample,
+	unifiedlog.KindAuditPeriod,
+	unifiedlog.KindAggregationRule,
+	unifiedlog.KindWalkthrough,
+}
+
+func dashboardActivityKindAllowed(k unifiedlog.Kind) bool {
+	for _, candidate := range dashboardActivityKinds {
+		if candidate == k {
+			return true
+		}
+	}
+	return false
+}
+
+func dashboardActivityKindFilter(raw string) []unifiedlog.Kind {
+	if raw != "" {
+		return []unifiedlog.Kind{unifiedlog.Kind(raw)}
+	}
+	return dashboardActivityKinds
 }
