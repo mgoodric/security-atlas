@@ -67,42 +67,50 @@ test.describe("admin bootstrap", () => {
 
     // 3. SSO discovery preflight + save (slice 063 extension).
     await page.goto("/admin/sso");
-    await page.fill('input#preflight-issuer', "https://accounts.google.com");
+    await page.fill("input#preflight-issuer", "https://accounts.google.com");
     await page.click("text=Run preflight");
     await expect(page.getByText("Discovery OK")).toBeVisible();
 
     // 3b. Fill the OIDC configuration form and submit (slice 063).
-    await page.fill('input#sso-issuer-url', "https://idp.example.com");
-    await page.fill('input#sso-client-id', "platform-rp-client");
-    await page.fill('input#sso-client-secret', "test-secret-placeholder");
-    await page.fill('input#sso-redirect-url', "https://your-deployment.example/auth/oidc/callback");
-    await page.fill('input#sso-allowed-domains', "example.com");
+    await page.fill("input#sso-issuer-url", "https://idp.example.com");
+    await page.fill("input#sso-client-id", "platform-rp-client");
+    await page.fill("input#sso-client-secret", "test-secret-placeholder");
+    await page.fill(
+      "input#sso-redirect-url",
+      "https://your-deployment.example/auth/oidc/callback",
+    );
+    await page.fill("input#sso-allowed-domains", "example.com");
     await page.click('[data-testid="sso-save-button"]');
-    await expect(page.locator('[data-testid="sso-save-success"]')).toBeVisible();
+    await expect(
+      page.locator('[data-testid="sso-save-success"]'),
+    ).toBeVisible();
 
     // 3c. Reload and assert the GET re-render shows the saved fields
     //     and DOES NOT show client_secret (slice 034 AC-9 / write-once).
     await page.reload();
-    await expect(page.locator('input#sso-issuer-url')).toHaveValue(
+    await expect(page.locator("input#sso-issuer-url")).toHaveValue(
       "https://idp.example.com",
     );
-    await expect(page.locator('input#sso-client-id')).toHaveValue(
+    await expect(page.locator("input#sso-client-id")).toHaveValue(
       "platform-rp-client",
     );
-    await expect(page.locator('input#sso-redirect-url')).toHaveValue(
+    await expect(page.locator("input#sso-redirect-url")).toHaveValue(
       "https://your-deployment.example/auth/oidc/callback",
     );
     // Critically: client_secret input is empty after the reload.
     // The backend never returns it; the UI never re-renders it.
-    await expect(page.locator('input#sso-client-secret')).toHaveValue(
-      "",
-    );
+    await expect(page.locator("input#sso-client-secret")).toHaveValue("");
 
     // 3d. Re-submit with an empty client_secret — slice 062 contract
     //     treats this as "leave existing", so the save must succeed.
-    await page.fill('input#sso-allowed-domains', "example.com, sub.example.com");
+    await page.fill(
+      "input#sso-allowed-domains",
+      "example.com, sub.example.com",
+    );
     await page.click('[data-testid="sso-save-button"]');
-    await expect(page.locator('[data-testid="sso-save-success"]')).toBeVisible();
+    await expect(
+      page.locator('[data-testid="sso-save-success"]'),
+    ).toBeVisible();
 
     // 4. Toggle a feature flag.
     await page.goto("/admin/features");
@@ -113,7 +121,7 @@ test.describe("admin bootstrap", () => {
 
     // 5. Issue an API key + confirm write-once disclosure.
     await page.goto("/admin/api-keys");
-    await page.fill('input[placeholder^="{\\"connector\\"}"]', '{}');
+    await page.fill('input[placeholder^="{\\"connector\\"}"]', "{}");
     await page.click("text=Issue credential");
     const callout = page.locator('[data-testid="fresh-secret-callout"]');
     await expect(callout).toBeVisible();
@@ -121,7 +129,13 @@ test.describe("admin bootstrap", () => {
 
     // 6. Verify the role-permission matrix.
     await page.goto("/admin/users");
-    for (const role of ["admin", "grc_engineer", "control_owner", "auditor", "viewer"]) {
+    for (const role of [
+      "admin",
+      "grc_engineer",
+      "control_owner",
+      "auditor",
+      "viewer",
+    ]) {
       await expect(page.getByText(role)).toBeVisible();
     }
   });
@@ -159,15 +173,15 @@ test.describe("admin bootstrap", () => {
     await page.waitForURL("/dashboard");
 
     // 2. Assert the sidebar Admin link is visible.
-    await expect(
-      page.locator('aside nav a[href="/admin"]'),
-    ).toBeVisible();
-    await expect(
-      page.locator('aside nav a[href="/admin"]'),
-    ).toHaveText("Admin");
+    await expect(page.locator('aside nav a[href="/admin"]')).toBeVisible();
+    await expect(page.locator('aside nav a[href="/admin"]')).toHaveText(
+      "Admin",
+    );
   });
 
-  test("non-admin bearer does NOT see the sidebar Admin entry", async ({ page }) => {
+  test("non-admin bearer does NOT see the sidebar Admin entry", async ({
+    page,
+  }) => {
     // 1. Sign in with a non-admin bearer (TEST_VIEWER_BEARER).
     await page.goto("/login");
     await page.fill('input[name="token"]', process.env.TEST_VIEWER_BEARER!);
@@ -175,9 +189,7 @@ test.describe("admin bootstrap", () => {
     await page.waitForURL("/dashboard");
 
     // 2. Assert the sidebar renders without an Admin link.
-    await expect(
-      page.locator('aside nav a[href="/admin"]'),
-    ).toHaveCount(0);
+    await expect(page.locator('aside nav a[href="/admin"]')).toHaveCount(0);
 
     // 3. Confirm the other canonical entries DO render — verifies the
     //    role-gate is surgical, not blanket-hiding.
