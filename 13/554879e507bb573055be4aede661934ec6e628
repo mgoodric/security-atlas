@@ -1,0 +1,24 @@
+Plans/canvas/11-open-questions.md
+  s_ccde1786bc1bb9::t_0f02701dbd8c34 64-70
+  s_ccde1786bc1bb9::t_f6228f54c599d2 72
+  s_ccde1786bc1bb9::t_59fbfb7a71bed0 20,63,71
+Plans/canvas/08-audit-workflow.md
+  s_ccde1786bc1bb9::t_27856c4ba0cec1 81
+  s_ccde1786bc1bb9::t_87c37b5803ec75 67-80,82-112
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "13554879e507bb573055be4aede661934ec6e628",
+  "prompts": {},
+  "sessions": {
+    "s_ccde1786bc1bb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "34f7d512-9af7-409d-830c-e83a823901e1",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
