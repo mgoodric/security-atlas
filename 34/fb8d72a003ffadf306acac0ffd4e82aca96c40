@@ -1,0 +1,19 @@
+docs/issues/_STATUS.md
+  s_ccde1786bc1bb9::t_c411feeadcf85d 1,3-6,8-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "34fb8d72a003ffadf306acac0ffd4e82aca96c40",
+  "prompts": {},
+  "sessions": {
+    "s_ccde1786bc1bb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "34f7d512-9af7-409d-830c-e83a823901e1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
