@@ -1,0 +1,28 @@
+Plans/canvas/08-audit-workflow.md
+  s_ccde1786bc1bb9::t_87c37b5803ec75 67-80,82-112
+  s_ccde1786bc1bb9::t_27856c4ba0cec1 81
+isa/assessor-delivery.md
+  s_ccde1786bc1bb9::t_59fbfb7a71bed0 17,47,114-123,156-157,159-161
+  s_ccde1786bc1bb9::t_47c49d5a6ad946 84,89
+  s_ccde1786bc1bb9::t_c163828d5ff2aa 1-16,18-46,48-83,85-88,90-113,124-155,158,162-183
+Plans/canvas/11-open-questions.md
+  s_ccde1786bc1bb9::t_0f02701dbd8c34 64-70
+  s_ccde1786bc1bb9::t_f6228f54c599d2 72
+  s_ccde1786bc1bb9::t_dd2872ec5e5db2 20,63,71
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "5a3c0030e6ee40fc55c169ca90cf58090f1baeb6",
+  "prompts": {},
+  "sessions": {
+    "s_ccde1786bc1bb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "34f7d512-9af7-409d-830c-e83a823901e1",
+        "model": "claude-opus-5"
+      },
+      "human_author": null
+    }
+  }
+}
