@@ -1,0 +1,22 @@
+AGENTS.md
+  s_ccde1786bc1bb9::t_b02ce372844157 13-16,22-29,201-205
+  s_ccde1786bc1bb9::t_c0744810201ff2 476-494,497-498,502,506-510,533-540,568
+  s_ccde1786bc1bb9::t_58b2275af66b91 17-21,344-350
+  s_ccde1786bc1bb9::t_3b59a483320364 342-343,351-361,383,448
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "501ee6664f5e92d9b3b6b080c3848964d3e542fd",
+  "prompts": {},
+  "sessions": {
+    "s_ccde1786bc1bb9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "34f7d512-9af7-409d-830c-e83a823901e1",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    }
+  }
+}
