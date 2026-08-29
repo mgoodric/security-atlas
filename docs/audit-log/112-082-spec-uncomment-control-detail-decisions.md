@@ -1,9 +1,9 @@
 # 112 — Extend `control-detail.sql` to FULL coverage + enable assertions in `control-detail.spec.ts`
 
-**Slice:** 112  
-**Status:** Ready for review  
-**Type:** AFK  
-**Date completed:** 2026-08-20  
+**Slice:** 112
+**Status:** Ready for review
+**Type:** AFK
+**Date completed:** 2026-08-20
 **Author:** Matt Goodrich (Agent: matt-codex)
 
 ## Summary
@@ -46,6 +46,7 @@ The requirement calls for "≥5 clean post-082 runs BEFORE the gap" (do not trea
 ### D1: Single synthetic framework + both edge types
 
 **Decision:** Create one synthetic `framework_version` and seed TWO `fw_to_scf_edges`:
+
 - Edge 1: demo requirement (from base seed) → synthetic anchor
 - Edge 2: synthetic requirement → synthetic anchor
 
@@ -61,7 +62,8 @@ The requirement calls for "≥5 clean post-082 runs BEFORE the gap" (do not trea
 
 **Decision:** Seed two evidence records (one recent, one older, both in-scope) and two drift snapshots (yesterday control passing, today not passing).
 
-**Rationale:** 
+**Rationale:**
+
 - AC-4 asserts evidence stream renders real data (not endpoint-pending placeholder).
 - AC-5 asserts freshness clock binds to control state.
 - Slice 256 asserts coverage column renders numeric coverage values (calculated from strength × 30-day effectiveness).
@@ -81,13 +83,13 @@ The freshness calculation requires `latest_observed_at` from evidence records. T
 
 To verify the spec FAILS when seeded incorrectly:
 
-**Break condition 1:** Remove the out-of-scope framework_scope.  
+**Break condition 1:** Remove the out-of-scope framework_scope.
 **Result:** AC-7 assertion `const oosRow = page.locator('[data-testid="coverage-row"][data-out-of-scope="true"]');` times out — no row with `data-out-of-scope="true"` renders.
 
-**Break condition 2:** Seed only one fw_to_scf_edge instead of two.  
+**Break condition 2:** Seed only one fw_to_scf_edge instead of two.
 **Result:** AC-6 assertion `expect(requests.filter((u) => u.includes("/effective-scope?framework_version=")).length).toBeGreaterThan(0);` may pass (if the single framework_version still triggers a call) but AC-7 and the multi-framework coverage scenarios fail — the control doesn't have at least one in-scope and one out-of-scope requirement pair.
 
-**Break condition 3:** Remove evidence records.  
+**Break condition 3:** Remove evidence records.
 **Result:** AC-4 assertion `await expect(list.or(empty)).toBeVisible();` passes (empty state renders), but slice 256 assertion `const numeric = page.locator('[data-testid="coverage-cell"][data-coverage-state="numeric"]');` times out — no numeric coverage row renders because the backend can't calculate coverage without evidence.
 
 These negative controls are structurally sound but not run in this session (requires active docker-compose stack + Playwright CLI). The assertions themselves carry the verification.
@@ -111,6 +113,7 @@ All test functions now carry `async ({ page })` parameter (required by Playwrigh
 ### No precondition violations
 
 The docker-compose bring-up per `web/e2e/README.md` establishes all preconditions:
+
 - Postgres + NATS + MinIO healthy
 - Atlas reachable; web app on :3000
 - `atlas-bootstrap` complete (phase-2 migrations run, evidence_kind_schemas exist)
@@ -129,6 +132,7 @@ The fixture SQL runs against the seeded database; no unmet dependencies.
 ## Outcomes
 
 **Deliverables:**
+
 - Extended `fixtures/e2e/control-detail.sql` (STUB → FULL)
 - Uncommented + enabled assertions in `web/e2e/control-detail.spec.ts`
 - Decisions log (this document)
