@@ -10,7 +10,23 @@
 > lives in open-engine `docs/AUTONOMY.md` and is referenced, not restated,
 > here.
 
-**Status:** v1 backlog fully merged on `main` (69/69 v1 slices; v2 follow-ons in progress). The system of record for design intent is still the canvas under `Plans/`; the system of record for implementation is `main` plus the merge trail in `docs/issues/_STATUS.md`. `_STATUS.md` is a **generated** file (`scripts/gen-status.sh` / `just status`); it is no longer reconciled via a per-merge `chore(status)` PR (slice 741). The in-repo copy is **regenerated on demand** (`just status`) and **may lag** — it is non-gating. A CI auto-push of the regenerated file is NOT active: on this personal repo a `GITHUB_TOKEN` cannot push to the protected `main` (see slice 744). Treat git history + `_events.jsonl` as ground truth; run `just status` when you need a fresh browsable copy.
+**Status:** v1 backlog fully merged on `main`; v2 work in progress.
+
+Two systems of record, and they answer different questions:
+
+| Question                        | Where it is answered                                                                               |
+| ------------------------------- | -------------------------------------------------------------------------------------------------- |
+| What is true when this is done? | `isa/` — `isa/ISA.md` (initiative) and `isa/<epic>.md`. Claims with falsifiers and probes.         |
+| Why is it shaped this way?      | `Plans/` (the canvas) for design intent, `docs/adr/` for the trade-off behind a ratified decision. |
+| What actually shipped?          | `main` and its history.                                                                            |
+
+**The slice workflow is retired.** `docs/issues/NNN-*.md`, `docs/issues/_STATUS.md`,
+`docs/issues/_INDEX.md`, `docs/issues/_events.jsonl`, `Plans/prompts/*` and the
+`chore(status)` commit trail are **history, not process** — accurate records of how
+the 69 v1 slices and their v2 follow-ons were built, and no longer how work is
+filed or tracked. Do not add a slice doc, do not edit `_STATUS.md`, do not append
+to `_events.jsonl`. Plane / Open Engine (`OE-NNN` in older commit subjects) is
+retired for the same reason. New work is stated as a claim in `isa/`.
 
 ---
 
@@ -182,7 +198,11 @@ Full updated list maintained at slice 182's tone-anti-pattern reference document
 
 **Forward note (banned-phrase enforcement):** the banned-phrase list above must be wired into the LLM system prompt when board-narrative v0 ships (slice 182's v2 continuation). No enforcement surface exists in v1 — the v1 board narrative is template-only (`internal/board/narrative.go`, a pure `text/template` renderer with no LLM call site). The list is documented here but not yet runtime-enforced; the v2 slice that introduces the call site owns wiring it in.
 
-**This boundary governs the product at runtime — not the development process.** It is constitutional and unchanged. Separately, the _slice-development_ workflow has a `JUDGMENT` slice type (formerly `HITL`): when building a slice, Claude makes the subjective build-time calls itself (control-text accuracy, UX copy, rule-DSL shape, OSCAL conformance choices) and records them in a decisions log rather than blocking the merge on a human sign-off — the maintainer iterates post-deployment. That is a process choice about _how we build_. It does NOT touch this boundary, which is about _how the shipped product behaves_: the product still never publishes an audit-binding artifact without one-click human approval. Never conflate the two. See `Plans/prompts/04-per-slice-template.md` "Slice types".
+**This boundary governs the product at runtime, not the development process.** It is constitutional and unchanged.
+
+Separately: an agent building a claim resolves the subjective build-time calls itself (control-text accuracy, UX copy, rule-DSL shape, OSCAL conformance choices) and records them in a decisions log under `docs/audit-log/`, rather than stopping to ask. That is a process choice about _how we build_. It does NOT touch this boundary, which is about _how the shipped product behaves_: the product still never publishes an audit-binding artifact without one-click human approval. Never conflate the two.
+
+(The retired slice workflow called this a `JUDGMENT` slice type, formerly `HITL`. The decisions-log habit survived the workflow that named it; the `Plans/prompts/` templates did not.)
 
 ### Licensing constraints (do not violate)
 
@@ -319,7 +339,26 @@ security-atlas/
 
 ## Working norms in this repo
 
-### Editing `Plans/` vs editing code
+### Where a change goes
+
+| Kind of change                                             | Lands in                                                                                                                |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| A new thing the platform must be true of                   | A claim in `isa/` — an epic `isa/<name>.md` for a feature, `isa/ISA.md` only for something true of the whole initiative |
+| The falsifier for a claim                                  | A probe under `isa/probes/`, named in that ISA's Test Strategy table                                                    |
+| Design intent behind a claim                               | The canvas section it belongs to, under `Plans/canvas/`                                                                 |
+| The trade-off behind a ratified decision                   | An ADR at `docs/adr/NNNN-*.md`                                                                                          |
+| A subjective build-time call made while satisfying a claim | A decisions log at `docs/audit-log/`                                                                                    |
+
+Claims state what is true, not what to do. An epic ISA inherits the Constraints
+in `isa/ISA.md` and cannot violate them. Anything true of one feature belongs in
+that feature's epic, never in the initiative ISA.
+
+**An ISA that is not on `origin/main` does not exist.** The engine reads
+`isa/*.md` from the base branch, so a claim on a PR branch is a draft no fire can
+read — and a fire provisioned against it gets a worktree with no `isa/` in it.
+This is a real 2026-08-24 failure in this repo, not a hypothetical.
+
+### Editing `Plans/`
 
 1. **Canvas (`Plans/canvas/*.md`) edits** — write to the split files, not the hub. The hub (`Plans/ARCHITECTURE_CANVAS.md`) is an index — only edit it for executive summary / navigation / load-bearing-decisions changes.
 2. **Companion docs** (`UCF_GRAPH_MODEL.md`, `EVIDENCE_SDK.md`) stay at `Plans/` root, not under `canvas/`.
@@ -341,7 +380,7 @@ The v1 spine was built in this order — preserved here so future contributors u
 - **No emojis** in code, docs, or commit messages unless the user explicitly requests them.
 - **Markdown over prose:** prefer tables, lists, and short paragraphs over walls of text.
 - **Cite sources** when making factual claims (versions, license terms, vendor behavior). Sources live in `Plans/canvas/sources.md`.
-- **Conventional Commits** when code commits begin (`feat:`, `fix:`, `docs:`, `chore:`, etc.).
+- **Conventional Commits** (`feat:`, `fix:`, `docs:`, `chore:`, etc.). Spec work carries the `isa:` prefix (e.g. `isa: assessor delivery, eight claims with falsifiers`).
 - **Co-authored-by** trailer on AI-assisted commits.
 - **DCO sign-off (required).** Every commit MUST carry a `Signed-off-by:` trailer matching the commit author (`git commit -s`); the project enforces the [Developer Certificate of Origin](https://developercertificate.org/) via the DCO check (see `CONTRIBUTING.md` §DCO). The sign-off email MUST match the author email, so the repo's git identity must be the human contributor (`Matt Goodrich <matt@mattgoodrich.com>`), never a bot — do NOT set a local `user.name`/`user.email` override. AI-assisted commits carry BOTH trailers, e.g.:
 
@@ -406,7 +445,7 @@ Slice 352 formalizes the per-surface flake budget proposed in slice 333's QA aud
 
 ### Defect detection-tier classification
 
-Slice 353 (Q-13 from slice 333's audit) adds two fields to every JUDGMENT-slice decisions log: `detection_tier_actual` (where a bug found during the slice WAS caught) and `detection_tier_target` (where it SHOULD have been caught). Allowed values: `unit`, `integration`, `playwright`, `contract`, `manual_review`, `production`, `none` (no bug surfaced during the slice). The template lives in [`Plans/prompts/04-per-slice-template.md`](Plans/prompts/04-per-slice-template.md) ("Detection-tier classification"). Aggregated over time, a recurring `target=unit, actual=production` pattern is a coverage-tier gap; a recurring `target=integration, actual=fix_forward` pattern is an integration-enrolment gap (Q-7). The cost is one line per decisions log; the payoff is an aggregate signal the project lacks today (slice 333 Theme 3). The companion fix-forward-rate metric (Q-14) is tracked in [`docs/fix-forward-rate.md`](docs/fix-forward-rate.md).
+Every decisions log under `docs/audit-log/` carries two fields: `detection_tier_actual` (where a bug found during the work WAS caught) and `detection_tier_target` (where it SHOULD have been caught). Allowed values: `unit`, `integration`, `playwright`, `contract`, `manual_review`, `production`, `none` (no bug surfaced). Originally slice 353 (Q-13 from slice 333's audit); the convention outlived the slice workflow that introduced it. Aggregated over time, a recurring `target=unit, actual=production` pattern is a coverage-tier gap; a recurring `target=integration, actual=fix_forward` pattern is an integration-enrolment gap (Q-7). The cost is one line per decisions log; the payoff is an aggregate signal the project lacks today (slice 333 Theme 3). The companion fix-forward-rate metric (Q-14) is tracked in [`docs/fix-forward-rate.md`](docs/fix-forward-rate.md).
 
 ---
 
@@ -434,27 +473,41 @@ These are explicitly deferred. Do not pick one unilaterally. (Full list: `Plans/
 
 ## How work lands (push + PR)
 
-Work in this repo is scoped as **slices** — one vertical, tracer-bullet unit
-per doc under `docs/issues/NNN-slug.md` (index: `docs/issues/_INDEX.md`;
-authoring template: `Plans/prompts/04-per-slice-template.md`; the
-`idea-to-slice` skill drafts new ones). Slice state is derived from git
-history + `docs/issues/_events.jsonl`; `just status` regenerates the
-browsable `_STATUS.md` (generated file — never hand-edit).
+Work in this repo is scoped as **claims**. Each claim names what is true when
+it is satisfied, the falsifier that would show it is not, and the probe that
+answers the question. The engine reads `isa/*.md` from `origin/main` and turns
+each claim into a work item; nothing writes a terminal state except the
+computation that reads probe results.
+
+Three rules carry most of the weight, and they are structural rather than
+advisory:
+
+- **An implementer satisfies a claim and never adds, weakens or rewords one.**
+  If satisfying a claim requires changing it, that is a finding to report, not
+  an edit to make. Propose; the engine appends.
+- **A named probe that does not exist yet is correct.** It reports
+  `unverifiable`, which is a third value and not a pass. Naming the probe is how
+  a machine-checkable claim avoids being misfiled as `manual`.
+- **A claim closes on a probe that has been observed failing and then passing.**
+  A probe that has only ever passed proves nothing about the claim.
+
+The mechanics:
 
 - Feature branch `<area>/<short-description>` off `main` (the only long-lived
-  branch); Open Engine fires use the runner-provided `open-engine/OE-NNN-*`
-  branch instead.
+  branch). Engine fires use the runner-provided branch and work in a worktree
+  under `~/Development/.engine-worktrees/`, never in this checkout.
 - Conventional Commit messages, DCO `Signed-off-by` (`git commit -s`) plus
   `Co-Authored-By` on AI-assisted commits — see "Style" above for the exact
   trailer rules.
-- Push the branch and open a PR to `main`; engine fires follow open-engine
-  `docs/AUTONOMY.md` (push + PR is the normal autonomous path; nothing
-  auto-merges past the checks).
+- Push the branch and open a PR to `main`. Nothing auto-merges past the checks.
 - Merge is squash-merge, gated on the four required checks (see "Testing
   discipline"): `Go · build + test`, `Go · integration (Postgres RLS)`,
   `Frontend · vitest`, `Frontend · Playwright e2e`.
-- JUDGMENT slices record their subjective build-time calls in a decisions log
-  under `docs/audit-log/` rather than blocking the merge on human sign-off.
+- Subjective build-time calls go in a decisions log under `docs/audit-log/`
+  rather than blocking the merge on a human.
+
+The engine's own contract — fire lifecycle, authority boundaries, routing,
+handoff — lives in the `engine` repo and is referenced here, not restated.
 
 ## How to verify done
 
@@ -477,9 +530,14 @@ Before claiming completion:
 
 ## Gotchas
 
-- **`docs/issues/_STATUS.md` is generated** (`just status`). Never edit it by
-  hand; it may lag `main` and that lag is non-gating. Git history +
-  `_events.jsonl` are ground truth.
+- **`docs/issues/` is history.** Slice docs, `_STATUS.md`, `_INDEX.md`,
+  `_events.jsonl` and `Plans/prompts/` record a retired workflow. They are
+  accurate about what was built and wrong about how to build. Never add to them
+  or edit them; state new work as a claim in `isa/`.
+- **An ISA off `origin/main` is invisible.** The engine reads `isa/*.md` from
+  the base branch. A claim that lives only on a PR branch is a draft, and a fire
+  provisioned against it gets a worktree with no `isa/` directory. Land the ISA
+  before expecting anything to be filed against it.
 - **Mockup-vs-`web/` divergence is NOT fileable drift.** The archived HTML
   mockups (`Plans/_archive/mockups/`) are historical; `web/` is canonical.
   This was a recurring false-drift source (slices 216/220/231/245/258/259).
@@ -507,6 +565,7 @@ Before claiming completion:
 ## Quick references
 
 - Repo on GitHub: https://github.com/mgoodric/security-atlas (private)
+- Initiative ISA: `isa/ISA.md` · epics: `isa/<name>.md`
 - Canvas hub: `Plans/ARCHITECTURE_CANVAS.md`
 - Mockups (archived): open `Plans/_archive/mockups/index.html` in a browser
 
