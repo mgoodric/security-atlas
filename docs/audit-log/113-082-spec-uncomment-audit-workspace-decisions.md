@@ -1,8 +1,8 @@
 # 113 — Extend `audit-workspace.sql` to FULL coverage + enable assertions in `audit-workspace.spec.ts`
 
-**Decision date:** 2026-08-19  
-**Slice:** 113  
-**Type:** JUDGMENT  
+**Decision date:** 2026-08-19
+**Slice:** 113
+**Type:** JUDGMENT
 **Status:** Complete
 
 ---
@@ -12,6 +12,7 @@
 **Q:** Is the gating condition met?
 
 **Findings:**
+
 - **Slice 111 merged:** ✓ PR #441, merged 2026-05-21
 - **CI run history:** The gating condition requires ≥5 clean post-082 runs of `Frontend · Playwright e2e`.
   - CI was disabled repo-wide from 2026-06-29 to 2026-07-24 (per issue context).
@@ -31,16 +32,17 @@
 
 From reading the commented-out assertions in slice 082's stub, and examining the now-enabled assertions in the current spec:
 
-| Assertion | Precondition | Fixture Status |
-|-----------|--------------|----------------|
-| AC-1: period bar shows "SOC 2 2026 Q2" + frozen badge | Active `AuditPeriod` with `name='SOC 2 2026 Q2'`, `status='frozen'`, `frozen_at IS NOT NULL` | ✓ Inserted (ID: `bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001`) |
-| AC-2: add two controls to nav | Two distinct control records | ✓ Both present (`33333333-3333-3333-3333-333333330001` + `...330002`) |
-| AC-3: create population + pull sample | ≥5 evidence rows in the period window (2026-04-01 to 2026-06-30, before frozen_at) | ✓ 5 rows inserted for control 330001 within window |
-| AC-5: two auditors, private-note filtering | Two separate `auditor_assignments` so the second auditor can verify server-side filtering | ✓ Two assignments inserted (`...440001` and `...440002`) |
-| Slice 749: period-scoped evidence summary with frozen label + bound count | Frozen audit period + in-window evidence + post-freeze evidence to prove period-bounding | ✓ 5 in-window rows + 1 post-freeze row (`...000006`, `observed_at='2026-07-02'`) |
-| P0-1: network logging assertion | No special fixture requirement; tests that the spec makes no `/v1/controls/:id/state` calls | ✓ Precondition is in the app logic, not the seed |
+| Assertion                                                                 | Precondition                                                                                 | Fixture Status                                                                   |
+| ------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| AC-1: period bar shows "SOC 2 2026 Q2" + frozen badge                     | Active `AuditPeriod` with `name='SOC 2 2026 Q2'`, `status='frozen'`, `frozen_at IS NOT NULL` | ✓ Inserted (ID: `bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001`)                          |
+| AC-2: add two controls to nav                                             | Two distinct control records                                                                 | ✓ Both present (`33333333-3333-3333-3333-333333330001` + `...330002`)            |
+| AC-3: create population + pull sample                                     | ≥5 evidence rows in the period window (2026-04-01 to 2026-06-30, before frozen_at)           | ✓ 5 rows inserted for control 330001 within window                               |
+| AC-5: two auditors, private-note filtering                                | Two separate `auditor_assignments` so the second auditor can verify server-side filtering    | ✓ Two assignments inserted (`...440001` and `...440002`)                         |
+| Slice 749: period-scoped evidence summary with frozen label + bound count | Frozen audit period + in-window evidence + post-freeze evidence to prove period-bounding     | ✓ 5 in-window rows + 1 post-freeze row (`...000006`, `observed_at='2026-07-02'`) |
+| P0-1: network logging assertion                                           | No special fixture requirement; tests that the spec makes no `/v1/controls/:id/state` calls  | ✓ Precondition is in the app logic, not the seed                                 |
 
 **Fixture shape:**
+
 - 1 `AuditPeriod` (frozen, Q2 2026)
 - 2 `auditor_assignments` (two distinct users)
 - 2 `Control` rows (CRY-05 + IAM-06)
@@ -89,6 +91,7 @@ The `fixtures/e2e/audit-workspace.sql` fixture:
 5. No references to external services, APIs, or environment variables within the SQL.
 
 **Preconditions the harness MUST establish (from `web/e2e/README.md` §2):**
+
 - Postgres + NATS + MinIO healthy → Used by `seedFromFixture("audit-workspace")` in `beforeAll`
 - Atlas server on `:8080` + web app on `:3000` → Standard for all specs
 - `atlas-bootstrap` phase-2 complete → Assumption (all specs depend on this)
@@ -111,6 +114,7 @@ Representative test of breaking a precondition:
 **Test: AC-1 failure when period is missing**
 
 Original fixture creates:
+
 ```sql
 INSERT INTO audit_periods (...) VALUES (
     'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001',
@@ -121,6 +125,7 @@ INSERT INTO audit_periods (...) VALUES (
 ```
 
 If this INSERT is commented out, the test `AC-1: /audit lands the auditor in their assigned AuditPeriod` will fail because:
+
 1. The auditor is assigned to `audit_period_id='bbbbbbbb-...'` (via `auditor_assignments`)
 2. The platform resolves `/v1/me/audit-period` with that assignment but finds no matching period row (foreign key exists in memory, but no row in the table)
 3. The BFF handler returns an error or 404
@@ -132,6 +137,7 @@ If this INSERT is commented out, the test `AC-1: /audit lands the auditor in the
 The private-note filtering assertion calls `issueBearerFor(OTHER_AUDITOR_USER_ID)` where `OTHER_AUDITOR_USER_ID = "44444444-4444-4444-4444-444444440002"`.
 
 If the second `auditor_assignments` INSERT is commented out:
+
 1. The second user can still issue a JWT (the `/v1/test/issue-jwt` endpoint doesn't validate assignment)
 2. But when the page calls `GET /api/audit/{controlId}/comments` with the second user's bearer, the platform filters by `auditor_assignment`
 3. The second user has no assignment to the period, so the comments query returns empty
@@ -165,10 +171,10 @@ Earlier tiers (Go unit tests, Go integration tests, vitest) do not exercise thes
 
 ## Files Changed Summary
 
-| File | Change | Notes |
-|------|--------|-------|
-| `fixtures/e2e/audit-workspace.sql` | STUB → FULL | Added second auditor, second control, evidence rows (5 pre-freeze + 1 post-freeze for first control, 2 for second control) |
-| `web/e2e/audit-workspace.spec.ts` | Uncommented 8 assertions (AC-1 through AC-7, slice 749, P0-1) + refactored for Playwright idioms | Enabled full coverage; extracted helpers (`gotoAuditControl`, `createPopulationAndSample`, `issueBearerFor`, `newAuthedPage`) |
+| File                               | Change                                                                                           | Notes                                                                                                                         |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
+| `fixtures/e2e/audit-workspace.sql` | STUB → FULL                                                                                      | Added second auditor, second control, evidence rows (5 pre-freeze + 1 post-freeze for first control, 2 for second control)    |
+| `web/e2e/audit-workspace.spec.ts`  | Uncommented 8 assertions (AC-1 through AC-7, slice 749, P0-1) + refactored for Playwright idioms | Enabled full coverage; extracted helpers (`gotoAuditControl`, `createPopulationAndSample`, `issueBearerFor`, `newAuthedPage`) |
 
 ---
 
@@ -180,5 +186,5 @@ Earlier tiers (Go unit tests, Go integration tests, vitest) do not exercise thes
 
 ---
 
-*Signed off by: Claude (Anthropic) on behalf of matt-codex runtime*  
-*Signed-off-by: Matt Goodrich <matt@mattgoodrich.com>*
+_Signed off by: Claude (Anthropic) on behalf of matt-codex runtime_
+_Signed-off-by: Matt Goodrich <matt@mattgoodrich.com>_
