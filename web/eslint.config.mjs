@@ -15,6 +15,14 @@ const eslintConfig = defineConfig([
     // Slice 060: Playwright spec authored ahead of @playwright/test
     // install. The file is a stub-shape contract today.
     "e2e/**",
+    // Generated Playwright output. Already gitignored (.gitignore:108) and
+    // tracked in zero files, but eslint does not read .gitignore, so a run of
+    // the e2e suite leaves ~3 MB of vendored trace bundles that lint as 164
+    // errors. Those errors then fail the pre-push hook for every branch in the
+    // repo, including pushes from other worktrees, until the directory is
+    // deleted by hand. Found 2026-08-29 while recovering stranded work.
+    "playwright-report/**",
+    "test-results/**",
   ]),
   // Slice 370 (AC-5) — soft cap on the per-domain api client modules to
   // prevent the god-file from re-accreting. The former `web/lib/api.ts`
