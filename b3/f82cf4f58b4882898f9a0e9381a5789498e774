@@ -1,16 +1,16 @@
 README.md
-  s_138a8c90a6b2be::t_96d3a1176d0761 22,26,28,30,32,34,36,38-47,49,51,53,55,57-65,67,69,71-78,80-99,109
+  s_83fd7289a54b30::t_9798f7392289ee 22,26,28,30,32,34,36,38-47,49,51,53,55,57-65,67,69,71-78,80-99,109
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.6.16",
+  "git_ai_version": "1.7.0",
   "base_commit_sha": "b3f82cf4f58b4882898f9a0e9381a5789498e774",
   "prompts": {},
   "sessions": {
-    "s_138a8c90a6b2be": {
+    "s_83fd7289a54b30": {
       "agent_id": {
         "tool": "claude",
-        "id": "c96316ce-f270-403d-86b3-8c9a2fa71586",
+        "id": "67ab6c44-8d6a-4bb9-90ba-f2e8eda2e748",
         "model": "claude-opus-4-8"
       },
       "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
