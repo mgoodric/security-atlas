@@ -93,16 +93,16 @@ func main() {
 
 ## API surface
 
-| Symbol                                                                    | Purpose                                                                                    |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `sdk.NewClient(endpoint, bearer string, opts ...Option) (*Client, error)` | Dial `endpoint` and prepare a push client. Returns an error on an empty bearer.            |
-| `(*Client).Push(ctx, *EvidenceRecord) (*EvidenceReceipt, error)`          | Send one evidence record. Retries transport-class transient failures and wraps gRPC errors. |
-| `(*Client).Close() error`                                                 | Release the underlying gRPC connection when the client owns it.                            |
-| `sdk.WithTLSConfig(*tls.Config) Option`                                   | Override the default TLS configuration (default: system roots, TLS 1.2 floor).             |
-| `sdk.WithInsecure() Option`                                               | Disable TLS — accepted **only** for loopback endpoints; refuses non-loopback.              |
-| `sdk.WithRetryConfig(sdk.RetryConfig) Option`                             | Override retry behavior. Default: 5 total attempts with 1s/2s/4s/8s exponential backoff and 20% jitter. |
-| `sdk.NewClientFromConn(*grpc.ClientConn, bearer string, opts ...Option) *Client` | Build a client around an existing conn (typical in `bufconn` tests). `Close()` is a no-op. |
-| `sdk.MetadataAuthorization`, `sdk.BearerPrefix`                           | The gRPC metadata key and bearer prefix the client appends to every RPC.                   |
+| Symbol                                                                           | Purpose                                                                                                 |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `sdk.NewClient(endpoint, bearer string, opts ...Option) (*Client, error)`        | Dial `endpoint` and prepare a push client. Returns an error on an empty bearer.                         |
+| `(*Client).Push(ctx, *EvidenceRecord) (*EvidenceReceipt, error)`                 | Send one evidence record. Retries transport-class transient failures and wraps gRPC errors.             |
+| `(*Client).Close() error`                                                        | Release the underlying gRPC connection when the client owns it.                                         |
+| `sdk.WithTLSConfig(*tls.Config) Option`                                          | Override the default TLS configuration (default: system roots, TLS 1.2 floor).                          |
+| `sdk.WithInsecure() Option`                                                      | Disable TLS — accepted **only** for loopback endpoints; refuses non-loopback.                           |
+| `sdk.WithRetryConfig(sdk.RetryConfig) Option`                                    | Override retry behavior. Default: 5 total attempts with 1s/2s/4s/8s exponential backoff and 20% jitter. |
+| `sdk.NewClientFromConn(*grpc.ClientConn, bearer string, opts ...Option) *Client` | Build a client around an existing conn (typical in `bufconn` tests). `Close()` is a no-op.              |
+| `sdk.MetadataAuthorization`, `sdk.BearerPrefix`                                  | The gRPC metadata key and bearer prefix the client appends to every RPC.                                |
 
 ## Retry behavior
 
