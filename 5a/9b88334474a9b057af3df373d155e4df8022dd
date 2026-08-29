@@ -1,37 +1,33 @@
-internal/mcp/tools/tools_test.go
-  s_138a8c90a6b2be::t_da0e9ca7cc8541 329,334-335,337-338
-  s_138a8c90a6b2be::t_9d3bfd0b5e5b93 345-347,352-353
-skills/atlas-risk-briefing/SKILL.md
-  s_138a8c90a6b2be::t_05aa748d5a03b4 1-59
-internal/mcp/tools/tools.go
-  s_138a8c90a6b2be::t_c3f7853efeb644 88-91
-  s_138a8c90a6b2be::t_fefe95ab66a5a8 78
-internal/mcp/tools/programreads_test.go
-  s_138a8c90a6b2be::t_c63b8e653877d9 1-106
-skills/README.md
-  s_138a8c90a6b2be::t_11af3922f5c0ae 14-18,22
-  s_138a8c90a6b2be::t_285c0c4dd51eb0 1-13,19-21,23-54
-internal/mcp/jsonrpc.go
-  s_138a8c90a6b2be::t_084e5991c947b4 344-348
-docs-site/docs/mcp.md
-  s_138a8c90a6b2be::t_c4adf78422c5f9 48-51
-  s_138a8c90a6b2be::t_672b8ae5b787a9 168-175
-internal/mcp/integration_test.go
-  s_138a8c90a6b2be::t_69a33fa83d01c1 221-223
-skills/atlas-audit-readiness/SKILL.md
-  s_138a8c90a6b2be::t_875ed86e8aae98 1-54
 README.md
-  s_138a8c90a6b2be::t_ebd0195e32dda9 233
-internal/mcp/tools/programreads.go
-  s_138a8c90a6b2be::t_31a9b28cd8d150 1-146
-skills/atlas-freshness-sweep/SKILL.md
-  s_138a8c90a6b2be::t_f94bf63e932cf5 1-57
+  s_83fd7289a54b30::t_13194ac093f386 233
+docs-site/docs/mcp.md
+  s_83fd7289a54b30::t_f5421c846d8cae 48-51,168-175
+internal/mcp/integration_test.go
+  s_90494127dacc5a::t_f53bdc074f0a66 221-223
+internal/mcp/jsonrpc.go
+  s_90494127dacc5a::t_1dcef61a003c2c 344-348
 internal/mcp/testdata/tools.golden.json
-  s_138a8c90a6b2be::t_654142bba8e5d2 152-215
+  s_90494127dacc5a::t_23fed06b2549ad 152-215
+internal/mcp/tools/programreads.go
+  s_90494127dacc5a::t_f8be97d9849452 1-146
+internal/mcp/tools/programreads_test.go
+  s_90494127dacc5a::t_a6fcd4af609a84 1-106
+internal/mcp/tools/tools.go
+  s_90494127dacc5a::t_1bb6d5d8904a92 78,88-91
+internal/mcp/tools/tools_test.go
+  s_90494127dacc5a::t_fed450eb51878b 329,334-335,337-338,345-347,352-353
+skills/README.md
+  s_138a8c90a6b2be::t_0b5c1d55375722 1-54
+skills/atlas-audit-readiness/SKILL.md
+  s_138a8c90a6b2be::t_102447d9f1dcc1 1-54
+skills/atlas-freshness-sweep/SKILL.md
+  s_138a8c90a6b2be::t_36664e723795a0 1-57
+skills/atlas-risk-briefing/SKILL.md
+  s_138a8c90a6b2be::t_c8d57d615a1cb1 1-59
 ---
 {
   "schema_version": "authorship/3.0.0",
-  "git_ai_version": "1.6.16",
+  "git_ai_version": "1.7.0",
   "base_commit_sha": "5a9b88334474a9b057af3df373d155e4df8022dd",
   "prompts": {},
   "sessions": {
@@ -39,6 +35,22 @@ internal/mcp/testdata/tools.golden.json
       "agent_id": {
         "tool": "claude",
         "id": "c96316ce-f270-403d-86b3-8c9a2fa71586",
+        "model": "unknown"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_83fd7289a54b30": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "67ab6c44-8d6a-4bb9-90ba-f2e8eda2e748",
+        "model": "claude-opus-4-8"
+      },
+      "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
+    },
+    "s_90494127dacc5a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "70dc1c02-0dc3-4ecc-a6e4-f7309aff5bd5",
         "model": "claude-opus-4-8"
       },
       "human_author": "Matt Goodrich <matt@mattgoodrich.com>"
