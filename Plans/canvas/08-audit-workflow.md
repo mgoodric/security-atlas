@@ -64,6 +64,52 @@ Practitioners cite Drata's in-product auditor↔auditee comment thread as the si
 
 This is not a separate "messaging" feature — it's threaded annotations on first-class objects.
 
+## 8.6 Assessor delivery (the outbound seam)
+
+Everything in 8.1-8.5 assumes the auditor comes to the platform. Real engagements
+run the other way too: the audit firm has its own audit-management platform
+(A-LIGN's A-SCEND, Johanson's portal, Prescient's), and the operator's last mile
+is still a zip file, a shared drive, or a portal upload done by hand. That last
+mile is where evidence goes stale, where version mismatches enter the record, and
+where the "which file did we actually send?" question becomes unanswerable.
+
+security-atlas closes it with a **delivery seam**: approved, in-period evidence
+leaves the platform over a typed adapter to a registered assessor destination,
+and every departure is written to an append-only delivery ledger.
+
+**Delivery is not Push.** Invariant #3 reserves "push" for the single inbound
+`EvidenceIngestService.Push` wire surface — connectors pushing evidence _into_ the
+platform. Outbound movement to an assessor is **delivery**, never push. The two
+directions never share a noun.
+
+Four commitments:
+
+- **Destinations are registered, tenant-scoped objects.** An `AssessorDestination`
+  binds an adapter kind, an endpoint, a credential reference, and the
+  framework/audit-period it may receive. A destination is not an ad-hoc URL typed
+  at delivery time.
+- **The delivery ledger is append-only**, sibling to the evidence ledger and
+  governed by the same rule: a delivery record is written, never mutated. It
+  captures actor, destination, audit period, the exact evidence record IDs and
+  their content hashes, the payload digest, and the remote receipt. "What did we
+  send the auditor, and when" is a query, not an archaeology exercise.
+- **Delivery is gated on approval and on the period horizon.** Nothing leaves
+  without an explicit human action per delivery, and a frozen `AuditPeriod`
+  delivers only evidence with `observed_at <= frozen_at` (invariant #10). An
+  AI-drafted artifact that has not been human-approved is structurally
+  undeliverable (the CLAUDE.md AI-assist boundary applies at the seam, not per
+  renderer).
+- **The payload is the signed OSCAL bundle.** Delivery does not invent a wire
+  format; it transports what `internal/oscal` already produces and cosign already
+  signs. A vendor adapter may reshape that bundle into the firm's API schema, but
+  the signed bundle is the artifact of record on our side.
+
+Adapters are ordinary connectors in reverse: a `Deliverer` interface with one
+open, credential-free implementation shipped in-tree (signed-bundle HTTP POST to
+any endpoint the operator controls), and vendor adapters added as partner API
+access allows. Closed vendor adapters that cannot be run by a self-hoster are the
+anti-pattern here, same as closed inbound connectors.
+
 ---
 
 [← Canvas index](../ARCHITECTURE_CANVAS.md) · [← 7. Metrics](./07-metrics.md) · **Next:** [9. Architecture and Tech Stack →](./09-tech-stack.md)
