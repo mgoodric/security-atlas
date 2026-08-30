@@ -1,11 +1,15 @@
-# v1 Slice Status — GENERATED
+# v1 Slice Status — FROZEN HISTORY
 
-> **GENERATED FILE — do not edit by hand.** Produced by `scripts/gen-status.sh`
-> (`just status`). State is derived from git history + open PRs + branches +
-> `_events.jsonl`. To change a slice's state: merge a PR, push a branch, or append
-> an event with `just event <slice> <state> [note]` — never edit this file.
+> **This file is a frozen snapshot, not a live tracker.** The slice workflow is
+> retired and its generator (`scripts/gen-status.sh`, `just status`) was removed.
+> Nothing regenerates this file and nothing reads it. It is kept because it is an
+> accurate record of how the v1 slices landed.
 >
-> Precedence: (git-merged or a `merged` event) > in-review > in-progress > other events > ready.
+> Current work is stated as claims in `isa/`. See `AGENTS.md` "Where a change goes".
+>
+> The state below was last derived on the generated date shown, from git history +
+> open PRs + branches + `_events.jsonl`. Precedence at that time: (git-merged or a
+> `merged` event) > in-review > in-progress > other events > ready.
 
 **Generated:** 2026-06-12 · **Total slices:** 628
 
