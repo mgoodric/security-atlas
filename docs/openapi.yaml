@@ -102,6 +102,7 @@ tags:
   - name: system
   - name: tenants
   - name: ucf
+  - name: ucf-coverage
   - name: vendors
   - name: walkthroughs
 
@@ -2410,6 +2411,20 @@ paths:
       summary: POST /v1/controls:upload-bundle
       tags: [controls]
       operationId: post-v1-controls_upload-bundle
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/coverage-strength/matrix:
+    get:
+      summary: GET /v1/coverage-strength/matrix — cross-framework coverage-strength matrix
+      tags: [ucf-coverage]
+      operationId: get-v1-coverage-strength-matrix
       security:
         - bearer: []
       responses:
