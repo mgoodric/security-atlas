@@ -52,9 +52,9 @@
 -- receives or accepts a tenant_id parameter — the implicit session context
 -- is the only carrier of tenant identity (slice 124 anti-criterion P0-A5).
 --
--- Pagination is cursor-based on (occurred_at, target_id, kind). The cursor is
--- opaque at the API layer; the handler base64-encodes a `{occurred_at, target_id, kind}`
--- tuple. Ordering is `occurred_at DESC, kind ASC, target_id ASC` so the cursor's
+-- Pagination is cursor-based on (occurred_at, kind, row_id). The cursor is
+-- opaque at the API layer; the handler base64-encodes a `{occurred_at, kind, row_id}`
+-- tuple. Ordering is `occurred_at DESC, kind ASC, row_id ASC` so the cursor's
 -- next-page condition is a single tuple comparison.
 --
 -- Filters:
