@@ -36,6 +36,10 @@ import (
 // register here so the wire layer can render type-specific UI.
 const (
 	TypeAuditNoteReply = "audit_note.reply"
+	// TypeControlDrift is written by the OE-599 drift/freshness alert
+	// producer when a control flips out of passing. The string is consumed by
+	// the shared notify kind map and existing Slack/webhook delivery sinks.
+	TypeControlDrift = "control.drift"
 	// TypeEvidenceStaleness is written by the slice-439 staleness rollup
 	// producer. The string is load-bearing: the already-merged delivery
 	// channels (slice 445/543/582/583) map it via internal/notify
