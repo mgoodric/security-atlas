@@ -45,6 +45,8 @@ const EXCEPTION_REASON =
   "A per-exception detail page is not available yet — view the exception register at /exceptions.";
 const POLICY_REASON =
   "A per-policy detail page is not available yet — view the policy register at /policies.";
+const ACCESS_REVIEW_REASON =
+  "A per-campaign access-review detail page is not available yet.";
 
 function assertNever(x: never): never {
   throw new Error(
@@ -66,6 +68,8 @@ export function linkFor(ev: CalendarEvent): LinkForResult {
       // Slice 675: vendor review events link to the real per-vendor
       // detail page (web/app/(authed)/vendors/[id]/page.tsx).
       return { kind: "link", href: `/vendors/${ev.related_entity_id}` };
+    case "access_review":
+      return { kind: "static", reason: ACCESS_REVIEW_REASON };
     case "control":
       return { kind: "link", href: `/controls/${ev.related_entity_id}` };
     default:

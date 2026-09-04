@@ -52,6 +52,7 @@ const ALL_TYPES = [
   "exception",
   "policy",
   "vendor",
+  "access_review",
   "control",
 ] as const;
 type AllowedType = (typeof ALL_TYPES)[number];
@@ -64,7 +65,7 @@ function CalendarPageInner() {
   const router = useRouter();
   const search = useSearchParams();
 
-  // URL-driven filter state. Parse once per render. Default = all four.
+  // URL-driven filter state. Parse once per render. Default = all types.
   const selectedTypes = useMemo(() => {
     const raw = search.get("types");
     if (!raw) return [...ALL_TYPES];
@@ -160,8 +161,8 @@ function CalendarPageInner() {
           <h1 className="text-2xl font-semibold">Compliance calendar</h1>
           <p className="text-sm text-muted-foreground">
             Upcoming audits, exception expirations, policy reviews, vendor
-            reviews, and periodic control reviews — one place for the whole
-            team.
+            reviews, access reviews, and periodic control reviews — one place
+            for the whole team.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
