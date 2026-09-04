@@ -76,7 +76,8 @@ func main() {
 		},
 	}
 
-	// 3. Push. The 10s timeout bounds the RPC.
+	// 3. Push. The 10s timeout bounds the whole operation, including any
+	//    retry sleeps.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -92,15 +93,29 @@ func main() {
 
 ## API surface
 
-| Symbol                                                                    | Purpose                                                                                    |
-| ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `sdk.NewClient(endpoint, bearer string, opts ...Option) (*Client, error)` | Dial `endpoint` and prepare a push client. Returns an error on an empty bearer.            |
-| `(*Client).Push(ctx, *EvidenceRecord) (*EvidenceReceipt, error)`          | Send one evidence record. Wraps gRPC errors so callers can `errors.As` a status.           |
-| `(*Client).Close() error`                                                 | Release the underlying gRPC connection when the client owns it.                            |
-| `sdk.WithTLSConfig(*tls.Config) Option`                                   | Override the default TLS configuration (default: system roots, TLS 1.2 floor).             |
-| `sdk.WithInsecure() Option`                                               | Disable TLS — accepted **only** for loopback endpoints; refuses non-loopback.              |
-| `sdk.NewClientFromConn(*grpc.ClientConn, bearer string) *Client`          | Build a client around an existing conn (typical in `bufconn` tests). `Close()` is a no-op. |
-| `sdk.MetadataAuthorization`, `sdk.BearerPrefix`                           | The gRPC metadata key and bearer prefix the client appends to every RPC.                   |
+| Symbol                                                                           | Purpose                                                                                                 |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `sdk.NewClient(endpoint, bearer string, opts ...Option) (*Client, error)`        | Dial `endpoint` and prepare a push client. Returns an error on an empty bearer.                         |
+| `(*Client).Push(ctx, *EvidenceRecord) (*EvidenceReceipt, error)`                 | Send one evidence record. Retries transport-class transient failures and wraps gRPC errors.             |
+| `(*Client).Close() error`                                                        | Release the underlying gRPC connection when the client owns it.                                         |
+| `sdk.WithTLSConfig(*tls.Config) Option`                                          | Override the default TLS configuration (default: system roots, TLS 1.2 floor).                          |
+| `sdk.WithInsecure() Option`                                                      | Disable TLS — accepted **only** for loopback endpoints; refuses non-loopback.                           |
+| `sdk.WithRetryConfig(sdk.RetryConfig) Option`                                    | Override retry behavior. Default: 5 total attempts with 1s/2s/4s/8s exponential backoff and 20% jitter. |
+| `sdk.NewClientFromConn(*grpc.ClientConn, bearer string, opts ...Option) *Client` | Build a client around an existing conn (typical in `bufconn` tests). `Close()` is a no-op.              |
+| `sdk.MetadataAuthorization`, `sdk.BearerPrefix`                                  | The gRPC metadata key and bearer prefix the client appends to every RPC.                                |
+
+## Retry behavior
+
+`Push` retries only `Unavailable` and `DeadlineExceeded`. Non-transport
+application statuses are terminal; `AlreadyExists` is never retried. When a
+retry is attempted, the SDK re-sends the same `EvidenceRecord` pointer without
+recomputing any fields, so the idempotency key and deterministic record bytes
+remain stable and server-side dedup absorbs a successful re-send.
+
+The default retry schedule is configurable with `WithRetryConfig`; set
+`RetryConfig.MaxAttempts` to `1` to disable retry. If the server returns
+`Retry-After` metadata on a retryable status, the SDK uses it, capped by
+`RetryConfig.MaxDelay`.
 
 ## Security notes
 
