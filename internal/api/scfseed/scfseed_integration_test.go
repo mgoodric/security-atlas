@@ -9,37 +9,15 @@ package scfseed_test
 
 import (
 	"context"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
-
-func adminDSN(t *testing.T) string {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return dsn
-}
-
-func openAdminPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, adminDSN(t))
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 // sentinelResolves mirrors the exact query the SOC 2 importer uses, so the
 // assertion tracks production resolution semantics, not a looser row count.
@@ -59,7 +37,7 @@ func sentinelResolves(t *testing.T, pool *pgxpool.Pool) bool {
 // TestEnsureFullCatalog_SeedsFromEmpty verifies the cold-start path: an empty
 // catalog gets fully seeded and the sentinel resolves afterwards.
 func TestEnsureFullCatalog_SeedsFromEmpty(t *testing.T) {
-	pool := openAdminPool(t)
+	pool := dbtest.NewMigratePool(t)
 	ctx := context.Background()
 
 	// Wipe to a clean platform-layer state.
@@ -82,7 +60,7 @@ func TestEnsureFullCatalog_SeedsFromEmpty(t *testing.T) {
 // leftover). The old `if anchorCount == 0` guard would see rows present and
 // skip reseed; the completeness-aware guard must detect the gap and reseed.
 func TestEnsureFullCatalog_SelfCorrectsAfterPartialDelete(t *testing.T) {
-	pool := openAdminPool(t)
+	pool := dbtest.NewMigratePool(t)
 	ctx := context.Background()
 
 	// Start fully seeded.
@@ -135,7 +113,7 @@ func TestEnsureFullCatalog_SelfCorrectsAfterPartialDelete(t *testing.T) {
 // safe no-op: calling twice on a fully-seeded catalog does not error and the
 // sentinel still resolves.
 func TestEnsureFullCatalog_IdempotentOnFullCatalog(t *testing.T) {
-	pool := openAdminPool(t)
+	pool := dbtest.NewMigratePool(t)
 	ctx := context.Background()
 
 	wipeCatalog(t, pool)
@@ -155,7 +133,7 @@ func TestEnsureFullCatalog_IdempotentOnFullCatalog(t *testing.T) {
 // only in a legacy version must read as incomplete (this is the demotion
 // scenario that TestImport_NewReleaseCreatesNewFrameworkVersion produces).
 func TestIsCatalogComplete_TracksCurrentVersionOnly(t *testing.T) {
-	pool := openAdminPool(t)
+	pool := dbtest.NewMigratePool(t)
 	ctx := context.Background()
 
 	wipeCatalog(t, pool)

@@ -11,50 +11,17 @@
 package dashboard_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
-
-func empAppDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func empAdminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func empOpenPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // TestDashboard_EmptyTenant_AllPanelsReturn200 is the slice-150 reproducer
 // for the operator-reported dashboard 500s on a fresh install. Hits every
@@ -62,23 +29,15 @@ func empOpenPool(t *testing.T, dsn string) *pgxpool.Pool {
 // envelope (array, not null). The panel-shape contract is what the
 // frontend iterates — null breaks the panel render.
 func TestDashboard_EmptyTenant_AllPanelsReturn200(t *testing.T) {
-	admin := empOpenPool(t, empAdminDSN(t))
-	app := empOpenPool(t, empAppDSN(t))
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		// No data was seeded, but be defensive in case a parallel test
-		// re-uses the tenant id (it won't — uuid.NewString — but the
-		// idiom matches the rest of the suite).
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM control_evaluations WHERE tenant_id = $1`,
-			`DELETE FROM evidence_records WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	// No data is seeded, but the cleanup stays defensive in case a parallel
+	// test re-uses the tenant id (it won't — SeedTenant mints a fresh UUID —
+	// but the idiom matches the rest of the suite).
+	tenant := dbtest.SeedTenant(t, admin,
+		"control_evaluations",
+		"evidence_records",
+	)
 
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)

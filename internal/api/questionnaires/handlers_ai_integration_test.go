@@ -18,10 +18,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -29,59 +27,23 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/qaisuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func aiAppDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func aiAdminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func aiPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
+// aiFreshTenant mints a tenant whose rows are cleaned in FK-safe order
+// (children before parents) through the privileged pool.
 func aiFreshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM questionnaire_answers WHERE tenant_id = $1`,
-			`DELETE FROM questionnaire_questions WHERE tenant_id = $1`,
-			`DELETE FROM questionnaires WHERE tenant_id = $1`,
-			`DELETE FROM policies WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
+	return dbtest.SeedTenant(t, admin,
+		"questionnaire_answers",
+		"questionnaire_questions",
+		"questionnaires",
+		"policies",
+	)
 }
 
 func aiSeedQuestion(t *testing.T, admin *pgxpool.Pool, tenant, text string) uuid.UUID {
@@ -152,8 +114,8 @@ func aiReq(t *testing.T, tenant, body string, params map[string]string) *http.Re
 // TestAIHandlers_DraftThenApprove drives the handler happy path: suggest a
 // cited draft, then approve it.
 func TestAIHandlers_DraftThenApprove(t *testing.T) {
-	app := aiPool(t, aiAppDSN(t))
-	admin := aiPool(t, aiAdminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := aiFreshTenant(t, admin)
 
 	qID := aiSeedQuestion(t, admin, tenant, "Do you encrypt customer data at rest?")
@@ -201,8 +163,8 @@ func TestAIHandlers_DraftThenApprove(t *testing.T) {
 // TestAIHandlers_Insufficient drives the no-candidate insufficient path
 // through the handler (no Ollama call — the service short-circuits).
 func TestAIHandlers_Insufficient(t *testing.T) {
-	app := aiPool(t, aiAppDSN(t))
-	admin := aiPool(t, aiAdminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := aiFreshTenant(t, admin)
 
 	qID := aiSeedQuestion(t, admin, tenant, "Do you maintain a lattice-cryptography roadmap?")
@@ -222,8 +184,8 @@ func TestAIHandlers_Insufficient(t *testing.T) {
 
 // TestAIHandlers_ApproveNotFound drives the approve not-found path.
 func TestAIHandlers_ApproveNotFound(t *testing.T) {
-	app := aiPool(t, aiAppDSN(t))
-	admin := aiPool(t, aiAdminDSN(t))
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
 	tenant := aiFreshTenant(t, admin)
 	h := aiHandler(app, "unused")
 
@@ -237,6 +199,3 @@ func TestAIHandlers_ApproveNotFound(t *testing.T) {
 		t.Fatalf("AIApprove (missing) = %d, want 404; body=%s", w.Code, w.Body.String())
 	}
 }
-
-// Keep time import used even if a future edit drops the only reference.
-var _ = time.Second
