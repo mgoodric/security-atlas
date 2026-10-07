@@ -453,8 +453,9 @@ jobs:
           --health-retries 10
       # Slice 036 MinIO is started as a workflow step below rather than a
       # `services:` entry because GitHub Actions service containers do not
-      # support a `command` / args override, and the official
-      # `minio/minio` image needs `server /data` passed explicitly. Started
+      # support a `command` / args override, and the MinIO image needs
+      # `server /data` passed explicitly (Chainguard's build, digest-pinned;
+      # `minio/minio` is no longer on Docker Hub). Started
       # via `docker run` in the `Start MinIO` step.
       #
       # Slice 015 NATS JetStream follows the same pattern (the `nats`
@@ -3849,7 +3850,7 @@ jobs:
             -p 9000:9000 \
             -e MINIO_ROOT_USER=minioadmin \
             -e MINIO_ROOT_PASSWORD=minioadmin \
-            minio/minio server /data
+            cgr.dev/chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa server /data
           for i in $(seq 1 30); do
             if curl -sf http://localhost:9000/minio/health/live; then
               echo "minio ready"; break
@@ -3858,7 +3859,7 @@ jobs:
           done
           docker run --rm --network host \
             -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-            minio/mc mb -p local/atlas-artifacts-test
+            --entrypoint mc cgr.dev/chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa mb -p local/atlas-artifacts-test
       - name: Start NATS JetStream
         run: |
           docker run -d --name nats \

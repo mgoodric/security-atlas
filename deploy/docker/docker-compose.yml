@@ -144,12 +144,13 @@ services:
     restart: unless-stopped
 
   # --------------------------------------------------------------------
-  # MinIO — S3-compatible artifact store (slice 036). The official
-  # `minio/minio` image needs `server /data` passed explicitly (the
-  # `bitnami/minio` image is unpullable — do not switch to it).
+  # MinIO — S3-compatible artifact store (slice 036). The image needs
+  # `server /data` passed explicitly. It is Chainguard's build, pinned
+  # by digest: `minio/minio`, `minio/mc` and `bitnami/minio` are all
+  # unpullable. It has no curl, so the healthcheck uses its bundled `mc`.
   # --------------------------------------------------------------------
   minio:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
@@ -160,7 +161,7 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -171,7 +172,7 @@ services:
   # the bucket in place for subsequent `up`s (idempotent --ignore-existing).
   # --------------------------------------------------------------------
   minio-mc:
-    image: minio/mc:latest
+    image: cgr.dev/chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa
     depends_on:
       minio:
         condition: service_healthy

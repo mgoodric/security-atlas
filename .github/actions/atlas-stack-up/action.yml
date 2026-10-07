@@ -121,8 +121,10 @@ runs:
     - name: Start MinIO
       # Slice 036 — MinIO is started with `docker run` rather than as a
       # `services:` entry because GitHub Actions service containers do
-      # not support a `command` / args override, and the official
-      # `minio/minio` image needs `server /data` passed explicitly.
+      # not support a `command` / args override, and the MinIO image
+      # needs `server /data` passed explicitly. The image is
+      # Chainguard's build, digest-pinned: `minio/minio` and `minio/mc`
+      # are no longer pullable from Docker Hub.
       if: inputs.start-services == 'true'
       shell: bash
       env:
@@ -132,7 +134,7 @@ runs:
           -p 9000:9000 \
           -e MINIO_ROOT_USER=minioadmin \
           -e MINIO_ROOT_PASSWORD=minioadmin \
-          minio/minio server /data
+          cgr.dev/chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa server /data
         # Wait for readiness (up to ~60s).
         for i in $(seq 1 30); do
           if curl -sf http://localhost:9000/minio/health/live; then
@@ -140,7 +142,8 @@ runs:
           fi
           sleep 2
         done
-        # Create the test bucket using a short-lived mc container. The
+        # Create the test bucket using a short-lived mc container (the
+        # MinIO image ships `mc`; Chainguard's mc-only image has no shell). The
         # MinIO admin client (`mc`) is the canonical bucket-bootstrap
         # tool. We inject the alias via the MC_HOST_<alias> env var so
         # the single `mc mb` invocation has the alias without needing a
@@ -148,7 +151,7 @@ runs:
         # ~/.mc/ that doesn't persist across `docker run` invocations).
         docker run --rm --network host \
           -e MC_HOST_local=http://minioadmin:minioadmin@localhost:9000 \
-          minio/mc mb -p "local/${ATLAS_MINIO_BUCKET}"
+          --entrypoint mc cgr.dev/chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa mb -p "local/${ATLAS_MINIO_BUCKET}"
 
     - name: Start NATS JetStream
       # Slice 015 — same non-default-CMD rationale as MinIO: the `nats`
