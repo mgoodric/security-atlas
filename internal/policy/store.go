@@ -2,7 +2,7 @@
 //
 // A Policy is a governance document — title, version, body_md, owner_role,
 // approver_role, linked_control_ids — that references the controls it
-// governs (canvas §2.6 + CONTEXT.md "Policy (slice 022)").
+// governs (canvas §2.6 + GLOSSARY.md "Policy (slice 022)").
 //
 // The state machine has five states:
 //

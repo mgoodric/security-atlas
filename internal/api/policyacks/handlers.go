@@ -242,7 +242,7 @@ func (h *Handler) Acknowledge(w http.ResponseWriter, r *http.Request) {
 		SchemaVersion:  EvidenceVersion,
 		// control_id is a non-UUID reference; ingest stores it in
 		// control_ref only (ingest.go line 386-392). This is legit per
-		// CONTEXT.md "Policy acknowledgment (slice 023)".
+		// GLOSSARY.md "Policy acknowledgment (slice 023)".
 		ControlId: fmt.Sprintf("policy:%s:v%s", ack.PolicyID.String(), ack.PolicyVersionID.String()),
 		Scope: []*evidencev1.ScopeDimension{{
 			Key:    "policy_id",

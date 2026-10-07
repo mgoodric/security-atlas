@@ -54,7 +54,7 @@ If this PR is AI-assisted, include a `Co-authored-by:` trailer naming the assist
 ## Documentation
 
 - [ ] `CHANGELOG.md` updated under `## [Unreleased]`
-- [ ] `CONTEXT.md` updated if domain vocabulary changed
+- [ ] `GLOSSARY.md` updated if domain vocabulary changed
 - [ ] `Plans/` updated if architecture changed
 - [ ] Slice status flipped in `docs/issues/_STATUS.md` (when opening as `in-review`)
 
