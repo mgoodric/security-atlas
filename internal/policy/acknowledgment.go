@@ -2,7 +2,7 @@
 //
 // An `Ack` is an affirmative, per-user attestation that a published
 // policy version has been read and accepted (canvas §2.6 + §7.1;
-// CONTEXT.md "Policy acknowledgment (slice 023)").
+// GLOSSARY.md "Policy acknowledgment (slice 023)").
 //
 // This package owns the domain Store; the HTTP surface lives in
 // internal/api/policyacks/ and the evidence emission flows through
@@ -351,7 +351,7 @@ func (s *AckStore) Rate(ctx context.Context, policyID uuid.UUID) (RateResult, er
 		// slice-034 stand-in (api_keys.owner_roles + is_admin). When
 		// slice 035 lands OPA-driven RBAC with first-class user-role
 		// bindings, replace this with a query against the
-		// user_role_bindings table. CONTEXT.md "Policy acknowledgment
+		// user_role_bindings table. GLOSSARY.md "Policy acknowledgment
 		// (slice 023)" documents the stand-in.
 		denom, derr := q.CountRequiredRoleUsersForVersion(ctx, dbx.CountRequiredRoleUsersForVersionParams{
 			TenantID:      pgUUID(tenantID),

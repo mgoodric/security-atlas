@@ -5,7 +5,7 @@
 // the tool sunsets Q3". It is distinct from an Exception (canvas Â§6.3 / the
 // internal/exception package): an Exception is a formal, scoped,
 // time-bounded bypass of a specific control; a Decision is the broader
-// rationale record. Canvas Â§6.7 is the design source; CONTEXT.md
+// rationale record. Canvas Â§6.7 is the design source; GLOSSARY.md
 // ("Decision Log (slice 055)") captures the precise domain definition.
 //
 // The lifecycle states (decision_status enum, slice 052):

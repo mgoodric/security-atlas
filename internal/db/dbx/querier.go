@@ -230,7 +230,7 @@ type Querier interface {
 	// credentials counts once.
 	//
 	// slice-035 (OPA-RBAC) graduates this: replace api_keys with a proper
-	// user-role binding table. Until then this is the stand-in per CONTEXT.md
+	// user-role binding table. Until then this is the stand-in per GLOSSARY.md
 	// "Policy acknowledgment (slice 023)".
 	CountRequiredRoleUsersForVersion(ctx context.Context, arg CountRequiredRoleUsersForVersionParams) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)

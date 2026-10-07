@@ -1,7 +1,7 @@
 // Package exception implements the slice-021 exception/waiver workflow.
 //
 // An Exception is a time-bounded, scope-bounded waiver of a control's normal
-// evaluation. Canvas §6.3 sets the rules; CONTEXT.md captures the precise
+// evaluation. Canvas §6.3 sets the rules; GLOSSARY.md captures the precise
 // domain definition.
 //
 // The state machine has five states:
