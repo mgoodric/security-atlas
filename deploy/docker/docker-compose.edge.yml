@@ -147,7 +147,7 @@ services:
   # minio-edge — S3-compatible artifact store for the EDGE instance.
   # --------------------------------------------------------------------
   minio-edge:
-    image: minio/minio:latest
+    image: cgr.dev/chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
@@ -158,7 +158,7 @@ services:
     volumes:
       - minio-data-edge:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "mc", "ready", "local"]
       interval: 5s
       timeout: 3s
       retries: 12
@@ -171,7 +171,7 @@ services:
   # name collision is possible across the two channels.
   # --------------------------------------------------------------------
   minio-mc-edge:
-    image: minio/mc:latest
+    image: cgr.dev/chainguard/minio@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa
     depends_on:
       minio-edge:
         condition: service_healthy

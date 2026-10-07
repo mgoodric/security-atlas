@@ -158,8 +158,10 @@ minio:
   # -- Bundle an in-cluster MinIO. Set false to use external S3.
   enabled: true
   image:
-    repository: minio/minio
-    tag: latest
+    # Chainguard's MinIO build; `minio/minio` is no longer on Docker Hub.
+    # The bucket-bootstrap Job reuses this image for its bundled `mc`.
+    repository: cgr.dev/chainguard/minio
+    tag: latest@sha256:e7ca559d9f7c0b5f24f5f669bb92f40f3ca88d56273b808bf3a7c116c17d2ffa
   # -- Persistent volume for MinIO object data.
   persistence:
     enabled: true
