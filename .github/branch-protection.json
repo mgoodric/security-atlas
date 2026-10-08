@@ -141,7 +141,13 @@
 
   "enforce_admins": true,
 
-  "required_pull_request_reviews": null,
+  "required_pull_request_reviews": {
+    "required_approving_review_count": 0,
+    "dismiss_stale_reviews": false,
+    "require_code_owner_reviews": false
+  },
+
+  "$additions_from_development_33": "mgoodric/development#33 (Phase 1 of mgoodric/development#22) — estate-wide PR requirement on `main`: every protected repo in the estate requires a pull request, with 0 approvals, enforce_admins true, and no force pushes or deletions. This repo was the outlier (`required_pull_request_reviews: null`, so the protection rule did not itself require a pull request). The block above makes a PR mandatory — which is what `$verification.2` already asserted — while keeping 0 approvals because Matt is the only collaborator and GitHub does not let a PR author approve their own PR. Supersedes the `null` described in `$deviations_from_slice_050_AC11.required_approving_review_count`; the approval count is still 0 for the same solo-maintainer reason. `flake-counter.yml`'s direct dashboard push to `main` already fails soft on a protected-branch rejection, so this does not break the weekly cron. The same change sets `allow_fork_syncing` to false to match live (live was false when re-read before this change; the file said true), so the apply leaves fork syncing off rather than turning it on.",
 
   "required_linear_history": true,
 
@@ -155,7 +161,7 @@
 
   "lock_branch": false,
 
-  "allow_fork_syncing": true,
+  "allow_fork_syncing": false,
 
   "required_signatures": false,
 
