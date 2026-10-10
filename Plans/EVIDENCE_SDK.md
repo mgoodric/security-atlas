@@ -220,7 +220,12 @@ Push endpoints are rate-limited per credential and per tenant:
 
 - **Soft limit** (token bucket): 100 records/second per credential by default, configurable.
 - **Hard tenant limit**: protects the ingestion stage from a runaway pusher exhausting downstream capacity.
-- **429 with `Retry-After`** on overage. The reference SDK respects this and exponential-backs-off.
+- **429 with `Retry-After`** on HTTP overage. Reference SDKs respect
+  `Retry-After` where the transport exposes it. The Go gRPC SDK retries only
+  transport-class `Unavailable` and `DeadlineExceeded` failures, using the
+  default 1s/2s/4s/8s exponential-backoff schedule with jitter; application
+  statuses such as `AlreadyExists`, `InvalidArgument`, `PermissionDenied`,
+  `Unauthenticated`, and `ResourceExhausted` are terminal.
 
 The ingestion stage between the push endpoint and the ledger uses NATS JetStream (canvas §9.3) for durable buffering — pushes acknowledge as soon as the record is committed to the stream, not after evaluation. This decouples write latency from any downstream evaluation cost.
 
@@ -337,7 +342,7 @@ Push SDKs ship for the languages where the friction matters:
 | Java / Kotlin     | Enterprise embed                                   | v2                           |
 | Rust              | High-perf agents                                   | v2 (community-driven likely) |
 
-Each SDK exposes the same surface: `client.evidence.push(record)`, `client.evidence.push_batch([...])`, schema validation client-side before transport, automatic retry/backoff, structured errors.
+Each SDK exposes the same surface: `client.evidence.push(record)`, `client.evidence.push_batch([...])`, schema validation client-side before transport, automatic retry/backoff for transport-class transient failures, structured errors. Retries re-send the byte-identical record and idempotency key; SDKs must not recompute observed fields or canonical payload content per attempt, because the ledger's content-hash dedup depends on stable bytes.
 
 ---
 
