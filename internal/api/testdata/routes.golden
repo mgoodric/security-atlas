@@ -96,6 +96,7 @@ GET /v1/controls/{id}/history
 GET /v1/controls/{id}/policies
 GET /v1/controls/{id}/risks
 GET /v1/controls/{id}/state
+GET /v1/coverage-strength/matrix
 GET /v1/csf/gap
 GET /v1/csf/profiles/{kind}
 GET /v1/csf/tier

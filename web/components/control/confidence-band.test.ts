@@ -51,4 +51,16 @@ describe("bandStyle", () => {
     // Labels are distinct (no two bands share a gloss).
     expect(new Set(labels).size).toBe(bands.length);
   });
+
+  it("uses semantic status tokens instead of hardcoded palette utilities", () => {
+    expect(bandStyle("strong").badge).toContain("bg-pass/15");
+    expect(bandStyle("partial").badge).toContain("bg-warning/15");
+    expect(bandStyle("weak").badge).toContain("bg-critical/15");
+    expect(bandStyle("uncovered").badge).toContain("bg-info/15");
+    for (const band of ["strong", "partial", "weak", "uncovered"] as const) {
+      expect(bandStyle(band).badge).not.toMatch(
+        /emerald|amber|orange|slate|red|yellow/,
+      );
+    }
+  });
 });

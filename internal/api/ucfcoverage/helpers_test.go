@@ -135,6 +135,46 @@ func TestClassifyBand(t *testing.T) {
 	}
 }
 
+func TestMatrixCellScoreReusesRollupContribution(t *testing.T) {
+	score, band := matrixCellScore([]float64{0.4, 0.8, 0.7}, 0.75, true)
+	if d := score - 0.6; d < -1e-9 || d > 1e-9 {
+		t.Fatalf("score = %v; want 0.8 * 0.75", score)
+	}
+	if band != BandPartial {
+		t.Fatalf("band = %s; want partial", band)
+	}
+}
+
+func TestMatrixCellScoreUncoveredWithoutAnchorCoverage(t *testing.T) {
+	score, band := matrixCellScore([]float64{1.0}, 0, false)
+	if score != 0 {
+		t.Fatalf("score = %v; want 0", score)
+	}
+	if band != BandUncovered {
+		t.Fatalf("band = %s; want uncovered", band)
+	}
+}
+
+func TestBandTokenUsesSemanticStatusTokens(t *testing.T) {
+	got := map[ConfidenceBand]string{
+		BandStrong:    bandToken(BandStrong),
+		BandPartial:   bandToken(BandPartial),
+		BandWeak:      bandToken(BandWeak),
+		BandUncovered: bandToken(BandUncovered),
+	}
+	want := map[ConfidenceBand]string{
+		BandStrong:    "pass",
+		BandPartial:   "warning",
+		BandWeak:      "critical",
+		BandUncovered: "info",
+	}
+	for band, token := range want {
+		if got[band] != token {
+			t.Fatalf("%s token = %q; want %q", band, got[band], token)
+		}
+	}
+}
+
 func TestClamp01(t *testing.T) {
 	t.Parallel()
 	cases := map[float64]float64{-0.5: 0, 0: 0, 0.5: 0.5, 1: 1, 1.7: 1}

@@ -49,7 +49,8 @@ export function classifyBand(
 }
 
 export type BandStyle = {
-  // Tailwind badge classes.
+  // Semantic status token classes. No palette-specific utilities here:
+  // PR #1427 owns the token colors and components consume token names.
   badge: string;
   // Human gloss shown in the badge title attribute.
   label: string;
@@ -57,19 +58,19 @@ export type BandStyle = {
 
 const BAND_STYLES: Record<ConfidenceBand, BandStyle> = {
   strong: {
-    badge: "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-200",
+    badge: "bg-pass/15 text-pass dark:bg-pass/24",
     label: "Strong coverage",
   },
   partial: {
-    badge: "bg-amber-50 text-amber-700 ring-1 ring-inset ring-amber-200",
+    badge: "bg-warning/15 text-warning dark:bg-warning/24",
     label: "Partial coverage",
   },
   weak: {
-    badge: "bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-200",
+    badge: "bg-critical/15 text-critical dark:bg-critical/24",
     label: "Weak coverage",
   },
   uncovered: {
-    badge: "bg-slate-100 text-slate-500 ring-1 ring-inset ring-slate-200",
+    badge: "bg-info/15 text-info dark:bg-info/24",
     label: "Uncovered",
   },
 };
