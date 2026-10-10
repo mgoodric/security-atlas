@@ -143,6 +143,7 @@ type Querier interface {
 	// 24h rate-limit). The `channel` column keeps slack + webhook claims
 	// independent.
 	ClaimChannelDigest(ctx context.Context, arg ClaimChannelDigestParams) (pgtype.UUID, error)
+	ClaimDriftFreshnessAlert(ctx context.Context, arg ClaimDriftFreshnessAlertParams) (pgtype.UUID, error)
 	// Idempotency claim (AC-5): insert a pending delivery-log row for
 	// (tenant, recipient, digest_key). ON CONFLICT DO NOTHING means a
 	// second claim for the same digest returns no row — the caller skips the
@@ -185,6 +186,7 @@ type Querier interface {
 	// DL-YYYY-MM-DD-NNNN identifier. $2 is the start-of-day (inclusive), $3 the
 	// start of the next day (exclusive).
 	CountDecisionsByDecidedDate(ctx context.Context, arg CountDecisionsByDecidedDateParams) (int64, error)
+	CountDriftFreshnessAlertClaims(ctx context.Context, arg CountDriftFreshnessAlertClaimsParams) (int64, error)
 	// Slice 502: total CURRENT LIVE evidence count for one control, used by the
 	// evidence-summary surface to render a "showing N of M" bound (the summary is
 	// over the bounded top-N, never the full history — P0-502-8). Resolution
@@ -730,6 +732,8 @@ type Querier interface {
 	// tenant (UNIQUE (tenant_id, decision_id)).
 	GetDecisionByDecisionID(ctx context.Context, arg GetDecisionByDecisionIDParams) (Decision, error)
 	GetDecisionByID(ctx context.Context, arg GetDecisionByIDParams) (Decision, error)
+	// OE-599 drift/freshness push-alert producer queries.
+	GetDriftFreshnessAlertConfig(ctx context.Context, tenantID pgtype.UUID) (DriftFreshnessAlertConfig, error)
 	// Read a delivery-log row by id (tests + outcome inspection).
 	GetEmailDeliveryLog(ctx context.Context, arg GetEmailDeliveryLogParams) (EmailDeliveryLog, error)
 	// Slice 445 — email/SMTP notification delivery channel queries.
@@ -3203,6 +3207,7 @@ type Querier interface {
 	// row ('tier_rated' on insert, 'tier_rerated' on the conflict path) and reads
 	// the returned `(xmax = 0)` flag to know which it was.
 	UpsertCsfTierRating(ctx context.Context, arg UpsertCsfTierRatingParams) (UpsertCsfTierRatingRow, error)
+	UpsertDriftFreshnessAlertConfig(ctx context.Context, arg UpsertDriftFreshnessAlertConfigParams) (DriftFreshnessAlertConfig, error)
 	// Set a user's email-channel master opt-in (AC-9). The (tenant_id,
 	// user_id) PK is the conflict target.
 	UpsertEmailOptIn(ctx context.Context, arg UpsertEmailOptInParams) (bool, error)

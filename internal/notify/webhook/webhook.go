@@ -313,6 +313,7 @@ func (c *Channel) DeliverDigest(ctx context.Context, userID uuid.UUID, recipient
 			return fmt.Errorf("webhook: list notification preferences: %w", err)
 		}
 		counts, total := notify.FilterCountsByChannelPref(counts, channelPrefMap(prefs, channelName))
+		counts, total = filterAlertCountsByTenantRoute(ctx, q, tenantID, counts, total, channelName)
 		if total == 0 {
 			result = DeliveryResult{Skipped: true, Reason: "no unread notifications"}
 			return nil
@@ -410,6 +411,32 @@ func channelPrefMap(prefs []dbx.UserNotificationPreference, channel string) map[
 		rows = append(rows, notify.ChannelPrefRow{Event: p.Event, Channel: p.Channel, Enabled: p.Enabled})
 	}
 	return notify.ChannelPrefMap(rows, channel)
+}
+
+func filterAlertCountsByTenantRoute(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, counts map[string]int, total int, channel string) (map[string]int, int) {
+	cfg, err := q.GetDriftFreshnessAlertConfig(ctx, pgUUID(tenantID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return counts, total
+	}
+	if err != nil {
+		return counts, total
+	}
+	channelEnabled := cfg.Enabled && cfg.PagerdutyEnabled
+	if channel != channelName {
+		channelEnabled = true
+	}
+	if channelEnabled {
+		return counts, total
+	}
+	out := make(map[string]int, len(counts))
+	for k, v := range counts {
+		if k == "control.drift" || k == "evidence.staleness" {
+			total -= v
+			continue
+		}
+		out[k] = v
+	}
+	return out, total
 }
 
 func truncErr(err error) string {

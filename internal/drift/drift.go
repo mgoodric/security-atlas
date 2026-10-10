@@ -180,6 +180,41 @@ func (s *Store) Report(ctx context.Context, since time.Duration) (DriftReport, e
 	return report, nil
 }
 
+// LatestSnapshotSince returns the latest drift snapshot for the tenant in ctx
+// within the provided lookback. It is used by alert producers that need to
+// compare a just-captured snapshot to the prior known state. ok=false means no
+// baseline exists yet, so no state-change alert should be emitted.
+func (s *Store) LatestSnapshotSince(ctx context.Context, since time.Duration) (Snapshot, bool, error) {
+	now := s.now()
+	sinceDays := int(since.Hours() / 24)
+	if sinceDays < 1 {
+		sinceDays = 1
+	}
+	sinceDate := now.AddDate(0, 0, -sinceDays)
+
+	var out Snapshot
+	var ok bool
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		rows, err := q.ListLatestDriftSnapshotsSince(ctx, dbx.ListLatestDriftSnapshotsSinceParams{
+			TenantID:     pgUUID(tenantID),
+			SnapshotDate: pgDate(sinceDate),
+		})
+		if err != nil {
+			return fmt.Errorf("list drift snapshots: %w", err)
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		out = snapshotFromRow(rows[0])
+		ok = true
+		return nil
+	})
+	if err != nil {
+		return Snapshot{}, false, err
+	}
+	return out, ok, nil
+}
+
 // computeDelta is the canvas §7.1 signed drift count over the window:
 // controls_passing(latest snapshot) - controls_passing(earliest snapshot).
 // A negative delta means controls drifted OUT of passing — the leading
