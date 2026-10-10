@@ -102,6 +102,7 @@ export type FixtureName =
   | "controls-top-bar"
   | "controls-list"
   | "global-search"
+  | "incidents"
   | "tenant-switch";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
