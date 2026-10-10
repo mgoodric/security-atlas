@@ -149,6 +149,7 @@ var typeLabels = map[string]string{
 	"risk_review_overdue":     "Overdue risk reviews",
 	"audit_period_assignment": "Audit-period assignments",
 	"evidence.staleness":      "Stale-evidence digests",
+	"access_review_due":       "Access-review reminders",
 }
 
 func typeLabel(t string) string {

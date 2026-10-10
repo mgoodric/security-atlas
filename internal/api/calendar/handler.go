@@ -53,11 +53,10 @@ const (
 	truncateThreshold = 500
 
 	// validEventTypes is the AC-1 closed set. Filters outside this set
-	// are rejected with 400. Slice 675 added `vendor` so the calendar
-	// agenda sources the same event types as the dashboard "Upcoming"
-	// widget (audit-period boundaries, vendor reviews, policy reviews,
-	// exceptions) plus the calendar-only periodic control reviews.
-	validEventTypes = "audit,exception,policy,vendor,control"
+	// are rejected with 400. The calendar agenda sources audits, vendor
+	// reviews/renewals, policy reviews, exceptions, access-review campaign
+	// due dates, plus calendar-only periodic control reviews.
+	validEventTypes = "audit,exception,policy,vendor,control,access_review"
 
 	// calendarScopeKind is the api_keys AllowedKinds entry used to
 	// scope a credential to "may only fetch the ICS feed." See decision
@@ -390,7 +389,7 @@ func parseWindow(r *http.Request, now time.Time) (time.Time, time.Time, error) {
 }
 
 // normalizeTypeFilter validates a comma-separated event-type filter
-// against the AC-1 closed vocabulary. An empty filter means "all four
+// against the AC-1 closed vocabulary. An empty filter means "all
 // types." An unknown value returns 400.
 func normalizeTypeFilter(raw string) (string, error) {
 	if raw == "" {
@@ -398,11 +397,12 @@ func normalizeTypeFilter(raw string) (string, error) {
 	}
 	parts := strings.Split(raw, ",")
 	allowed := map[string]struct{}{
-		"audit":     {},
-		"exception": {},
-		"policy":    {},
-		"vendor":    {},
-		"control":   {},
+		"audit":         {},
+		"exception":     {},
+		"policy":        {},
+		"vendor":        {},
+		"control":       {},
+		"access_review": {},
 	}
 	kept := make([]string, 0, len(parts))
 	seen := map[string]struct{}{}

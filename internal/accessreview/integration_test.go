@@ -155,6 +155,41 @@ func TestCampaignFlowEvidenceReminderAndRLS(t *testing.T) {
 	}
 }
 
+func TestReminderSchedulerCreatesDueNotificationsForEachTenant(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenantA := dbtest.SeedTenant(t, admin,
+		"notifications",
+		"access_review_items",
+		"access_review_reviewer_assignments",
+		"access_review_campaigns",
+	)
+	tenantB := dbtest.SeedTenant(t, admin,
+		"notifications",
+		"access_review_items",
+		"access_review_reviewer_assignments",
+		"access_review_campaigns",
+	)
+
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, time.UTC)
+	seedDueCampaign(t, admin, tenantA, "Tenant A review", "reviewer-a", now.Add(-time.Hour))
+	seedDueCampaign(t, admin, tenantB, "Tenant B review", "reviewer-b", now.Add(-2*time.Hour))
+
+	s := NewReminderScheduler(admin, app, nil)
+	rep, err := s.SweepOnce(context.Background(), now)
+	if err != nil {
+		t.Fatalf("SweepOnce: %v", err)
+	}
+	if rep.TenantsSwept != 2 || rep.TenantFailures != 0 || rep.NotificationsCreated != 2 {
+		t.Fatalf("report = %+v, want 2 swept / 0 failures / 2 notifications", rep)
+	}
+
+	assertReminderCount(t, admin, tenantA, "reviewer-a", 1)
+	assertReminderCount(t, admin, tenantA, "reviewer-b", 0)
+	assertReminderCount(t, admin, tenantB, "reviewer-b", 1)
+	assertReminderCount(t, admin, tenantB, "reviewer-a", 0)
+}
+
 func seedUser(t *testing.T, pool *pgxpool.Pool, tenant string, email string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
@@ -187,6 +222,34 @@ func seedMember(t *testing.T, pool *pgxpool.Pool, tenant string, groupID, userID
 	`, uuid.New(), tenant, groupID, userID.String(), groupRef); err != nil {
 		t.Fatalf("seed member: %v", err)
 	}
+}
+
+func seedDueCampaign(t *testing.T, pool *pgxpool.Pool, tenant, name, reviewer string, dueAt time.Time) uuid.UUID {
+	t.Helper()
+	campaignID := uuid.New()
+	itemID := uuid.New()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO access_review_campaigns (id, tenant_id, name, source, status, due_at, created_by)
+		VALUES ($1, $2, $3, 'manual_csv', 'active', $4, 'owner')
+	`, campaignID, tenant, name, dueAt.UTC()); err != nil {
+		t.Fatalf("seed campaign: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO access_review_reviewer_assignments (id, tenant_id, campaign_id, reviewer_id)
+		VALUES ($1, $2, $3, $4)
+	`, uuid.New(), tenant, campaignID, reviewer); err != nil {
+		t.Fatalf("seed reviewer assignment: %v", err)
+	}
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO access_review_items (
+			id, tenant_id, campaign_id, system, entitlement, principal_user_id,
+			principal_email, reviewer_id, status, source, source_ref
+		)
+		VALUES ($1, $2, $3, 'github', 'admin', 'u1', 'u1@example.test', $4, 'pending', 'manual_csv', 'row-1')
+	`, itemID, tenant, campaignID, reviewer); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+	return campaignID
 }
 
 func assertEvidence(t *testing.T, pool *pgxpool.Pool, tenant string, evidenceID uuid.UUID) {
@@ -226,5 +289,22 @@ func assertReminder(t *testing.T, pool *pgxpool.Pool, tenant, reviewer string, c
 	}
 	if count != 1 {
 		t.Fatalf("reminder count = %d, want 1", count)
+	}
+}
+
+func assertReminderCount(t *testing.T, pool *pgxpool.Pool, tenant, reviewer string, want int) {
+	t.Helper()
+	var count int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT COUNT(*)
+		FROM notifications
+		WHERE tenant_id = $1
+		  AND recipient_user_id = $2
+		  AND type = $3
+	`, tenant, reviewer, ReminderNotificationType).Scan(&count); err != nil {
+		t.Fatalf("query reminder count: %v", err)
+	}
+	if count != want {
+		t.Fatalf("tenant %s reviewer %s reminder count = %d, want %d", tenant, reviewer, count, want)
 	}
 }

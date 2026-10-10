@@ -123,6 +123,17 @@ func TestNormalizeTypeFilter_AcceptsVendor(t *testing.T) {
 	}
 }
 
+func TestNormalizeTypeFilter_AcceptsAccessReview(t *testing.T) {
+	got, err := normalizeTypeFilter("access_review,policy")
+	if err != nil {
+		t.Fatalf("access_review should be a valid event type: %v", err)
+	}
+	want := "access_review,policy"
+	if got != want {
+		t.Errorf("normalized=%q want=%q", got, want)
+	}
+}
+
 // TestCalendarNameFor_TenantIDShortened — the X-WR-CALNAME label uses the
 // first 8 chars of the tenant id to disambiguate multiple calendars in a
 // client.

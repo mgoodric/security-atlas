@@ -54,6 +54,9 @@ import (
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
+		"access_review_items",
+		"access_review_reviewer_assignments",
+		"access_review_campaigns",
 		"control_evaluations",
 		"exceptions",
 		"controls",
@@ -174,6 +177,18 @@ func seedVendor(t *testing.T, admin *pgxpool.Pool, tenant string, name string, l
 		t.Fatalf("seed vendor: %v", err)
 	}
 	return vendorID
+}
+
+func seedAccessReviewCampaign(t *testing.T, admin *pgxpool.Pool, tenant string, name string, dueAt time.Time) uuid.UUID {
+	t.Helper()
+	campaignID := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO access_review_campaigns (id, tenant_id, name, source, status, due_at, created_by)
+		VALUES ($1, $2, $3, 'manual_csv', 'active', $4, 'tester')
+	`, campaignID, tenant, name, dueAt.UTC()); err != nil {
+		t.Fatalf("seed access_review_campaign: %v", err)
+	}
+	return campaignID
 }
 
 func seedEvaluation(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, evaluatedAt time.Time) {
@@ -490,6 +505,39 @@ func TestCalendar_SurfacesVendorReviews(t *testing.T) {
 	}
 	if first["related_entity_kind"] != "vendor" {
 		t.Errorf("related_entity_kind=%v want=vendor", first["related_entity_kind"])
+	}
+}
+
+func TestCalendar_SurfacesAccessReviewCampaigns(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	tenant := freshTenant(t, admin)
+	now := time.Now().UTC()
+	campaignID := seedAccessReviewCampaign(t, admin, tenant, "Q3 access certification", now.Add(10*24*time.Hour))
+
+	env := testServer(t, app, tenant)
+	resp, body := get(t, env, "/v1/calendar?types=access_review")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("calendar GET: status=%d body=%s", resp.StatusCode, string(body))
+	}
+	got := decodeJSON(t, body)
+	events := got["events"].([]any)
+	if len(events) != 1 {
+		t.Fatalf("expected 1 access-review event, got %d; body=%s", len(events), string(body))
+	}
+	first := events[0].(map[string]any)
+	if first["type"] != "access_review" {
+		t.Errorf("type=%v want=access_review", first["type"])
+	}
+	if first["related_entity_id"] != campaignID.String() {
+		t.Errorf("related_entity_id=%v want=%s", first["related_entity_id"], campaignID)
+	}
+	if first["related_entity_kind"] != "access_review_campaign" {
+		t.Errorf("related_entity_kind=%v want=access_review_campaign", first["related_entity_kind"])
+	}
+	if !strings.Contains(first["title"].(string), "Q3 access certification") {
+		t.Errorf("title=%v want campaign name", first["title"])
 	}
 }
 

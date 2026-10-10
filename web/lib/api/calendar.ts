@@ -7,8 +7,8 @@ import { apiFetch, bffControlFetch } from "./_shared";
 // ===== Slice 094 — Compliance calendar =====
 //
 // Read-only aggregation across audit_periods + exceptions + policies +
-// vendors + controls (with cadence math). Plus a per-user ICS URL token
-// mint. See docs/audit-log/094-compliance-calendar-decisions.md.
+// vendors + access-review campaigns + controls (with cadence math). Plus a
+// per-user ICS URL token mint. See docs/audit-log/094-compliance-calendar-decisions.md.
 //
 // Slice 675 added `vendor` so the agenda sources the same event types as
 // the dashboard "Upcoming" widget (the calendar was previously missing
@@ -19,6 +19,7 @@ export type CalendarEventType =
   | "exception"
   | "policy"
   | "vendor"
+  | "access_review"
   | "control";
 
 export type CalendarEvent = {
