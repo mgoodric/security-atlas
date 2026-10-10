@@ -56,7 +56,7 @@ const (
 // real row->wire transformation records on the unit surface.
 type stubReader struct {
 	posture  []dbx.FrameworkPostureRow
-	activity []dbx.ListEvidenceActivityRow
+	activity []ActivityRow
 	upcoming []dbx.ListUpcomingItemsRow
 }
 
@@ -64,7 +64,7 @@ func (s stubReader) FrameworkPosture(_ context.Context, _ pgtype.Timestamptz) ([
 	return s.posture, nil
 }
 
-func (s stubReader) ActivityFeed(_ context.Context, _ keyset, _ int32) ([]dbx.ListEvidenceActivityRow, error) {
+func (s stubReader) ActivityFeed(_ context.Context, _ string, _ keyset, _ int32) ([]ActivityRow, error) {
 	return s.activity, nil
 }
 
@@ -146,9 +146,11 @@ func TestContract_FrameworkPosture(t *testing.T) {
 // ===== GET /v1/activity =====
 
 func TestContract_Activity(t *testing.T) {
-	populated := stubReader{activity: []dbx.ListEvidenceActivityRow{
+	populated := stubReader{activity: []ActivityRow{
 		{
 			Ts:           pgTS("2026-05-15T15:04:05Z"),
+			Kind:         "evidence",
+			RowID:        uuid.MustParse(contractControlA),
 			EventType:    "evidence.ingested",
 			Actor:        "connector:aws",
 			ResourceType: "evidence",
@@ -158,14 +160,16 @@ func TestContract_Activity(t *testing.T) {
 		{
 			// Null summary -> the handler renders JSON `null` (jsonOrNull).
 			Ts:           pgTS("2026-05-15T14:00:00Z"),
-			EventType:    "evidence.ingested",
+			Kind:         "exception",
+			RowID:        uuid.MustParse("33333333-3333-4333-8333-333333333333"),
+			EventType:    "exception.approved",
 			Actor:        "user:contract",
-			ResourceType: "evidence",
+			ResourceType: "exception",
 			ResourceID:   contractControlA,
 			Summary:      nil,
 		},
 	}}
-	empty := stubReader{activity: []dbx.ListEvidenceActivityRow{}}
+	empty := stubReader{activity: []ActivityRow{}}
 
 	recorded := map[string]json.RawMessage{
 		"populated": recordVariant(t, newHandlerWithReader(populated).Activity, "/v1/activity"),
