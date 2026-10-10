@@ -18,30 +18,20 @@ package bundletest
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 func TestRun_SQLBundle_EndToEnd(t *testing.T) {
-	dsn := os.Getenv("DATABASE_URL_APP")
-	if dsn == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping SQL integration test")
-	}
+	pool := dbtest.NewAppPool(t)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	defer pool.Close()
 
 	// A throwaway tenant id — no rows are written, but the GUC must be set for
 	// the SQL subtransaction to begin under RLS context. (The SQL query only

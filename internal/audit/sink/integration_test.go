@@ -20,7 +20,6 @@ package sink_test
 import (
 	"context"
 	"encoding/json"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -31,24 +30,9 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
-
-func openAppPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL_APP")
-	if dsn == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping sink integration test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 // freshSinkTenant returns a tenant UUID + registers cleanup of the
 // audit_sink_failures rows we'll produce. Each test isolates itself via a
@@ -78,7 +62,7 @@ func freshSinkTenant(t *testing.T, pool *pgxpool.Pool) uuid.UUID {
 // records yields 100 lines in the sink within 5 seconds, all carrying a
 // valid _hmac. No fallback rows are produced.
 func TestIntegration_AC7_100RecordsAllReachSink(t *testing.T) {
-	pool := openAppPool(t)
+	pool := dbtest.NewAppPool(t)
 	tenant := freshSinkTenant(t, pool)
 
 	key := []byte("integration-test-hmac-key-must-be-32+!")
@@ -151,7 +135,7 @@ func TestIntegration_AC7_100RecordsAllReachSink(t *testing.T) {
 // audit_sink_failures (real Postgres table with the slice 036 four-policy
 // RLS pattern) — no silent-drop, no panic.
 func TestIntegration_AC8_BackpressureFallsBackToTable(t *testing.T) {
-	pool := openAppPool(t)
+	pool := dbtest.NewAppPool(t)
 	tenant := freshSinkTenant(t, pool)
 
 	key := []byte("integration-test-hmac-key-must-be-32+!")

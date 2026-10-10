@@ -35,38 +35,19 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
-
-// openIntegrationPool opens the atlas_app pool used for the
-// revocation table. Skips when DATABASE_URL_APP is unset.
-func openIntegrationPool(t *testing.T) *pgxpool.Pool {
-	t.Helper()
-	dsn := os.Getenv("DATABASE_URL_APP")
-	if dsn == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping R2 eviction test")
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(pool.Close)
-	return pool
-}
 
 // tenantRecorder is the downstream handler the middleware wraps in
 // these tests. It captures the tenant id pulled from the request
@@ -87,7 +68,7 @@ func tenantRecorder(captured *string) http.Handler {
 
 // TestR2Eviction_EventualThenRevoke is the AC-25 load-bearing test.
 func TestR2Eviction_EventualThenRevoke(t *testing.T) {
-	pool := openIntegrationPool(t)
+	pool := dbtest.NewAppPool(t)
 	ks, err := fsstore.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("fsstore.Open: %v", err)
@@ -180,7 +161,7 @@ func TestR2Eviction_EventualThenRevoke(t *testing.T) {
 // ignored — the JWT claim is the only source of tenant identity.
 // P0-190-3 is the binding anti-criterion.
 func TestR2Eviction_CrossTenantHeaderOverride(t *testing.T) {
-	pool := openIntegrationPool(t)
+	pool := dbtest.NewAppPool(t)
 	ks, err := fsstore.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("fsstore.Open: %v", err)

@@ -13,50 +13,17 @@
 package policies_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
-
-func emptyAppDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func emptyAdminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func emptyOpenPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // TestListPolicies_EmptyTenant_Returns200EmptyEnvelope is the slice-150
 // reproducer for the operator-reported "Could not load policies · 500
@@ -72,20 +39,12 @@ func emptyOpenPool(t *testing.T, dsn string) *pgxpool.Pool {
 // `?include=ack_rate` (web/lib/api.ts listPolicies) so the joined-row
 // path is on the hot frontend path.
 func TestListPolicies_EmptyTenant_Returns200EmptyEnvelope(t *testing.T) {
-	admin := emptyOpenPool(t, emptyAdminDSN(t))
-	app := emptyOpenPool(t, emptyAppDSN(t))
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM policy_acknowledgments WHERE tenant_id = $1`,
-			`DELETE FROM policies WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := dbtest.SeedTenant(t, admin,
+		"policy_acknowledgments",
+		"policies",
+	)
 
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)

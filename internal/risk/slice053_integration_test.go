@@ -17,80 +17,31 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/risk"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // ----- harness helpers -----
 
-func slice053AppDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func slice053AdminDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL")
-	if v == "" {
-		t.Skip("DATABASE_URL not set; skipping integration test")
-	}
-	return v
-}
-
-func slice053OpenPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	// Register cleanup via t.Cleanup so it runs in LIFO order with
-	// other Cleanup callbacks — tenant deletes (registered later by
-	// freshTenant) run BEFORE the pool closes.
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
-
+// slice053FreshTenant mints a tenant whose rows are cleaned in FK-safe
+// order (children before parents) through the privileged pool. The pool
+// constructors register their Close via t.Cleanup, so LIFO ordering keeps
+// the migrate pool open while these deletes run.
 func slice053FreshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
-	tenant := uuid.NewString()
-	t.Cleanup(func() {
-		ctx := context.Background()
-		for _, stmt := range []string{
-			`DELETE FROM risk_aggregations WHERE tenant_id = $1`,
-			`DELETE FROM risk_control_links WHERE tenant_id = $1`,
-			`DELETE FROM risks WHERE tenant_id = $1`,
-			`DELETE FROM org_units WHERE tenant_id = $1`,
-			`DELETE FROM org_themes WHERE tenant_id = $1`,
-		} {
-			if _, err := admin.Exec(ctx, stmt, tenant); err != nil {
-				t.Logf("cleanup %s: %v", stmt, err)
-			}
-		}
-	})
-	return tenant
-}
-
-func slice053CtxFor(t *testing.T, tenant string) context.Context {
-	t.Helper()
-	ctx, err := tenancy.WithTenant(context.Background(), tenant)
-	if err != nil {
-		t.Fatalf("WithTenant: %v", err)
-	}
-	return ctx
+	return dbtest.SeedTenant(t, admin,
+		"risk_aggregations",
+		"risk_control_links",
+		"risks",
+		"org_units",
+		"org_themes",
+	)
 }
 
 // seedRisk inserts a risk directly via admin pool with the given (L,I) on a
@@ -134,8 +85,8 @@ func seedTenantTheme(t *testing.T, admin *pgxpool.Pool, tenant string, name, des
 // ================================================================
 
 func TestAggregate_CrossTenantChildDenial_AC10(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 
 	tenantA := slice053FreshTenant(t, admin)
 	tenantB := slice053FreshTenant(t, admin)
@@ -147,7 +98,7 @@ func TestAggregate_CrossTenantChildDenial_AC10(t *testing.T) {
 	localChild := seedAggregableRisk(t, admin, tenantA, "tenant-A risk", 4, 4, nil)
 
 	// As tenant A, try to aggregate including tenant B's child.
-	ctx := slice053CtxFor(t, tenantA)
+	ctx := dbtest.WithTenantCtx(t, tenantA)
 	_, err := store.Aggregate(ctx, risk.AggregateInput{
 		ParentTitle:      "Cross-tenant attempt",
 		ParentLevel:      dbx.RiskLevelOrg,
@@ -178,11 +129,11 @@ func TestAggregate_CrossTenantChildDenial_AC10(t *testing.T) {
 // ================================================================
 
 func TestAssignThemes_DefaultVocab_AC1(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	riskID := seedAggregableRisk(t, admin, tenant, "needs themes", 3, 3, nil)
 	updated, err := store.AssignThemes(ctx, riskID, []string{"ownership", "access-control"})
@@ -199,11 +150,11 @@ func TestAssignThemes_DefaultVocab_AC1(t *testing.T) {
 }
 
 func TestAssignThemes_RejectUnknown_AC1_AC25(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	riskID := seedAggregableRisk(t, admin, tenant, "rejects unknown", 2, 2, nil)
 	_, err := store.AssignThemes(ctx, riskID, []string{"ownership", "made-up-theme"})
@@ -213,11 +164,11 @@ func TestAssignThemes_RejectUnknown_AC1_AC25(t *testing.T) {
 }
 
 func TestAssignThemes_TenantPrivateAccepted_AC1(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	seedTenantTheme(t, admin, tenant, "org-private:fintech", "tenant-private theme")
 	riskID := seedAggregableRisk(t, admin, tenant, "tenant-private theme", 2, 2, nil)
@@ -231,11 +182,11 @@ func TestAssignThemes_TenantPrivateAccepted_AC1(t *testing.T) {
 }
 
 func TestListVisibleThemes_DefaultsPlusTenantPrivate_AC3(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	seedTenantTheme(t, admin, tenant, "org-private:zeta", "tenant-private")
 	themes, err := store.ListVisibleThemes(ctx)
@@ -271,11 +222,11 @@ func TestListVisibleThemes_DefaultsPlusTenantPrivate_AC3(t *testing.T) {
 // ================================================================
 
 func TestRemoveTheme_Idempotent_AC2(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	riskID := seedAggregableRisk(t, admin, tenant, "idempotent delete", 2, 2, []string{"ownership", "tech-debt"})
 	current, err := store.GetRiskThemes(ctx, riskID)
@@ -308,11 +259,11 @@ func TestRemoveTheme_Idempotent_AC2(t *testing.T) {
 // ================================================================
 
 func TestOrgUnit_CRUD_HappyPath_AC4(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	// Create root.
 	root, err := store.CreateOrgUnit(ctx, risk.OrgUnitInput{
@@ -367,11 +318,11 @@ func TestOrgUnit_CRUD_HappyPath_AC4(t *testing.T) {
 }
 
 func TestOrgUnit_CycleDetection_AC4_AC24(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	// A -> B -> C chain (A is root, B's parent is A, C's parent is B).
 	a, _ := store.CreateOrgUnit(ctx, risk.OrgUnitInput{Name: "A", Level: dbx.RiskLevelCompany})
@@ -404,18 +355,18 @@ func TestOrgUnit_CycleDetection_AC4_AC24(t *testing.T) {
 }
 
 func TestOrgUnit_CrossTenantParent_AC9(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenantA := slice053FreshTenant(t, admin)
 	tenantB := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
 
 	// Create a unit in tenant B.
-	ctxB := slice053CtxFor(t, tenantB)
+	ctxB := dbtest.WithTenantCtx(t, tenantB)
 	bUnit, _ := store.CreateOrgUnit(ctxB, risk.OrgUnitInput{Name: "B-root", Level: dbx.RiskLevelOrg})
 
 	// As tenant A, try to use B's id as a parent — must return ErrNotFound.
-	ctxA := slice053CtxFor(t, tenantA)
+	ctxA := dbtest.WithTenantCtx(t, tenantA)
 	_, err := store.CreateOrgUnit(ctxA, risk.OrgUnitInput{
 		Name: "A-child", Level: dbx.RiskLevelTeam, ParentID: &bUnit.ID,
 	})
@@ -429,11 +380,11 @@ func TestOrgUnit_CrossTenantParent_AC9(t *testing.T) {
 // ================================================================
 
 func TestAggregate_EndToEnd_AC5_AC6_AC8_AC22(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	// Two org_units. Three child risks tagged with `ownership`, spread across
 	// the two units. Severities 15 (3*5), 12 (4*3), 9 (3*3).
@@ -498,11 +449,11 @@ func TestAggregate_EndToEnd_AC5_AC6_AC8_AC22(t *testing.T) {
 }
 
 func TestAggregate_WeightedMax(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	r1 := seedAggregableRisk(t, admin, tenant, "WM 1", 3, 5, nil) // 15
 	r2 := seedAggregableRisk(t, admin, tenant, "WM 2", 4, 3, nil) // 12
@@ -524,11 +475,11 @@ func TestAggregate_WeightedMax(t *testing.T) {
 }
 
 func TestAggregate_Sum_Capped(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	r1 := seedAggregableRisk(t, admin, tenant, "Sum 1", 5, 4, nil) // 20
 	r2 := seedAggregableRisk(t, admin, tenant, "Sum 2", 3, 3, nil) // 9
@@ -552,11 +503,11 @@ func TestAggregate_Sum_Capped(t *testing.T) {
 // ================================================================
 
 func TestAggregate_Idempotent_AC7(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	r1 := seedAggregableRisk(t, admin, tenant, "Idemp 1", 3, 3, nil)
 	r2 := seedAggregableRisk(t, admin, tenant, "Idemp 2", 3, 3, nil)
@@ -593,11 +544,11 @@ func TestAggregate_Idempotent_AC7(t *testing.T) {
 // ================================================================
 
 func TestAggregate_MixedMethodology_Rejected(t *testing.T) {
-	admin := slice053OpenPool(t, slice053AdminDSN(t))
-	app := slice053OpenPool(t, slice053AppDSN(t))
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
 	tenant := slice053FreshTenant(t, admin)
 	store := risk.NewStore(app)
-	ctx := slice053CtxFor(t, tenant)
+	ctx := dbtest.WithTenantCtx(t, tenant)
 
 	// Eligible child (nist_800_30).
 	r1 := seedAggregableRisk(t, admin, tenant, "eligible", 3, 3, nil)

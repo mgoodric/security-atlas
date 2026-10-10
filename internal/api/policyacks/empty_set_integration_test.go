@@ -17,41 +17,17 @@
 package policyacks_test
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
-
-func emptySetAppDSN(t *testing.T) string {
-	t.Helper()
-	v := os.Getenv("DATABASE_URL_APP")
-	if v == "" {
-		t.Skip("DATABASE_URL_APP not set; skipping integration test")
-	}
-	return v
-}
-
-func emptySetOpenPool(t *testing.T, dsn string) *pgxpool.Pool {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	pool, err := pgxpool.New(ctx, dsn)
-	if err != nil {
-		t.Fatalf("pgxpool.New: %v", err)
-	}
-	t.Cleanup(func() { pool.Close() })
-	return pool
-}
 
 // TestMyAcknowledgments_BootstrapCred_Returns200EmptyEnvelope is the
 // slice-150 reproducer for the operator-reported fresh-install bug:
@@ -60,7 +36,7 @@ func emptySetOpenPool(t *testing.T, dsn string) *pgxpool.Pool {
 // non-UUID UserID. Post-fix the handler returns 200 with
 // `{pending: [], count: 0, window_seconds: <int>}`.
 func TestMyAcknowledgments_BootstrapCred_Returns200EmptyEnvelope(t *testing.T) {
-	app := emptySetOpenPool(t, emptySetAppDSN(t))
+	app := dbtest.NewAppPool(t)
 	srv := api.New(api.Config{})
 	srv.AttachDB(app)
 	tenant := uuid.NewString()

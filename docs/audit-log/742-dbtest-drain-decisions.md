@@ -586,6 +586,162 @@ Verification: `goimports -w` applied; `gofmt -l` clean; `go vet -tags=integratio
 detection_tier_actual: none
 detection_tier_target: none
 
+## Batch 25 — the differently-named-helper population (10 packages, each fully drained)
+
+Ten `_test.go` files across ten packages, every one of them a WHOLE-PACKAGE
+drain: after this batch none of the ten contains an `os.Getenv("DATABASE_URL…")`
+or a `pgxpool.New` dial.
+
+### Scope finding (why the drain was not actually finished at batch 24)
+
+Batch 24 declared itself the "FINAL drainable package". That claim is true
+against **AC-6 as literally written** — `grep -rl 'func openPool' internal/ |
+grep _test.go` does reach zero (modulo the documented `*testing.B` carve-out).
+It is NOT true of the drain's actual subject. The AC-6 metric keys on the
+canonical helper NAME; ~39 suites still derived the same pool/DSN boilerplate
+under DIFFERENT names (`empOpenPool`, `emptyOpenPool`, `emptySetOpenPool`,
+`aiPool`, `slice053OpenPool`, `openAppPool`, `openIntegrationPool`,
+`openAdminPool`, …). The slice doc's "Scope discipline" section explicitly
+contemplates this population and names `internal/risk/slice053_integration_test.go`'s
+`slice053OpenPool` as its example — flagged **lower priority** (not a
+compile-blocker for anything), not out of scope. Batch 25 begins draining it;
+`internal/risk/slice053_integration_test.go` is in this batch.
+
+Corrected inventory: **39 such files before this batch, 10 migrated here, 29
+remain.**
+
+### Files migrated (all pure conversions)
+
+- `internal/api/dashboard/empty_set_integration_test.go` — `empAppDSN`/
+  `empAdminDSN`/`empOpenPool` deleted. The inline `t.Cleanup` DELETE loop over
+  `control_evaluations`, `evidence_records` is a pure FK-ordered tenant-scoped
+  delete, so `uuid.NewString()`+closure → `dbtest.SeedTenant(t, admin, …)` with
+  the same two tables in the same order.
+- `internal/api/policies/empty_set_integration_test.go` — same shape
+  (`emptyAppDSN`/`emptyAdminDSN`/`emptyOpenPool`); cleanup tables
+  `policy_acknowledgments`, `policies` → `SeedTenant`.
+- `internal/api/policyacks/empty_set_integration_test.go` — `emptySetAppDSN`/
+  `emptySetOpenPool` deleted; app-only suite, no admin pool, no tenant cleanup
+  (it seeds nothing), so `uuid.NewString()` stays as the tenant source.
+- `internal/api/emptyset/audit_integration_test.go` — `openAppPool` deleted →
+  `dbtest.NewAppPool(t)`; its doc-comment rationale (app role so RLS is
+  exercised as production does) moved to the call site.
+- `internal/api/questionnaires/handlers_ai_integration_test.go` — `aiAppDSN`/
+  `aiAdminDSN`/`aiPool` deleted; `aiFreshTenant` KEPT as a thin wrapper
+  delegating to `dbtest.SeedTenant` (it carries the four-table FK order and has
+  three call sites). Also removed the now-dead `var _ = time.Second`
+  import-keeper — the "future edit [that] drops the only reference" it guarded
+  against is this one.
+- `internal/api/scfseed/scfseed_integration_test.go` — `adminDSN`/
+  `openAdminPool` deleted → `dbtest.NewMigratePool(t)`. Privileged-pool-only
+  suite (platform-layer SCF catalog, `tenant_id`-NULL rows), the same shape as
+  batch 24's soc2import: no app pool, no `freshTenant`.
+- `internal/audit/sink/integration_test.go` — `openAppPool` deleted →
+  `dbtest.NewAppPool(t)`.
+- `internal/auth/jwtmw/integration_test.go` — `openIntegrationPool` deleted →
+  `dbtest.NewAppPool(t)` (the `atlas_app` pool backing the revocation table).
+- `internal/control/bundletest/integration_test.go` — the dial was inline in the
+  test body rather than in a helper; `dsn`+`pgxpool.New`+`defer pool.Close()` →
+  `dbtest.NewAppPool(t)`. The outer 30s `context.WithTimeout` STAYS — it scopes
+  the tenant-GUC transaction the SQL evaluator nests its read-only
+  subtransaction on, not the dial.
+- `internal/risk/slice053_integration_test.go` — the batch's largest conversion
+  and the file the slice doc names. All four helpers drained:
+  `slice053AppDSN`/`slice053AdminDSN`/`slice053OpenPool` → `dbtest.NewAppPool`/
+  `NewMigratePool` at 13 call sites each; `slice053CtxFor` → `dbtest.WithTenantCtx`
+  at 16 call sites (byte-identical semantics — `tenancy.WithTenant` over
+  `context.Background()`, `t.Fatalf` on error); `slice053FreshTenant` KEPT as a
+  thin `dbtest.SeedTenant` wrapper (five-table FK order, 17 call sites). The
+  `tenancy` import fell out entirely as a result.
+
+### Carve-outs kept inline (sanctioned — semantics `dbtest` cannot express)
+
+1. **`internal/audit/sink`'s `freshSinkTenant`.** Returns a `uuid.UUID` and its
+   cleanup is a DELIBERATE NO-OP: the comment records that `atlas_app` cannot
+   DELETE from `audit_sink_failures` (no policy + no grant, by design) and that
+   the test residue is accepted. `dbtest.SeedTenant` would require a migrate pool
+   this suite does not open and WOULD perform the delete — that is a behavior
+   change, not a refactor, so the helper stays. Its pool was not re-routed
+   because it opens none.
+2. **`internal/api/questionnaires`'s `aiReq`.** Its `tenancy.WithTenant` is
+   rooted at `r.Context()` (an `*http.Request` context) and then chained with
+   `authctx.WithCredential` + a chi route context. `dbtest.WithTenantCtx` is
+   rooted at `context.Background()` and returns immediately — not a drop-in.
+   Left inline.
+3. **`internal/api/oauth/residual_audit_integration_test.go`** (NOT in this
+   batch, noted so a later batch does not mistake it for a conversion): it builds
+   a deliberately-BROKEN `search_path` pool via `pgxpool.NewWithConfig` and a
+   deliberately-CLOSED pool, to drive audit-write failure seams. Neither shape is
+   a harness call.
+4. **`internal/api/ucfcoverage/benchmark_test.go`** — unchanged, the standing
+   `*testing.B` carve-out from batch 10.
+
+### Role model
+
+Preserved throughout. Every RLS-bound assertion runs through
+`dbtest.NewAppPool`; `dbtest.NewMigratePool` appears only for cross-tenant
+fixture seeding, the platform-layer SCF catalog wipe/seed (`scfseed`), and
+FK-ordered tenant cleanup. No assertion was moved to the privileged pool
+(slice-435 AC-3 / the EoP guard). `dashboard`, `policies`, `questionnaires` and
+`risk` open the migrate pool BEFORE `SeedTenant` registers its cleanup, so LIFO
+ordering keeps that pool open while the DELETEs run.
+
+### Verification (live, not deferred)
+
+Unlike batches 9-24 (which deferred the live run to CI), this batch was verified
+against a real Postgres 16 — bootstrapped `atlas_app` role + all forward
+migrations — with a BEFORE/AFTER per-test comparison:
+
+- Baseline (pre-change), all ten packages under
+  `go test -tags=integration -p 1`: **204 PASS, 2 SKIP**.
+- After migration, same command: **204 PASS, 2 SKIP**.
+- `diff` of the sorted `--- PASS/SKIP: <name>` lines is **EMPTY** — same test
+  names, same outcomes, nothing newly skipped and nothing silently dropped.
+  (The 2 SKIPs are `internal/risk`'s two NATS-dependent residual-subscriber
+  tests, skipped identically before and after; no NATS in the harness env.)
+- `gofmt -l` clean on all ten files; `go vet -tags=integration ./internal/...`
+  clean; `go build -tags=integration ./...` clean.
+- No production (`!_test.go`) code touched (AC-4); `-p 1` and the no-retry
+  policy untouched (AC-5); shard enrolment (`scripts/integration-shards.txt`)
+  unchanged.
+
+### Remaining after this batch — 29 files, in two classes
+
+- **23 are `TestMain`-based** and are NOT drainable without a harness change.
+  They open package-level pools inside `func TestMain(m *testing.M)`, and the
+  slice-435 harness is `*testing.T`-only — the exact hard constraint already
+  documented for the `*testing.B` benchmark carve-out. The whole
+  `internal/api/admin*` cluster (12 files) plus `internal/db`, `internal/auth`,
+  `internal/scim`, `internal/featureflag`, `internal/demoseed`,
+  `internal/catalog/metrics`, `internal/api/{features,scim,tenants}`,
+  `internal/auth/{grouprole,users}` are in this class. Draining them requires
+  either a `testing.TB` overload of the harness or converting each `TestMain`
+  to per-test setup — both are design changes, not mechanical adoption, and
+  belong in a separate slice.
+- **6 are per-test**, of which **4 are drainable now** — the next batch's work:
+  `internal/api/legacy_bearer_retirement_test.go`,
+  `internal/api/oauth/token_integration_test.go`,
+  `internal/api/oauth/user_resolver_authpool_integration_test.go`,
+  `internal/demoseed/evaluate_integration_test.go`.
+  The other 2 are the carve-outs already named above and are NOT drainable by
+  design: `internal/api/oauth/residual_audit_integration_test.go` (deliberately
+  broken/closed pools driving audit-write failure seams) and
+  `internal/api/ucfcoverage/benchmark_test.go` (the standing `*testing.B`
+  carve-out).
+
+  Inventory method, so the next batch can reproduce it: the population is
+  `grep -rl 'pgxpool.New' --include='*_test.go' internal/` restricted to
+  `//go:build integration` files — 35 hits total, 6 of which carry NO build tag
+  and are unit-tier fixtures dialing a deliberately-unreachable DSN
+  (`internal/api/adminscim/helpers_test.go`, `internal/api/routewalk_test.go`,
+  `internal/artifact/store_test.go`, `internal/demoseed/evaluate_test.go`,
+  `internal/metrics/scheduler/worker_test.go`,
+  `internal/observability/otel/coverage_test.go`). Those 6 are NOT drain
+  candidates — they never reach Postgres. 35 − 6 = the 29 above.
+
+detection_tier_actual: none
+detection_tier_target: none
+
 ## Batch 24 — internal/api soc2import (whole-package, sibling-shared) — FINAL drainable package
 
 WHOLE-PACKAGE drain of `internal/api/soc2import` (8 `_test.go` files), zero
