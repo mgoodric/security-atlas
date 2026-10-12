@@ -11,7 +11,7 @@
 # Built + published by .github/workflows/container-publish.yml on release.
 
 # ----- Stage 1: build -----
-FROM golang:1.26 AS builder
+FROM golang:1.27 AS builder
 
 WORKDIR /src
 
