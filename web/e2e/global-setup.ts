@@ -128,6 +128,10 @@ async function issueTestJWT(): Promise<string> {
  */
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export default async function globalSetup(_config: FullConfig): Promise<void> {
+  if (process.env.TEST_USER_EMAIL && process.env.TEST_USER_PASSWORD) {
+    console.log("e2e global-setup: skipping JWT issue because user email/password are provided.");
+    return;
+  }
   const token = await issueTestJWT();
   process.env.TEST_BEARER = token;
 }

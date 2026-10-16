@@ -55,6 +55,7 @@ export default defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
     video: "retain-on-failure",
+    ignoreHTTPSErrors: true,
   },
 
   projects: [
@@ -73,12 +74,12 @@ export default defineConfig({
   // locally. Slice 119 — the prior `!isCI` was a polarity inversion: it
   // told Playwright to spawn its own server in CI, racing the workflow
   // step for :3000 and failing every run with "port 3000 already in use".
-  webServer: {
+  webServer: (baseURL.includes("localhost") || baseURL.includes("127.0.0.1")) ? {
     command: "npm start",
     url: baseURL,
     reuseExistingServer: isCI,
     timeout: 120_000,
     stdout: "ignore",
     stderr: "pipe",
-  },
+  } : undefined,
 });
