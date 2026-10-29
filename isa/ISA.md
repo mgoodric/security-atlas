@@ -156,11 +156,11 @@ have marked them `manual` instead, which would be a false statement about
 ISC-2, ISC-3 and ISC-4 — all three are machine-checkable, they are simply
 unchecked today.
 
-| isc   | tier    | type | check                                                             | threshold | tool                                       |
-| ----- | ------- | ---- | ----------------------------------------------------------------- | --------- | ------------------------------------------ |
-| ISC-2 | service | sql  | no SCF anchor carries two controls with overlapping satisfactions | 0         | `bash isa/probes/no-duplicate-controls.sh` |
-| ISC-3 | service | bash | replay at T equals what was reported at T                         | 0         | `bash isa/probes/ledger-replay.sh`         |
-| ISC-4 | service | sql  | no published artifact has ai_assisted without a human_approver    | 0         | `bash isa/probes/human-approver-guard.sh`  |
+| isc   | tier    | type | check                                                           | threshold | tool                                       |
+| ----- | ------- | ---- | --------------------------------------------------------------- | --------- | ------------------------------------------ |
+| ISC-2 | pure    | bash | no SCF anchor carries a control under two framework directories | 0         | `bash isa/probes/no-duplicate-controls.sh` |
+| ISC-3 | service | bash | replay at T equals what was reported at T                       | 0         | `bash isa/probes/ledger-replay.sh`         |
+| ISC-4 | service | sql  | no published artifact has ai_assisted without a human_approver  | 0         | `bash isa/probes/human-approver-guard.sh`  |
 
 ISC-1 and ISC-5 carry no row on purpose. Both are manual with a stated reason
 in the claim itself: ISC-1 is experiential (a whole audit cycle with a real
@@ -177,10 +177,42 @@ automatable by wanting it to.
 
 ## Not yet specified
 
-- Whether ISC-2's falsifier can be a probe against a seeded catalog, or needs
-  the real SCF import to be meaningful.
-- What "audit-binding artifact" enumerates to. C11 is enforced per-surface
-  today; ISC-4 asserts it globally and cannot close until the set is named.
+- ~~Whether ISC-2's falsifier can be a probe against a seeded catalog, or
+  needs the real SCF import to be meaningful.~~ Answered 2026-10-29 (Matt's
+  ruling on #1698): neither. The probe reads the shipped catalog itself,
+  `controls/`, with no database.
+  - **What a duplicate is.** One control copied per framework onto the same
+    SCF anchor, which is what C1 and ADR-0013 forbid. Distinct controls of one
+    framework that share an anchor are not duplicates. The five SOC 2
+    controls on GOV-01 (`soc2_cc1_1_code_of_conduct`,
+    `soc2_cc1_2_board_oversight`, `soc2_cc2_1_information_quality`,
+    `soc2_cc5_3_policies_procedures`, `soc2_pi1_1_processing_objectives`) are
+    five controls. The falsifier's phrase "overlapping framework
+    satisfactions" is read that way: overlapping across frameworks, not
+    within one.
+  - **Where the framework comes from.** The catalog's layout,
+    `controls/<framework>/<bundle>/control.yaml`. It is the only place a
+    control's framework is recorded. Neither the bundle format nor the
+    `controls` row carries one, and satisfactions come from the anchor alone.
+    So the falsifier is one `scf_anchor_id` under two different
+    `controls/<framework>/` directories.
+  - **How the probe proves itself.** `isa/probes/no-duplicate-controls.sh`
+    scans two fixtures on every run before the real catalog
+    (`isa/probes/testdata/no-duplicate-controls/`). `holds/` is the GOV-01
+    shape and must pass. `false/` adds an `iso27001` copy on GOV-01 and must
+    fail. If either answers wrong, the probe exits 3 rather than vouch for
+    the catalog.
+  - **What it cannot see.** A bundle a tenant uploads carries no framework,
+    so a per-framework copy made by upload is invisible to this probe, and to
+    the database too. ISC-2 is checked for the shipped catalog only. Covering
+    uploads would need a framework attribution on the control, which is a
+    feature and not a probe.
+- ~~What "audit-binding artifact" enumerates to.~~ Answered 2026-10-29; see
+  **Audit-binding artifact** under Language. The schema guard alone cannot
+  answer ISC-4. It stops an approval being recorded without an approver, but
+  it does not stop an unapproved draft being published. That half belongs to
+  each publish path, and `isa/probes/human-approver-guard.sh` tests the paths
+  directly.
 - How this initiative's epics relate to the 69 v1 slices already merged. The
   slices are history; the epics are current state. The mapping is unwritten.
 
@@ -217,11 +249,46 @@ was resolved rather than wished away.
   CDE, HIPAA covered systems and the SOC 2 system are three different sets.
 - **Audit period** — a window that can be frozen. Once frozen, its sample
   population stops moving.
-- **Audit-binding artifact** — anything that leaves the system and is relied on
-  by an auditor or customer. The enumeration is unwritten; see Not yet
-  specified.
+- **Audit-binding artifact**: anything that leaves the system and that an
+  auditor, customer or board relies on. As of 2026-10-29 the set has two
+  kinds:
+  - _Can carry model-drafted content, so ISC-4 applies:_ questionnaire
+    responses (the questionnaire PDF export a customer receives, from
+    `questionnaire_answers`) and the board-pack narrative (approved sections
+    of `board_narrative_sections`).
+  - _Deterministic, with no model output today:_ OSCAL SSP / AP / AR / POA&M
+    exports, audit-period freeze bundles, walkthrough exports, and the
+    templated board brief. These are audit-binding, but there is nothing for
+    the guard to gate yet. The first time one of them takes model-drafted
+    text, it joins the first kind.
+  - _Not audit-binding:_ surfaces whose AI output stays inside the system
+    until a human acts on it. These are `checklist_sections`,
+    `mcp_write_proposals` and `questionnaire_mapping_proposals`. They still
+    carry the guard, and the ISC-4 probe checks it on every table with the
+    three columns.
 
 ## Changelog
+
+### 2026-10-29 · ISC-2/3/4 probes land (security-atlas#1691)
+
+The three probes named in Test Strategy now exist. They were adopted from the
+retired engine's August drafts (#1614, #1615, #1616) and rewritten where the
+drafts tested a copy of the code rather than the code. The two open questions
+they depend on are answered under Not yet specified. No claim changed. The
+ISC-2 Test Strategy row now describes the catalog scan Matt ruled for, in
+place of the database check it described before.
+
+- ISC-2 holds on `main` today: the shipped catalog has one framework
+  directory, `controls/soc2/`. The probe's self-test fixtures show it failing
+  on a cross-framework copy and passing on the GOV-01 shape. Ticking the
+  claim is left to review.
+- ISC-3 is false on `main` (#1699): the evaluation engine's as-of read
+  (`ListEvidenceForControlAsOf`) bounds `observed_at` but never
+  `ingested_at`. Evidence that arrives late with a backdated `observed_at`
+  therefore changes the replay of a date that had already been reported.
+- ISC-4 is false on `main` (#1700): the questionnaire PDF export puts
+  AI-suggested answers into the document whether or not a human approved
+  them.
 
 ### 2026-08-21 · initiative ISA written
 

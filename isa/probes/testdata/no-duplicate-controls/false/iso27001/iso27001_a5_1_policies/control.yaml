@@ -1,0 +1,8 @@
+# Fixture for isa/probes/no-duplicate-controls.sh. Not a real control.
+bundle_schema_version: "1"
+bundle_id: iso27001_a5_1_policies
+title: "Policies for information security (copy of soc2_cc5_3)"
+scf_anchor_id: GOV-01
+control_family: GOV
+implementation_type: manual_attested
+lifecycle_state: active

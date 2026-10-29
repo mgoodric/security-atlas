@@ -69,6 +69,31 @@ type PDFItem struct {
 	NeedsMapping bool
 }
 
+// PDFItems projects a questionnaire's questions, with their answers, into
+// the rows the PDF export renders. It is the export's entire content
+// selection: the ExportPDF handler passes its result to RenderPDF
+// unchanged, so whatever answer reaches a PDFItem reaches the customer.
+// isa/probes/human-approver-guard.sh (ISC-4) calls it directly for that
+// reason.
+func PDFItems(questions []Question) []PDFItem {
+	items := make([]PDFItem, 0, len(questions))
+	for _, q := range questions {
+		pi := PDFItem{
+			Code:         q.Code,
+			Text:         q.Text,
+			Domain:       q.Domain,
+			ScfAnchorID:  q.ScfAnchorID,
+			NeedsMapping: q.NeedsMapping,
+		}
+		if q.Answer != nil {
+			pi.AnswerValue = q.Answer.AnswerValue
+			pi.Narrative = q.Answer.Narrative
+		}
+		items = append(items, pi)
+	}
+	return items
+}
+
 // RenderPDF returns a PDF byte stream for the questionnaire. Bytes
 // begin with the literal `%PDF-` magic header. Blocking; caller
 // supplies the timeout via ctx.
