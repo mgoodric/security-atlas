@@ -3237,10 +3237,15 @@ jobs:
   # a failure. So this job is green on an ordinary PR and red only on a
   # regression of something already claimed true.
   #
-  # The stack is the same one the integration shards get (Postgres with
-  # roles + forward migrations, MinIO, NATS), so `service`-tier SQL probes
-  # find a real schema with RLS and `$DATABASE_URL_APP` set. Go is on PATH
-  # for probes that compile against internal/.
+  # Postgres ONLY, with the roles + forward migrations the integration
+  # shards get, so `service`-tier SQL probes find a real schema with RLS and
+  # `$DATABASE_URL_APP` set. Go is on PATH for probes that compile against
+  # internal/. NATS and MinIO are deliberately absent: this job gates every
+  # PR, docs-only ones included, and each extra image pull (and the `mc mb`)
+  # is one more way an infra blip reddens merge-gate for a PR that is not at
+  # fault (slice 419 D-1; #1695 review finding 1). Add them back, by
+  # switching to ./.github/actions/atlas-stack-up, in the PR that lands the
+  # first probe needing NATS or MinIO — not before.
   #
   # No stub-twin and no path filter: the claims and probes live in isa/*.md,
   # which the `code` filter treats as docs, and a claim ticked `- [x]` in a
@@ -3271,11 +3276,6 @@ jobs:
     env:
       DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
       ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
-      MINIO_ENDPOINT: http://localhost:9000
-      MINIO_BUCKET: atlas-artifacts-test
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      NATS_URL: nats://localhost:4222
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -3288,12 +3288,24 @@ jobs:
         with:
           go-version: "1.26"
           cache: true
-      - name: Bring up the atlas CI stack (MinIO + NATS + Postgres)
-        uses: ./.github/actions/atlas-stack-up
-        with:
-          start-services: "true"
-          start-atlas: "false"
-          minio-bucket: atlas-artifacts-test
+      # The Postgres half of ./.github/actions/atlas-stack-up, inlined
+      # because that action's `start-services` brings up MinIO + NATS with
+      # it. Keep these three steps in step with the action's.
+      - name: Bootstrap roles
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+      - name: Set role passwords (CI-scoped)
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+      - name: Apply forward migrations
+        run: |
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
       - name: Run ISA probes (fails only on a closed claim's regression)
         run: bash isa/run-probes.sh
 
@@ -3563,10 +3575,13 @@ jobs:
   # docs/audit-log/631-ci-red-shard-merge-guard-decisions.md.
   #
   # CONSERVATIVE-BY-DESIGN: a normal GREEN Go PR has every leg `success`,
-  # so the gate is GREEN. A docs-only PR has `code == 'false'`, so the
-  # gate short-circuits GREEN. The ONLY way this gate is RED is a real
+  # so the gate is GREEN. A docs-only PR has `code == 'false'`, so its
+  # path-filtered legs may be `skipped`; the unconditional legs (below)
+  # must still succeed. The ONLY way this gate is RED is a real
   # failed/cancelled/skipped-but-needed leg — which is exactly when the
-  # merge SHOULD be blocked. It adds no new failure mode for a clean PR.
+  # merge SHOULD be blocked. One caveat for docs-only PRs: `isa-probes`
+  # pulls `postgres:16-alpine`, so a registry outage reddens the gate
+  # even when nothing in the PR is at fault.
   #
   # MAINTAINER HAND-OFF (cannot be done from a PR): add the check name
   # `CI · merge-gate` to `.github/branch-protection.json`'s
@@ -3616,7 +3631,8 @@ jobs:
   #     `!= 'true'` branch and PASSED the gate — the path-filter oracle
   #     failing must fail the gate closed, not open it.
   #   * The unconditional legs (`precommit`, `actions-pin-check`,
-  #     `openapi-drift-check`) are asserted on docs-only PRs too. Only a
+  #     `openapi-drift-check`, and since #1690 `isa-probes`) are asserted
+  #     on docs-only PRs too. Only a
   #     `skipped` result is forgiven when `code != 'true'`; those jobs
   #     have no `if:` so they never skip, and a RED one now reddens the
   #     gate instead of being short-circuited past.

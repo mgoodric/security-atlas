@@ -512,16 +512,19 @@ handoff — lives in the `engine` repo and is referenced here, not restated.
 ## ISA probes
 
 `isa/run-probes.sh` runs every probe in `isa/probes/`. CI runs it in the
-`ISA · probes` job against the same migrated Postgres (plus MinIO and NATS) the
-integration shards get, with `$DATABASE_URL` and `$DATABASE_URL_APP` set, so
-`service`-tier SQL probes run for real. The job has no path filter and is in
+`ISA · probes` job against the same migrated Postgres the integration shards
+get, with `$DATABASE_URL` and `$DATABASE_URL_APP` set, so `service`-tier SQL
+probes run for real. NATS and MinIO are not started; the PR that lands the
+first probe needing either adds it to the job. The job has no path filter and is in
 `CI · merge-gate`'s `needs:`, so it gates every PR, docs-only ones included.
 
 It blocks a merge on ONE thing: a probe for a claim ticked `- [x]` reporting
 that claim false. An open claim's probe exiting 1 is the expected state -- the
 falsifier is written before the feature -- and exit 3 means unrunnable (no
 database, no toolchain, no credentials) and is never a failure. Every probe
-follows that contract: exit 0 holds, exit 1 false, exit 3 cannot run.
+follows that contract: exit 0 holds, exit 1 false, exit 3 cannot run. Any
+other non-zero is treated as false, so a probe maps toolchain and network
+failures (a `go run` module download, a missing binary) to exit 3 itself.
 
 `isa/check-probes.sh` runs first and blocks on the probe files and the Test
 Strategy tables disagreeing: two probes answering one claim (COLLISION), a
