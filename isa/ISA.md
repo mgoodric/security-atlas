@@ -156,11 +156,11 @@ have marked them `manual` instead, which would be a false statement about
 ISC-2, ISC-3 and ISC-4 — all three are machine-checkable, they are simply
 unchecked today.
 
-| isc   | tier    | type | check                                                             | threshold | tool                                       |
-| ----- | ------- | ---- | ----------------------------------------------------------------- | --------- | ------------------------------------------ |
-| ISC-2 | service | sql  | no SCF anchor carries two controls with overlapping satisfactions | 0         | `bash isa/probes/no-duplicate-controls.sh` |
-| ISC-3 | service | bash | replay at T equals what was reported at T                         | 0         | `bash isa/probes/ledger-replay.sh`         |
-| ISC-4 | service | sql  | no published artifact has ai_assisted without a human_approver    | 0         | `bash isa/probes/human-approver-guard.sh`  |
+| isc   | tier    | type | check                                                           | threshold | tool                                       |
+| ----- | ------- | ---- | --------------------------------------------------------------- | --------- | ------------------------------------------ |
+| ISC-2 | pure    | bash | no SCF anchor carries a control under two framework directories | 0         | `bash isa/probes/no-duplicate-controls.sh` |
+| ISC-3 | service | bash | replay at T equals what was reported at T                       | 0         | `bash isa/probes/ledger-replay.sh`         |
+| ISC-4 | service | sql  | no published artifact has ai_assisted without a human_approver  | 0         | `bash isa/probes/human-approver-guard.sh`  |
 
 ISC-1 and ISC-5 carry no row on purpose. Both are manual with a stated reason
 in the claim itself: ISC-1 is experiential (a whole audit cycle with a real
@@ -178,20 +178,35 @@ automatable by wanting it to.
 ## Not yet specified
 
 - ~~Whether ISC-2's falsifier can be a probe against a seeded catalog, or
-  needs the real SCF import to be meaningful.~~ Answered 2026-10-29: a seeded
-  fixture is enough, and it tests prevention rather than absence. Whether a
-  duplicate can exist is a property of the schema, not of which anchors are
-  loaded. A guard keyed on (tenant, anchor) holds for every anchor the import
-  will ever load, or for none, and a scan of an empty catalog proves nothing.
-  So `isa/probes/no-duplicate-controls.sh` builds one anchor with real edges
-  into two frameworks inside a rolled-back transaction and asks the database
-  to accept a second active control on it. It also scans whatever catalog it
-  runs against, so it covers the real import wherever that is loaded. The
-  guard has to be in the database, because controls have several writers
-  (bundle upload, OSCAL import, control import, demo seed). "Duplicate" means
-  two active (`superseded_by IS NULL`) controls in one tenant on one
-  `scf_anchor_id` that has any edge other than `no_relationship`. That is the
-  join the coverage query uses, so their satisfactions are identical.
+  needs the real SCF import to be meaningful.~~ Answered 2026-10-29 (Matt's
+  ruling on #1698): neither. The probe reads the shipped catalog itself,
+  `controls/`, with no database.
+  - **What a duplicate is.** One control copied per framework onto the same
+    SCF anchor, which is what C1 and ADR-0013 forbid. Distinct controls of one
+    framework that share an anchor are not duplicates. The five SOC 2
+    controls on GOV-01 (`soc2_cc1_1_code_of_conduct`,
+    `soc2_cc1_2_board_oversight`, `soc2_cc2_1_information_quality`,
+    `soc2_cc5_3_policies_procedures`, `soc2_pi1_1_processing_objectives`) are
+    five controls. The falsifier's phrase "overlapping framework
+    satisfactions" is read that way: overlapping across frameworks, not
+    within one.
+  - **Where the framework comes from.** The catalog's layout,
+    `controls/<framework>/<bundle>/control.yaml`. It is the only place a
+    control's framework is recorded. Neither the bundle format nor the
+    `controls` row carries one, and satisfactions come from the anchor alone.
+    So the falsifier is one `scf_anchor_id` under two different
+    `controls/<framework>/` directories.
+  - **How the probe proves itself.** `isa/probes/no-duplicate-controls.sh`
+    scans two fixtures on every run before the real catalog
+    (`isa/probes/testdata/no-duplicate-controls/`). `holds/` is the GOV-01
+    shape and must pass. `false/` adds an `iso27001` copy on GOV-01 and must
+    fail. If either answers wrong, the probe exits 3 rather than vouch for
+    the catalog.
+  - **What it cannot see.** A bundle a tenant uploads carries no framework,
+    so a per-framework copy made by upload is invisible to this probe, and to
+    the database too. ISC-2 is checked for the shipped catalog only. Covering
+    uploads would need a framework attribution on the control, which is a
+    feature and not a probe.
 - ~~What "audit-binding artifact" enumerates to.~~ Answered 2026-10-29; see
   **Audit-binding artifact** under Language. The schema guard alone cannot
   answer ISC-4. It stops an approval being recorded without an approver, but
@@ -259,17 +274,21 @@ was resolved rather than wished away.
 The three probes named in Test Strategy now exist. They were adopted from the
 retired engine's August drafts (#1614, #1615, #1616) and rewritten where the
 drafts tested a copy of the code rather than the code. The two open questions
-they depend on are answered under Not yet specified. No claim changed. All
-three probes exit 1 on `main` today, so all three claims stay open:
+they depend on are answered under Not yet specified. No claim changed. The
+ISC-2 Test Strategy row now describes the catalog scan Matt ruled for, in
+place of the database check it described before.
 
-- ISC-2: nothing in the schema stops a second active control in one tenant
-  on one SCF anchor.
-- ISC-3: the evaluation engine's as-of read (`ListEvidenceForControlAsOf`)
-  bounds `observed_at` but never `ingested_at`. Evidence that arrives late
-  with a backdated `observed_at` therefore changes the replay of a date that
-  had already been reported.
-- ISC-4: the questionnaire PDF export puts AI-suggested answers into the
-  document whether or not a human approved them.
+- ISC-2 holds on `main` today: the shipped catalog has one framework
+  directory, `controls/soc2/`. The probe's self-test fixtures show it failing
+  on a cross-framework copy and passing on the GOV-01 shape. Ticking the
+  claim is left to review.
+- ISC-3 is false on `main` (#1699): the evaluation engine's as-of read
+  (`ListEvidenceForControlAsOf`) bounds `observed_at` but never
+  `ingested_at`. Evidence that arrives late with a backdated `observed_at`
+  therefore changes the replay of a date that had already been reported.
+- ISC-4 is false on `main` (#1700): the questionnaire PDF export puts
+  AI-suggested answers into the document whether or not a human approved
+  them.
 
 ### 2026-08-21 · initiative ISA written
 
