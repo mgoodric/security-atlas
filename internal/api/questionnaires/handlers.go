@@ -350,21 +350,7 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 		QuestionnaireName: q.Name,
 		SourceLabel:       q.SourceLabel,
 		GeneratedAt:       time.Now().UTC().Format(time.RFC3339),
-		Items:             make([]questionnaire.PDFItem, 0, len(items)),
-	}
-	for _, it := range items {
-		pi := questionnaire.PDFItem{
-			Code:         it.Code,
-			Text:         it.Text,
-			Domain:       it.Domain,
-			ScfAnchorID:  it.ScfAnchorID,
-			NeedsMapping: it.NeedsMapping,
-		}
-		if it.Answer != nil {
-			pi.AnswerValue = it.Answer.AnswerValue
-			pi.Narrative = it.Answer.Narrative
-		}
-		in.Items = append(in.Items, pi)
+		Items:             questionnaire.PDFItems(items),
 	}
 
 	// The render budget + concurrency cap live on the shared pdfrender

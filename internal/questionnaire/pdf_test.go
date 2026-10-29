@@ -260,3 +260,28 @@ func excerpt(s string) string {
 	}
 	return s[:240] + "...(truncated)"
 }
+
+func TestPDFItems_ProjectsQuestionsAndAnswers(t *testing.T) {
+	t.Parallel()
+	got := PDFItems([]Question{
+		{Code: "Q1", Text: "MFA?", Domain: "IAM", ScfAnchorID: "anchor-1",
+			Answer: &Answer{AnswerValue: "Yes", Narrative: "Enforced by the IdP."}},
+		{Code: "Q2", Text: "Unmapped", NeedsMapping: true},
+	})
+	want := []PDFItem{
+		{Code: "Q1", Text: "MFA?", Domain: "IAM", ScfAnchorID: "anchor-1",
+			AnswerValue: "Yes", Narrative: "Enforced by the IdP."},
+		{Code: "Q2", Text: "Unmapped", NeedsMapping: true},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d items, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("item %d: got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if empty := PDFItems(nil); len(empty) != 0 {
+		t.Fatalf("PDFItems(nil) = %d items, want 0", len(empty))
+	}
+}

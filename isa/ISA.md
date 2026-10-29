@@ -177,10 +177,27 @@ automatable by wanting it to.
 
 ## Not yet specified
 
-- Whether ISC-2's falsifier can be a probe against a seeded catalog, or needs
-  the real SCF import to be meaningful.
-- What "audit-binding artifact" enumerates to. C11 is enforced per-surface
-  today; ISC-4 asserts it globally and cannot close until the set is named.
+- ~~Whether ISC-2's falsifier can be a probe against a seeded catalog, or
+  needs the real SCF import to be meaningful.~~ Answered 2026-10-29: a seeded
+  fixture is enough, and it tests prevention rather than absence. Whether a
+  duplicate can exist is a property of the schema, not of which anchors are
+  loaded. A guard keyed on (tenant, anchor) holds for every anchor the import
+  will ever load, or for none, and a scan of an empty catalog proves nothing.
+  So `isa/probes/no-duplicate-controls.sh` builds one anchor with real edges
+  into two frameworks inside a rolled-back transaction and asks the database
+  to accept a second active control on it. It also scans whatever catalog it
+  runs against, so it covers the real import wherever that is loaded. The
+  guard has to be in the database, because controls have several writers
+  (bundle upload, OSCAL import, control import, demo seed). "Duplicate" means
+  two active (`superseded_by IS NULL`) controls in one tenant on one
+  `scf_anchor_id` that has any edge other than `no_relationship`. That is the
+  join the coverage query uses, so their satisfactions are identical.
+- ~~What "audit-binding artifact" enumerates to.~~ Answered 2026-10-29; see
+  **Audit-binding artifact** under Language. The schema guard alone cannot
+  answer ISC-4. It stops an approval being recorded without an approver, but
+  it does not stop an unapproved draft being published. That half belongs to
+  each publish path, and `isa/probes/human-approver-guard.sh` tests the paths
+  directly.
 - How this initiative's epics relate to the 69 v1 slices already merged. The
   slices are history; the epics are current state. The mapping is unwritten.
 
@@ -217,11 +234,42 @@ was resolved rather than wished away.
   CDE, HIPAA covered systems and the SOC 2 system are three different sets.
 - **Audit period** — a window that can be frozen. Once frozen, its sample
   population stops moving.
-- **Audit-binding artifact** — anything that leaves the system and is relied on
-  by an auditor or customer. The enumeration is unwritten; see Not yet
-  specified.
+- **Audit-binding artifact**: anything that leaves the system and that an
+  auditor, customer or board relies on. As of 2026-10-29 the set has two
+  kinds:
+  - _Can carry model-drafted content, so ISC-4 applies:_ questionnaire
+    responses (the questionnaire PDF export a customer receives, from
+    `questionnaire_answers`) and the board-pack narrative (approved sections
+    of `board_narrative_sections`).
+  - _Deterministic, with no model output today:_ OSCAL SSP / AP / AR / POA&M
+    exports, audit-period freeze bundles, walkthrough exports, and the
+    templated board brief. These are audit-binding, but there is nothing for
+    the guard to gate yet. The first time one of them takes model-drafted
+    text, it joins the first kind.
+  - _Not audit-binding:_ surfaces whose AI output stays inside the system
+    until a human acts on it. These are `checklist_sections`,
+    `mcp_write_proposals` and `questionnaire_mapping_proposals`. They still
+    carry the guard, and the ISC-4 probe checks it on every table with the
+    three columns.
 
 ## Changelog
+
+### 2026-10-29 · ISC-2/3/4 probes land (security-atlas#1691)
+
+The three probes named in Test Strategy now exist. They were adopted from the
+retired engine's August drafts (#1614, #1615, #1616) and rewritten where the
+drafts tested a copy of the code rather than the code. The two open questions
+they depend on are answered under Not yet specified. No claim changed. All
+three probes exit 1 on `main` today, so all three claims stay open:
+
+- ISC-2: nothing in the schema stops a second active control in one tenant
+  on one SCF anchor.
+- ISC-3: the evaluation engine's as-of read (`ListEvidenceForControlAsOf`)
+  bounds `observed_at` but never `ingested_at`. Evidence that arrives late
+  with a backdated `observed_at` therefore changes the replay of a date that
+  had already been reported.
+- ISC-4: the questionnaire PDF export puts AI-suggested answers into the
+  document whether or not a human approved them.
 
 ### 2026-08-21 · initiative ISA written
 
