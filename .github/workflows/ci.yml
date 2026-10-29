@@ -3227,6 +3227,89 @@ jobs:
         run: bash scripts/check-integration-seed-order-independence_test.sh
 
   # ====================================================================
+  # ISA probes (security-atlas#1690) — the runner that replaced the retired
+  # engine for isa/probes/. Ported from tend's isa-probes job.
+  #
+  # isa/run-probes.sh first runs isa/check-probes.sh (blocks on COLLISION,
+  # ORPHAN and SIGPIPE-RACE; reports MISSING), then runs every probe and
+  # fails ONLY when a probe for a claim ticked `- [x]` exits non-zero. An
+  # open claim's probe exiting 1 is expected; exit 3 (unrunnable) is never
+  # a failure. So this job is green on an ordinary PR and red only on a
+  # regression of something already claimed true.
+  #
+  # Postgres ONLY, with the roles + forward migrations the integration
+  # shards get, so `service`-tier SQL probes find a real schema with RLS and
+  # `$DATABASE_URL_APP` set. Go is on PATH for probes that compile against
+  # internal/. NATS and MinIO are deliberately absent: this job gates every
+  # PR, docs-only ones included, and each extra image pull (and the `mc mb`)
+  # is one more way an infra blip reddens merge-gate for a PR that is not at
+  # fault (slice 419 D-1; #1695 review finding 1). Add them back, by
+  # switching to ./.github/actions/atlas-stack-up, in the PR that lands the
+  # first probe needing NATS or MinIO — not before.
+  #
+  # No stub-twin and no path filter: the claims and probes live in isa/*.md,
+  # which the `code` filter treats as docs, and a claim ticked `- [x]` in a
+  # docs-only PR is exactly the change this job must check. Listed in
+  # merge-gate's `needs:`, so a regression blocks the merge.
+  #
+  # Local repro: `bash isa/run-probes.sh` (SQL probes exit 3 without a DB;
+  # `just db-up` + `just migrate-up` + the two DATABASE_URLs to run them).
+  # ====================================================================
+  isa-probes:
+    name: ISA · probes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: security_atlas
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable
+      ATLAS_APP_PASSWORD: ${{ secrets.CI_ATLAS_APP_PASSWORD || 'ci-ephemeral' }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.26"
+          cache: true
+      # The Postgres half of ./.github/actions/atlas-stack-up, inlined
+      # because that action's `start-services` brings up MinIO + NATS with
+      # it. Keep these three steps in step with the action's.
+      - name: Bootstrap roles
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
+      - name: Set role passwords (CI-scoped)
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
+      - name: Apply forward migrations
+        run: |
+          for f in migrations/sql/*.sql; do
+            case "$f" in
+              *.down.sql) ;;
+              *) echo "applying $f"; psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f" ;;
+            esac
+          done
+      - name: Run ISA probes (fails only on a closed claim's regression)
+        run: bash isa/run-probes.sh
+
+  # ====================================================================
   # Slice 393 (Q-5) — coverage-exclude justification lint (HARD FAIL).
   #
   # Wires scripts/check-coverage-excludes.sh (shipped by slice 353) into
@@ -3492,10 +3575,13 @@ jobs:
   # docs/audit-log/631-ci-red-shard-merge-guard-decisions.md.
   #
   # CONSERVATIVE-BY-DESIGN: a normal GREEN Go PR has every leg `success`,
-  # so the gate is GREEN. A docs-only PR has `code == 'false'`, so the
-  # gate short-circuits GREEN. The ONLY way this gate is RED is a real
+  # so the gate is GREEN. A docs-only PR has `code == 'false'`, so its
+  # path-filtered legs may be `skipped`; the unconditional legs (below)
+  # must still succeed. The ONLY way this gate is RED is a real
   # failed/cancelled/skipped-but-needed leg — which is exactly when the
-  # merge SHOULD be blocked. It adds no new failure mode for a clean PR.
+  # merge SHOULD be blocked. One caveat for docs-only PRs: `isa-probes`
+  # pulls `postgres:16-alpine`, so a registry outage reddens the gate
+  # even when nothing in the PR is at fault.
   #
   # MAINTAINER HAND-OFF (cannot be done from a PR): add the check name
   # `CI · merge-gate` to `.github/branch-protection.json`'s
@@ -3545,7 +3631,8 @@ jobs:
   #     `!= 'true'` branch and PASSED the gate — the path-filter oracle
   #     failing must fail the gate closed, not open it.
   #   * The unconditional legs (`precommit`, `actions-pin-check`,
-  #     `openapi-drift-check`) are asserted on docs-only PRs too. Only a
+  #     `openapi-drift-check`, and since #1690 `isa-probes`) are asserted
+  #     on docs-only PRs too. Only a
   #     `skipped` result is forgiven when `code != 'true'`; those jobs
   #     have no `if:` so they never skip, and a RED one now reddens the
   #     gate instead of being short-circuited past.
@@ -3580,6 +3667,7 @@ jobs:
       - precommit # pre-commit · all hooks
       - actions-pin-check # actions-pin-check
       - openapi-drift-check # openapi-drift-check
+      - isa-probes # ISA · probes (unconditional; red only on a closed claim's regression)
       # --- no required context of its own; covered here so the slice-701
       #     stub collapse cannot drop them on the floor (slice 701 §AC-1) ---
       - tests-integration-shard # Go · integration (shard A/B1/B2/B3/B4) — matrix aggregate
@@ -3643,7 +3731,7 @@ jobs:
           else
             echo "code='${CODE:-}' (no Go-affecting changes) — path-filtered legs may legitimately"
             echo "be 'skipped' (their slice-061 stub-twins post the green named checks)."
-            echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check) still"
+            echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check, isa-probes) still"
             echo "MUST be 'success'. 'skipped' is the ONLY forgiven non-success result, and only here."
           fi
           echo "Asserting ${leg_count} legs derived from toJSON(needs)."
@@ -3672,6 +3760,7 @@ jobs:
               oscal-bridge)                   echo "OSCAL bridge · Python (ruff + pytest)" ;;
               fuzz)                           echo "Go · fuzz (bounded)" ;;
               govulncheck)                    echo "Go · govulncheck" ;;
+              isa-probes)                     echo "ISA · probes" ;;
               *)                              echo "$1" ;;
             esac
           }
