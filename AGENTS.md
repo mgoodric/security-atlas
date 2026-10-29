@@ -562,6 +562,22 @@ Before claiming completion:
 
 ---
 
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `mgoodric/security-atlas`, via the `gh` CLI; `isa/` remains the system of record for claims. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical triage roles, each label string equal to its own name. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+---
+
 ## Quick references
 
 - Repo on GitHub: https://github.com/mgoodric/security-atlas (private)
