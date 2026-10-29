@@ -147,9 +147,11 @@ epic, not here.
 
 ## Test Strategy
 
-Naming a probe that does not exist yet is deliberate. The engine treats an
-unrunnable probe as a third value, not a pass, so these claims report
-`unverifiable` rather than closing on silence. Leaving them untabled would
+Naming a probe that does not exist yet is deliberate. `isa/run-probes.sh`, run
+by the `ISA · probes` CI job, treats a missing or unrunnable probe as a third
+value, not a pass: `isa/check-probes.sh` reports the missing file as MISSING
+without blocking, and a probe that exits 3 is skipped as unrunnable. Either way
+the claim stays open rather than closing on silence. Leaving them untabled would
 have marked them `manual` instead, which would be a false statement about
 ISC-2, ISC-3 and ISC-4 — all three are machine-checkable, they are simply
 unchecked today.

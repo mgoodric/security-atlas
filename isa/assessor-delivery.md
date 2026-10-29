@@ -105,9 +105,10 @@ question "which records, which versions, sent by whom, when" is answered from
 
 ## Test Strategy
 
-No probe listed below exists yet. That is deliberate and follows `isa/ISA.md`:
-the engine treats an unrunnable probe as a third value, so these claims report
-`unverifiable` rather than closing on silence. Leaving them untabled would
+Not every probe listed below exists yet. That is deliberate and follows
+`isa/ISA.md`: `isa/run-probes.sh` treats a missing or unrunnable probe as a
+third value, reporting it as MISSING or exit 3 rather than as a pass, so these
+claims stay open rather than closing on silence. Leaving them untabled would
 report them as `manual`, which would be false — seven of the eight are
 machine-checkable and are simply unchecked today.
 

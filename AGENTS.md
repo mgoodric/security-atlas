@@ -485,9 +485,9 @@ advisory:
 - **An implementer satisfies a claim and never adds, weakens or rewords one.**
   If satisfying a claim requires changing it, that is a finding to report, not
   an edit to make. Propose; the engine appends.
-- **A named probe that does not exist yet is correct.** It reports
-  `unverifiable`, which is a third value and not a pass. Naming the probe is how
-  a machine-checkable claim avoids being misfiled as `manual`.
+- **A named probe that does not exist yet is correct.** `isa/check-probes.sh`
+  reports it as MISSING, which is a third value and not a pass. Naming the
+  probe is how a machine-checkable claim avoids being misfiled as `manual`.
 - **A claim closes on a probe that has been observed failing and then passing.**
   A probe that has only ever passed proves nothing about the claim.
 
@@ -508,6 +508,41 @@ The mechanics:
 
 The engine's own contract — fire lifecycle, authority boundaries, routing,
 handoff — lives in the `engine` repo and is referenced here, not restated.
+
+## ISA probes
+
+`isa/run-probes.sh` runs every probe in `isa/probes/`. CI runs it in the
+`ISA · probes` job against the same migrated Postgres (plus MinIO and NATS) the
+integration shards get, with `$DATABASE_URL` and `$DATABASE_URL_APP` set, so
+`service`-tier SQL probes run for real. The job has no path filter and is in
+`CI · merge-gate`'s `needs:`, so it gates every PR, docs-only ones included.
+
+It blocks a merge on ONE thing: a probe for a claim ticked `- [x]` reporting
+that claim false. An open claim's probe exiting 1 is the expected state -- the
+falsifier is written before the feature -- and exit 3 means unrunnable (no
+database, no toolchain, no credentials) and is never a failure. Every probe
+follows that contract: exit 0 holds, exit 1 false, exit 3 cannot run.
+
+`isa/check-probes.sh` runs first and blocks on the probe files and the Test
+Strategy tables disagreeing: two probes answering one claim (COLLISION), a
+probe no row references (ORPHAN), or a probe piping into `grep -q` under
+`pipefail` (SIGPIPE-RACE). A row naming a file that is not there (MISSING) is
+printed but does not block, because naming a not-yet-written probe is correct.
+
+Both scripts are ported from tend with the same semantics; tend's AGENTS.md
+records the failures that shaped them.
+
+**Before writing a probe, check whether the claim already has one.** The Test
+Strategy table in the epic is the authority, not the `isa/probes/` listing.
+
+**Never pipe into `grep -q` in a probe.** `grep -q` exits on its first match
+and closes the pipe, so the writer on the left dies of SIGPIPE, `pipefail` makes
+that the pipeline's status, and the `if` reads a match as no match, depending
+on payload size and machine load. Use `grep -q PAT <<<"$var"`, or drop `-q` and
+redirect to `/dev/null`.
+
+Locally, `bash isa/run-probes.sh` runs everything; SQL probes exit 3 until
+`just db-up`, `just migrate-up` and the two database URLs are in place.
 
 ## How to verify done
 
