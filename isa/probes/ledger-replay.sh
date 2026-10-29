@@ -89,6 +89,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/eval"
@@ -254,8 +255,14 @@ func main() {
 			}
 			tag, err := tx.Exec(ctx, a.sql, e1)
 			if err != nil {
-				// Refused outright (a privilege, a policy, a trigger): the
-				// ledger held. Undo the aborted savepoint and carry on.
+				// Only a refusal counts as the ledger holding: a missing
+				// privilege (42501) or a guard trigger's RAISE (P0001). Any
+				// other error (a dropped connection, a typo in this probe)
+				// says nothing about the ledger.
+				var pgErr *pgconn.PgError
+				if !errors.As(err, &pgErr) || (pgErr.Code != "42501" && pgErr.Code != "P0001") {
+					return fmt.Errorf("%s: %w", a.what, err)
+				}
 				if _, rbErr := tx.Exec(ctx, "ROLLBACK TO SAVEPOINT attempt"); rbErr != nil {
 					return errors.Join(err, rbErr)
 				}

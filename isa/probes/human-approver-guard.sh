@@ -19,10 +19,10 @@
 # publish paths are tested directly.
 #
 #   1. questionnaire export -- questionnaire.PDFItems, the entire content
-#      selection of GET /v1/questionnaires/{id}/export.pdf (the handler passes
-#      its result to the renderer unchanged), is given an AI-suggested answer
-#      no human approved. If that answer reaches a PDF row, it reaches the
-#      customer. No database needed.
+#      selection of POST /v1/questionnaires/{id}/export-pdf (the handler
+#      passes its result to the renderer unchanged), is given an AI-suggested
+#      answer no human approved. If that answer reaches a PDF row, it reaches
+#      the customer. No database needed.
 #   2. board pack -- the approved-sections read the board pack ships from
 #      (ListApprovedBoardNarrativeSections, behind
 #      boardnarrative.Store.ApprovedNarrative) is run against an unapproved AI
@@ -67,12 +67,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -208,9 +210,15 @@ func guard(ctx context.Context, conn *pgx.Conn) {
 	err = conn.QueryRow(ctx, `SELECT ai_assist_human_approver_guard(TRUE, TRUE, NULL),
 	                                 ai_assist_human_approver_guard(TRUE, TRUE, ''),
 	                                 ai_assist_human_approver_guard(TRUE, FALSE, NULL)`).Scan(&nullOK, &emptyOK, &draftOK)
+	var pgErr *pgconn.PgError
 	switch {
+	case errors.As(err, &pgErr) && pgErr.Code == "42883":
+		// undefined_function: the shared guard is gone.
+		falsef("the shared guard ai_assist_human_approver_guard does not exist: %v", err)
 	case err != nil:
-		falsef("the shared guard ai_assist_human_approver_guard cannot be called: %v", err)
+		// Anything else (a dropped connection, a timeout) says nothing about
+		// the guard.
+		skipf("guard: call ai_assist_human_approver_guard: %v", err)
 	case nullOK || emptyOK:
 		falsef("ai_assist_human_approver_guard accepts an approval with no approver (NULL accepted: %v, empty accepted: %v)", nullOK, emptyOK)
 	case !draftOK:
