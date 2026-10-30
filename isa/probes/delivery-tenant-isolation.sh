@@ -29,7 +29,8 @@
 # Exit 0  every delivery carries only its destination's tenant's evidence.
 # Exit 1  one carries another tenant's or an unknown tenant's, or the tables
 #         do not exist.
-# Exit 3  cannot run (see isa/probes/_delivery-lib.sh), or the ledger is empty.
+# Exit 3  cannot run (see isa/probes/_delivery-lib.sh), the ledger is empty, or
+#         no delivery carries a record.
 set -uo pipefail
 
 name=delivery-tenant-isolation
@@ -67,13 +68,22 @@ VALUES ('00000000-0000-0000-0000-000000000018', '00000000-0000-0000-0000-0000000
         '00000000-0000-0000-0000-0000000000d1', 'https://intake.example.test/v1', 'delivered',
         '[\"00000000-0000-0000-0000-0000000000e9\"]');"
 
+# At least one delivered record, or the clean result has checked nothing. An
+# individual empty manifest is allowed.
+SCOPE="
+SELECT EXISTS (
+  SELECT 1 FROM assessor_deliveries d CROSS JOIN LATERAL jsonb_array_elements(d.manifest) m);"
+EMPTY_MANIFESTS="UPDATE assessor_deliveries SET manifest = '[]';"
+
 dl_preflight "$name"
 dl_selftest "$name" "$CHECK" "$VIOLATION" "$DRIFT"
+dl_selftest_scope "$name" "$SCOPE" "$EMPTY_MANIFESTS"
 dl_require_tables "$name" "$claim" \
   "There is no delivery record binding a departure to a destination's tenant, so nothing establishes that what left was one tenant's evidence." \
   assessor_destinations assessor_deliveries evidence_records
 dl_check "$name" "$claim" "$CHECK" "delivery_id	destination_tenant	delivery_tenant	manifest_element	record_tenant"
 dl_require_rows "$name" assessor_deliveries
+dl_require_scope "$name" "$SCOPE" "delivered record"
 
 echo "$name: ok -- every delivery carries only its destination's tenant's evidence"
 exit 0

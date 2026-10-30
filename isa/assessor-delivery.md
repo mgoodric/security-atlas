@@ -178,17 +178,18 @@ retired engine's August drafts (#1625-#1628, #1630, #1631) and rewritten where
 the drafts each guessed a different shape for the unbuilt tables. The assumed
 shape of `assessor_destinations` and `assessor_deliveries` is written once, in
 `isa/probes/_delivery-lib.sh`; when the migration lands and differs, the
-probes exit 3 and name that file. Each probe runs its own check against a clean
-fixture and a violating one on every run before reading the real tables. The
+probes exit 3 and name that file. On every run, before reading the real
+tables, each probe runs its own check against a clean fixture and against each
+violation it names, which includes a drifted manifest for ISC-4 and ISC-7. The
 redelivery and partial-acceptance questions are answered under Not yet
 specified. No claim changed.
 
 - All six report false on `main`: the tables they read do not exist, and the
   one way evidence leaves today, the OSCAL bundle download, records nothing
   and passes no gate.
-- Once the tables exist, no probe passes on nothing: an empty table exits 3,
-  and a manifest element that does not resolve to an evidence record is a
-  violation.
+- Once the tables exist, no database probe passes on nothing. An empty table
+  exits 3, and so do ISC-4 and ISC-7 when no delivered record is in scope. A
+  manifest element that does not resolve to an evidence record is a violation.
 - ISC-2's replay compares the evidence-record set and hashes through a
   manifest digest. ISC-6 checks the schema and the ledger rows. Each is half
   its Test Strategy row, so a clean result exits 3, naming the unwritten half

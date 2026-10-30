@@ -128,7 +128,12 @@ dl_psql() {
 # lost, leaving the previous call's.
 dl_run() {
   local errf rc
-  errf=$(mktemp) || return 1
+  DL_OUT=""
+  DL_ERR=""
+  errf=$(mktemp) || {
+    DL_ERR="mktemp failed"
+    return 1
+  }
   DL_OUT=$(dl_psql "$@" 2>"$errf")
   rc=$?
   DL_ERR=$(cat "$errf")
@@ -167,6 +172,10 @@ dl_preflight() {
 dl_selftest() {
   local name=$1 check=$2 violation n=0
   shift 2
+  if (($# == 0)); then
+    echo "$name: CANNOT RUN -- self-test: no violating fixture given, so the check is never shown to fail" >&2
+    exit 3
+  fi
   if ! dl_run <<<"BEGIN;$DL_SCHEMA$DL_BASE$DL_SEAL$check
 ROLLBACK;"; then
     echo "$name: CANNOT RUN -- self-test: the check errored on the clean fixture: $DL_ERR" >&2
@@ -224,6 +233,49 @@ dl_check() {
     echo "$name: FALSE ($claim) -- violating rows:"
     printf '%s\n' "$header" "$DL_OUT"
     exit 1
+  fi
+}
+
+# dl_selftest_scope NAME SCOPE_SQL OUT_OF_SCOPE_SQL... -- SCOPE_SQL answers
+# t when at least one record is in the claim's scope. Exit 3 unless it answers
+# t on DL_BASE and f on DL_BASE plus each OUT_OF_SCOPE_SQL (a ledger whose
+# rows put nothing in scope, such as all-empty manifests).
+dl_selftest_scope() {
+  local name=$1 scope=$2 fixture n=0
+  shift 2
+  if (($# == 0)); then
+    echo "$name: CANNOT RUN -- self-test: no out-of-scope fixture given for the scope check" >&2
+    exit 3
+  fi
+  if ! dl_run <<<"BEGIN;$DL_SCHEMA$DL_BASE$DL_SEAL$scope
+ROLLBACK;" || [[ "$DL_OUT" != "t" ]]; then
+    echo "$name: CANNOT RUN -- self-test: the scope check found nothing in scope on the clean fixture ${DL_ERR}" >&2
+    exit 3
+  fi
+  for fixture in "$@"; do
+    n=$((n + 1))
+    if ! dl_run <<<"BEGIN;$DL_SCHEMA$DL_BASE$DL_SEAL$fixture
+$scope
+ROLLBACK;" || [[ "$DL_OUT" != "f" ]]; then
+      echo "$name: CANNOT RUN -- self-test: the scope check found records in scope in out-of-scope fixture $n ${DL_ERR}" >&2
+      exit 3
+    fi
+  done
+  echo "$name: scope self-test ok (clean fixture in scope, $n out-of-scope fixture(s) not)"
+}
+
+# dl_require_scope NAME SCOPE_SQL WHAT -- run after dl_check found nothing.
+# Exit 3 unless SCOPE_SQL answers t against the real tables: rows that put no
+# record in the claim's scope have shown nothing.
+dl_require_scope() {
+  local name=$1 scope=$2 what=$3
+  if ! dl_run <<<"$scope"; then
+    echo "$name: CANNOT RUN -- scope check errored against the real tables: $DL_ERR" >&2
+    exit 3
+  fi
+  if [[ "$DL_OUT" != "t" ]]; then
+    echo "$name: CANNOT RUN -- no violation found, but no $what to check yet" >&2
+    exit 3
   fi
 }
 

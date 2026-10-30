@@ -26,7 +26,8 @@
 # Exit 0  no delivered record postdates its frozen period's freeze.
 # Exit 1  one does, a manifest element or period does not resolve, or the
 #         tables do not exist.
-# Exit 3  cannot run (see isa/probes/_delivery-lib.sh), or the ledger is empty.
+# Exit 3  cannot run (see isa/probes/_delivery-lib.sh), the ledger is empty, or
+#         no delivery of a frozen period carries a record.
 set -uo pipefail
 
 name=delivery-freeze-horizon
@@ -65,13 +66,26 @@ VALUES ('00000000-0000-0000-0000-000000000015', '00000000-0000-0000-0000-0000000
         'https://intake.example.test/v1', 'delivered',
         '[{\"record_id\": \"00000000-0000-0000-0000-0000000000e5\"}]');"
 
+# At least one delivered record of a frozen period, or the clean result has
+# checked nothing. An individual empty manifest is allowed.
+SCOPE="
+SELECT EXISTS (
+  SELECT 1
+  FROM assessor_deliveries d
+  JOIN audit_periods ap ON ap.id = d.audit_period_id AND ap.frozen_at IS NOT NULL
+  CROSS JOIN LATERAL jsonb_array_elements(d.manifest) m);"
+EMPTY_MANIFESTS="UPDATE assessor_deliveries SET manifest = '[]';"
+NOT_FROZEN="UPDATE audit_periods SET frozen_at = NULL;"
+
 dl_preflight "$name"
 dl_selftest "$name" "$CHECK" "$VIOLATION" "$DRIFT"
+dl_selftest_scope "$name" "$SCOPE" "$EMPTY_MANIFESTS" "$NOT_FROZEN"
 dl_require_tables "$name" "$claim" \
   "There is no delivery record, so nothing checks a departure's evidence against its period's frozen_at at the moment it leaves." \
   assessor_deliveries audit_periods evidence_records
 dl_check "$name" "$claim" "$CHECK" "delivery_id	audit_period_id	frozen_at	manifest_element	observed_at"
 dl_require_rows "$name" assessor_deliveries
+dl_require_scope "$name" "$SCOPE" "delivered record of a frozen period"
 
 echo "$name: ok -- no delivered record was observed after its frozen period's freeze"
 exit 0
