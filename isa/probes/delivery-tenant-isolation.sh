@@ -10,6 +10,12 @@
 # tenant (the preflight in isa/probes/_delivery-lib.sh refuses any other), so
 # RLS cannot hide the very row that would falsify the claim.
 #
+# Three things count as violations because they leave the tenant unknown: a
+# delivery with no destination (NULL or unresolved `destination_id`), and a
+# manifest element that does not resolve to an `evidence_records` row. The
+# last stops a manifest written with other keys or bare ids from dropping out
+# of the join and passing having checked nothing.
+#
 # Adopted from the engine draft (#1631) in part. The draft instead attacked
 # `sample_evidence`, whose evidence_record_id foreign key is single-column, so
 # a tenant-A session can insert a sample row naming tenant B's record id. That
@@ -21,8 +27,9 @@
 # Today: no delivery tables, so nothing ties a departure to one tenant. FALSE.
 #
 # Exit 0  every delivery carries only its destination's tenant's evidence.
-# Exit 1  one carries another tenant's, or the tables do not exist.
-# Exit 3  cannot run (see isa/probes/_delivery-lib.sh).
+# Exit 1  one carries another tenant's or an unknown tenant's, or the tables
+#         do not exist.
+# Exit 3  cannot run (see isa/probes/_delivery-lib.sh), or the ledger is empty.
 set -uo pipefail
 
 name=delivery-tenant-isolation
@@ -31,16 +38,19 @@ claim=ISC-7
 . "$(dirname "${BASH_SOURCE[0]}")/_delivery-lib.sh"
 
 CHECK="
-SELECT d.id, dest.tenant_id, d.tenant_id, coalesce(er.id::text, '<none>'), coalesce(er.tenant_id::text, '<none>')
+SELECT d.id,
+       coalesce(dest.tenant_id::text, '<no destination>'),
+       d.tenant_id,
+       coalesce(m::text, '<no element>'),
+       coalesce(er.tenant_id::text, CASE WHEN m IS NULL THEN '<none>' ELSE '<unresolved>' END)
 FROM assessor_deliveries d
-JOIN assessor_destinations dest ON dest.id = d.destination_id
-LEFT JOIN LATERAL (
-  SELECT e.id, e.tenant_id
-  FROM jsonb_array_elements(d.manifest) m
-  JOIN evidence_records e ON e.id::text = m->>'evidence_record_id'
-  WHERE e.tenant_id <> dest.tenant_id) er ON true
-WHERE d.tenant_id <> dest.tenant_id OR er.id IS NOT NULL
-ORDER BY d.id;"
+LEFT JOIN assessor_destinations dest ON dest.id = d.destination_id
+LEFT JOIN LATERAL jsonb_array_elements(d.manifest) m ON true
+LEFT JOIN evidence_records er ON er.id::text = m->>'evidence_record_id'
+WHERE dest.id IS NULL
+   OR d.tenant_id <> dest.tenant_id
+   OR (m IS NOT NULL AND (er.id IS NULL OR er.tenant_id <> dest.tenant_id))
+ORDER BY 1, 4;"
 
 # Tenant A's delivery carries tenant B's record.
 VIOLATION="
@@ -50,12 +60,20 @@ VALUES ('00000000-0000-0000-0000-000000000017', '00000000-0000-0000-0000-0000000
         '[{\"evidence_record_id\": \"00000000-0000-0000-0000-0000000000e1\", \"content_hash\": \"hash-e1\"},
           {\"evidence_record_id\": \"00000000-0000-0000-0000-0000000000e9\", \"content_hash\": \"hash-e9\"}]');"
 
+# The same tenant B record, as a bare id the check's key does not read.
+DRIFT="
+INSERT INTO assessor_deliveries (id, tenant_id, destination_id, endpoint, status, manifest)
+VALUES ('00000000-0000-0000-0000-000000000018', '00000000-0000-0000-0000-0000000000a1',
+        '00000000-0000-0000-0000-0000000000d1', 'https://intake.example.test/v1', 'delivered',
+        '[\"00000000-0000-0000-0000-0000000000e9\"]');"
+
 dl_preflight "$name"
-dl_selftest "$name" "$CHECK" "$VIOLATION"
+dl_selftest "$name" "$CHECK" "$VIOLATION" "$DRIFT"
 dl_require_tables "$name" "$claim" \
   "There is no delivery record binding a departure to a destination's tenant, so nothing establishes that what left was one tenant's evidence." \
   assessor_destinations assessor_deliveries evidence_records
-dl_check "$name" "$claim" "$CHECK" "delivery_id	destination_tenant	delivery_tenant	evidence_record_id	record_tenant"
+dl_check "$name" "$claim" "$CHECK" "delivery_id	destination_tenant	delivery_tenant	manifest_element	record_tenant"
+dl_require_rows "$name" assessor_deliveries
 
 echo "$name: ok -- every delivery carries only its destination's tenant's evidence"
 exit 0

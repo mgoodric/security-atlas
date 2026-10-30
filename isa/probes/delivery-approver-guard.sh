@@ -29,7 +29,7 @@
 # Exit 0  no AI-assisted departure lacks a recorded approver, and the guard is
 #         on the table.
 # Exit 1  one does, the guard is missing, or the table does not exist.
-# Exit 3  cannot run (see isa/probes/_delivery-lib.sh).
+# Exit 3  cannot run (see isa/probes/_delivery-lib.sh), or the ledger is empty.
 set -uo pipefail
 
 name=delivery-approver-guard
@@ -58,19 +58,20 @@ dl_require_tables "$name" "$claim" \
   assessor_deliveries
 dl_check "$name" "$claim" "$CHECK" "delivery_id	tenant_id	status	human_approved	human_approver"
 
-if ! guarded=$(dl_psql -c "
+if ! dl_run -c "
   SELECT EXISTS (
     SELECT 1 FROM pg_constraint
     WHERE conrelid = 'public.assessor_deliveries'::regclass
       AND contype = 'c' AND convalidated
-      AND pg_get_constraintdef(oid) LIKE '%ai_assist_human_approver_guard%')" 2>&1); then
-  echo "$name: CANNOT RUN -- constraint lookup failed: $guarded" >&2
+      AND pg_get_constraintdef(oid) LIKE '%ai_assist_human_approver_guard%')"; then
+  echo "$name: CANNOT RUN -- constraint lookup failed: $DL_ERR" >&2
   exit 3
 fi
-if [[ "$guarded" != "t" ]]; then
+if [[ "$DL_OUT" != "t" ]]; then
   echo "$name: FALSE ($claim) -- assessor_deliveries has no validated CHECK calling ai_assist_human_approver_guard, so an approval can be recorded with no approver"
   exit 1
 fi
+dl_require_rows "$name" assessor_deliveries
 
 echo "$name: ok -- no AI-assisted departure lacks a recorded approver, and the shared guard is on assessor_deliveries"
 exit 0

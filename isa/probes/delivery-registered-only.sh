@@ -22,8 +22,8 @@
 # Exit 0  every delivery went to the registered endpoint of its destination.
 # Exit 1  a delivery did not, or the tables do not exist.
 # Exit 3  cannot run: no psql or DATABASE_URL, a role that cannot see every
-#         tenant, a failed self-test, or a schema that differs from the
-#         assumed one.
+#         tenant, an unmigrated database, a failed self-test, a schema that
+#         differs from the assumed one, or no delivery rows to check.
 set -uo pipefail
 
 name=delivery-registered-only
@@ -51,6 +51,7 @@ dl_require_tables "$name" "$claim" \
   "There is no registered-destination store. The one way evidence leaves today, POST /v1/audit-periods/{id}/oscal-export:download (internal/api/oscalexport), hands the signed bundle to whichever caller asks, and the caller decides where it goes." \
   assessor_destinations assessor_deliveries
 dl_check "$name" "$claim" "$CHECK" "delivery_id	tenant_id	endpoint_dialed	registered_endpoint"
+dl_require_rows "$name" assessor_deliveries
 
 echo "$name: ok -- every delivery went to the registered endpoint of a same-tenant destination"
 exit 0

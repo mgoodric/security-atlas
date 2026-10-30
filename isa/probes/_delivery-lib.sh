@@ -20,8 +20,10 @@
 #                          immutable: changing where a destination points is a
 #                          new row, so a past delivery still joins to the
 #                          endpoint it was sent to (ISC-1). The credential is
-#                          held as `credential_ref` (an op:// path or a
-#                          ciphertext), never as plaintext (ISC-6).
+#                          held as `credential_ref`, a `scheme://` reference
+#                          (op://, vault://, env://) resolved at delivery
+#                          time. An encrypted credential would be a separate
+#                          `*_ciphertext` column. Never plaintext (ISC-6).
 #   assessor_deliveries    one row per departure, appended, never updated in
 #                          place (redelivery is a new row). `endpoint` is the
 #                          address actually dialed. `manifest` is a JSON array
@@ -35,18 +37,21 @@
 # its claim governs do not exist. The one way evidence leaves today is the
 # OSCAL bundle download (internal/api/oscalexport), which goes to whichever
 # caller asks, records no departure, and passes through no delivery gate. So
-# the claims are false of the platform as it stands, not unverifiable, and
-# reporting them 0 on an empty table would let a claim close on vacuous truth.
+# the claims are false of the platform as it stands, not unverifiable.
 # isa/probes/delivery-open-adapter.sh (ISC-8) already answers absence the same
-# way.
+# way. Exit 0 is never reached on nothing: once the tables exist, a probe whose
+# check finds no violation still exits 3 if they hold no rows (dl_require_rows),
+# as isa/probes/no-duplicate-controls.sh does for an empty catalog. A database
+# that is not migrated at all (no evidence_records) is exit 3, not FALSE.
 #
 # Self-test, every run. Before it reads the real schema, each probe runs its
-# own check query twice inside a rolled-back transaction, against temporary
-# tables built from DL_SCHEMA (temporary tables shadow public ones of the same
-# name, so the query runs unchanged): once on DL_BASE, a clean fixture that
-# must produce no rows, and once on DL_BASE plus the probe's own violation,
-# which must produce at least one. If either answers wrong the query is broken,
-# nothing it says about the real tables can be trusted, and the probe exits 3.
+# own check query inside rolled-back transactions, against temporary tables
+# built from DL_SCHEMA (temporary tables shadow public ones of the same name,
+# so the query runs unchanged): once on DL_BASE, a clean fixture that must
+# produce no rows, and once per violation the probe names, on DL_BASE plus that
+# violation, each of which must produce at least one. If any answers wrong the
+# query is broken, nothing it says about the real tables can be trusted, and
+# the probe exits 3.
 #
 # Env:
 #   DATABASE_URL  a role that sees every tenant's rows: a superuser or a
@@ -116,10 +121,25 @@ dl_psql() {
   psql "$DATABASE_URL" -X -q -v ON_ERROR_STOP=1 -At -F $'\t' "$@"
 }
 
-# dl_preflight NAME -- exit 3 unless psql, DATABASE_URL, a connection and a
-# role that sees every tenant are all present.
+# dl_run [PSQL_ARGS...] -- run psql with SQL on stdin (or -c), leaving stdout in
+# DL_OUT and stderr in DL_ERR, and return psql's status. Kept apart so a
+# NOTICE or WARNING on stderr is never read as a result row. Feed it with a
+# here-string, never a pipe: a pipe runs it in a subshell and its DL_OUT is
+# lost, leaving the previous call's.
+dl_run() {
+  local errf rc
+  errf=$(mktemp) || return 1
+  DL_OUT=$(dl_psql "$@" 2>"$errf")
+  rc=$?
+  DL_ERR=$(cat "$errf")
+  rm -f "$errf"
+  return "$rc"
+}
+
+# dl_preflight NAME -- exit 3 unless psql, DATABASE_URL, a connection, a role
+# that sees every tenant and a migrated schema are all present.
 dl_preflight() {
-  local name=$1 seer
+  local name=$1
   if ! command -v psql >/dev/null 2>&1; then
     echo "$name: CANNOT RUN -- psql not on PATH" >&2
     exit 3
@@ -128,51 +148,62 @@ dl_preflight() {
     echo "$name: CANNOT RUN -- DATABASE_URL is not set" >&2
     exit 3
   fi
-  if ! seer=$(dl_psql -c "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user" 2>&1); then
-    echo "$name: CANNOT RUN -- cannot query Postgres via DATABASE_URL: $seer" >&2
+  if ! dl_run -c "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"; then
+    echo "$name: CANNOT RUN -- cannot query Postgres via DATABASE_URL: $DL_ERR" >&2
     exit 3
   fi
-  if [[ "$seer" != "t" ]]; then
+  if [[ "$DL_OUT" != "t" ]]; then
     echo "$name: CANNOT RUN -- the DATABASE_URL role is neither superuser nor BYPASSRLS, so RLS would hide other tenants' rows and the scan would pass on nothing" >&2
+    exit 3
+  fi
+  if ! dl_run -c "SELECT to_regclass('public.evidence_records') IS NOT NULL" || [[ "$DL_OUT" != "t" ]]; then
+    echo "$name: CANNOT RUN -- no evidence_records table; the schema is not migrated (just migrate-up) ${DL_ERR}" >&2
     exit 3
   fi
 }
 
-# dl_selftest NAME CHECK_SQL VIOLATION_SQL -- see the header. Exits 3 if the
-# check misjudges either fixture; returns otherwise.
+# dl_selftest NAME CHECK_SQL VIOLATION_SQL... -- see the header. Exits 3 if the
+# check misjudges the clean fixture or any violation; returns otherwise.
 dl_selftest() {
-  local name=$1 check=$2 violation=$3 out
-  if ! out=$(printf '%s\n' "BEGIN;" "$DL_SCHEMA" "$DL_BASE" "$DL_SEAL" "$check" "ROLLBACK;" | dl_psql 2>&1); then
-    echo "$name: CANNOT RUN -- self-test: the check errored on the clean fixture: $out" >&2
+  local name=$1 check=$2 violation n=0
+  shift 2
+  if ! dl_run <<<"BEGIN;$DL_SCHEMA$DL_BASE$DL_SEAL$check
+ROLLBACK;"; then
+    echo "$name: CANNOT RUN -- self-test: the check errored on the clean fixture: $DL_ERR" >&2
     exit 3
   fi
-  if [[ -n "$out" ]]; then
+  if [[ -n "$DL_OUT" ]]; then
     echo "$name: CANNOT RUN -- self-test: the check reported a clean fixture false:" >&2
-    printf '%s\n' "$out" >&2
+    printf '%s\n' "$DL_OUT" >&2
     exit 3
   fi
-  if ! out=$(printf '%s\n' "BEGIN;" "$DL_SCHEMA" "$DL_BASE" "$DL_SEAL" "$violation" "$check" "ROLLBACK;" | dl_psql 2>&1); then
-    echo "$name: CANNOT RUN -- self-test: the check errored on the violating fixture: $out" >&2
-    exit 3
-  fi
-  if [[ -z "$out" ]]; then
-    echo "$name: CANNOT RUN -- self-test: the check passed a fixture that violates the claim" >&2
-    exit 3
-  fi
-  echo "$name: self-test ok (clean fixture holds, violating fixture is caught)"
+  for violation in "$@"; do
+    n=$((n + 1))
+    if ! dl_run <<<"BEGIN;$DL_SCHEMA$DL_BASE$DL_SEAL$violation
+$check
+ROLLBACK;"; then
+      echo "$name: CANNOT RUN -- self-test: the check errored on violating fixture $n: $DL_ERR" >&2
+      exit 3
+    fi
+    if [[ -z "$DL_OUT" ]]; then
+      echo "$name: CANNOT RUN -- self-test: the check passed violating fixture $n" >&2
+      exit 3
+    fi
+  done
+  echo "$name: self-test ok (clean fixture holds, $n violating fixture(s) caught)"
 }
 
 # dl_require_tables NAME CLAIM REASON TABLE... -- exit 1 with REASON if any
 # TABLE is absent from public. See "unbuilt is exit 1" in the header.
 dl_require_tables() {
-  local name=$1 claim=$2 reason=$3 t present missing=""
+  local name=$1 claim=$2 reason=$3 t missing=""
   shift 3
   for t in "$@"; do
-    if ! present=$(dl_psql -c "SELECT to_regclass('public.$t') IS NOT NULL" 2>&1); then
-      echo "$name: CANNOT RUN -- catalog lookup for $t failed: $present" >&2
+    if ! dl_run -c "SELECT to_regclass('public.$t') IS NOT NULL"; then
+      echo "$name: CANNOT RUN -- catalog lookup for $t failed: $DL_ERR" >&2
       exit 3
     fi
-    [[ "$present" == "t" ]] || missing="$missing $t"
+    [[ "$DL_OUT" == "t" ]] || missing="$missing $t"
   done
   if [[ -n "$missing" ]]; then
     echo "$name: FALSE ($claim) -- no table:$missing. $reason"
@@ -184,14 +215,32 @@ dl_require_tables() {
 # tables. Rows are violations: print them under HEADER and exit 1. An error
 # means the real schema differs from DL_SCHEMA: exit 3.
 dl_check() {
-  local name=$1 claim=$2 check=$3 header=$4 out
-  if ! out=$(printf '%s\n' "$check" | dl_psql 2>&1); then
-    echo "$name: CANNOT RUN -- the check errored against the real tables; reconcile DL_SCHEMA in isa/probes/_delivery-lib.sh with the migration: $out" >&2
+  local name=$1 claim=$2 check=$3 header=$4
+  if ! dl_run <<<"$check"; then
+    echo "$name: CANNOT RUN -- the check errored against the real tables; reconcile DL_SCHEMA in isa/probes/_delivery-lib.sh with the migration: $DL_ERR" >&2
     exit 3
   fi
-  if [[ -n "$out" ]]; then
+  if [[ -n "$DL_OUT" ]]; then
     echo "$name: FALSE ($claim) -- violating rows:"
-    printf '%s\n' "$header" "$out"
+    printf '%s\n' "$header" "$DL_OUT"
     exit 1
   fi
+}
+
+# dl_require_rows NAME TABLE... -- run after dl_check found nothing. Exit 3 if
+# any TABLE is empty: a check over no rows has shown nothing, and exit 0 there
+# would let a claim close before a single delivery was made.
+dl_require_rows() {
+  local name=$1 t
+  shift
+  for t in "$@"; do
+    if ! dl_run -c "SELECT EXISTS (SELECT 1 FROM public.$t)"; then
+      echo "$name: CANNOT RUN -- row count for $t failed: $DL_ERR" >&2
+      exit 3
+    fi
+    if [[ "$DL_OUT" != "t" ]]; then
+      echo "$name: CANNOT RUN -- $t has no rows; no violation found, but there is nothing to check yet" >&2
+      exit 3
+    fi
+  done
 }

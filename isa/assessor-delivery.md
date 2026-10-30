@@ -105,12 +105,13 @@ question "which records, which versions, sent by whom, when" is answered from
 
 ## Test Strategy
 
-Every probe listed below exists as of 2026-10-29. Before that, several were
-named ahead of being written, which is deliberate and follows `isa/ISA.md`: `isa/run-probes.sh` treats a missing or unrunnable probe as a
-third value, reporting it as MISSING or exit 3 rather than as a pass, so these
-claims stay open rather than closing on silence. Leaving them untabled would
-report them as `manual`, which would be false — seven of the eight are
-machine-checkable and are simply unchecked today.
+Every probe listed below exists as of 2026-10-29. Several were named before
+they were written, which `isa/ISA.md` allows: a missing probe is reported as
+MISSING, not as a pass, so the claim stays open. Leaving them untabled would
+have reported them as `manual`, which would be false, since seven of the eight
+are machine-checkable. The database probes report FALSE while the delivery
+tables do not exist, and exit 3 (unverifiable, never a pass) when the tables
+are empty or when only part of a row's check exists yet.
 
 | isc   | tier    | type | check                                                                              | threshold | tool                                           |
 | ----- | ------- | ---- | ---------------------------------------------------------------------------------- | --------- | ---------------------------------------------- |
@@ -185,12 +186,17 @@ specified. No claim changed.
 - All six report false on `main`: the tables they read do not exist, and the
   one way evidence leaves today, the OSCAL bundle download, records nothing
   and passes no gate.
+- Once the tables exist, no probe passes on nothing: an empty table exits 3,
+  and a manifest element that does not resolve to an evidence record is a
+  violation.
 - ISC-2's replay compares the evidence-record set and hashes through a
-  manifest digest. A byte-for-byte rebuild of the signed bundle waits for the
-  adapter.
-- ISC-3 and ISC-6 check the schema and the ledger rows only. The assembly path
-  (ISC-3) and responses, CLI output and logs (ISC-6) need behavioral halves
-  once the delivery code exists; each probe's header says what they drive.
+  manifest digest. ISC-6 checks the schema and the ledger rows. Each is half
+  its Test Strategy row, so a clean result exits 3, naming the unwritten half
+  (the signed-bundle rebuild; responses, CLI output and logs), until the
+  delivery code exists to write it. The rows are unchanged.
+- ISC-3 checks rows and the shared guard. The assembly path needs a
+  behavioral check once the delivery code exists; the probe's header says
+  what it drives.
 
 ### 2026-08-29 · specified
 

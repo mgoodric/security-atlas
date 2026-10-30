@@ -20,22 +20,23 @@
 #   - A partial or failed delivery is replayed against what was transmitted,
 #     not what the adapter says it accepted (anti-claim A1). Every row is
 #     checked whatever its status.
-#   - The digest covers the evidence-record set and hashes the claim names. It
-#     is not a byte-for-byte rebuild of the signed OSCAL bundle; that waits for
-#     the adapter, whose bundle the delivery path does not produce yet.
+#   - The digest covers the evidence-record set and hashes. The Test Strategy
+#     row asks for more: the bundle rebuilt from the ledger equals the
+#     delivered digest. A byte-for-byte rebuild of the signed OSCAL bundle
+#     waits for the adapter, whose bundle the delivery path does not produce
+#     yet. Until that half is written, a clean ledger exits 3, not 0, so the
+#     claim cannot close on half its row (the human-approver-guard.sh rule).
 #
 # Adopted from the engine draft (#1626), which assumed one ledger row per
-# record and reported an empty ledger as cannot-run. Here a departure is one
-# row with a manifest, and an empty ledger is not special: zero departures
-# replay trivially, and the claim stays open on the unbuilt check until the
-# tables exist.
+# record. Here a departure is one row with a manifest.
 #
 # Today: no `assessor_deliveries` table, so a departure is recorded nowhere.
 # The OSCAL download leaves no row at all. FALSE.
 #
-# Exit 0  every recorded departure replays to its recorded digest.
-# Exit 1  one does not, or the tables do not exist.
-# Exit 3  cannot run (see isa/probes/_delivery-lib.sh).
+# Exit 0  not reachable until the bundle-rebuild half is written.
+# Exit 1  a recorded departure does not replay, or the tables do not exist.
+# Exit 3  cannot run (see isa/probes/_delivery-lib.sh), the ledger is empty,
+#         or the manifest half holds and the bundle half is not written.
 set -uo pipefail
 
 name=delivery-replay
@@ -69,6 +70,7 @@ dl_require_tables "$name" "$claim" \
   "A departure is recorded nowhere: the OSCAL bundle download (internal/api/oscalexport) leaves no row naming the records or hashes it carried, so nothing that left can be recovered and compared." \
   assessor_deliveries evidence_records
 dl_check "$name" "$claim" "$CHECK" "delivery_id	status	recorded_digest	rebuilt_digest	unresolved_records"
+dl_require_rows "$name" assessor_deliveries
 
-echo "$name: ok -- every recorded departure replays from the ledger to its recorded digest"
-exit 0
+echo "$name: CANNOT RUN -- ledger half holds (every recorded departure's record set and hashes replay to its manifest digest); bundle-rebuild half not written" >&2
+exit 3

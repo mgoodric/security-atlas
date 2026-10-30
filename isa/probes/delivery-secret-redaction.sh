@@ -14,15 +14,18 @@
 #      tenant_llm_routing.api_key_ciphertext). The delivery ledger carries no
 #      credential-named column at all: it records what left, and has no reason
 #      to hold destination credentials in any form.
-#   2. Every `credential_ref` value is a reference (`scheme://...`), not a
-#      pasted secret.
+#   2. Every `credential_ref` value is a `scheme://` reference, as
+#      isa/probes/_delivery-lib.sh defines the column, not a pasted secret.
 #
 # What this does not reach: API responses, CLI output, log lines and error
-# strings. Those are produced by delivery code that does not exist. When it
-# lands this probe needs a behavioral half that registers a destination with a
-# known sentinel credential, drives a delivery that fails, and searches every
-# response, the CLI output and the captured logs for the sentinel. The epic
-# commits that path to internal/notify's redacting Secret and ScrubSecret.
+# strings, which the Test Strategy row also names. Those are produced by
+# delivery code that does not exist. When it lands this probe needs a
+# behavioral half that registers a destination with a known sentinel
+# credential, drives a delivery that fails, and searches every response, the
+# CLI output and the captured logs for the sentinel. The epic commits that
+# path to internal/notify's redacting Secret and ScrubSecret. Until that half
+# is written, a clean ledger exits 3, not 0, so the claim cannot close on half
+# its row (the human-approver-guard.sh rule).
 #
 # Adopted from the engine draft (#1630). Its source-tree grep needed ripgrep,
 # which CI does not install, and matched on file names containing "assessor";
@@ -31,9 +34,11 @@
 # Today: no `assessor_destinations` table, so there is no stored credential
 # and no redaction contract for one. FALSE.
 #
-# Exit 0  no plaintext-shaped credential column or value in either table.
-# Exit 1  there is one, or the tables do not exist.
-# Exit 3  cannot run (see isa/probes/_delivery-lib.sh).
+# Exit 0  not reachable until the response/log half is written.
+# Exit 1  a plaintext-shaped credential column or value, or the tables do not
+#         exist.
+# Exit 3  cannot run (see isa/probes/_delivery-lib.sh), either table is empty,
+#         or the ledger half holds and the response/log half is not written.
 set -uo pipefail
 
 name=delivery-secret-redaction
@@ -60,12 +65,18 @@ ORDER BY 1, 2;"
 VIOLATION="
 ALTER TABLE assessor_destinations ADD COLUMN api_token text;"
 
+# The reference column holding the secret itself.
+PASTED="
+UPDATE assessor_destinations SET credential_ref = 'sk-live-0123456789abcdef'
+WHERE id = '00000000-0000-0000-0000-0000000000d1';"
+
 dl_preflight "$name"
-dl_selftest "$name" "$CHECK" "$VIOLATION"
+dl_selftest "$name" "$CHECK" "$VIOLATION" "$PASTED"
 dl_require_tables "$name" "$claim" \
   "There is nowhere a destination credential is stored, so there is no redaction contract for one: nothing yet holds it as a reference or ciphertext, or keeps it out of the delivery ledger." \
   assessor_destinations assessor_deliveries
 dl_check "$name" "$claim" "$CHECK" "table	column_or_row	problem"
+dl_require_rows "$name" assessor_destinations assessor_deliveries
 
-echo "$name: ok -- no plaintext-shaped credential column or value in assessor_destinations or assessor_deliveries (ledger rows only; see header)"
-exit 0
+echo "$name: CANNOT RUN -- ledger half holds (no plaintext-shaped credential column or value in assessor_destinations or assessor_deliveries); response/CLI/log half not written" >&2
+exit 3
