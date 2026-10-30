@@ -105,12 +105,13 @@ question "which records, which versions, sent by whom, when" is answered from
 
 ## Test Strategy
 
-Not every probe listed below exists yet. That is deliberate and follows
-`isa/ISA.md`: `isa/run-probes.sh` treats a missing or unrunnable probe as a
-third value, reporting it as MISSING or exit 3 rather than as a pass, so these
-claims stay open rather than closing on silence. Leaving them untabled would
-report them as `manual`, which would be false — seven of the eight are
-machine-checkable and are simply unchecked today.
+Every probe listed below exists as of 2026-10-29. Several were named before
+they were written, which `isa/ISA.md` allows: a missing probe is reported as
+MISSING, not as a pass, so the claim stays open. Leaving them untabled would
+have reported them as `manual`, which would be false, since seven of the eight
+are machine-checkable. The database probes report FALSE while the delivery
+tables do not exist, and exit 3 (unverifiable, never a pass) when the tables
+are empty or when only part of a row's check exists yet.
 
 | isc   | tier    | type | check                                                                              | threshold | tool                                           |
 | ----- | ------- | ---- | ---------------------------------------------------------------------------------- | --------- | ---------------------------------------------- |
@@ -141,12 +142,16 @@ other claim in D1 is unfalsifiable.
   `Plans/canvas/11-open-questions.md` #22 — in-tree vendor adapters, open
   adapter only, or an out-of-tree registry. ISC-8 holds under all three, so the
   question blocks the first firm-named adapter and not this epic.
-- Redelivery semantics. Whether a second delivery of the same period appends a
-  new row (favored) or is an idempotent no-op. ISC-2's falsifier is written to
-  hold either way.
-- Partial acceptance. If an adapter reports some records accepted and some
-  rejected, whether the row terminates `failed` or `partial`, and what ISC-2's
-  replay compares against in that case.
+- ~~Redelivery semantics.~~ Answered 2026-10-29 (security-atlas#1692): a
+  second delivery of the same period appends a new row. Every departure is an
+  explicit human action, and a no-op would leave one of them unrecorded. ISC-2
+  replays each row on its own; two rows for one period are two departures.
+- ~~Partial acceptance.~~ Answered 2026-10-29 (security-atlas#1692): the row
+  terminates `partial`, distinct from `failed`, and the receipt records which
+  records the adapter reported accepted. ISC-2's replay compares against what
+  was transmitted, never against what was accepted: acceptance is the
+  assessor's conclusion (A1), and the ledger's job is what left. A `failed`
+  row is replayed the same way, against whatever its manifest says was sent.
 - What the delivery surface looks like in `web/`. This epic is the seam and the
   CLI; the queue UI is unwritten.
 
@@ -165,6 +170,34 @@ Canvas §8.6 (`Plans/canvas/08-audit-workflow.md`) carries the design
 commitment these claims are the falsifiers for.
 
 ## Changelog
+
+### 2026-10-29 · ISC-1/2/3/4/6/7 probes land (security-atlas#1692)
+
+The six remaining probes named in Test Strategy now exist, adopted from the
+retired engine's August drafts (#1625-#1628, #1630, #1631) and rewritten where
+the drafts each guessed a different shape for the unbuilt tables. The assumed
+shape of `assessor_destinations` and `assessor_deliveries` is written once, in
+`isa/probes/_delivery-lib.sh`; when the migration lands and differs, the
+probes exit 3 and name that file. On every run, before reading the real
+tables, each probe runs its own check against a clean fixture and against each
+violation it names, which includes a drifted manifest for ISC-4 and ISC-7. The
+redelivery and partial-acceptance questions are answered under Not yet
+specified. No claim changed.
+
+- All six report false on `main`: the tables they read do not exist, and the
+  one way evidence leaves today, the OSCAL bundle download, records nothing
+  and passes no gate.
+- Once the tables exist, no database probe passes on nothing. An empty table
+  exits 3, and so do ISC-4 and ISC-7 when no delivered record is in scope. A
+  manifest element that does not resolve to an evidence record is a violation.
+- ISC-2's replay compares the evidence-record set and hashes through a
+  manifest digest. ISC-6 checks the schema and the ledger rows. Each is half
+  its Test Strategy row, so a clean result exits 3, naming the unwritten half
+  (the signed-bundle rebuild; responses, CLI output and logs), until the
+  delivery code exists to write it. The rows are unchanged.
+- ISC-3 checks rows and the shared guard. The assembly path needs a
+  behavioral check once the delivery code exists; the probe's header says
+  what it drives.
 
 ### 2026-08-29 · specified
 
