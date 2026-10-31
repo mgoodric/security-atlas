@@ -116,9 +116,9 @@ func TestJWKSRoundTripEndToEnd(t *testing.T) {
 	if len(keys) == 0 {
 		t.Fatalf("JWKS missing kid %q", kid)
 	}
-	parsed, err := jose.ParseSigned(tok, []jose.SignatureAlgorithm{jose.ES256})
+	parsed, err := jose.ParseSignedCompact(tok, []jose.SignatureAlgorithm{jose.ES256})
 	if err != nil {
-		t.Fatalf("ParseSigned: %v", err)
+		t.Fatalf("ParseSignedCompact: %v", err)
 	}
 	if _, err := parsed.Verify(keys[0]); err != nil {
 		t.Fatalf("verify against JWKS: %v", err)

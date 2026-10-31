@@ -88,7 +88,7 @@ func (e *RevocationEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tokenIn := r.FormValue("token")
+	tokenIn := strings.TrimSpace(r.FormValue("token"))
 	if tokenIn == "" {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "token is required")
 		return

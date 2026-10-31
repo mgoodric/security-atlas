@@ -281,7 +281,7 @@ func (t *TokenEndpoint) handleClientCredentials(w http.ResponseWriter, r *http.R
 // ===== token-exchange (RFC 8693) =====
 
 func (t *TokenEndpoint) handleTokenExchange(w http.ResponseWriter, r *http.Request) {
-	subjectToken := r.FormValue("subject_token")
+	subjectToken := strings.TrimSpace(r.FormValue("subject_token"))
 	subjectTokenType := r.FormValue("subject_token_type")
 	targetTenantRaw := r.FormValue("atlas:target_tenant_id")
 	if subjectToken == "" {

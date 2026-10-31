@@ -29,6 +29,7 @@ package oauth
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
@@ -98,7 +99,7 @@ func (e *IntrospectionEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	tokenIn := r.FormValue("token")
+	tokenIn := strings.TrimSpace(r.FormValue("token"))
 	if tokenIn == "" {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "token is required")
 		return

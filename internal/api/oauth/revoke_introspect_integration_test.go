@@ -348,6 +348,34 @@ func TestIntegrationRevoke_HappyPath(t *testing.T) {
 	}
 }
 
+// TestIntegrationRevoke_PaddedToken_Revokes: a valid token sent with
+// surrounding whitespace is trimmed and revoked. Without the trim it
+// fails to parse, and RFC 7009 §2.2's silent 200 would hide that the
+// token is still live.
+func TestIntegrationRevoke_PaddedToken_Revokes(t *testing.T) {
+	srv, signer, revoked, clients, _ := newRevokeIntrospectServer(t)
+	clientID, clientSecret := issueClientForTest(t, clients)
+
+	tok, claims := mintJWTForTest(t, signer, "user:alice-revoke-padded")
+
+	form := url.Values{}
+	form.Set("token", "  "+tok+"\n")
+	form.Set("client_id", clientID)
+	form.Set("client_secret", clientSecret)
+
+	resp, body := postFormAt(t, srv.URL+oauth.PathRevoke, form, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("revoke status = %d body = %s", resp.StatusCode, body)
+	}
+	isRevoked, err := revoked.IsRevoked(context.Background(), claims.ID)
+	if err != nil {
+		t.Fatalf("IsRevoked: %v", err)
+	}
+	if !isRevoked {
+		t.Fatal("padded token answered 200 but was not revoked")
+	}
+}
+
 // TestIntegrationRevoke_UnknownToken_Returns200: AC-17 / P0-190-4 —
 // RFC 7009 §2.2 silent 200 for unknown tokens.
 func TestIntegrationRevoke_UnknownToken_Returns200(t *testing.T) {
