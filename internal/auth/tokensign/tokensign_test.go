@@ -5,9 +5,11 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"strings"
 	"testing"
 	"time"
 
+	jose "github.com/go-jose/go-jose/v4"
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
@@ -153,6 +155,49 @@ func TestSignRejectsWrongCurve(t *testing.T) {
 	signer := tokensign.New(store)
 	if _, err := signer.Sign(context.Background(), makeClaims(t)); err == nil {
 		t.Fatal("expected Sign to reject non-P-256 key")
+	}
+}
+
+// Verify accepts only the compact serialization an atlas JWT uses
+// (RFC 7519 §1). go-jose's deprecated ParseSigned also took the JSON
+// serialization and stripped whitespace anywhere in the input;
+// ParseSignedCompact does neither, and callers trim the outer edges.
+func TestVerifyAcceptsOnlyCompactSerialization(t *testing.T) {
+	store, err := fsstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("fsstore.Open: %v", err)
+	}
+	signer := tokensign.New(store)
+	tok, err := signer.Sign(context.Background(), makeClaims(t))
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+	parsed, err := jose.ParseSignedCompact(tok, tokensign.AllowedAlgs)
+	if err != nil {
+		t.Fatalf("ParseSignedCompact: %v", err)
+	}
+	header, rest, _ := strings.Cut(tok, ".")
+
+	cases := []struct {
+		name    string
+		tok     string
+		wantErr bool
+	}{
+		{name: "valid compact", tok: tok},
+		{name: "JSON serialization", tok: parsed.FullSerialize(), wantErr: true},
+		{name: "internal whitespace", tok: header + ". " + rest, wantErr: true},
+		{name: "space inside a segment", tok: header[:8] + " " + header[8:] + "." + rest, wantErr: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := signer.Verify(context.Background(), tc.tok)
+			if tc.wantErr && err == nil {
+				t.Fatal("Verify accepted a non-compact token")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("Verify: %v", err)
+			}
+		})
 	}
 }
 
