@@ -190,9 +190,9 @@ func TestJWKSRoundTripVerifiesSignedJWT(t *testing.T) {
 	if len(matches) == 0 {
 		t.Fatalf("JWK Set missing kid %q", kid)
 	}
-	parsed, err := jose.ParseSigned(tok, []jose.SignatureAlgorithm{jose.ES256})
+	parsed, err := jose.ParseSignedCompact(tok, []jose.SignatureAlgorithm{jose.ES256})
 	if err != nil {
-		t.Fatalf("ParseSigned: %v", err)
+		t.Fatalf("ParseSignedCompact: %v", err)
 	}
 	if _, err := parsed.Verify(matches[0]); err != nil {
 		t.Fatalf("verify against published JWK: %v", err)
