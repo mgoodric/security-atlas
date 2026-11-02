@@ -15,7 +15,7 @@
 # Built locally by the docker-compose self-host bundle (slice 037).
 
 # ----- Stage 1: build -----
-FROM golang:1.26 AS builder
+FROM golang:1.27 AS builder
 
 WORKDIR /src
 
