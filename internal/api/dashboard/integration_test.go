@@ -60,9 +60,15 @@ import (
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
+		"decision_audit_log",
 		"control_evaluations",
 		"evidence_freshness",
 		"evidence_audit_log",
+		"exception_audit_log",
+		"sample_audit_log",
+		"audit_period_audit_log",
+		"aggregation_rule_audit_log",
+		"walkthrough_audit_log",
 		"exceptions",
 		"policy_acknowledgments",
 		"vendors",
@@ -219,6 +225,50 @@ func seedIngestEvent(t *testing.T, admin *pgxpool.Pool, tenant, decision string,
 		VALUES ($1, $2, 'cred-test-066', $3, 'sast.scan_result', $4, $5)
 	`, id, tenant, decision, uuid.New(), receivedAt); err != nil {
 		t.Fatalf("seed evidence_audit_log: %v", err)
+	}
+	return id
+}
+
+func seedDecisionAuditEvent(t *testing.T, admin *pgxpool.Pool, tenant, action string, occurredAt time.Time) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO decision_audit_log (
+			decision_id, tenant_id, occurred_at, user_id, action,
+			resource_type, resource_id, result, request_path, request_method
+		)
+		VALUES ($1, $2, $3, 'slice-472-user', $4,
+		        'control', $5, 'allow', '/v1/controls', 'POST')
+	`, id, tenant, occurredAt, action, uuid.NewString()); err != nil {
+		t.Fatalf("seed decision_audit_log: %v", err)
+	}
+	return id
+}
+
+func seedExceptionAuditEvent(t *testing.T, admin *pgxpool.Pool, tenant, action string, occurredAt time.Time) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO exception_audit_log (
+			id, tenant_id, exception_id, action, actor, to_state, occurred_at
+		)
+		VALUES ($1, $2, $3, $4, 'slice-472-user', 'approved', $5)
+	`, id, tenant, uuid.New(), action, occurredAt); err != nil {
+		t.Fatalf("seed exception_audit_log: %v", err)
+	}
+	return id
+}
+
+func seedSampleAuditEvent(t *testing.T, admin *pgxpool.Pool, tenant string, occurredAt time.Time) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO sample_audit_log (
+			id, tenant_id, action, actor, sample_id, occurred_at
+		)
+		VALUES ($1, $2, 'sample_drawn', 'slice-472-user', $3, $4)
+	`, id, tenant, uuid.New(), occurredAt); err != nil {
+		t.Fatalf("seed sample_audit_log: %v", err)
 	}
 	return id
 }
@@ -547,6 +597,65 @@ func TestActivity_PaginatesNewestFirst(t *testing.T) {
 	}
 }
 
+func TestActivity_MixedKindsAndKindFilter(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	seedIngestEvent(t, admin, tenant, "accepted", now.Add(-1*time.Minute))
+	seedDecisionAuditEvent(t, admin, tenant, "write", now.Add(-2*time.Minute))
+	seedExceptionAuditEvent(t, admin, tenant, "approved", now.Add(-3*time.Minute))
+	seedSampleAuditEvent(t, admin, tenant, now.Add(-4*time.Minute))
+
+	resp, body := get(t, env, "/v1/activity?limit=3")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET mixed activity: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	rows, _ := body["activity"].([]any)
+	if len(rows) != 3 {
+		t.Fatalf("mixed activity page1 rows = %d, want 3", len(rows))
+	}
+	gotTypes := make([]string, 0, len(rows))
+	for _, r := range rows {
+		gotTypes = append(gotTypes, r.(map[string]any)["event_type"].(string))
+	}
+	wantTypes := []string{"evidence.accepted", "decision.write", "exception.approved"}
+	for i, want := range wantTypes {
+		if gotTypes[i] != want {
+			t.Fatalf("mixed activity event_type[%d] = %q, want %q (all=%v)", i, gotTypes[i], want, gotTypes)
+		}
+	}
+	cursor, _ := body["next_cursor"].(string)
+	if cursor == "" {
+		t.Fatalf("mixed activity expected next_cursor for fourth row")
+	}
+	resp, body = get(t, env, "/v1/activity?limit=3&cursor="+cursor)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET mixed activity page2: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	rows, _ = body["activity"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("mixed activity page2 rows = %d, want 1", len(rows))
+	}
+	if got := rows[0].(map[string]any)["event_type"].(string); got != "sample.sample_drawn" {
+		t.Fatalf("mixed activity page2 event_type = %q, want sample.sample_drawn", got)
+	}
+
+	resp, body = get(t, env, "/v1/activity?kind=exception")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET activity?kind=exception: status %d, want 200; body=%v", resp.StatusCode, body)
+	}
+	rows, _ = body["activity"].([]any)
+	if len(rows) != 1 {
+		t.Fatalf("kind filter rows = %d, want 1", len(rows))
+	}
+	if got := rows[0].(map[string]any)["event_type"].(string); got != "exception.approved" {
+		t.Fatalf("kind filter event_type = %q, want exception.approved", got)
+	}
+}
+
 // ===== ISC-21: upcoming rollup merges all four sources date-sorted =====
 
 func TestUpcoming_MergesAllFourSourcesDateSorted(t *testing.T) {
@@ -789,6 +898,7 @@ func TestDashboard_RejectsBadInput(t *testing.T) {
 		{"/v1/activity?limit=999", http.StatusBadRequest},
 		{"/v1/activity?limit=abc", http.StatusBadRequest},
 		{"/v1/activity?cursor=@@@", http.StatusBadRequest},
+		{"/v1/activity?kind=feature_flag", http.StatusBadRequest},
 		{"/v1/upcoming?limit=0", http.StatusBadRequest},
 		{"/v1/upcoming?cursor=not-base64-!!", http.StatusBadRequest},
 		{"/v1/upcoming?category=bogus", http.StatusBadRequest},

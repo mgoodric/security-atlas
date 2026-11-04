@@ -6,12 +6,11 @@
 // fetches (page 2 skips or repeats rows). A keyset cursor over
 // (sort_timestamp, id) is stable under concurrent change.
 //
-// The cursor is opaque: a base64url-encoded "RFC3339Nano|id" string. The
+// The cursor is opaque. Upcoming rows encode as "RFC3339Nano|id"; activity
+// rows encode as "RFC3339Nano|kind|row_id" because the widened feed is a
+// heterogeneous UNION sorted by (timestamp DESC, kind ASC, row_id ASC). The
 // wire contract does not leak the internal shape, and the handler treats a
-// malformed cursor as a 400. The activity feed sorts newest-first, so an
-// absent cursor selects the first page via a far-FUTURE sentinel timestamp;
-// the upcoming rollup sorts oldest-first, so an absent cursor selects the
-// first page via a far-PAST sentinel timestamp.
+// malformed cursor as a 400.
 package dashboard
 
 import (
@@ -39,8 +38,9 @@ var (
 // rollup mixes exception / policy-ack / vendor / audit-period ids; the
 // activity feed's resource_id is the view's text projection).
 type keyset struct {
-	ts time.Time
-	id string
+	ts   time.Time
+	kind string
+	id   string
 }
 
 // far-past / far-future sentinel timestamps. The activity feed (newest-
@@ -83,6 +83,9 @@ func encodeCursor(k keyset) string {
 		return ""
 	}
 	raw := k.ts.UTC().Format(time.RFC3339Nano) + "|" + k.id
+	if k.kind != "" {
+		raw = k.ts.UTC().Format(time.RFC3339Nano) + "|" + k.kind + "|" + k.id
+	}
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
 
@@ -97,13 +100,16 @@ func decodeCursor(token string, firstPage keyset) (keyset, error) {
 	if err != nil {
 		return keyset{}, errBadCursor
 	}
-	parts := strings.SplitN(string(rawBytes), "|", 2)
-	if len(parts) != 2 {
+	parts := strings.Split(string(rawBytes), "|")
+	if len(parts) != 2 && len(parts) != 3 {
 		return keyset{}, errBadCursor
 	}
 	ts, err := time.Parse(time.RFC3339Nano, parts[0])
 	if err != nil {
 		return keyset{}, errBadCursor
+	}
+	if len(parts) == 3 {
+		return keyset{ts: ts.UTC(), kind: parts[1], id: parts[2]}, nil
 	}
 	return keyset{ts: ts.UTC(), id: parts[1]}, nil
 }

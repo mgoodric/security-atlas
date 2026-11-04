@@ -18,6 +18,14 @@ type RouteSpec struct {
 	Tier     string // Auth tier: "none" | "bearer" | "adminBearer"
 	Internal bool   // True for operator-only endpoints filtered from public Redoc
 	Summary  string // One-line summary; rendered as the Redoc operation header
+	Query    []QueryParam
+}
+
+// QueryParam documents a query-string parameter for generated OpenAPI.
+type QueryParam struct {
+	Name        string
+	Description string
+	Enum        []string
 }
 
 // RouteSpecs is the canonical route list. See package doc.
@@ -48,7 +56,11 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/ready", Tag: "system", Tier: "none", Internal: true, Summary: "GET /ready"},
 	{Method: "GET", Path: "/v1/action-plans", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "GET /v1/action-plans"},
 	{Method: "GET", Path: "/v1/action-plans/{id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "GET /v1/action-plans/{id}"},
-	{Method: "GET", Path: "/v1/activity", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/activity"},
+	{Method: "GET", Path: "/v1/activity", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/activity", Query: []QueryParam{
+		{Name: "cursor", Description: "Opaque pagination cursor returned as next_cursor."},
+		{Name: "limit", Description: "Page size, default 50, max 200."},
+		{Name: "kind", Description: "Dashboard activity kind filter.", Enum: []string{"decision", "evidence", "exception", "sample", "audit_period", "aggregation_rule", "walkthrough"}},
+	}},
 	{Method: "GET", Path: "/v1/activity/unified", Tag: "activity", Tier: "bearer", Internal: false, Summary: "GET /v1/activity/unified"},
 	{Method: "GET", Path: "/v1/admin/audit-log", Tag: "admin-audit-log", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/audit-log"},
 	{Method: "GET", Path: "/v1/admin/audit-log/export", Tag: "admin-audit-log", Tier: "adminBearer", Internal: false, Summary: "GET /v1/admin/audit-log/export"},

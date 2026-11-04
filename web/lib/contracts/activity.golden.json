@@ -21,9 +21,9 @@
         },
         {
           "actor": "user:contract",
-          "event_type": "evidence.ingested",
+          "event_type": "exception.approved",
           "resource_id": "22222222-2222-4222-8222-222222222222",
-          "resource_type": "evidence",
+          "resource_type": "exception",
           "summary": null,
           "ts": "2026-05-15T14:00:00Z"
         }
