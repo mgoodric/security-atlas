@@ -22,15 +22,23 @@ evidence_queries:
     evidence_kind: access_review.completion.v1
     description: "Every in-scope system has a completed access review within 90 days"
     expression: |
-      package atlas.controls.soc2.cc6_3_review
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every s in input.in_scope_systems {
-          some r in input.review_records
-          r.system_id == s.id
-          r.status == "completed"
-          time.parse_rfc3339_ns(r.completed_at) > (time.now_ns() - (90 * 24 * 60 * 60 * 1000000000))
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
