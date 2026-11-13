@@ -12,9 +12,9 @@
 //   - PurgeUnboundRows refuses a confirmation that does not match the
 //     purgeable total and deletes nothing.
 //   - PurgeUnboundRows deletes a parent after the child rows that reference
-//     it (controls before personnel_security_checklists by name, so the
-//     first pass trips the composite foreign key), spares other tenants,
-//     and writes an append-only tenant_data_purges row.
+//     it (populations before samples by name, so the first pass trips the
+//     composite foreign key), spares other tenants, and writes an
+//     append-only tenant_data_purges row.
 //   - PurgeUnboundRows keeps ledger rows and the parents they reference.
 //
 // Each test runs inside a transaction on the BYPASSRLS migrate pool and
@@ -72,13 +72,25 @@ func seedEvidence(t *testing.T, tx pgx.Tx, tenant, control uuid.UUID) {
 	}
 }
 
-func seedChecklist(t *testing.T, tx pgx.Tx, tenant, control uuid.UUID) {
+// seedPopulationWithSample inserts a population on control and a sample
+// drawn from it, both in tenant. samples references populations with
+// RESTRICT, and both sort after controls, so a purge must delete samples
+// before populations whether or not controls is retained.
+func seedPopulationWithSample(t *testing.T, tx pgx.Tx, tenant, control uuid.UUID) {
 	t.Helper()
-	if _, err := tx.Exec(context.Background(),
-		`INSERT INTO personnel_security_checklists (tenant_id, workflow_kind, source, person_external_id, control_id, due_at)
-		 VALUES ($1, 'onboarding', 'manual', 'unbound-rows-test', $2, now())`, tenant, control,
+	ctx := context.Background()
+	pop := uuid.New()
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO populations (id, tenant_id, control_id, scope_predicate, time_window_start, time_window_end, created_by)
+		 VALUES ($1, $2, $3, '{}'::jsonb, now() - interval '1 day', now(), 'unbound-rows-test')`, pop, tenant, control,
 	); err != nil {
-		t.Fatalf("insert checklist: %v", err)
+		t.Fatalf("insert population: %v", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO samples (id, tenant_id, population_id, n, seed, created_by)
+		 VALUES ($1, $2, $3, 1, 'seed', 'unbound-rows-test')`, uuid.New(), tenant, pop,
+	); err != nil {
+		t.Fatalf("insert sample: %v", err)
 	}
 }
 
@@ -167,7 +179,7 @@ func TestLedgerTables_CoverAppendOnlyTables(t *testing.T) {
 			t.Errorf("%s is append-only but not classified as a ledger; a purge would delete from it", table)
 		}
 	}
-	for _, purgeable := range []string{"controls", "risks", "personnel_security_checklists"} {
+	for _, purgeable := range []string{"controls", "risks", "populations", "samples"} {
 		if isLedger[purgeable] {
 			t.Errorf("%s is classified as a ledger, want purgeable", purgeable)
 		}
@@ -242,7 +254,7 @@ func TestPurgeUnboundRows_PurgesInOrderSparesOthersAndRecords(t *testing.T) {
 	other := uuid.New()
 
 	control := seedControl(t, tx, uuid.Nil)
-	seedChecklist(t, tx, uuid.Nil, control)
+	seedPopulationWithSample(t, tx, uuid.Nil, control)
 	seedRisk(t, tx, uuid.Nil)
 	otherControl := seedControl(t, tx, other)
 	seedEvidence(t, tx, other, otherControl)
@@ -259,7 +271,9 @@ func TestPurgeUnboundRows_PurgesInOrderSparesOthersAndRecords(t *testing.T) {
 	if got, want := oauthclient.PurgeableRows(res.Purged), oauthclient.PurgeableRows(listed); got != want {
 		t.Errorf("purged total = %d, want %d", got, want)
 	}
-	for _, table := range []string{"controls", "personnel_security_checklists", "risks"} {
+	// controls may be retained by all-zeros evidence another suite left in
+	// a shared database; the tables below never are.
+	for _, table := range []string{"populations", "samples", "risks"} {
 		if find(res.Purged, table).Rows == 0 {
 			t.Errorf("purge log %v is missing %s", res.Purged, table)
 		}

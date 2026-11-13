@@ -32,8 +32,10 @@ Foreign keys between tenant-scoped tables are composite `(tenant_id, id)` and
 mostly `RESTRICT`. The purge deletes in name order, each table under a
 savepoint. A table whose delete trips a foreign key is retried on the next
 pass, once its children are gone. A pass that deletes nothing fails the purge.
-This needs no dependency graph. The integration test covers it with `controls`
-(the parent, sorted first) and `personnel_security_checklists` (the child).
+This needs no dependency graph. The integration test covers it with
+`populations` (the parent, sorted first) and `samples` (the child). Both are
+children of `controls`, so the test holds even when leftover all-zeros
+evidence in a shared database retains `controls`.
 
 Reassign is left out. Moving rows to a real tenant means rewriting `tenant_id`
 on every row in a reference chain in one statement, because the composite keys
