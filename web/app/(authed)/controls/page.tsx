@@ -60,6 +60,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  fetchCatalogCounts,
   fetchControlsList,
   fetchMyControls,
   fetchScopeCells,
@@ -371,11 +372,11 @@ function ControlsPageInner() {
     queryFn: () => fetchControlsList(scopeArg, hasControl),
     enabled: view === "catalog",
   });
-  // The catalog size for the "My controls" header. `has_control=true`
-  // keeps the page small; only the totals are read.
+  // The catalog size for the "My controls" header. Issue #1832: a
+  // one-row page; only the totals are read.
   const catalogCountsQ = useQuery<ControlsListResponse>({
     queryKey: ["controls", "catalog-counts"],
-    queryFn: () => fetchControlsList(undefined, true),
+    queryFn: fetchCatalogCounts,
     enabled: view === "mine",
   });
   const listQ = view === "mine" ? myControlsQ : anchorsQ;

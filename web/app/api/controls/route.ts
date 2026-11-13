@@ -50,9 +50,16 @@ export async function GET(req: NextRequest): Promise<Response> {
     );
   }
   const hasControl = hasControlParam ? hasControlParam === "true" : undefined;
+  // Issue #1832 — forward a positive integer `limit` so the page can read
+  // the catalog totals off a one-row page; anything else keeps the
+  // platform default.
+  const limitParam = req.nextUrl.searchParams.get("limit") ?? "";
+  const limit = /^[1-9]\d*$/.test(limitParam)
+    ? Number.parseInt(limitParam, 10)
+    : undefined;
   try {
     const { anchors, total, catalog_total, with_control_total } =
-      await listAnchorsWithState(bearer, scope || undefined, hasControl);
+      await listAnchorsWithState(bearer, scope || undefined, hasControl, limit);
     return NextResponse.json({
       anchors,
       total,
