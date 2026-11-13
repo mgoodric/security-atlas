@@ -23,18 +23,23 @@ evidence_queries:
     evidence_kind: github.repo_protection.v1
     description: "Every prod-deploying repo has protected main branch with PR reviews and status checks"
     expression: |
-      package atlas.controls.soc2.cc8_1
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every r in input.repos {
-          r.deploys_to_prod == true
-          some p in r.protection_rules
-          p.branch == r.default_branch
-          p.required_pull_request_reviews.required_approving_review_count >= 1
-          p.required_status_checks.enabled == true
-          p.allow_force_pushes == false
-          p.enforce_admins == true
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"

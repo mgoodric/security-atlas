@@ -24,14 +24,23 @@ evidence_queries:
     evidence_kind: okta.mfa_policy.v1
     description: "Okta MFA policy is enabled, applies broadly, requires a phishing-resistant factor for admins"
     expression: |
-      package atlas.controls.soc2.cc6_1
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        some pol in input.policies
-        pol.status == "ACTIVE"
-        "everyone" in pol.assigned_groups
-        some factor in pol.required_factors
-        factor in {"webauthn", "okta_verify_push_number_match"}
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
