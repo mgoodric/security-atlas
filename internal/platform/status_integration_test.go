@@ -365,8 +365,8 @@ func TestStatus_TenantCount(t *testing.T) {
 		"e0000000-0000-4000-8000-000000000002",
 	} {
 		if _, err := admin.Exec(context.Background(),
-			`INSERT INTO tenants (id, name) VALUES ($1, $1::text)`,
-			uuid.MustParse(id)); err != nil {
+			`INSERT INTO tenants (id, name) VALUES ($1, $2)`,
+			uuid.MustParse(id), "tenant "+id); err != nil {
 			t.Fatalf("seed tenant: %v", err)
 		}
 		got, err := s.TenantCount(context.Background())
