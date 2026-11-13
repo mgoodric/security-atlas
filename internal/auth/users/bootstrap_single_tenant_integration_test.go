@@ -11,9 +11,12 @@ package users_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -167,11 +170,18 @@ func applySingleTenantUpgrade(t *testing.T) {
 // insertAdmin creates an active admin user in tenant with no super_admin row.
 func insertAdmin(t *testing.T, tenant uuid.UUID, email string) uuid.UUID {
 	t.Helper()
+	return insertAdminAt(t, tenant, uuid.New(), email, "active", time.Now())
+}
+
+// insertAdminAt creates an admin user with a chosen id, status and
+// created_at, and no super_admin row.
+func insertAdminAt(t *testing.T, tenant, id uuid.UUID, email, status string, createdAt time.Time) uuid.UUID {
+	t.Helper()
 	ctx := context.Background()
-	id := uuid.New()
 	if _, err := bootstrapAdminPool.Exec(ctx,
-		`INSERT INTO users (id, tenant_id, email, display_name, status) VALUES ($1, $2, $3, $3, 'active')`,
-		id, tenant, email,
+		`INSERT INTO users (id, tenant_id, email, display_name, status, created_at)
+		 VALUES ($1, $2, $3, $3, $4, $5)`,
+		id, tenant, email, status, createdAt,
 	); err != nil {
 		t.Fatalf("insert user: %v", err)
 	}
@@ -247,5 +257,185 @@ func TestSingleTenantUpgrade_MultiTenantDoesNothing(t *testing.T) {
 
 	if n := countRows(t, `SELECT COUNT(*) FROM super_admins`); n != 0 {
 		t.Errorf("super_admins = %d on a multi-tenant install, want 0", n)
+	}
+}
+
+func grantSuperAdmin(t *testing.T, user uuid.UUID, via string) {
+	t.Helper()
+	if _, err := bootstrapAdminPool.Exec(context.Background(),
+		`INSERT INTO super_admins (user_id, granted_via) VALUES ($1, $2)`, user, via,
+	); err != nil {
+		t.Fatalf("grant super_admin: %v", err)
+	}
+}
+
+// The operator moved super-admin to another user and the oldest admin
+// lacks it: the upgrade must not re-grant the oldest admin.
+func TestSingleTenantUpgrade_AnotherUserAlreadySuperAdmin_NoOp(t *testing.T) {
+	cleanupBootstrap(t)
+	t.Cleanup(func() { cleanupBootstrap(t) })
+
+	tenant := uuid.New()
+	insertTenant(t, tenant, "Moved Org", "", true)
+	oldest := insertAdminAt(t, tenant, uuid.New(), "oldest@example.com", "active", time.Now().Add(-time.Hour))
+	chosen := insertAdmin(t, tenant, "chosen@example.com")
+	grantSuperAdmin(t, chosen, "manual_grant")
+
+	applySingleTenantUpgrade(t)
+
+	if n := countRows(t, `SELECT COUNT(*) FROM super_admins WHERE user_id = $1`, oldest); n != 0 {
+		t.Errorf("oldest admin was re-granted super-admin")
+	}
+	if n := countRows(t, `SELECT COUNT(*) FROM super_admins`); n != 1 {
+		t.Errorf("super_admins = %d, want 1 (the operator's choice only)", n)
+	}
+}
+
+// The bootstrap admin was deactivated but still holds its grant: the
+// next-oldest admin must not become a second super-admin.
+func TestSingleTenantUpgrade_InactiveBootstrapAdminWithGrant_NoOp(t *testing.T) {
+	cleanupBootstrap(t)
+	t.Cleanup(func() { cleanupBootstrap(t) })
+
+	tenant := uuid.New()
+	insertTenant(t, tenant, "Inactive Org", "", true)
+	boot := insertAdminAt(t, tenant, uuid.New(), "boot@example.com", "disabled", time.Now().Add(-time.Hour))
+	grantSuperAdmin(t, boot, "bootstrap_first_install")
+	next := insertAdmin(t, tenant, "next@example.com")
+
+	applySingleTenantUpgrade(t)
+
+	if n := countRows(t, `SELECT COUNT(*) FROM super_admins WHERE user_id = $1`, next); n != 0 {
+		t.Errorf("next-oldest admin became a second super-admin")
+	}
+	if n := countRows(t, `SELECT COUNT(*) FROM super_admins`); n != 1 {
+		t.Errorf("super_admins = %d, want 1", n)
+	}
+}
+
+// The identified bootstrap user (the Docker seed's well-known id) is
+// preferred over an older admin.
+func TestSingleTenantUpgrade_PrefersSeedBootstrapUser(t *testing.T) {
+	cleanupBootstrap(t)
+	t.Cleanup(func() { cleanupBootstrap(t) })
+
+	tenant := uuid.New()
+	insertTenant(t, tenant, "Seed Org", "", true)
+	older := insertAdminAt(t, tenant, uuid.New(), "older@example.com", "active", time.Now().Add(-time.Hour))
+	seed := insertAdminAt(t, tenant, uuid.MustParse("c0000000-0000-4000-8000-000000000001"),
+		"admin@example.com", "active", time.Now())
+
+	applySingleTenantUpgrade(t)
+
+	if n := countRows(t,
+		`SELECT COUNT(*) FROM super_admins WHERE user_id = $1 AND granted_via = 'single_tenant_upgrade'`, seed); n != 1 {
+		t.Errorf("seed bootstrap user not granted")
+	}
+	if n := countRows(t, `SELECT COUNT(*) FROM super_admins WHERE user_id = $1`, older); n != 0 {
+		t.Errorf("older non-bootstrap admin granted instead of the seed user")
+	}
+}
+
+// The user on the OIDC bootstrap audit row is preferred over an older admin.
+func TestSingleTenantUpgrade_PrefersAuditedBootstrapUser(t *testing.T) {
+	cleanupBootstrap(t)
+	t.Cleanup(func() { cleanupBootstrap(t) })
+
+	tenant := uuid.New()
+	insertTenant(t, tenant, "Audited Org", "", true)
+	older := insertAdminAt(t, tenant, uuid.New(), "older@example.com", "active", time.Now().Add(-time.Hour))
+	boot := insertAdmin(t, tenant, "boot@example.com")
+	if _, err := bootstrapAdminPool.Exec(context.Background(),
+		`INSERT INTO me_audit_log (tenant_id, user_id, action) VALUES ($1, $2, 'bootstrap_first_install')`,
+		tenant, boot,
+	); err != nil {
+		t.Fatalf("insert audit row: %v", err)
+	}
+
+	applySingleTenantUpgrade(t)
+
+	if n := countRows(t, `SELECT COUNT(*) FROM super_admins WHERE user_id = $1`, boot); n != 1 {
+		t.Errorf("audited bootstrap user not granted")
+	}
+	if n := countRows(t, `SELECT COUNT(*) FROM super_admins WHERE user_id = $1`, older); n != 0 {
+		t.Errorf("older admin granted instead of the audited bootstrap user")
+	}
+}
+
+// Concurrent first logins against one seeded tenant: the advisory lock is
+// the only guard on the attach branch, so exactly one user and one
+// super-admin must result.
+func TestBootstrap_ConcurrentFirstLogins_SeededTenant_OneWinner(t *testing.T) {
+	cleanupBootstrap(t)
+	t.Cleanup(func() { cleanupBootstrap(t) })
+
+	seeded := uuid.New()
+	insertTenant(t, seeded, "Seeded Org", "", true)
+	store := users.NewStoreWithAuthPool(bootstrapAppPool, bootstrapAdminPool)
+
+	const n = 8
+	var wg sync.WaitGroup
+	results := make([]users.BootstrapResult, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			results[i], errs[i] = store.BootstrapFirstInstallOrUpsert(context.Background(), users.BootstrapInput{
+				Email:       fmt.Sprintf("racer-%d@example.com", i),
+				DisplayName: "Racer",
+				Issuer:      "https://idp.example.com/",
+				Subject:     fmt.Sprintf("racer-%d", i),
+			})
+		}(i)
+	}
+	wg.Wait()
+
+	winners := 0
+	for i := range results {
+		if errs[i] != nil {
+			t.Errorf("racer %d: %v", i, errs[i])
+		}
+		if results[i].Bootstrapped {
+			winners++
+			if results[i].TenantID != seeded {
+				t.Errorf("winner attached to %s, want seeded %s", results[i].TenantID, seeded)
+			}
+		}
+	}
+	if winners != 1 {
+		t.Errorf("winners = %d, want exactly 1", winners)
+	}
+	if c := countRows(t, `SELECT COUNT(*) FROM users`); c != 1 {
+		t.Errorf("users = %d, want 1", c)
+	}
+	if c := countRows(t, `SELECT COUNT(*) FROM super_admins`); c != 1 {
+		t.Errorf("super_admins = %d, want 1", c)
+	}
+	if c := countRows(t, `SELECT COUNT(*) FROM tenants`); c != 1 {
+		t.Errorf("tenants = %d, want 1", c)
+	}
+}
+
+// An install whose users were all deleted still has its super_admin grant;
+// the first-login gate must stay shut rather than hand the next IdP login
+// admin + super_admin.
+func TestBootstrap_GateStaysShutWhenUsersDeleted(t *testing.T) {
+	cleanupBootstrap(t)
+	t.Cleanup(func() { cleanupBootstrap(t) })
+
+	insertTenant(t, uuid.New(), "Emptied Org", "", true)
+	grantSuperAdmin(t, uuid.New(), "bootstrap_first_install") // its user is gone
+
+	store := users.NewStoreWithAuthPool(bootstrapAppPool, bootstrapAdminPool)
+	res, err := store.BootstrapFirstInstallOrUpsert(context.Background(), founderInput())
+	if err != nil {
+		t.Fatalf("bootstrap: %v", err)
+	}
+	if res.Bootstrapped {
+		t.Fatal("gate reopened with zero users but an existing super_admin")
+	}
+	if c := countRows(t, `SELECT COUNT(*) FROM users`); c != 0 {
+		t.Errorf("users = %d, want 0", c)
 	}
 }

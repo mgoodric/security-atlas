@@ -48,6 +48,12 @@ const BootstrapGrantVia = "bootstrap_first_install"
 // through to the established-install path.
 const pgUniqueViolation = "23505"
 
+// bootstrapAdvisoryLockKey is the fixed pg_advisory_xact_lock(BIGINT) key
+// that serializes OIDC first-installers (#1759). Fixed and documented, like
+// slice 142's 0x142142142142 super-admin lock: 0x198 names slice 198, which
+// introduced this bootstrap path. Do not reuse it for another lock.
+const bootstrapAdvisoryLockKey int64 = 0x198198198198
+
 // ErrNotFound is the sentinel for "no such user under this tenant."
 var ErrNotFound = errors.New("users: not found")
 
@@ -228,7 +234,7 @@ type BootstrapInput struct {
 //     user. The caller MUST NOT call UpsertOIDC after this; the
 //     bootstrap branch already created the row.
 //
-//   - Bootstrapped=false means a user already exists. The caller falls
+//   - Bootstrapped=false means a user or a super_admin already exists. The caller falls
 //     through to the existing UpsertOIDC path. The TenantID and UserID
 //     fields are zero-valued.
 type BootstrapResult struct {
@@ -238,8 +244,8 @@ type BootstrapResult struct {
 }
 
 // BootstrapFirstInstallOrUpsert is the slice 198 OIDC-first-install
-// path. Under a transaction-scoped advisory lock it checks whether any
-// user exists, and if none does, atomically:
+// path. Under a transaction-scoped advisory lock (READ COMMITTED) it checks
+// whether any user or super_admin exists, and if none does, atomically:
 //
 //  1. Resolves the implied tenant (tenancy.ResolveImplicitTenant). The
 //     bootstrap tenant is canonical: with one tenant (e.g. the one
@@ -299,7 +305,12 @@ func (s *Store) BootstrapFirstInstallOrUpsert(ctx context.Context, in BootstrapI
 // concurrent first-installer beat us; the caller re-enters the loop
 // once.
 func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (BootstrapResult, bool, error) {
-	tx, err := s.authPool.BeginTx(ctx, pgx.TxOptions{})
+	// READ COMMITTED is load-bearing: each statement takes a fresh
+	// snapshot, so the gate below, read after the advisory lock is
+	// granted, sees the user a concurrent winner committed while we
+	// waited. Under REPEATABLE READ the snapshot would predate the lock
+	// and the loser would bootstrap a second admin.
+	tx, err := s.authPool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap begin tx: %w", err)
 	}
@@ -308,19 +319,24 @@ func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (Bootst
 	// Serialize concurrent first-installers. When the bootstrap tenant
 	// already exists (seeded by bootstrap.sh) no tenants INSERT happens,
 	// so the partial UNIQUE index cannot do it; the advisory lock does.
-	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, BootstrapGrantVia); err != nil {
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, bootstrapAdvisoryLockKey); err != nil {
 		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap lock: %w", err)
 	}
 
 	// P0-198-2: the gate is the first read inside the tx so the
 	// established-install path falls through without writes. The gate
-	// is "no user exists yet": the first user is the bootstrap admin,
-	// whether or not the bootstrap tenant was seeded before them.
-	var hasUser bool
-	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users)`).Scan(&hasUser); err != nil {
-		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap check users: %w", err)
+	// is "nobody has been provisioned yet": no user and no super_admin.
+	// The first user is the bootstrap admin, whether or not the bootstrap
+	// tenant was seeded before them. Requiring no super_admins row too
+	// keeps the gate shut on an install whose users were all deleted:
+	// super_admins has no FK to users, so the grant outlives them.
+	var provisioned bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM users) OR EXISTS (SELECT 1 FROM super_admins)`,
+	).Scan(&provisioned); err != nil {
+		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap check provisioned: %w", err)
 	}
-	if hasUser {
+	if provisioned {
 		// Established-install path — caller falls through to UpsertOIDC.
 		return BootstrapResult{Bootstrapped: false}, false, nil
 	}
