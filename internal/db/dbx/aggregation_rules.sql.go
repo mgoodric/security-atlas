@@ -594,6 +594,23 @@ func (q *Queries) ListCandidateRisksForRule(ctx context.Context, arg ListCandida
 	return items, nil
 }
 
+const lockAggregationKey = `-- name: LockAggregationKey :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// #1861: serialize every evaluation of one rule's meta-risk key inside the
+// caller's transaction. The engine's de-dup is a read (GetRuleMetaRiskByKey)
+// then an insert (CreateAggregateRisk); without this lock two concurrent
+// risk writes, or a risk write racing evaluate-now, can both miss the read
+// and both create. Transaction-scoped, so it releases on commit/rollback.
+// Under READ COMMITTED the reads issued after the lock see the winner's
+// committed meta-risk. hashtextextended maps the hex key to the BIGINT
+// lock space; a hash collision only over-serializes, never under-.
+func (q *Queries) LockAggregationKey(ctx context.Context, aggregationKey string) error {
+	_, err := q.db.Exec(ctx, lockAggregationKey, aggregationKey)
+	return err
+}
+
 const updateAggregationRuleThresholds = `-- name: UpdateAggregationRuleThresholds :one
 UPDATE aggregation_rules
 SET target_theme = $3,

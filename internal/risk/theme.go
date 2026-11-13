@@ -94,6 +94,19 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 		if err := validateThemesAgainstVocab(ctx, q, tenantID, normalised); err != nil {
 			return err
 		}
+		// The themes the risk carried before this write: a rule targeting a
+		// theme being removed must re-evaluate too, or its meta-risk keeps
+		// the stale child link and score (#1861).
+		before, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(riskID),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get risk themes: %w", err)
+		}
 		row, err := q.UpdateRiskThemes(ctx, dbx.UpdateRiskThemesParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(riskID),
@@ -119,7 +132,7 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 		for i, l := range links {
 			out.LinkedControlIDs[i] = uuid.UUID(l.ControlID.Bytes)
 		}
-		return s.runAfterRiskWrite(ctx, q, tenantID, out.Themes)
+		return s.runAfterRiskWrite(ctx, q, tenantID, unionThemes(before.Themes, out.Themes))
 	})
 	return out, err
 }
@@ -169,6 +182,20 @@ func validateThemesAgainstVocab(ctx context.Context, q *dbx.Queries, tenantID uu
 		return fmt.Errorf("%w: %s", ErrUnknownTheme, strings.Join(bad, ", "))
 	}
 	return nil
+}
+
+// unionThemes returns every theme in a or b, once each.
+func unionThemes(a, b []string) []string {
+	seen := make(map[string]struct{}, len(a)+len(b))
+	out := make([]string, 0, len(a)+len(b))
+	for _, t := range append(append([]string(nil), a...), b...) {
+		if _, dup := seen[t]; dup {
+			continue
+		}
+		seen[t] = struct{}{}
+		out = append(out, t)
+	}
+	return out
 }
 
 // normaliseThemes trims whitespace, lowercases (theme names are slug-style
