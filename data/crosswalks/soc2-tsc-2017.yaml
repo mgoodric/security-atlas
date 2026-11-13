@@ -184,7 +184,7 @@ requirements:
   # Processing Integrity (PI1)
   - code: PI1.1
     title: "Processing specifications"
-    body: "Definitions of the data processed and of product and service specifications are maintained and shared so the service can be used correctly."
+    body: "Each service publishes what data it handles and how it is meant to behave, so customers know what to expect from it."
   - code: PI1.2
     title: "Input controls"
     body: "Inputs to the system are checked for completeness and accuracy."
