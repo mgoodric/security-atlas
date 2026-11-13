@@ -68,6 +68,10 @@ func TestResetBootstrap_RecoveryKeyTTL(t *testing.T) {
 	for name, body := range map[string]string{
 		"negative":    `{"force":true,"ttl_seconds":-1}`,
 		"over 7 days": `{"force":true,"ttl_seconds":604801}`,
+		// 2^62 seconds: time.Duration(n) * time.Second wraps negative.
+		// Must be refused before the reset, not as a 500 at the mint.
+		"overflowing": `{"force":true,"ttl_seconds":4611686018427387904}`,
+		"max int64":   `{"force":true,"ttl_seconds":9223372036854775807}`,
 	} {
 		t.Run("refused "+name, func(t *testing.T) {
 			f := newResetFixture(t, 1)

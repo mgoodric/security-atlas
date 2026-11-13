@@ -150,12 +150,15 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 	ttl := defaultRecoveryTTL
 	if req.TTLSeconds != 0 {
-		ttl = time.Duration(req.TTLSeconds) * time.Second
-		if req.TTLSeconds < 0 || ttl > maxRecoveryTTL {
+		// Range-check the seconds before converting: a huge value would
+		// wrap time.Duration negative, pass a check on the product, and
+		// fail only at the mint, after the status was already reset.
+		if req.TTLSeconds < 0 || req.TTLSeconds > int64(maxRecoveryTTL/time.Second) {
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"error":"ttl_seconds must be between 1 and 604800 (7d)"}`))
 			return
 		}
+		ttl = time.Duration(req.TTLSeconds) * time.Second
 	}
 
 	if err := s.platformResetter.ResetBootstrap(r.Context(), req.Force); err != nil {

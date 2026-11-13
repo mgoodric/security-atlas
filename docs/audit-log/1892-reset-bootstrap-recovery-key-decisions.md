@@ -26,10 +26,19 @@ changing it. Every in-tree issue path passes `ttl=0` (bootstrap, fixed
 admin, approver, owner), the chaos and CI scripts pass `--ttl 0`, and OAuth
 clients are a separate store. The DB-backed `apikeystore.Store` already
 rejects past `expires_at`, so a key past its TTL was already refused on that
-path. Only a key issued via the admin gRPC `Issue` RPC with a non-zero
-`--ttl` changes behaviour: it now expires on time instead of at the next
-restart. That is what `--ttl` documents. `TestAuthenticate_TTLZeroNeverExpires`
+path. What changes is every key with a non-zero TTL that lives in the
+in-memory store: one issued via the admin gRPC `Issue` RPC with `--ttl`,
+and one issued via `POST /v1/admin/credentials` with `ttl_seconds`, which
+the boot scan (`LoadActive`) loads from `api_keys`. Each now expires on
+time instead of authenticating past its expiry until the next restart.
+That is what both TTL options document. `TestAuthenticate_TTLZeroNeverExpires`
 pins `ttl=0`.
+
+The handler range-checks `ttl_seconds` before converting it to a
+`time.Duration`. A large value would otherwise wrap negative, pass a check
+on the product, and fail only at the mint, after the status reset (500
+instead of 400). Found in review; `TestResetBootstrap_RecoveryKeyTTL` covers
+2^62 and max int64.
 
 ## D3 — Persist the recovery marker as `api_keys.purpose`
 
