@@ -60,7 +60,8 @@ func TestApplyRiskTreatment_UntreatedDefaultAndValidation(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := treatmentTenant(t, admin)
-	store := writeproposals.RegisterDefaultAppliers(writeproposals.NewStore(app))
+	// Risk appliers only; the evidence appliers' ingest service is not needed.
+	store := writeproposals.RegisterDefaultAppliers(writeproposals.NewStore(app), nil)
 	ctx := ctxFor(t, tenant)
 
 	// create_risk with no treatment stores untreated.

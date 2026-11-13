@@ -58,7 +58,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	// update_risk_treatment) registered; on confirm, the Applier executes
 	// inside the same transaction as the state flip so a downstream-write
 	// failure rolls the proposal back to state=ai_proposed.
-	mcpWriteStore := writeproposals.RegisterDefaultAppliers(writeproposals.NewStore(s.dbPool))
+	mcpWriteStore := writeproposals.RegisterDefaultAppliers(writeproposals.NewStore(s.dbPool), s.ingestService)
 	mcpWriteH := mcpwriteproposalsapi.New(mcpWriteStore)
 	root.Post("/v1/mcp/write-proposals", mcpWriteH.CreateProposal)
 	root.Get("/v1/mcp/write-proposals", mcpWriteH.ListProposals)
