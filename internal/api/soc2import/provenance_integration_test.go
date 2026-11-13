@@ -73,17 +73,12 @@ func TestImport_WeakerSourceNeverDowngradesOfficialEdge(t *testing.T) {
 	if _, err := soc2import.Import(ctx, pool, provenanceCrosswalk("scf_official", "official rationale")); err != nil {
 		t.Fatalf("official Import: %v", err)
 	}
-	// Pin a known tier so the assertion proves the importer leaves it alone.
-	if _, err := pool.Exec(ctx, `
-		UPDATE fw_to_scf_edges SET mapping_tier = 'verified'
-		WHERE framework_requirement_id IN (
-			SELECT fr.id FROM framework_requirements fr
-			JOIN framework_versions fv ON fv.id = fr.framework_version_id
-			JOIN frameworks f ON f.id = fv.framework_id
-			WHERE f.slug = $1 AND f.tenant_id IS NULL)`, provenanceSlug); err != nil {
-		t.Fatalf("pin tier: %v", err)
-	}
+	// A new official edge seeds at verified (ADR 0018 §2, #1849); a skipped
+	// weaker row must leave it there.
 	want := edgeState{attribution: "scf_official", tier: "verified", rationale: "official rationale"}
+	if got := readProvenanceEdge(t, pool); got != want {
+		t.Fatalf("after official import edge = %+v; want %+v", got, want)
+	}
 
 	for _, weaker := range []string{"community_draft", "org_internal"} {
 		report, err := soc2import.Import(ctx, pool, provenanceCrosswalk(weaker, weaker+" rationale"))
@@ -114,8 +109,8 @@ func TestImport_WeakerSourceNeverDowngradesOfficialEdge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("same-source Import: %v", err)
 	}
-	if report.EdgesUpdated != 1 || len(report.EdgesSkipped) != 0 {
-		t.Fatalf("same-source re-import report = %+v; want one update, no skips", report)
+	if report.EdgesUpdated != 1 || len(report.EdgesSkipped) != 0 || len(report.EdgesTierReseeded) != 0 {
+		t.Fatalf("same-source re-import report = %+v; want one update, no skips, no tier change", report)
 	}
 	want.rationale = "revised official rationale"
 	if got := readProvenanceEdge(t, pool); got != want {
@@ -140,9 +135,12 @@ func TestImport_StrongerSourceReplacesWeakerEdge(t *testing.T) {
 	if report.EdgesUpdated != 1 || len(report.EdgesSkipped) != 0 {
 		t.Fatalf("upgrade report = %+v; want one update, no skips", report)
 	}
-	// Provenance and trust are separate axes (ADR 0018): the upgrade raises
-	// source_attribution and leaves the tier where it was.
+	// The upgrade raises source_attribution; both sources seed at draft, so
+	// the tier does not move (#1849).
 	want := edgeState{attribution: "community_draft", tier: "draft", rationale: "draft rationale"}
+	if len(report.EdgesTierReseeded) != 0 {
+		t.Fatalf("draft-to-draft upgrade reported a reseed: %+v", report.EdgesTierReseeded)
+	}
 	if got := readProvenanceEdge(t, pool); got != want {
 		t.Fatalf("after upgrade edge = %+v; want %+v", got, want)
 	}
@@ -164,8 +162,8 @@ func setProvenanceTier(t *testing.T, pool *pgxpool.Pool, tier string) {
 	}
 }
 
-// An upgrade onto a 'rejected' edge keeps the tier (the importer never
-// touches trust) and is listed in the report so an operator can act on it.
+// An upgrade onto a 'rejected' edge keeps the tier (only a reviewer reopens a
+// rejection) and is listed in the report so an operator can act on it.
 func TestImport_UpgradeOntoRejectedEdgeIsReported(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)
 	ctx := context.Background()
@@ -193,6 +191,109 @@ func TestImport_UpgradeOntoRejectedEdgeIsReported(t *testing.T) {
 	want := edgeState{attribution: "scf_official", tier: "rejected", rationale: "official rationale"}
 	if got := readProvenanceEdge(t, pool); got != want {
 		t.Fatalf("after upgrade edge = %+v; want %+v", got, want)
+	}
+	if len(report.EdgesTierReseeded) != 0 {
+		t.Fatalf("rejected edge reseeded: %+v", report.EdgesTierReseeded)
+	}
+}
+
+// tierAuditRows returns the fixture edge's tier-transition audit rows, newest
+// first, as (reviewer_id, from, to) triples.
+func tierAuditRows(t *testing.T, pool *pgxpool.Pool) [][3]string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `
+		SELECT tt.reviewer_id::text, tt.from_tier::text, tt.to_tier::text
+		FROM fw_to_scf_edge_tier_transitions tt
+		JOIN fw_to_scf_edges e ON e.id = tt.edge_id
+		JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+		JOIN framework_versions fv ON fv.id = fr.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = $1 AND f.tenant_id IS NULL
+		ORDER BY tt.created_at DESC`, provenanceSlug)
+	if err != nil {
+		t.Fatalf("query audit: %v", err)
+	}
+	defer rows.Close()
+	var out [][3]string
+	for rows.Next() {
+		var r [3]string
+		if err := rows.Scan(&r[0], &r[1], &r[2]); err != nil {
+			t.Fatalf("scan audit: %v", err)
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// #1849: an official upgrade onto a draft edge re-seeds it at verified, with a
+// system audit row.
+func TestImport_OfficialUpgradeOntoDraftSeedsVerified(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	ctx := context.Background()
+	resetFrameworkCatalog(t, pool, provenanceSlug)
+	t.Cleanup(func() { resetFrameworkCatalog(t, pool, provenanceSlug) })
+	ensureSCFLoaded(t, pool)
+
+	if _, err := soc2import.Import(ctx, pool, provenanceCrosswalk("community_draft", "draft rationale")); err != nil {
+		t.Fatalf("draft Import: %v", err)
+	}
+	report, err := soc2import.Import(ctx, pool, provenanceCrosswalk("scf_official", "official rationale"))
+	if err != nil {
+		t.Fatalf("official Import: %v", err)
+	}
+	if len(report.EdgesTierReseeded) != 1 {
+		t.Fatalf("reseeded = %+v; want exactly one", report.EdgesTierReseeded)
+	}
+	if rs := report.EdgesTierReseeded[0]; rs.PreviousTier != "draft" || rs.NewTier != "verified" {
+		t.Fatalf("reseeded entry = %+v; want draft -> verified", rs)
+	}
+	want := edgeState{attribution: "scf_official", tier: "verified", rationale: "official rationale"}
+	if got := readProvenanceEdge(t, pool); got != want {
+		t.Fatalf("after official upgrade edge = %+v; want %+v", got, want)
+	}
+	audit := tierAuditRows(t, pool)
+	if len(audit) != 1 || audit[0] != [3]string{soc2import.SystemReviewerID.String(), "draft", "verified"} {
+		t.Fatalf("audit rows = %+v; want one system draft -> verified", audit)
+	}
+}
+
+// #1849: a same-source re-import that changes a verified community edge's
+// content drops it back to draft, since the reviewer vetted the old content.
+func TestImport_ContentChangeOnVerifiedEdgeReturnsToDraft(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	ctx := context.Background()
+	resetFrameworkCatalog(t, pool, provenanceSlug)
+	t.Cleanup(func() { resetFrameworkCatalog(t, pool, provenanceSlug) })
+	ensureSCFLoaded(t, pool)
+
+	if _, err := soc2import.Import(ctx, pool, provenanceCrosswalk("community_draft", "draft rationale")); err != nil {
+		t.Fatalf("draft Import: %v", err)
+	}
+	setProvenanceTier(t, pool, "verified")
+
+	// Unchanged content keeps the tier.
+	report, err := soc2import.Import(ctx, pool, provenanceCrosswalk("community_draft", "draft rationale"))
+	if err != nil {
+		t.Fatalf("unchanged re-import: %v", err)
+	}
+	if report.EdgesUnchanged != 1 || len(report.EdgesTierReseeded) != 0 {
+		t.Fatalf("unchanged re-import report = %+v; want one unchanged, no reseed", report)
+	}
+
+	report, err = soc2import.Import(ctx, pool, provenanceCrosswalk("community_draft", "revised draft rationale"))
+	if err != nil {
+		t.Fatalf("changed re-import: %v", err)
+	}
+	if len(report.EdgesTierReseeded) != 1 || report.EdgesTierReseeded[0].PreviousTier != "verified" || report.EdgesTierReseeded[0].NewTier != "draft" {
+		t.Fatalf("reseeded = %+v; want one verified -> draft", report.EdgesTierReseeded)
+	}
+	want := edgeState{attribution: "community_draft", tier: "draft", rationale: "revised draft rationale"}
+	if got := readProvenanceEdge(t, pool); got != want {
+		t.Fatalf("after content change edge = %+v; want %+v", got, want)
+	}
+	audit := tierAuditRows(t, pool)
+	if len(audit) != 1 || audit[0] != [3]string{soc2import.SystemReviewerID.String(), "verified", "draft"} {
+		t.Fatalf("audit rows = %+v; want one system verified -> draft", audit)
 	}
 }
 

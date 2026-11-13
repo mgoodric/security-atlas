@@ -91,6 +91,7 @@ import {
   fairScore,
   formatDollars,
   formatResidualScore,
+  patternNoLongerMet,
   residualClass,
   residualState,
   reviewDuePending,
@@ -505,6 +506,15 @@ function RisksPageInner() {
           data-testid="risks-row-title"
         >
           {row.title}
+          {patternNoLongerMet(row.inherent_score) ? (
+            <span
+              className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              data-testid="risks-row-pattern-lapsed"
+              title="Rule-generated meta-risk with 0 child risks in the current window. The engine never closes it; review it."
+            >
+              Pattern no longer met
+            </span>
+          ) : null}
         </Link>
       ),
     },

@@ -294,6 +294,23 @@ export function residualState(score: unknown): ResidualState {
 }
 
 /**
+ * #1867 — a rule-generated meta-risk whose pattern is no longer met.
+ *
+ * The aggregation engine never closes or deletes a meta-risk (canvas
+ * §6.4). When the last child leaves the rule's window, loses the theme,
+ * or is deleted, the next evaluation that touches the theme relinks the
+ * meta-risk to zero children and scores it 0, which the grid renders as
+ * a 1x1 cell on an open risk. This flags that state so the UI can say so
+ * instead of showing a quiet low risk. True only for a score carrying the
+ * engine's `rule_generated` flag with `child_count` exactly 0.
+ */
+export function patternNoLongerMet(score: unknown): boolean {
+  if (score == null || typeof score !== "object") return false;
+  const s = score as { rule_generated?: unknown; child_count?: unknown };
+  return s.rule_generated === true && s.child_count === 0;
+}
+
+/**
  * Slice 680 / ATLAS-029 — review-due evaluation state.
  *
  * The evaluator backfills `review_due_at` alongside the residual; until
