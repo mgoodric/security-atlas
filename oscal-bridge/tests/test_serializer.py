@@ -13,6 +13,7 @@ import pytest
 from atlas_oscal_bridge import OSCAL_VERSION, oscal_pb2
 from atlas_oscal_bridge.serializer import (
     SerializeError,
+    _scalar_str,
     round_trip_validate,
     serialize_assessment,
     serialize_poam,
@@ -328,3 +329,18 @@ def test_round_trip_rejects_wrong_top_key():
     valid, errors = round_trip_validate("assessment-plan", b'{"wrong-key": {}}')
     assert not valid
     assert "missing top-level key" in errors[0]
+
+
+def test_scalar_str_unwraps_root_model_and_enum():
+    # DefinedComponent.type is ``StringDatatype | DefinedComponentTypeValidValues``.
+    # Parsed JSON lands on the RootModel; a model built in code can hold the
+    # plain Enum member, whose str() is ``Class.member`` (issue #1875).
+    from trestle.oscal.component import DefinedComponent, DefinedComponentTypeValidValues
+
+    base = {"uuid": "11111111-1111-4111-8111-111111111111", "title": "t", "description": "d"}
+    parsed = DefinedComponent.model_validate({**base, "type": "software"})
+    built = DefinedComponent(**base, type=DefinedComponentTypeValidValues.software)
+
+    assert _scalar_str(parsed.type) == "software"
+    assert _scalar_str(built.type) == "software"
+    assert _scalar_str(None) == ""

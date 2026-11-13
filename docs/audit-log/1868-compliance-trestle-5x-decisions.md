@@ -87,3 +87,28 @@ start the real bridge but need Postgres, and skip in CI because
 bridge's own pytest suite (unit + in-process gRPC) is the coverage.
 
 New transitive dependencies from trestle 5.x: `rfc8785`, `securesystemslib`.
+
+## Follow-ups landed in #1875
+
+**D4 superseded.** The profile-import path now reports the entry profile's
+declared `metadata.oscal-version`, not the resolver's stamp, and both the
+bridge test and the Go `profileimport` integration test assert `1.1.2`.
+
+**`_scalar_str` unwraps `Enum.value`.** `DefinedComponent.type` is
+`StringDatatype | DefinedComponentTypeValidValues`. Parsed JSON lands on the
+RootModel, but a model built in code holds the plain Enum member, whose
+`str()` is `DefinedComponentTypeValidValues.software`.
+
+**The Go bridge tests now run in CI.** The "Not verified here" gap above is
+closed: integration legs B3 and B5 sync the bridge env, set
+`OSCAL_BRIDGE_PYTHON`, and set `ATLAS_REQUIRE_OSCAL_BRIDGE=1`, which turns
+the bridge helper's skip into a failure (`internal/oscal/bridgetest`). The
+bridge CI job also runs its pytest suite on Python 3.12.
+
+**trestle 5.2.1 hard-pins its runtime dependencies.** Every runtime
+`Requires-Dist` in the 5.2.1 wheel is an exact `==` pin (`cryptography==50.0.2`,
+`requests==2.34.2`, `pydantic[email]==2.14.3`, `paramiko==5.1.0`, and the
+rest; read from the installed wheel's `METADATA`). A Dependabot bump of any of
+them in the bridge environment cannot resolve against trestle until trestle
+publishes a release that moves the pin. Close such PRs as blocked upstream,
+rather than trying to override the resolver.

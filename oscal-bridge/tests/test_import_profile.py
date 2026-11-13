@@ -15,7 +15,6 @@ tests prove the proto/server wiring.
 
 from __future__ import annotations
 
-import re
 import socket
 from pathlib import Path
 
@@ -76,10 +75,9 @@ def test_import_profile_resolves_against_supplied_catalog():
     )
     assert result.valid, result.errors
     assert result.profile_title == "FedRAMP-style Test Moderate Baseline"
-    # A plain version string, never a pydantic RootModel repr. The resolver
-    # stamps its own OSCAL version on the resolved catalog (1.2.1 on both
-    # trestle 4.0.3 and 5.2.1), so this pins the shape, not the value.
-    assert re.fullmatch(r"\d+\.\d+\.\d+", result.oscal_version), result.oscal_version
+    # The profile's own declared oscal-version, not the 1.2.1 the resolver
+    # stamps on the resolved catalog (issue #1875).
+    assert result.oscal_version == "1.1.2", result.oscal_version
     ids = {c.control_id for c in result.controls}
     # include-controls selected exactly ac-1, ac-2, IAC-06 (NOT ac-3).
     assert ids == {"ac-1", "ac-2", "IAC-06"}
