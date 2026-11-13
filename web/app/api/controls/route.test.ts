@@ -309,4 +309,31 @@ describe("GET /api/controls", () => {
       expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).not.toContain("limit=");
     }
   });
+
+  test("issue 1740: forwards a non-negative offset so the catalog can be walked", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1740" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ anchors: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    for (const good of ["0", "500"]) {
+      fetchSpy.mockClear();
+      await GET(makeReq(`/api/controls?limit=500&offset=${good}`) as never);
+      expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).toContain(
+        `offset=${good}`,
+      );
+    }
+
+    for (const bad of ["-1", "abc", "1.5", ""]) {
+      fetchSpy.mockClear();
+      await GET(makeReq(`/api/controls?offset=${bad}`) as never);
+      expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).not.toContain(
+        "offset=",
+      );
+    }
+  });
 });
