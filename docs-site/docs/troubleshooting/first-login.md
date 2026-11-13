@@ -56,10 +56,12 @@ atlas-cli credentials issue \
 
 The `--force` flag is the foot-gun gate: without it the CLI refuses because re-issuing bootstrap after a real user has signed in is rarely the right move. With it, the platform:
 
-1. Mints a fresh admin bearer.
-2. Clears `platform_status.bootstrap_token_consumed_at` and `first_signin_at`.
+1. Clears `platform_status.bootstrap_token_consumed_at` and `first_signin_at`.
+2. Mints a fresh admin bearer for `--tenant`, which must be the tenant of the `--token` credential. Signing in with it gives an admin session.
 3. Writes the new token to `${ATLAS_DATA_DIR}/bootstrap-token` (mode 0600).
 4. Returns the new bearer plaintext to stdout.
+
+`--token` must be a super_admin JWT, or an admin API key on an install with one tenant.
 
 **Verified on Helm:**
 

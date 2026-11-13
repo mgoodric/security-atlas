@@ -16,28 +16,32 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/platform"
 )
 
 // fakeResetter records ResetBootstrap calls and reports a fixed tenant count.
+// resetErr, when set, is returned by ResetBootstrap.
 type fakeResetter struct {
 	tenants    int
 	resetCalls int
+	resetErr   error
 }
 
 func (f *fakeResetter) ResetBootstrap(context.Context, bool) error {
 	f.resetCalls++
-	return nil
+	return f.resetErr
 }
 
 func (f *fakeResetter) TenantCount(context.Context) (int, error) { return f.tenants, nil }
 
-// resetFixture is a Server with a fake resetter, a bootstrap-token path in a
-// temp dir, and one live credential whose bearer is the valid reset token.
+// resetFixture is a Server with a fake resetter and a bootstrap-token path
+// in a temp dir. tenantID is the caller's tenant for every credential the
+// fixture's callers present.
 type resetFixture struct {
 	srv       *Server
 	resetter  *fakeResetter
 	tokenPath string
-	liveToken string
+	tenantID  string
 }
 
 func newResetFixture(t *testing.T, tenants int) resetFixture {
@@ -47,24 +51,20 @@ func newResetFixture(t *testing.T, tenants int) resetFixture {
 	srv.AttachPlatformResetter(r)
 	path := filepath.Join(t.TempDir(), "bootstrap-token")
 	srv.AttachBootstrapTokenPath(path)
-	_, tok, err := srv.IssueBootstrapCredential(uuid.NewString())
-	if err != nil {
-		t.Fatalf("issue: %v", err)
-	}
-	return resetFixture{srv: srv, resetter: r, tokenPath: path, liveToken: tok}
+	return resetFixture{srv: srv, resetter: r, tokenPath: path, tenantID: uuid.NewString()}
 }
 
 // tenantAdminKey is what a per-tenant admin API key produces: IsAdmin, no JWT.
-func tenantAdminKey(ctx context.Context) context.Context {
+func (f resetFixture) tenantAdminKey(ctx context.Context) context.Context {
 	return authctx.WithCredential(ctx, credstore.Credential{
-		ID: "key_admin", TenantID: uuid.NewString(), IsAdmin: true,
+		ID: "key_admin", TenantID: f.tenantID, IsAdmin: true,
 	})
 }
 
-func superAdminJWT(ctx context.Context) context.Context {
+func (f resetFixture) superAdminJWT(ctx context.Context) context.Context {
 	userID := uuid.NewString()
 	ctx = authctx.WithCredential(ctx, credstore.Credential{
-		ID: "jwt:test", UserID: "user:" + userID, TenantID: uuid.NewString(),
+		ID: "jwt:test", UserID: "user:" + userID, TenantID: f.tenantID,
 	})
 	return jwtmw.WithClaimsForTest(ctx, &jwt.AtlasClaims{
 		RegisteredClaims: jwt.RegisteredClaims{Subject: "user:" + userID},
@@ -72,10 +72,13 @@ func superAdminJWT(ctx context.Context) context.Context {
 	})
 }
 
-func (f resetFixture) post(t *testing.T, as func(context.Context) context.Context, token string) *httptest.ResponseRecorder {
+func (f resetFixture) viewer(ctx context.Context) context.Context {
+	return authctx.WithCredential(ctx, credstore.Credential{ID: "key_viewer", TenantID: f.tenantID})
+}
+
+func (f resetFixture) postBody(t *testing.T, as func(context.Context) context.Context, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	body, _ := json.Marshal(resetBootstrapRequest{Token: token, Force: true})
-	req := httptest.NewRequest(http.MethodPost, "/v1/admin/install/reset-bootstrap", strings.NewReader(string(body)))
+	req := httptest.NewRequest(http.MethodPost, "/v1/admin/install/reset-bootstrap", strings.NewReader(body))
 	if as != nil {
 		req = req.WithContext(as(req.Context()))
 	}
@@ -84,95 +87,150 @@ func (f resetFixture) post(t *testing.T, as func(context.Context) context.Contex
 	return rec
 }
 
-// #1851: on a multi-tenant install a tenant admin key is refused, and
-// nothing is reset or written.
-func TestResetBootstrap_TenantAdminKeyOnMultiTenantGets403(t *testing.T) {
-	f := newResetFixture(t, 2)
-	rec := f.post(t, tenantAdminKey, f.liveToken)
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
-	}
-	if f.resetter.resetCalls != 0 {
-		t.Fatalf("ResetBootstrap called %d times; want 0", f.resetter.resetCalls)
+func (f resetFixture) post(t *testing.T, as func(context.Context) context.Context) *httptest.ResponseRecorder {
+	t.Helper()
+	return f.postBody(t, as, `{"force":true}`)
+}
+
+// assertNothingWritten checks a refused reset left no trace: no status
+// reset, no bootstrap-token file, and no credential minted for the tenant.
+func (f resetFixture) assertNothingWritten(t *testing.T, wantResetCalls int) {
+	t.Helper()
+	if f.resetter.resetCalls != wantResetCalls {
+		t.Fatalf("ResetBootstrap called %d times; want %d", f.resetter.resetCalls, wantResetCalls)
 	}
 	if _, err := os.Stat(f.tokenPath); !os.IsNotExist(err) {
 		t.Fatalf("bootstrap-token file written on a refused reset (stat err=%v)", err)
 	}
+	if got := f.srv.credStore.List(f.tenantID); len(got) != 0 {
+		t.Fatalf("refused reset minted %d credential(s) for the tenant; want 0", len(got))
+	}
 }
 
-// #1851: the allowed paths, a super_admin JWT on any install and the admin
-// key fallback on a single-tenant install, reset and write the token.
-func TestResetBootstrap_AllowedPaths(t *testing.T) {
+// #1851: on a multi-tenant install a tenant admin key is refused, and
+// nothing is reset or written.
+func TestResetBootstrap_TenantAdminKeyOnMultiTenantGets403(t *testing.T) {
+	f := newResetFixture(t, 2)
+	rec := f.post(t, f.tenantAdminKey)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	f.assertNothingWritten(t, 0)
+}
+
+// #1851, #1885: the allowed paths, a super_admin JWT on any install and the
+// admin key fallback on a single-tenant install, reset the status and write
+// a freshly minted ADMIN credential for the caller's tenant to the token
+// file, so signing in with it after recovery gives an admin session.
+func TestResetBootstrap_AllowedPathsMintAdminCredential(t *testing.T) {
 	cases := map[string]struct {
-		tenants int
-		as      func(context.Context) context.Context
+		tenants  int
+		superJWT bool
 	}{
-		"super_admin on multi-tenant":  {2, superAdminJWT},
-		"super_admin on single-tenant": {1, superAdminJWT},
-		"admin key on single-tenant":   {1, tenantAdminKey},
+		"super_admin on multi-tenant":  {2, true},
+		"super_admin on single-tenant": {1, true},
+		"admin key on single-tenant":   {1, false},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			f := newResetFixture(t, tc.tenants)
-			rec := f.post(t, tc.as, f.liveToken)
+			as := f.tenantAdminKey
+			if tc.superJWT {
+				as = f.superAdminJWT
+			}
+			rec := f.post(t, as)
 			if rec.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 			}
 			if f.resetter.resetCalls != 1 {
 				t.Fatalf("ResetBootstrap called %d times; want 1", f.resetter.resetCalls)
 			}
+			var resp resetBootstrapResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if !resp.StatusReset || !resp.FileWritten || resp.BearerToken == "" {
+				t.Fatalf("response = %+v; want status_reset, file_written and a bearer", resp)
+			}
 			got, err := os.ReadFile(f.tokenPath)
 			if err != nil {
 				t.Fatalf("read token file: %v", err)
 			}
-			if string(got) != f.liveToken {
-				t.Fatalf("token file = %q, want the issued token", got)
+			if string(got) != resp.BearerToken {
+				t.Fatalf("token file = %q, want the returned bearer", got)
+			}
+			cred, err := f.srv.credStore.Authenticate(resp.BearerToken)
+			if err != nil {
+				t.Fatalf("re-issued bearer does not authenticate: %v", err)
+			}
+			if !cred.IsAdmin {
+				t.Fatalf("re-issued bootstrap credential IsAdmin = false; want an admin credential")
+			}
+			if cred.TenantID != f.tenantID || resp.TenantID != f.tenantID || resp.CredentialID != cred.ID {
+				t.Fatalf("re-issued credential %+v / response %+v; want tenant %s", cred, resp, f.tenantID)
 			}
 		})
 	}
 }
 
-// A non-admin credential and a missing credential are refused.
-func TestResetBootstrap_NonAdminRefused(t *testing.T) {
+// #1885: a caller that does not pass the gate gets no admin credential. A
+// non-admin key and a missing credential are refused before anything is
+// minted, reset or written.
+func TestResetBootstrap_NonGatedCallerGetsNoAdminCredential(t *testing.T) {
 	f := newResetFixture(t, 1)
-	viewer := func(ctx context.Context) context.Context {
-		return authctx.WithCredential(ctx, credstore.Credential{ID: "key_viewer", TenantID: uuid.NewString()})
-	}
-	if rec := f.post(t, viewer, f.liveToken); rec.Code != http.StatusForbidden {
+	if rec := f.post(t, f.viewer); rec.Code != http.StatusForbidden {
 		t.Fatalf("viewer status = %d, want 403", rec.Code)
 	}
-	if rec := f.post(t, nil, f.liveToken); rec.Code != http.StatusUnauthorized {
+	if rec := f.post(t, nil); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("no credential status = %d, want 401", rec.Code)
 	}
-	if f.resetter.resetCalls != 0 {
-		t.Fatalf("ResetBootstrap called %d times; want 0", f.resetter.resetCalls)
+	f.assertNothingWritten(t, 0)
+}
+
+// #1885: a reset refused by the foot-gun gate (first sign-in happened, no
+// --force) mints no credential and writes no file.
+func TestResetBootstrap_RefusedResetMintsNothing(t *testing.T) {
+	f := newResetFixture(t, 1)
+	f.resetter.resetErr = platform.ErrResetForbidden
+	rec := f.postBody(t, f.superAdminJWT, `{"force":false}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%s", rec.Code, rec.Body.String())
+	}
+	f.assertNothingWritten(t, 1)
+}
+
+// #1885: tenant_id naming another tenant is refused before anything is
+// minted, reset or written; the caller's own tenant id is accepted.
+func TestResetBootstrap_TenantIDMustBeCallersTenant(t *testing.T) {
+	f := newResetFixture(t, 2)
+	rec := f.postBody(t, f.superAdminJWT, `{"force":true,"tenant_id":"`+uuid.NewString()+`"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("other tenant: status = %d, want 400; body=%s", rec.Code, rec.Body.String())
+	}
+	f.assertNothingWritten(t, 0)
+
+	rec = f.postBody(t, f.superAdminJWT, `{"force":true,"tenant_id":"`+f.tenantID+`"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("own tenant: status = %d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 }
 
-// #1851: a caller-chosen string, or a revoked credential's token, is refused
-// before anything is reset or written, even for a super_admin.
-func TestResetBootstrap_RejectsTokenThatIsNotALiveCredential(t *testing.T) {
+// #1885: a caller-supplied token (what an older CLI sends) is ignored. The
+// file never holds a caller-chosen string; it holds the minted credential.
+func TestResetBootstrap_IgnoresCallerSuppliedToken(t *testing.T) {
 	f := newResetFixture(t, 1)
-	cred, revoked, err := f.srv.IssueBootstrapCredential(uuid.NewString())
+	rec := f.postBody(t, f.superAdminJWT, `{"token":"hunter2","force":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	got, err := os.ReadFile(f.tokenPath)
 	if err != nil {
-		t.Fatalf("issue: %v", err)
+		t.Fatalf("read token file: %v", err)
 	}
-	if err := f.srv.credStore.Revoke(cred.ID); err != nil {
-		t.Fatalf("revoke: %v", err)
+	if string(got) == "hunter2" {
+		t.Fatalf("token file holds the caller-supplied token")
 	}
-	for name, tok := range map[string]string{
-		"caller-chosen": "hunter2",
-		"revoked":       revoked,
-	} {
-		rec := f.post(t, superAdminJWT, tok)
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("%s: status = %d, want 400; body=%s", name, rec.Code, rec.Body.String())
-		}
-	}
-	if f.resetter.resetCalls != 0 {
-		t.Fatalf("ResetBootstrap called %d times; want 0", f.resetter.resetCalls)
-	}
-	if _, err := os.Stat(f.tokenPath); !os.IsNotExist(err) {
-		t.Fatalf("bootstrap-token file written for an invalid token (stat err=%v)", err)
+	if _, err := f.srv.credStore.Authenticate(string(got)); err != nil {
+		t.Fatalf("token file does not hold a live credential: %v", err)
 	}
 }

@@ -248,12 +248,20 @@ func (s *Status) ResetBootstrap(ctx context.Context, force bool) error {
 // the writePool (BYPASSRLS migrate role): `tenants` is RLS-scoped, so the app
 // pool without a tenant GUC would count zero. The reset-bootstrap endpoint
 // uses it to admit a tenant admin key only on a single-tenant install (#1851).
+//
+// The all-zeros tenant is not a tenant (#1885): it is excluded, as in
+// migrations 20260810000000_single_tenant_bootstrap_super_admin.sql and
+// 20260811000000_oauth_client_tenant_binding.sql. Counting it would make a
+// single-tenant install that has the row look multi-tenant and refuse the
+// admin-key fallback.
 func (s *Status) TenantCount(ctx context.Context) (int, error) {
 	if s.writePool == nil {
 		return 0, ErrWriteNotConfigured
 	}
 	var n int
-	if err := s.writePool.QueryRow(ctx, `SELECT count(*) FROM tenants`).Scan(&n); err != nil {
+	if err := s.writePool.QueryRow(ctx,
+		`SELECT count(*) FROM tenants WHERE id <> '00000000-0000-0000-0000-000000000000'`,
+	).Scan(&n); err != nil {
 		return 0, fmt.Errorf("platform: count tenants: %w", err)
 	}
 	return n, nil
