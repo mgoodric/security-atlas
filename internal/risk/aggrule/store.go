@@ -419,6 +419,19 @@ func (s *Store) Evaluate(ctx context.Context, triggerThemes []string) ([]Evaluat
 	return out, err
 }
 
+// EvaluateOnRiskWrite is the risk.AfterRiskWrite hook: it runs the engine
+// inside the risk write's own transaction, narrowed to the written risk's
+// themes, so evaluation commits or rolls back with the write. A risk with no
+// themes cannot match any rule (every rule targets one theme), so it skips
+// the engine rather than letting the empty trigger set mean a full sweep.
+func EvaluateOnRiskWrite(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error {
+	if len(themes) == 0 {
+		return nil
+	}
+	_, err := NewEngine(q).Evaluate(ctx, tenantID, themes)
+	return err
+}
+
 // inTx mirrors risk.Store.inTx — sets the tenant GUC inside a transaction so
 // RLS sees it, runs fn, commits on success.
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries, uuid.UUID) error) error {

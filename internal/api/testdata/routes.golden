@@ -241,6 +241,7 @@ POST /v1/admin/tenants
 POST /v1/admin/users/assign
 POST /v1/admin/users/revoke
 POST /v1/aggregation-rules
+POST /v1/aggregation-rules/evaluate
 POST /v1/audit-notes
 POST /v1/audit-periods
 POST /v1/audit-periods/{id}/freeze
