@@ -57,9 +57,21 @@ export async function GET(req: NextRequest): Promise<Response> {
   const limit = /^[1-9]\d*$/.test(limitParam)
     ? Number.parseInt(limitParam, 10)
     : undefined;
+  // Issue #1740 — forward a non-negative integer `offset` so the page can
+  // walk the whole catalog; anything else starts at the first row.
+  const offsetParam = req.nextUrl.searchParams.get("offset") ?? "";
+  const offset = /^\d+$/.test(offsetParam)
+    ? Number.parseInt(offsetParam, 10)
+    : undefined;
   try {
     const { anchors, total, catalog_total, with_control_total } =
-      await listAnchorsWithState(bearer, scope || undefined, hasControl, limit);
+      await listAnchorsWithState(
+        bearer,
+        scope || undefined,
+        hasControl,
+        limit,
+        offset,
+      );
     return NextResponse.json({
       anchors,
       total,
