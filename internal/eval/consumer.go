@@ -143,12 +143,13 @@ func (s *Scheduler) SweepOnce(ctx context.Context) (int, error) {
 			s.logger.Error("eval scheduler: tenant ctx", "tenant", tenantID, "err", err.Error())
 			continue
 		}
+		// EvaluateAll keeps going past a failing control (#1859), so n counts
+		// the controls that did evaluate even when err joins the failures.
 		n, err := s.newEngine().EvaluateAll(tctx, TriggerScheduled, FarFuture)
+		total += n
 		if err != nil {
 			s.logger.Error("eval scheduler: evaluate tenant", "tenant", tenantID, "err", err.Error())
-			continue
 		}
-		total += n
 	}
 	return total, nil
 }

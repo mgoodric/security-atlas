@@ -358,3 +358,53 @@ evidence_queries:
 		t.Fatalf("expected 1 errored case; got %+v", v.report)
 	}
 }
+
+// allowStyleManifest declares a Rego query that never assigns `result` (an
+// OPA-authz-style `allow` rule). It compiles, but every evaluation errors.
+const allowStyleManifest = `bundle_schema_version: "1"
+bundle_id: gate_allow_style_control
+title: "Allow-style rego"
+scf_anchor_id: IAC-06
+implementation_type: automated
+freshness_class: daily
+evidence_queries:
+  - id: allow_rule
+    language: rego
+    expression: |
+      package evidence.query
+
+      allow if { true }
+`
+
+// TestUpload_RejectsAllowStyleRego (#1859): a bundle whose Rego module never
+// assigns `result` is refused at upload with a 400 naming the query, even when
+// it ships no tests, instead of erroring on every scheduled evaluation.
+func TestUpload_RejectsAllowStyleRego(t *testing.T) {
+	t.Parallel()
+	h := New(nil, nil)
+	req, rr := multipartUpload(t, buildBundleTarball(t, allowStyleManifest, nil))
+	h.UploadBundle(rr, req)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 (query dry-run); got %d body=%s", rr.Code, rr.Body.String())
+	}
+	body := rr.Body.String()
+	for _, want := range []string{"evidence_queries[0]", "rego", "did not assign `result`"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("rejection should contain %q; got %s", want, body)
+		}
+	}
+}
+
+// TestDryRunQueries_AcceptsWorkingQueries proves the dry-run lets a valid
+// query through: a jsonpath query on an empty ledger is inconclusive, not an
+// error.
+func TestDryRunQueries_AcceptsWorkingQueries(t *testing.T) {
+	t.Parallel()
+	bundle, err := control.ParseTarball(bytes.NewReader(buildBundleTarball(t, jsonpathManifest, nil)))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if err := dryRunQueries(context.Background(), nil, bundle); err != nil {
+		t.Fatalf("a working query must pass the dry-run: %v", err)
+	}
+}

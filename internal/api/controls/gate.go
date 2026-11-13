@@ -41,11 +41,13 @@ package controls
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/control/bundletest"
+	"github.com/mgoodric/security-atlas/internal/eval"
 )
 
 // gateVerdict is the gate's decision about one uploaded bundle.
@@ -170,6 +172,55 @@ func runGate(ctx context.Context, runner txRunner, bundle *control.Bundle, mode 
 		blocked: true,
 		report:  report,
 	}, nil
+}
+
+// queryDryRunError names the declared evidence query that failed the upload
+// dry-run (#1859), so the 400 tells the author which query to fix.
+type queryDryRunError struct {
+	Index    int
+	Language string
+	Err      error
+}
+
+func (e *queryDryRunError) Error() string {
+	return fmt.Sprintf("evidence_queries[%d] (%s) fails on an empty ledger: %v", e.Index, e.Language, e.Err)
+}
+
+func (e *queryDryRunError) Unwrap() error { return e.Err }
+
+// dryRunQueries evaluates every declared evidence query, one at a time,
+// through eval.EvaluateFixture over an EMPTY record set (#1859). A query that
+// fails to compile, errors at eval, or never assigns `result` (an `allow`-style
+// Rego module) would make every live evaluation of the control error, so the
+// upload is refused here rather than discovered by the scheduler later.
+//
+// The check is independent of the tenant's gate mode and of whether the bundle
+// ships tests: a query that cannot evaluate at all is broken, not merely red.
+// SQL queries run inside the read-only tenant tx when a runner is available;
+// with no runner (unit servers) they are skipped rather than reported as
+// ErrFixtureSQLNeedsDB, since that error says nothing about the query.
+func dryRunQueries(ctx context.Context, runner txRunner, bundle *control.Bundle) error {
+	freshnessClass := bundle.Manifest.FreshnessClass
+	now := time.Now().UTC()
+	for i, q := range bundle.Manifest.EvidenceQueries {
+		fq := []eval.FixtureQuery{{Language: q.Language, Expression: q.Expression}}
+		var err error
+		if q.Language == "sql" {
+			if runner == nil {
+				continue
+			}
+			err = runner.WithReadOnlyTenantTx(ctx, func(tx pgx.Tx) error {
+				_, ferr := eval.EvaluateFixture(ctx, freshnessClass, fq, nil, now, tx)
+				return ferr
+			})
+		} else {
+			_, err = eval.EvaluateFixture(ctx, freshnessClass, fq, nil, now, nil)
+		}
+		if err != nil {
+			return &queryDryRunError{Index: i, Language: q.Language, Err: err}
+		}
+	}
+	return nil
 }
 
 // needsSQL reports whether any declared query uses the sql language (the only

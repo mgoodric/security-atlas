@@ -16,7 +16,9 @@ package eval
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
@@ -242,9 +244,19 @@ func (e *Engine) evalQueries(ctx context.Context, tx pgx.Tx, meta controlMeta, i
 // EvaluateAll evaluates every active (non-superseded) control for the tenant.
 // Used by the scheduled time-based recompute and by Replay. Returns the
 // total rows written across all controls.
+//
+// One control's failure does not stop the rest (#1859): a broken
+// tenant-authored bundle would otherwise leave every control after it in list
+// order unevaluated. Each failure is logged with its control and tenant ids,
+// and the failures come back as one errors.Join alongside the rows that were
+// written.
 func (e *Engine) EvaluateAll(ctx context.Context, trigger string, asOf time.Time) (int, error) {
-	var controlIDs []uuid.UUID
+	var (
+		controlIDs []uuid.UUID
+		tenant     uuid.UUID
+	)
 	err := e.store.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ pgx.Tx, tenantID uuid.UUID) error {
+		tenant = tenantID
 		rows, err := q.ListActiveControls(ctx, pgUUID(tenantID))
 		if err != nil {
 			return fmt.Errorf("list active controls: %w", err)
@@ -260,14 +272,17 @@ func (e *Engine) EvaluateAll(ctx context.Context, trigger string, asOf time.Time
 	}
 
 	total := 0
+	var errs []error
 	for _, id := range controlIDs {
 		n, err := e.EvaluateControl(ctx, id, trigger, asOf)
 		if err != nil {
-			return total, fmt.Errorf("evaluate control %s: %w", id, err)
+			slog.ErrorContext(ctx, "eval: evaluate control", "control_id", id, "tenant", tenant, "trigger", trigger, "err", err.Error())
+			errs = append(errs, fmt.Errorf("evaluate control %s: %w", id, err))
+			continue
 		}
 		total += n
 	}
-	return total, nil
+	return total, errors.Join(errs...)
 }
 
 // Replay re-evaluates every active control from the ledger with
