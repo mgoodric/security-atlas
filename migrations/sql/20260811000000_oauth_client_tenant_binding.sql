@@ -31,8 +31,13 @@
 -- IDEMPOTENCY / REVERSIBILITY:
 --
 --   ADD COLUMN IF NOT EXISTS, and the bind only touches unbound rows, so
---   re-applying the file binds only clients issued unbound since. The down
---   migration drops the column.
+--   re-applying the file never re-binds a bound client. It does bind every
+--   client that is unbound at the time, including public clients issued
+--   with `--unbound` on purpose (`cli-public`, device and authorize
+--   probes), both on first upgrade and on any re-run. Don't re-run it by
+--   hand; after an upgrade, audit public clients and re-issue any that
+--   must stay unbound (docs-site/docs/migration/oauth.md,
+--   security-atlas#1876). The down migration drops the column.
 
 -- ===== 1. oauth_clients.bound_tenant_id =====
 

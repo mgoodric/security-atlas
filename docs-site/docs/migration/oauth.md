@@ -195,6 +195,55 @@ API answers `403 tenant_unbound`. Bind an existing client with
 Upgrading to this release binds every existing client on a
 single-tenant install; on a multi-tenant install, bind each one.
 
+**Audit public clients after upgrade.** On a single-tenant install
+the upgrade binds every unbound client, public ones included
+(`cli-public`, and any device-flow or authorize probe client you
+issued). Device-code and authorization-code tokens carry the user's
+tenant either way, so a bound public client still works for its
+users. If a public client must stay unbound, re-issue it with
+`atlas-cli oauth issue-client <new-name> --unbound` and hand out the new
+`client_id`. A bound client cannot be unbound in place.
+
+### Rows in the all-zeros tenant
+
+Before clients were bound, a `client_credentials` write from an
+unbound client (for example the `controls upload` that
+`bootstrap.sh` runs) landed in the all-zeros tenant
+(`00000000-0000-0000-0000-000000000000`). No user can see those rows,
+and any unbound client token can still read them. After upgrading,
+list them. The listing only reads:
+
+```bash
+DATABASE_URL=postgres://... atlas-cli oauth unbound-rows
+controls	12
+evidence_records	40
+total	52
+to delete them: atlas-cli oauth unbound-rows --purge --confirm-rows 52
+```
+
+`DATABASE_URL` must be the BYPASSRLS `atlas_migrate` connection; an
+RLS-bound role sees none of these rows.
+
+There is no in-place reassign: tenant-scoped tables reference each
+other through `(tenant_id, id)` keys, so rows cannot be moved one
+table at a time. To keep the data, re-create it in the right tenant
+with a bound client (for controls, re-run `atlas-cli controls upload`
+with that client's credentials). Then purge, restating the total the
+listing printed:
+
+```bash
+DATABASE_URL=postgres://... \
+  atlas-cli oauth unbound-rows --purge --confirm-rows 52
+purged	controls	12
+purged	evidence_records	40
+purged total	52
+```
+
+The purge runs in one transaction. It deletes nothing when the total
+no longer matches the listing, or when any table cannot be purged
+(the error names it), and it prints every table it purged. Take a
+database backup first: the deleted rows are gone.
+
 ## Audience: operators
 
 ### What you need to do

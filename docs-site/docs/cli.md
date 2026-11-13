@@ -45,6 +45,7 @@ commands need the `atlas_migrate` role; the read/verify paths use `atlas_app`.
 | `bootstrap hash-password`                | Read a password from stdin, print its argon2id hash              |
 | `oauth issue-client <name>`              | Issue an OAuth `client_credentials` identity bound to a tenant   |
 | `oauth bind-client <client_id>`          | Bind an existing OAuth client to a tenant                        |
+| `oauth unbound-rows [--purge]`           | List (or purge) rows left in the all-zeros tenant                |
 | `oauth add-redirect-uri <id> <uri>`      | Register a redirect URI for an OAuth client                      |
 | `oauth migrate-api-key <api_key>`        | Issue an OAuth client mirroring a legacy API key                 |
 | `keys list` / `rotate` / `prune`         | JWT signing-key lifecycle                                        |
