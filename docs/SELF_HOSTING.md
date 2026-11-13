@@ -424,18 +424,18 @@ or volume encryption) exactly as the runbook describes.
 
 Configuration (all optional; sensible defaults for the single-VM bundle):
 
-| Env var                        | Default                  | Meaning                                                          |
-| ------------------------------ | ------------------------ | ---------------------------------------------------------------- |
-| `ATLAS_BACKUP_TARGET`          | `local`                  | `local` (volume) or `s3`                                         |
-| `ATLAS_BACKUP_DIR`             | `/var/lib/atlas/backups` | local-target directory (mount a volume here)                     |
-| `ATLAS_BACKUP_S3_BUCKET`       | —                        | bucket for the `s3` target                                       |
-| `ATLAS_BACKUP_S3_PREFIX`       | —                        | key prefix within the bucket                                     |
-| `ATLAS_BACKUP_S3_ENDPOINT`     | —                        | S3-compatible endpoint (e.g. MinIO); uses standard `AWS_*` creds |
-| `ATLAS_BACKUP_INTERVAL`        | `24h`                    | backup cadence                                                   |
-| `ATLAS_BACKUP_VERIFY_INTERVAL` | `24h`                    | restore-verification cadence                                     |
-| `ATLAS_BACKUP_KEEP_DAILY`      | `7`                      | dailies to retain                                                |
-| `ATLAS_BACKUP_KEEP_WEEKLY`     | `4`                      | weeklies to retain                                               |
-| `ATLAS_BACKUP_ALERT_RECIPIENT` | —                        | user id that receives failure notifications                      |
+| Env var                        | Default                   | Meaning                                                                                               |
+| ------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `ATLAS_BACKUP_TARGET`          | `local`                   | `local` (volume) or `s3`                                                                              |
+| `ATLAS_BACKUP_DIR`             | `$ATLAS_DATA_DIR/backups` | local-target directory (mount a volume here); `/var/lib/atlas/backups` when `ATLAS_DATA_DIR` is unset |
+| `ATLAS_BACKUP_S3_BUCKET`       | —                         | bucket for the `s3` target                                                                            |
+| `ATLAS_BACKUP_S3_PREFIX`       | —                         | key prefix within the bucket                                                                          |
+| `ATLAS_BACKUP_S3_ENDPOINT`     | —                         | S3-compatible endpoint (e.g. MinIO); uses standard `AWS_*` creds                                      |
+| `ATLAS_BACKUP_INTERVAL`        | `24h`                     | backup cadence                                                                                        |
+| `ATLAS_BACKUP_VERIFY_INTERVAL` | `24h`                     | restore-verification cadence                                                                          |
+| `ATLAS_BACKUP_KEEP_DAILY`      | `7`                       | dailies to retain                                                                                     |
+| `ATLAS_BACKUP_KEEP_WEEKLY`     | `4`                       | weeklies to retain                                                                                    |
+| `ATLAS_BACKUP_ALERT_RECIPIENT` | —                         | user id that receives failure notifications                                                           |
 
 > **Scope note.** The automated dump is a logical (data + minimal-schema)
 > dump tuned for continuity + restore-verification. For exact catalog fidelity
