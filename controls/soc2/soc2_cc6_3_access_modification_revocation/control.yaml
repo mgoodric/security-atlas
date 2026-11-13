@@ -22,17 +22,23 @@ evidence_queries:
     evidence_kind: okta.user_lifecycle.v1
     description: "Every HRIS termination is followed by an Okta deactivation within 24h"
     expression: |
-      package atlas.controls.soc2.cc6_3
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every t in input.terminations {
-          some e in input.lifecycle_events
-          e.user_email == t.email
-          e.event_type in {"user.deactivated", "user.deleted"}
-          delta_ns := time.parse_rfc3339_ns(e.observed_at) - time.parse_rfc3339_ns(t.termination_date)
-          delta_ns >= 0
-          delta_ns <= (24 * 60 * 60 * 1000000000)
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"

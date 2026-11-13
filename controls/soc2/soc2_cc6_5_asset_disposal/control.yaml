@@ -24,15 +24,26 @@ evidence_queries:
     evidence_kind: manual.upload.v1
     description: "A disposal-log upload exists within the last 90 days"
     expression: |
-      package atlas.controls.soc2.cc6_5
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        some u in input.uploads
-        u.control_bundle_id == "soc2_cc6_5_asset_disposal"
-        time.parse_rfc3339_ns(u.observed_at) > (time.now_ns() - (90 * 24 * 60 * 60 * 1000000000))
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
 
 manual_evidence_schema:
   type: object

@@ -21,25 +21,23 @@ evidence_queries:
     evidence_kind: sast.scan_result.v1
     description: "SAST scans show zero unsuppressed authorization/IDOR findings"
     expression: |
-      package atlas.controls.soc2.pi1_3
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      authz_rule_ids := {
-        "authz.missing_check",
-        "authz.idor",
-        "authz.privilege_escalation",
-        "authz.broken_object_level"
-      }
-
-      allow if {
-        every s in input.scans {
-          relevant_count(s) == 0
-        }
-      }
-
-      relevant_count(s) := count([f |
-        some f in s.findings
-        f.rule_id in authz_rule_ids
-        f.suppressed != true
-      ])
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
