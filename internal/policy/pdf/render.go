@@ -22,8 +22,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/remote"
 )
 
 // Doc is the data passed to the renderer. Pure-content; the caller
@@ -44,22 +46,13 @@ type Doc struct {
 // StepSecurity Harden-Runner audit-mode egress instrumentation (slice 117)
 // can take 20-40s to print its DevTools websocket URL on a cold start
 // because Chrome's startup network calls (component-updater, GPU blocklist
-// refresh) traverse the audited egress hook. The 90s budget = 60s WS-URL
-// read window (see chromedpWSURLReadTimeout below) + 30s render headroom.
+// refresh) traverse the audited egress hook. The 90s budget was 60s WS-URL
+// read window + 30s render headroom. chromedp v0.23 launches Chrome over a
+// pipe, so the WS-URL window no longer applies; the budget is kept as is.
 // Slice 340 raised this from the original 30s after diagnosing the
 // `--- FAIL: TestRender_ProducesRealPDF (20.04s)` chromedp websocket-url
 // timeout flake (5 consecutive CI failures across slices 312/315/320).
 const DefaultTimeout = 90 * time.Second
-
-// chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
-// "wait for Chrome to print `DevTools listening on ws://...` to stderr"
-// timer. The default fires at 20.0s flat in CI when Chrome's startup is
-// stretched by Harden-Runner audit-mode latency (slice 117) — see
-// internal slice 340 decisions log for the diagnosis trail. 60s is the
-// canonical "make chromedp work in CI containers" value used by
-// upstream chromedp examples. Local fast-path renders are unaffected
-// because Chrome prints the WS URL in <1s on a warm machine.
-const chromedpWSURLReadTimeout = 60 * time.Second
 
 // ErrChromeUnavailable is returned when chromedp could not launch a
 // browser. The HTTP handler maps this to 503 so operators can run the
@@ -88,9 +81,9 @@ func Render(ctx context.Context, doc Doc) ([]byte, error) {
 	var browserCtx context.Context
 	var cancelAlloc context.CancelFunc
 	var cancelBrowser context.CancelFunc
-	if remote := os.Getenv("CHROME_DEBUG_URL"); remote != "" {
+	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
 		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewRemoteAllocator(ctx, remote)
+		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
 		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
 	} else {
 		opts := append(
@@ -99,12 +92,6 @@ func Render(ctx context.Context, doc Doc) ([]byte, error) {
 			chromedp.DisableGPU,
 			chromedp.Headless,
 			chromedp.Flag("hide-scrollbars", true),
-			// Slice 340: extend chromedp's hardcoded 20s "wait for
-			// DevTools websocket URL" watchdog to 60s. Without this,
-			// the GitHub Actions runner with Harden-Runner audit-mode
-			// (slice 117) flakes at exactly 20.04s in 4-of-5 runs.
-			// Local renders complete in <1s and are unaffected.
-			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
 		)
 		var allocCtx context.Context
 		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
@@ -115,17 +102,17 @@ func Render(ctx context.Context, doc Doc) ([]byte, error) {
 
 	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
 	var buf []byte
-	err := chromedp.Run(browserCtx,
+	err := chromedp.Do(browserCtx,
 		chromedp.Navigate(dataURL),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			var err error
-			buf, _, err = page.PrintToPDF().
-				WithPrintBackground(true).
-				WithMarginTop(0.4).
-				WithMarginBottom(0.4).
-				WithMarginLeft(0.4).
-				WithMarginRight(0.4).
-				Do(ctx)
+		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
+				PrintBackground: new(true),
+				MarginTop:       new(0.4),
+				MarginBottom:    new(0.4),
+				MarginLeft:      new(0.4),
+				MarginRight:     new(0.4),
+			})
+			buf = res.Data
 			return err
 		}),
 	)
