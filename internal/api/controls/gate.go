@@ -40,12 +40,15 @@ package controls
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/control/bundletest"
+	"github.com/mgoodric/security-atlas/internal/eval"
 )
 
 // gateVerdict is the gate's decision about one uploaded bundle.
@@ -170,6 +173,88 @@ func runGate(ctx context.Context, runner txRunner, bundle *control.Bundle, mode 
 		blocked: true,
 		report:  report,
 	}, nil
+}
+
+// queryDryRunError names the declared evidence query that failed the upload
+// dry-run (#1859), so the 400 tells the author which query to fix. Only a
+// failure that is the query's own fault becomes one (#1865); anything else
+// dryRunQueries returns is infrastructure and maps to a 500.
+type queryDryRunError struct {
+	Index    int
+	Language string
+	Err      error
+}
+
+func (e *queryDryRunError) Error() string {
+	return fmt.Sprintf("evidence_queries[%d] (%s) fails on an empty ledger: %v", e.Index, e.Language, e.Err)
+}
+
+func (e *queryDryRunError) Unwrap() error { return e.Err }
+
+// dryRunQueries evaluates every declared evidence query, one at a time,
+// through eval.EvaluateFixture over an EMPTY record set (#1859). A query that
+// fails to compile, errors at eval, never assigns `result` (an `allow`-style
+// Rego module), or does not finish within timeout would make every live
+// evaluation of the control error, so the upload is refused here rather than
+// discovered by the scheduler later.
+//
+// The check is independent of the tenant's gate mode and of whether the bundle
+// ships tests: a query that cannot evaluate at all is broken, not merely red.
+// SQL queries run inside the read-only tenant tx when a runner is available;
+// with no runner (unit servers) they are skipped rather than reported as
+// ErrFixtureSQLNeedsDB, since that error says nothing about the query.
+//
+// A query-level failure comes back as *queryDryRunError (a 400). A failure to
+// open the tx, a missing tenant context, or the request being cancelled comes
+// back as a plain error, for the caller to treat as internal (#1865).
+func dryRunQueries(ctx context.Context, runner txRunner, bundle *control.Bundle, timeout time.Duration) error {
+	freshnessClass := bundle.Manifest.FreshnessClass
+	now := time.Now().UTC()
+	for i, q := range bundle.Manifest.EvidenceQueries {
+		if q.Language == "sql" && runner == nil {
+			continue
+		}
+		err := dryRunQuery(ctx, runner, timeout, freshnessClass, q.Language, q.Expression, now)
+		if err == nil {
+			continue
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// The request itself went away; that says nothing about the query.
+			return fmt.Errorf("control: query dry-run: %w", ctxErr)
+		}
+		var fqe *eval.FixtureQueryError
+		if errors.As(err, &fqe) || errors.Is(err, eval.ErrFixtureSQLNeedsDB) || errors.Is(err, errDryRunTimeout) {
+			return &queryDryRunError{Index: i, Language: q.Language, Err: err}
+		}
+		return err
+	}
+	return nil
+}
+
+// errDryRunTimeout marks a query that did not finish within timeout.
+var errDryRunTimeout = errors.New("query did not finish within the dry-run time limit")
+
+// dryRunQuery evaluates one query under its own timeout deadline. When
+// that deadline is what stopped it, the error says so: OPA reports the
+// cancellation as an opaque eval error, which would otherwise read like any
+// other failure.
+func dryRunQuery(ctx context.Context, runner txRunner, timeout time.Duration, freshnessClass, language, expression string, now time.Time) error {
+	qctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	fq := []eval.FixtureQuery{{Language: language, Expression: expression}}
+	var err error
+	if language == "sql" {
+		err = runner.WithReadOnlyTenantTx(qctx, func(tx pgx.Tx) error {
+			_, ferr := eval.EvaluateFixture(qctx, freshnessClass, fq, nil, now, tx)
+			return ferr
+		})
+	} else {
+		_, err = eval.EvaluateFixture(qctx, freshnessClass, fq, nil, now, nil)
+	}
+	if err != nil && ctx.Err() == nil && errors.Is(qctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w (%s)", errDryRunTimeout, timeout)
+	}
+	return err
 }
 
 // needsSQL reports whether any declared query uses the sql language (the only

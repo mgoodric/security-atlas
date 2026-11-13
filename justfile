@@ -45,10 +45,10 @@ lint: lint-go lint-errleak lint-duphelper lint-frontend lint-python
 # no review (slice 416; same class as slice 090's govulncheck@latest). Bump
 # this AND the ci.yml pin together in a dedicated `chore(golangci):` slice so
 # the new analyzer set lands as an auditable diff (mirrors SQLC_VERSION).
-GOLANGCI_VERSION := "v2.12.2"
+GOLANGCI_VERSION := "v2.15.0"
 
 # Verify the installed golangci-lint matches the pin. `golangci-lint version`
-# prints e.g. "golangci-lint has version 2.12.2 built with ..." — extract the
+# prints e.g. "golangci-lint has version 2.15.0 built with ..." — extract the
 # bare X.Y.Z and compare against the pin (sans leading `v`).
 golangci-version-check:
     @installed=$(golangci-lint version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'); \
@@ -270,6 +270,12 @@ check-integration-shard-coverage:
 # QA-audit finding Q-5; slice 353. Self-test: scripts/check-coverage-excludes_test.sh
 check-coverage-excludes:
     bash scripts/check-coverage-excludes.sh
+
+# Refuse a migration whose timestamp prefix another migration already uses;
+# the prefixes that collided before the check are grandfathered. #1880.
+# Self-test: scripts/check-migration-timestamps_test.sh
+check-migration-timestamps:
+    bash scripts/check-migration-timestamps.sh
 
 # Count assertions per Go test file and warn where assertion density is below
 # threshold (cheap mutation-testing proxy). Slice 333 Q-6; slice 353. ADVISORY

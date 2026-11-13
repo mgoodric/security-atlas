@@ -19,6 +19,8 @@ package eval_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -843,5 +845,89 @@ func TestEvaluateControl_UnsupportedLanguageFailsLoud(t *testing.T) {
 	eng := newEngine(app)
 	if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err == nil {
 		t.Fatal("unsupported language must FAIL LOUD (error), not silently no-op")
+	}
+}
+
+// #1859: one broken tenant-authored control must not stop EvaluateAll (and so
+// scheduled recompute and Replay) from evaluating the controls after it. The
+// good controls still get state; the failure comes back joined, naming the
+// broken control.
+func TestEvaluateAll_ContinuesPastBrokenControl(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	observed := time.Now().UTC().Add(-1 * 24 * time.Hour)
+	good1 := seedControl(t, admin, tenant, "automated", "monthly", "")
+	seedEvidence(t, admin, tenant, good1, "pass", observed)
+	// An allow-style module never assigns `result`: every evaluation errors.
+	broken := seedControl(t, admin, tenant, "automated", "monthly",
+		`[{"id":"q","language":"rego","expression":`+jsonString("package evidence.query\n\nallow if { true }")+`}]`)
+	seedEvidence(t, admin, tenant, broken, "pass", observed)
+	good2 := seedControl(t, admin, tenant, "automated", "monthly", "")
+	seedEvidence(t, admin, tenant, good2, "fail", observed)
+
+	eng := newEngine(app)
+	n, err := eng.Replay(ctx, eval.FarFuture)
+	if err == nil {
+		t.Fatal("EvaluateAll must report the broken control's error")
+	}
+	if !strings.Contains(err.Error(), broken.String()) {
+		t.Fatalf("joined error must name the broken control %s, got: %v", broken, err)
+	}
+	if n != 2 {
+		t.Fatalf("expected 2 rows written for the two good controls, got %d", n)
+	}
+	for _, c := range []struct {
+		id   uuid.UUID
+		want string
+	}{{good1, "pass"}, {good2, "fail"}} {
+		st, err := eng.ControlState(ctx, c.id, "", eval.FarFuture)
+		if err != nil {
+			t.Fatalf("ControlState %s: %v", c.id, err)
+		}
+		if len(st) == 0 || st[0].Result != c.want {
+			t.Fatalf("control %s: want %q, got %+v", c.id, c.want, st)
+		}
+	}
+}
+
+// #1865: once the sweep's context is cancelled, EvaluateAll stops instead of
+// logging and joining one context error per remaining control. Every control
+// here runs a Rego policy that cannot finish before the deadline, so at most
+// the one in flight when it fires may appear in the error.
+func TestEvaluateAll_StopsOnCancelledContext(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+
+	const runaway = "package evidence.query\n\nn := numbers.range(1, 100000)\n\nresult := \"pass\" if {\n  count([a | some a in n; some b in n; a == b + 1000000]) > 0\n}\n"
+	observed := time.Now().UTC().Add(-1 * 24 * time.Hour)
+	var ids []uuid.UUID
+	for range 3 {
+		id := seedControl(t, admin, tenant, "automated", "monthly",
+			`[{"id":"q","language":"rego","expression":`+jsonString(runaway)+`}]`)
+		seedEvidence(t, admin, tenant, id, "pass", observed)
+		ids = append(ids, id)
+	}
+
+	ctx, cancel := context.WithTimeout(ctxFor(t, tenant), time.Second)
+	defer cancel()
+	n, err := newEngine(app).EvaluateAll(ctx, eval.TriggerManual, eval.FarFuture)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("EvaluateAll must report the cancelled context, got: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("no control can finish before the deadline; wrote %d rows", n)
+	}
+	named := 0
+	for _, id := range ids {
+		if strings.Contains(err.Error(), id.String()) {
+			named++
+		}
+	}
+	if named > 1 {
+		t.Fatalf("EvaluateAll kept evaluating after cancellation (%d controls in the error): %v", named, err)
 	}
 }

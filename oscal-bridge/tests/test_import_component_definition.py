@@ -45,6 +45,10 @@ def test_import_component_definition_parses_components_and_claims():
     )
     assert result.valid, result.errors
     assert result.component_definition_title == "Acme Cloud Platform Component Definition"
+    # Scalars come back as plain strings, never a pydantic RootModel repr
+    # (trestle 5.x wraps oscal-version and component type in RootModels).
+    assert result.oscal_version == "1.1.2"
+    assert {c.component_type for c in result.components} == {"service", "software"}
     titles = {c.title for c in result.components}
     assert titles == {"Acme Identity Service", "Acme Audit Logger"}
     # Three vendor claims across the two components.

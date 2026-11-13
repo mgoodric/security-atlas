@@ -63,12 +63,17 @@ security-atlas-cli catalog import-crosswalk data/crosswalks/soc2-tsc-2017.yaml
 
 The import is idempotent — re-running the same file is a no-op.
 
-Confirm the framework version is registered:
+Confirm the framework is registered:
 
 ```sh
 curl -fsS http://localhost:8080/v1/frameworks
-# [ { "slug": "soc2", "version": "v2017", "requirement_count": 64, ... } ]
+# { "frameworks": [ { "slug": "soc2", "name": "SOC 2 (System and Organization Controls 2)", ... } ] }
 ```
+
+The import registers framework version `2017` with 43 requirements: the
+Common Criteria (CC1.1-CC9.2) plus the Availability, Confidentiality and
+Processing Integrity criteria. A requirement's natural key is
+`soc2:2017:<code>`, e.g. `soc2:2017:CC6.1`.
 
 ## Step 3 — inspect a crosswalk
 
@@ -76,7 +81,7 @@ Pick a SOC 2 requirement and traverse to its SCF anchors + your tenant's
 controls:
 
 ```sh
-curl -fsS http://localhost:8080/v1/requirements/soc2:v2017:CC6.1/coverage | jq
+curl -fsS http://localhost:8080/v1/requirements/soc2:2017:CC6.1/coverage | jq
 ```
 
 A shape you should see:
@@ -108,12 +113,29 @@ mapping-inspector UI, not the coverage view.
 
 ## Where SOC 2 v2017 came from
 
-The crosswalk JSON committed at `controls/frameworks/soc2-v2017.json`
-was machine-generated from the SCF organisation's STRM workbook (SOC 2
-Trust Services Criteria v2017). The SCF standard license permits this
-redistribution; the file ships with the repo. The bundling decision is
-captured in [Plans/canvas/11-open-questions.md](https://github.com/mgoodric/security-atlas/blob/main/Plans/canvas/11-open-questions.md)
+The crosswalk at `data/crosswalks/soc2-tsc-2017.yaml` is a
+`community_draft`: each SOC 2 → SCF edge is a project-authored mapping,
+not SCF's published crosswalk. The AICPA Trust Services Criteria and the
+COSO principles behind CC1-CC5 are copyrighted, so the file carries only
+the criterion identifiers, short project-authored titles, and original
+one-line summaries. It reproduces no AICPA or COSO wording; the
+`LICENSING POSTURE` header in the file says so. Read the criteria
+themselves from the AICPA publication.
+
+The SCF anchors the edges point at come from the separately imported SCF
+catalog. The SCF bundling decision is captured in
+[Plans/canvas/11-open-questions.md](https://github.com/mgoodric/security-atlas/blob/main/Plans/canvas/11-open-questions.md)
 under the SCF redistribution item.
+
+### Upgrades re-seed changed SOC 2 edges
+
+The bootstrap imports this file on every boot. When an image upgrade
+changes a SOC 2 mapping row (its relationship type, strength, source
+attribution or rationale), the next boot updates that edge and re-seeds
+its review tier to the tier its source starts at, with an audit row
+(ADR 0018 §2). A reviewer's verified tier on a changed edge does not
+survive the upgrade; re-review it. A change to a requirement's title or
+summary alone updates the requirement and leaves edge tiers alone.
 
 ## Next steps
 

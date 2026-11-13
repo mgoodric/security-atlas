@@ -260,3 +260,66 @@ func TestImport_BeginTxErrorIsWrapped(t *testing.T) {
 		t.Fatalf("Import should return a zero Report on failure; got %+v", report)
 	}
 }
+
+// attributionRank orders provenance scf_official > community_draft >
+// org_internal (issue #1754); an unknown label ranks below all three.
+func TestAttributionRank_Order(t *testing.T) {
+	t.Parallel()
+	official := attributionRank(dbx.CrosswalkSourceAttributionScfOfficial)
+	draft := attributionRank(dbx.CrosswalkSourceAttributionCommunityDraft)
+	org := attributionRank(dbx.CrosswalkSourceAttributionOrgInternal)
+	unknown := attributionRank(dbx.CrosswalkSourceAttribution("bogus"))
+	if official <= draft || draft <= org || org <= unknown {
+		t.Fatalf("rank order wrong: official=%d draft=%d org=%d unknown=%d", official, draft, org, unknown)
+	}
+}
+
+// reseedTier (#1849): changed content restarts at the new source's ADR 0018
+// §2 seed tier, except on a rejected edge, which only a reviewer reopens.
+func TestReseedTier(t *testing.T) {
+	t.Parallel()
+	const (
+		official = dbx.CrosswalkSourceAttributionScfOfficial
+		draftSrc = dbx.CrosswalkSourceAttributionCommunityDraft
+		org      = dbx.CrosswalkSourceAttributionOrgInternal
+		draft    = dbx.CrosswalkMappingTierDraft
+		review   = dbx.CrosswalkMappingTierUnderReview
+		verified = dbx.CrosswalkMappingTierVerified
+		rejected = dbx.CrosswalkMappingTierRejected
+	)
+	cases := []struct {
+		current     dbx.CrosswalkMappingTier
+		incoming    dbx.CrosswalkSourceAttribution
+		want        dbx.CrosswalkMappingTier
+		wantChanged bool
+	}{
+		{draft, official, verified, true},
+		{review, official, verified, true},
+		{verified, official, verified, false},
+		{rejected, official, rejected, false},
+		{draft, draftSrc, draft, false},
+		{review, draftSrc, draft, true},
+		{verified, draftSrc, draft, true},
+		{rejected, draftSrc, rejected, false},
+		{verified, org, draft, true},
+		{rejected, org, rejected, false},
+	}
+	for _, tc := range cases {
+		got, changed := reseedTier(tc.current, tc.incoming)
+		if got != tc.want || changed != tc.wantChanged {
+			t.Errorf("reseedTier(%s, %s) = (%s, %v); want (%s, %v)", tc.current, tc.incoming, got, changed, tc.want, tc.wantChanged)
+		}
+	}
+}
+
+// Every source_attribution enum value carries a nonzero rank (#1849). An
+// unranked value ranks 0, so any import would overwrite it; adding an enum
+// value without a ranking decision fails here instead.
+func TestAttributionRank_CoversEveryEnumValue(t *testing.T) {
+	t.Parallel()
+	for _, a := range dbx.AllCrosswalkSourceAttributionValues() {
+		if attributionRank(a) == 0 {
+			t.Errorf("source_attribution %q has no attributionRank", a)
+		}
+	}
+}

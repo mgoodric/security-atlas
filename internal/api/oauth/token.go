@@ -18,7 +18,9 @@
 //     reply is 401 with the standard `invalid_client` error.
 //   - P0-188-4 (no super_admin elevation via exchange): the
 //     token-exchange path copies `super_admin` from the verified
-//     subject_token claims; it cannot set the claim true.
+//     subject_token claims; it cannot set the claim true. #1850: it
+//     copies the claim only while `super_admins` still agrees, so a
+//     demoted super_admin cannot keep re-exchanging to hold it.
 //   - P0-188-5 (signature-before-allowlist): the token-exchange path
 //     ALWAYS calls tokensign.Verify (signature validation) BEFORE
 //     reading any claim from the supplied subject_token. An
@@ -49,6 +51,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -103,6 +106,16 @@ type TokenEndpoint struct {
 	auditPool   *pgxpool.Pool
 	limiter     *tokenBucketLimiter
 	now         func() time.Time
+	// superAdmins re-reads super_admins on token exchange (#1850).
+	// Nil fails closed: no exchanged token carries super_admin.
+	superAdmins superadmin.Checker
+}
+
+// AttachSuperAdminChecker wires the live super_admins re-check used by
+// the token-exchange grant (#1850). Without it, exchange never
+// carries the super_admin claim forward.
+func (t *TokenEndpoint) AttachSuperAdminChecker(c superadmin.Checker) {
+	t.superAdmins = c
 }
 
 // TokenEndpointConfig is the constructor parameter bag for
@@ -259,13 +272,18 @@ func (t *TokenEndpoint) handleClientCredentials(w http.ResponseWriter, r *http.R
 			NotBefore: now.Unix(),
 			ID:        uuid.NewString(),
 		},
-		IDPIssuer: MachineIDPIssuer,
-		// CurrentTenantID intentionally zero — machine tokens are
-		// tenant-free by default; the caller scopes a tenant via the
-		// slice-191 wire convention or via a follow-on token-exchange.
+		IDPIssuer:        MachineIDPIssuer,
 		AvailableTenants: []uuid.UUID{},
 		Roles:            map[uuid.UUID][]string{},
 		SuperAdmin:       false,
+	}
+	// security-atlas#1739: a client bound to a tenant mints tokens that
+	// act in that tenant. An unbound client's token stays tenant-free
+	// (CurrentTenantID zero), and tenancymw refuses every write it makes,
+	// so a machine write can never land in the all-zeros tenant.
+	if client.TenantID != nil && *client.TenantID != uuid.Nil {
+		claims.CurrentTenantID = *client.TenantID
+		claims.AvailableTenants = []uuid.UUID{*client.TenantID}
 	}
 
 	tok, err := t.signer.Sign(r.Context(), claims)
@@ -331,13 +349,19 @@ func (t *TokenEndpoint) handleTokenExchange(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// #1850: the subject_token's super_admin claim is a snapshot from
+	// its mint. Re-read super_admins so a demoted user neither keeps
+	// the cross-tenant shortcut below nor carries the claim forward.
+	superAdmin := claims.SuperAdmin &&
+		superadmin.Confirm(r.Context(), t.superAdmins, claims.Subject)
+
 	// AC-12 / P0-188-4: allowlist check. The target tenant MUST be
 	// in the subject_token's verified `atlas:available_tenants[]`
 	// OR the caller MUST already be super_admin. The super_admin
 	// shortcut is the deliberate escape hatch for platform-wide
 	// operations; the slice 142 OIDC login is the only path that
 	// sets super_admin true.
-	if !claims.SuperAdmin && !containsUUID(claims.AvailableTenants, targetTenant) {
+	if !superAdmin && !containsUUID(claims.AvailableTenants, targetTenant) {
 		writeOAuthError(w, http.StatusForbidden, "invalid_target",
 			"target tenant is not in available_tenants")
 		return
@@ -354,12 +378,13 @@ func (t *TokenEndpoint) handleTokenExchange(w http.ResponseWriter, r *http.Reque
 			NotBefore: now.Unix(),
 			ID:        uuid.NewString(),
 		},
-		// P0-188-4: copy super_admin, NEVER set it.
+		// P0-188-4: copy super_admin, NEVER set it (and #1850: only
+		// while the table still agrees).
 		IDPIssuer:        claims.IDPIssuer,
 		CurrentTenantID:  targetTenant,
 		AvailableTenants: claims.AvailableTenants,
 		Roles:            claims.Roles,
-		SuperAdmin:       claims.SuperAdmin,
+		SuperAdmin:       superAdmin,
 	}
 
 	tok, err := t.signer.Sign(r.Context(), newClaims)

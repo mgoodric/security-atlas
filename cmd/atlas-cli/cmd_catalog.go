@@ -141,8 +141,20 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 				report.FrameworkSlug, report.FrameworkVersion, report.FrameworkVersionID, report.IsNewVersion)
 			fmt.Printf("requirements created=%d updated=%d unchanged=%d\n",
 				report.RequirementsCreated, report.RequirementsUpdated, report.RequirementsUnchanged)
-			fmt.Printf("edges        created=%d updated=%d unchanged=%d\n",
-				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged)
+			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d\n",
+				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped))
+			for _, sk := range report.EdgesSkipped {
+				fmt.Printf("edge skipped %s->%s: existing source_attribution=%s outranks incoming %s\n",
+					sk.RequirementCode, sk.SCFAnchor, sk.ExistingAttribution, sk.IncomingAttribution)
+			}
+			for _, up := range report.EdgesUpgradedOntoRejected {
+				fmt.Printf("edge upgraded onto rejected tier %s->%s: source_attribution %s -> %s; mapping_tier stays rejected\n",
+					up.RequirementCode, up.SCFAnchor, up.PreviousAttribution, up.IncomingAttribution)
+			}
+			for _, rs := range report.EdgesTierReseeded {
+				fmt.Printf("edge tier re-seeded %s->%s: content changed; mapping_tier %s -> %s\n",
+					rs.RequirementCode, rs.SCFAnchor, rs.PreviousTier, rs.NewTier)
+			}
 			keys := make([]string, 0, len(report.MappingsByAttribution))
 			for k := range report.MappingsByAttribution {
 				keys = append(keys, k)

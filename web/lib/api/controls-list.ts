@@ -39,10 +39,14 @@ export type ControlsListResponse = {
 export async function fetchControlsList(
   scopeCellID?: string,
   hasControl?: boolean,
+  limit?: number,
+  offset?: number,
 ): Promise<ControlsListResponse> {
   const qs = new URLSearchParams();
   if (scopeCellID) qs.set("scope", scopeCellID);
   if (hasControl !== undefined) qs.set("has_control", String(hasControl));
+  if (limit !== undefined) qs.set("limit", String(limit));
+  if (offset !== undefined) qs.set("offset", String(offset));
   const url = qs.toString()
     ? `/api/controls?${qs.toString()}`
     : `/api/controls`;
@@ -58,6 +62,47 @@ export async function fetchControlsList(
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ControlsListResponse;
+}
+
+/** The platform's page cap for `GET /v1/anchors`. */
+export const ANCHORS_PAGE_LIMIT = 500;
+
+// Hard stop for the catalog walk: 20 pages of 500 is 10,000 anchors, well
+// past SCF's ~1,600, so a `total` that never arrives cannot loop forever.
+const ANCHORS_MAX_PAGES = 20;
+
+// Issue #1740 — browser-side fn: every anchor of the SCF catalog, walked
+// page by page through the BFF. The /controls page filters (family,
+// state, framework, freshness) and paginates over the full set, so it
+// must not stop at the platform's first page of 100. The walk ends when
+// `total` is reached, a page comes back short, or the page cap is hit.
+// The totals of the last page are returned alongside the rows.
+export async function fetchControlsCatalog(
+  scopeCellID?: string,
+  hasControl?: boolean,
+): Promise<ControlsListResponse> {
+  const anchors: AnchorWithState[] = [];
+  let last: ControlsListResponse = { anchors: [] };
+  for (let i = 0; i < ANCHORS_MAX_PAGES; i++) {
+    last = await fetchControlsList(
+      scopeCellID,
+      hasControl,
+      ANCHORS_PAGE_LIMIT,
+      anchors.length,
+    );
+    const rows = last.anchors ?? [];
+    anchors.push(...rows);
+    if (rows.length < ANCHORS_PAGE_LIMIT) break;
+    if (last.total !== undefined && anchors.length >= last.total) break;
+  }
+  return { ...last, anchors };
+}
+
+// Issue #1832 — the catalog totals alone, for the "My controls" header.
+// The totals ride on every anchor page, so one row is enough to read
+// them; the page used to pull up to 100 anchors with state to do it.
+export function fetchCatalogCounts(): Promise<ControlsListResponse> {
+  return fetchControlsList(undefined, true, 1);
 }
 
 // ----- Slice 224: tenant scope cells (for the /controls Scope filter pill) -----
@@ -202,6 +247,43 @@ export async function fetchTenantControlsWithState(
   };
 }
 
+// Issue #1832 — the one active-control count. The sidebar badge and the
+// /controls page both read it from a `/api/controls-list?include=state`
+// page, whose `total` is the platform's CountActiveControls. `count` and
+// the row length are fallbacks for payloads without a total.
+export function activeControlsTotal(
+  page: Partial<ControlsWithStateResponse>,
+): number {
+  return page.total ?? page.count ?? page.controls?.length ?? 0;
+}
+
+// Browser-side fn: one page of the caller's controls with state, through
+// the BFF.
+async function fetchMyControlsPage(
+  params: Record<string, string>,
+): Promise<Partial<ControlsWithStateResponse>> {
+  const qs = new URLSearchParams({ include: "state", ...params });
+  const res = await fetch(`/api/controls-list?${qs.toString()}`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as Partial<ControlsWithStateResponse>;
+}
+
+// Browser-side fn: the caller's active-control count for the sidebar
+// badge. One row is fetched; only the total is read.
+export async function fetchMyControlsTotal(): Promise<number> {
+  const page = await fetchMyControlsPage({ limit: "1" });
+  return activeControlsTotal(page);
+}
+
 // Browser-side fn: every active control of the caller's tenant, walked
 // page by page through the BFF until `total` is reached. The page's
 // family / state / freshness filters run over the full set, so it must
@@ -212,26 +294,14 @@ export async function fetchMyControls(
   const controls: ControlWithState[] = [];
   let total = 0;
   for (;;) {
-    const qs = new URLSearchParams({
-      include: "state",
+    const params: Record<string, string> = {
       limit: String(CONTROLS_WITH_STATE_PAGE_LIMIT),
       offset: String(controls.length),
-    });
-    if (scopeCellID) qs.set("scope", scopeCellID);
-    const res = await fetch(`/api/controls-list?${qs.toString()}`);
-    if (!res.ok) {
-      let msg = `${res.status} ${res.statusText}`;
-      try {
-        const j = (await res.json()) as { error?: string };
-        if (j.error) msg = j.error;
-      } catch {
-        // body not JSON — keep the status line
-      }
-      throw new APIError(res.status, msg);
-    }
-    const page = (await res.json()) as ControlsWithStateResponse;
+    };
+    if (scopeCellID) params.scope = scopeCellID;
+    const page = await fetchMyControlsPage(params);
     const rows = page.controls ?? [];
-    total = page.total ?? rows.length;
+    total = activeControlsTotal(page);
     controls.push(...rows);
     if (rows.length === 0 || controls.length >= total) break;
   }

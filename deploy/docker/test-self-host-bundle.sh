@@ -86,7 +86,8 @@
 #      would return 403 even though sign-in itself succeeded.
 #   8. A fresh re-run of `docker compose run --rm atlas-bootstrap` exits 0
 #      and does not duplicate seed rows (slice 065 bug #3 idempotency,
-#      AC-7).
+#      AC-7). The first boot printed the opt-in crosswalk commands and the
+#      re-run does not (security-atlas#1888).
 #
 # AC-9 is covered by the `external` mode's pre-created non-superuser
 # atlas_migrate: if the cluster-admin one-time grant (BYPASSRLS +
@@ -401,6 +402,26 @@ done
 [ -n "${SCHEMA_READY}" ] || fail "evidence_kind_schemas relation not created within ~4 min (stage-1 migrations stalled)"
 log "evidence_kind_schemas exists — stage-1 migrations complete"
 
+# security-atlas#1888: the first boot prints the opt-in crosswalk import
+# commands in a form that runs from the repo root. Read them now: stage 2's
+# `up -d --build` recreates the bootstrap container, which drops this log,
+# and the recreated container is no longer a first install. Phase 4 (wait
+# for atlas /health) follows the crosswalk phase, and atlas is not up in
+# stage 1, so the bootstrap is parked there once the line appears.
+OPTIN_CMD="docker compose -f deploy/docker/docker-compose.yml run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/iso27001-2022.yaml"
+PHASE4_SEEN=""
+for i in $(seq 1 60); do
+    if "${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 | grep -qF "waiting for atlas /health"; then
+        PHASE4_SEEN=1
+        break
+    fi
+    sleep 2
+done
+[ -n "${PHASE4_SEEN}" ] || fail "atlas-bootstrap did not reach phase 4 within ~2 min of stage-1 migrations"
+"${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 | grep -qF -- "${OPTIN_CMD}" \
+    || fail "first-boot bootstrap log lacks the opt-in command: ${OPTIN_CMD}"
+log "first boot printed the repo-root opt-in crosswalk commands"
+
 # ---------------------------------------------------------------------
 # Stage 2: bring up the rest (atlas + web). atlas's boot-time schema
 # importer now finds evidence_kind_schemas already migrated; the
@@ -566,6 +587,64 @@ log "JWT carries super_admin=true + admin role in bootstrap tenant"
 rm -f "${LOGIN_RESP}"
 
 # ---------------------------------------------------------------------
+# Assertion 8 (security-atlas#1739): the stock controls the bootstrap
+# uploaded with its OAuth client land in the bootstrap tenant, and the
+# default user sees them. Before the fix the client's tokens were
+# tenant-free, so all 50 rows landed in the all-zeros tenant and the
+# signed-in user's GET /v1/controls returned count 0.
+# ---------------------------------------------------------------------
+BOOTSTRAP_TENANT_ID="00000000-0000-4000-8000-000000000001"
+NIL_TENANT_ID="00000000-0000-0000-0000-000000000000"
+IN_TENANT="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${BOOTSTRAP_TENANT_ID}'")"
+[ "${IN_TENANT}" = "50" ] || fail "controls in bootstrap tenant = ${IN_TENANT}, want 50"
+IN_NIL="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${NIL_TENANT_ID}'")"
+[ "${IN_NIL}" = "0" ] || fail "controls in the all-zeros tenant = ${IN_NIL}, want 0"
+UNBOUND="$(db_count "SELECT count(*) FROM oauth_clients WHERE name LIKE 'atlas-bootstrap-controls-%' AND bound_tenant_id IS DISTINCT FROM '${BOOTSTRAP_TENANT_ID}'")"
+[ "${UNBOUND}" = "0" ] || fail "${UNBOUND} bootstrap OAuth client(s) not bound to the bootstrap tenant"
+
+CONTROLS_RESP="$(mktemp)"
+CONTROLS_CODE="$(curl -sS -o "${CONTROLS_RESP}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    "http://127.0.0.1:${ATLAS_HOSTPORT}/v1/controls?limit=100")"
+[ "${CONTROLS_CODE}" = "200" ] \
+    || fail "GET /v1/controls: HTTP ${CONTROLS_CODE} (want 200); body: $(head -c 400 "${CONTROLS_RESP}")"
+API_COUNT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("count", -1))' "${CONTROLS_RESP}")"
+rm -f "${CONTROLS_RESP}"
+[ "${API_COUNT}" = "50" ] || fail "default user's GET /v1/controls count = ${API_COUNT}, want 50"
+log "default user sees the 50 stock controls in the bootstrap tenant; none in the all-zeros tenant"
+
+# ---------------------------------------------------------------------
+# Assertion 8b (security-atlas#1721): the bootstrap imports the bundled
+# SOC 2 crosswalk, so the stock SOC 2 controls map to SOC 2 requirements
+# through their SCF anchors. Before the fix a fresh install had zero
+# framework requirements and /v1/frameworks listed only SCF.
+#
+# security-atlas#1888: an exact count, not a > 0 floor. Every requirement
+# in the bundled YAML has an edge, and the stock controls' anchors cover
+# every one, so the mapped count must equal the YAML's requirement count.
+# A lost edge or a dropped requirement fails here.
+# ---------------------------------------------------------------------
+SOC2_WANT="$(grep -c '^  - code:' "${REPO_ROOT}/data/crosswalks/soc2-tsc-2017.yaml")"
+SOC2_WITH_EDGES="$(db_count "SELECT count(DISTINCT fr.id)
+    FROM framework_requirements fr
+    JOIN fw_to_scf_edges e ON e.framework_requirement_id = fr.id
+    JOIN framework_versions fv ON fv.id = fr.framework_version_id
+    JOIN frameworks f ON f.id = fv.framework_id
+    WHERE f.slug = 'soc2'")"
+[ "${SOC2_WITH_EDGES}" = "${SOC2_WANT}" ] \
+    || fail "SOC 2 requirements with edges = ${SOC2_WITH_EDGES:-?}, want ${SOC2_WANT} (every requirement in soc2-tsc-2017.yaml)"
+SOC2_MAPPED="$(db_count "SELECT count(DISTINCT fr.id)
+    FROM controls c
+    JOIN fw_to_scf_edges e ON e.scf_anchor_id = c.scf_anchor_id
+    JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+    JOIN framework_versions fv ON fv.id = fr.framework_version_id
+    JOIN frameworks f ON f.id = fv.framework_id
+    WHERE c.tenant_id = '${BOOTSTRAP_TENANT_ID}' AND f.slug = 'soc2'")"
+[ "${SOC2_MAPPED}" = "${SOC2_WITH_EDGES}" ] \
+    || fail "stock SOC 2 controls map to ${SOC2_MAPPED:-?} SOC 2 requirements, want ${SOC2_WITH_EDGES} (the SOC 2 requirements that have edges)"
+log "stock SOC 2 controls map to ${SOC2_MAPPED} SOC 2 requirements"
+
+# ---------------------------------------------------------------------
 # Assertions 9 + 10 (slice 470) — PROXY MODE ONLY: the trusted-proxy
 # X-Forwarded-For walk (internal/api/auth/clientip.go, slice 466) proven
 # end-to-end across a real multi-container topology.
@@ -719,11 +798,17 @@ CONTROLS_BEFORE="${CONTROLS}"
 SCOPES_BEFORE="$(db_count 'SELECT count(*) FROM scope_cells')"
 USERS_BEFORE="$(db_count 'SELECT count(*) FROM users')"
 
+# security-atlas#1888: the first boot printed the opt-in crosswalk commands
+# (checked in stage 1 above); a re-run is not a first install and prints none.
 set +e
-"${COMPOSE[@]}" run --rm atlas-bootstrap
+RERUN_OUT="$("${COMPOSE[@]}" run --rm atlas-bootstrap 2>&1)"
 RERUN_RC=$?
 set -e
+printf '%s\n' "${RERUN_OUT}"
 [ "${RERUN_RC}" = "0" ] || fail "atlas-bootstrap re-run exited ${RERUN_RC}, want 0"
+case "${RERUN_OUT}" in
+    *"catalog import-crosswalk /repo/data/crosswalks/"*) fail "atlas-bootstrap re-run printed the opt-in crosswalk commands again" ;;
+esac
 
 CONTROLS_AFTER="$(db_count 'SELECT count(*) FROM controls')"
 SCOPES_AFTER="$(db_count 'SELECT count(*) FROM scope_cells')"

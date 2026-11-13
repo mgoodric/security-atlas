@@ -37,8 +37,9 @@ var ErrLinkWeightOutOfRange = errors.New("risk: link weight must be between 0 an
 // Same shape as scope.Store: every method opens a tx, applies the tenant GUC,
 // runs queries inside that transaction.
 type Store struct {
-	pool      *pgxpool.Pool
-	afterRisk AfterRiskWrite
+	pool       *pgxpool.Pool
+	beforeRisk BeforeRiskWrite
+	afterRisk  AfterRiskWrite
 }
 
 // NewStore constructs a Store over an existing pgx pool. The pool must be
@@ -46,7 +47,9 @@ type Store struct {
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 // AfterRiskWrite runs inside the transaction of a risk write (create, theme
-// assignment) with the themes the written risk now carries. An error rolls
+// assignment, delete) with the themes the write touched: the risk's themes
+// after a create, the themes before and after a theme assignment, and the
+// deleted risk's themes after a delete (#1861). An error rolls
 // the write back. It is how the slice 054 aggregation engine
 // (internal/risk/aggrule) evaluates its rules on each risk write; aggrule
 // imports this package, so the engine is injected rather than imported
@@ -60,12 +63,91 @@ func (s *Store) WithAfterRiskWrite(fn AfterRiskWrite) *Store {
 	return s
 }
 
+// BeforeRiskWrite runs inside the transaction of a theme assignment or a
+// delete, before the write locks or deletes the risk row, with the themes
+// the write may touch. The aggregation engine uses it to take its rules'
+// advisory locks first, in the order an evaluation takes them, so the write
+// and a concurrent evaluation never wait on each other in opposite orders
+// (#1867). An error rolls the write back. Set it together with
+// AfterRiskWrite (httpserver.go wires both).
+type BeforeRiskWrite func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error
+
+// WithBeforeRiskWrite sets the hook run before a theme assignment or delete
+// locks the risk row, and returns the Store.
+func (s *Store) WithBeforeRiskWrite(fn BeforeRiskWrite) *Store {
+	s.beforeRisk = fn
+	return s
+}
+
+// runBeforeRiskWrite invokes the BeforeRiskWrite hook, if one is set.
+func (s *Store) runBeforeRiskWrite(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error {
+	if s.beforeRisk == nil {
+		return nil
+	}
+	return s.beforeRisk(ctx, q, tenantID, themes)
+}
+
+// errStaleRuleLocks is returned inside a risk write's transaction when the
+// themes read under the row lock are not covered by the themes whose rule
+// locks BeforeRiskWrite took from the unlocked read: a concurrent theme
+// write committed in between. inTxRuleLocked rolls back and retries once.
+var errStaleRuleLocks = errors.New("risk: themes changed between rule lock and row lock")
+
+// checkRuleLocks returns errStaleRuleLocks when lockedThemes, read under the
+// row lock, has a theme outside preLocked, the themes BeforeRiskWrite was
+// called with. AfterRiskWrite would then take a rule lock while holding the
+// row lock, the order #1867 removed, and could deadlock with an evaluation
+// (40P01). Theme coverage is sufficient: every rule the after-hook
+// evaluates for a covered theme was locked before the row. The store cannot
+// see the rules, so a new theme no rule targets retries too, at the cost of
+// one extra transaction. On the last attempt it reports nothing and the
+// write proceeds, no worse than before #1880.
+func (s *Store) checkRuleLocks(lastAttempt bool, preLocked, lockedThemes []string) error {
+	if s.beforeRisk == nil || lastAttempt {
+		return nil
+	}
+	set := make(map[string]struct{}, len(preLocked))
+	for _, t := range preLocked {
+		set[t] = struct{}{}
+	}
+	for _, t := range lockedThemes {
+		if _, ok := set[t]; !ok {
+			return errStaleRuleLocks
+		}
+	}
+	return nil
+}
+
+// inTxRuleLocked runs fn in a transaction like inTx, and once more in a
+// fresh one if fn returns errStaleRuleLocks (#1880). lastAttempt is true on
+// the retry, so fn's checkRuleLocks lets it proceed.
+func (s *Store) inTxRuleLocked(ctx context.Context, fn func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error) error {
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		return fn(ctx, q, tenantID, false)
+	})
+	if !errors.Is(err, errStaleRuleLocks) {
+		return err
+	}
+	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		return fn(ctx, q, tenantID, true)
+	})
+}
+
 // runAfterRiskWrite invokes the AfterRiskWrite hook, if one is set.
 func (s *Store) runAfterRiskWrite(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error {
 	if s.afterRisk == nil {
 		return nil
 	}
 	return s.afterRisk(ctx, q, tenantID, themes)
+}
+
+// isRuleGeneratedScore reports whether an inherent_score carries the slice
+// 054 engine's rule_generated flag, i.e. the risk is a rule's meta-risk.
+func isRuleGeneratedScore(inherent []byte) bool {
+	var raw struct {
+		RuleGenerated bool `json:"rule_generated"`
+	}
+	return json.Unmarshal(inherent, &raw) == nil && raw.RuleGenerated
 }
 
 // Risk is the domain shape returned from store calls. It mirrors the sqlc Risk
@@ -417,17 +499,42 @@ func (s *Store) Heatmap(ctx context.Context) ([]HeatmapCell, error) {
 
 // Delete removes a risk by id. ErrNotFound if no row was matched.
 func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	return s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
 		// Check existence first so we can return ErrNotFound rather than a
 		// silent success on a missing row.
-		if _, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
+		row, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
-		}); err != nil {
+		})
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
 			return fmt.Errorf("delete risk get: %w", err)
+		}
+		// Lock order (#1867): the rules' advisory locks before the row. An
+		// evaluation holding a rule's lock may be about to link this risk
+		// as a child; deleting first and locking second deadlocks with it.
+		// A meta-risk's themes include its rule's target theme, so deleting
+		// one also waits out an evaluation that is updating it.
+		preLocked := row.Themes
+		if err := s.runBeforeRiskWrite(ctx, q, tenantID, preLocked); err != nil {
+			return err
+		}
+		// Re-read under a row lock: the themes may have changed since the
+		// unlocked read, and the hook below must see the deleted row's own.
+		row, err = q.LockRiskByID(ctx, dbx.LockRiskByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(id),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("delete risk lock: %w", err)
+		}
+		if err := s.checkRuleLocks(lastAttempt, preLocked, row.Themes); err != nil {
+			return err
 		}
 		if err := q.DeleteRisk(ctx, dbx.DeleteRiskParams{
 			TenantID: pgUUID(tenantID),
@@ -435,7 +542,14 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 		}); err != nil {
 			return fmt.Errorf("delete risk: %w", err)
 		}
-		return nil
+		// Re-evaluate the rules that targeted the deleted risk's themes, so
+		// a meta-risk it fed drops it from its score (#1861). Deleting a
+		// rule-generated meta-risk itself does not: evaluating would
+		// immediately re-create the meta-risk the operator just deleted.
+		if isRuleGeneratedScore(row.InherentScore) {
+			return nil
+		}
+		return s.runAfterRiskWrite(ctx, q, tenantID, row.Themes)
 	})
 }
 

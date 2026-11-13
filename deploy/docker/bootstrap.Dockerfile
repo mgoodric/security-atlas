@@ -35,7 +35,7 @@
 # (and is omitted from the GHCR-image self-host bundle).
 
 # ----- Stage 1: build atlas-cli -----
-FROM golang:1.26 AS builder
+FROM golang:1.27 AS builder
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -55,12 +55,13 @@ FROM postgres:18-alpine
 # postgres:16-alpine ships psql, sh, and wget. No extra packages needed.
 COPY --from=builder /out/atlas-cli /usr/local/bin/atlas-cli
 
-# bootstrap.sh + migrate.sh + seed.sql land in /bootstrap. migrations/ +
-# controls/ get baked into /repo so the image is self-contained — no host
+# bootstrap.sh + migrate.sh + seed.sql land in /bootstrap. migrations/,
+# controls/ and data/crosswalks/ get baked into /repo so the image is self-contained — no host
 # bind-mount required. REPO_ROOT defaults to /repo (see both scripts).
 COPY deploy/docker/bootstrap/ /bootstrap/
 COPY migrations/                /repo/migrations/
 COPY controls/                  /repo/controls/
+COPY data/crosswalks/           /repo/data/crosswalks/
 RUN chmod +x /bootstrap/bootstrap.sh /bootstrap/migrate.sh
 
 # Slice 196: pre-create /var/lib/atlas-bootstrap owned by the postgres

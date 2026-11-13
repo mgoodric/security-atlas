@@ -24,6 +24,7 @@ import shutil
 import tempfile
 import uuid
 from datetime import UTC, datetime
+from enum import Enum
 
 from trestle.core.control_interface import ParameterRep
 from trestle.core.profile_resolver import ProfileResolver
@@ -62,13 +63,34 @@ from trestle.oscal.ssp import (
 
 from . import OSCAL_VERSION
 
-# trestle's pydantic enums are reachable via each field's own ``.type_``.
+# trestle's pydantic enums are reachable via each field's own
+# ``.annotation`` (trestle 5.x models are native pydantic v2).
 # Resolving them this way avoids guessing which of the near-identically
 # named ``Status`` / ``OperationalState`` enums a given field validates
 # against (there are several; see the slice-030 decisions log).
-_SC_STATUS_CLS = SystemCharacteristics.__fields__["status"].type_
-_SC_STATE_ENUM = _SC_STATUS_CLS.__fields__["state"].type_
-_COMP_STATE_ENUM = SystemComponent.__fields__["status"].type_.__fields__["state"].type_
+_SC_STATUS_CLS = SystemCharacteristics.model_fields["status"].annotation
+_SC_STATE_ENUM = _SC_STATUS_CLS.model_fields["state"].annotation
+_COMP_STATUS_CLS = SystemComponent.model_fields["status"].annotation
+_COMP_STATE_ENUM = _COMP_STATUS_CLS.model_fields["state"].annotation
+
+
+def _scalar_str(value) -> str:
+    """Read a scalar off a parsed trestle model as a plain ``str``.
+
+    trestle 5.x wraps some OSCAL scalars (``oscal-version``, a component's
+    ``type``) in pydantic ``RootModel`` datatypes, whose ``str()`` is the
+    model repr (``root='1.1.2'``), not the value. Unwrap ``.root`` first.
+    A field typed as a union with a plain ``Enum`` (``DefinedComponent.type``
+    is ``StringDatatype | DefinedComponentTypeValidValues``) parses to the
+    enum member, whose ``str()`` is ``Class.member``; unwrap ``.value`` too.
+    """
+    while True:
+        if hasattr(value, "root"):
+            value = value.root
+        elif isinstance(value, Enum):
+            value = value.value
+        else:
+            return str(value or "")
 
 
 class SerializeError(ValueError):
@@ -765,9 +787,9 @@ def import_catalog(oscal_json: bytes, source_label: str = "") -> ImportResult:
         return ImportResult(False, ["catalog contains zero controls"], [], "", "")
 
     meta = catalog.metadata
-    oscal_version = getattr(meta, "oscal_version", "") or ""
-    catalog_title = getattr(meta, "title", "") or ""
-    return ImportResult(True, [], controls, str(oscal_version), str(catalog_title))
+    oscal_version = _scalar_str(getattr(meta, "oscal_version", ""))
+    catalog_title = _scalar_str(getattr(meta, "title", ""))
+    return ImportResult(True, [], controls, oscal_version, catalog_title)
 
 
 # --------------------------------------------------------------------------
@@ -1166,13 +1188,15 @@ def import_profile(
         if not controls:
             return _profile_reject(["resolved profile contains zero controls"])
 
-        rmeta = resolved.metadata
-        oscal_version = str(getattr(rmeta, "oscal_version", "") or "")
-        # The profile's OWN declared title is the provenance label, not the
-        # resolved catalog's (trestle stamps the resolved catalog with the
-        # profile's metadata, so this is the same value either way).
+        # Provenance comes from the profile's OWN declared metadata, not the
+        # resolved catalog's: trestle stamps the resolved catalog with its own
+        # OSCAL_VERSION (1.2.1 on 5.2.1), which is the resolver's version, not
+        # the one the imported document declared (issue #1875).
         pmeta = profile.get("metadata", {}) if isinstance(profile, dict) else {}
-        profile_title = str(pmeta.get("title", "")) if isinstance(pmeta, dict) else ""
+        if not isinstance(pmeta, dict):
+            pmeta = {}
+        oscal_version = str(pmeta.get("oscal-version", "") or "")
+        profile_title = str(pmeta.get("title", "") or "")
         return ProfileImportResult(True, [], controls, oscal_version, profile_title)
     finally:
         shutil.rmtree(root, ignore_errors=True)
@@ -1339,7 +1363,7 @@ def import_component_definition(oscal_json: bytes, source_label: str = "") -> Co
         components.append(
             VendorComponent(
                 component_uuid=str(getattr(comp, "uuid", "") or ""),
-                component_type=str(getattr(comp, "type", "") or ""),
+                component_type=_scalar_str(getattr(comp, "type", "")),
                 title=str(getattr(comp, "title", "") or ""),
                 description=str(getattr(comp, "description", "") or ""),
                 claims=claims,
@@ -1354,6 +1378,6 @@ def import_component_definition(oscal_json: bytes, source_label: str = "") -> Co
         )
 
     meta = comp_def.metadata
-    oscal_version = str(getattr(meta, "oscal_version", "") or "")
+    oscal_version = _scalar_str(getattr(meta, "oscal_version", ""))
     title = str(getattr(meta, "title", "") or "")
     return ComponentImportResult(True, [], components, oscal_version, title)

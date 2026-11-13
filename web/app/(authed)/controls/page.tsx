@@ -60,7 +60,8 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  fetchControlsList,
+  fetchCatalogCounts,
+  fetchControlsCatalog,
   fetchMyControls,
   fetchScopeCells,
   type ControlsListResponse,
@@ -356,7 +357,8 @@ function ControlsPageInner() {
   // Slice 224 — refetch the controls list when the scope filter changes.
   // The narrowing is server-side; the queryKey carries the scope so
   // TanStack invalidates correctly. `ALL` is treated as no-filter
-  // (fetchControlsList drops the query param entirely).
+  // (fetchControlsList drops the query param entirely). Issue #1740 —
+  // the catalog view walks every anchor page, not just the first 100.
   const scopeArg = filters.scope === ALL ? undefined : filters.scope;
   // Issue #1741 — the default view reads the tenant's controls; the
   // catalog view reads the anchors (with the server-side has_control
@@ -368,14 +370,14 @@ function ControlsPageInner() {
   });
   const anchorsQ = useQuery<ControlsListResponse>({
     queryKey: ["controls", "list", scopeArg ?? "all", String(hasControl)],
-    queryFn: () => fetchControlsList(scopeArg, hasControl),
+    queryFn: () => fetchControlsCatalog(scopeArg, hasControl),
     enabled: view === "catalog",
   });
-  // The catalog size for the "My controls" header. `has_control=true`
-  // keeps the page small; only the totals are read.
+  // The catalog size for the "My controls" header. Issue #1832: a
+  // one-row page; only the totals are read.
   const catalogCountsQ = useQuery<ControlsListResponse>({
     queryKey: ["controls", "catalog-counts"],
-    queryFn: () => fetchControlsList(undefined, true),
+    queryFn: fetchCatalogCounts,
     enabled: view === "mine",
   });
   const listQ = view === "mine" ? myControlsQ : anchorsQ;

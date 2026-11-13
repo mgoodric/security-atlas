@@ -25,34 +25,48 @@ evidence_queries:
     evidence_kind: jira.ticket_evidence.v1
     description: "Every active user has a closed security-training ticket within 365 days"
     expression: |
-      package atlas.controls.soc2.cc1_4
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      # input.users         — array of {id, active, email}
-      # input.training_tix  — array of jira tickets with labels[], resolution, resolution_date
-
-      allow if {
-        every u in input.users {
-          u.active == true
-          some t in input.training_tix
-          t.assignee == u.email
-          "security-training" in t.labels
-          t.resolution == "Done"
-          time.parse_rfc3339_ns(t.resolution_date) > (time.now_ns() - (365 * 24 * 60 * 60 * 1000000000))
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
   - id: training_completion_records_within_365d
     language: rego
     evidence_kind: security_awareness.training_completion.v1
     description: "Every assigned security-awareness training completion is current within 365 days"
     expression: |
-      package atlas.controls.soc2.cc1_4.training_records
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        input.assignment_id
-        time.parse_rfc3339_ns(input.completed_at) > (time.now_ns() - (365 * 24 * 60 * 60 * 1000000000))
-        input.completion_source in {"manual", "csv", "lms_connector"}
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"

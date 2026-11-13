@@ -75,6 +75,9 @@ def test_import_profile_resolves_against_supplied_catalog():
     )
     assert result.valid, result.errors
     assert result.profile_title == "FedRAMP-style Test Moderate Baseline"
+    # The profile's own declared oscal-version, not the 1.2.1 the resolver
+    # stamps on the resolved catalog (issue #1875).
+    assert result.oscal_version == "1.1.2", result.oscal_version
     ids = {c.control_id for c in result.controls}
     # include-controls selected exactly ac-1, ac-2, IAC-06 (NOT ac-3).
     assert ids == {"ac-1", "ac-2", "IAC-06"}

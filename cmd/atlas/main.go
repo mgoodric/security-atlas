@@ -38,6 +38,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -421,6 +422,16 @@ func main() {
 				}
 			}
 			localAuthResolver = oauthapi.NewDBUserResolverWithAuthPool(pool, resolverAuthPool)
+
+			// #1850: one live super_admins re-check, on the same
+			// BYPASSRLS pool the resolver uses to set the claim, for
+			// every path that would otherwise carry a stale claim:
+			// token exchange, device-code approval, and the JWT
+			// middleware (which drops the claim from a demoted user's
+			// live tokens). A nil pool fails closed.
+			superAdmins := superadmin.NewDBChecker(resolverAuthPool)
+			ep.AttachSuperAdminChecker(superAdmins)
+			srv.AttachSuperAdminChecker(superAdmins)
 			authorizeEP := oauthapi.NewAuthorizeEndpoint(oauthapi.AuthorizeEndpointConfig{
 				Codes:    codeStore,
 				Clients:  clients,
@@ -477,7 +488,9 @@ func main() {
 			deviceAuthEP := oauthapi.NewDeviceAuthorizationEndpoint(clients, deviceCodes, oauthapi.DeviceAuthorizationConfig{
 				Issuer: issuer,
 			})
-			deviceApprovalEP := oauthapi.NewDeviceApprovalEndpoint(deviceCodes, oauthapi.DeviceApprovalConfig{})
+			deviceApprovalEP := oauthapi.NewDeviceApprovalEndpoint(deviceCodes, oauthapi.DeviceApprovalConfig{
+				SuperAdmins: superAdmins,
+			})
 			ep.AttachDeviceCodeStore(deviceCodes)
 			oauthHandler.AttachDeviceAuthorizationEndpoint(deviceAuthEP)
 			oauthHandler.AttachDeviceApprovalEndpoint(deviceApprovalEP)
@@ -735,6 +748,12 @@ func main() {
 		// it reads/writes under the request's tenant RLS context (pool is the
 		// RLS app pool).
 		authHandler.AttachGroupDeriver(oidcGroupDeriver{resolver: grouprole.NewResolver(pool)})
+		// #1727: a local login may omit tenant_id on a single-tenant
+		// install. Resolving the implicit tenant reads `tenants` before
+		// any tenant context exists, so it needs the BYPASSRLS authPool.
+		if authPool != nil {
+			authHandler.AttachImplicitTenantResolver(authapi.PoolImplicitTenantResolver{Q: authPool})
+		}
 		srv.AttachAuthHandler(authHandler)
 		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t, group_role_derivation=on)\n",
 			secureCookies, localAS != nil)

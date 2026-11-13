@@ -139,6 +139,7 @@ func (s *Server) buildRouter() *chi.Mux {
 			ExpectedIssuer:   s.jwtIssuer,
 			ExpectedAudience: s.jwtAudience,
 			CookieName:       jwtmw.DefaultCookieName,
+			SuperAdmins:      s.jwtSuperAdmins,
 		}), "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
@@ -218,7 +219,9 @@ func (s *Server) buildRouter() *chi.Mux {
 	// and board reads). Identical to the former inline construction.
 	// #1750: the slice 054 aggregation engine runs inside every risk
 	// write's transaction (canvas §6.6 "on each risk write").
-	risksStore := risk.NewStore(s.dbPool).WithAfterRiskWrite(aggrule.EvaluateOnRiskWrite)
+	risksStore := risk.NewStore(s.dbPool).
+		WithBeforeRiskWrite(aggrule.LockOnRiskWrite).
+		WithAfterRiskWrite(aggrule.EvaluateOnRiskWrite)
 	vendorStore := vendor.NewStore(s.dbPool)
 	freshnessStore := freshness.NewStore(s.dbPool)
 	driftStore := drift.NewStore(s.dbPool)

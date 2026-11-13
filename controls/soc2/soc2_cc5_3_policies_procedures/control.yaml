@@ -23,18 +23,23 @@ evidence_queries:
     evidence_kind: policy.acknowledgment.v1
     description: "Every active user has acknowledged the current version of each in-scope policy"
     expression: |
-      package atlas.controls.soc2.cc5_3
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every p in input.policies {
-          p.in_scope == true
-          every u in input.active_users {
-            some a in input.acknowledgments
-            a.user_id == u.id
-            a.policy_id == p.id
-            a.policy_version_id == p.current_version_id
-          }
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"

@@ -23,18 +23,26 @@ evidence_queries:
     evidence_kind: policy.acknowledgment.v1
     description: "Every on-call rotation member has acknowledged the current IR plan version"
     expression: |
-      package atlas.controls.soc2.cc7_4
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every u in input.on_call_users {
-          some a in input.acknowledgments
-          a.user_id == u.id
-          a.policy_id == "policy_incident_response"
-          a.policy_version_id == input.current_ir_plan_version_id
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
 
 manual_evidence_schema:
   type: object

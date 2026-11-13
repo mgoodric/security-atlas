@@ -105,6 +105,33 @@ func TestSelectForDeletion(t *testing.T) {
 	})
 }
 
+func TestConfigFromLookupDirDerivation(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"neither set", map[string]string{}, DefaultDir},
+		{"data dir set", map[string]string{"ATLAS_DATA_DIR": "/home/op/atlas"}, "/home/op/atlas/backups"},
+		{"data dir empty", map[string]string{"ATLAS_DATA_DIR": ""}, DefaultDir},
+		{"backup dir wins", map[string]string{"ATLAS_DATA_DIR": "/home/op/atlas", "ATLAS_BACKUP_DIR": "/mnt/backups"}, "/mnt/backups"},
+		{"backup dir alone", map[string]string{"ATLAS_BACKUP_DIR": "/mnt/backups"}, "/mnt/backups"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := configFromLookup(func(k string) (string, bool) {
+				v, ok := tc.env[k]
+				return v, ok
+			})
+			if cfg.Dir != tc.want {
+				t.Errorf("Dir = %q, want %q", cfg.Dir, tc.want)
+			}
+		})
+	}
+}
+
 func TestConfigFromLookupDefaults(t *testing.T) {
 	t.Parallel()
 	cfg := configFromLookup(func(string) (string, bool) { return "", false })

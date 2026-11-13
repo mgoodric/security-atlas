@@ -55,6 +55,15 @@ func (ns NullControlImplementationType) Value() (driver.Value, error) {
 	return string(ns.ControlImplementationType), nil
 }
 
+func AllControlImplementationTypeValues() []ControlImplementationType {
+	return []ControlImplementationType{
+		ControlImplementationTypeAutomated,
+		ControlImplementationTypeSemiAutomated,
+		ControlImplementationTypeManualAttested,
+		ControlImplementationTypeManualPeriodic,
+	}
+}
+
 type ControlLifecycleState string
 
 const (
@@ -98,6 +107,16 @@ func (ns NullControlLifecycleState) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.ControlLifecycleState), nil
+}
+
+func AllControlLifecycleStateValues() []ControlLifecycleState {
+	return []ControlLifecycleState{
+		ControlLifecycleStateDraft,
+		ControlLifecycleStateProposed,
+		ControlLifecycleStateActive,
+		ControlLifecycleStateDeprecated,
+		ControlLifecycleStateRetired,
+	}
 }
 
 type CrosswalkMappingTier string
@@ -144,6 +163,15 @@ func (ns NullCrosswalkMappingTier) Value() (driver.Value, error) {
 	return string(ns.CrosswalkMappingTier), nil
 }
 
+func AllCrosswalkMappingTierValues() []CrosswalkMappingTier {
+	return []CrosswalkMappingTier{
+		CrosswalkMappingTierDraft,
+		CrosswalkMappingTierUnderReview,
+		CrosswalkMappingTierVerified,
+		CrosswalkMappingTierRejected,
+	}
+}
+
 type CrosswalkSourceAttribution string
 
 const (
@@ -187,6 +215,14 @@ func (ns NullCrosswalkSourceAttribution) Value() (driver.Value, error) {
 	return string(ns.CrosswalkSourceAttribution), nil
 }
 
+func AllCrosswalkSourceAttributionValues() []CrosswalkSourceAttribution {
+	return []CrosswalkSourceAttribution{
+		CrosswalkSourceAttributionScfOfficial,
+		CrosswalkSourceAttributionCommunityDraft,
+		CrosswalkSourceAttributionOrgInternal,
+	}
+}
+
 type CsfProfileKind string
 
 const (
@@ -227,6 +263,13 @@ func (ns NullCsfProfileKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.CsfProfileKind), nil
+}
+
+func AllCsfProfileKindValues() []CsfProfileKind {
+	return []CsfProfileKind{
+		CsfProfileKindCurrent,
+		CsfProfileKindTarget,
+	}
 }
 
 type CsfTier string
@@ -273,6 +316,15 @@ func (ns NullCsfTier) Value() (driver.Value, error) {
 	return string(ns.CsfTier), nil
 }
 
+func AllCsfTierValues() []CsfTier {
+	return []CsfTier{
+		CsfTierTier1Partial,
+		CsfTierTier2RiskInformed,
+		CsfTierTier3Repeatable,
+		CsfTierTier4Adaptive,
+	}
+}
+
 type DecisionStatus string
 
 const (
@@ -315,6 +367,15 @@ func (ns NullDecisionStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.DecisionStatus), nil
+}
+
+func AllDecisionStatusValues() []DecisionStatus {
+	return []DecisionStatus{
+		DecisionStatusActive,
+		DecisionStatusRevisited,
+		DecisionStatusSuperseded,
+		DecisionStatusExpired,
+	}
 }
 
 type EvidenceFreshnessClass string
@@ -363,6 +424,17 @@ func (ns NullEvidenceFreshnessClass) Value() (driver.Value, error) {
 	return string(ns.EvidenceFreshnessClass), nil
 }
 
+func AllEvidenceFreshnessClassValues() []EvidenceFreshnessClass {
+	return []EvidenceFreshnessClass{
+		EvidenceFreshnessClassRealtime,
+		EvidenceFreshnessClassDaily,
+		EvidenceFreshnessClassWeekly,
+		EvidenceFreshnessClassMonthly,
+		EvidenceFreshnessClassQuarterly,
+		EvidenceFreshnessClassAnnual,
+	}
+}
+
 type EvidenceResult string
 
 const (
@@ -405,6 +477,15 @@ func (ns NullEvidenceResult) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.EvidenceResult), nil
+}
+
+func AllEvidenceResultValues() []EvidenceResult {
+	return []EvidenceResult{
+		EvidenceResultPass,
+		EvidenceResultFail,
+		EvidenceResultNa,
+		EvidenceResultInconclusive,
+	}
 }
 
 type FrameworkVersionAuditAction string
@@ -451,6 +532,15 @@ func (ns NullFrameworkVersionAuditAction) Value() (driver.Value, error) {
 	return string(ns.FrameworkVersionAuditAction), nil
 }
 
+func AllFrameworkVersionAuditActionValues() []FrameworkVersionAuditAction {
+	return []FrameworkVersionAuditAction{
+		FrameworkVersionAuditActionPromote,
+		FrameworkVersionAuditActionRevert,
+		FrameworkVersionAuditActionMigrationApprove,
+		FrameworkVersionAuditActionMigrationReject,
+	}
+}
+
 type FrameworkVersionMigrationMatchKind string
 
 const (
@@ -492,6 +582,14 @@ func (ns NullFrameworkVersionMigrationMatchKind) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.FrameworkVersionMigrationMatchKind), nil
+}
+
+func AllFrameworkVersionMigrationMatchKindValues() []FrameworkVersionMigrationMatchKind {
+	return []FrameworkVersionMigrationMatchKind{
+		FrameworkVersionMigrationMatchKindExactCode,
+		FrameworkVersionMigrationMatchKindAdded,
+		FrameworkVersionMigrationMatchKindRemoved,
+	}
 }
 
 type FrameworkVersionMigrationStatus string
@@ -537,6 +635,14 @@ func (ns NullFrameworkVersionMigrationStatus) Value() (driver.Value, error) {
 	return string(ns.FrameworkVersionMigrationStatus), nil
 }
 
+func AllFrameworkVersionMigrationStatusValues() []FrameworkVersionMigrationStatus {
+	return []FrameworkVersionMigrationStatus{
+		FrameworkVersionMigrationStatusPending,
+		FrameworkVersionMigrationStatusApproved,
+		FrameworkVersionMigrationStatusRejected,
+	}
+}
+
 type FrameworkVersionStatus string
 
 const (
@@ -578,6 +684,14 @@ func (ns NullFrameworkVersionStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.FrameworkVersionStatus), nil
+}
+
+func AllFrameworkVersionStatusValues() []FrameworkVersionStatus {
+	return []FrameworkVersionStatus{
+		FrameworkVersionStatusCurrent,
+		FrameworkVersionStatusLegacy,
+		FrameworkVersionStatusWithdrawn,
+	}
 }
 
 type PolicyStatus string
@@ -625,6 +739,16 @@ func (ns NullPolicyStatus) Value() (driver.Value, error) {
 	return string(ns.PolicyStatus), nil
 }
 
+func AllPolicyStatusValues() []PolicyStatus {
+	return []PolicyStatus{
+		PolicyStatusDraft,
+		PolicyStatusUnderReview,
+		PolicyStatusApproved,
+		PolicyStatusPublished,
+		PolicyStatusSuperseded,
+	}
+}
+
 type RiskAcceptanceStatus string
 
 const (
@@ -665,6 +789,13 @@ func (ns NullRiskAcceptanceStatus) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RiskAcceptanceStatus), nil
+}
+
+func AllRiskAcceptanceStatusValues() []RiskAcceptanceStatus {
+	return []RiskAcceptanceStatus{
+		RiskAcceptanceStatusProposed,
+		RiskAcceptanceStatusApproved,
+	}
 }
 
 type RiskCategory string
@@ -714,6 +845,18 @@ func (ns NullRiskCategory) Value() (driver.Value, error) {
 	return string(ns.RiskCategory), nil
 }
 
+func AllRiskCategoryValues() []RiskCategory {
+	return []RiskCategory{
+		RiskCategoryConfidentiality,
+		RiskCategoryIntegrity,
+		RiskCategoryAvailability,
+		RiskCategoryPrivacy,
+		RiskCategoryRegulatory,
+		RiskCategoryOperational,
+		RiskCategoryFinancial,
+	}
+}
+
 type RiskLevel string
 
 const (
@@ -755,6 +898,14 @@ func (ns NullRiskLevel) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RiskLevel), nil
+}
+
+func AllRiskLevelValues() []RiskLevel {
+	return []RiskLevel{
+		RiskLevelTeam,
+		RiskLevelOrg,
+		RiskLevelCompany,
+	}
 }
 
 type RiskMethodology string
@@ -802,6 +953,16 @@ func (ns NullRiskMethodology) Value() (driver.Value, error) {
 	return string(ns.RiskMethodology), nil
 }
 
+func AllRiskMethodologyValues() []RiskMethodology {
+	return []RiskMethodology{
+		RiskMethodologyNist80030,
+		RiskMethodologyFair,
+		RiskMethodologyCisRam,
+		RiskMethodologyIso27005,
+		RiskMethodologyQualitative5x5,
+	}
+}
+
 type RiskTreatment string
 
 const (
@@ -845,6 +1006,16 @@ func (ns NullRiskTreatment) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.RiskTreatment), nil
+}
+
+func AllRiskTreatmentValues() []RiskTreatment {
+	return []RiskTreatment{
+		RiskTreatmentAccept,
+		RiskTreatmentMitigate,
+		RiskTreatmentTransfer,
+		RiskTreatmentAvoid,
+		RiskTreatmentUntreated,
+	}
 }
 
 type ScopeDataClassification string
@@ -891,6 +1062,15 @@ func (ns NullScopeDataClassification) Value() (driver.Value, error) {
 	return string(ns.ScopeDataClassification), nil
 }
 
+func AllScopeDataClassificationValues() []ScopeDataClassification {
+	return []ScopeDataClassification{
+		ScopeDataClassificationRestricted,
+		ScopeDataClassificationConfidential,
+		ScopeDataClassificationInternal,
+		ScopeDataClassificationPublic,
+	}
+}
+
 type ScopeEnvironment string
 
 const (
@@ -933,6 +1113,15 @@ func (ns NullScopeEnvironment) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.ScopeEnvironment), nil
+}
+
+func AllScopeEnvironmentValues() []ScopeEnvironment {
+	return []ScopeEnvironment{
+		ScopeEnvironmentProd,
+		ScopeEnvironmentStaging,
+		ScopeEnvironmentDev,
+		ScopeEnvironmentSandbox,
+	}
 }
 
 type StrmRelationshipType string
@@ -980,6 +1169,16 @@ func (ns NullStrmRelationshipType) Value() (driver.Value, error) {
 	return string(ns.StrmRelationshipType), nil
 }
 
+func AllStrmRelationshipTypeValues() []StrmRelationshipType {
+	return []StrmRelationshipType{
+		StrmRelationshipTypeEqual,
+		StrmRelationshipTypeSubsetOf,
+		StrmRelationshipTypeSupersetOf,
+		StrmRelationshipTypeIntersectsWith,
+		StrmRelationshipTypeNoRelationship,
+	}
+}
+
 type VendorBillingCadence string
 
 const (
@@ -1025,6 +1224,16 @@ func (ns NullVendorBillingCadence) Value() (driver.Value, error) {
 	return string(ns.VendorBillingCadence), nil
 }
 
+func AllVendorBillingCadenceValues() []VendorBillingCadence {
+	return []VendorBillingCadence{
+		VendorBillingCadenceMonthly,
+		VendorBillingCadenceQuarterly,
+		VendorBillingCadenceAnnual,
+		VendorBillingCadenceMultiYear,
+		VendorBillingCadenceOneTime,
+	}
+}
+
 type VendorCommercialStatus string
 
 const (
@@ -1068,6 +1277,14 @@ func (ns NullVendorCommercialStatus) Value() (driver.Value, error) {
 	return string(ns.VendorCommercialStatus), nil
 }
 
+func AllVendorCommercialStatusValues() []VendorCommercialStatus {
+	return []VendorCommercialStatus{
+		VendorCommercialStatusActive,
+		VendorCommercialStatusTrialing,
+		VendorCommercialStatusChurned,
+	}
+}
+
 type VendorCriticality string
 
 const (
@@ -1109,6 +1326,14 @@ func (ns NullVendorCriticality) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.VendorCriticality), nil
+}
+
+func AllVendorCriticalityValues() []VendorCriticality {
+	return []VendorCriticality{
+		VendorCriticalityLow,
+		VendorCriticalityMedium,
+		VendorCriticalityHigh,
+	}
 }
 
 type VendorReviewCadence string
@@ -1155,6 +1380,15 @@ func (ns NullVendorReviewCadence) Value() (driver.Value, error) {
 	return string(ns.VendorReviewCadence), nil
 }
 
+func AllVendorReviewCadenceValues() []VendorReviewCadence {
+	return []VendorReviewCadence{
+		VendorReviewCadenceMonthly,
+		VendorReviewCadenceQuarterly,
+		VendorReviewCadenceBiannual,
+		VendorReviewCadenceAnnual,
+	}
+}
+
 type VendorReviewOutcome string
 
 const (
@@ -1197,6 +1431,15 @@ func (ns NullVendorReviewOutcome) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.VendorReviewOutcome), nil
+}
+
+func AllVendorReviewOutcomeValues() []VendorReviewOutcome {
+	return []VendorReviewOutcome{
+		VendorReviewOutcomePass,
+		VendorReviewOutcomePassWithFindings,
+		VendorReviewOutcomeFail,
+		VendorReviewOutcomeWaived,
+	}
 }
 
 type VendorToolCategory string
@@ -1246,6 +1489,20 @@ func (ns NullVendorToolCategory) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.VendorToolCategory), nil
+}
+
+func AllVendorToolCategoryValues() []VendorToolCategory {
+	return []VendorToolCategory{
+		VendorToolCategoryEdr,
+		VendorToolCategorySiem,
+		VendorToolCategoryIam,
+		VendorToolCategoryVulnMgmt,
+		VendorToolCategoryCloudSecurity,
+		VendorToolCategoryAppsec,
+		VendorToolCategoryGrc,
+		VendorToolCategoryMonitoring,
+		VendorToolCategoryOther,
+	}
 }
 
 type AccessReviewCampaign struct {
@@ -1434,6 +1691,10 @@ type ApiKey struct {
 	OwnerRoles     []string           `json:"owner_roles"`
 	Last4          string             `json:"last4"`
 	TtlSeconds     int64              `json:"ttl_seconds"`
+	// Why the key exists, when it is not an ordinary issued key. 'bootstrap-recovery' marks the admin key reset-bootstrap minted (#1892).
+	Purpose *string `json:"purpose"`
+	// users(id) of whoever minted the key, for attribution only (#1892). Not the key's owner: that is issued_by. Never read for identity or authorization.
+	MintedBy pgtype.UUID `json:"minted_by"`
 }
 
 type Artifact struct {

@@ -30,11 +30,99 @@ type Report struct {
 	EdgesUpdated   int
 	EdgesUnchanged int
 
+	// EdgesSkipped lists the (requirement, anchor) pairs whose incoming row
+	// was dropped because the existing edge carries a higher-precedence
+	// source_attribution (see attributionRank). The stored edge is left
+	// untouched, provenance and mapping_tier included.
+	EdgesSkipped []SkippedEdge
+
+	// EdgesUpgradedOntoRejected lists edges whose provenance this import
+	// raised while their mapping_tier is 'rejected'. A rejection is a human
+	// judgment the importer never overrides, so these stay hidden from
+	// coverage until a reviewer reopens them (rejected -> draft, #1849).
+	EdgesUpgradedOntoRejected []UpgradedEdge
+
+	// EdgesTierReseeded lists edges whose content this import changed and
+	// whose mapping_tier it therefore re-seeded per ADR 0018 §2 (#1849): a
+	// tier vouches for the content a reviewer saw, so changed content restarts
+	// at the tier its new source would seed at. Each re-seed also appends an
+	// audit row by SystemReviewerID.
+	EdgesTierReseeded []ReseededEdge
+
 	// MappingsByAttribution tallies edges by their source_attribution
 	// label. Exposed for the HITL audit summary so the orchestrator
 	// can read "X community-draft mappings ingested, 0 scf_official"
 	// without a second query.
 	MappingsByAttribution map[string]int
+}
+
+// SkippedEdge names one crosswalk row the importer refused to apply because
+// it would downgrade an existing edge's provenance.
+type SkippedEdge struct {
+	RequirementCode     string
+	SCFAnchor           string
+	ExistingAttribution string
+	IncomingAttribution string
+}
+
+// UpgradedEdge names one existing edge whose provenance an import raised.
+type UpgradedEdge struct {
+	RequirementCode     string
+	SCFAnchor           string
+	PreviousAttribution string
+	IncomingAttribution string
+}
+
+// ReseededEdge names one existing edge whose tier an import re-seeded.
+type ReseededEdge struct {
+	RequirementCode string
+	SCFAnchor       string
+	PreviousTier    string
+	NewTier         string
+}
+
+// SystemReviewerID is the reviewer_id on a tier-transition audit row written
+// by the importer rather than a person. fw_to_scf_edge_tier_transitions has a
+// NOT NULL uuid reviewer column, and no atlas user has the nil uuid, so the
+// row reads unambiguously as a system move; its note names the import.
+var SystemReviewerID = uuid.Nil
+
+// seedTier is the tier ADR 0018 §2 seeds an edge from this source at: an
+// scf_official mapping is trusted on arrival, every other source starts at
+// draft.
+func seedTier(a dbx.CrosswalkSourceAttribution) dbx.CrosswalkMappingTier {
+	if a == dbx.CrosswalkSourceAttributionScfOfficial {
+		return dbx.CrosswalkMappingTierVerified
+	}
+	return dbx.CrosswalkMappingTierDraft
+}
+
+// reseedTier decides the tier of an existing edge whose content an import
+// just changed (#1849). The content a reviewer vetted is gone, so the edge
+// restarts at the seed tier of its new source. A rejected edge is the one
+// exception: rejection is a human judgment, and only a reviewer reopens it.
+// Returns the target tier and whether it differs from the current one.
+func reseedTier(current dbx.CrosswalkMappingTier, incoming dbx.CrosswalkSourceAttribution) (dbx.CrosswalkMappingTier, bool) {
+	if current == dbx.CrosswalkMappingTierRejected {
+		return current, false
+	}
+	target := seedTier(incoming)
+	return target, target != current
+}
+
+// attributionRank orders crosswalk provenance: scf_official > community_draft
+// > org_internal. Edges are global catalog data, so a weaker source must
+// never overwrite a stronger one for every tenant at once.
+func attributionRank(a dbx.CrosswalkSourceAttribution) int {
+	switch a {
+	case dbx.CrosswalkSourceAttributionScfOfficial:
+		return 3
+	case dbx.CrosswalkSourceAttributionCommunityDraft:
+		return 2
+	case dbx.CrosswalkSourceAttributionOrgInternal:
+		return 1
+	}
+	return 0
 }
 
 // pgxBeginner is the minimum surface Import needs from the DB handle.
@@ -214,16 +302,28 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		}
 		relType := dbx.StrmRelationshipType(m.RelationshipType)
 		srcAttr := dbx.CrosswalkSourceAttribution(attribution)
-		report.MappingsByAttribution[attribution]++
 
 		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.RequirementCode + "-" + m.SCFAnchor)
 
-		existing, lookupErr := q.GetFwToScfEdge(ctx, dbx.GetFwToScfEdgeParams{
+		// FOR UPDATE: the precedence check below reads, then writes. Without
+		// the row lock a concurrent weaker import that passed its check
+		// against the old row would overwrite a just-committed stronger edge.
+		existing, lookupErr := q.GetFwToScfEdgeForUpdate(ctx, dbx.GetFwToScfEdgeForUpdateParams{
 			FrameworkRequirementID: reqID,
 			ScfAnchorID:            anchor.ID,
 		})
 		switch {
 		case lookupErr == nil:
+			if attributionRank(srcAttr) < attributionRank(existing.SourceAttribution) {
+				report.EdgesSkipped = append(report.EdgesSkipped, SkippedEdge{
+					RequirementCode:     m.RequirementCode,
+					SCFAnchor:           m.SCFAnchor,
+					ExistingAttribution: string(existing.SourceAttribution),
+					IncomingAttribution: attribution,
+				})
+				continue
+			}
+			report.MappingsByAttribution[attribution]++
 			if edgeContentEqual(existing, relType, m.Strength, srcAttr, m.Rationale) {
 				report.EdgesUnchanged++
 				continue
@@ -238,7 +338,36 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				return Report{}, fmt.Errorf("crosswalk: update edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 			}
 			report.EdgesUpdated++
+			if target, changed := reseedTier(existing.MappingTier, srcAttr); changed {
+				if err := q.SetFwToScfEdgeTier(ctx, dbx.SetFwToScfEdgeTierParams{ID: existing.ID, MappingTier: target}); err != nil {
+					return Report{}, fmt.Errorf("crosswalk: reseed tier %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
+				}
+				if _, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
+					EdgeID:     existing.ID,
+					ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
+					FromTier:   existing.MappingTier,
+					ToTier:     target,
+					Note:       fmt.Sprintf("crosswalk import %s@%s (%s) changed the mapping content; tier re-seeded per ADR 0018 §2", cw.FrameworkSlug, cw.FrameworkVersion, attribution),
+				}); err != nil {
+					return Report{}, fmt.Errorf("crosswalk: audit tier reseed %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
+				}
+				report.EdgesTierReseeded = append(report.EdgesTierReseeded, ReseededEdge{
+					RequirementCode: m.RequirementCode,
+					SCFAnchor:       m.SCFAnchor,
+					PreviousTier:    string(existing.MappingTier),
+					NewTier:         string(target),
+				})
+			}
+			if existing.MappingTier == dbx.CrosswalkMappingTierRejected && srcAttr != existing.SourceAttribution {
+				report.EdgesUpgradedOntoRejected = append(report.EdgesUpgradedOntoRejected, UpgradedEdge{
+					RequirementCode:     m.RequirementCode,
+					SCFAnchor:           m.SCFAnchor,
+					PreviousAttribution: string(existing.SourceAttribution),
+					IncomingAttribution: attribution,
+				})
+			}
 		case errors.Is(lookupErr, pgx.ErrNoRows):
+			report.MappingsByAttribution[attribution]++
 			if _, err := q.InsertFwToScfEdge(ctx, dbx.InsertFwToScfEdgeParams{
 				ID:                     edgeID,
 				FrameworkRequirementID: reqID,
@@ -249,6 +378,14 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				Rationale:              m.Rationale,
 			}); err != nil {
 				return Report{}, fmt.Errorf("crosswalk: insert edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
+			}
+			// The column defaults to draft; an official edge seeds at verified
+			// (ADR 0018 §2), as the tier migration did for existing rows. A seed
+			// is not a transition, so no audit row.
+			if tier := seedTier(srcAttr); tier != dbx.CrosswalkMappingTierDraft {
+				if err := q.SetFwToScfEdgeTier(ctx, dbx.SetFwToScfEdgeTierParams{ID: edgeID, MappingTier: tier}); err != nil {
+					return Report{}, fmt.Errorf("crosswalk: seed tier %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
+				}
 			}
 			report.EdgesCreated++
 		default:

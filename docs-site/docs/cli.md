@@ -43,7 +43,9 @@ commands need the `atlas_migrate` role; the read/verify paths use `atlas_app`.
 | `oscal sign` / `verify` / `config-check` | Sign, verify, and inspect OSCAL bundle signing config            |
 | `features list` / `set <key> <on\|off>`  | Per-tenant feature-flag toggles (admin only)                     |
 | `bootstrap hash-password`                | Read a password from stdin, print its argon2id hash              |
-| `oauth issue-client <name>`              | Issue an OAuth `client_credentials` identity                     |
+| `oauth issue-client <name>`              | Issue an OAuth `client_credentials` identity bound to a tenant   |
+| `oauth bind-client <client_id>`          | Bind an existing OAuth client to a tenant                        |
+| `oauth unbound-rows [--purge]`           | List (or purge) rows left in the all-zeros tenant                |
 | `oauth add-redirect-uri <id> <uri>`      | Register a redirect URI for an OAuth client                      |
 | `oauth migrate-api-key <api_key>`        | Issue an OAuth client mirroring a legacy API key                 |
 | `keys list` / `rotate` / `prune`         | JWT signing-key lifecycle                                        |
@@ -100,7 +102,7 @@ The bearer is printed exactly once, at issue time. `--kinds` empty means all
 evidence kinds; `--ttl 0` (the default) means no expiry.
 
 `credentials issue --reset-bootstrap --force` is the first-login recovery
-path — see [First-time login](troubleshooting/first-login.md).
+path — see [First-time login](troubleshooting/first-login.md). It mints a tenant admin key that expires (24h by default, `--ttl` up to `168h`) and refuses `--scope` and `--kinds`; revoke the key once you have signed in another way.
 
 ## catalog
 

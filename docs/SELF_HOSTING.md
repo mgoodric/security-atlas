@@ -88,6 +88,26 @@ curl -fsS http://localhost:3000 -o /dev/null -w '%{http_code}\n'   # expect 200
 just self-host-wipe                                # tear down + delete volumes
 ```
 
+### Signing in from a script
+
+`POST /auth/local/login` takes a JSON body of `tenant_id`, `email` and
+`password`, and answers with the session cookie and, when the in-app
+authorization server is configured, an `atlas_jwt` in `token`:
+
+```sh
+curl -fsS -X POST http://localhost:8080/auth/local/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"..."}'
+```
+
+- **One tenant (the self-host default):** `tenant_id` may be omitted; the
+  login uses the install's only tenant.
+- **Several tenants:** `tenant_id` is required. Without it the endpoint
+  answers `400 {"error":"tenant_id is required"}`. The tenant ids are on
+  `GET /v1/admin/tenants`.
+- The all-zeros tenant id is never accepted. Wrong passwords and unknown
+  emails both answer `401 invalid credentials`.
+
 ### Bootstrap credential — rotate it
 
 `ATLAS_BOOTSTRAP_TOKEN` is a pre-shared admin token the one-shot
@@ -424,18 +444,18 @@ or volume encryption) exactly as the runbook describes.
 
 Configuration (all optional; sensible defaults for the single-VM bundle):
 
-| Env var                        | Default                  | Meaning                                                          |
-| ------------------------------ | ------------------------ | ---------------------------------------------------------------- |
-| `ATLAS_BACKUP_TARGET`          | `local`                  | `local` (volume) or `s3`                                         |
-| `ATLAS_BACKUP_DIR`             | `/var/lib/atlas/backups` | local-target directory (mount a volume here)                     |
-| `ATLAS_BACKUP_S3_BUCKET`       | —                        | bucket for the `s3` target                                       |
-| `ATLAS_BACKUP_S3_PREFIX`       | —                        | key prefix within the bucket                                     |
-| `ATLAS_BACKUP_S3_ENDPOINT`     | —                        | S3-compatible endpoint (e.g. MinIO); uses standard `AWS_*` creds |
-| `ATLAS_BACKUP_INTERVAL`        | `24h`                    | backup cadence                                                   |
-| `ATLAS_BACKUP_VERIFY_INTERVAL` | `24h`                    | restore-verification cadence                                     |
-| `ATLAS_BACKUP_KEEP_DAILY`      | `7`                      | dailies to retain                                                |
-| `ATLAS_BACKUP_KEEP_WEEKLY`     | `4`                      | weeklies to retain                                               |
-| `ATLAS_BACKUP_ALERT_RECIPIENT` | —                        | user id that receives failure notifications                      |
+| Env var                        | Default                   | Meaning                                                                                               |
+| ------------------------------ | ------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `ATLAS_BACKUP_TARGET`          | `local`                   | `local` (volume) or `s3`                                                                              |
+| `ATLAS_BACKUP_DIR`             | `$ATLAS_DATA_DIR/backups` | local-target directory (mount a volume here); `/var/lib/atlas/backups` when `ATLAS_DATA_DIR` is unset |
+| `ATLAS_BACKUP_S3_BUCKET`       | —                         | bucket for the `s3` target                                                                            |
+| `ATLAS_BACKUP_S3_PREFIX`       | —                         | key prefix within the bucket                                                                          |
+| `ATLAS_BACKUP_S3_ENDPOINT`     | —                         | S3-compatible endpoint (e.g. MinIO); uses standard `AWS_*` creds                                      |
+| `ATLAS_BACKUP_INTERVAL`        | `24h`                     | backup cadence                                                                                        |
+| `ATLAS_BACKUP_VERIFY_INTERVAL` | `24h`                     | restore-verification cadence                                                                          |
+| `ATLAS_BACKUP_KEEP_DAILY`      | `7`                       | dailies to retain                                                                                     |
+| `ATLAS_BACKUP_KEEP_WEEKLY`     | `4`                       | weeklies to retain                                                                                    |
+| `ATLAS_BACKUP_ALERT_RECIPIENT` | —                         | user id that receives failure notifications                                                           |
 
 > **Scope note.** The automated dump is a logical (data + minimal-schema)
 > dump tuned for continuity + restore-verification. For exact catalog fidelity

@@ -136,13 +136,14 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		}
 		if withState {
 			var rows []dbx.ListSCFAnchorsForVersionWithStateRow
-			err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+			err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID) error {
 				var inner error
 				rows, inner = q.ListSCFAnchorsForVersionWithState(ctx, dbx.ListSCFAnchorsForVersionWithStateParams{
 					FrameworkVersionID: pgtype.UUID{Bytes: uid, Valid: true},
 					Limit:              limit,
 					Offset:             offset,
 					ScopeCellID:        scopeCell,
+					TenantID:           tenantID,
 				})
 				return inner
 			})
@@ -171,18 +172,19 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 			rows   []dbx.ListSCFAnchorsLatestWithStateRow
 			counts dbx.CountSCFAnchorsLatestRow
 		)
-		err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID) error {
 			var inner error
 			rows, inner = q.ListSCFAnchorsLatestWithState(ctx, dbx.ListSCFAnchorsLatestWithStateParams{
 				Limit:       limit,
 				Offset:      offset,
 				HasControl:  hasControl,
 				ScopeCellID: scopeCell,
+				TenantID:    tenantID,
 			})
 			if inner != nil {
 				return inner
 			}
-			counts, inner = q.CountSCFAnchorsLatest(ctx)
+			counts, inner = q.CountSCFAnchorsLatest(ctx, tenantID)
 			return inner
 		})
 		if err != nil {
@@ -211,16 +213,23 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 
 // inTenantTx opens a tx on the pool, sets the `app.current_tenant` GUC
 // from the request context's tenant binding (slice-033 middleware
-// wired this), runs fn, and commits. Mirrors the ucfcoverage pattern.
+// wired this), runs fn with the tenant id, and commits. Mirrors the
+// ucfcoverage pattern. The tenant id feeds the queries' explicit
+// `c.tenant_id` predicates (issue #1832), which back up RLS.
 // Required for the slice-104 `?include=state` join — control_evaluations
 // + controls are tenant-scoped under FORCE ROW LEVEL SECURITY, so RLS
 // denies on unset GUC.
-func (h *Handler) inTenantTx(ctx context.Context, fn func(context.Context, *dbx.Queries) error) error {
+func (h *Handler) inTenantTx(ctx context.Context, fn func(context.Context, *dbx.Queries, pgtype.UUID) error) error {
 	if h.pool == nil {
 		return fmt.Errorf("anchors: pool not wired; ?include=state requires NewWithPool")
 	}
-	if _, err := tenancy.TenantFromContext(ctx); err != nil {
+	tid, err := tenancy.TenantFromContext(ctx)
+	if err != nil {
 		return err
+	}
+	tenantUUID, err := uuid.Parse(tid)
+	if err != nil {
+		return fmt.Errorf("anchors: tenant id: %w", err)
 	}
 	tx, err := h.pool.Begin(ctx)
 	if err != nil {
@@ -230,7 +239,7 @@ func (h *Handler) inTenantTx(ctx context.Context, fn func(context.Context, *dbx.
 	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
 		return err
 	}
-	if err := fn(ctx, dbx.New(tx)); err != nil {
+	if err := fn(ctx, dbx.New(tx), pgtype.UUID{Bytes: tenantUUID, Valid: true}); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {

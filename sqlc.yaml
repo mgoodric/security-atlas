@@ -91,6 +91,7 @@ sql:
       - "migrations/sql/20260802000000_change_management.sql"
       - "migrations/sql/20260804000000_incident_register.sql"
       - "migrations/sql/20260809000001_risk_acceptance_status.sql"
+      - "migrations/sql/20260814000000_api_keys_purpose.sql"
     queries: "internal/db/queries"
     gen:
       go:
@@ -100,3 +101,4 @@ sql:
         emit_pointers_for_null_types: true
         emit_interface: true
         emit_json_tags: true
+        emit_all_enum_values: true

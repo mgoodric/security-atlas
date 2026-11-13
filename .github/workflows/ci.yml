@@ -273,7 +273,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - name: Verify go.mod is tidy
         run: |
@@ -364,7 +364,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - name: Build atlas binary
         run: go build -o atlas ./cmd/atlas
@@ -483,7 +483,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - name: Install cosign
         # Slice 413: the internal/oscal/cosign integration tests exercise
@@ -497,6 +497,27 @@ jobs:
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: "v3.0.6"
+      # Issue #1875: the bridge-dependent Go tests (internal/oscal on B5,
+      # catalogimport + profileimport on B3, componentimport on B5) start the
+      # Python oscal-bridge as a subprocess. Install it on those two legs and
+      # set ATLAS_REQUIRE_OSCAL_BRIDGE=1 so an unavailable bridge fails the
+      # test instead of skipping it (internal/oscal/bridgetest). The bridge is
+      # a uv workspace member, so the env lands in the root .venv.
+      - name: Install uv (oscal-bridge — legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync oscal-bridge env (legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        run: |
+          uv python install 3.11
+          uv sync --frozen --package atlas-oscal-bridge
+          {
+            echo "OSCAL_BRIDGE_PYTHON=$(pwd)/.venv/bin/python"
+            echo "ATLAS_REQUIRE_OSCAL_BRIDGE=1"
+          } >> "$GITHUB_ENV"
       - name: Start LocalStack KMS (slice 425 — OPTIONAL, leg B3 only)
         # Slice 425: the internal/oscal/cosign LocalStack round-trip test
         # (cosign_kms_localstack_integration_test.go) drives the REAL
@@ -748,7 +769,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       # Slice 279 — the unit-coverage artifact (uploaded by build-go).
       - name: Download unit coverage artifact
@@ -837,7 +858,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
@@ -850,7 +871,7 @@ jobs:
           # both in a dedicated `chore(golangci):` slice so the new analyzer
           # set lands as an auditable diff — never as a surprise red check on
           # an unrelated PR (mirrors the SQLC_VERSION bump convention).
-          version: v2.12.2
+          version: v2.15.0
 
       # Slice 367 — CWE-209 errleak check. Rejects new code reflecting
       # err.Error() into 5xx JSON response bodies. Background: slice 327
@@ -909,7 +930,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - name: Bounded fuzz pass (20s per target)
         # FUZZTIME caps each target. Keep it tight: this is a regression
@@ -1093,7 +1114,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
@@ -1188,9 +1209,10 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: oscal-bridge/uv.lock
+          # The bridge is a uv workspace member; the lockfile is the root one.
+          cache-dependency-glob: uv.lock
       - name: Set up Python
-        run: uv python install 3.11
+        run: uv python install 3.11 3.12
       - name: Sync oscal-bridge env
         working-directory: oscal-bridge
         run: uv sync --extra test
@@ -1201,6 +1223,13 @@ jobs:
       - name: Test (pytest — unit + in-process gRPC server)
         working-directory: oscal-bridge
         run: PYTHONPATH=. uv run --extra test python -m pytest tests/ -q
+      # Issue #1875: the bridge declares requires-python >=3.11; also run the
+      # suite on 3.12, in its own environment so the 3.11 one is untouched.
+      - name: Test on Python 3.12 (pytest)
+        working-directory: oscal-bridge
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-py312
+        run: PYTHONPATH=. uv run --python 3.12 --extra test python -m pytest tests/ -q
 
   oscal-bridge-stub:
     name: OSCAL bridge · Python (ruff + pytest)
@@ -1606,7 +1635,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
@@ -1818,7 +1847,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
@@ -2006,7 +2035,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
@@ -2258,7 +2287,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       # Pinned version (not @latest) for reproducibility. Bump in a
       # dedicated PR so the diff is auditable. See slice 089 decisions
@@ -2348,7 +2377,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - name: Read SQLC_VERSION from justfile
         id: pin
@@ -3158,7 +3187,7 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
 
       - name: Run check-openapi-drift.sh
@@ -3286,7 +3315,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       # The Postgres half of ./.github/actions/atlas-stack-up, inlined
       # because that action's `start-services` brings up MinIO + NATS with
@@ -3352,6 +3381,38 @@ jobs:
 
       - name: Run check-coverage-excludes.sh
         run: bash scripts/check-coverage-excludes.sh
+
+  # ====================================================================
+  # #1880 — migration timestamp uniqueness (HARD FAIL).
+  #
+  # Refuses a migration under migrations/sql/ whose timestamp prefix
+  # another migration already uses, so the apply order stays the order
+  # the migrations were written in. The prefixes that collided before the
+  # check (six, including the two 20260811000000 files) are grandfathered
+  # by name in the script. Fast, no network; runs unconditionally (no
+  # `if:`), so merge-gate needs it and requires `success` on every PR.
+  #
+  # Local repro: `bash scripts/check-migration-timestamps.sh`
+  #   self-test: `bash scripts/check-migration-timestamps_test.sh`
+  # ====================================================================
+  migration-timestamps-check:
+    name: migration-timestamps-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run check-migration-timestamps self-test
+        run: bash scripts/check-migration-timestamps_test.sh
+
+      - name: Run check-migration-timestamps.sh
+        run: bash scripts/check-migration-timestamps.sh
 
   # ====================================================================
   # Slice 393 (Q-6) — assertion-density advisory (INFORMATIONAL).
@@ -3668,6 +3729,7 @@ jobs:
       - actions-pin-check # actions-pin-check
       - openapi-drift-check # openapi-drift-check
       - isa-probes # ISA · probes (unconditional; red only on a closed claim's regression)
+      - migration-timestamps-check # migration-timestamps-check (unconditional, #1880)
       # --- no required context of its own; covered here so the slice-701
       #     stub collapse cannot drop them on the floor (slice 701 §AC-1) ---
       - tests-integration-shard # Go · integration (shard A/B1/B2/B3/B4) — matrix aggregate
@@ -3731,7 +3793,8 @@ jobs:
           else
             echo "code='${CODE:-}' (no Go-affecting changes) — path-filtered legs may legitimately"
             echo "be 'skipped' (their slice-061 stub-twins post the green named checks)."
-            echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check, isa-probes) still"
+            echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check, isa-probes,"
+            echo "migration-timestamps-check) still"
             echo "MUST be 'success'. 'skipped' is the ONLY forgiven non-success result, and only here."
           fi
           echo "Asserting ${leg_count} legs derived from toJSON(needs)."
@@ -3761,6 +3824,7 @@ jobs:
               fuzz)                           echo "Go · fuzz (bounded)" ;;
               govulncheck)                    echo "Go · govulncheck" ;;
               isa-probes)                     echo "ISA · probes" ;;
+              migration-timestamps-check)     echo "migration-timestamps-check" ;;
               *)                              echo "$1" ;;
             esac
           }
@@ -3927,12 +3991,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: "1.26"
+          go-version: "1.27"
           cache: true
       - name: Install cosign
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: "v3.0.6"
+      # Issue #1875: same oscal-bridge install as the PR-time shard matrix.
+      - name: Install uv (oscal-bridge — legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync oscal-bridge env (legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        run: |
+          uv python install 3.11
+          uv sync --frozen --package atlas-oscal-bridge
+          {
+            echo "OSCAL_BRIDGE_PYTHON=$(pwd)/.venv/bin/python"
+            echo "ATLAS_REQUIRE_OSCAL_BRIDGE=1"
+          } >> "$GITHUB_ENV"
       - name: Start MinIO
         run: |
           docker run -d --name minio \

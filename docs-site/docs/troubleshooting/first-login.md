@@ -56,10 +56,21 @@ atlas-cli credentials issue \
 
 The `--force` flag is the foot-gun gate: without it the CLI refuses because re-issuing bootstrap after a real user has signed in is rarely the right move. With it, the platform:
 
-1. Mints a fresh admin bearer.
-2. Clears `platform_status.bootstrap_token_consumed_at` and `first_signin_at`.
+1. Clears `platform_status.bootstrap_token_consumed_at` and `first_signin_at`.
+2. Mints a fresh admin bearer for `--tenant`, which must be the tenant of the `--token` credential. Signing in with it gives an admin session.
 3. Writes the new token to `${ATLAS_DATA_DIR}/bootstrap-token` (mode 0600).
-4. Returns the new bearer plaintext to stdout.
+4. Revokes any recovery key an earlier reset minted.
+5. Returns the new bearer plaintext, its `credential_id` and its `expires_at` to stdout.
+
+`--token` must be a super_admin JWT, or an admin API key on an install with one tenant. `--scope` and `--kinds` are refused with `--reset-bootstrap`.
+
+**The recovery key expires.** It lasts 24h by default. Pass `--ttl` to change that, up to `168h` (7 days). The key cannot be made non-expiring.
+
+**Revoke it after you sign in.** If the first sign-in uses another credential, the platform revokes the recovery key itself. If you sign in with the recovery key, it stays live until it expires, because it is your session. Once you can sign in another way (local password or SSO), revoke it:
+
+```sh
+atlas-cli credentials revoke --id <credential_id> --endpoint atlas:50051 --token <your admin token>
+```
 
 **Verified on Helm:**
 

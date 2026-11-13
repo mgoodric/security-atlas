@@ -131,15 +131,19 @@ WHERE tenant_id = $1
 ORDER BY created_at ASC, id ASC;
 
 -- name: GetRuleMetaRiskByKey :one
--- Idempotency lookup: find the meta-risk a rule already created for a
--- given (rule_id, window_start) window. The key is stored on the
+-- Idempotency lookup: find the meta-risk a rule activation already created.
+-- The key, sha256(rule_id|activated_at) since #1861, is stored on the
 -- meta-risk's inherent_score JSONB as 'aggregation_key' (slice 053
 -- pattern). If found, the engine UPDATEs it rather than creating a
--- duplicate (canvas §6.6: one meta-risk per rule per window).
+-- duplicate (canvas §6.6: one meta-risk per rule activation). The ORDER BY
+-- makes the pick deterministic on installs that already hold same-key
+-- duplicates from before the #1861 advisory lock: every evaluation updates
+-- the oldest one (#1867).
 SELECT *
 FROM risks
 WHERE tenant_id = $1
   AND inherent_score->>'aggregation_key' = $2::text
+ORDER BY created_at ASC, id ASC
 LIMIT 1;
 
 -- name: UpdateMetaRiskInherentScore :one
@@ -159,8 +163,9 @@ RETURNING *;
 -- name: WriteAggregationRuleEvaluation :one
 -- Append-only. EVERY evaluation cycle writes exactly one row, including
 -- 'no_match' (canvas §6.6 + AC-8: the audit trail proves the engine ran).
--- window_start + meta_risk_id are non-NULL only for outcome='fired' (the
--- fired-coherent CHECK enforces this).
+-- window_start + meta_risk_id are set together: always for outcome='fired',
+-- and for a near_miss / no_match that refreshed an existing meta-risk
+-- (#1867). The fired-coherent CHECK enforces this.
 INSERT INTO aggregation_rule_evaluations (
     id, tenant_id, rule_id, outcome,
     risk_count, team_count, window_start, meta_risk_id
@@ -209,3 +214,14 @@ SELECT *
 FROM aggregation_rule_audit_log
 WHERE tenant_id = $1 AND rule_id = $2
 ORDER BY created_at DESC, id ASC;
+
+-- name: LockAggregationKey :exec
+-- #1861: serialize every evaluation of one rule's meta-risk key inside the
+-- caller's transaction. The engine's de-dup is a read (GetRuleMetaRiskByKey)
+-- then an insert (CreateAggregateRisk); without this lock two concurrent
+-- risk writes, or a risk write racing evaluate-now, can both miss the read
+-- and both create. Transaction-scoped, so it releases on commit/rollback.
+-- Under READ COMMITTED the reads issued after the lock see the winner's
+-- committed meta-risk. hashtextextended maps the hex key to the BIGINT
+-- lock space; a hash collision only over-serializes, never under-.
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(aggregation_key)::text, 0));

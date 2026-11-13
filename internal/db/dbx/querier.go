@@ -240,8 +240,10 @@ type Querier interface {
 	// Issue #1741: totals for the paged `/v1/anchors?include=state` read on
 	// the current SCF version: the whole catalog, and the anchors the
 	// caller's tenant has at least one active control on. `controls` is
-	// tenant-scoped under FORCE RLS, so with_control_total is per tenant.
-	CountSCFAnchorsLatest(ctx context.Context) (CountSCFAnchorsLatestRow, error)
+	// tenant-scoped under FORCE RLS; the explicit `c.tenant_id` predicate
+	// (issue #1832) keeps with_control_total per tenant even where RLS is
+	// bypassed.
+	CountSCFAnchorsLatest(ctx context.Context, tenantID pgtype.UUID) (CountSCFAnchorsLatestRow, error)
 	// Total group count in the tenant (List envelope totalResults).
 	CountSCIMGroups(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountSCIMUsers(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -823,6 +825,13 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// Row-lock one edge by (requirement, anchor) inside the import transaction.
+	// The importer compares source_attribution precedence before it updates
+	// (issue #1754); without the lock a concurrent weaker import that passed its
+	// check against the old row would overwrite a just-committed scf_official
+	// edge at READ COMMITTED. Same read-validate-write guard as
+	// GetFwToScfEdgeTierForUpdate. Returns ErrNoRows when the edge doesn't exist.
+	GetFwToScfEdgeForUpdate(ctx context.Context, arg GetFwToScfEdgeForUpdateParams) (FwToScfEdge, error)
 	// ===== slice 483: crosswalk mapping-tier governance =====
 	// Read the current trust tier of one edge by id. The transition store calls
 	// this FOR UPDATE (see GetFwToScfEdgeTierForUpdate) inside the tx; this plain
@@ -911,11 +920,14 @@ type Querier interface {
 	// Slice 020: one link row by (risk, control). Used to confirm a link exists
 	// before returning its effectiveness breakdown.
 	GetRiskControlLink(ctx context.Context, arg GetRiskControlLinkParams) (GetRiskControlLinkRow, error)
-	// Idempotency lookup: find the meta-risk a rule already created for a
-	// given (rule_id, window_start) window. The key is stored on the
+	// Idempotency lookup: find the meta-risk a rule activation already created.
+	// The key, sha256(rule_id|activated_at) since #1861, is stored on the
 	// meta-risk's inherent_score JSONB as 'aggregation_key' (slice 053
 	// pattern). If found, the engine UPDATEs it rather than creating a
-	// duplicate (canvas §6.6: one meta-risk per rule per window).
+	// duplicate (canvas §6.6: one meta-risk per rule activation). The ORDER BY
+	// makes the pick deterministic on installs that already hold same-key
+	// duplicates from before the #1861 advisory lock: every evaluation updates
+	// the oldest one (#1867).
 	GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskByKeyParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
@@ -2512,8 +2524,10 @@ type Querier interface {
 	//      column SURFACES this invariant on the controls list.
 	//   #6 RLS: `controls` and `control_evaluations` are tenant-scoped under
 	//      FORCE ROW LEVEL SECURITY. The tenant GUC set by `tenancymw`
-	//      filters those rows; the global `scf_anchors` rows + the
-	//      catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
+	//      filters those rows, and each `controls` read also carries an
+	//      explicit `c.tenant_id = sqlc.arg(tenant_id)` predicate (issue
+	//      #1832, belt-and-suspenders as in ListActiveControlsWithState);
+	//      the global `scf_anchors` rows + the catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
 	//      visible to every tenant by design.
 	//   #2 Engine is sole writer of control_evaluations: this is a pure read
 	//      over the engine's output table, never a parallel computation.
@@ -2833,6 +2847,21 @@ type Querier interface {
 	// ListSlackOptInUsers. enabled = false / no-row excluded (default
 	// opted-OUT). Returns only the (tenant, user) keys — no PII.
 	ListWebhookOptInUsers(ctx context.Context) ([]ListWebhookOptInUsersRow, error)
+	// #1861: serialize every evaluation of one rule's meta-risk key inside the
+	// caller's transaction. The engine's de-dup is a read (GetRuleMetaRiskByKey)
+	// then an insert (CreateAggregateRisk); without this lock two concurrent
+	// risk writes, or a risk write racing evaluate-now, can both miss the read
+	// and both create. Transaction-scoped, so it releases on commit/rollback.
+	// Under READ COMMITTED the reads issued after the lock see the winner's
+	// committed meta-risk. hashtextextended maps the hex key to the BIGINT
+	// lock space; a hash collision only over-serializes, never under-.
+	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// #1867: read a risk and hold its row against concurrent theme writes and
+	// deletes until the transaction ends, so a theme write or delete sees the
+	// themes it actually replaces. FOR NO KEY UPDATE, not FOR UPDATE: it does
+	// not conflict with the FOR KEY SHARE an aggregation evaluation takes when
+	// it links this risk as a child, so an evaluation is never blocked by it.
+	LockRiskByID(ctx context.Context, arg LockRiskByIDParams) (Risk, error)
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
@@ -3343,8 +3372,9 @@ type Querier interface {
 	// ===== aggregation_rule_evaluations (append-only) =====
 	// Append-only. EVERY evaluation cycle writes exactly one row, including
 	// 'no_match' (canvas §6.6 + AC-8: the audit trail proves the engine ran).
-	// window_start + meta_risk_id are non-NULL only for outcome='fired' (the
-	// fired-coherent CHECK enforces this).
+	// window_start + meta_risk_id are set together: always for outcome='fired',
+	// and for a near_miss / no_match that refreshed an existing meta-risk
+	// (#1867). The fired-coherent CHECK enforces this.
 	WriteAggregationRuleEvaluation(ctx context.Context, arg WriteAggregationRuleEvaluationParams) (AggregationRuleEvaluation, error)
 	// Append-only lifecycle log. action is constrained at the DB layer
 	// (period_created | period_frozen | freeze_rejected_already_frozen |
