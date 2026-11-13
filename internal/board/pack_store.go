@@ -88,7 +88,7 @@ func (s *PackStore) ListRisksAsOf(ctx context.Context, asOf time.Time) ([]riskRo
 				ID:            uuid.UUID(r.ID.Bytes),
 				Title:         r.Title,
 				Category:      string(r.Category),
-				Treatment:     string(r.Treatment),
+				Treatment:     treatmentLabel(r),
 				ResidualScore: r.ResidualScore,
 				InherentScore: r.InherentScore,
 			}

@@ -13,7 +13,12 @@
 // would be dead code. The server-side validation still fires; the
 // existing inline-error rendering surfaces those failures.
 
-export type RiskTreatment = "mitigate" | "transfer" | "accept" | "avoid";
+export type RiskTreatment =
+  | "untreated"
+  | "mitigate"
+  | "transfer"
+  | "accept"
+  | "avoid";
 
 // OFFERED_METHODOLOGIES lists only methodologies this form can save with a
 // matching score widget. FAIR is offered because the form renders its
@@ -27,28 +32,19 @@ export const OFFERED_METHODOLOGIES = [
 
 export type RiskMethodology = (typeof OFFERED_METHODOLOGIES)[number];
 
-// DEFAULT_TREATMENT — slice 663.
+// DEFAULT_TREATMENT — slice 663, revised by #1746.
 //
-// The risk-create form (risk-form.tsx) opens on this treatment. It is
-// deliberately "avoid", NOT "mitigate".
+// The risk-create form (risk-form.tsx) opens on "untreated": no treatment
+// decision yet. It needs no satellite fields, so a fresh tenant with zero
+// controls can still create its first risk (the slice 663 dead-end), and
+// it records no decision the operator did not make. Slice 663 opened on
+// "avoid" for the same reason, which silently recorded avoid decisions
+// nobody took. The server stores untreated when the wire treatment is
+// empty, so the default is consistent client-to-server.
 //
-// Why: "mitigate" requires >=1 linked control (canvas §6.1). On a fresh
-// tenant with zero instantiated controls there is nothing to link, so a
-// mitigate-default form CANNOT be submitted — the primary create flow
-// dead-ends for a brand-new operator (slice 663 / ATLAS-006).
-//
-// "avoid" is the only treatment with zero required satellite fields
-// (canvas §6.1: accept needs accepter + accepted_until; transfer needs
-// instrument_reference; mitigate needs a linked control; avoid is
-// status-only). It also matches the SERVER's own omitted-treatment
-// safe-default (`internal/api/risks/handlers.go` falls back to
-// RiskTreatmentAvoid when the wire treatment is empty), so the default
-// is consistent client-to-server.
-//
-// The mitigate-requires-control rule is UNCHANGED: an operator who
-// picks "mitigate" in a populated tenant still must link a control
-// (slice 663 AC-3). Only the *opening default* moved.
-export const DEFAULT_TREATMENT: RiskTreatment = "avoid";
+// The mitigate rule is unchanged in the form: a new risk has no linked
+// action plans yet, so mitigate still needs a linked control here.
+export const DEFAULT_TREATMENT: RiskTreatment = "untreated";
 
 export type RiskFormForValidation = {
   title: string;

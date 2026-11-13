@@ -309,9 +309,9 @@ func (e *Engine) upsertMetaRisk(
 
 	case errors.Is(err, pgx.ErrNoRows):
 		// No meta-risk for this window yet — create one. qualitative_5x5 +
-		// treatment=avoid mirrors slice 053's manual-aggregation parent so
-		// it passes the slice-019 risk CHECK constraints without linked
-		// controls (a meta-risk is a pattern tracker, not control-mitigated).
+		// treatment=untreated mirrors slice 053's manual-aggregation parent:
+		// a generated meta-risk carries no treatment decision until someone
+		// makes one (#1746).
 		metaRiskID := uuid.New()
 		if _, cerr := e.w.CreateAggregateRisk(ctx, dbx.CreateAggregateRiskParams{
 			ID:                  pgUUID(metaRiskID),
@@ -321,7 +321,7 @@ func (e *Engine) upsertMetaRisk(
 			Category:            category,
 			Methodology:         dbx.RiskMethodologyQualitative5x5,
 			InherentScore:       inherentBytes,
-			Treatment:           dbx.RiskTreatmentAvoid,
+			Treatment:           dbx.RiskTreatmentUntreated,
 			TreatmentOwner:      "",
 			ResidualScore:       []byte("{}"),
 			Accepter:            "",

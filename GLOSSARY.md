@@ -44,6 +44,25 @@ All three accept optional `?framework_version=slug:version` to pin historical ma
 
 **RLS interaction:** the catalog tables (`framework_requirements`, `fw_to_scf_edges`, `scf_anchors`) have no `tenant_id` and no RLS — they're platform-bundled and global. Only `controls` is tenant-scoped. A traversal across tenant boundaries returns the (global) requirement + anchors but an empty controls list — this is the correct shape (canvas §3.5) and is enforced by Postgres RLS, not by app code. The handler MUST NOT add `WHERE tenant_id = ?` to any query (constitutional invariant 6).
 
+## Risk treatment (#1746)
+
+How the program has decided to handle a risk. `risks.treatment` is the `risk_treatment` enum, NOT NULL, and every create path (REST, MCP, web form, DB column default, generated aggregate parents) defaults it to `untreated`. No path ever defaults to a real decision.
+
+| Value       | Meaning                                                | Required with it                                       |
+| ----------- | ------------------------------------------------------ | ------------------------------------------------------ |
+| `untreated` | No treatment decision yet (intake, not triaged).       | Nothing.                                               |
+| `mitigate`  | Reduce the risk through controls or planned work.      | At least one linked control **or** linked action plan. |
+| `transfer`  | Shift the risk to a third party (insurance, contract). | `instrument_reference` (policy number, SOW).           |
+| `accept`    | Live with the risk.                                    | An **acceptance status** (below).                      |
+| `avoid`     | Stop the activity that creates the risk.               | Nothing.                                               |
+
+**Acceptance status** — `risks.acceptance_status`, the `risk_acceptance_status` enum, set exactly when `treatment = 'accept'` and NULL otherwise:
+
+- `proposed` — acceptance pending sign-off. No accepter or expiry required.
+- `approved` — signed off. Requires `accepter` and `accepted_until`, enforced by `ValidateTreatment` (`internal/risk/treatment.go`) and the `risks_accept_fields_required` CHECK.
+
+**Open exposure** — a risk counts as open unless it is an `approved` acceptance. `untreated` risks and `proposed` acceptances stay open (`risk.IsOpenTreatment`, the `open_risk_financial_exposure` metric). `untreated` is never grouped with `avoid`.
+
 ## Exception (slice 021)
 
 A time-bounded, scope-bounded waiver of a control's normal evaluation. Always:

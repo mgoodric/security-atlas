@@ -47,14 +47,17 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // Risk is the domain shape returned from store calls. It mirrors the sqlc Risk
 // but exposes more idiomatic Go types (uuid.UUID, time.Time, json.RawMessage).
 type Risk struct {
-	ID                  uuid.UUID
-	TenantID            uuid.UUID
-	Title               string
-	Description         string
-	Category            dbx.RiskCategory
-	Methodology         dbx.RiskMethodology
-	InherentScore       []byte
-	Treatment           dbx.RiskTreatment
+	ID            uuid.UUID
+	TenantID      uuid.UUID
+	Title         string
+	Description   string
+	Category      dbx.RiskCategory
+	Methodology   dbx.RiskMethodology
+	InherentScore []byte
+	Treatment     dbx.RiskTreatment
+	// AcceptanceStatus is proposed | approved when Treatment is accept,
+	// empty otherwise (#1746).
+	AcceptanceStatus    dbx.RiskAcceptanceStatus
 	TreatmentOwner      string
 	ResidualScore       []byte
 	ReviewDueAt         *time.Time
@@ -75,12 +78,15 @@ type Risk struct {
 // CreateInput is the API-shape for POST /v1/risks. The store re-validates
 // every rule the handler should have validated already; defense in depth.
 type CreateInput struct {
-	Title               string
-	Description         string
-	Category            dbx.RiskCategory
-	Methodology         dbx.RiskMethodology
-	InherentScore       []byte
+	Title         string
+	Description   string
+	Category      dbx.RiskCategory
+	Methodology   dbx.RiskMethodology
+	InherentScore []byte
+	// Treatment defaults to untreated when empty: no create path records a
+	// treatment decision nobody made (#1746).
 	Treatment           dbx.RiskTreatment
+	AcceptanceStatus    dbx.RiskAcceptanceStatus
 	TreatmentOwner      string
 	ResidualScore       []byte
 	ReviewDueAt         *time.Time
@@ -96,6 +102,9 @@ type CreateInput struct {
 func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	if in.Methodology == "" {
 		in.Methodology = DefaultMethodology
+	}
+	if in.Treatment == "" {
+		in.Treatment = dbx.RiskTreatmentUntreated
 	}
 	if err := ValidateInherentScore(in.Methodology, in.InherentScore); err != nil {
 		return Risk{}, err
@@ -118,6 +127,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	}
 	if err := ValidateTreatment(TreatmentInput{
 		Treatment:            in.Treatment,
+		AcceptanceStatus:     in.AcceptanceStatus,
 		AcceptedUntilPresent: in.AcceptedUntil != nil,
 		Accepter:             in.Accepter,
 		InstrumentReference:  in.InstrumentReference,
@@ -144,6 +154,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			AcceptedUntil:       pgDatePtr(in.AcceptedUntil),
 			Accepter:            in.Accepter,
 			InstrumentReference: in.InstrumentReference,
+			AcceptanceStatus:    NullAcceptanceStatus(in.AcceptanceStatus),
 		})
 		if err != nil {
 			return fmt.Errorf("create risk: %w", err)
@@ -592,6 +603,9 @@ func riskFromRow(r dbx.Risk) Risk {
 		t := r.AcceptedUntil.Time
 		risk.AcceptedUntil = &t
 	}
+	if r.AcceptanceStatus != nil {
+		risk.AcceptanceStatus = *r.AcceptanceStatus
+	}
 	// Slice 052 columns: level NOT NULL DEFAULT 'team', org_unit_id nullable,
 	// themes NOT NULL DEFAULT '{}'.
 	risk.Level = r.Level
@@ -612,6 +626,14 @@ func pgTimestamptzPtr(t *time.Time) pgtype.Timestamptz {
 		return pgtype.Timestamptz{}
 	}
 	return pgtype.Timestamptz{Time: *t, Valid: true}
+}
+
+// NullAcceptanceStatus maps an empty acceptance status to SQL NULL.
+func NullAcceptanceStatus(s dbx.RiskAcceptanceStatus) *dbx.RiskAcceptanceStatus {
+	if s == "" {
+		return nil
+	}
+	return &s
 }
 
 func pgDatePtr(t *time.Time) pgtype.Date {

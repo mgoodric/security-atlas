@@ -22,6 +22,8 @@ export type Risk = {
   methodology: string;
   inherent_score: unknown;
   treatment: string;
+  // #1746: proposed | approved when treatment is accept; absent otherwise.
+  acceptance_status?: "proposed" | "approved";
   treatment_owner: string;
   residual_score: unknown;
   review_due_at?: string;
@@ -149,6 +151,7 @@ export type RiskCreateInput = {
   methodology?: string;
   inherent_score?: unknown;
   treatment?: string;
+  acceptance_status?: "proposed" | "approved";
   treatment_owner?: string;
   residual_score?: unknown;
   review_due_at?: string | null;
@@ -189,4 +192,15 @@ export async function createRisk(
   }
   const decoded = (await res.json()) as RiskCreatedResponse;
   return decoded.risk;
+}
+
+// treatmentLabel renders a risk's treatment for display (#1746): an
+// acceptance shows its status, so a pending one never reads as signed off.
+export function treatmentLabel(
+  r: Pick<Risk, "treatment" | "acceptance_status">,
+): string {
+  if (r.treatment === "accept" && r.acceptance_status) {
+    return `accept (${r.acceptance_status})`;
+  }
+  return r.treatment;
 }

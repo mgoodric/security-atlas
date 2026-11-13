@@ -625,6 +625,48 @@ func (ns NullPolicyStatus) Value() (driver.Value, error) {
 	return string(ns.PolicyStatus), nil
 }
 
+type RiskAcceptanceStatus string
+
+const (
+	RiskAcceptanceStatusProposed RiskAcceptanceStatus = "proposed"
+	RiskAcceptanceStatusApproved RiskAcceptanceStatus = "approved"
+)
+
+func (e *RiskAcceptanceStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiskAcceptanceStatus(s)
+	case string:
+		*e = RiskAcceptanceStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiskAcceptanceStatus: %T", src)
+	}
+	return nil
+}
+
+type NullRiskAcceptanceStatus struct {
+	RiskAcceptanceStatus RiskAcceptanceStatus `json:"risk_acceptance_status"`
+	Valid                bool                 `json:"valid"` // Valid is true if RiskAcceptanceStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiskAcceptanceStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiskAcceptanceStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiskAcceptanceStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiskAcceptanceStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiskAcceptanceStatus), nil
+}
+
 type RiskCategory string
 
 const (
@@ -763,10 +805,11 @@ func (ns NullRiskMethodology) Value() (driver.Value, error) {
 type RiskTreatment string
 
 const (
-	RiskTreatmentAccept   RiskTreatment = "accept"
-	RiskTreatmentMitigate RiskTreatment = "mitigate"
-	RiskTreatmentTransfer RiskTreatment = "transfer"
-	RiskTreatmentAvoid    RiskTreatment = "avoid"
+	RiskTreatmentAccept    RiskTreatment = "accept"
+	RiskTreatmentMitigate  RiskTreatment = "mitigate"
+	RiskTreatmentTransfer  RiskTreatment = "transfer"
+	RiskTreatmentAvoid     RiskTreatment = "avoid"
+	RiskTreatmentUntreated RiskTreatment = "untreated"
 )
 
 func (e *RiskTreatment) Scan(src interface{}) error {
@@ -2500,25 +2543,26 @@ type QuestionnaireQuestion struct {
 }
 
 type Risk struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	Title               string             `json:"title"`
-	Description         string             `json:"description"`
-	Category            RiskCategory       `json:"category"`
-	Methodology         RiskMethodology    `json:"methodology"`
-	InherentScore       []byte             `json:"inherent_score"`
-	Treatment           RiskTreatment      `json:"treatment"`
-	TreatmentOwner      string             `json:"treatment_owner"`
-	ResidualScore       []byte             `json:"residual_score"`
-	ReviewDueAt         pgtype.Timestamptz `json:"review_due_at"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
-	AcceptedUntil       pgtype.Date        `json:"accepted_until"`
-	Accepter            string             `json:"accepter"`
-	InstrumentReference string             `json:"instrument_reference"`
-	Level               RiskLevel          `json:"level"`
-	OrgUnitID           pgtype.UUID        `json:"org_unit_id"`
-	Themes              []string           `json:"themes"`
+	ID                  pgtype.UUID           `json:"id"`
+	TenantID            pgtype.UUID           `json:"tenant_id"`
+	Title               string                `json:"title"`
+	Description         string                `json:"description"`
+	Category            RiskCategory          `json:"category"`
+	Methodology         RiskMethodology       `json:"methodology"`
+	InherentScore       []byte                `json:"inherent_score"`
+	Treatment           RiskTreatment         `json:"treatment"`
+	TreatmentOwner      string                `json:"treatment_owner"`
+	ResidualScore       []byte                `json:"residual_score"`
+	ReviewDueAt         pgtype.Timestamptz    `json:"review_due_at"`
+	CreatedAt           pgtype.Timestamptz    `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz    `json:"updated_at"`
+	AcceptedUntil       pgtype.Date           `json:"accepted_until"`
+	Accepter            string                `json:"accepter"`
+	InstrumentReference string                `json:"instrument_reference"`
+	Level               RiskLevel             `json:"level"`
+	OrgUnitID           pgtype.UUID           `json:"org_unit_id"`
+	Themes              []string              `json:"themes"`
+	AcceptanceStatus    *RiskAcceptanceStatus `json:"acceptance_status"`
 }
 
 type RiskAggregation struct {

@@ -72,6 +72,7 @@ test.describe("/risks/new risk-create form", () => {
   }) => {
     // List GET: empty before create, holds the new row after.
     let created = false;
+    let postedAcceptanceStatus: string | undefined;
     await page.route("**/api/risks", async (route, req) => {
       if (req.method() === "GET") {
         const risks = created
@@ -97,6 +98,9 @@ test.describe("/risks/new risk-create form", () => {
       }
       // POST = create. The BFF returns { risk } on 201 (slice 105
       // contract — see web/app/(authed)/risks/new/actions.ts).
+      postedAcceptanceStatus = (
+        JSON.parse(req.postData() ?? "{}") as { acceptance_status?: string }
+      ).acceptance_status;
       created = true;
       await route.fulfill({
         status: 201,
@@ -124,7 +128,8 @@ test.describe("/risks/new risk-create form", () => {
     await page.getByTestId("risks-create-title").fill(NEW_RISK_TITLE);
     await page.getByTestId("risks-create-treatment-owner").fill("e2e-owner");
     // treatment=accept avoids the mitigate-requires-linked-control
-    // client-side validation rule (validateRiskForm).
+    // client-side validation rule (validateRiskForm). The form has no
+    // accepter / expiry inputs, so it posts a proposed acceptance (#1746).
     await page.getByTestId("risks-create-treatment").selectOption("accept");
 
     const createResp = page.waitForResponse(
@@ -136,6 +141,7 @@ test.describe("/risks/new risk-create form", () => {
     );
     await page.getByTestId("risks-create-submit").click();
     await createResp;
+    expect(postedAcceptanceStatus).toBe("proposed");
 
     // AC: routed back to /risks and the new row appears (cache
     // invalidation + re-fetch).
@@ -151,8 +157,9 @@ test.describe("/risks/new risk-create form", () => {
   test("AC-1: a fresh tenant (zero controls) creates a risk through the default flow without linking a control", async ({
     authedPage: page,
   }) => {
-    // Slice 663 regression guard. The form opens on treatment "avoid"
-    // (the fresh-tenant-safe default), so a brand-new operator can fill
+    // Slice 663 regression guard, revised by #1746. The form opens on
+    // treatment "untreated" (no decision yet, no required fields), so a
+    // brand-new operator can fill
     // only the required fields and submit — no unsatisfiable
     // mitigate-requires-control gate. We do NOT touch the treatment
     // dropdown: the default flow itself must succeed.
@@ -176,7 +183,7 @@ test.describe("/risks/new risk-create form", () => {
                 id: CREATED_RISK_ID,
                 title: NEW_RISK_TITLE,
                 category: "operational",
-                treatment: "avoid",
+                treatment: "untreated",
                 treatment_owner: "e2e-owner",
                 methodology: "nist_800_30",
                 inherent_score: { likelihood: 3, impact: 3, severity: 9 },
@@ -202,7 +209,7 @@ test.describe("/risks/new risk-create form", () => {
             id: CREATED_RISK_ID,
             title: NEW_RISK_TITLE,
             category: "operational",
-            treatment: "avoid",
+            treatment: "untreated",
             treatment_owner: "e2e-owner",
             methodology: "nist_800_30",
             inherent_score: { likelihood: 3, impact: 3, severity: 9 },
@@ -217,8 +224,12 @@ test.describe("/risks/new risk-create form", () => {
       timeout: 30_000,
     });
 
+    // The form opens on "untreated", never a real treatment decision.
+    await expect(page.getByTestId("risks-create-treatment")).toHaveValue(
+      "untreated",
+    );
     // The control picker is NOT rendered on the default flow (treatment
-    // is "avoid"), so there is no unsatisfiable required field.
+    // is "untreated"), so there is no unsatisfiable required field.
     await expect(
       page.getByTestId("risks-create-control-multi-select"),
     ).toHaveCount(0);
@@ -237,9 +248,9 @@ test.describe("/risks/new risk-create form", () => {
     await page.getByTestId("risks-create-submit").click();
     await createResp;
 
-    // The default-flow submit posts treatment=avoid (the slice 663
-    // fresh-tenant-safe default) and routes back with the new row.
-    expect(postedTreatment).toBe("avoid");
+    // The default-flow submit posts treatment=untreated (#1746) and
+    // routes back with the new row.
+    expect(postedTreatment).toBe("untreated");
     await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
     await expect(
       page

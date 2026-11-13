@@ -156,12 +156,37 @@ func TestContract_Risks(t *testing.T) {
 		UpdatedAt:        updated,
 	}
 
+	// #1746 — the treatment states with no side fields: an untreated risk
+	// (acceptance_status absent on the wire) and a proposed acceptance
+	// (acceptance_status present, no accepter or accepted_until).
+	untreated := risk.Risk{
+		ID:          uuid.MustParse(contractRiskID),
+		Title:       "Intake risk not yet triaged",
+		Category:    dbx.RiskCategory("operational"),
+		Methodology: dbx.RiskMethodologyNist80030,
+		Treatment:   dbx.RiskTreatmentUntreated,
+		CreatedAt:   created,
+		UpdatedAt:   updated,
+	}
+	proposedAccept := risk.Risk{
+		ID:               uuid.MustParse(contractRiskID),
+		Title:            "Legacy TLS endpoint, acceptance pending sign-off",
+		Category:         dbx.RiskCategory("technology"),
+		Methodology:      dbx.RiskMethodologyNist80030,
+		Treatment:        dbx.RiskTreatmentAccept,
+		AcceptanceStatus: dbx.RiskAcceptanceStatusProposed,
+		CreatedAt:        created,
+		UpdatedAt:        updated,
+	}
+
 	populated := stubRiskLister{rows: []risk.Risk{full, minimal}}
 	empty := stubRiskLister{rows: []risk.Risk{}}
+	states := stubRiskLister{rows: []risk.Risk{untreated, proposedAccept}}
 
 	recorded := map[string]json.RawMessage{
-		"populated": recordVariant(t, newHandlerWithLister(populated).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
-		"empty":     recordVariant(t, newHandlerWithLister(empty).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
+		"populated":        recordVariant(t, newHandlerWithLister(populated).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
+		"empty":            recordVariant(t, newHandlerWithLister(empty).ListRisks, "/v1/risks?treatment=mitigate&sort=residual,age"),
+		"treatment_states": recordVariant(t, newHandlerWithLister(states).ListRisks, "/v1/risks"),
 	}
 	assertContractGolden(t,
 		filepath.Clean("../../../web/lib/contracts/risks.golden.json"),
