@@ -59,119 +59,119 @@ requirements:
   # ===== Req 1: Install and maintain network security controls =====
   - code: 1.2.1
     title: "Network security control configuration standards"
-    body: "Configuration standards for network security controls are defined, implemented, and maintained."
+    body: "Firewall and router rule sets follow written baseline configurations that are kept current."
   - code: 1.3.1
     title: "Inbound traffic to the CDE is restricted"
-    body: "Inbound traffic to the cardholder data environment is restricted to only what is necessary."
+    body: "Only the traffic the CDE actually needs is allowed in; everything else is blocked."
   - code: 1.4.1
     title: "Network security controls between trusted and untrusted networks"
-    body: "Network security controls are implemented between trusted and untrusted networks."
+    body: "Firewalls or equivalent controls sit between trusted internal networks and untrusted ones such as the internet."
 
   # ===== Req 2: Apply secure configurations =====
   - code: 2.2.1
     title: "Configuration standards for system components"
-    body: "Configuration standards are developed, implemented, and maintained for all system components, addressing known vulnerabilities and industry-accepted hardening."
+    body: "Every type of system has a hardened baseline build that addresses known weaknesses and is kept up to date."
   - code: 2.2.4
     title: "Only necessary services and functions are enabled"
-    body: "Only necessary services, protocols, daemons, and functions are enabled, and unnecessary functionality is removed or disabled."
+    body: "Systems run only the services and features they need; the rest are turned off or removed."
 
   # ===== Req 3: Protect stored account data =====
   - code: 3.2.1
     title: "Account data storage is kept to a minimum"
-    body: "Storage of account data is minimized through retention and disposal policies, procedures, and processes."
+    body: "Cardholder data is kept only as long as needed and then deleted under a retention schedule."
   - code: 3.5.1
     title: "Primary account number (PAN) is rendered unreadable"
-    body: "The primary account number is rendered unreadable anywhere it is stored, using strong cryptography."
+    body: "Stored card numbers cannot be read in the clear, using strong encryption, hashing, truncation or tokenization."
   - code: 3.6.1
     title: "Cryptographic keys protecting stored account data are secured"
-    body: "Procedures protect cryptographic keys used to secure stored account data against disclosure and misuse."
+    body: "Keys that encrypt stored card data are themselves protected from exposure and misuse."
 
   # ===== Req 4: Protect cardholder data with strong cryptography during transmission =====
   - code: 4.2.1
     title: "Strong cryptography protects PAN during transmission"
-    body: "Strong cryptography and security protocols protect the primary account number during transmission over open, public networks."
+    body: "Card numbers sent over public networks travel only inside strong encryption."
 
   # ===== Req 5: Protect all systems and networks from malicious software =====
   - code: 5.2.1
     title: "An anti-malware solution is deployed"
-    body: "An anti-malware solution is deployed on all system components, except those not at risk from malware."
+    body: "Anti-malware runs on every system that malware can realistically affect."
   - code: 5.3.1
     title: "The anti-malware solution is kept current and active"
-    body: "The anti-malware solution is kept current via automatic updates and performs periodic and active scans."
+    body: "Anti-malware updates itself automatically and scans both on schedule and in real time."
 
   # ===== Req 6: Develop and maintain secure systems and software =====
   - code: 6.2.1
     title: "Bespoke and custom software is developed securely"
-    body: "Bespoke and custom software is developed securely, based on industry standards and secure software development practices."
+    body: "In-house and custom software is built following recognised secure development practice."
   - code: 6.3.1
     title: "Security vulnerabilities are identified and managed"
-    body: "Security vulnerabilities are identified, assigned a risk ranking, and managed through an established process."
+    body: "New vulnerabilities are found, ranked by risk and tracked to resolution."
   - code: 6.3.3
     title: "System components are protected from known vulnerabilities by patching"
-    body: "System components are protected from known vulnerabilities by installing applicable security patches within defined timeframes."
+    body: "Security patches are applied to systems within set deadlines."
   - code: 6.4.1
     title: "Public-facing web applications are protected against attacks"
-    body: "Public-facing web applications are protected against attacks through automated technical solutions or review methods."
+    body: "Internet-facing web applications are shielded from attack by automated protection or regular review."
 
   # ===== Req 7: Restrict access to system components and cardholder data by business need to know =====
   - code: 7.2.1
     title: "An access control model defines need-to-know access"
-    body: "An access control model is defined that grants access to system components and data based on business need-to-know and least privilege."
+    body: "A documented access model gives people only the access their role needs."
   - code: 7.2.2
     title: "Access is assigned based on job classification and function"
-    body: "Access to system components and data is assigned to users based on job classification, function, and least privilege."
+    body: "User access follows job role and the least access that role requires."
 
   # ===== Req 8: Identify users and authenticate access =====
   - code: 8.2.1
     title: "Users are uniquely identified before access is granted"
-    body: "All users are assigned a unique ID before access to system components or cardholder data is granted."
+    body: "Each user has their own ID before getting any access to systems or card data."
   - code: 8.3.1
     title: "Strong authentication for users and administrators"
-    body: "Access for all users is authenticated using at least one authentication factor managed under defined access-control rules."
+    body: "Every user proves who they are with at least one managed authentication factor."
   - code: 8.4.1
     title: "Multi-factor authentication for access into the CDE"
-    body: "Multi-factor authentication is implemented for all non-console administrative access and all remote access into the cardholder data environment."
+    body: "Admin access from outside the console, and all remote access, into the CDE requires more than one factor."
   - code: 8.5.1
     title: "Multi-factor authentication systems are resistant to misuse"
-    body: "Multi-factor authentication systems are configured to resist replay attacks and bypass, and require all factors before access is granted."
+    body: "The MFA setup cannot be replayed or bypassed, and access is given only once every factor checks out."
 
   # ===== Req 9: Restrict physical access to cardholder data =====
   - code: 9.2.1
     title: "Physical access controls protect facilities housing the CDE"
-    body: "Appropriate facility entry controls are in place to restrict physical access to systems in the cardholder data environment."
+    body: "Entry controls keep unauthorised people physically away from CDE systems."
   - code: 9.4.1
     title: "Media containing cardholder data is physically secured"
-    body: "Media containing cardholder data is physically secured, and its storage and accessibility are controlled."
+    body: "Physical media holding card data is locked away and access to it is controlled."
 
   # ===== Req 10: Log and monitor all access =====
   - code: 10.2.1
     title: "Audit logs capture access to system components and data"
-    body: "Audit logs are enabled and active for all system components and capture access events, administrative actions, and security-relevant changes."
+    body: "Logging is on for every in-scope system and records access, admin activity and security changes."
   - code: 10.4.1
     title: "Audit logs are reviewed for anomalies"
-    body: "Audit logs are reviewed to identify anomalies or suspicious activity, supported where feasible by automated mechanisms."
+    body: "Logs are reviewed for suspicious activity, with automation doing the bulk of the work where possible."
 
   # ===== Req 11: Test security of systems and networks regularly =====
   - code: 11.3.1
     title: "Internal vulnerability scans are performed regularly"
-    body: "Internal vulnerability scans are performed periodically and after significant changes, and identified vulnerabilities are resolved."
+    body: "Internal vulnerability scans run on a schedule and after major changes, and their findings are fixed."
   - code: 11.4.1
     title: "Penetration testing methodology is defined and executed"
-    body: "A penetration testing methodology is defined, documented, and executed against the CDE perimeter and critical systems."
+    body: "Penetration testing follows a written method and covers the CDE boundary and critical systems."
 
   # ===== Req 12: Support information security with organizational policies and programs =====
   - code: 12.1.1
     title: "An overall information security policy is established"
-    body: "An overall information security policy is established, published, maintained, and disseminated to relevant personnel."
+    body: "A top-level security policy exists, is kept current and is shared with the people it applies to."
   - code: 12.6.1
     title: "A security awareness program is implemented"
-    body: "A formal security awareness program is implemented to make personnel aware of the cardholder data security policy and procedures."
+    body: "A formal awareness program teaches staff the card-data security policy and procedures."
   - code: 12.8.1
     title: "Third-party service providers managing account data are managed"
-    body: "Third-party service providers with whom account data is shared or that could affect CDE security are identified and managed."
+    body: "Service providers that receive card data, or could affect CDE security, are listed and managed."
   - code: 12.10.1
     title: "An incident response plan exists and is ready to activate"
-    body: "An incident response plan exists and is ready to be activated in the event of a suspected or confirmed security incident."
+    body: "An incident response plan is in place and can be started immediately when a breach is suspected or confirmed."
 
 mappings:
   # --- Req 1: Network security controls ---
