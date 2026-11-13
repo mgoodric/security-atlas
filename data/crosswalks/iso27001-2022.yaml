@@ -55,286 +55,286 @@ requirements:
   # ===== A.5 Organizational controls =====
   - code: A.5.1
     title: "Policies for information security"
-    body: "Information security policy and topic-specific policies are defined, approved, published, communicated, and reviewed at planned intervals."
+    body: "Management approves a top-level security policy plus subject policies, shares them with staff and revisits them on a schedule."
   - code: A.5.2
     title: "Information security roles and responsibilities"
-    body: "Information security roles and responsibilities are defined and allocated according to organizational needs."
+    body: "Every security duty has a named owner, sized to what the organization actually needs."
   - code: A.5.3
     title: "Segregation of duties"
-    body: "Conflicting duties and conflicting areas of responsibility are segregated to reduce the risk of unauthorized or unintended modification or misuse of assets."
+    body: "No single person can both make and approve a sensitive change, so one person's mistake or misuse is caught."
   - code: A.5.4
     title: "Management responsibilities"
-    body: "Management requires all personnel to apply information security in accordance with the established policies and procedures of the organization."
+    body: "Managers expect their teams to follow security policy and hold them to it."
   - code: A.5.5
     title: "Contact with authorities"
-    body: "The organization establishes and maintains contact with relevant authorities."
+    body: "Contacts with regulators, law enforcement and other authorities are known and kept current."
   - code: A.5.6
     title: "Contact with special interest groups"
-    body: "The organization establishes and maintains contact with special interest groups, specialist security forums, and professional associations."
+    body: "The security team stays connected to industry forums and peer groups for warnings and advice."
   - code: A.5.7
     title: "Threat intelligence"
-    body: "Information relating to information security threats is collected and analyzed to produce threat intelligence."
+    body: "Threat information is gathered and turned into intelligence the team can act on."
   - code: A.5.8
     title: "Information security in project management"
-    body: "Information security is integrated into project management."
+    body: "Projects account for security from the start rather than at hand-off."
   - code: A.5.9
     title: "Inventory of information and other associated assets"
-    body: "An inventory of information and other associated assets, including owners, is developed and maintained."
+    body: "There is a current list of information and assets, and each entry has an owner."
   - code: A.5.10
     title: "Acceptable use of information and other associated assets"
-    body: "Rules for the acceptable use and handling of information and associated assets are identified, documented, and implemented."
+    body: "Written rules say how information and equipment may be used and handled, and people follow them."
   - code: A.5.11
     title: "Return of assets"
-    body: "Personnel and other interested parties return all organizational assets in their possession upon change or termination of their employment, contract, or agreement."
+    body: "Leavers and people changing roles hand back the organization's equipment and information."
   - code: A.5.12
     title: "Classification of information"
-    body: "Information is classified according to the organization's information security needs based on confidentiality, integrity, availability, and relevant requirements."
+    body: "Information is sorted into sensitivity levels by what loss, tampering or outage would cost."
   - code: A.5.13
     title: "Labelling of information"
-    body: "An appropriate set of procedures for information labelling is developed and implemented in accordance with the information classification scheme adopted by the organization."
+    body: "Labels show each item's sensitivity level, following the classification scheme."
   - code: A.5.14
     title: "Information transfer"
-    body: "Information transfer rules, procedures, and agreements are in place for all types of transfer facilities within the organization and between the organization and external parties."
+    body: "Moving information inside or outside the organization, by any channel, follows set rules and agreements."
   - code: A.5.15
     title: "Access control"
-    body: "Rules to control physical and logical access to information and associated assets are established and implemented based on business and information security requirements."
+    body: "Who may reach which information and systems, physically or logically, is decided by written rules tied to business need."
   - code: A.5.16
     title: "Identity management"
-    body: "The full life cycle of identities is managed by the organization."
+    body: "Identities are created, maintained and retired under one managed lifecycle."
   - code: A.5.17
     title: "Authentication information"
-    body: "Allocation and management of authentication information is controlled by a management process, including advising personnel on appropriate handling."
+    body: "Passwords, keys and other authenticators are issued and handled under a managed process, and users are told how to look after theirs."
   - code: A.5.18
     title: "Access rights"
-    body: "Access rights to information and associated assets are provisioned, reviewed, modified, and removed in accordance with the access control policy."
+    body: "Access is granted, checked, changed and withdrawn as the access policy says."
   - code: A.5.19
     title: "Information security in supplier relationships"
-    body: "Processes and procedures are defined and implemented to manage the information security risks associated with the use of suppliers' products or services."
+    body: "The security risk of relying on suppliers is identified and managed."
   - code: A.5.20
     title: "Addressing information security within supplier agreements"
-    body: "Relevant information security requirements are established and agreed with each supplier based on the type of supplier relationship."
+    body: "Each supplier agreement states the security terms that suit that supplier."
   - code: A.5.21
     title: "Managing information security in the ICT supply chain"
-    body: "Processes and procedures are defined and implemented to manage the information security risks associated with the ICT products and services supply chain."
+    body: "Security risk in the technology supply chain is identified and managed."
   - code: A.5.22
     title: "Monitoring, review and change management of supplier services"
-    body: "The organization regularly monitors, reviews, evaluates, and manages change in supplier information security practices and service delivery."
+    body: "Supplier security and service quality are watched over time, and changes on their side are managed."
   - code: A.5.23
     title: "Information security for use of cloud services"
-    body: "Processes for acquisition, use, management, and exit from cloud services are established in accordance with information security requirements."
+    body: "Taking on, running and leaving a cloud service each meet the organization's security needs."
   - code: A.5.24
     title: "Information security incident management planning and preparation"
-    body: "The organization plans and prepares for managing information security incidents by defining, establishing, and communicating processes, roles, and responsibilities."
+    body: "Incident handling is planned ahead: process, roles and who to tell are settled before anything happens."
   - code: A.5.25
     title: "Assessment and decision on information security events"
-    body: "The organization assesses information security events and decides whether they are to be categorized as information security incidents."
+    body: "Security events are triaged to decide which ones count as incidents."
   - code: A.5.26
     title: "Response to information security incidents"
-    body: "Information security incidents are responded to in accordance with documented procedures."
+    body: "Incidents are handled by following the written response procedure."
   - code: A.5.27
     title: "Learning from information security incidents"
-    body: "Knowledge gained from information security incidents is used to strengthen and improve information security controls."
+    body: "Lessons from past incidents feed back into stronger controls."
   - code: A.5.28
     title: "Collection of evidence"
-    body: "The organization establishes and implements procedures for the identification, collection, acquisition, and preservation of evidence related to information security events."
+    body: "Evidence from security events is gathered and kept in a way that preserves its value."
   - code: A.5.29
     title: "Information security during disruption"
-    body: "The organization plans how to maintain information security at an appropriate level during disruption."
+    body: "Security stays at an acceptable level while the business is disrupted."
   - code: A.5.30
     title: "ICT readiness for business continuity"
-    body: "ICT readiness is planned, implemented, maintained, and tested based on business continuity objectives and ICT continuity requirements."
+    body: "Technology needed for continuity is prepared and tested against recovery targets."
   - code: A.5.31
     title: "Legal, statutory, regulatory and contractual requirements"
-    body: "Legal, statutory, regulatory, and contractual requirements relevant to information security and the organization's approach to meeting them are identified, documented, and kept up to date."
+    body: "Laws, regulations and contract terms that bear on security are tracked, along with how each is met."
   - code: A.5.32
     title: "Intellectual property rights"
-    body: "The organization implements appropriate procedures to protect intellectual property rights."
+    body: "The organization respects intellectual property rights, including software licensing."
   - code: A.5.33
     title: "Protection of records"
-    body: "Records are protected from loss, destruction, falsification, unauthorized access, and unauthorized release."
+    body: "Business records are kept safe from loss, tampering and unauthorised disclosure."
   - code: A.5.34
     title: "Privacy and protection of personal identifiable information (PII)"
-    body: "The organization identifies and meets the requirements regarding the preservation of privacy and protection of personal identifiable information according to applicable laws and regulations."
+    body: "Personal data is protected as privacy law requires."
   - code: A.5.35
     title: "Independent review of information security"
-    body: "The organization's approach to managing information security and its implementation is reviewed independently at planned intervals or when significant changes occur."
+    body: "Someone independent reviews the security program on a schedule and after major changes."
   - code: A.5.36
     title: "Compliance with policies, rules and standards for information security"
-    body: "Compliance with the organization's information security policy, topic-specific policies, rules, and standards is regularly reviewed."
+    body: "Compliance with security policies and standards is checked regularly."
   - code: A.5.37
     title: "Documented operating procedures"
-    body: "Operating procedures for information processing facilities are documented and made available to personnel who need them."
+    body: "Operating procedures for systems are written down and available to the people who run them."
   # ===== A.6 People controls =====
   - code: A.6.1
     title: "Screening"
-    body: "Background verification checks on all candidates for employment are carried out prior to joining the organization and on an ongoing basis, in accordance with applicable laws, regulations, and ethics, and proportional to the business requirements."
+    body: "Candidates are background-checked before they join and as appropriate afterwards, within the law and in proportion to the role."
   - code: A.6.2
     title: "Terms and conditions of employment"
-    body: "Employment contractual agreements state the personnel's and the organization's responsibilities for information security."
+    body: "Employment contracts spell out each side's security obligations."
   - code: A.6.3
     title: "Information security awareness, education and training"
-    body: "Personnel and relevant interested parties receive appropriate information security awareness, education, and training and regular updates of policies relevant to their function."
+    body: "Staff and relevant third parties get security awareness training suited to their role, and policy updates as they change."
   - code: A.6.4
     title: "Disciplinary process"
-    body: "A disciplinary process is formalized and communicated to take actions against personnel and other relevant interested parties who have committed an information security policy violation."
+    body: "A known disciplinary process applies when someone breaks security policy."
   - code: A.6.5
     title: "Responsibilities after termination or change of employment"
-    body: "Information security responsibilities and duties that remain valid after termination or change of employment are defined, enforced, and communicated."
+    body: "Security obligations that outlast a departure or role change are defined and made known."
   - code: A.6.6
     title: "Confidentiality or non-disclosure agreements"
-    body: "Confidentiality or non-disclosure agreements reflecting the organization's needs for the protection of information are identified, documented, regularly reviewed, and signed by personnel and other relevant interested parties."
+    body: "Confidentiality agreements fit the organization's protection needs, are kept current and are signed by the people they cover."
   - code: A.6.7
     title: "Remote working"
-    body: "Security measures are implemented when personnel are working remotely to protect information accessed, processed, or stored outside the organization's premises."
+    body: "Remote work has its own safeguards for information handled off-site."
   - code: A.6.8
     title: "Information security event reporting"
-    body: "The organization provides a mechanism for personnel to report observed or suspected information security events through appropriate channels in a timely manner."
+    body: "Staff have a clear, fast way to report a suspected security event."
   # ===== A.7 Physical controls =====
   - code: A.7.1
     title: "Physical security perimeters"
-    body: "Security perimeters are defined and used to protect areas that contain information and other associated assets."
+    body: "Defined physical perimeters protect the areas holding information and equipment."
   - code: A.7.2
     title: "Physical entry"
-    body: "Secure areas are protected by appropriate entry controls and access points."
+    body: "Entry to secure areas is controlled."
   - code: A.7.3
     title: "Securing offices, rooms and facilities"
-    body: "Physical security for offices, rooms, and facilities is designed and implemented."
+    body: "Offices, rooms and facilities are physically secured by design."
   - code: A.7.4
     title: "Physical security monitoring"
-    body: "Premises are continuously monitored for unauthorized physical access."
+    body: "Premises are watched for unauthorised entry."
   - code: A.7.5
     title: "Protecting against physical and environmental threats"
-    body: "Protection against physical and environmental threats, such as natural disasters and other intentional or unintentional physical threats to infrastructure, is designed and implemented."
+    body: "Facilities are designed to withstand natural and man-made physical threats."
   - code: A.7.6
     title: "Working in secure areas"
-    body: "Security measures for working in secure areas are designed and implemented."
+    body: "Working inside secure areas follows its own security rules."
   - code: A.7.7
     title: "Clear desk and clear screen"
-    body: "Clear desk rules for papers and removable storage media and clear screen rules for information processing facilities are defined and appropriately enforced."
+    body: "Desks are kept clear of papers and media, and unattended screens are locked."
   - code: A.7.8
     title: "Equipment siting and protection"
-    body: "Equipment is sited securely and protected."
+    body: "Equipment is placed and protected so it is hard to damage or tamper with."
   - code: A.7.9
     title: "Security of assets off-premises"
-    body: "Off-site assets are protected."
+    body: "Assets used away from the premises are protected."
   - code: A.7.10
     title: "Storage media"
-    body: "Storage media are managed through their acquisition, use, transportation, and disposal in accordance with the classification scheme and handling requirements."
+    body: "Storage media are controlled from purchase to disposal according to classification."
   - code: A.7.11
     title: "Supporting utilities"
-    body: "Information processing facilities are protected from power failures and other disruptions caused by failures in supporting utilities."
+    body: "Power and other utilities are protected so their failure does not take systems down."
   - code: A.7.12
     title: "Cabling security"
-    body: "Cables carrying power, data, or supporting information services are protected from interception, interference, or damage."
+    body: "Power and network cabling is protected from tapping, interference and damage."
   - code: A.7.13
     title: "Equipment maintenance"
-    body: "Equipment is maintained correctly to ensure the availability, integrity, and confidentiality of information."
+    body: "Equipment is serviced correctly so it keeps information available and intact."
   - code: A.7.14
     title: "Secure disposal or re-use of equipment"
-    body: "Items of equipment containing storage media are verified to ensure that any sensitive data and licensed software has been removed or securely overwritten prior to disposal or re-use."
+    body: "Equipment with storage is checked to be wiped of sensitive data and licensed software before disposal or reuse."
   # ===== A.8 Technological controls =====
   - code: A.8.1
     title: "User endpoint devices"
-    body: "Information stored on, processed by, or accessible via user endpoint devices is protected."
+    body: "Information on laptops, phones and other user devices is protected."
   - code: A.8.2
     title: "Privileged access rights"
-    body: "The allocation and use of privileged access rights are restricted and managed."
+    body: "Admin-level access is kept to the few who need it and tracked."
   - code: A.8.3
     title: "Information access restriction"
-    body: "Access to information and other associated assets is restricted in accordance with the established topic-specific policy on access control."
+    body: "Access to information is limited as the access control policy sets out."
   - code: A.8.4
     title: "Access to source code"
-    body: "Read and write access to source code, development tools, and software libraries is appropriately managed."
+    body: "Who can read or change source code, build tools and libraries is controlled."
   - code: A.8.5
     title: "Secure authentication"
-    body: "Secure authentication technologies and procedures are implemented based on information access restrictions and the access control policy."
+    body: "Sign-in methods are strong enough for the sensitivity of what they protect."
   - code: A.8.6
     title: "Capacity management"
-    body: "The use of resources is monitored and adjusted in line with current and anticipated capacity requirements."
+    body: "Resource use is watched and capacity adjusted ahead of demand."
   - code: A.8.7
     title: "Protection against malware"
-    body: "Protection against malware is implemented and supported by appropriate user awareness."
+    body: "Malware defences are in place, backed by user awareness."
   - code: A.8.8
     title: "Management of technical vulnerabilities"
-    body: "Information about technical vulnerabilities of information systems in use is obtained, the organization's exposure is evaluated, and appropriate measures are taken."
+    body: "Known technical weaknesses in systems in use are tracked, exposure is judged and fixes are applied."
   - code: A.8.9
     title: "Configuration management"
-    body: "Configurations, including security configurations, of hardware, software, services, and networks are established, documented, implemented, monitored, and reviewed."
+    body: "Secure configurations for hardware, software, services and networks are set, recorded and kept in check."
   - code: A.8.10
     title: "Information deletion"
-    body: "Information stored in information systems, devices, or any other storage media is deleted when no longer required."
+    body: "Information that is no longer needed is deleted from systems and media."
   - code: A.8.11
     title: "Data masking"
-    body: "Data masking is used in accordance with the access control policy and other related policies and business requirements, considering applicable legislation."
+    body: "Sensitive data is masked where policy, business need or law calls for it."
   - code: A.8.12
     title: "Data leakage prevention"
-    body: "Data leakage prevention measures are applied to systems, networks, and any other devices that process, store, or transmit sensitive information."
+    body: "Measures stop sensitive information from leaking out of systems and networks."
   - code: A.8.13
     title: "Information backup"
-    body: "Backup copies of information, software, and systems are maintained and regularly tested in accordance with the agreed backup policy."
+    body: "Backups of data, software and systems are taken and restore-tested as the backup policy sets out."
   - code: A.8.14
     title: "Redundancy of information processing facilities"
-    body: "Information processing facilities are implemented with redundancy sufficient to meet availability requirements."
+    body: "Systems have enough redundancy to meet availability targets."
   - code: A.8.15
     title: "Logging"
-    body: "Logs recording activities, exceptions, faults, and other relevant events are produced, stored, protected, and analyzed."
+    body: "Activity and error logs are kept, protected and reviewed."
   - code: A.8.16
     title: "Monitoring activities"
-    body: "Networks, systems, and applications are monitored for anomalous behavior, and appropriate actions are taken to evaluate potential information security incidents."
+    body: "Networks, systems and applications are watched for abnormal behaviour, and suspicious findings are investigated."
   - code: A.8.17
     title: "Clock synchronization"
-    body: "The clocks of information processing systems used by the organization are synchronized to approved time sources."
+    body: "System clocks are synchronised to trusted time sources."
   - code: A.8.18
     title: "Use of privileged utility programs"
-    body: "The use of utility programs that can be capable of overriding system and application controls is restricted and tightly controlled."
+    body: "Powerful utilities that can bypass system controls are restricted."
   - code: A.8.19
     title: "Installation of software on operational systems"
-    body: "Procedures and measures are implemented to securely manage software installation on operational systems."
+    body: "Installing software on production systems is controlled."
   - code: A.8.20
     title: "Networks security"
-    body: "Networks and network devices are secured, managed, and controlled to protect information in systems and applications."
+    body: "Networks and network devices are secured and managed."
   - code: A.8.21
     title: "Security of network services"
-    body: "Security mechanisms, service levels, and service requirements of network services are identified, implemented, and monitored."
+    body: "Network services have defined security features and service levels, and both are monitored."
   - code: A.8.22
     title: "Segregation of networks"
-    body: "Groups of information services, users, and information systems are segregated in the organization's networks."
+    body: "Networks are segmented to keep groups of users, services and systems apart."
   - code: A.8.23
     title: "Web filtering"
-    body: "Access to external websites is managed to reduce exposure to malicious content."
+    body: "Web access is filtered to cut exposure to malicious sites."
   - code: A.8.24
     title: "Use of cryptography"
-    body: "Rules for the effective use of cryptography, including cryptographic key management, are defined and implemented."
+    body: "Encryption use and key handling follow defined rules."
   - code: A.8.25
     title: "Secure development life cycle"
-    body: "Rules for the secure development of software and systems are established and applied."
+    body: "Software and systems are built under a secure development lifecycle."
   - code: A.8.26
     title: "Application security requirements"
-    body: "Information security requirements are identified, specified, and approved when developing or acquiring applications."
+    body: "Security requirements are written into the spec when building or buying applications."
   - code: A.8.27
     title: "Secure system architecture and engineering principles"
-    body: "Principles for engineering secure systems are established, documented, maintained, and applied to information system development activities."
+    body: "Secure engineering principles are documented and applied to system development."
   - code: A.8.28
     title: "Secure coding"
-    body: "Secure coding principles are applied to software development."
+    body: "Code is written to secure coding standards."
   - code: A.8.29
     title: "Security testing in development and acceptance"
-    body: "Security testing processes are defined and implemented in the development life cycle."
+    body: "Security testing is a defined step in development."
   - code: A.8.30
     title: "Outsourced development"
-    body: "The organization directs, monitors, and reviews the activities related to outsourced system development."
+    body: "Outsourced development is directed, monitored and reviewed."
   - code: A.8.31
     title: "Separation of development, test and production environments"
-    body: "Development, testing, and production environments are separated and secured."
+    body: "Development, test and production environments are kept apart and each is secured."
   - code: A.8.32
     title: "Change management"
-    body: "Changes to information processing facilities and information systems are subject to change management procedures."
+    body: "Changes to systems and facilities go through change management."
   - code: A.8.33
     title: "Test information"
-    body: "Test information is appropriately selected, protected, and managed."
+    body: "Test data is chosen carefully and protected."
   - code: A.8.34
     title: "Protection of information systems during audit testing"
-    body: "Audit tests and other assurance activities involving assessment of operational systems are planned and agreed between the tester and appropriate management."
+    body: "Audit tests on live systems are planned and agreed with management to limit disruption."
 
 mappings:
   # --- A.5 Organizational ---
