@@ -14,16 +14,20 @@ package aggrule_test
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // metaChildIDs returns the child risk ids linked under a meta-risk.
@@ -148,8 +152,11 @@ func TestEngine_RollingWindowKeepsOneMetaRisk_1861(t *testing.T) {
 	}
 }
 
-// Meta-risk de-dup is a read then an insert. Concurrent evaluations of one
-// rule must still create exactly one meta-risk.
+// Meta-risk de-dup is a read then an insert. A second evaluation of the same
+// rule, started while the first has created the meta-risk but not yet
+// committed, must wait and then update that meta-risk, not create its own.
+// Holding transaction A open makes the overlap deterministic; with free-running
+// goroutines the transactions are too short to overlap reliably.
 func TestEngine_ConcurrentEvaluationsCreateOneMetaRisk_1861(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 	admin := dbtest.NewMigratePool(t)
@@ -164,48 +171,74 @@ func TestEngine_ConcurrentEvaluationsCreateOneMetaRisk_1861(t *testing.T) {
 	seedRisk(t, admin, tenant, "r1", 3, 3, []string{"ownership"}, &team1, now)
 	seedRisk(t, admin, tenant, "r2", 4, 3, []string{"ownership"}, &team1, now)
 	seedRisk(t, admin, tenant, "r3", 3, 3, []string{"ownership"}, &team2, now)
+	tenantID := uuid.MustParse(tenant)
 
-	const workers = 12
-	var (
-		wg    sync.WaitGroup
-		start = make(chan struct{})
-		errs  = make(chan error, workers)
-		ids   = make(chan uuid.UUID, workers)
-	)
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-start
-			evals, err := store.Evaluate(ctx, []string{"ownership"})
-			if err != nil {
-				errs <- err
-				return
-			}
-			for _, ev := range evals {
-				if ev.MetaRiskID != nil {
-					ids <- *ev.MetaRiskID
-				}
-			}
-		}()
-	}
-	close(start)
-	wg.Wait()
-	close(errs)
-	close(ids)
-	for err := range errs {
-		t.Fatalf("concurrent Evaluate: %v", err)
+	// evaluateInTx runs the engine in a fresh tenant transaction and leaves
+	// it open for the caller to commit.
+	evaluateInTx := func() (pgx.Tx, *uuid.UUID, error) {
+		tx, err := app.Begin(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+			_ = tx.Rollback(ctx)
+			return nil, nil, err
+		}
+		evals, err := aggrule.NewEngine(dbx.New(tx)).Evaluate(ctx, tenantID, []string{"ownership"})
+		if err != nil {
+			_ = tx.Rollback(ctx)
+			return nil, nil, err
+		}
+		if len(evals) != 1 || evals[0].MetaRiskID == nil {
+			_ = tx.Rollback(ctx)
+			return nil, nil, fmt.Errorf("want 1 fired evaluation, got %v", evalOutcomes(evals))
+		}
+		return tx, evals[0].MetaRiskID, nil
 	}
 
-	distinct := map[uuid.UUID]bool{}
-	for id := range ids {
-		distinct[id] = true
+	txA, metaA, err := evaluateInTx()
+	if err != nil {
+		t.Fatalf("evaluation A: %v", err)
 	}
-	if len(distinct) != 1 {
-		t.Fatalf("concurrent evaluations fired into %d distinct meta-risks, want 1", len(distinct))
+
+	type result struct {
+		tx   pgx.Tx
+		meta *uuid.UUID
+		err  error
+	}
+	done := make(chan result, 1)
+	go func() {
+		tx, meta, err := evaluateInTx()
+		done <- result{tx, meta, err}
+	}()
+
+	// Give B time to reach the meta-risk lookup (or, unserialized, to create
+	// its own) while A still holds its uncommitted meta-risk.
+	select {
+	case r := <-done:
+		if r.tx != nil {
+			_ = r.tx.Rollback(ctx)
+		}
+		_ = txA.Rollback(ctx)
+		t.Fatalf("evaluation B finished while A was uncommitted (meta %v, err %v): not serialized on the rule's key", r.meta, r.err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := txA.Commit(ctx); err != nil {
+		t.Fatalf("commit A: %v", err)
+	}
+
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("evaluation B: %v", r.err)
+	}
+	if err := r.tx.Commit(ctx); err != nil {
+		t.Fatalf("commit B: %v", err)
+	}
+	if *r.meta != *metaA {
+		t.Fatalf("evaluation B fired into meta-risk %s, want A's %s", *r.meta, *metaA)
 	}
 	if n := metaRiskCount(t, admin, tenant); n != 1 {
-		t.Fatalf("%d meta-risks after %d concurrent evaluations, want 1", n, workers)
+		t.Fatalf("%d meta-risks after two overlapping evaluations, want 1", n)
 	}
 }
 
