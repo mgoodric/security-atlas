@@ -141,8 +141,12 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 				report.FrameworkSlug, report.FrameworkVersion, report.FrameworkVersionID, report.IsNewVersion)
 			fmt.Printf("requirements created=%d updated=%d unchanged=%d\n",
 				report.RequirementsCreated, report.RequirementsUpdated, report.RequirementsUnchanged)
-			fmt.Printf("edges        created=%d updated=%d unchanged=%d\n",
-				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged)
+			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d\n",
+				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped))
+			for _, sk := range report.EdgesSkipped {
+				fmt.Printf("edge skipped %s->%s: existing source_attribution=%s outranks incoming %s\n",
+					sk.RequirementCode, sk.SCFAnchor, sk.ExistingAttribution, sk.IncomingAttribution)
+			}
 			keys := make([]string, 0, len(report.MappingsByAttribution))
 			for k := range report.MappingsByAttribution {
 				keys = append(keys, k)

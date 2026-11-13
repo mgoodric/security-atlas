@@ -30,11 +30,41 @@ type Report struct {
 	EdgesUpdated   int
 	EdgesUnchanged int
 
+	// EdgesSkipped lists the (requirement, anchor) pairs whose incoming row
+	// was dropped because the existing edge carries a higher-precedence
+	// source_attribution (see attributionRank). The stored edge is left
+	// untouched, provenance and mapping_tier included.
+	EdgesSkipped []SkippedEdge
+
 	// MappingsByAttribution tallies edges by their source_attribution
 	// label. Exposed for the HITL audit summary so the orchestrator
 	// can read "X community-draft mappings ingested, 0 scf_official"
 	// without a second query.
 	MappingsByAttribution map[string]int
+}
+
+// SkippedEdge names one crosswalk row the importer refused to apply because
+// it would downgrade an existing edge's provenance.
+type SkippedEdge struct {
+	RequirementCode     string
+	SCFAnchor           string
+	ExistingAttribution string
+	IncomingAttribution string
+}
+
+// attributionRank orders crosswalk provenance: scf_official > community_draft
+// > org_internal. Edges are global catalog data, so a weaker source must
+// never overwrite a stronger one for every tenant at once.
+func attributionRank(a dbx.CrosswalkSourceAttribution) int {
+	switch a {
+	case dbx.CrosswalkSourceAttributionScfOfficial:
+		return 3
+	case dbx.CrosswalkSourceAttributionCommunityDraft:
+		return 2
+	case dbx.CrosswalkSourceAttributionOrgInternal:
+		return 1
+	}
+	return 0
 }
 
 // pgxBeginner is the minimum surface Import needs from the DB handle.
@@ -214,7 +244,6 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		}
 		relType := dbx.StrmRelationshipType(m.RelationshipType)
 		srcAttr := dbx.CrosswalkSourceAttribution(attribution)
-		report.MappingsByAttribution[attribution]++
 
 		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.RequirementCode + "-" + m.SCFAnchor)
 
@@ -224,6 +253,16 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		})
 		switch {
 		case lookupErr == nil:
+			if attributionRank(srcAttr) < attributionRank(existing.SourceAttribution) {
+				report.EdgesSkipped = append(report.EdgesSkipped, SkippedEdge{
+					RequirementCode:     m.RequirementCode,
+					SCFAnchor:           m.SCFAnchor,
+					ExistingAttribution: string(existing.SourceAttribution),
+					IncomingAttribution: attribution,
+				})
+				continue
+			}
+			report.MappingsByAttribution[attribution]++
 			if edgeContentEqual(existing, relType, m.Strength, srcAttr, m.Rationale) {
 				report.EdgesUnchanged++
 				continue
@@ -239,6 +278,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 			}
 			report.EdgesUpdated++
 		case errors.Is(lookupErr, pgx.ErrNoRows):
+			report.MappingsByAttribution[attribution]++
 			if _, err := q.InsertFwToScfEdge(ctx, dbx.InsertFwToScfEdgeParams{
 				ID:                     edgeID,
 				FrameworkRequirementID: reqID,
