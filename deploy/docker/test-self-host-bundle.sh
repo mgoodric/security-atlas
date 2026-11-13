@@ -593,6 +593,23 @@ rm -f "${CONTROLS_RESP}"
 log "default user sees the 50 stock controls in the bootstrap tenant; none in the all-zeros tenant"
 
 # ---------------------------------------------------------------------
+# Assertion 8b (security-atlas#1721): the bootstrap imports the bundled
+# SOC 2 crosswalk, so the stock SOC 2 controls map to SOC 2 requirements
+# through their SCF anchors. Before the fix a fresh install had zero
+# framework requirements and /v1/frameworks listed only SCF.
+# ---------------------------------------------------------------------
+SOC2_MAPPED="$(db_count "SELECT count(DISTINCT fr.id)
+    FROM controls c
+    JOIN fw_to_scf_edges e ON e.scf_anchor_id = c.scf_anchor_id
+    JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+    JOIN framework_versions fv ON fv.id = fr.framework_version_id
+    JOIN frameworks f ON f.id = fv.framework_id
+    WHERE c.tenant_id = '${BOOTSTRAP_TENANT_ID}' AND f.slug = 'soc2'")"
+[ "${SOC2_MAPPED:-0}" -gt 0 ] 2>/dev/null \
+    || fail "stock SOC 2 controls map to ${SOC2_MAPPED:-?} SOC 2 requirements, want > 0 (bootstrap did not import the SOC 2 crosswalk?)"
+log "stock SOC 2 controls map to ${SOC2_MAPPED} SOC 2 requirements"
+
+# ---------------------------------------------------------------------
 # Assertions 9 + 10 (slice 470) — PROXY MODE ONLY: the trusted-proxy
 # X-Forwarded-For walk (internal/api/auth/clientip.go, slice 466) proven
 # end-to-end across a real multi-container topology.

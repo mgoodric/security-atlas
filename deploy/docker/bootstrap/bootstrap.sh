@@ -15,7 +15,7 @@
 #   1. wait for Postgres to accept connections
 #   2. seed: default tenant + builtin scope dimension + default scope cell
 #      + default local user (argon2id password hash)
-#   3. import the SCF catalog
+#   3. import the SCF catalog + the bundled SOC 2 crosswalk
 #   4. wait for the atlas server's /health to return 200
 #   5. ensure an OAuth client + upload the 50 SOC 2 control bundles
 #
@@ -61,6 +61,7 @@ BOOTSTRAP_DIR="$(dirname "$0")"
 REPO_ROOT="${REPO_ROOT:-/repo}"
 SCF_CATALOG="${SCF_CATALOG:-$REPO_ROOT/migrations/fixtures/scf-sample.json}"
 CONTROLS_DIR="${CONTROLS_DIR:-$REPO_ROOT/controls/soc2}"
+CROSSWALKS_DIR="${CROSSWALKS_DIR:-$REPO_ROOT/data/crosswalks}"
 
 log() { echo "[bootstrap] $*"; }
 
@@ -104,6 +105,19 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
 # ----- Phase 3: import the SCF catalog -----
 log "importing SCF catalog from $SCF_CATALOG ..."
 atlas-cli catalog import-scf "$SCF_CATALOG"
+
+# security-atlas#1721: without a crosswalk the stock SOC 2 controls map to
+# zero framework requirements and /v1/frameworks lists only SCF. The SOC 2
+# crosswalk's anchors all exist in the SCF sample imported above, so it is
+# the one imported by default. Upsert, so re-runs are no-ops. Other
+# frameworks stay opt-in: the command for each is printed below.
+log "importing SOC 2 crosswalk from $CROSSWALKS_DIR/soc2-tsc-2017.yaml ..."
+atlas-cli catalog import-crosswalk "$CROSSWALKS_DIR/soc2-tsc-2017.yaml"
+log "other bundled framework crosswalks are not imported; to add one, run:"
+for cw in "$CROSSWALKS_DIR"/*.yaml; do
+    [ "$(basename "$cw")" = "soc2-tsc-2017.yaml" ] && continue
+    log "  docker compose run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/$(basename "$cw")"
+done
 
 # ----- Phase 4: wait for the atlas server /health -----
 log "waiting for atlas /health at $ATLAS_HTTP_URL/health ..."
