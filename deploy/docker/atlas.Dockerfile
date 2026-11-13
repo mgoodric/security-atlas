@@ -3,7 +3,7 @@
 # atlas.Dockerfile — the security-atlas platform server (cmd/atlas).
 #
 # Multi-stage:
-#   1. builder  — golang:1.26 toolchain, compiles a static binary
+#   1. builder  — golang:1.27 toolchain, compiles a static binary
 #   2. runtime  — gcr.io/distroless/static-debian12:nonroot, ~2 MB base,
 #                 no shell, no package manager, runs as uid 65532
 #
@@ -15,7 +15,7 @@
 # Built locally by the docker-compose self-host bundle (slice 037).
 
 # ----- Stage 1: build -----
-FROM golang:1.26 AS builder
+FROM golang:1.27 AS builder
 
 WORKDIR /src
 
