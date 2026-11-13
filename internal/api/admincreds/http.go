@@ -12,6 +12,7 @@ package admincreds
 import (
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -47,11 +48,16 @@ type IssueRequest struct {
 	TenantID       string   `json:"tenant_id,omitempty"`
 	ScopePredicate string   `json:"scope_predicate"`
 	AllowedKinds   []string `json:"allowed_kinds"`
-	TTLSeconds     int64    `json:"ttl_seconds"`
+	TTLSeconds     int64    `json:"ttl_seconds"` // 0 = no expiry; at most maxTTLSeconds
 	IsAdmin        bool     `json:"is_admin"`
 	IsApprover     bool     `json:"is_approver"`
 	OwnerRoles     []string `json:"owner_roles"`
 }
+
+// maxTTLSeconds is the largest ttl_seconds whose Duration does not
+// overflow int64 nanoseconds (about 292 years). Anything larger would
+// wrap, so Issue refuses it with 400 (#1914).
+const maxTTLSeconds = math.MaxInt64 / int64(time.Second)
 
 // IssueResponse carries the bearer plaintext (returned exactly once).
 type IssueResponse struct {
@@ -82,6 +88,12 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.TenantID != "" {
 		httpresp.WriteError(w, http.StatusBadRequest, "tenant_id is not accepted; tenant is derived from the calling credential")
+		return
+	}
+	// Range-check the seconds before converting: a huge value wraps
+	// time.Duration to an arbitrary or negative TTL (#1914).
+	if req.TTLSeconds < 0 || req.TTLSeconds > maxTTLSeconds {
+		httpresp.WriteError(w, http.StatusBadRequest, "ttl_seconds must be between 0 (no expiry) and 9223372036")
 		return
 	}
 	// requireAdmin returning true guarantees the credential is in context.
