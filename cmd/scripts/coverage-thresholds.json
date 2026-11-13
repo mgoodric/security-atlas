@@ -247,6 +247,7 @@
     "internal/auth/oidc": 67,
     "internal/auth/password": 69,
     "internal/auth/revocation": 77,
+    "internal/auth/superadmin": 91,
     "internal/auth/tokensign": 72,
     "internal/auth/userprefs": 83,
     "internal/authz": 70,

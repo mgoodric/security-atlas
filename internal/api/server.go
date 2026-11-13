@@ -35,6 +35,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -122,6 +123,10 @@ type Server struct {
 	jwtRevoked  *revocation.Store
 	jwtIssuer   string
 	jwtAudience string
+	// jwtSuperAdmins re-reads super_admins for tokens carrying the
+	// atlas:super_admin claim, so a demote drops the claim from live
+	// tokens on their next request (#1850). Nil skips the re-check.
+	jwtSuperAdmins superadmin.Checker
 
 	// Slice 191 + 326: the migration URL originally surfaced in the
 	// retired 410 deprecation responder's body. The slice 326
@@ -181,6 +186,14 @@ func (s *Server) AttachJWTValidator(signer *tokensign.Signer, revoked *revocatio
 	s.jwtRevoked = revoked
 	s.jwtIssuer = issuer
 	s.jwtAudience = audience
+}
+
+// AttachSuperAdminChecker wires the live super_admins re-check the JWT
+// middleware applies to any token carrying atlas:super_admin (#1850).
+// cmd/atlas wires it with the BYPASSRLS pool; unit and integration
+// servers that leave it unset trust the claim as minted.
+func (s *Server) AttachSuperAdminChecker(c superadmin.Checker) {
+	s.jwtSuperAdmins = c
 }
 
 // AttachAuthz wires the slice-035 OPA engine + decision audit writer.
