@@ -32,6 +32,7 @@ package backup
 
 import (
 	"os"
+	"path/filepath"
 	"time"
 )
 
@@ -47,6 +48,7 @@ const (
 	envS3Bucket          = "ATLAS_BACKUP_S3_BUCKET" // s3 target bucket
 	envS3Prefix          = "ATLAS_BACKUP_S3_PREFIX" // key prefix within bucket
 	envVerifyMaintenance = "ATLAS_BACKUP_VERIFY_MAINTENANCE_DB"
+	envDataDir           = "ATLAS_DATA_DIR" // platform data dir; backups default beneath it
 )
 
 // Defaults (D4 daily cadence, D5 retention window).
@@ -65,8 +67,9 @@ const (
 type Config struct {
 	// TargetKind is "local" (default) or "s3".
 	TargetKind string
-	// Dir is the local-target directory (default ATLAS_BACKUP_DIR or
-	// /var/lib/atlas/backups). A mounted named volume on the single-VM host.
+	// Dir is the local-target directory: ATLAS_BACKUP_DIR when set, else
+	// $ATLAS_DATA_DIR/backups, else /var/lib/atlas/backups. A mounted named
+	// volume on the single-VM host.
 	Dir string
 	// S3Bucket / S3Prefix wire the off-host S3 target.
 	S3Bucket string
@@ -82,7 +85,10 @@ type Config struct {
 	MaintenanceDB string
 }
 
-// DefaultDir is the on-host backup directory when ATLAS_BACKUP_DIR is unset.
+// DefaultDir is the on-host backup directory when neither ATLAS_BACKUP_DIR
+// nor ATLAS_DATA_DIR is set. With ATLAS_DATA_DIR set, the default is
+// $ATLAS_DATA_DIR/backups, so a non-root run with its own data dir never
+// tries to create /var/lib/atlas.
 const DefaultDir = "/var/lib/atlas/backups"
 
 // ConfigFromEnv reads the backup config from the process environment.
@@ -103,6 +109,9 @@ func configFromLookup(lookup func(string) (string, bool)) Config {
 	}
 	if v, ok := lookup(envTargetKind); ok && (v == "local" || v == "s3") {
 		cfg.TargetKind = v
+	}
+	if v, ok := lookup(envDataDir); ok && v != "" {
+		cfg.Dir = filepath.Join(v, "backups")
 	}
 	if v, ok := lookup(envBackupDir); ok && v != "" {
 		cfg.Dir = v
