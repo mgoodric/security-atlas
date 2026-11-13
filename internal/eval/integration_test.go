@@ -19,6 +19,7 @@ package eval_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -889,5 +890,44 @@ func TestEvaluateAll_ContinuesPastBrokenControl(t *testing.T) {
 		if len(st) == 0 || st[0].Result != c.want {
 			t.Fatalf("control %s: want %q, got %+v", c.id, c.want, st)
 		}
+	}
+}
+
+// #1865: once the sweep's context is cancelled, EvaluateAll stops instead of
+// logging and joining one context error per remaining control. Every control
+// here runs a Rego policy that cannot finish before the deadline, so at most
+// the one in flight when it fires may appear in the error.
+func TestEvaluateAll_StopsOnCancelledContext(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+
+	const runaway = "package evidence.query\n\nn := numbers.range(1, 100000)\n\nresult := \"pass\" if {\n  count([a | some a in n; some b in n; a == b + 1000000]) > 0\n}\n"
+	observed := time.Now().UTC().Add(-1 * 24 * time.Hour)
+	var ids []uuid.UUID
+	for range 3 {
+		id := seedControl(t, admin, tenant, "automated", "monthly",
+			`[{"id":"q","language":"rego","expression":`+jsonString(runaway)+`}]`)
+		seedEvidence(t, admin, tenant, id, "pass", observed)
+		ids = append(ids, id)
+	}
+
+	ctx, cancel := context.WithTimeout(ctxFor(t, tenant), time.Second)
+	defer cancel()
+	n, err := newEngine(app).EvaluateAll(ctx, eval.TriggerManual, eval.FarFuture)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("EvaluateAll must report the cancelled context, got: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("no control can finish before the deadline; wrote %d rows", n)
+	}
+	named := 0
+	for _, id := range ids {
+		if strings.Contains(err.Error(), id.String()) {
+			named++
+		}
+	}
+	if named > 1 {
+		t.Fatalf("EvaluateAll kept evaluating after cancellation (%d controls in the error): %v", named, err)
 	}
 }
