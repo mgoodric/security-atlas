@@ -8,8 +8,9 @@
 //      (a) clear platform_status.bootstrap_token_consumed_at
 //      (b) write the new token to ${ATLAS_DATA_DIR}/bootstrap-token.
 //
-// The endpoint is admin-only (defense-in-depth: cred.IsAdmin check),
-// runs the foot-gun gate (refuse without --force if first_signin_at is
+// The endpoint requires super_admin, or an admin credential on a
+// single-tenant install (#1851), accepts only a live credential this server
+// issued as the token, runs the foot-gun gate (refuse without --force if first_signin_at is
 // set), and is the ONLY runtime path that writes the bootstrap-token
 // file outside of the cold-start path in cmd/atlas.
 
@@ -23,6 +24,7 @@ import (
 	"net/http"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/platform"
 )
 
@@ -31,6 +33,7 @@ import (
 // needs.
 type PlatformResetter interface {
 	ResetBootstrap(ctx context.Context, force bool) error
+	TenantCount(ctx context.Context) (int, error)
 }
 
 // AttachPlatformResetter wires the slice-073 ResetBootstrap path. cmd/atlas
@@ -56,8 +59,10 @@ type resetBootstrapResponse struct {
 //
 // Pre-conditions enforced (in order):
 //
-//	(1) Authenticated bearer with cred.IsAdmin == true.
-//	(2) Either first_signin_at IS NULL, or force == true.
+//	(1) super_admin, or an admin credential on a single-tenant install
+//	    (authorizeResetBootstrap).
+//	(2) token authenticates as a live credential in the credential store.
+//	(3) Either first_signin_at IS NULL, or force == true.
 //
 // Either failure returns a non-2xx without writing anything. On success
 // the platform_status row is reset AND the new token is written to the
@@ -71,13 +76,7 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Admin gate (defense in depth — the slice-035 OPA middleware also
-	// gates this path, but a server-side check keeps the handler honest
-	// even when authz is bypassed for unit tests).
-	cred, ok := authctx.CredentialFromContext(r.Context())
-	if !ok || !cred.IsAdmin {
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(`{"error":"admin credential required"}`))
+	if !s.authorizeResetBootstrap(w, r) {
 		return
 	}
 
@@ -90,6 +89,20 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 	if req.Token == "" {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":"token is required"}`))
+		return
+	}
+	// The token lands in the bootstrap-token file that the login page
+	// points operators at, so it must be a live credential this server
+	// issued, not a caller-chosen string (#1851). Fail closed without a
+	// credential store.
+	if s.credStore == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"credential store not configured"}`))
+		return
+	}
+	if _, err := s.credStore.Authenticate(req.Token); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"token is not a live atlas credential"}`))
 		return
 	}
 
@@ -126,4 +139,44 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 		resp.FileWritten = true
 	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// authorizeResetBootstrap admits a caller whose verified JWT carries
+// `atlas:super_admin`, or an admin credential (including a per-tenant admin
+// API key) while the install has exactly one tenant (#1851, ADR 0003
+// amendment). The reset clears install-wide markers and rewrites the
+// install's bootstrap-token file, so on a multi-tenant install a tenant
+// admin reaching it is a cross-tenant effect. On a single-tenant install
+// the only tenant admin is the install's operator, and the fallback keeps
+// the CLI recovery path working when no browser sign-in (and so no JWT) is
+// possible. Missing credential is 401; anything else refused is 403.
+func (s *Server) authorizeResetBootstrap(w http.ResponseWriter, r *http.Request) bool {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"missing credential"}`))
+		return false
+	}
+	if claims := jwtmw.FromContext(r.Context()); claims != nil && claims.SuperAdmin {
+		return true
+	}
+	if !cred.IsAdmin {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"super_admin required"}`))
+		return false
+	}
+	n, err := s.platformResetter.TenantCount(r.Context())
+	if err != nil {
+		s.installLogger().Warn("reset-bootstrap tenant count failed",
+			slog.String("error", err.Error()))
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"reset bootstrap failed"}`))
+		return false
+	}
+	if n != 1 {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"super_admin required on a multi-tenant install"}`))
+		return false
+	}
+	return true
 }
