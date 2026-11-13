@@ -192,6 +192,32 @@ func TestStatus_EnabledFalse(t *testing.T) {
 	}
 }
 
+// Status keeps the admin gate, not super_admin (#1851): a tenant admin key
+// and a tenant admin role grant both read it; a viewer is 403 and a missing
+// credential 401.
+func TestStatus_AdminGate(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		req  *http.Request
+		want int
+	}{
+		{"tenant admin API key", requestWithTenantAdminKey(http.MethodGet, "/v1/admin/demo/status"), http.StatusOK},
+		{"tenant admin role JWT", requestWithOwnerRoleAdmin(http.MethodGet, "/v1/admin/demo/status"), http.StatusOK},
+		{"viewer", requestWithViewer(http.MethodGet, "/v1/admin/demo/status"), http.StatusForbidden},
+		{"no credential", httptest.NewRequest(http.MethodGet, "/v1/admin/demo/status", nil), http.StatusUnauthorized},
+	}
+	for _, tc := range cases {
+		h := New(nil, func() bool { return true })
+		w := httptest.NewRecorder()
+		h.Status(w, tc.req)
+		if w.Code != tc.want {
+			t.Errorf("%s: status = %d, want %d; body=%s", tc.name, w.Code, tc.want, w.Body.String())
+		}
+	}
+}
+
 // --- Admin gate ---
 
 // ISC-4: non-admin caller (viewer) gets 403.
