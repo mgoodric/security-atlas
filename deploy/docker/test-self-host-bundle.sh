@@ -402,6 +402,26 @@ done
 [ -n "${SCHEMA_READY}" ] || fail "evidence_kind_schemas relation not created within ~4 min (stage-1 migrations stalled)"
 log "evidence_kind_schemas exists — stage-1 migrations complete"
 
+# security-atlas#1888: the first boot prints the opt-in crosswalk import
+# commands in a form that runs from the repo root. Read them now: stage 2's
+# `up -d --build` recreates the bootstrap container, which drops this log,
+# and the recreated container is no longer a first install. Phase 4 (wait
+# for atlas /health) follows the crosswalk phase, and atlas is not up in
+# stage 1, so the bootstrap is parked there once the line appears.
+OPTIN_CMD="docker compose -f deploy/docker/docker-compose.yml run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/iso27001-2022.yaml"
+PHASE4_SEEN=""
+for i in $(seq 1 60); do
+    if "${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 | grep -qF "waiting for atlas /health"; then
+        PHASE4_SEEN=1
+        break
+    fi
+    sleep 2
+done
+[ -n "${PHASE4_SEEN}" ] || fail "atlas-bootstrap did not reach phase 4 within ~2 min of stage-1 migrations"
+"${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 | grep -qF -- "${OPTIN_CMD}" \
+    || fail "first-boot bootstrap log lacks the opt-in command: ${OPTIN_CMD}"
+log "first boot printed the repo-root opt-in crosswalk commands"
+
 # ---------------------------------------------------------------------
 # Stage 2: bring up the rest (atlas + web). atlas's boot-time schema
 # importer now finds evidence_kind_schemas already migrated; the
@@ -778,12 +798,8 @@ CONTROLS_BEFORE="${CONTROLS}"
 SCOPES_BEFORE="$(db_count 'SELECT count(*) FROM scope_cells')"
 USERS_BEFORE="$(db_count 'SELECT count(*) FROM users')"
 
-# security-atlas#1888: the first boot printed the opt-in crosswalk import
-# commands in a form that runs from the repo root; a re-run prints none.
-OPTIN_CMD="docker compose -f deploy/docker/docker-compose.yml run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/iso27001-2022.yaml"
-"${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 | grep -qF -- "${OPTIN_CMD}" \
-    || fail "first-boot bootstrap log lacks the opt-in command: ${OPTIN_CMD}"
-
+# security-atlas#1888: the first boot printed the opt-in crosswalk commands
+# (checked in stage 1 above); a re-run is not a first install and prints none.
 set +e
 RERUN_OUT="$("${COMPOSE[@]}" run --rm atlas-bootstrap 2>&1)"
 RERUN_RC=$?
