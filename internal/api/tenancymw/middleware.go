@@ -28,6 +28,12 @@
 //     where a request body legitimately establishes the tenant — every
 //     other handler MUST inherit from this middleware.
 //
+//   - If the credential resolves to no tenant (empty or the all-zeros
+//     tenant), a write (any method but GET/HEAD/OPTIONS) is refused with
+//     403 `tenant_unbound` (security-atlas#1739). Before that refusal an
+//     unbound OAuth client's writes landed in the all-zeros tenant, where
+//     no user could see them.
+//
 //   - If the credential carries a malformed tenant id, the middleware
 //     fails the request with 500. A malformed tenant id at this layer
 //     means the credstore returned a credential with bad data — that is
@@ -40,8 +46,11 @@
 package tenancymw
 
 import (
+	"encoding/json"
 	"log"
 	"net/http"
+
+	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -77,6 +86,47 @@ func Middleware(next http.Handler) http.Handler {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
+		if isUnboundTenant(cred.TenantID) && !isSafeMethod(r.Method) {
+			refuseUnboundWrite(w)
+			return
+		}
 		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+// UnboundWriteMessage is the body of the refusal a write gets when its
+// credential resolves to no tenant. It names the fix, because the usual
+// cause is an OAuth client issued before clients were bound to tenants.
+const UnboundWriteMessage = "this credential is not bound to a tenant, so it cannot write. " +
+	"Bind its OAuth client to a tenant: atlas-cli oauth bind-client <client_id> --tenant <tenant-id> " +
+	"(or issue a new client with atlas-cli oauth issue-client <name> --tenant <tenant-id>)"
+
+// isUnboundTenant reports whether a credential's tenant id is the
+// all-zeros tenant (security-atlas#1739). A client_credentials token from
+// an unbound OAuth client carries uuid.Nil; jwtmw bridges it as
+// "00000000-0000-0000-0000-000000000000". Writes under it would land in a
+// tenant no user can see. The id has already parsed (tenancy.WithTenant
+// rejects anything that is not a UUID, including "").
+func isUnboundTenant(tenantID string) bool {
+	return uuid.MustParse(tenantID) == uuid.Nil
+}
+
+// isSafeMethod reports the RFC 9110 §9.2.1 safe methods. Reads under the
+// all-zeros tenant return nothing and are left alone; only writes are
+// refused.
+func isSafeMethod(m string) bool {
+	switch m {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return true
+	}
+	return false
+}
+
+func refuseUnboundWrite(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusForbidden)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error":   "tenant_unbound",
+		"message": UnboundWriteMessage,
 	})
 }

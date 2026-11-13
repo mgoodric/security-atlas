@@ -76,6 +76,15 @@ var ErrDuplicateName = errors.New("oauthclient: client with that name already ex
 // client-existence oracles.
 var ErrUnknownClient = errors.New("oauthclient: unknown client")
 
+// ErrAlreadyBound is returned by Bind when the client is already bound to
+// a different tenant. Moving a client between tenants would silently
+// redirect every write its tokens make, so it is refused rather than done.
+var ErrAlreadyBound = errors.New("oauthclient: client is bound to a different tenant")
+
+// ErrNilTenant is returned when a caller asks to bind a client to the
+// all-zeros tenant, which is not a tenant anyone means.
+var ErrNilTenant = errors.New("oauthclient: refusing to bind to the all-zeros tenant")
+
 // Client is the in-memory projection of an oauth_clients row. The
 // `client_secret_hash` column is deliberately NOT exposed — the hash
 // is an implementation detail of the verification path.
@@ -85,6 +94,10 @@ type Client struct {
 	Name       string
 	CreatedAt  time.Time
 	DisabledAt *time.Time
+	// TenantID is the tenant this client's client_credentials tokens act
+	// in (security-atlas#1739). Nil means unbound: its tokens carry no
+	// tenant and every write they attempt is refused.
+	TenantID *uuid.UUID
 }
 
 // Store wraps a pgxpool with the issuance and verification primitives
@@ -111,6 +124,19 @@ func New(pool *pgxpool.Pool) *Store {
 // unique_violation SQLSTATE. The DB UNIQUE constraint on (name) is
 // the source of truth.
 func (s *Store) Issue(ctx context.Context, name string) (*Client, string, error) {
+	return s.issue(ctx, name, nil)
+}
+
+// IssueForTenant is Issue for a client bound to tenant at creation, so its
+// client_credentials tokens act in that tenant (security-atlas#1739).
+func (s *Store) IssueForTenant(ctx context.Context, name string, tenant uuid.UUID) (*Client, string, error) {
+	if tenant == uuid.Nil {
+		return nil, "", ErrNilTenant
+	}
+	return s.issue(ctx, name, &tenant)
+}
+
+func (s *Store) issue(ctx context.Context, name string, tenant *uuid.UUID) (*Client, string, error) {
 	if name == "" {
 		return nil, "", errors.New("oauthclient: name is empty")
 	}
@@ -128,15 +154,16 @@ func (s *Store) Issue(ctx context.Context, name string) (*Client, string, error)
 		ID:       uuid.New(),
 		ClientID: clientID,
 		Name:     name,
+		TenantID: tenant,
 	}
 
 	const q = `
-		INSERT INTO oauth_clients (id, client_id, client_secret_hash, name)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO oauth_clients (id, client_id, client_secret_hash, name, bound_tenant_id)
+		VALUES ($1, $2, $3, $4, $5)
 		RETURNING created_at
 	`
 	if err := s.pool.QueryRow(ctx, q,
-		row.ID, row.ClientID, hash, row.Name,
+		row.ID, row.ClientID, hash, row.Name, row.TenantID,
 	).Scan(&row.CreatedAt); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgErrUniqueViolation {
@@ -161,7 +188,7 @@ func (s *Store) Verify(ctx context.Context, clientID, secretPlaintext string) (*
 		return nil, ErrUnknownClient
 	}
 	const q = `
-		SELECT id, client_id, client_secret_hash, name, disabled_at, created_at
+		SELECT id, client_id, client_secret_hash, name, disabled_at, created_at, bound_tenant_id
 		FROM oauth_clients
 		WHERE client_id = $1
 	`
@@ -171,7 +198,7 @@ func (s *Store) Verify(ctx context.Context, clientID, secretPlaintext string) (*
 		disabled *time.Time
 	)
 	err := s.pool.QueryRow(ctx, q, clientID).Scan(
-		&c.ID, &c.ClientID, &hash, &c.Name, &disabled, &c.CreatedAt,
+		&c.ID, &c.ClientID, &hash, &c.Name, &disabled, &c.CreatedAt, &c.TenantID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -214,7 +241,7 @@ func (s *Store) Lookup(ctx context.Context, clientID string) (*Client, error) {
 		return nil, ErrUnknownClient
 	}
 	const q = `
-		SELECT id, client_id, name, disabled_at, created_at
+		SELECT id, client_id, name, disabled_at, created_at, bound_tenant_id
 		FROM oauth_clients
 		WHERE client_id = $1
 	`
@@ -223,7 +250,7 @@ func (s *Store) Lookup(ctx context.Context, clientID string) (*Client, error) {
 		disabled *time.Time
 	)
 	err := s.pool.QueryRow(ctx, q, clientID).Scan(
-		&c.ID, &c.ClientID, &c.Name, &disabled, &c.CreatedAt,
+		&c.ID, &c.ClientID, &c.Name, &disabled, &c.CreatedAt, &c.TenantID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -236,6 +263,46 @@ func (s *Store) Lookup(ctx context.Context, clientID string) (*Client, error) {
 	}
 	c.DisabledAt = disabled
 	return &c, nil
+}
+
+// Bind binds the client identified by clientID (the public client_id) to
+// tenant, so its client_credentials tokens act in that tenant
+// (security-atlas#1739). Binding an unbound client, or re-binding to the
+// tenant it already has, succeeds; a client bound to a different tenant
+// returns ErrAlreadyBound. A disabled or missing client returns
+// ErrUnknownClient. The tenant must exist (oauth_clients.bound_tenant_id is a
+// foreign key to tenants).
+func (s *Store) Bind(ctx context.Context, clientID string, tenant uuid.UUID) (*Client, error) {
+	if tenant == uuid.Nil {
+		return nil, ErrNilTenant
+	}
+	if clientID == "" {
+		return nil, ErrUnknownClient
+	}
+	const q = `
+		UPDATE oauth_clients
+		SET bound_tenant_id = $2
+		WHERE client_id = $1
+		  AND disabled_at IS NULL
+		  AND (bound_tenant_id IS NULL OR bound_tenant_id = $2)
+		RETURNING id, client_id, name, created_at, bound_tenant_id
+	`
+	var c Client
+	err := s.pool.QueryRow(ctx, q, clientID, tenant).Scan(
+		&c.ID, &c.ClientID, &c.Name, &c.CreatedAt, &c.TenantID,
+	)
+	if err == nil {
+		return &c, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, fmt.Errorf("oauthclient: bind: %w", err)
+	}
+	// No row updated: the client is missing, disabled, or bound to
+	// another tenant. Lookup tells the first two from the third.
+	if _, lerr := s.Lookup(ctx, clientID); lerr != nil {
+		return nil, lerr
+	}
+	return nil, ErrAlreadyBound
 }
 
 // generateSecret produces a 32-byte random secret encoded as

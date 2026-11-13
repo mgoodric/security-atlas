@@ -56,6 +56,13 @@ var ErrSQLQuery = errors.New("eval: sql evidence query failed")
 // as a Go context deadline so a hung connection cannot outlive it.
 const sqlStatementTimeout = 5 * time.Second
 
+// QueryDryRunTimeout bounds the control-upload dry-run of one declared
+// evidence query (#1865). The API server sets no WriteTimeout, so without it a
+// non-terminating Rego module would run for as long as the client waits. It
+// matches sqlStatementTimeout: a query that cannot finish on an empty ledger
+// in the time a SQL query is allowed will not finish on a live one either.
+const QueryDryRunTimeout = sqlStatementTimeout
+
 // forbiddenSQLKeyword matches any statement-level keyword that has no place in
 // a read-only single-SELECT evidence query. The READ ONLY transaction is the
 // load-bearing control; this static guard is the early, loud rejection so an

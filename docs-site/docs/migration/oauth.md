@@ -172,7 +172,7 @@ public OAuth client for the CLI:
 
 ```bash
 DATABASE_URL=postgres://... \
-  atlas-cli oauth issue-client cli-public
+  atlas-cli oauth issue-client cli-public --unbound
 client_id: 0e3b4a7e-...
 client_secret: A1b2C3d4...
 ```
@@ -182,6 +182,18 @@ not require a `client_secret` for public clients per RFC 8628
 §5.1; the secret is unused — it can be discarded). Distribute
 the `client_id` to your CLI users via a wiki / configuration
 management.
+
+`--unbound` is right for a public client: a user's device-code
+token carries that user's tenant, not the client's. A client used
+for `client_credentials` (a CI pipeline, a connector) is instead
+bound to the tenant it writes into. `issue-client` binds to the
+install's only tenant by default, or to `--tenant <tenant-id>`, and
+refuses when several tenants exist and none is named. A
+`client_credentials` token from an unbound client cannot write: the
+API answers `403 tenant_unbound`. Bind an existing client with
+`atlas-cli oauth bind-client <client_id> --tenant <tenant-id>`.
+Upgrading to this release binds every existing client on a
+single-tenant install; on a multi-tenant install, bind each one.
 
 ## Audience: operators
 
