@@ -24,15 +24,13 @@ import (
 	"os"
 	"strings"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/remote"
 
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
-
-// Note: chromedpWSURLReadTimeout is declared in pdf.go (same package).
-// Slice 341 fans the slice 340 fix across packages; within package board
-// both renderers share the single declaration.
 
 // RenderPackPDF returns a PDF byte stream for the stored pack. The returned
 // bytes begin with the literal `%PDF-` magic header. Blocking; caller
@@ -55,9 +53,9 @@ func renderPackBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
 	var browserCtx context.Context
 	var cancelAlloc context.CancelFunc
 	var cancelBrowser context.CancelFunc
-	if remote := os.Getenv("CHROME_DEBUG_URL"); remote != "" {
+	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
 		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewRemoteAllocator(ctx, remote)
+		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
 		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
 	} else {
 		opts := append(
@@ -66,7 +64,6 @@ func renderPackBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
 			chromedp.DisableGPU,
 			chromedp.Headless,
 			chromedp.Flag("hide-scrollbars", true),
-			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
 		)
 		var allocCtx context.Context
 		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
@@ -77,17 +74,17 @@ func renderPackBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
 
 	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
 	var buf []byte
-	err := chromedp.Run(browserCtx,
+	err := chromedp.Do(browserCtx,
 		chromedp.Navigate(dataURL),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			var err error
-			buf, _, err = page.PrintToPDF().
-				WithPrintBackground(true).
-				WithMarginTop(0.4).
-				WithMarginBottom(0.4).
-				WithMarginLeft(0.4).
-				WithMarginRight(0.4).
-				Do(ctx)
+		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
+				PrintBackground: new(true),
+				MarginTop:       new(0.4),
+				MarginBottom:    new(0.4),
+				MarginLeft:      new(0.4),
+				MarginRight:     new(0.4),
+			})
+			buf = res.Data
 			return err
 		}),
 	)

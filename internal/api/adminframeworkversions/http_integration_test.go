@@ -47,6 +47,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/adminframeworkversions"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/frameworkversion"
 )
 
@@ -186,12 +188,22 @@ func mustExec(t *testing.T, sql string, args ...any) {
 	}
 }
 
-func newRouter(isAdmin bool, actorID string) http.Handler {
+// newRouter injects the caller. superAdmin attaches verified JWT claims carrying
+// atlas:super_admin, the authority the write routes require (#1757); without it
+// the caller is a tenant admin (isAdmin) or a non-admin.
+func newRouter(isAdmin, superAdmin bool, actorID string) http.Handler {
 	h := adminframeworkversions.New(frameworkversion.NewStore(appPool))
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ctx := authctx.WithCredential(req.Context(), credstore.Credential{
+			ctx := req.Context()
+			if superAdmin {
+				ctx = jwtmw.WithClaimsForTest(ctx, &jwt.AtlasClaims{
+					RegisteredClaims: jwt.RegisteredClaims{Subject: actorID},
+					SuperAdmin:       true,
+				})
+			}
+			ctx = authctx.WithCredential(ctx, credstore.Credential{
 				ID:      "key_test",
 				IsAdmin: isAdmin,
 				UserID:  actorID,
@@ -225,7 +237,7 @@ func doJSON(t *testing.T, router http.Handler, method, path string, body any) *h
 // AC-9 / threat-model E / P0-484-3 — a non-admin promotion is rejected 403.
 func TestNonAdminPromotion_Rejected403(t *testing.T) {
 	s := seedFramework(t, "eop")
-	router := newRouter(false, "user:"+uuid.NewString())
+	router := newRouter(false, false, "user:"+uuid.NewString())
 	rec := doJSON(t, router, http.MethodPost,
 		"/v1/admin/framework-versions/"+s.v2ID.String()+"/promote",
 		map[string]string{"note": "should be blocked"})
@@ -243,12 +255,58 @@ func TestNonAdminPromotion_Rejected403(t *testing.T) {
 	}
 }
 
+// #1757 — framework versions reached here are global catalog rows, so a tenant
+// admin (a per-tenant admin API key: IsAdmin, no super_admin claim) is refused
+// 403 on every write route and nothing changes. The read-only queue listing
+// stays open to the tenant admin.
+func TestTenantAdminGlobalCatalogWrites_Rejected403(t *testing.T) {
+	s := seedFramework(t, "tenantadmin")
+	router := newRouter(true, false, "user:"+uuid.NewString())
+	writes := []struct {
+		path string
+		body any
+	}{
+		{"/v1/admin/framework-versions/" + s.v2ID.String() + "/promote", map[string]string{"note": "blocked"}},
+		{"/v1/admin/framework-versions/" + s.v2ID.String() + "/revert", map[string]string{"prior_version_id": s.v1ID.String()}},
+		{"/v1/admin/framework-versions/migrations:suggest", map[string]string{"from_version_id": s.v1ID.String(), "to_version_id": s.v2ID.String()}},
+		{"/v1/admin/framework-versions/migrations/" + uuid.NewString() + "/decision", map[string]bool{"approve": true}},
+	}
+	for _, wr := range writes {
+		rec := doJSON(t, router, http.MethodPost, wr.path, wr.body)
+		if rec.Code != http.StatusForbidden {
+			t.Errorf("tenant-admin POST %s = %d; want 403 (body=%s)", wr.path, rec.Code, rec.Body.String())
+		}
+	}
+	var status string
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT status FROM framework_versions WHERE id = $1`, s.v2ID).Scan(&status); err != nil {
+		t.Fatalf("read status: %v", err)
+	}
+	if status != "legacy" {
+		t.Errorf("blocked promotion still changed status to %q; want legacy", status)
+	}
+	var queued int
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM framework_version_migrations WHERE to_version_id = $1`, s.v2ID).Scan(&queued); err != nil {
+		t.Fatalf("count migrations: %v", err)
+	}
+	if queued != 0 {
+		t.Errorf("blocked suggest still queued %d migrations; want 0", queued)
+	}
+
+	rec := doJSON(t, router, http.MethodGet,
+		"/v1/admin/framework-versions/migrations?from="+s.v1ID.String()+"&to="+s.v2ID.String(), nil)
+	if rec.Code != http.StatusOK {
+		t.Errorf("tenant-admin GET migrations = %d; want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+}
+
 // AC-1 — admin promotion: v2 -> current, v1 -> legacy, latest_version_id
 // repointed, audit written; then Revert restores v1.
 func TestPromoteAndRevert(t *testing.T) {
 	s := seedFramework(t, "promote")
 	actor := uuid.New()
-	router := newRouter(true, "user:"+actor.String())
+	router := newRouter(true, true, "user:"+actor.String())
 
 	rec := doJSON(t, router, http.MethodPost,
 		"/v1/admin/framework-versions/"+s.v2ID.String()+"/promote",
@@ -288,7 +346,7 @@ func TestPromoteAndRevert(t *testing.T) {
 func TestSuggestAndPinnedReadNoBleed(t *testing.T) {
 	s := seedFramework(t, "suggest")
 	actor := uuid.New()
-	router := newRouter(true, "user:"+actor.String())
+	router := newRouter(true, true, "user:"+actor.String())
 
 	// Suggest v1 (2017) -> v2 (synthetic rev).
 	rec := doJSON(t, router, http.MethodPost,

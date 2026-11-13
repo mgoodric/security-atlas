@@ -101,3 +101,14 @@ Migration: `migrations/sql/20260612080000_crosswalk_mapping_tier.sql`
 (+`.down.sql`). State machine + store: `internal/crosswalktier`. Admin surface:
 `internal/api/admincrosswalktier`. The `scf_official → verified` seed is an
 idempotent in-migration data `UPDATE` (decisions log D3).
+
+## Amendment (2026-11-13, #1757): super_admin gate
+
+The "any admin/maintainer role" choice above is narrowed to **`super_admin`**,
+the tighter gate this ADR said to revisit for multi-operator deployments.
+`fw_to_scf_edges` rows are global catalog data shared by every tenant, so a
+tenant-scoped admin, including a per-tenant admin API key, changing a tier is a
+cross-tenant write. `POST /v1/admin/crosswalk-edges/{id}/tier` now requires the
+verified JWT's `atlas:super_admin` claim (the slice-142 check). On a
+single-tenant install the bootstrap admin holds `super_admin` (#1759), so a
+single operator keeps the capability. The audit trail is unchanged.
