@@ -88,6 +88,26 @@ curl -fsS http://localhost:3000 -o /dev/null -w '%{http_code}\n'   # expect 200
 just self-host-wipe                                # tear down + delete volumes
 ```
 
+### Signing in from a script
+
+`POST /auth/local/login` takes a JSON body of `tenant_id`, `email` and
+`password`, and answers with the session cookie and, when the in-app
+authorization server is configured, an `atlas_jwt` in `token`:
+
+```sh
+curl -fsS -X POST http://localhost:8080/auth/local/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"admin@example.com","password":"..."}'
+```
+
+- **One tenant (the self-host default):** `tenant_id` may be omitted; the
+  login uses the install's only tenant.
+- **Several tenants:** `tenant_id` is required. Without it the endpoint
+  answers `400 {"error":"tenant_id is required"}`. The tenant ids are on
+  `GET /v1/admin/tenants`.
+- The all-zeros tenant id is never accepted. Wrong passwords and unknown
+  emails both answer `401 invalid credentials`.
+
 ### Bootstrap credential — rotate it
 
 `ATLAS_BOOTSTRAP_TOKEN` is a pre-shared admin token the one-shot

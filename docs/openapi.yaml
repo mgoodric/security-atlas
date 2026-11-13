@@ -132,7 +132,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /auth/local/login:
     post:
-      summary: POST /auth/local/login
+      summary: POST /auth/local/login — local sign-in; JSON body {tenant_id, email, password}. tenant_id may be omitted when the install has exactly one tenant; otherwise 400 tenant_id is required
       tags: [auth]
       operationId: post-auth-local-login
       responses:

@@ -748,6 +748,12 @@ func main() {
 		// it reads/writes under the request's tenant RLS context (pool is the
 		// RLS app pool).
 		authHandler.AttachGroupDeriver(oidcGroupDeriver{resolver: grouprole.NewResolver(pool)})
+		// #1727: a local login may omit tenant_id on a single-tenant
+		// install. Resolving the implicit tenant reads `tenants` before
+		// any tenant context exists, so it needs the BYPASSRLS authPool.
+		if authPool != nil {
+			authHandler.AttachImplicitTenantResolver(authapi.PoolImplicitTenantResolver{Q: authPool})
+		}
 		srv.AttachAuthHandler(authHandler)
 		fmt.Fprintf(os.Stderr, "atlas: auth handler wired (/auth/local/login mounted, secure_cookies=%t, local_as_enabled=%t, group_role_derivation=on)\n",
 			secureCookies, localAS != nil)
