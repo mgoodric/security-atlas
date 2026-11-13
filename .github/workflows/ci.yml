@@ -497,6 +497,27 @@ jobs:
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: "v3.0.6"
+      # Issue #1875: the bridge-dependent Go tests (internal/oscal on B5,
+      # catalogimport + profileimport on B3, componentimport on B5) start the
+      # Python oscal-bridge as a subprocess. Install it on those two legs and
+      # set ATLAS_REQUIRE_OSCAL_BRIDGE=1 so an unavailable bridge fails the
+      # test instead of skipping it (internal/oscal/bridgetest). The bridge is
+      # a uv workspace member, so the env lands in the root .venv.
+      - name: Install uv (oscal-bridge — legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync oscal-bridge env (legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        run: |
+          uv python install 3.11
+          uv sync --frozen --package atlas-oscal-bridge
+          {
+            echo "OSCAL_BRIDGE_PYTHON=$(pwd)/.venv/bin/python"
+            echo "ATLAS_REQUIRE_OSCAL_BRIDGE=1"
+          } >> "$GITHUB_ENV"
       - name: Start LocalStack KMS (slice 425 — OPTIONAL, leg B3 only)
         # Slice 425: the internal/oscal/cosign LocalStack round-trip test
         # (cosign_kms_localstack_integration_test.go) drives the REAL
@@ -1188,9 +1209,10 @@ jobs:
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
           enable-cache: true
-          cache-dependency-glob: oscal-bridge/uv.lock
+          # The bridge is a uv workspace member; the lockfile is the root one.
+          cache-dependency-glob: uv.lock
       - name: Set up Python
-        run: uv python install 3.11
+        run: uv python install 3.11 3.12
       - name: Sync oscal-bridge env
         working-directory: oscal-bridge
         run: uv sync --extra test
@@ -1201,6 +1223,13 @@ jobs:
       - name: Test (pytest — unit + in-process gRPC server)
         working-directory: oscal-bridge
         run: PYTHONPATH=. uv run --extra test python -m pytest tests/ -q
+      # Issue #1875: the bridge declares requires-python >=3.11; also run the
+      # suite on 3.12, in its own environment so the 3.11 one is untouched.
+      - name: Test on Python 3.12 (pytest)
+        working-directory: oscal-bridge
+        env:
+          UV_PROJECT_ENVIRONMENT: ${{ github.workspace }}/.venv-py312
+        run: PYTHONPATH=. uv run --python 3.12 --extra test python -m pytest tests/ -q
 
   oscal-bridge-stub:
     name: OSCAL bridge · Python (ruff + pytest)
@@ -3933,6 +3962,22 @@ jobs:
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
         with:
           cosign-release: "v3.0.6"
+      # Issue #1875: same oscal-bridge install as the PR-time shard matrix.
+      - name: Install uv (oscal-bridge — legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync oscal-bridge env (legs B3/B5 only)
+        if: matrix.leg == 'B3' || matrix.leg == 'B5'
+        run: |
+          uv python install 3.11
+          uv sync --frozen --package atlas-oscal-bridge
+          {
+            echo "OSCAL_BRIDGE_PYTHON=$(pwd)/.venv/bin/python"
+            echo "ATLAS_REQUIRE_OSCAL_BRIDGE=1"
+          } >> "$GITHUB_ENV"
       - name: Start MinIO
         run: |
           docker run -d --name minio \

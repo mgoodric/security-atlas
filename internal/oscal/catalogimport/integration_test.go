@@ -22,13 +22,9 @@ package catalogimport_test
 import (
 	"context"
 	"errors"
-	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -36,6 +32,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/oscal/bridgetest"
 	"github.com/mgoodric/security-atlas/internal/oscal/catalogimport"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -69,49 +66,12 @@ func loadFixture(t *testing.T, name string) []byte {
 	return data
 }
 
-// startBridge starts the Python oscal-bridge on a free loopback port.
-// Skips the test if the bridge cannot start (slice-030 D2 pattern).
+// startBridge starts the Python oscal-bridge on a free loopback port. It
+// skips when the bridge is unavailable, or fails under
+// ATLAS_REQUIRE_OSCAL_BRIDGE=1 (CI) — see internal/oscal/bridgetest.
 func startBridge(t *testing.T) (string, func()) {
 	t.Helper()
-	py := os.Getenv("OSCAL_BRIDGE_PYTHON")
-	if py == "" {
-		py = "python3"
-	}
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("pick port: %v", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
-
-	repoRoot, err := filepath.Abs("../../..")
-	if err != nil {
-		t.Fatalf("repo root: %v", err)
-	}
-	bridgeDir := filepath.Join(repoRoot, "oscal-bridge")
-
-	cmd := exec.Command(py, "-m", "atlas_oscal_bridge.server", "--address", addr)
-	cmd.Dir = bridgeDir
-	cmd.Env = append(os.Environ(), "PYTHONPATH="+bridgeDir)
-	if err := cmd.Start(); err != nil {
-		t.Skipf("oscal-bridge could not start (%s): %v — skipping bridge-dependent test", py, err)
-	}
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, derr := net.DialTimeout("tcp", addr, 250*time.Millisecond)
-		if derr == nil {
-			_ = conn.Close()
-			return addr, func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() }
-		}
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			t.Skipf("oscal-bridge exited during startup — skipping bridge-dependent test")
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	_ = cmd.Process.Kill()
-	t.Skipf("oscal-bridge did not become ready on %s — skipping bridge-dependent test", addr)
-	return "", func() {}
+	return bridgetest.Start(t)
 }
 
 // seedCurrentSCFAnchor seeds a minimal 'scf'-slug framework with a CURRENT

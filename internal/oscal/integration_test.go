@@ -25,9 +25,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 	"time"
@@ -37,6 +35,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/oscal"
+	"github.com/mgoodric/security-atlas/internal/oscal/bridgetest"
 )
 
 // Slice 435 / 742: the appDSN/adminDSN/openPool/ctxFor pool/DSN/tenant-context
@@ -128,53 +127,12 @@ func seedPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fwVersion uuid
 	return id, frozenAt
 }
 
-// startBridge starts the Python oscal-bridge on a free loopback port.
-// Returns the address and a stop func. Skips the test if the bridge
-// cannot start (Python / trestle not installed) — decision D2.
-func startBridge(t *testing.T) (addr string, stop func()) {
+// startBridge starts the Python oscal-bridge on a free loopback port. It
+// skips when the bridge is unavailable, or fails under
+// ATLAS_REQUIRE_OSCAL_BRIDGE=1 (CI) — see internal/oscal/bridgetest.
+func startBridge(t *testing.T) (string, func()) {
 	t.Helper()
-	py := os.Getenv("OSCAL_BRIDGE_PYTHON")
-	if py == "" {
-		py = "python3"
-	}
-	// Pick a free port.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("pick port: %v", err)
-	}
-	port := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
-	addr = fmt.Sprintf("127.0.0.1:%d", port)
-
-	repoRoot, err := filepath.Abs("../..")
-	if err != nil {
-		t.Fatalf("repo root: %v", err)
-	}
-	bridgeDir := filepath.Join(repoRoot, "oscal-bridge")
-
-	cmd := exec.Command(py, "-m", "atlas_oscal_bridge.server", "--address", addr)
-	cmd.Dir = bridgeDir
-	cmd.Env = append(os.Environ(), "PYTHONPATH="+bridgeDir)
-	if err := cmd.Start(); err != nil {
-		t.Skipf("oscal-bridge could not start (%s): %v — skipping bridge-dependent test", py, err)
-	}
-	// Poll the port until the gRPC server is accepting connections.
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		conn, derr := net.DialTimeout("tcp", addr, 250*time.Millisecond)
-		if derr == nil {
-			_ = conn.Close()
-			return addr, func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() }
-		}
-		// If the process already exited, the bridge env is unusable.
-		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-			t.Skipf("oscal-bridge exited during startup — skipping bridge-dependent test")
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	_ = cmd.Process.Kill()
-	t.Skipf("oscal-bridge did not become ready on %s — skipping bridge-dependent test", addr)
-	return "", func() {}
+	return bridgetest.Start(t)
 }
 
 // ===== Invariant 10: refuse a non-frozen period (no bridge needed) =====
