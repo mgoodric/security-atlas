@@ -86,11 +86,11 @@ same way.
 ## D4 — Append-only ledgers, and the rows they reference, are never purged
 
 Review of #1881 blocked the first cut. It hard-deleted all-zeros rows from
-`evidence_records` and `evidence_audit_log` over BYPASSRLS. ADR-0012 (property
-
-1. allows disposal from the evidence ledger only by tombstone, and ADR-0020
-   names privileged BYPASSRLS SQL on the migrate DSN, with no audit trail, as
-   "the worst of every available world". The purge now keeps:
+`evidence_records` and `evidence_audit_log` over BYPASSRLS.
+ADR-0012 (property 1) allows disposal from the evidence ledger only by
+tombstone, and ADR-0020 names privileged BYPASSRLS SQL on the migrate DSN,
+with no audit trail, as "the worst of every available world". The purge now
+keeps:
 
 - **Ledger tables.** These are tables the application itself cannot delete
   from: no RLS policy with `FOR DELETE` or `FOR ALL`, or a user `BEFORE

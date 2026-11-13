@@ -143,6 +143,30 @@ var (
 	}
 )
 
+// tenantTableNames lists the tables with a tenant_id column in every
+// non-system schema, by LedgerTables' display name: bare in public,
+// schema-qualified elsewhere (privacy.erasure_audit_log, say).
+func tenantTableNames(t *testing.T, tx pgx.Tx) []string {
+	t.Helper()
+	rows, err := tx.Query(context.Background(),
+		`SELECT CASE WHEN n.nspname = 'public' THEN c.relname ELSE n.nspname || '.' || c.relname END
+		 FROM pg_class c
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 JOIN pg_attribute a ON a.attrelid = c.oid
+		 WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+		   AND n.nspname NOT LIKE 'pg\_toast%' AND n.nspname NOT LIKE 'pg\_temp\_%'
+		   AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+		   AND a.attname = 'tenant_id' AND NOT a.attisdropped`)
+	if err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	return names
+}
+
 func TestLedgerTables_CoverAppendOnlyTables(t *testing.T) {
 	tx := beginRolledBack(t)
 	ctx := context.Background()
@@ -156,20 +180,7 @@ func TestLedgerTables_CoverAppendOnlyTables(t *testing.T) {
 		isLedger[l] = true
 	}
 	want := append([]string{}, knownLedgers...)
-	rows, err := tx.Query(ctx,
-		`SELECT c.relname FROM pg_class c
-		 JOIN pg_namespace n ON n.oid = c.relnamespace
-		 JOIN pg_attribute a ON a.attrelid = c.oid
-		 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
-		   AND a.attname = 'tenant_id' AND NOT a.attisdropped`)
-	if err != nil {
-		t.Fatalf("list tables: %v", err)
-	}
-	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
-	if err != nil {
-		t.Fatalf("list tables: %v", err)
-	}
-	for _, n := range names {
+	for _, n := range tenantTableNames(t, tx) {
 		if ledgerName.MatchString(n) && !notLedgers[n] {
 			want = append(want, n)
 		}
@@ -183,6 +194,71 @@ func TestLedgerTables_CoverAppendOnlyTables(t *testing.T) {
 		if isLedger[purgeable] {
 			t.Errorf("%s is classified as a ledger, want purgeable", purgeable)
 		}
+	}
+}
+
+// TestLedgerTables_ClassifiesBySignal builds scratch tables, each missing
+// one way the application could delete from it, and checks each is a
+// ledger; the control table has every way and must stay purgeable. The
+// DDL rolls back with the test transaction.
+func TestLedgerTables_ClassifiesBySignal(t *testing.T) {
+	tx := beginRolledBack(t)
+	ctx := context.Background()
+
+	// scratch creates a tenant-scoped table under RLS. grantDelete gives
+	// atlas_app DELETE on it; policy, when set, is its one DELETE policy.
+	scratch := func(name, policy string, grantDelete bool) {
+		t.Helper()
+		ident := pgx.Identifier(strings.Split(name, ".")).Sanitize()
+		stmts := []string{
+			"CREATE TABLE " + ident + " (id uuid PRIMARY KEY, tenant_id uuid NOT NULL)",
+			"ALTER TABLE " + ident + " ENABLE ROW LEVEL SECURITY",
+			"GRANT SELECT, INSERT ON " + ident + " TO atlas_app",
+		}
+		if grantDelete {
+			stmts = append(stmts, "GRANT DELETE ON "+ident+" TO atlas_app")
+		}
+		if policy != "" {
+			stmts = append(stmts, "CREATE POLICY tenant_delete ON "+ident+" "+policy+" FOR DELETE USING (true)")
+		}
+		for _, s := range stmts {
+			if _, err := tx.Exec(ctx, s); err != nil {
+				t.Fatalf("%s: %v", s, err)
+			}
+		}
+	}
+	if _, err := tx.Exec(ctx, "CREATE SCHEMA scratch_1897"); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	scratch("scratch_1897_deletable", "AS PERMISSIVE", true)
+	scratch("scratch_1897_restrictive_only", "AS RESTRICTIVE", true)
+	scratch("scratch_1897_no_delete_grant", "AS PERMISSIVE", false)
+	scratch("scratch_1897.erasure_audit_log", "", true)
+
+	ledger, err := oauthclient.LedgerTables(ctx, tx)
+	if err != nil {
+		t.Fatalf("LedgerTables: %v", err)
+	}
+	isLedger := map[string]bool{}
+	for _, l := range ledger {
+		isLedger[l] = true
+	}
+	for table, want := range map[string]bool{
+		"scratch_1897_deletable":         false,
+		"scratch_1897_restrictive_only":  true, // a restrictive policy never grants DELETE
+		"scratch_1897_no_delete_grant":   true, // append-only by grant
+		"scratch_1897.erasure_audit_log": true, // outside public
+	} {
+		if isLedger[table] != want {
+			t.Errorf("%s ledger = %v, want %v", table, isLedger[table], want)
+		}
+	}
+	found := false
+	for _, n := range tenantTableNames(t, tx) {
+		found = found || n == "scratch_1897.erasure_audit_log"
+	}
+	if !found {
+		t.Error("tenantTableNames misses scratch_1897.erasure_audit_log; the coverage guard does not see non-public schemas")
 	}
 }
 

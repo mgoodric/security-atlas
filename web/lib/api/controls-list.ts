@@ -40,11 +40,13 @@ export async function fetchControlsList(
   scopeCellID?: string,
   hasControl?: boolean,
   limit?: number,
+  offset?: number,
 ): Promise<ControlsListResponse> {
   const qs = new URLSearchParams();
   if (scopeCellID) qs.set("scope", scopeCellID);
   if (hasControl !== undefined) qs.set("has_control", String(hasControl));
   if (limit !== undefined) qs.set("limit", String(limit));
+  if (offset !== undefined) qs.set("offset", String(offset));
   const url = qs.toString()
     ? `/api/controls?${qs.toString()}`
     : `/api/controls`;
@@ -60,6 +62,40 @@ export async function fetchControlsList(
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as ControlsListResponse;
+}
+
+/** The platform's page cap for `GET /v1/anchors`. */
+export const ANCHORS_PAGE_LIMIT = 500;
+
+// Hard stop for the catalog walk: 20 pages of 500 is 10,000 anchors, well
+// past SCF's ~1,600, so a `total` that never arrives cannot loop forever.
+const ANCHORS_MAX_PAGES = 20;
+
+// Issue #1740 — browser-side fn: every anchor of the SCF catalog, walked
+// page by page through the BFF. The /controls page filters (family,
+// state, framework, freshness) and paginates over the full set, so it
+// must not stop at the platform's first page of 100. The walk ends when
+// `total` is reached, a page comes back short, or the page cap is hit.
+// The totals of the last page are returned alongside the rows.
+export async function fetchControlsCatalog(
+  scopeCellID?: string,
+  hasControl?: boolean,
+): Promise<ControlsListResponse> {
+  const anchors: AnchorWithState[] = [];
+  let last: ControlsListResponse = { anchors: [] };
+  for (let i = 0; i < ANCHORS_MAX_PAGES; i++) {
+    last = await fetchControlsList(
+      scopeCellID,
+      hasControl,
+      ANCHORS_PAGE_LIMIT,
+      anchors.length,
+    );
+    const rows = last.anchors ?? [];
+    anchors.push(...rows);
+    if (rows.length < ANCHORS_PAGE_LIMIT) break;
+    if (last.total !== undefined && anchors.length >= last.total) break;
+  }
+  return { ...last, anchors };
 }
 
 // Issue #1832 — the catalog totals alone, for the "My controls" header.
