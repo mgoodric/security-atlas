@@ -46,7 +46,9 @@ type Store struct {
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 
 // AfterRiskWrite runs inside the transaction of a risk write (create, theme
-// assignment) with the themes the written risk now carries. An error rolls
+// assignment, delete) with the themes the write touched: the risk's themes
+// after a create, the themes before and after a theme assignment, and the
+// deleted risk's themes after a delete (#1861). An error rolls
 // the write back. It is how the slice 054 aggregation engine
 // (internal/risk/aggrule) evaluates its rules on each risk write; aggrule
 // imports this package, so the engine is injected rather than imported
@@ -66,6 +68,15 @@ func (s *Store) runAfterRiskWrite(ctx context.Context, q *dbx.Queries, tenantID 
 		return nil
 	}
 	return s.afterRisk(ctx, q, tenantID, themes)
+}
+
+// isRuleGeneratedScore reports whether an inherent_score carries the slice
+// 054 engine's rule_generated flag, i.e. the risk is a rule's meta-risk.
+func isRuleGeneratedScore(inherent []byte) bool {
+	var raw struct {
+		RuleGenerated bool `json:"rule_generated"`
+	}
+	return json.Unmarshal(inherent, &raw) == nil && raw.RuleGenerated
 }
 
 // Risk is the domain shape returned from store calls. It mirrors the sqlc Risk
@@ -420,10 +431,11 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		// Check existence first so we can return ErrNotFound rather than a
 		// silent success on a missing row.
-		if _, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
+		row, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
-		}); err != nil {
+		})
+		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrNotFound
 			}
@@ -435,7 +447,14 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 		}); err != nil {
 			return fmt.Errorf("delete risk: %w", err)
 		}
-		return nil
+		// Re-evaluate the rules that targeted the deleted risk's themes, so
+		// a meta-risk it fed drops it from its score (#1861). Deleting a
+		// rule-generated meta-risk itself does not: evaluating would
+		// immediately re-create the meta-risk the operator just deleted.
+		if isRuleGeneratedScore(row.InherentScore) {
+			return nil
+		}
+		return s.runAfterRiskWrite(ctx, q, tenantID, row.Themes)
 	})
 }
 

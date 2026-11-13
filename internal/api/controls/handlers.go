@@ -171,6 +171,14 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	if h.store != nil {
 		gateRunner = h.store
 	}
+	// #1859: refuse a bundle whose declared queries cannot evaluate at all
+	// (compile error, eval error, never assigns `result`). Unlike red tests,
+	// this is not subject to the tenant's gate mode: a broken query errors on
+	// every live evaluation of the control.
+	if err := dryRunQueries(ctx, gateRunner, bundle); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "control bundle rejected: "+err.Error())
+		return
+	}
 	// Slice 608: resolve the per-tenant gate policy. A nil store (unit servers)
 	// or any tenant without an explicit value resolves to the strict default,
 	// preserving slice 574's global behaviour. An unrecognised stored value

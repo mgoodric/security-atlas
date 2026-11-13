@@ -38,6 +38,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/revocation"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -421,6 +422,16 @@ func main() {
 				}
 			}
 			localAuthResolver = oauthapi.NewDBUserResolverWithAuthPool(pool, resolverAuthPool)
+
+			// #1850: one live super_admins re-check, on the same
+			// BYPASSRLS pool the resolver uses to set the claim, for
+			// every path that would otherwise carry a stale claim:
+			// token exchange, device-code approval, and the JWT
+			// middleware (which drops the claim from a demoted user's
+			// live tokens). A nil pool fails closed.
+			superAdmins := superadmin.NewDBChecker(resolverAuthPool)
+			ep.AttachSuperAdminChecker(superAdmins)
+			srv.AttachSuperAdminChecker(superAdmins)
 			authorizeEP := oauthapi.NewAuthorizeEndpoint(oauthapi.AuthorizeEndpointConfig{
 				Codes:    codeStore,
 				Clients:  clients,
@@ -477,7 +488,9 @@ func main() {
 			deviceAuthEP := oauthapi.NewDeviceAuthorizationEndpoint(clients, deviceCodes, oauthapi.DeviceAuthorizationConfig{
 				Issuer: issuer,
 			})
-			deviceApprovalEP := oauthapi.NewDeviceApprovalEndpoint(deviceCodes, oauthapi.DeviceApprovalConfig{})
+			deviceApprovalEP := oauthapi.NewDeviceApprovalEndpoint(deviceCodes, oauthapi.DeviceApprovalConfig{
+				SuperAdmins: superAdmins,
+			})
 			ep.AttachDeviceCodeStore(deviceCodes)
 			oauthHandler.AttachDeviceAuthorizationEndpoint(deviceAuthEP)
 			oauthHandler.AttachDeviceApprovalEndpoint(deviceApprovalEP)

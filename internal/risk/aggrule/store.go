@@ -65,10 +65,18 @@ var (
 // tables.
 type Store struct {
 	pool *pgxpool.Pool
+	now  func() time.Time
 }
 
 // NewStore constructs a Store over an existing pgx pool.
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, now: time.Now} }
+
+// WithClock sets the clock Evaluate's engine uses to place the rolling
+// window, and returns the Store. Tests use it to step across window_days.
+func (s *Store) WithClock(now func() time.Time) *Store {
+	s.now = now
+	return s
+}
 
 // StoredRule is the domain shape returned from Store calls — the typed
 // columns plus the parsed Rule body.
@@ -408,7 +416,7 @@ func (s *Store) Evaluations(ctx context.Context, ruleID uuid.UUID) ([]Evaluation
 func (s *Store) Evaluate(ctx context.Context, triggerThemes []string) ([]Evaluation, error) {
 	var out []Evaluation
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		eng := NewEngine(q)
+		eng := NewEngine(q).WithClock(s.now)
 		evals, eerr := eng.Evaluate(ctx, tenantID, triggerThemes)
 		if eerr != nil {
 			return eerr

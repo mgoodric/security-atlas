@@ -87,3 +87,11 @@ RLS hides tenant-private rows from it), so a tenant-scoped admin, including a
 per-tenant admin API key, changing them is a cross-tenant write. The read-only
 `GET /v1/admin/framework-versions/migrations` keeps the admin gate. On a
 single-tenant install the bootstrap admin holds `super_admin` (#1759).
+
+These routes take a JWT, not an API key: an API key's credential is
+tenant-scoped and never carries `atlas:super_admin`. An operator gets one by
+signing in through the browser (the `atlas_jwt` session cookie) or by running
+`atlas-cli login --issuer <url> --client-id <cli client>` and approving the
+device code from a signed-in browser session; the CLI then presents the JWT
+as its bearer. The claim is re-read from `super_admins` on every request, so
+a demoted operator loses these routes on their next call (#1850).

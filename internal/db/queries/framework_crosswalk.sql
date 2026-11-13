@@ -62,6 +62,17 @@ WHERE id = $1;
 SELECT * FROM fw_to_scf_edges
 WHERE framework_requirement_id = $1 AND scf_anchor_id = $2;
 
+-- name: GetFwToScfEdgeForUpdate :one
+-- Row-lock one edge by (requirement, anchor) inside the import transaction.
+-- The importer compares source_attribution precedence before it updates
+-- (issue #1754); without the lock a concurrent weaker import that passed its
+-- check against the old row would overwrite a just-committed scf_official
+-- edge at READ COMMITTED. Same read-validate-write guard as
+-- GetFwToScfEdgeTierForUpdate. Returns ErrNoRows when the edge doesn't exist.
+SELECT * FROM fw_to_scf_edges
+WHERE framework_requirement_id = $1 AND scf_anchor_id = $2
+FOR UPDATE;
+
 -- name: InsertFwToScfEdge :one
 INSERT INTO fw_to_scf_edges (
     id, framework_requirement_id, scf_anchor_id,
