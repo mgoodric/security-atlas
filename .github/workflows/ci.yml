@@ -3360,8 +3360,8 @@ jobs:
   # another migration already uses, so the apply order stays the order
   # the migrations were written in. The prefixes that collided before the
   # check (six, including the two 20260811000000 files) are grandfathered
-  # by name in the script. Fast, no network; runs unconditionally, like
-  # coverage-excludes-check.
+  # by name in the script. Fast, no network; runs unconditionally (no
+  # `if:`), so merge-gate needs it and requires `success` on every PR.
   #
   # Local repro: `bash scripts/check-migration-timestamps.sh`
   #   self-test: `bash scripts/check-migration-timestamps_test.sh`
@@ -3700,6 +3700,7 @@ jobs:
       - actions-pin-check # actions-pin-check
       - openapi-drift-check # openapi-drift-check
       - isa-probes # ISA · probes (unconditional; red only on a closed claim's regression)
+      - migration-timestamps-check # migration-timestamps-check (unconditional, #1880)
       # --- no required context of its own; covered here so the slice-701
       #     stub collapse cannot drop them on the floor (slice 701 §AC-1) ---
       - tests-integration-shard # Go · integration (shard A/B1/B2/B3/B4) — matrix aggregate
@@ -3763,7 +3764,8 @@ jobs:
           else
             echo "code='${CODE:-}' (no Go-affecting changes) — path-filtered legs may legitimately"
             echo "be 'skipped' (their slice-061 stub-twins post the green named checks)."
-            echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check, isa-probes) still"
+            echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check, isa-probes,"
+            echo "migration-timestamps-check) still"
             echo "MUST be 'success'. 'skipped' is the ONLY forgiven non-success result, and only here."
           fi
           echo "Asserting ${leg_count} legs derived from toJSON(needs)."
@@ -3793,6 +3795,7 @@ jobs:
               fuzz)                           echo "Go · fuzz (bounded)" ;;
               govulncheck)                    echo "Go · govulncheck" ;;
               isa-probes)                     echo "ISA · probes" ;;
+              migration-timestamps-check)     echo "migration-timestamps-check" ;;
               *)                              echo "$1" ;;
             esac
           }

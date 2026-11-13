@@ -13,8 +13,9 @@
 # check makes the second one renumber before it merges.
 #
 # GRANDFATHERED lists the migrations that already shared a prefix when the
-# check landed (six prefixes, not only the 20260811000000 pair #1880 named). A prefix passes if every migration on it is grandfathered,
-# so a new migration on a grandfathered prefix still fails.
+# check landed (six prefixes, not only the 20260811000000 pair #1880
+# named). A prefix passes if every migration on it is grandfathered, so a
+# new migration on a grandfathered prefix still fails.
 #
 # Exit codes:
 #   0 — no prefix carries two migrations, outside the grandfathered set
