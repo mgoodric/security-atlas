@@ -39,6 +39,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/admincrosswalktier"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 )
 
@@ -158,12 +160,22 @@ func seedEdge(t *testing.T, tag string) (edgeID, requirementID uuid.UUID) {
 // newRouter wires the handler behind a credential-injecting middleware exactly
 // like the production /v1 chain (minus tenancymw — catalog tables, no RLS).
 // reviewerID is the acting admin's user id (the JWT subject form "user:<uuid>").
-func newRouter(isAdmin bool, reviewerID string) http.Handler {
+// superAdmin attaches verified JWT claims carrying atlas:super_admin, the
+// authority the route requires (#1757); without it the caller is a tenant
+// admin (isAdmin) or a non-admin.
+func newRouter(isAdmin, superAdmin bool, reviewerID string) http.Handler {
 	handler := admincrosswalktier.New(crosswalktier.NewStore(appPool))
 	r := chi.NewRouter()
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			ctx := authctx.WithCredential(req.Context(), credstore.Credential{
+			ctx := req.Context()
+			if superAdmin {
+				ctx = jwtmw.WithClaimsForTest(ctx, &jwt.AtlasClaims{
+					RegisteredClaims: jwt.RegisteredClaims{Subject: reviewerID},
+					SuperAdmin:       true,
+				})
+			}
+			ctx = authctx.WithCredential(ctx, credstore.Credential{
 				ID:      "key_test",
 				IsAdmin: isAdmin,
 				UserID:  reviewerID,
@@ -192,7 +204,7 @@ func TestFullTransitionLifecycle(t *testing.T) {
 	}
 	edgeID, requirementID := seedEdge(t, "lifecycle")
 	reviewer := uuid.New()
-	router := newRouter(true, "user:"+reviewer.String())
+	router := newRouter(true, true, "user:"+reviewer.String())
 
 	// draft -> under_review.
 	rec := postTier(t, router, edgeID, "under_review", "claimed for review")
@@ -265,11 +277,43 @@ func TestNonAdminRejected(t *testing.T) {
 		t.Skip("DATABASE_URL not set; skipping")
 	}
 	edgeID, _ := seedEdge(t, "nonadmin")
-	router := newRouter(false, "user:"+uuid.NewString())
+	router := newRouter(false, false, "user:"+uuid.NewString())
 
 	rec := postTier(t, router, edgeID, "under_review", "should be blocked")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("non-admin status = %d; want 403 (body=%s)", rec.Code, rec.Body.String())
+	}
+
+	store := crosswalktier.NewStore(appPool)
+	cur, err := store.CurrentTier(context.Background(), edgeID)
+	if err != nil {
+		t.Fatalf("current tier: %v", err)
+	}
+	if cur != crosswalktier.TierDraft {
+		t.Fatalf("tier changed despite 403: %q", cur)
+	}
+	transitions, err := store.ListTransitions(context.Background(), edgeID)
+	if err != nil {
+		t.Fatalf("list transitions: %v", err)
+	}
+	if len(transitions) != 0 {
+		t.Fatalf("audit rows written despite 403: %d", len(transitions))
+	}
+}
+
+// TestTenantAdminRejected is #1757: the edge is a global catalog row, so a
+// tenant admin (a per-tenant admin API key: IsAdmin, no super_admin claim) is
+// refused 403 and neither the tier nor an audit row is written.
+func TestTenantAdminRejected(t *testing.T) {
+	if adminPool == nil {
+		t.Skip("DATABASE_URL not set; skipping")
+	}
+	edgeID, _ := seedEdge(t, "tenantadmin")
+	router := newRouter(true, false, "user:"+uuid.NewString())
+
+	rec := postTier(t, router, edgeID, "under_review", "should be blocked")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("tenant-admin status = %d; want 403 (body=%s)", rec.Code, rec.Body.String())
 	}
 
 	store := crosswalktier.NewStore(appPool)
@@ -297,7 +341,7 @@ func TestIllegalSkipRejected(t *testing.T) {
 		t.Skip("DATABASE_URL not set; skipping")
 	}
 	edgeID, _ := seedEdge(t, "skip")
-	router := newRouter(true, "user:"+uuid.NewString())
+	router := newRouter(true, true, "user:"+uuid.NewString())
 
 	rec := postTier(t, router, edgeID, "verified", "illegal skip")
 	if rec.Code != http.StatusUnprocessableEntity {
@@ -326,7 +370,7 @@ func TestUnknownEdge404(t *testing.T) {
 	if adminPool == nil {
 		t.Skip("DATABASE_URL not set; skipping")
 	}
-	router := newRouter(true, "user:"+uuid.NewString())
+	router := newRouter(true, true, "user:"+uuid.NewString())
 	rec := postTier(t, router, uuid.New(), "under_review", "no such edge")
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown edge status = %d; want 404 (body=%s)", rec.Code, rec.Body.String())
@@ -339,7 +383,7 @@ func TestBadTier400(t *testing.T) {
 		t.Skip("DATABASE_URL not set; skipping")
 	}
 	edgeID, _ := seedEdge(t, "badtier")
-	router := newRouter(true, "user:"+uuid.NewString())
+	router := newRouter(true, true, "user:"+uuid.NewString())
 	rec := postTier(t, router, edgeID, "approved", "not a tier")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad tier status = %d; want 400 (body=%s)", rec.Code, rec.Body.String())
