@@ -8,9 +8,9 @@ package writeproposals
 //
 // Load-bearing functions / branches covered here:
 //
-//   - stateToEvidenceResult — every accepted enum value + the invalid
-//     fallback. Load-bearing because it gates ApplyUpdateControlState +
-//     ApplyPushEvidence before the DB ever sees the input (defense-in-
+//   - stateToProtoResult — every accepted enum value + the invalid
+//     fallback. Load-bearing because it gates the update_control_state +
+//     push_evidence appliers before ingest ever sees the input (defense-in-
 //     depth ahead of the schema-level CHECK on evidence_records.result).
 //   - nullableString / nullableSubject — both nil-vs-set branches.
 //     Load-bearing because they control whether the UPDATE writes NULL
@@ -38,32 +38,40 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 )
 
-// ----- stateToEvidenceResult -----
+// ----- stateToProtoResult -----
 
-func TestStateToEvidenceResult_AcceptsAllCanonicalValues(t *testing.T) {
+func TestStateToProtoResult_AcceptsAllCanonicalValues(t *testing.T) {
 	t.Parallel()
-	for _, v := range []string{"pass", "fail", "na", "inconclusive"} {
-		got, err := stateToEvidenceResult(v)
+	want := map[string]evidencev1.Result{
+		"pass":         evidencev1.Result_RESULT_PASS,
+		"fail":         evidencev1.Result_RESULT_FAIL,
+		"na":           evidencev1.Result_RESULT_NA,
+		"inconclusive": evidencev1.Result_RESULT_INCONCLUSIVE,
+	}
+	for v, w := range want {
+		got, err := stateToProtoResult(v)
 		if err != nil {
-			t.Fatalf("stateToEvidenceResult(%q) = err %v, want nil", v, err)
+			t.Fatalf("stateToProtoResult(%q) = err %v, want nil", v, err)
 		}
-		if got != v {
-			t.Fatalf("stateToEvidenceResult(%q) = %q, want %q", v, got, v)
+		if got != w {
+			t.Fatalf("stateToProtoResult(%q) = %v, want %v", v, got, w)
 		}
 	}
 }
 
-func TestStateToEvidenceResult_RejectsInvalidValues(t *testing.T) {
+func TestStateToProtoResult_RejectsInvalidValues(t *testing.T) {
 	t.Parallel()
 	for _, v := range []string{"", "PASS", "passed", "ok", "unknown", "; DROP"} {
-		got, err := stateToEvidenceResult(v)
+		got, err := stateToProtoResult(v)
 		if err == nil {
-			t.Fatalf("stateToEvidenceResult(%q) = nil err, want rejection", v)
+			t.Fatalf("stateToProtoResult(%q) = nil err, want rejection", v)
 		}
-		if got != "" {
-			t.Fatalf("stateToEvidenceResult(%q) returned %q on err, want empty", v, got)
+		if got != evidencev1.Result_RESULT_UNSPECIFIED {
+			t.Fatalf("stateToProtoResult(%q) returned %v on err, want UNSPECIFIED", v, got)
 		}
 	}
 }
