@@ -43,7 +43,8 @@ commands need the `atlas_migrate` role; the read/verify paths use `atlas_app`.
 | `oscal sign` / `verify` / `config-check` | Sign, verify, and inspect OSCAL bundle signing config            |
 | `features list` / `set <key> <on\|off>`  | Per-tenant feature-flag toggles (admin only)                     |
 | `bootstrap hash-password`                | Read a password from stdin, print its argon2id hash              |
-| `oauth issue-client <name>`              | Issue an OAuth `client_credentials` identity                     |
+| `oauth issue-client <name>`              | Issue an OAuth `client_credentials` identity bound to a tenant   |
+| `oauth bind-client <client_id>`          | Bind an existing OAuth client to a tenant                        |
 | `oauth add-redirect-uri <id> <uri>`      | Register a redirect URI for an OAuth client                      |
 | `oauth migrate-api-key <api_key>`        | Issue an OAuth client mirroring a legacy API key                 |
 | `keys list` / `rotate` / `prune`         | JWT signing-key lifecycle                                        |
