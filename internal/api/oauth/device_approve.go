@@ -33,9 +33,11 @@
 //     redemption. A later mutation (e.g., admin removes user from
 //     tenant) cannot retroactively change the JWT's scope. This is
 //     the standard OAuth eventual-eviction shape (slice 190 R2).
-//   - P0-188-4 (no super_admin elevation): the snapshot copies
-//     super_admin from the verified identity; it cannot be set
-//     true synthetically.
+//   - P0-188-4 (no super_admin elevation): the snapshot reads
+//     super_admin from the live `super_admins` table for the
+//     approver's user_id; it cannot be set true synthetically. It is
+//     never taken from the credential's IsAdmin bit, which a
+//     tenant-scoped admin credential also carries (#1850, #1757).
 package oauth
 
 import (
@@ -45,19 +47,26 @@ import (
 	"time"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 )
 
 // DeviceApprovalEndpoint owns the dependencies for the approve and
 // deny handlers. Construction goes through NewDeviceApprovalEndpoint
 // because both handlers share the same store + clock.
 type DeviceApprovalEndpoint struct {
-	codes *DeviceCodeStore
-	now   func() time.Time
+	codes       *DeviceCodeStore
+	now         func() time.Time
+	superAdmins superadmin.Checker
 }
 
 // DeviceApprovalConfig is the constructor bag.
 type DeviceApprovalConfig struct {
 	Now func() time.Time
+
+	// SuperAdmins re-reads `super_admins` for the approver. Nil fails
+	// closed: no device-code token carries super_admin.
+	SuperAdmins superadmin.Checker
 }
 
 // NewDeviceApprovalEndpoint constructs the approval endpoint.
@@ -69,7 +78,7 @@ func NewDeviceApprovalEndpoint(codes *DeviceCodeStore, cfg DeviceApprovalConfig)
 	if nowFn == nil {
 		nowFn = time.Now
 	}
-	return &DeviceApprovalEndpoint{codes: codes, now: nowFn}
+	return &DeviceApprovalEndpoint{codes: codes, now: nowFn, superAdmins: cfg.SuperAdmins}
 }
 
 // approveRequest is the JSON body shape the slice-191 approval UI
@@ -112,12 +121,17 @@ func (e *DeviceApprovalEndpoint) ServeApprove(w http.ResponseWriter, r *http.Req
 	// will surface real OIDC metadata when the slice-034
 	// session model is extended.
 	in := ApproveInput{
-		UserCode:        body.UserCode,
-		UserID:          cred.UserID,
+		UserCode: body.UserCode,
+		// A JWT-authenticated approver's credential carries the token
+		// subject, "user:<uuid>"; approved_by_user_id is a UUID column.
+		UserID:          jwtmw.SubjectUserID(cred.UserID),
 		IDPIssuer:       MachineIDPIssuer,
 		IDPSubject:      "",
 		CurrentTenantID: cred.TenantID,
-		SuperAdmin:      cred.IsAdmin,
+		// #1850: super_admin comes from the super_admins table, not
+		// cred.IsAdmin. A tenant admin's credential has IsAdmin set;
+		// copying it would mint a platform-global token.
+		SuperAdmin: superadmin.Confirm(r.Context(), e.superAdmins, cred.UserID),
 	}
 	// AvailableTenants + Roles for v1: the slice-034 credential is
 	// single-tenant, so we mirror that into the snapshot as a

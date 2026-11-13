@@ -43,6 +43,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 )
 
 // approvalHarness mounts the device-approval endpoints on the public
@@ -52,6 +53,7 @@ import (
 type approvalHarness struct {
 	srv      *httptest.Server
 	devCodes *oauth.DeviceCodeStore
+	pool     *pgxpool.Pool
 	cred     credstore.Credential
 	now      func() time.Time
 }
@@ -64,7 +66,12 @@ func newApprovalHarness(t *testing.T, cred credstore.Credential, now func() time
 		t.Fatalf("fsstore.Open: %v", err)
 	}
 	devCodes := oauth.NewDeviceCodeStore(pool)
-	approvalEP := oauth.NewDeviceApprovalEndpoint(devCodes, oauth.DeviceApprovalConfig{Now: now})
+	// #1850: the approver's super_admin bit is re-read from the real
+	// super_admins table, as cmd/atlas wires it.
+	approvalEP := oauth.NewDeviceApprovalEndpoint(devCodes, oauth.DeviceApprovalConfig{
+		Now:         now,
+		SuperAdmins: superadmin.NewDBChecker(pool),
+	})
 
 	h := oauth.New(ks, oauth.Config{Issuer: testIssuer})
 	h.AttachDeviceApprovalEndpoint(approvalEP) // oauth.go:151 — AC-1 (0% before)
@@ -81,7 +88,7 @@ func newApprovalHarness(t *testing.T, cred credstore.Credential, now func() time
 	h.Mount(r)
 	srv := httptest.NewServer(r)
 	t.Cleanup(srv.Close)
-	return approvalHarness{srv: srv, devCodes: devCodes, cred: cred, now: now}
+	return approvalHarness{srv: srv, devCodes: devCodes, pool: pool, cred: cred, now: now}
 }
 
 // insertCode inserts an unapproved device code expiring at expiresAt and
@@ -110,6 +117,14 @@ func (h approvalHarness) postApprove(t *testing.T, userCode string) (*http.Respo
 func (h approvalHarness) postDeny(t *testing.T, userCode string) (*http.Response, []byte) {
 	t.Helper()
 	return postJSONTo(t, h.srv.URL+oauth.PathDeviceDeny, `{"user_code":`+jsonString(userCode)+`}`)
+}
+
+// derefBool renders a nullable bool for failure messages.
+func derefBool(b *bool) any {
+	if b == nil {
+		return nil
+	}
+	return *b
 }
 
 // jsonString returns a minimal JSON-quoted form of s (test values are
@@ -141,10 +156,11 @@ type approveAck struct {
 	UserCode string `json:"user_code"`
 }
 
-// adminCred builds an authenticated admin credential carrying a tenant +
-// owner roles, so the ServeApprove snapshot-build branch (the
-// cred.TenantID != "" arm that marshals AvailableTenants + RolesJSON) is
-// exercised, AND super_admin inherits from IsAdmin (P0-188-4 shape).
+// adminCred builds an authenticated TENANT admin credential (IsAdmin set)
+// carrying a tenant + owner roles, so the ServeApprove snapshot-build
+// branch (the cred.TenantID != "" arm that marshals AvailableTenants +
+// RolesJSON) is exercised. Its user is not in super_admins, so the
+// snapshot must NOT carry super_admin (#1850).
 func adminCred() credstore.Credential {
 	return credstore.Credential{
 		UserID:     uuid.NewString(),
@@ -188,12 +204,55 @@ func TestIntegrationDeviceApprove_Success(t *testing.T) {
 	if row.ApprovedByUserID == nil || *row.ApprovedByUserID != h.cred.UserID {
 		t.Errorf("approved_by_user_id = %v, want %q", row.ApprovedByUserID, h.cred.UserID)
 	}
-	// P0-188-4: super_admin inherits from the verified IsAdmin, not synthetic.
-	if row.ApprovedBySuperAdmin == nil || !*row.ApprovedBySuperAdmin {
-		t.Errorf("approved_by_super_admin = %v, want true (inherited from IsAdmin)", row.ApprovedBySuperAdmin)
+	// #1850: a tenant admin (IsAdmin) who is not in super_admins must not
+	// mint a super_admin device token.
+	if row.ApprovedBySuperAdmin == nil || *row.ApprovedBySuperAdmin {
+		t.Errorf("approved_by_super_admin = %v, want false (tenant admin is not super_admin)", derefBool(row.ApprovedBySuperAdmin))
 	}
 	if len(row.ApprovedByAvailableTenants) != 1 || row.ApprovedByAvailableTenants[0] != h.cred.TenantID {
 		t.Errorf("approved_by_available_tenants = %v, want [%s]", row.ApprovedByAvailableTenants, h.cred.TenantID)
+	}
+}
+
+// TestIntegrationDeviceApprove_SuperAdminFromTable covers #1850's
+// positive arm: an approver whose user_id IS in super_admins gets
+// super_admin in the snapshot, read from the table. The credential's
+// IsAdmin is false here, so the bit cannot have come from it. The
+// credential carries the JWT-session UserID form ("user:<uuid>"), which
+// must be stored as the bare UUID.
+func TestIntegrationDeviceApprove_SuperAdminFromTable(t *testing.T) {
+	base := time.Now().UTC().Truncate(time.Second)
+	userID := uuid.New()
+	cred := credstore.Credential{
+		UserID:   "user:" + userID.String(), // the JWT-session form
+		TenantID: uuid.NewString(),
+	}
+	h := newApprovalHarness(t, cred, func() time.Time { return base })
+
+	ctx := context.Background()
+	if _, err := h.pool.Exec(ctx,
+		`INSERT INTO super_admins (user_id, granted_via) VALUES ($1, 'bootstrap_first_install')`,
+		userID,
+	); err != nil {
+		t.Fatalf("insert super_admins: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = h.pool.Exec(context.Background(), `DELETE FROM super_admins WHERE user_id = $1`, userID)
+	})
+
+	userCode, _ := h.insertCode(t, base.Add(15*time.Minute))
+	if resp, body := h.postApprove(t, userCode); resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; want 200", resp.StatusCode, body)
+	}
+	row, err := h.devCodes.LookupByUserCode(ctx, userCode)
+	if err != nil {
+		t.Fatalf("LookupByUserCode: %v", err)
+	}
+	if row.ApprovedBySuperAdmin == nil || !*row.ApprovedBySuperAdmin {
+		t.Errorf("approved_by_super_admin = %v, want true (row in super_admins)", derefBool(row.ApprovedBySuperAdmin))
+	}
+	if row.ApprovedByUserID == nil || *row.ApprovedByUserID != userID.String() {
+		t.Errorf("approved_by_user_id = %v, want %s", row.ApprovedByUserID, userID)
 	}
 }
 

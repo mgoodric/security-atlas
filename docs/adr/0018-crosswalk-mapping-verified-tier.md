@@ -112,3 +112,11 @@ cross-tenant write. `POST /v1/admin/crosswalk-edges/{id}/tier` now requires the
 verified JWT's `atlas:super_admin` claim (the slice-142 check). On a
 single-tenant install the bootstrap admin holds `super_admin` (#1759), so a
 single operator keeps the capability. The audit trail is unchanged.
+
+The tier route takes a JWT, not an API key: an API key's credential is
+tenant-scoped and never carries `atlas:super_admin`. An operator gets one by
+signing in through the browser (the `atlas_jwt` session cookie) or by running
+`atlas-cli login --issuer <url> --client-id <cli client>` and approving the
+device code from a signed-in browser session; the CLI then presents the JWT
+as its bearer. The claim is re-read from `super_admins` on every request, so
+a demoted operator loses the route on their next call (#1850).
