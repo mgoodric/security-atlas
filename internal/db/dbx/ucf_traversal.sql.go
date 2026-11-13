@@ -65,6 +65,7 @@ FROM fw_to_scf_edges e
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
 ORDER BY e.strength DESC, a.scf_id
 `
 
@@ -155,6 +156,7 @@ FROM fw_to_scf_edges e
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
   AND a.framework_version_id = $2
 ORDER BY e.strength DESC, a.scf_id
 `
@@ -319,6 +321,7 @@ JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
 WHERE e.scf_anchor_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
 ORDER BY f.slug, fv.version, r.code
 `
 
@@ -404,6 +407,7 @@ JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
 WHERE e.scf_anchor_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
   AND r.framework_version_id = $2
 ORDER BY f.slug, fv.version, r.code
 `
@@ -493,6 +497,7 @@ JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
 WHERE e.scf_anchor_id = $1
   AND e.relationship_type <> 'no_relationship'
+  AND e.mapping_tier <> 'rejected'
   AND fv.status = 'current'
 ORDER BY f.slug, fv.version, r.code
 `

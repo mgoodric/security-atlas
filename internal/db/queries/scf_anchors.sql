@@ -235,6 +235,7 @@ anchor_frameworks AS (
     JOIN framework_versions afv    ON afv.id = ar.framework_version_id
     JOIN frameworks af             ON af.id = afv.framework_id
     WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
       AND af.tenant_id IS NULL
       AND af.slug <> 'scf'
     GROUP BY e.scf_anchor_id
@@ -354,6 +355,7 @@ anchor_frameworks AS (
     JOIN framework_versions afv    ON afv.id = ar.framework_version_id
     JOIN frameworks af             ON af.id = afv.framework_id
     WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
       AND af.tenant_id IS NULL
       AND af.slug <> 'scf'
     GROUP BY e.scf_anchor_id
