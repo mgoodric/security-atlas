@@ -24,7 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-const singleTenantUpgradeUp = "../../../migrations/sql/20260809000000_single_tenant_bootstrap_super_admin.sql"
+const singleTenantUpgradeUp = "../../../migrations/sql/20260810000000_single_tenant_bootstrap_super_admin.sql"
 
 func founderInput() users.BootstrapInput {
 	return users.BootstrapInput{

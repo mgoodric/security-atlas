@@ -1,4 +1,4 @@
--- Reverses 20260809000000_single_tenant_bootstrap_super_admin.sql:
+-- Reverses 20260810000000_single_tenant_bootstrap_super_admin.sql:
 --   1. removes the super_admin grants that migration wrote;
 --   2. restores super_admins.granted_via CHECK to its slice-142 shape.
 
