@@ -72,9 +72,9 @@ test.describe("/risks/new control-link multi-select", () => {
       timeout: 30_000,
     });
 
-    // Slice 663: the opening default treatment is now "avoid" (the
-    // fresh-tenant-safe default with no required satellite field), so the
-    // picker is hidden on first paint.
+    // #1746: the opening default treatment is "untreated" (no decision
+    // yet, no required satellite field), so the picker is hidden on
+    // first paint.
     await expect(
       page.getByTestId("risks-create-control-multi-select"),
     ).toHaveCount(0);

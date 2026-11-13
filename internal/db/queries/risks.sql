@@ -6,12 +6,14 @@
 INSERT INTO risks (
     id, tenant_id, title, description, category, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
-    review_due_at, accepted_until, accepter, instrument_reference
+    review_due_at, accepted_until, accepter, instrument_reference,
+    acceptance_status
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
-    $11, $12, $13, $14
+    $11, $12, $13, $14,
+    $15
 )
 RETURNING *;
 
@@ -46,6 +48,7 @@ SET title = $3,
     accepted_until = $12,
     accepter = $13,
     instrument_reference = $14,
+    acceptance_status = $15,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;

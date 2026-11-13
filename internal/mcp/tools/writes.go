@@ -103,8 +103,13 @@ const createRiskInputSchema = `{
     },
     "treatment": {
       "type": "string",
-      "enum": ["avoid", "accept", "transfer", "mitigate"],
-      "description": "Optional; defaults to avoid (safest)."
+      "enum": ["untreated", "avoid", "accept", "transfer", "mitigate"],
+      "description": "Optional; defaults to untreated (no treatment decision yet). accept needs acceptance_status=proposed here, since create_risk sets no accepter or expiry; mitigate needs a linked control or action plan, which a new risk does not have."
+    },
+    "acceptance_status": {
+      "type": "string",
+      "enum": ["proposed", "approved"],
+      "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off."
     },
     "treatment_owner": {
       "type": "string",
@@ -269,7 +274,21 @@ const updateRiskTreatmentInputSchema = `{
     },
     "treatment": {
       "type": "string",
-      "enum": ["avoid", "accept", "transfer", "mitigate"]
+      "enum": ["untreated", "avoid", "accept", "transfer", "mitigate"],
+      "description": "untreated = no decision yet. mitigate needs at least one linked control or linked action plan."
+    },
+    "acceptance_status": {
+      "type": "string",
+      "enum": ["proposed", "approved"],
+      "description": "Required with treatment=accept, forbidden otherwise. proposed = pending sign-off; approved requires an accepter and accepted_until (on the risk already, or set here)."
+    },
+    "accepter": {
+      "type": "string",
+      "description": "Optional; who signed off the acceptance. Overwrites the risk's accepter."
+    },
+    "accepted_until": {
+      "type": "string",
+      "description": "Optional; YYYY-MM-DD date the acceptance lapses. Overwrites the risk's accepted_until."
     },
     "treatment_owner": {
       "type": "string",

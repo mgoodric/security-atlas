@@ -11,6 +11,20 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveControls = `-- name: CountActiveControls :one
+SELECT count(*)::bigint AS total
+FROM controls
+WHERE tenant_id = $1 AND superseded_by IS NULL
+`
+
+// Issue #1741 — total for the paged ListActiveControlsWithState read.
+func (q *Queries) CountActiveControls(ctx context.Context, tenantID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveControls, tenantID)
+	var total int64
+	err := row.Scan(&total)
+	return total, err
+}
+
 const getActiveControlByBundleID = `-- name: GetActiveControlByBundleID :one
 
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
@@ -637,6 +651,164 @@ func (q *Queries) ListActiveControlsWithDescription(ctx context.Context, tenantI
 			&i.FreshnessClass,
 			&i.BundleManifestHash,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveControlsWithState = `-- name: ListActiveControlsWithState :many
+
+WITH latest_eval AS (
+    SELECT DISTINCT ON (ce.tenant_id, ce.control_id, ce.scope_cell_id)
+        ce.tenant_id,
+        ce.control_id,
+        ce.scope_cell_id,
+        ce.result,
+        ce.freshness_status,
+        ce.last_observed_at,
+        ce.evaluated_at
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $1
+    ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+),
+worst_per_control AS (
+    SELECT
+        le.control_id,
+        CASE MAX(CASE le.result
+                    WHEN 'fail'         THEN 4
+                    WHEN 'inconclusive' THEN 3
+                    WHEN 'pass'         THEN 2
+                    WHEN 'na'           THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'fail'
+            WHEN 3 THEN 'inconclusive'
+            WHEN 2 THEN 'pass'
+            WHEN 1 THEN 'na'
+        END::evidence_result AS result,
+        (CASE MAX(CASE le.freshness_status
+                    WHEN 'expired'     THEN 4
+                    WHEN 'stale'       THEN 3
+                    WHEN 'no_evidence' THEN 2
+                    WHEN 'fresh'       THEN 1
+                    ELSE 0
+                 END)
+            WHEN 4 THEN 'expired'
+            WHEN 3 THEN 'stale'
+            WHEN 2 THEN 'no_evidence'
+            WHEN 1 THEN 'fresh'
+        END)::text AS freshness_status,
+        MAX(le.last_observed_at) AS last_observed_at,
+        MAX(le.evaluated_at)     AS evaluated_at
+    FROM latest_eval le
+    WHERE ($4::uuid IS NULL OR le.scope_cell_id = $4::uuid)
+    GROUP BY le.control_id
+),
+anchor_frameworks AS (
+    SELECT
+        e.scf_anchor_id AS anchor_id,
+        array_agg(DISTINCT af.slug) AS framework_slugs
+    FROM fw_to_scf_edges e
+    JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
+    JOIN framework_versions afv    ON afv.id = ar.framework_version_id
+    JOIN frameworks af             ON af.id = afv.framework_id
+    WHERE e.relationship_type <> 'no_relationship'
+      AND e.mapping_tier <> 'rejected'
+      AND af.tenant_id IS NULL
+      AND af.slug <> 'scf'
+    GROUP BY e.scf_anchor_id
+)
+SELECT
+    c.id, c.bundle_id, c.scf_id, c.scf_anchor_id, c.title, c.control_family,
+    c.lifecycle_state,
+    wpc.result                        AS state_result,
+    wpc.freshness_status              AS state_freshness_status,
+    wpc.last_observed_at::timestamptz AS state_last_observed_at,
+    wpc.evaluated_at::timestamptz     AS state_evaluated_at,
+    af.framework_slugs::text[]        AS framework_slugs
+FROM controls c
+LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
+LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
+WHERE c.tenant_id = $1 AND c.superseded_by IS NULL
+ORDER BY c.scf_id NULLS LAST, c.bundle_id
+LIMIT $3 OFFSET $2
+`
+
+type ListActiveControlsWithStateParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	RowOffset   int32       `json:"row_offset"`
+	RowLimit    int32       `json:"row_limit"`
+	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
+}
+
+type ListActiveControlsWithStateRow struct {
+	ID                   pgtype.UUID           `json:"id"`
+	BundleID             string                `json:"bundle_id"`
+	ScfID                *string               `json:"scf_id"`
+	ScfAnchorID          pgtype.UUID           `json:"scf_anchor_id"`
+	Title                string                `json:"title"`
+	ControlFamily        string                `json:"control_family"`
+	LifecycleState       ControlLifecycleState `json:"lifecycle_state"`
+	StateResult          *EvidenceResult       `json:"state_result"`
+	StateFreshnessStatus *string               `json:"state_freshness_status"`
+	StateLastObservedAt  pgtype.Timestamptz    `json:"state_last_observed_at"`
+	StateEvaluatedAt     pgtype.Timestamptz    `json:"state_evaluated_at"`
+	FrameworkSlugs       []string              `json:"framework_slugs"`
+}
+
+// NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
+// from internal/db/queries/scf_anchors.sql (slice 006). The bundle parser
+// in internal/control/parser.go calls them through the same dbx.Queries
+// facade.
+// Issue #1741 — the /controls page's default "My controls" view.
+//
+// One row per active (non-superseded) control for the active tenant, with
+// the worst-state-wins rollup over THAT control's latest evaluation per
+// scope cell, plus the framework set its SCF anchor satisfies. Same rank
+// order and CTE shape as ListSCFAnchorsLatestWithState (slice 104/224/226),
+// grouped by control instead of by anchor, so two controls on one anchor
+// never borrow each other's state.
+//
+// Paged server-side (row_limit / row_offset); CountActiveControls is the
+// matching total. The optional scope_cell_id narrows the rollup exactly as
+// slice 224 does on the anchor list.
+//
+// RLS posture: `WHERE c.tenant_id = sqlc.arg(tenant_id)` is
+// belt-and-suspenders alongside the GUC-driven RLS on `controls` and
+// `control_evaluations` (invariant #6).
+func (q *Queries) ListActiveControlsWithState(ctx context.Context, arg ListActiveControlsWithStateParams) ([]ListActiveControlsWithStateRow, error) {
+	rows, err := q.db.Query(ctx, listActiveControlsWithState,
+		arg.TenantID,
+		arg.RowOffset,
+		arg.RowLimit,
+		arg.ScopeCellID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListActiveControlsWithStateRow
+	for rows.Next() {
+		var i ListActiveControlsWithStateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BundleID,
+			&i.ScfID,
+			&i.ScfAnchorID,
+			&i.Title,
+			&i.ControlFamily,
+			&i.LifecycleState,
+			&i.StateResult,
+			&i.StateFreshnessStatus,
+			&i.StateLastObservedAt,
+			&i.StateEvaluatedAt,
+			&i.FrameworkSlugs,
 		); err != nil {
 			return nil, err
 		}

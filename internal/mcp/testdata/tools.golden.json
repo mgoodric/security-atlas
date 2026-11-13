@@ -62,7 +62,7 @@
             "type": "string"
           },
           "status": {
-            "description": "Filter by treatment status: avoid | accept | transfer | mitigate. Optional; default returns all treatments.",
+            "description": "Filter by treatment status: untreated | avoid | accept | transfer | mitigate. Optional; default returns all treatments.",
             "type": "string"
           }
         },
@@ -235,6 +235,14 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "acceptance_status": {
+            "description": "Required with treatment=accept, forbidden otherwise. proposed = acceptance pending sign-off.",
+            "enum": [
+              "proposed",
+              "approved"
+            ],
+            "type": "string"
+          },
           "category": {
             "description": "Risk category slug (e.g., operational, technical, legal).",
             "type": "string"
@@ -259,8 +267,9 @@
             "type": "string"
           },
           "treatment": {
-            "description": "Optional; defaults to avoid (safest).",
+            "description": "Optional; defaults to untreated (no treatment decision yet). accept needs acceptance_status=proposed here, since create_risk sets no accepter or expiry; mitigate needs a linked control or action plan, which a new risk does not have.",
             "enum": [
+              "untreated",
               "avoid",
               "accept",
               "transfer",
@@ -365,12 +374,30 @@
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
+          "acceptance_status": {
+            "description": "Required with treatment=accept, forbidden otherwise. proposed = pending sign-off; approved requires an accepter and accepted_until (on the risk already, or set here).",
+            "enum": [
+              "proposed",
+              "approved"
+            ],
+            "type": "string"
+          },
+          "accepted_until": {
+            "description": "Optional; YYYY-MM-DD date the acceptance lapses. Overwrites the risk's accepted_until.",
+            "type": "string"
+          },
+          "accepter": {
+            "description": "Optional; who signed off the acceptance. Overwrites the risk's accepter.",
+            "type": "string"
+          },
           "risk_id": {
             "description": "Risk UUID to update.",
             "type": "string"
           },
           "treatment": {
+            "description": "untreated = no decision yet. mitigate needs at least one linked control or linked action plan.",
             "enum": [
+              "untreated",
               "avoid",
               "accept",
               "transfer",

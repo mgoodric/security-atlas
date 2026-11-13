@@ -170,6 +170,8 @@ type Querier interface {
 	CountAIGenerationsForTenant(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountActionPlanControls(ctx context.Context, arg CountActionPlanControlsParams) (int64, error)
 	CountActionPlanRisks(ctx context.Context, arg CountActionPlanRisksParams) (int64, error)
+	// Issue #1741 — total for the paged ListActiveControlsWithState read.
+	CountActiveControls(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Count of all checklist sections visible to the caller's tenant. Used by the
 	// cross-tenant isolation integration test to prove tenant B sees zero of
 	// tenant A's rows (AC-8).
@@ -235,6 +237,11 @@ type Querier interface {
 	CountRequiredRoleUsersForVersion(ctx context.Context, arg CountRequiredRoleUsersForVersionParams) (int64, error)
 	CountRiskControlLinks(ctx context.Context, arg CountRiskControlLinksParams) (int64, error)
 	CountSCFAnchorsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) (int64, error)
+	// Issue #1741: totals for the paged `/v1/anchors?include=state` read on
+	// the current SCF version: the whole catalog, and the anchors the
+	// caller's tenant has at least one active control on. `controls` is
+	// tenant-scoped under FORCE RLS, so with_control_total is per tenant.
+	CountSCFAnchorsLatest(ctx context.Context) (CountSCFAnchorsLatestRow, error)
 	// Total group count in the tenant (List envelope totalResults).
 	CountSCIMGroups(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountSCIMUsers(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -1462,6 +1469,27 @@ type Querier interface {
 	// alongside the GUC-driven RLS policy (slice 002); tenancy.ApplyTenant
 	// upstream pins the GUC so the read is tenant-scoped (invariant #6).
 	ListActiveControlsWithDescription(ctx context.Context, tenantID pgtype.UUID) ([]ListActiveControlsWithDescriptionRow, error)
+	// NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
+	// from internal/db/queries/scf_anchors.sql (slice 006). The bundle parser
+	// in internal/control/parser.go calls them through the same dbx.Queries
+	// facade.
+	// Issue #1741 — the /controls page's default "My controls" view.
+	//
+	// One row per active (non-superseded) control for the active tenant, with
+	// the worst-state-wins rollup over THAT control's latest evaluation per
+	// scope cell, plus the framework set its SCF anchor satisfies. Same rank
+	// order and CTE shape as ListSCFAnchorsLatestWithState (slice 104/224/226),
+	// grouped by control instead of by anchor, so two controls on one anchor
+	// never borrow each other's state.
+	//
+	// Paged server-side (row_limit / row_offset); CountActiveControls is the
+	// matching total. The optional scope_cell_id narrows the rollup exactly as
+	// slice 224 does on the anchor list.
+	//
+	// RLS posture: `WHERE c.tenant_id = sqlc.arg(tenant_id)` is
+	// belt-and-suspenders alongside the GUC-driven RLS on `controls` and
+	// `control_evaluations` (invariant #6).
+	ListActiveControlsWithState(ctx context.Context, arg ListActiveControlsWithStateParams) ([]ListActiveControlsWithStateRow, error)
 	// Slice 439 — evidence-staleness rollup producer queries.
 	//
 	// The rollup job (internal/staleness) reads the slice-016 freshness read
