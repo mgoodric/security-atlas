@@ -86,7 +86,8 @@
 #      would return 403 even though sign-in itself succeeded.
 #   8. A fresh re-run of `docker compose run --rm atlas-bootstrap` exits 0
 #      and does not duplicate seed rows (slice 065 bug #3 idempotency,
-#      AC-7).
+#      AC-7). The first boot printed the opt-in crosswalk commands and the
+#      re-run does not (security-atlas#1888).
 #
 # AC-9 is covered by the `external` mode's pre-created non-superuser
 # atlas_migrate: if the cluster-admin one-time grant (BYPASSRLS +
@@ -597,7 +598,21 @@ log "default user sees the 50 stock controls in the bootstrap tenant; none in th
 # SOC 2 crosswalk, so the stock SOC 2 controls map to SOC 2 requirements
 # through their SCF anchors. Before the fix a fresh install had zero
 # framework requirements and /v1/frameworks listed only SCF.
+#
+# security-atlas#1888: an exact count, not a > 0 floor. Every requirement
+# in the bundled YAML has an edge, and the stock controls' anchors cover
+# every one, so the mapped count must equal the YAML's requirement count.
+# A lost edge or a dropped requirement fails here.
 # ---------------------------------------------------------------------
+SOC2_WANT="$(grep -c '^  - code:' "${REPO_ROOT}/data/crosswalks/soc2-tsc-2017.yaml")"
+SOC2_WITH_EDGES="$(db_count "SELECT count(DISTINCT fr.id)
+    FROM framework_requirements fr
+    JOIN fw_to_scf_edges e ON e.framework_requirement_id = fr.id
+    JOIN framework_versions fv ON fv.id = fr.framework_version_id
+    JOIN frameworks f ON f.id = fv.framework_id
+    WHERE f.slug = 'soc2'")"
+[ "${SOC2_WITH_EDGES}" = "${SOC2_WANT}" ] \
+    || fail "SOC 2 requirements with edges = ${SOC2_WITH_EDGES:-?}, want ${SOC2_WANT} (every requirement in soc2-tsc-2017.yaml)"
 SOC2_MAPPED="$(db_count "SELECT count(DISTINCT fr.id)
     FROM controls c
     JOIN fw_to_scf_edges e ON e.scf_anchor_id = c.scf_anchor_id
@@ -605,8 +620,8 @@ SOC2_MAPPED="$(db_count "SELECT count(DISTINCT fr.id)
     JOIN framework_versions fv ON fv.id = fr.framework_version_id
     JOIN frameworks f ON f.id = fv.framework_id
     WHERE c.tenant_id = '${BOOTSTRAP_TENANT_ID}' AND f.slug = 'soc2'")"
-[ "${SOC2_MAPPED:-0}" -gt 0 ] 2>/dev/null \
-    || fail "stock SOC 2 controls map to ${SOC2_MAPPED:-?} SOC 2 requirements, want > 0 (bootstrap did not import the SOC 2 crosswalk?)"
+[ "${SOC2_MAPPED}" = "${SOC2_WITH_EDGES}" ] \
+    || fail "stock SOC 2 controls map to ${SOC2_MAPPED:-?} SOC 2 requirements, want ${SOC2_WITH_EDGES} (the SOC 2 requirements that have edges)"
 log "stock SOC 2 controls map to ${SOC2_MAPPED} SOC 2 requirements"
 
 # ---------------------------------------------------------------------
@@ -763,11 +778,21 @@ CONTROLS_BEFORE="${CONTROLS}"
 SCOPES_BEFORE="$(db_count 'SELECT count(*) FROM scope_cells')"
 USERS_BEFORE="$(db_count 'SELECT count(*) FROM users')"
 
+# security-atlas#1888: the first boot printed the opt-in crosswalk import
+# commands in a form that runs from the repo root; a re-run prints none.
+OPTIN_CMD="docker compose -f deploy/docker/docker-compose.yml run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/iso27001-2022.yaml"
+"${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 | grep -qF -- "${OPTIN_CMD}" \
+    || fail "first-boot bootstrap log lacks the opt-in command: ${OPTIN_CMD}"
+
 set +e
-"${COMPOSE[@]}" run --rm atlas-bootstrap
+RERUN_OUT="$("${COMPOSE[@]}" run --rm atlas-bootstrap 2>&1)"
 RERUN_RC=$?
 set -e
+printf '%s\n' "${RERUN_OUT}"
 [ "${RERUN_RC}" = "0" ] || fail "atlas-bootstrap re-run exited ${RERUN_RC}, want 0"
+case "${RERUN_OUT}" in
+    *"catalog import-crosswalk /repo/data/crosswalks/"*) fail "atlas-bootstrap re-run printed the opt-in crosswalk commands again" ;;
+esac
 
 CONTROLS_AFTER="$(db_count 'SELECT count(*) FROM controls')"
 SCOPES_AFTER="$(db_count 'SELECT count(*) FROM scope_cells')"
