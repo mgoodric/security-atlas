@@ -1693,6 +1693,8 @@ type ApiKey struct {
 	TtlSeconds     int64              `json:"ttl_seconds"`
 	// Why the key exists, when it is not an ordinary issued key. 'bootstrap-recovery' marks the admin key reset-bootstrap minted (#1892).
 	Purpose *string `json:"purpose"`
+	// users(id) of whoever minted the key, for attribution only (#1892). Not the key's owner: that is issued_by. Never read for identity or authorization.
+	MintedBy pgtype.UUID `json:"minted_by"`
 }
 
 type Artifact struct {

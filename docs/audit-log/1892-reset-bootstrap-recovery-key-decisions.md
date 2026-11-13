@@ -53,17 +53,30 @@ keep the caller's key until its TTL, and say which happened in the response
 and the log. The docs tell the operator to revoke it once they can sign in
 another way.
 
-## D5 — The issuer rides in `UserID`, not a new `PersistedCredential` field
+## D5 — The minter goes in `api_keys.minted_by`, not `issued_by`
 
-The ticket suggested adding an issued-by field to `PersistedCredential`. The
-Persister already writes `issued_by` from a uuid-shaped `UserID`, and
-`credentialFromRow` reads `issued_by` back into `UserID`. A separate field
-would make the key's `UserID` differ before and after a restart. So
-`IssueRecoveryAdmin` sets `UserID` to the issuing user, `issued_by` is
-written by the existing mapping, and the key resolves to the same user
-across a restart. JWT subjects are `user:<uuid>`; the prefix is stripped. A
-caller with no user (an API key) records no issuer, and the log names its
-credential id instead.
+The ticket asked to set `api_keys.issued_by`. The first draft did that by
+setting the recovery key's `UserID` to the minting user, which the Persister
+writes as `issued_by`. Review (relayed by the dispatcher) asked whether
+`UserID` means more than attribution. It does, and so does `issued_by`:
+
+- `credentialFromRow` maps `issued_by` to the key's `UserID`.
+- `/v1/me` and approval records (`approver_user_id`) resolve `UserID`.
+- The policy-acknowledgment denominators (`CountRequiredRoleUsersForVersion`,
+  the policies list) count distinct `issued_by` over admin keys as users who
+  must acknowledge.
+- The admin audit log reads `issued_by` as the key's user.
+
+A recovery key written that way would act as, and count as a key of, the
+operator who minted it. So the minter goes in a dedicated nullable column,
+`api_keys.minted_by` (same migration as `purpose`), carried on the
+credential as `MintedBy`. Nothing reads it for identity or authorization. A
+recovery key keeps `issued_by` NULL and `UserID` equal to its own
+credential id, before and after a restart.
+
+JWT subjects are `user:<uuid>`; the prefix is stripped. A caller with no
+user (an API key) records no minter, and the log names its credential id
+instead.
 
 ## D6 — Logging, not an audit-table row
 

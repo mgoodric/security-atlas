@@ -65,20 +65,25 @@ func TestIssueRecoveryAdmin_MarkedExpiringAdmin(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	if !got.IsAdmin || got.Purpose != PurposeBootstrapRecovery || got.UserID != issuer || got.TTL != 24*time.Hour {
-		t.Fatalf("credential = %+v; want admin, recovery purpose, UserID=issuer, 24h ttl", got)
+	if !got.IsAdmin || got.Purpose != PurposeBootstrapRecovery || got.TTL != 24*time.Hour {
+		t.Fatalf("credential = %+v; want admin, recovery purpose, 24h ttl", got)
+	}
+	// The minter is attribution only. The key's identity stays its own id,
+	// so it never acts as the user who minted it.
+	if got.MintedBy != issuer || got.UserID != got.ID {
+		t.Fatalf("MintedBy=%q UserID=%q; want MintedBy=%s and UserID=%s (own id)", got.MintedBy, got.UserID, issuer, got.ID)
 	}
 	if cred.ExpiresAt().IsZero() {
 		t.Fatalf("recovery key has no expiry")
 	}
 
-	// No issuer: UserID falls back to the credential id, as for IssueAdmin.
+	// No minter: nothing recorded, identity is still the credential id.
 	cred2, _, err := s.IssueRecoveryAdmin(recoveryTenant, time.Hour, "")
 	if err != nil {
 		t.Fatalf("IssueRecoveryAdmin: %v", err)
 	}
-	if cred2.UserID != cred2.ID {
-		t.Fatalf("UserID = %q; want the credential id %q", cred2.UserID, cred2.ID)
+	if cred2.UserID != cred2.ID || cred2.MintedBy != "" {
+		t.Fatalf("UserID=%q MintedBy=%q; want the credential id and no minter", cred2.UserID, cred2.MintedBy)
 	}
 }
 

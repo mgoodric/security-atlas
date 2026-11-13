@@ -78,6 +78,11 @@ type Credential struct {
 	// key reset-bootstrap mints. Persisted in api_keys.purpose, so the
 	// marker survives a restart; a Rotate successor inherits it.
 	Purpose string
+	// MintedBy is the users(id) uuid of whoever minted the key, for
+	// attribution only (api_keys.minted_by). It is NOT the key's identity:
+	// UserID is. Nothing authorizes on it. Set on recovery keys (#1892);
+	// a Rotate successor inherits it.
+	MintedBy string
 }
 
 // PurposeBootstrapRecovery marks the admin key POST
@@ -293,12 +298,12 @@ func (s *Store) IssueAdmin(tenantID string, ttl time.Duration) (Credential, stri
 
 // IssueRecoveryAdmin mints the admin key reset-bootstrap writes to the
 // bootstrap-token file (#1892): IssueAdmin, marked
-// PurposeBootstrapRecovery, with the issuing user recorded. issuedBy is a
-// users(id) uuid or empty. When set, the credential's UserID is set to it,
-// which is how the Persister fills api_keys.issued_by and how a reload
-// reconstructs UserID, so the key resolves to the same user before and
-// after a restart. ttl must be positive: a recovery key always expires.
-func (s *Store) IssueRecoveryAdmin(tenantID string, ttl time.Duration, issuedBy string) (Credential, string, error) {
+// PurposeBootstrapRecovery, with the minting user recorded in MintedBy.
+// mintedBy is a users(id) uuid or empty. It is attribution only: the
+// key's UserID stays its own credential id, so the key never acts as, or
+// counts as a key of, the user who minted it. ttl must be positive: a
+// recovery key always expires.
+func (s *Store) IssueRecoveryAdmin(tenantID string, ttl time.Duration, mintedBy string) (Credential, string, error) {
 	if ttl <= 0 {
 		return Credential{}, "", errors.New("credstore: recovery admin key needs a positive ttl")
 	}
@@ -309,9 +314,7 @@ func (s *Store) IssueRecoveryAdmin(tenantID string, ttl time.Duration, issuedBy 
 		return Credential{}, "", err
 	}
 	cred.Purpose = PurposeBootstrapRecovery
-	if issuedBy != "" {
-		cred.UserID = issuedBy
-	}
+	cred.MintedBy = mintedBy
 	r.cred = cred
 	if err := s.commitLocked(cred, r); err != nil {
 		return Credential{}, "", err
@@ -416,6 +419,8 @@ func (s *Store) Rotate(id string) (successor Credential, bearer string, predeces
 	// strip the marker the next reset and sign-in revoke by.
 	successor.Purpose = pred.cred.Purpose
 	rec.cred.Purpose = pred.cred.Purpose
+	successor.MintedBy = pred.cred.MintedBy
+	rec.cred.MintedBy = pred.cred.MintedBy
 
 	predecessorExpiresAt = time.Now().UTC().Add(s.rotationGrace)
 	if s.persist != nil {

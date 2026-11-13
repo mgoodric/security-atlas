@@ -16,7 +16,9 @@
 // is marked bootstrap-recovery in api_keys.purpose, each new reset revokes
 // the recovery keys earlier resets minted, and the first sign-in by a
 // different credential revokes it (install_state.go). Every mint is logged
-// with the caller's identity, never the bearer.
+// with the caller's identity, never the bearer, and a user caller is
+// recorded in api_keys.minted_by. The key's own identity (UserID) stays
+// its credential id: it never acts as the user who minted it.
 
 package api
 
@@ -176,7 +178,7 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 
 	// Minted after the status reset, so a refused reset (409) leaves no
 	// live admin credential behind.
-	issued, bearer, err := s.credStore.IssueRecoveryAdmin(cred.TenantID, ttl, issuerUserID(cred))
+	issued, bearer, err := s.credStore.IssueRecoveryAdmin(cred.TenantID, ttl, minterUserID(cred))
 	if err != nil {
 		s.installLogger().Warn("reset-bootstrap credential issue failed",
 			slog.String("error", err.Error()))
@@ -233,6 +235,7 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 		slog.String("expires_at", resp.ExpiresAt),
 		slog.String("caller_credential_id", cred.ID),
 		slog.String("caller_subject", callerSubject(r.Context(), cred)),
+		slog.String("minted_by", issued.MintedBy),
 		slog.Bool("force", req.Force),
 		slog.Any("revoked_credential_ids", resp.RevokedCredentialIDs))
 	_ = json.NewEncoder(w).Encode(resp)
@@ -248,11 +251,12 @@ func callerSubject(ctx context.Context, cred credstore.Credential) string {
 	return cred.UserID
 }
 
-// issuerUserID returns the users(id) uuid behind the caller, for
-// api_keys.issued_by, or "" when the caller is not a user. A JWT carries
-// "user:<uuid>"; a key issued by a user carries the bare uuid; a bootstrap
-// or machine credential carries neither and records no issuer.
-func issuerUserID(cred credstore.Credential) string {
+// minterUserID returns the users(id) uuid behind the caller, for
+// api_keys.minted_by (attribution only, never the new key's identity), or
+// "" when the caller is not a user. A JWT carries "user:<uuid>"; a key
+// issued by a user carries the bare uuid; a bootstrap or machine
+// credential carries neither and records no minter.
+func minterUserID(cred credstore.Credential) string {
 	id := strings.TrimPrefix(cred.UserID, "user:")
 	if _, err := uuid.Parse(id); err != nil {
 		return ""

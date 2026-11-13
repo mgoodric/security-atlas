@@ -374,6 +374,11 @@ func credentialFromRow(row dbx.ApiKey) credstore.Credential {
 	if row.Purpose != nil {
 		c.Purpose = *row.Purpose
 	}
+	if row.MintedBy.Valid {
+		if u, err := uuidFromPg(row.MintedBy); err == nil {
+			c.MintedBy = u.String()
+		}
+	}
 	if row.RotatedFrom.Valid {
 		ruu, _ := uuidFromPg(row.RotatedFrom)
 		c.RotatedFrom = "key_" + ruu.String()

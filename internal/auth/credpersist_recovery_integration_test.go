@@ -1,13 +1,16 @@
 //go:build integration
 
-// #1892: the bootstrap-recovery marker and issuer survive a restart, so a
+// #1892: the bootstrap-recovery marker and minter survive a restart, so a
 // reset or sign-in after a restart still finds and revokes the recovery
-// key by marker and id. Reuses the pools and hasher from TestMain in
-// integration_test.go.
+// key by marker and id. The minter lands in api_keys.minted_by, never in
+// issued_by, so the key never takes on the minter's identity. Reuses the
+// pools and hasher from TestMain in integration_test.go.
 package auth_test
 
 import (
+	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,15 +48,30 @@ func TestCredPersist_RecoveryMarkerSurvivesRestart(t *testing.T) {
 		t.Fatalf("IssueAdmin: %v", err)
 	}
 
-	// Restart: the marker, issuer and TTL come back from api_keys.
+	// The row: minted_by holds the minter, issued_by (the key's owner, read
+	// as identity elsewhere) stays NULL.
+	var issuedByNull bool
+	var mintedBy string
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT issued_by IS NULL, coalesce(minted_by::text, '') FROM api_keys WHERE id = $1`,
+		strings.TrimPrefix(minted.ID, "key_"),
+	).Scan(&issuedByNull, &mintedBy); err != nil {
+		t.Fatalf("read api_keys row: %v", err)
+	}
+	if !issuedByNull || mintedBy != issuer {
+		t.Fatalf("issued_by NULL=%v minted_by=%q; want NULL and %s", issuedByNull, mintedBy, issuer)
+	}
+
+	// Restart: the marker, minter and TTL come back from api_keys, and the
+	// key's identity is still its own id.
 	atlas2 := bootStore(t)
 	got, err := atlas2.Authenticate(bearer)
 	if err != nil {
 		t.Fatalf("recovery key after restart: %v", err)
 	}
 	if got.ID != minted.ID || got.Purpose != credstore.PurposeBootstrapRecovery ||
-		got.UserID != issuer || got.TTL != 24*time.Hour || !got.IsAdmin {
-		t.Fatalf("reloaded credential = %+v; want id %s, recovery marker, issuer %s, 24h, admin",
+		got.MintedBy != issuer || got.UserID != minted.ID || got.TTL != 24*time.Hour || !got.IsAdmin {
+		t.Fatalf("reloaded credential = %+v; want id %s, recovery marker, minter %s, UserID = own id, 24h, admin",
 			got, minted.ID, issuer)
 	}
 

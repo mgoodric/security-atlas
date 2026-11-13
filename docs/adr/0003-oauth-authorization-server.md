@@ -313,7 +313,7 @@ revoked), and nothing recorded who minted it.
   means no expiry, which the env `ATLAS_BOOTSTRAP_TOKEN` key, the
   `ATLAS_BOOTSTRAP_TENANT` key and the chaos and CI keys (`--ttl 0`) rely on.
 - **Marked, durably.** The key is minted with `api_keys.purpose =
-'bootstrap-recovery'` (migration `20260813000000_api_keys_purpose`). It is
+'bootstrap-recovery'` (migration `20260814000000_api_keys_purpose`). It is
   reloaded at boot, and a rotated successor inherits it. Revocation finds
   recovery keys by this marker and the credential id, never by the bearer.
   The env `ATLAS_BOOTSTRAP_TOKEN` key is memory-only and unmarked, and no
@@ -334,12 +334,20 @@ revoked), and nothing recorded who minted it.
   `tenant_id`, `expires_at`, the caller's credential id and subject, and the
   ids it revoked. The bearer is never logged, in whole or in part. A caller
   that is a user (a JWT `user:<uuid>` subject, or a key issued by a user) is
-  recorded as `api_keys.issued_by`. The store carries the issuer as the
-  key's `UserID`, which is how `issued_by` is written and reloaded, so the
-  key resolves to the same user before and after a restart. An API-key
-  caller with no user records no issuer. The log line names its credential
-  id. There is no separate admin audit-event sink. The OPA decision audit
-  already records the request.
+  recorded in a new column, `api_keys.minted_by`, and on the credential as
+  `MintedBy`. Both are attribution only, and nothing authorizes on them. An
+  API-key caller with no user records no minter; the log line names its
+  credential id. There is no separate admin audit-event sink. The OPA
+  decision audit already records the request.
+- **The recovery key never acts as its minter.** The ticket asked for
+  `api_keys.issued_by`, but the platform reads `issued_by` as the user the
+  key belongs to. `credentialFromRow` maps it to the key's `UserID`, which
+  `/v1/me` and approval records (`approver_user_id`) resolve. The
+  policy-acknowledgment denominators count distinct `issued_by` over admin
+  keys. Writing the minter there would make the recovery key act as, and
+  count as a key of, the operator who minted it. So a recovery key keeps
+  `issued_by` NULL and its `UserID` equal to its own credential id, before
+  and after a restart.
 - **The all-zeros tenant is refused.** A super_admin JWT with no current
   tenant carries `00000000-…`, which passed the empty-tenant check. It is now
   refused with 400 before the reset, as the empty tenant is.

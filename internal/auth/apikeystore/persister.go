@@ -234,6 +234,12 @@ func (p *Persister) insertRow(ctx context.Context, q *dbx.Queries, rec credstore
 	if rec.Cred.Purpose != "" {
 		purpose = &rec.Cred.Purpose
 	}
+	// minted_by is attribution only, kept apart from issued_by (the key's
+	// owner) so a recovery key never acts as the user who minted it (#1892).
+	var mintedBy pgtype.UUID
+	if u, uerr := uuid.Parse(rec.Cred.MintedBy); uerr == nil {
+		mintedBy = pgtype.UUID{Bytes: u, Valid: true}
+	}
 	_, err = q.InsertAPIKey(ctx, dbx.InsertAPIKeyParams{
 		ID:             id,
 		TenantID:       tid,
@@ -249,6 +255,7 @@ func (p *Persister) insertRow(ctx context.Context, q *dbx.Queries, rec credstore
 		Last4:          rec.Cred.Last4,
 		TtlSeconds:     int64(rec.Cred.TTL.Seconds()),
 		Purpose:        purpose,
+		MintedBy:       mintedBy,
 	})
 	return err
 }

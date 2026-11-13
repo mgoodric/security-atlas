@@ -5,12 +5,14 @@
 INSERT INTO api_keys (
     id, tenant_id, token_hash, scope_predicate, allowed_kinds,
     issued_by, expires_at, rotated_from,
-    is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose
+    is_admin, is_approver, owner_roles, last4, ttl_seconds, purpose,
+    minted_by
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
-    $9, $10, $11, $12, $13, $14
+    $9, $10, $11, $12, $13, $14,
+    $15
 )
 RETURNING *;
 

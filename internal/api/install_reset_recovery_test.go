@@ -118,7 +118,8 @@ func TestResetBootstrap_RevokesEarlierRecoveryKeysOnly(t *testing.T) {
 
 // (b): the mint is logged with the new credential id, the tenant and the
 // caller's credential id and subject, and the bearer appears nowhere. A JWT
-// caller is recorded as the issuer (api_keys.issued_by, via UserID).
+// caller is recorded as the minter (api_keys.minted_by), and the key does
+// NOT take on that user's identity: its UserID stays its own id.
 func TestResetBootstrap_LogsMintWithoutBearer(t *testing.T) {
 	f := newResetFixture(t, 1)
 	var buf bytes.Buffer
@@ -144,6 +145,7 @@ func TestResetBootstrap_LogsMintWithoutBearer(t *testing.T) {
 		`"tenant_id":"` + f.tenantID + `"`,
 		`"caller_credential_id":"jwt:abc"`,
 		`"caller_subject":"user:` + userID + `"`,
+		`"minted_by":"` + userID + `"`,
 	} {
 		if !strings.Contains(logs, want) {
 			t.Fatalf("log missing %s: %s", want, logs)
@@ -153,18 +155,21 @@ func TestResetBootstrap_LogsMintWithoutBearer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	if cred.UserID != userID {
-		t.Fatalf("recovery key UserID = %q; want issuer %q", cred.UserID, userID)
+	if cred.MintedBy != userID {
+		t.Fatalf("recovery key MintedBy = %q; want minter %q", cred.MintedBy, userID)
+	}
+	if cred.UserID != cred.ID {
+		t.Fatalf("recovery key UserID = %q; want its own id %q, never the minter's", cred.UserID, cred.ID)
 	}
 
-	// An API-key caller is not a user: no issuer is recorded.
+	// An API-key caller is not a user: no minter is recorded.
 	resp = decodeReset(t, f.post(t, f.tenantAdminKey))
 	cred, err = f.srv.credStore.Authenticate(resp.BearerToken)
 	if err != nil {
 		t.Fatalf("Authenticate: %v", err)
 	}
-	if cred.UserID != cred.ID {
-		t.Fatalf("key-minted recovery UserID = %q; want its own id", cred.UserID)
+	if cred.UserID != cred.ID || cred.MintedBy != "" {
+		t.Fatalf("key-minted recovery UserID=%q MintedBy=%q; want its own id and no minter", cred.UserID, cred.MintedBy)
 	}
 }
 
