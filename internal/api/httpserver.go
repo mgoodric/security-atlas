@@ -31,6 +31,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/risk"
+	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/vendor"
 	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
@@ -215,7 +216,9 @@ func (s *Server) buildRouter() *chi.Mux {
 	// backs both the vendor routes and the board-pack burndown adapter; the
 	// freshness+drift read-model stores back the freshness/drift, dashboard,
 	// and board reads). Identical to the former inline construction.
-	risksStore := risk.NewStore(s.dbPool)
+	// #1750: the slice 054 aggregation engine runs inside every risk
+	// write's transaction (canvas §6.6 "on each risk write").
+	risksStore := risk.NewStore(s.dbPool).WithAfterRiskWrite(aggrule.EvaluateOnRiskWrite)
 	vendorStore := vendor.NewStore(s.dbPool)
 	freshnessStore := freshness.NewStore(s.dbPool)
 	driftStore := drift.NewStore(s.dbPool)

@@ -37,12 +37,36 @@ var ErrLinkWeightOutOfRange = errors.New("risk: link weight must be between 0 an
 // Same shape as scope.Store: every method opens a tx, applies the tenant GUC,
 // runs queries inside that transaction.
 type Store struct {
-	pool *pgxpool.Pool
+	pool      *pgxpool.Pool
+	afterRisk AfterRiskWrite
 }
 
 // NewStore constructs a Store over an existing pgx pool. The pool must be
 // connected as `atlas_app` (NOSUPERUSER NOBYPASSRLS) for RLS to fire.
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// AfterRiskWrite runs inside the transaction of a risk write (create, theme
+// assignment) with the themes the written risk now carries. An error rolls
+// the write back. It is how the slice 054 aggregation engine
+// (internal/risk/aggrule) evaluates its rules on each risk write; aggrule
+// imports this package, so the engine is injected rather than imported
+// (#1750).
+type AfterRiskWrite func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error
+
+// WithAfterRiskWrite sets the hook run inside every risk write's
+// transaction and returns the Store.
+func (s *Store) WithAfterRiskWrite(fn AfterRiskWrite) *Store {
+	s.afterRisk = fn
+	return s
+}
+
+// runAfterRiskWrite invokes the AfterRiskWrite hook, if one is set.
+func (s *Store) runAfterRiskWrite(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error {
+	if s.afterRisk == nil {
+		return nil
+	}
+	return s.afterRisk(ctx, q, tenantID, themes)
+}
 
 // Risk is the domain shape returned from store calls. It mirrors the sqlc Risk
 // but exposes more idiomatic Go types (uuid.UUID, time.Time, json.RawMessage).
@@ -171,7 +195,7 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		}
 		out = riskFromRow(row)
 		out.LinkedControlIDs = append([]uuid.UUID(nil), in.LinkedControlIDs...)
-		return nil
+		return s.runAfterRiskWrite(ctx, q, tenantID, out.Themes)
 	})
 	return out, err
 }
