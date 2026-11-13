@@ -164,8 +164,10 @@ WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id
 --      column SURFACES this invariant on the controls list.
 --   #6 RLS: `controls` and `control_evaluations` are tenant-scoped under
 --      FORCE ROW LEVEL SECURITY. The tenant GUC set by `tenancymw`
---      filters those rows; the global `scf_anchors` rows + the
---      catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
+--      filters those rows, and each `controls` read also carries an
+--      explicit `c.tenant_id = sqlc.arg(tenant_id)` predicate (issue
+--      #1832, belt-and-suspenders as in ListActiveControlsWithState);
+--      the global `scf_anchors` rows + the catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
 --      visible to every tenant by design.
 --   #2 Engine is sole writer of control_evaluations: this is a pure read
 --      over the engine's output table, never a parallel computation.
@@ -216,7 +218,8 @@ worst_per_anchor AS (
         MAX(le.evaluated_at)     AS evaluated_at
     FROM controls c
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
-    WHERE c.superseded_by IS NULL
+    WHERE c.tenant_id = sqlc.arg(tenant_id)
+      AND c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
       -- Slice 224: optional scope cell filter via sqlc.narg('scope_cell_id').
       -- When the param is the NULL UUID sentinel, this predicate is a no-op
@@ -245,7 +248,9 @@ anchor_controls AS (
     -- row links to a control id (not the anchor id the control detail
     -- page cannot resolve) and the `has_control` filter runs here, in
     -- SQL, ahead of LIMIT/OFFSET. `controls` is tenant-scoped under
-    -- FORCE RLS; the GUC limits this CTE to the caller's tenant. The
+    -- FORCE RLS; the GUC limits this CTE to the caller's tenant, and the
+    -- explicit `c.tenant_id` predicate (issue #1832) holds it there even
+    -- where RLS is bypassed. The
     -- representative control is the lowest bundle_id, deterministic
     -- when more than one bundle anchors to the same SCF control.
     SELECT
@@ -253,7 +258,8 @@ anchor_controls AS (
         (array_agg(c.id ORDER BY c.bundle_id))[1]::uuid AS control_id,
         count(*)::bigint AS control_count
     FROM controls c
-    WHERE c.superseded_by IS NULL
+    WHERE c.tenant_id = sqlc.arg(tenant_id)
+      AND c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
     GROUP BY c.scf_anchor_id
 )
@@ -360,7 +366,8 @@ worst_per_anchor AS (
         MAX(le.evaluated_at)     AS evaluated_at
     FROM controls c
     JOIN latest_eval le ON le.tenant_id = c.tenant_id AND le.control_id = c.id
-    WHERE c.superseded_by IS NULL
+    WHERE c.tenant_id = sqlc.arg(tenant_id)
+      AND c.superseded_by IS NULL
       AND c.scf_anchor_id IS NOT NULL
       -- Slice 224: optional scope cell filter; see comment on the
       -- latest-with-state variant above.
@@ -499,12 +506,15 @@ ORDER BY a.scf_id, f.slug, fv.version, r.code;
 -- Issue #1741: totals for the paged `/v1/anchors?include=state` read on
 -- the current SCF version: the whole catalog, and the anchors the
 -- caller's tenant has at least one active control on. `controls` is
--- tenant-scoped under FORCE RLS, so with_control_total is per tenant.
+-- tenant-scoped under FORCE RLS; the explicit `c.tenant_id` predicate
+-- (issue #1832) keeps with_control_total per tenant even where RLS is
+-- bypassed.
 SELECT
     count(*)::bigint AS catalog_total,
     count(*) FILTER (WHERE EXISTS (
         SELECT 1 FROM controls c
-        WHERE c.scf_anchor_id = a.id AND c.superseded_by IS NULL
+        WHERE c.tenant_id = sqlc.arg(tenant_id)
+          AND c.scf_anchor_id = a.id AND c.superseded_by IS NULL
     ))::bigint AS with_control_total
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id

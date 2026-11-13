@@ -289,4 +289,24 @@ describe("GET /api/controls", () => {
     expect(res.status).toBe(400);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
+
+  test("issue 1832: forwards a positive limit so the totals can ride a one-row page", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1832" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ anchors: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+    );
+
+    await GET(makeReq("/api/controls?has_control=true&limit=1") as never);
+    expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).toContain("limit=1");
+
+    for (const bad of ["0", "-1", "abc", ""]) {
+      fetchSpy.mockClear();
+      await GET(makeReq(`/api/controls?limit=${bad}`) as never);
+      expect(String(fetchSpy.mock.calls[0]?.[0] ?? "")).not.toContain("limit=");
+    }
+  });
 });
