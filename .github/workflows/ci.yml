@@ -3354,6 +3354,38 @@ jobs:
         run: bash scripts/check-coverage-excludes.sh
 
   # ====================================================================
+  # #1880 — migration timestamp uniqueness (HARD FAIL).
+  #
+  # Refuses a migration under migrations/sql/ whose timestamp prefix
+  # another migration already uses, so the apply order stays the order
+  # the migrations were written in. The prefixes that collided before the
+  # check (six, including the two 20260811000000 files) are grandfathered
+  # by name in the script. Fast, no network; runs unconditionally, like
+  # coverage-excludes-check.
+  #
+  # Local repro: `bash scripts/check-migration-timestamps.sh`
+  #   self-test: `bash scripts/check-migration-timestamps_test.sh`
+  # ====================================================================
+  migration-timestamps-check:
+    name: migration-timestamps-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run check-migration-timestamps self-test
+        run: bash scripts/check-migration-timestamps_test.sh
+
+      - name: Run check-migration-timestamps.sh
+        run: bash scripts/check-migration-timestamps.sh
+
+  # ====================================================================
   # Slice 393 (Q-6) — assertion-density advisory (INFORMATIONAL).
   #
   # Wires scripts/assertion-density.sh (shipped by slice 353) into CI as

@@ -281,3 +281,82 @@ func TestEngine_BelowThresholdRefreshNamesMetaRisk_1867(t *testing.T) {
 		t.Fatalf("no meta-risk to refresh, but the row names %v / %v", evals[0].MetaRiskID, evals[0].WindowStart)
 	}
 }
+
+// themeRacingHook wraps LockOnRiskWrite and records the themes of each call.
+// On the first call it commits race, a theme write on another connection,
+// between the store's unlocked read and its row lock: the window #1880
+// closes.
+type themeRacingHook struct {
+	race  func()
+	calls [][]string
+}
+
+func (h *themeRacingHook) before(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error {
+	h.calls = append(h.calls, append([]string(nil), themes...))
+	if len(h.calls) == 1 {
+		h.race()
+	}
+	return aggrule.LockOnRiskWrite(ctx, q, tenantID, themes)
+}
+
+// A theme write that commits between a risk write's unlocked read and its
+// row lock adds a theme whose rules were not locked first. The after-hook
+// would take that rule's lock while holding the row lock, the order #1867
+// removed. The store notices the locked themes are not covered, rolls back,
+// and retries once, so the second attempt pre-locks the added theme.
+func TestRiskWrite_RetriesWhenThemesChangeBeforeRowLock_1880(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+	team1 := seedOrgUnit(t, admin, tenant, "team-1")
+	now := time.Now().UTC().Add(5 * time.Second)
+
+	addMonitoring := func(id uuid.UUID) func() {
+		return func() {
+			if _, err := admin.Exec(context.Background(),
+				`UPDATE risks SET themes = ARRAY['monitoring'] WHERE tenant_id = $1 AND id = $2`,
+				tenant, id); err != nil {
+				t.Errorf("racing theme write: %v", err)
+			}
+		}
+	}
+	wired := func(h *themeRacingHook) *risk.Store {
+		return risk.NewStore(app).
+			WithBeforeRiskWrite(h.before).
+			WithAfterRiskWrite(aggrule.EvaluateOnRiskWrite)
+	}
+
+	t.Run("AssignThemes", func(t *testing.T) {
+		r := seedRisk(t, admin, tenant, "assign", 2, 2, nil, &team1, now)
+		h := &themeRacingHook{race: addMonitoring(r)}
+		if _, err := wired(h).AssignThemes(ctx, r, []string{"ownership"}); err != nil {
+			t.Fatalf("AssignThemes: %v", err)
+		}
+		if len(h.calls) != 2 || !contains(h.calls[1], "monitoring") {
+			t.Fatalf("want a retry that pre-locks monitoring, got calls %v", h.calls)
+		}
+	})
+
+	t.Run("Delete", func(t *testing.T) {
+		r := seedRisk(t, admin, tenant, "delete", 2, 2, []string{"ownership"}, &team1, now)
+		h := &themeRacingHook{race: addMonitoring(r)}
+		if err := wired(h).Delete(ctx, r); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if len(h.calls) != 2 || !contains(h.calls[1], "monitoring") {
+			t.Fatalf("want a retry that pre-locks monitoring, got calls %v", h.calls)
+		}
+	})
+
+	t.Run("NoRaceNoRetry", func(t *testing.T) {
+		r := seedRisk(t, admin, tenant, "steady", 2, 2, []string{"ownership"}, &team1, now)
+		h := &themeRacingHook{race: func() {}}
+		if _, err := wired(h).AssignThemes(ctx, r, []string{"monitoring"}); err != nil {
+			t.Fatalf("AssignThemes: %v", err)
+		}
+		if len(h.calls) != 1 {
+			t.Fatalf("no concurrent write, want one attempt, got calls %v", h.calls)
+		}
+	})
+}
