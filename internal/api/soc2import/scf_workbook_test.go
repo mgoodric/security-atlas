@@ -77,7 +77,7 @@ func TestLoadSCFWorkbook_PublishedSheetOrderPicksControlSheet(t *testing.T) {
 	t.Parallel()
 	xlsx := writePublishedLayoutSCFWorkbook(t)
 	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{
-		FrameworkColumn: "Example\nStandard\n2026",
+		FrameworkColumns: []string{"Example\nStandard\n2026"},
 	})
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
@@ -90,6 +90,81 @@ func TestLoadSCFWorkbook_PublishedSheetOrderPicksControlSheet(t *testing.T) {
 	}
 	if cw.FrameworkSlug != "general-example-standard-2026" || cw.FrameworkIssuer != "Example Issuer" {
 		t.Fatalf("focal-document metadata not read from \"Focal Documents (FD)\": %+v", cw)
+	}
+}
+
+// SCF maps ISO 27001's management-system clauses under "ISO 27001 2022" and
+// its Annex A controls under "ISO 27002 2022" as bare 5.1-8.34. Repeating the
+// framework column combines both into one framework, and the "=A." suffix
+// puts the Annex A codes in the A.x form the shipped iso27001 crosswalk uses.
+func TestLoadSCFWorkbook_CombinesColumnsWithPrefix(t *testing.T) {
+	t.Parallel()
+	f := excelize.NewFile()
+	mustSetSheetName(t, f, "Sheet1", "Focal Documents")
+	mustSetRows(t, f, "Focal Documents", [][]interface{}{
+		{"Geography", "SCF Column Header", "Focal Document Identifier (FDI)", "Source", "Focal Document Name (FDN)"},
+		{"General", "ISO\n27001\n2022", "general-iso-27001-2022", "ISO", "ISO/IEC 27001:2022"},
+		{"General", "ISO\n27002\n2022", "general-iso-27002-2022", "ISO", "ISO/IEC 27002:2022"},
+	})
+	if _, err := f.NewSheet("SCF 2026.3"); err != nil {
+		t.Fatalf("NewSheet: %v", err)
+	}
+	mustSetRows(t, f, "SCF 2026.3", [][]interface{}{
+		{"SCF Domain", "SCF Control", "SCF #", "ISO\n27001\n2022", "ISO\n27002\n2022"},
+		{"Governance", "Program", "GOV-01", "4.4\n5.1", "5.1"},
+		{"Identity", "Access", "IAC-01", "", "5.15\n5.16"},
+	})
+	path := filepath.Join(t.TempDir(), "scf-iso.xlsx")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("SaveAs: %v", err)
+	}
+
+	cw, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{
+		FrameworkColumns: []string{"ISO 27001 2022", "ISO 27002 2022=A."},
+		FrameworkSlug:    "iso27001",
+		FrameworkVersion: "2022",
+	})
+	if err != nil {
+		t.Fatalf("LoadSCFWorkbook: %v", err)
+	}
+	var codes []string
+	for _, r := range cw.Requirements {
+		codes = append(codes, r.Code)
+	}
+	if got, want := strings.Join(codes, ","), "4.4,5.1,A.5.1,A.5.15,A.5.16"; got != want {
+		t.Fatalf("requirement codes = %s; want %s", got, want)
+	}
+	if len(cw.Mappings) != 5 {
+		t.Fatalf("mappings = %d; want 5", len(cw.Mappings))
+	}
+	if cw.FrameworkSlug != "iso27001" || cw.FrameworkName != "ISO/IEC 27001:2022" || cw.FrameworkVersion != "2022" {
+		t.Fatalf("metadata should come from the first column: %+v", cw)
+	}
+	for _, m := range cw.Mappings {
+		if strings.HasPrefix(m.RequirementCode, "A.") != strings.Contains(m.Rationale, "27002") {
+			t.Fatalf("rationale should cite the column the code came from: %+v", m)
+		}
+	}
+}
+
+func TestLoadSCFWorkbook_FrameworkColumnErrors(t *testing.T) {
+	t.Parallel()
+	xlsx := writePublishedLayoutSCFWorkbook(t)
+	for _, tc := range []struct {
+		name    string
+		columns []string
+		want    string
+	}{
+		{"unknown header", []string{"Nope"}, `framework column "Nope" not found`},
+		{"unknown header with prefix", []string{"Nope=A."}, `framework column "Nope" not found`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{FrameworkColumns: tc.columns})
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v; want %q", err, tc.want)
+			}
+		})
 	}
 }
 

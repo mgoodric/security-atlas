@@ -19,11 +19,17 @@ const (
 
 var errNotOLIRWorkbook = errors.New("not an SCF OLIR STRM workbook")
 
-// SCFWorkbookOptions selects the framework column and metadata when importing
-// SCF's published Excel workbook. Empty metadata is derived from the workbook
-// where possible.
+// SCFWorkbookOptions selects the framework columns and metadata when
+// importing SCF's published Excel workbook. Empty metadata is derived from the
+// workbook (from the first framework column) where possible.
+//
+// Each FrameworkColumns entry is a column header, optionally followed by
+// "=PREFIX" to prepend PREFIX to every requirement code read from that column.
+// Several entries combine into one framework: SCF maps ISO 27001's clauses
+// under "ISO 27001 2022" but its Annex A controls under "ISO 27002 2022" as
+// bare 5.1-8.34, so ISO 27001 takes both, the second as "ISO 27002 2022=A.".
 type SCFWorkbookOptions struct {
-	FrameworkColumn  string
+	FrameworkColumns []string
 	FrameworkSlug    string
 	FrameworkName    string
 	FrameworkIssuer  string
@@ -85,46 +91,54 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 	}
 
 	focalDocs := loadFocalDocuments(f)
-	frameworkCol, frameworkHeader, err := selectFrameworkColumn(headers, focalDocs, opts.FrameworkColumn)
+	columns, err := selectFrameworkColumns(headers, focalDocs, opts.FrameworkColumns)
 	if err != nil {
 		return nil, err
 	}
+	frameworkHeader := headers[columns[0].Index]
 	meta := focalDocs[normalizeHeader(frameworkHeader)]
 
 	reqs := map[string]Requirement{}
 	seenEdges := map[string]struct{}{}
 	mappings := make([]Mapping, 0)
-	for rowIdx, row := range rows[1:] {
-		scfAnchor := cellAt(row, scfCol)
-		if scfAnchor == "" {
-			continue
-		}
-		rawMappings := cellAt(row, frameworkCol)
-		if rawMappings == "" {
-			continue
-		}
-		for _, code := range splitWorkbookCodes(rawMappings) {
-			reqs[code] = Requirement{Code: code, Title: code}
-			key := code + "\x00" + scfAnchor
-			if _, ok := seenEdges[key]; ok {
+	for _, col := range columns {
+		header := headers[col.Index]
+		colMappings := 0
+		for rowIdx, row := range rows[1:] {
+			scfAnchor := cellAt(row, scfCol)
+			if scfAnchor == "" {
 				continue
 			}
-			seenEdges[key] = struct{}{}
-			mappings = append(mappings, Mapping{
-				RequirementCode:  code,
-				SCFAnchor:        scfAnchor,
-				RelationshipType: defaultWorkbookRelationship,
-				Strength:         defaultWorkbookStrength,
-				Rationale: fmt.Sprintf(
-					"Imported from SCF workbook sheet %q row %d column %q; the full workbook lists ID mappings only, so this lands as community_draft pending STRM review.",
-					sheet, rowIdx+2, frameworkHeader,
-				),
-			})
+			rawMappings := cellAt(row, col.Index)
+			if rawMappings == "" {
+				continue
+			}
+			for _, code := range splitWorkbookCodes(rawMappings) {
+				if !strings.HasPrefix(code, col.Prefix) {
+					code = col.Prefix + code
+				}
+				reqs[code] = Requirement{Code: code, Title: code}
+				key := code + "\x00" + scfAnchor
+				if _, ok := seenEdges[key]; ok {
+					continue
+				}
+				seenEdges[key] = struct{}{}
+				colMappings++
+				mappings = append(mappings, Mapping{
+					RequirementCode:  code,
+					SCFAnchor:        scfAnchor,
+					RelationshipType: defaultWorkbookRelationship,
+					Strength:         defaultWorkbookStrength,
+					Rationale: fmt.Sprintf(
+						"Imported from SCF workbook sheet %q row %d column %q; the full workbook lists ID mappings only, so this lands as community_draft pending STRM review.",
+						sheet, rowIdx+2, header,
+					),
+				})
+			}
 		}
-	}
-
-	if len(mappings) == 0 {
-		return nil, fmt.Errorf("crosswalk: framework column %q in sheet %q has zero mappings", frameworkHeader, sheet)
+		if colMappings == 0 {
+			return nil, fmt.Errorf("crosswalk: framework column %q in sheet %q has zero mappings", header, sheet)
+		}
 	}
 
 	requirements := make([]Requirement, 0, len(reqs))
@@ -306,13 +320,24 @@ func loadFocalDocuments(f *excelize.File) map[string]focalDocument {
 	return out
 }
 
-func selectFrameworkColumn(headers []string, focalDocs map[string]focalDocument, requested string) (int, string, error) {
-	if requested != "" {
-		idx := findHeader(headers, requested)
-		if idx < 0 {
-			return -1, "", fmt.Errorf("crosswalk: framework column %q not found", requested)
+// workbookColumn is one framework column picked for import, with the prefix
+// prepended to each requirement code read from it.
+type workbookColumn struct {
+	Index  int
+	Prefix string
+}
+
+func selectFrameworkColumns(headers []string, focalDocs map[string]focalDocument, requested []string) ([]workbookColumn, error) {
+	if len(requested) > 0 {
+		out := make([]workbookColumn, 0, len(requested))
+		for _, spec := range requested {
+			col, err := resolveFrameworkColumn(headers, spec)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, col)
 		}
-		return idx, headers[idx], nil
+		return out, nil
 	}
 	candidates := make([]int, 0)
 	for i, h := range headers {
@@ -321,13 +346,28 @@ func selectFrameworkColumn(headers []string, focalDocs map[string]focalDocument,
 		}
 	}
 	if len(candidates) == 1 {
-		idx := candidates[0]
-		return idx, headers[idx], nil
+		return []workbookColumn{{Index: candidates[0]}}, nil
 	}
 	if len(candidates) == 0 {
-		return -1, "", fmt.Errorf("crosswalk: no framework mapping columns found; pass --framework-column")
+		return nil, fmt.Errorf("crosswalk: no framework mapping columns found; pass --framework-column")
 	}
-	return -1, "", fmt.Errorf("crosswalk: workbook has %d framework columns; pass --framework-column", len(candidates))
+	return nil, fmt.Errorf("crosswalk: workbook has %d framework columns; pass --framework-column", len(candidates))
+}
+
+// resolveFrameworkColumn reads a "HEADER" or "HEADER=PREFIX" spec. A spec that
+// names a header outright wins, so a header containing "=" still resolves.
+func resolveFrameworkColumn(headers []string, spec string) (workbookColumn, error) {
+	if idx := findHeader(headers, spec); idx >= 0 {
+		return workbookColumn{Index: idx}, nil
+	}
+	if i := strings.LastIndex(spec, "="); i >= 0 {
+		header, prefix := spec[:i], strings.TrimSpace(spec[i+1:])
+		if idx := findHeader(headers, header); idx >= 0 {
+			return workbookColumn{Index: idx, Prefix: prefix}, nil
+		}
+		return workbookColumn{}, fmt.Errorf("crosswalk: framework column %q not found", header)
+	}
+	return workbookColumn{}, fmt.Errorf("crosswalk: framework column %q not found", spec)
 }
 
 func findHeader(headers []string, want string) int {
