@@ -23,15 +23,23 @@ evidence_queries:
     evidence_kind: 1password.org_policy.v1
     description: "Privileged vault has restricted membership, sharing-disabled-by-default, audit logging on"
     expression: |
-      package atlas.controls.soc2.cc6_3_pam
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        some v in input.vaults
-        v.kind == "privileged"
-        v.sharing_default == "disabled"
-        v.audit_events_enabled == true
-        count(v.members) > 0
-        count(v.members) <= input.privileged_role_count
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
