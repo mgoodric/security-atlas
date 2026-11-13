@@ -52,6 +52,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -434,6 +435,7 @@ func TestWriteTransitionErr_ApplierRefusals(t *testing.T) {
 		{ingest.ErrIdempotencyMismatch, http.StatusConflict, "idempotency_mismatch"},
 		{writeproposals.ErrInvalidInput, http.StatusBadRequest, "invalid_input"},
 		{writeproposals.ErrIngestUnavailable, http.StatusServiceUnavailable, "ingest_unavailable"},
+		{risk.ErrTreatmentValidation, http.StatusBadRequest, "treatment_validation_failed"},
 	}
 	h := New(nil)
 	for _, tc := range cases {

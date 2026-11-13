@@ -66,5 +66,9 @@ func TestCreateRisk_TreatmentStates(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("%s: status %d, want 400 (body %v)", name, resp.StatusCode, body)
 		}
+		// #1844: the MCP confirm surface returns the same code.
+		if body["code"] != "treatment_validation_failed" {
+			t.Errorf("%s: code = %v, want treatment_validation_failed", name, body["code"])
+		}
 	}
 }

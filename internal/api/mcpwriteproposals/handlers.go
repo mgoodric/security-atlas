@@ -42,6 +42,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -297,8 +298,12 @@ type transitionErrBody struct {
 // the codes match the REST push surface (internal/api/evidence/http.go);
 // an unknown kind is a 400 here because the proposal's input is at fault,
 // not a precondition the caller can fix by registering a schema first.
+// The risk appliers' treatment-validation refusal carries the code
+// POST /v1/risks uses (internal/api/risks/handlers.go, #1844).
 func applyErrStatus(err error) (int, string, bool) {
 	switch {
+	case risk.IsTreatmentValidation(err):
+		return http.StatusBadRequest, "treatment_validation_failed", true
 	case errors.Is(err, ingest.ErrObservedAtSkew):
 		return http.StatusBadRequest, "observed_at_skew", true
 	case errors.Is(err, ingest.ErrValidation):
