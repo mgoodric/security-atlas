@@ -189,7 +189,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 //
 // Wire shape:
 //
-//  1. Admin check (defense-in-depth; OPA already ran).
+//  1. super_admin check (OPA already ran its admin check; #1851).
 //  2. Env-var gate.
 //  3. Rate-limit gate (per-IP, 60s).
 //  4. Write me_audit_log + super_admin_audit_log rows BEFORE invoking.
@@ -204,7 +204,7 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 // 'demo_seed_apply' row separately (the run). Two-row forensic
 // separation distinguishes who-clicked from what-was-seeded.
 func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
-	if !h.requireAdmin(w, r) {
+	if !h.requireSuperAdmin(w, r) {
 		return
 	}
 	if !h.isEnabled() {
@@ -322,7 +322,7 @@ func (h *Handler) evaluateSeededTenant(ctx context.Context, tenantID uuid.UUID) 
 // Mirrors Seed exactly except: writes action='demo_teardown' instead
 // of 'demo_seed' and invokes Seeder.Teardown instead of Apply.
 func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
-	if !h.requireAdmin(w, r) {
+	if !h.requireSuperAdmin(w, r) {
 		return
 	}
 	if !h.isEnabled() {
@@ -372,6 +372,25 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		Status:     "deleted",
 	})
 
+}
+
+// requireSuperAdmin gates Seed and Teardown on the verified JWT's
+// `atlas:super_admin` claim (#1851). Both create or delete a whole tenant
+// through the BYPASSRLS auth pool, an install-wide effect, so a tenant-scoped
+// admin (including a per-tenant admin API key, which sets cred.IsAdmin and
+// never carries the claim) gets 403. It is the check #1757 put on the global
+// catalog write routes. On a single-tenant install the bootstrap admin holds
+// super_admin (#1759). A missing credential is 401.
+func (h *Handler) requireSuperAdmin(w http.ResponseWriter, r *http.Request) bool {
+	if _, ok := authctx.CredentialFromContext(r.Context()); !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
+		return false
+	}
+	if claims := jwtmw.FromContext(r.Context()); claims == nil || !claims.SuperAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "super_admin required")
+		return false
+	}
+	return true
 }
 
 // requireAdmin enforces the admin role. Defense in depth: the OPA

@@ -33,12 +33,34 @@ import (
 // --- helpers ---
 
 // requestWithAdmin returns a fresh request whose context carries an
-// admin credential (cred.IsAdmin=true). The credential's TenantID is
-// a valid UUID so resolveActor can construct it.
+// admin credential (cred.IsAdmin=true) AND verified JWT claims with
+// atlas:super_admin, the authority Seed and Teardown require (#1851).
+// The credential's TenantID is a valid UUID so resolveActor can
+// construct it.
 func requestWithAdmin(method, path string) *http.Request {
 	r := httptest.NewRequest(method, path, nil)
+	userID := uuid.NewString()
 	cred := credstore.Credential{
 		ID:       "test-admin",
+		UserID:   userID,
+		TenantID: uuid.NewString(),
+		IsAdmin:  true,
+	}
+	ctx := authctx.WithCredential(r.Context(), cred)
+	ctx = jwtmw.WithClaimsForTest(ctx, &jwt.AtlasClaims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: "user:" + userID},
+		SuperAdmin:       true,
+	})
+	return r.WithContext(ctx)
+}
+
+// requestWithTenantAdminKey returns a request carrying what a per-tenant
+// admin API key produces: cred.IsAdmin=true and no JWT claims, so no
+// super_admin.
+func requestWithTenantAdminKey(method, path string) *http.Request {
+	r := httptest.NewRequest(method, path, nil)
+	cred := credstore.Credential{
+		ID:       "key_tenant-admin",
 		UserID:   uuid.NewString(),
 		TenantID: uuid.NewString(),
 		IsAdmin:  true,
@@ -170,6 +192,32 @@ func TestStatus_EnabledFalse(t *testing.T) {
 	}
 }
 
+// Status keeps the admin gate, not super_admin (#1851): a tenant admin key
+// and a tenant admin role grant both read it; a viewer is 403 and a missing
+// credential 401.
+func TestStatus_AdminGate(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		req  *http.Request
+		want int
+	}{
+		{"tenant admin API key", requestWithTenantAdminKey(http.MethodGet, "/v1/admin/demo/status"), http.StatusOK},
+		{"tenant admin role JWT", requestWithOwnerRoleAdmin(http.MethodGet, "/v1/admin/demo/status"), http.StatusOK},
+		{"viewer", requestWithViewer(http.MethodGet, "/v1/admin/demo/status"), http.StatusForbidden},
+		{"no credential", httptest.NewRequest(http.MethodGet, "/v1/admin/demo/status", nil), http.StatusUnauthorized},
+	}
+	for _, tc := range cases {
+		h := New(nil, func() bool { return true })
+		w := httptest.NewRecorder()
+		h.Status(w, tc.req)
+		if w.Code != tc.want {
+			t.Errorf("%s: status = %d, want %d; body=%s", tc.name, w.Code, tc.want, w.Body.String())
+		}
+	}
+}
+
 // --- Admin gate ---
 
 // ISC-4: non-admin caller (viewer) gets 403.
@@ -199,21 +247,55 @@ func TestSeed_MissingCredentialGets401(t *testing.T) {
 	}
 }
 
-// ISC-4: admin role via OwnerRoles (JWT path) is accepted by the gate.
-// Reaches the next gate (env-var) which returns 503 because the test
-// passes an empty pool. Verifies the admin path doesn't 403.
-func TestSeed_OwnerRoleAdminPasses(t *testing.T) {
+// #1851: Seed and Teardown create or delete a whole tenant through the
+// BYPASSRLS pool, so a tenant-scoped admin without the super_admin claim
+// is refused: a per-tenant admin API key (IsAdmin) and a tenant admin
+// role grant (OwnerRoles) alike. The env gate is open, so a 403 here
+// can only come from the super_admin check.
+func TestSeedTeardown_TenantAdminWithoutSuperAdminGets403(t *testing.T) {
 	t.Parallel()
 
-	h := New(nil, func() bool { return true })
-	w := httptest.NewRecorder()
-	h.Seed(w, requestWithOwnerRoleAdmin(http.MethodPost, "/v1/admin/demo/seed"))
+	callers := map[string]func(string, string) *http.Request{
+		"tenant admin API key":  requestWithTenantAdminKey,
+		"tenant admin role JWT": requestWithOwnerRoleAdmin,
+	}
+	for name, mk := range callers {
+		for _, route := range []string{"seed", "teardown"} {
+			t.Run(name+"/"+route, func(t *testing.T) {
+				t.Parallel()
+				h := New(nil, func() bool { return true })
+				w := httptest.NewRecorder()
+				r := mk(http.MethodPost, "/v1/admin/demo/"+route)
+				if route == "seed" {
+					h.Seed(w, r)
+				} else {
+					h.Teardown(w, r)
+				}
+				if w.Code != http.StatusForbidden {
+					t.Fatalf("status = %d, want 403; body=%s", w.Code, w.Body.String())
+				}
+			})
+		}
+	}
+}
 
-	// Past the admin gate; will fail on the next gate (authPool=nil
-	// → 503 "no auth pool"). Anything that is NOT 403/401 confirms
-	// admin acceptance.
-	if w.Code == http.StatusForbidden || w.Code == http.StatusUnauthorized {
-		t.Fatalf("admin via OwnerRoles rejected; status=%d body=%s", w.Code, w.Body.String())
+// #1851: a super_admin passes the gate and reaches the next one (authPool
+// is nil here, so 503 "no auth pool"). Anything but 401/403 confirms it.
+func TestSeedTeardown_SuperAdminPasses(t *testing.T) {
+	t.Parallel()
+
+	for _, route := range []string{"seed", "teardown"} {
+		h := New(nil, func() bool { return true })
+		w := httptest.NewRecorder()
+		r := requestWithAdmin(http.MethodPost, "/v1/admin/demo/"+route)
+		if route == "seed" {
+			h.Seed(w, r)
+		} else {
+			h.Teardown(w, r)
+		}
+		if w.Code == http.StatusForbidden || w.Code == http.StatusUnauthorized {
+			t.Fatalf("%s: super_admin rejected; status=%d body=%s", route, w.Code, w.Body.String())
+		}
 	}
 }
 
