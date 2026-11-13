@@ -485,6 +485,65 @@ func TestFrameworkPosture_TrendReflectsGrowth(t *testing.T) {
 	t.Fatal("trend: framework posture row missing")
 }
 
+// #1755: an edge a reviewer marked mapping_tier='rejected' (ADR 0018) earns no
+// framework credit, now or in the 90-day trend; restoring the tier brings the
+// credit back.
+
+func TestFrameworkPosture_RejectedEdgeEarnsNoCredit(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	// Two requirements, both covered now (100%). Only ctrl1 was passing 90
+	// days ago (then 50%), so the trend is +50.
+	fw, anchors := seedFramework(t, admin, "fwrejected", "2024", 2)
+	ctrl1 := seedControlOnAnchor(t, admin, tenant, anchors[0])
+	ctrl2 := seedControlOnAnchor(t, admin, tenant, anchors[1])
+	old := time.Now().UTC().Add(-120 * 24 * time.Hour)
+	seedEvaluation(t, admin, tenant, ctrl1, "pass", old)
+	seedEvaluation(t, admin, tenant, ctrl2, "fail", old)
+
+	setTier := func(tier string) {
+		t.Helper()
+		if _, err := admin.Exec(context.Background(),
+			`UPDATE fw_to_scf_edges SET mapping_tier = $1::crosswalk_mapping_tier WHERE scf_anchor_id = $2`,
+			tier, anchors[0]); err != nil {
+			t.Fatalf("set mapping_tier=%s: %v", tier, err)
+		}
+	}
+	posture := func() (coverage, trend float64) {
+		t.Helper()
+		_, body := get(t, env, "/v1/frameworks/posture")
+		rows, _ := body["frameworks"].([]any)
+		for _, r := range rows {
+			m := r.(map[string]any)
+			if m["framework_id"].(string) == fw.frameworkID.String() {
+				return m["coverage_pct"].(float64), m["trend_delta_90d"].(float64)
+			}
+		}
+		t.Fatal("framework posture row missing")
+		return 0, 0
+	}
+
+	if cov, trend := posture(); cov != 100.0 || trend != 50.0 {
+		t.Fatalf("draft edges: coverage=%v trend=%v, want 100 / +50", cov, trend)
+	}
+
+	// Rejecting ctrl1's only edge drops its requirement now (50%) AND then
+	// (0%): the trend stays +50. A trend that ignored the tier would read
+	// 50 - 50 = 0.
+	setTier("rejected")
+	if cov, trend := posture(); cov != 50.0 || trend != 50.0 {
+		t.Fatalf("rejected edge: coverage=%v trend=%v, want 50 / +50", cov, trend)
+	}
+
+	setTier("draft")
+	if cov, trend := posture(); cov != 100.0 || trend != 50.0 {
+		t.Fatalf("restored edge: coverage=%v trend=%v, want 100 / +50", cov, trend)
+	}
+}
+
 // ===== ISC-19: activity feed paginates newest-first with a stable cursor =====
 
 func TestActivity_PaginatesNewestFirst(t *testing.T) {
