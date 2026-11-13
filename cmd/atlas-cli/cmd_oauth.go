@@ -34,6 +34,7 @@ func newOAuthCmd() *cobra.Command {
 	}
 	cmd.AddCommand(newOAuthIssueClientCmd())
 	cmd.AddCommand(newOAuthBindClientCmd())
+	cmd.AddCommand(newOAuthUnboundRowsCmd())
 	cmd.AddCommand(newOAuthAddRedirectURICmd())
 	cmd.AddCommand(newOAuthMigrateAPIKeyCmd())
 	return cmd

@@ -195,6 +195,90 @@ API answers `403 tenant_unbound`. Bind an existing client with
 Upgrading to this release binds every existing client on a
 single-tenant install; on a multi-tenant install, bind each one.
 
+**Audit public clients after upgrade.** On a single-tenant install
+the upgrade binds every unbound client, public ones included
+(`cli-public`, and any device-flow or authorize probe client you
+issued). Device-code and authorization-code tokens carry the user's
+tenant either way, so a bound public client still works for its
+users. If a public client must stay unbound, re-issue it with
+`atlas-cli oauth issue-client <new-name> --unbound` and hand out the new
+`client_id`. A bound client cannot be unbound in place.
+
+### Rows in the all-zeros tenant
+
+Before clients were bound, a `client_credentials` write from an
+unbound client (for example the `controls upload` that
+`bootstrap.sh` runs) landed in the all-zeros tenant
+(`00000000-0000-0000-0000-000000000000`). No user can see those rows,
+and any unbound client token can still read them. After upgrading,
+list them. The listing only reads:
+
+```bash
+DATABASE_URL=postgres://... atlas-cli oauth unbound-rows
+controls	12	retained: referenced by 40 retained row(s) in evidence_records
+evidence_records	40	retained: append-only ledger (ADR-0012, tombstone only)
+risks	3
+purgeable total	3
+to delete them: atlas-cli oauth unbound-rows --purge --confirm-rows 3
+```
+
+`DATABASE_URL` must be the BYPASSRLS `atlas_migrate` connection; an
+RLS-bound role sees none of these rows.
+
+**Retained rows are never purged.**
+
+- **Append-only ledgers.** The evidence ledger and every audit log
+  (any table the application itself cannot delete from: no RLS policy
+  allows DELETE, or a trigger refuses it, as on
+  `action_plan_audit_log` and `change_audit_log`) are kept. ADR-0012
+  allows ledger disposal only by tombstone, and that path does not
+  exist yet. (The `RESTRICT` keys from `sample_evidence` and
+  `sample_annotations` would block deleting `evidence_records` in any
+  case.)
+- **Rows a retained row references.** A table whose rows a retained
+  row references is kept too, because deleting them would either fail
+  on the foreign key (`evidence_records` references `controls` with
+  `RESTRICT`) or cascade into the ledger (`control_evaluations`
+  references `controls` with `ON DELETE CASCADE`). In practice,
+  controls with evidence stay.
+- **Not part of the confirmation.** Retained rows don't count toward
+  `--confirm-rows`.
+
+There is no in-place reassign: tenant-scoped tables reference each
+other through `(tenant_id, id)` keys, so rows cannot be moved one
+table at a time. To keep the data, re-create it in the right tenant
+with a bound client (for controls, re-run `atlas-cli controls upload`
+with that client's credentials). Then take a database backup and
+purge, restating the purgeable total the listing printed:
+
+```bash
+DATABASE_URL=postgres://... \
+  atlas-cli oauth unbound-rows --purge --confirm-rows 3
+purged	risks	3
+kept	controls	12	retained: referenced by 40 retained row(s) in evidence_records
+kept	evidence_records	40	retained: append-only ledger (ADR-0012, tombstone only)
+purged total	3
+recorded in tenant_data_purges	64c4346e-85af-452f-8e82-f0e384fe58a0
+```
+
+**How the purge behaves.**
+
+- **One transaction.** The purge runs in one REPEATABLE READ
+  transaction.
+- **Nothing deleted on a mismatch.** It deletes nothing when the
+  purgeable total no longer matches the listing, when a table cannot
+  be purged (the error names it), or when the purge would change any
+  ledger table's row count.
+- **A permanent record.** A committed purge writes one row to the
+  append-only `tenant_data_purges` table: the time, the database
+  role, the OS user, and the per-table counts purged and kept. Read it
+  with
+  `SELECT * FROM tenant_data_purges ORDER BY purged_at` on the same
+  connection.
+- **Cascades are not counted.** The counts cover tables with a
+  `tenant_id` column. A foreign-key cascade into a table without one
+  deletes rows the purge does not count.
+
 ## Audience: operators
 
 ### What you need to do
