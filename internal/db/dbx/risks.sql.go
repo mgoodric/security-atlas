@@ -677,6 +677,51 @@ func (q *Queries) ListRisksByIDs(ctx context.Context, arg ListRisksByIDsParams) 
 	return items, nil
 }
 
+const lockRiskByID = `-- name: LockRiskByID :one
+SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status
+FROM risks
+WHERE tenant_id = $1 AND id = $2
+FOR NO KEY UPDATE
+`
+
+type LockRiskByIDParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #1867: read a risk and hold its row against concurrent theme writes and
+// deletes until the transaction ends, so a theme write or delete sees the
+// themes it actually replaces. FOR NO KEY UPDATE, not FOR UPDATE: it does
+// not conflict with the FOR KEY SHARE an aggregation evaluation takes when
+// it links this risk as a child, so an evaluation is never blocked by it.
+func (q *Queries) LockRiskByID(ctx context.Context, arg LockRiskByIDParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, lockRiskByID, arg.TenantID, arg.ID)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Category,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+		&i.AcceptanceStatus,
+	)
+	return i, err
+}
+
 const unlinkRiskControl = `-- name: UnlinkRiskControl :exec
 DELETE FROM risk_control_links
 WHERE tenant_id = $1 AND risk_id = $2 AND control_id = $3

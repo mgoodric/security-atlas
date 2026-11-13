@@ -25,6 +25,19 @@ ages out of the window, the meta-risk drops it. This also happens when the
 rule falls below its threshold. The meta-risk itself is never closed or
 deleted by the engine.
 
+Ageing out is not on a timer. Nothing runs when a risk passes the end of the
+window; the meta-risk drops it on the next evaluation that touches the rule's
+theme (a risk write on that theme, or `POST /v1/aggregation-rules/evaluate`).
+Until then the meta-risk still shows the old children and score. Run
+`evaluate` to bring every meta-risk up to date at once.
+
+When every child has gone, the meta-risk stays open with `child_count` 0 and
+an empty score, which the grid would otherwise show as a quiet 1x1 risk. The
+risks list and the risk page label it **Pattern no longer met**. Close or
+delete it if the pattern is over; the engine will not. The evaluation that
+emptied it is a `near_miss` or `no_match` ledger row that names the
+meta-risk, so the change is traceable.
+
 Deactivating a rule leaves its meta-risk as it was. Re-activating the rule
 starts a new meta-risk; the old one stays as history.
 
@@ -35,6 +48,10 @@ current activation. That is the one created in the rule's first
 `window_days`, if it fired then. If it didn't, the engine creates one on the
 next evaluation that meets the threshold. It leaves the per-day meta-risks
 alone. Review them and delete the ones you don't need.
+
+Installs that raced two evaluations of one rule before #1861 may also hold
+two meta-risks with the same key. The engine always updates the oldest of
+them (by `created_at`, then `id`), so the other one stops changing. Delete it.
 
 ## One broken active rule blocks writes on its theme
 

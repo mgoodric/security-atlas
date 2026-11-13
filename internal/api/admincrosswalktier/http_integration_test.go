@@ -389,3 +389,70 @@ func TestBadTier400(t *testing.T) {
 		t.Fatalf("bad tier status = %d; want 400 (body=%s)", rec.Code, rec.Body.String())
 	}
 }
+
+// TestReopenRejected is #1849: a super_admin moves a rejected edge back to
+// draft, the move is audited, and the reopened edge must climb the ladder
+// again (rejected -> under_review stays illegal).
+func TestReopenRejected(t *testing.T) {
+	if adminPool == nil {
+		t.Skip("DATABASE_URL not set; skipping")
+	}
+	edgeID, _ := seedEdge(t, "reopen")
+	reviewer := uuid.New()
+	router := newRouter(true, true, "user:"+reviewer.String())
+
+	if rec := postTier(t, router, edgeID, "rejected", "judged wrong"); rec.Code != http.StatusOK {
+		t.Fatalf("reject status = %d; want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+	if rec := postTier(t, router, edgeID, "under_review", "skip past draft"); rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("rejected->under_review status = %d; want 422 (body=%s)", rec.Code, rec.Body.String())
+	}
+	rec := postTier(t, router, edgeID, "draft", "official mapping supersedes the rejection")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("reopen status = %d; want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+
+	store := crosswalktier.NewStore(appPool)
+	cur, err := store.CurrentTier(context.Background(), edgeID)
+	if err != nil {
+		t.Fatalf("current tier: %v", err)
+	}
+	if cur != crosswalktier.TierDraft {
+		t.Fatalf("current tier = %q; want draft", cur)
+	}
+	transitions, err := store.ListTransitions(context.Background(), edgeID)
+	if err != nil {
+		t.Fatalf("list transitions: %v", err)
+	}
+	if len(transitions) != 2 {
+		t.Fatalf("audit rows = %d; want 2 (reject + reopen)", len(transitions))
+	}
+	if transitions[0].FromTier != crosswalktier.TierRejected || transitions[0].ToTier != crosswalktier.TierDraft || transitions[0].ReviewerID != reviewer {
+		t.Fatalf("reopen audit row = %+v; want rejected->draft by %v", transitions[0], reviewer)
+	}
+}
+
+// TestReopenTenantAdminRejected is #1849 under the #1757 gate: reopening is a
+// catalog write like any other move, so a tenant admin is refused 403 and the
+// edge stays rejected.
+func TestReopenTenantAdminRejected(t *testing.T) {
+	if adminPool == nil {
+		t.Skip("DATABASE_URL not set; skipping")
+	}
+	edgeID, _ := seedEdge(t, "reopen-tenant")
+	if rec := postTier(t, newRouter(true, true, "user:"+uuid.NewString()), edgeID, "rejected", ""); rec.Code != http.StatusOK {
+		t.Fatalf("reject status = %d; want 200 (body=%s)", rec.Code, rec.Body.String())
+	}
+
+	rec := postTier(t, newRouter(true, false, "user:"+uuid.NewString()), edgeID, "draft", "should be blocked")
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("tenant-admin reopen status = %d; want 403 (body=%s)", rec.Code, rec.Body.String())
+	}
+	cur, err := crosswalktier.NewStore(appPool).CurrentTier(context.Background(), edgeID)
+	if err != nil {
+		t.Fatalf("current tier: %v", err)
+	}
+	if cur != crosswalktier.TierRejected {
+		t.Fatalf("tier changed despite 403: %q", cur)
+	}
+}
