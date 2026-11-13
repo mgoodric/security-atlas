@@ -73,7 +73,17 @@ type Credential struct {
 	// bundle manifest). IsAdmin acts as a wildcard: an admin holds every
 	// owner role implicitly. Slice 035 graduates this to OPA-driven RBAC.
 	OwnerRoles []string
+	// Purpose marks a key minted for a specific job rather than an
+	// ordinary issue. PurposeBootstrapRecovery is the only value: the admin
+	// key reset-bootstrap mints. Persisted in api_keys.purpose, so the
+	// marker survives a restart; a Rotate successor inherits it.
+	Purpose string
 }
+
+// PurposeBootstrapRecovery marks the admin key POST
+// /v1/admin/install/reset-bootstrap mints (#1892). RevokePurpose finds
+// these by the marker and id, never by bearer.
+const PurposeBootstrapRecovery = "bootstrap-recovery"
 
 // HasOwnerRole reports whether c can attest a control whose `owner_role`
 // equals role. Admin is a wildcard; otherwise c must list the role
@@ -93,6 +103,23 @@ func (c Credential) HasOwnerRole(role string) bool {
 		}
 	}
 	return false
+}
+
+// ExpiresAt is IssuedAt + TTL, or the zero time for a credential with no
+// TTL (it never expires).
+func (c Credential) ExpiresAt() time.Time {
+	if c.TTL <= 0 {
+		return time.Time{}
+	}
+	return c.IssuedAt.Add(c.TTL)
+}
+
+// expired reports whether c's TTL has run out at now. The api_keys
+// expires_at column is the same IssuedAt + TTL, so a key expires in memory
+// at the moment LoadActive would stop reloading it (#1892).
+func (c Credential) expired(now time.Time) bool {
+	exp := c.ExpiresAt()
+	return !exp.IsZero() && now.After(exp)
 }
 
 // Persister is the optional durability backend for a Store (OE-435). When
@@ -264,6 +291,34 @@ func (s *Store) IssueAdmin(tenantID string, ttl time.Duration) (Credential, stri
 	return s.issueLocked(tenantID, "", nil, ttl, "", true, true, nil)
 }
 
+// IssueRecoveryAdmin mints the admin key reset-bootstrap writes to the
+// bootstrap-token file (#1892): IssueAdmin, marked
+// PurposeBootstrapRecovery, with the issuing user recorded. issuedBy is a
+// users(id) uuid or empty. When set, the credential's UserID is set to it,
+// which is how the Persister fills api_keys.issued_by and how a reload
+// reconstructs UserID, so the key resolves to the same user before and
+// after a restart. ttl must be positive: a recovery key always expires.
+func (s *Store) IssueRecoveryAdmin(tenantID string, ttl time.Duration, issuedBy string) (Credential, string, error) {
+	if ttl <= 0 {
+		return Credential{}, "", errors.New("credstore: recovery admin key needs a positive ttl")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cred, token, r, err := s.buildLocked(tenantID, "", nil, ttl, "", true, true, nil)
+	if err != nil {
+		return Credential{}, "", err
+	}
+	cred.Purpose = PurposeBootstrapRecovery
+	if issuedBy != "" {
+		cred.UserID = issuedBy
+	}
+	r.cred = cred
+	if err := s.commitLocked(cred, r); err != nil {
+		return Credential{}, "", err
+	}
+	return cred, token, nil
+}
+
 // IssueFixedAdmin mints an admin-flagged credential for tenantID whose
 // bearer token is the caller-supplied `token` rather than a freshly
 // generated random one. Slice 037 uses this so the offline
@@ -357,6 +412,10 @@ func (s *Store) Rotate(id string) (successor Credential, bearer string, predeces
 	if err != nil {
 		return
 	}
+	// A rotated recovery key stays a recovery key, so rotation cannot
+	// strip the marker the next reset and sign-in revoke by.
+	successor.Purpose = pred.cred.Purpose
+	rec.cred.Purpose = pred.cred.Purpose
 
 	predecessorExpiresAt = time.Now().UTC().Add(s.rotationGrace)
 	if s.persist != nil {
@@ -405,6 +464,33 @@ func (s *Store) Revoke(id string) error {
 	return nil
 }
 
+// RevokePurpose revokes every live credential, in any tenant, marked with
+// purpose, except the one whose id is except (empty spares none). It
+// matches on the marker and the id only, never on a bearer. Returns the
+// revoked ids. Stops at the first durable-revoke failure and returns the
+// ids revoked so far with the error.
+func (s *Store) RevokePurpose(purpose, except string) ([]string, error) {
+	if purpose == "" {
+		return nil, errors.New("credstore: RevokePurpose needs a purpose")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var revoked []string
+	for id, r := range s.byID {
+		if r.state != stateActive || r.cred.Purpose != purpose || id == except {
+			continue
+		}
+		if s.persist != nil && r.persisted {
+			if err := s.persist.Revoke(id, r.cred.TenantID); err != nil {
+				return revoked, fmt.Errorf("credstore: persist revoke: %w", err)
+			}
+		}
+		r.state = stateRevoked
+		revoked = append(revoked, id)
+	}
+	return revoked, nil
+}
+
 // List returns active credentials for a tenant. Metadata only.
 func (s *Store) List(tenantID string) []Credential {
 	s.mu.Lock()
@@ -415,6 +501,9 @@ func (s *Store) List(tenantID string) []Credential {
 			continue
 		}
 		if !r.retiresAt.IsZero() && time.Now().UTC().After(r.retiresAt) {
+			continue
+		}
+		if r.cred.expired(time.Now().UTC()) {
 			continue
 		}
 		out = append(out, r.cred)
@@ -457,6 +546,9 @@ func (s *Store) Authenticate(token string) (Credential, error) {
 	if !r.retiresAt.IsZero() && time.Now().UTC().After(r.retiresAt) {
 		return Credential{}, ErrUnknownKey
 	}
+	if r.cred.expired(time.Now().UTC()) {
+		return Credential{}, ErrUnknownKey
+	}
 	r.cred.LastUsedAt = time.Now().UTC()
 	return r.cred, nil
 }
@@ -468,15 +560,24 @@ func (s *Store) issueLocked(tenantID, scope string, kinds []string, ttl time.Dur
 	if err != nil {
 		return Credential{}, "", err
 	}
+	if err := s.commitLocked(cred, r); err != nil {
+		return Credential{}, "", err
+	}
+	return cred, token, nil
+}
+
+// commitLocked writes a built credential through to the Persister (when
+// attached) and then makes it visible in the maps. Caller must hold s.mu.
+func (s *Store) commitLocked(cred Credential, r *record) error {
 	if s.persist != nil {
 		if err := s.persist.Insert(PersistedCredential{Cred: cred, TokenHashHex: r.tokenHash}); err != nil {
-			return Credential{}, "", fmt.Errorf("credstore: persist issue: %w", err)
+			return fmt.Errorf("credstore: persist issue: %w", err)
 		}
 		r.persisted = true
 	}
 	s.byID[cred.ID] = r
 	s.byTokenHash[r.tokenHash] = r
-	return cred, token, nil
+	return nil
 }
 
 // buildLocked constructs a credential + record WITHOUT inserting it into

@@ -11,6 +11,12 @@
 // --force if first_signin_at is set). It is the ONLY runtime path that
 // mints an admin credential for the bootstrap-token file or writes that
 // file outside of the cold-start path in cmd/atlas (#1885, ADR 0003).
+//
+// #1892 bounds that credential. It expires (default 24h, at most 7d), it
+// is marked bootstrap-recovery in api_keys.purpose, each new reset revokes
+// the recovery keys earlier resets minted, and the first sign-in by a
+// different credential revokes it (install_state.go). Every mint is logged
+// with the caller's identity, never the bearer.
 
 package api
 
@@ -20,8 +26,13 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/platform"
 )
@@ -46,19 +57,37 @@ func (s *Server) AttachPlatformResetter(pr PlatformResetter) {
 // token (#1885); a `token` field sent by an older CLI is ignored. TenantID,
 // when set, must be the caller's tenant: the credential is always minted
 // for the caller's tenant, and a mismatch is refused rather than ignored.
+//
+// TTLSeconds is the recovery key's lifetime (#1892). 0 or absent means
+// defaultRecoveryTTL; anything outside (0, maxRecoveryTTL] is refused.
+// There is no non-expiring recovery key.
 type resetBootstrapRequest struct {
-	Force    bool   `json:"force"`
-	TenantID string `json:"tenant_id,omitempty"`
+	Force      bool   `json:"force"`
+	TenantID   string `json:"tenant_id,omitempty"`
+	TTLSeconds int64  `json:"ttl_seconds,omitempty"`
 }
+
+// defaultRecoveryTTL is longer than the 8h session cookie the bearer-paste
+// sign-in sets (web/app/login/actions.ts), so a session opened with the
+// recovery key does not outlive it by much, nor die before the cookie.
+// maxRecoveryTTL caps an operator override. ADR 0003 records both.
+const (
+	defaultRecoveryTTL = 24 * time.Hour
+	maxRecoveryTTL     = 7 * 24 * time.Hour
+)
 
 // resetBootstrapResponse is the JSON response shape. BearerToken is the
 // re-issued bootstrap admin credential's plaintext, returned once.
+// RevokedCredentialIDs lists the recovery keys earlier resets minted that
+// this reset revoked.
 type resetBootstrapResponse struct {
-	FileWritten  bool   `json:"file_written"`
-	StatusReset  bool   `json:"status_reset"`
-	CredentialID string `json:"credential_id"`
-	TenantID     string `json:"tenant_id"`
-	BearerToken  string `json:"bearer_token"`
+	FileWritten          bool     `json:"file_written"`
+	StatusReset          bool     `json:"status_reset"`
+	CredentialID         string   `json:"credential_id"`
+	TenantID             string   `json:"tenant_id"`
+	BearerToken          string   `json:"bearer_token"`
+	ExpiresAt            string   `json:"expires_at"`
+	RevokedCredentialIDs []string `json:"revoked_credential_ids"`
 }
 
 // handleResetBootstrap is the admin-only recovery endpoint.
@@ -104,7 +133,10 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cred, _ := authctx.CredentialFromContext(r.Context())
-	if cred.TenantID == "" {
+	// A super_admin JWT with no current tenant carries the all-zeros uuid,
+	// which is not a tenant (#1892): refuse it like a missing one, before
+	// anything is reset.
+	if cred.TenantID == "" || cred.TenantID == uuid.Nil.String() {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":"caller credential carries no tenant"}`))
 		return
@@ -113,6 +145,15 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`{"error":"tenant_id must be the caller's tenant"}`))
 		return
+	}
+	ttl := defaultRecoveryTTL
+	if req.TTLSeconds != 0 {
+		ttl = time.Duration(req.TTLSeconds) * time.Second
+		if req.TTLSeconds < 0 || ttl > maxRecoveryTTL {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"error":"ttl_seconds must be between 1 and 604800 (7d)"}`))
+			return
+		}
 	}
 
 	if err := s.platformResetter.ResetBootstrap(r.Context(), req.Force); err != nil {
@@ -135,7 +176,7 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 
 	// Minted after the status reset, so a refused reset (409) leaves no
 	// live admin credential behind.
-	issued, bearer, err := s.credStore.IssueAdmin(cred.TenantID, 0)
+	issued, bearer, err := s.credStore.IssueRecoveryAdmin(cred.TenantID, ttl, issuerUserID(cred))
 	if err != nil {
 		s.installLogger().Warn("reset-bootstrap credential issue failed",
 			slog.String("error", err.Error()))
@@ -145,10 +186,12 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := resetBootstrapResponse{
-		StatusReset:  true,
-		CredentialID: issued.ID,
-		TenantID:     issued.TenantID,
-		BearerToken:  bearer,
+		StatusReset:          true,
+		CredentialID:         issued.ID,
+		TenantID:             issued.TenantID,
+		BearerToken:          bearer,
+		ExpiresAt:            issued.ExpiresAt().Format(time.RFC3339),
+		RevokedCredentialIDs: []string{},
 	}
 	if s.bootstrapTokenPath != "" {
 		if err := platform.WriteBootstrapToken(s.bootstrapTokenPath, bearer); err != nil {
@@ -169,7 +212,52 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 		}
 		resp.FileWritten = true
 	}
+
+	// The file now holds the new key, so the keys earlier resets minted
+	// are no longer in it: revoke them, matched by marker and id. A
+	// failure leaves those keys to expire on their TTL; it does not undo
+	// this reset.
+	revoked, rerr := s.credStore.RevokePurpose(credstore.PurposeBootstrapRecovery, issued.ID)
+	if rerr != nil {
+		s.installLogger().Warn("reset-bootstrap revoke of earlier recovery keys failed",
+			slog.String("error", rerr.Error()))
+	}
+	if revoked != nil {
+		resp.RevokedCredentialIDs = revoked
+	}
+
+	// The record of the mint. Never the bearer, not even its last four.
+	s.installLogger().Info("reset-bootstrap minted recovery admin credential",
+		slog.String("credential_id", issued.ID),
+		slog.String("tenant_id", issued.TenantID),
+		slog.String("expires_at", resp.ExpiresAt),
+		slog.String("caller_credential_id", cred.ID),
+		slog.String("caller_subject", callerSubject(r.Context(), cred)),
+		slog.Bool("force", req.Force),
+		slog.Any("revoked_credential_ids", resp.RevokedCredentialIDs))
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// callerSubject names who called: the verified JWT's subject when there is
+// one, otherwise the credential's UserID (an API key's own id, or the user
+// it was issued by).
+func callerSubject(ctx context.Context, cred credstore.Credential) string {
+	if claims := jwtmw.FromContext(ctx); claims != nil && claims.Subject != "" {
+		return claims.Subject
+	}
+	return cred.UserID
+}
+
+// issuerUserID returns the users(id) uuid behind the caller, for
+// api_keys.issued_by, or "" when the caller is not a user. A JWT carries
+// "user:<uuid>"; a key issued by a user carries the bare uuid; a bootstrap
+// or machine credential carries neither and records no issuer.
+func issuerUserID(cred credstore.Credential) string {
+	id := strings.TrimPrefix(cred.UserID, "user:")
+	if _, err := uuid.Parse(id); err != nil {
+		return ""
+	}
+	return id
 }
 
 // authorizeResetBootstrap admits a caller whose verified JWT carries

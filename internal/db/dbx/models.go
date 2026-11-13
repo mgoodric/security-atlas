@@ -1691,6 +1691,8 @@ type ApiKey struct {
 	OwnerRoles     []string           `json:"owner_roles"`
 	Last4          string             `json:"last4"`
 	TtlSeconds     int64              `json:"ttl_seconds"`
+	// Why the key exists, when it is not an ordinary issued key. 'bootstrap-recovery' marks the admin key reset-bootstrap minted (#1892).
+	Purpose *string `json:"purpose"`
 }
 
 type Artifact struct {

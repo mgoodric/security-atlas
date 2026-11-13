@@ -371,6 +371,9 @@ func credentialFromRow(row dbx.ApiKey) credstore.Credential {
 	if row.LastUsedAt.Valid {
 		c.LastUsedAt = row.LastUsedAt.Time
 	}
+	if row.Purpose != nil {
+		c.Purpose = *row.Purpose
+	}
 	if row.RotatedFrom.Valid {
 		ruu, _ := uuidFromPg(row.RotatedFrom)
 		c.RotatedFrom = "key_" + ruu.String()

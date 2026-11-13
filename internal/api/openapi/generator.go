@@ -243,6 +243,66 @@ components:
         Unified lexical search response for ` + "`GET /v1/search`" + `. Controls,
         risks, and evidence are tenant-confined by database RLS. Anchors are
         bundled tenant-agnostic catalog rows.
+    ResetBootstrapRequest:
+      type: object
+      properties:
+        force:
+          type: boolean
+          description: Allow the reset after a first sign-in has happened. Without it that case is refused with 409.
+        tenant_id:
+          type: string
+          format: uuid
+          description: Optional. When set, must be the caller's tenant; the key is always minted for the caller's tenant.
+        ttl_seconds:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 604800
+          description: Lifetime of the recovery key in seconds. 0 or absent means 86400 (24h); the cap is 604800 (7d). There is no non-expiring recovery key.
+      description: |
+        Body of ` + "`POST /v1/admin/install/reset-bootstrap`" + `. The platform mints
+        the recovery credential itself; a ` + "`token`" + ` field sent by an older
+        CLI is ignored.
+    ResetBootstrapResponse:
+      type: object
+      required:
+        - file_written
+        - status_reset
+        - credential_id
+        - tenant_id
+        - bearer_token
+        - expires_at
+        - revoked_credential_ids
+      properties:
+        file_written:
+          type: boolean
+          description: The bearer was written to the bootstrap-token file. False when the server has no file path configured.
+        status_reset:
+          type: boolean
+          description: platform_status first-sign-in and bootstrap-consumed markers were cleared.
+        credential_id:
+          type: string
+          description: Id of the minted recovery admin key. Revoke it with ` + "`atlas-cli credentials revoke`" + ` once you have signed in another way.
+        tenant_id:
+          type: string
+          format: uuid
+          description: Tenant the key is minted for, always the caller's tenant.
+        bearer_token:
+          type: string
+          description: Plaintext of the recovery key. Returned once and never logged.
+        expires_at:
+          type: string
+          format: date-time
+          description: When the recovery key stops authenticating.
+        revoked_credential_ids:
+          type: array
+          items:
+            type: string
+          description: Recovery keys earlier resets minted that this reset revoked.
+      description: |
+        A fresh admin credential for the caller's tenant, marked
+        bootstrap-recovery. The first sign-in by a different credential
+        revokes it; a sign-in with the key itself keeps it until it expires.
     SearchHit:
       type: object
       required: [id, type, title, snippet, relevance_score]
@@ -400,6 +460,10 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 		}
 		return nil
 	}
+	if isResetBootstrapOperation(r) {
+		_, err := io.WriteString(w, resetBootstrapOperationDetails)
+		return err
+	}
 	// Responses — single `default` ref to the Ack envelope. v1 spec
 	// does not commit to per-operation response schemas; follow-on
 	// slice will refine. Operations that genuinely return bodies (most
@@ -433,6 +497,63 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 func isSearchOperation(r RouteSpec) bool {
 	return r.Method == "GET" && r.Path == "/v1/search"
 }
+
+func isResetBootstrapOperation(r RouteSpec) bool {
+	return r.Method == "POST" && r.Path == "/v1/admin/install/reset-bootstrap"
+}
+
+// resetBootstrapOperationDetails documents the reset endpoint's body and
+// responses (#1892) in place of the generic Ack.
+const resetBootstrapOperationDetails = `      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResetBootstrapRequest"
+      responses:
+        "200":
+          description: Status reset and recovery admin key minted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResetBootstrapResponse"
+        "400":
+          description: Invalid body, tenant_id not the caller's, a caller with no tenant (or the all-zeros tenant), or ttl_seconds out of range.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: No credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Not super_admin, and not an admin key on a single-tenant install.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: A first sign-in has happened and force was not set.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: The status reset, key mint or file write failed. A key whose bearer could not be written is revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: Platform resetter, credential store or write pool not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
 
 func isSchemaRegistryReadOperation(r RouteSpec) bool {
 	return r.Method == "GET" && (r.Path == "/v1/schemas" || r.Path == "/v1/schemas/{kind}/{semver}")

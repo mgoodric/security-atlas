@@ -289,6 +289,68 @@ for an operator who has lost admin access. A recovered non-admin session
 cannot reach admin pages or re-run this gate, so the operator would still
 need an admin key from elsewhere, which is the situation recovery is for.
 
+(The "no expiry" above is superseded by the #1892 amendment below.)
+
+## Amendment (2026-11-13, #1892): the recovery key is bounded, marked and traceable
+
+The #1885 key had the right privilege but no end. It never expired, it
+outlived the next reset (the file was overwritten, the key was not
+revoked), and nothing recorded who minted it.
+
+**Decision.**
+
+- **Bounded TTL.** The recovery key expires 24h after issue by default.
+  The operator can set `ttl_seconds` (CLI `--ttl`) up to 7d. Zero or
+  absent means the default. A negative value, a value above 7d, and a
+  non-expiring key are refused with 400. 24h is longer than the 8h session
+  cookie the bearer-paste sign-in sets, so the session it opens is not cut
+  short, and short enough that a forgotten key dies the next day. 7d covers
+  a recovery that waits over a weekend.
+- **TTL is enforced in memory.** `credstore.Store.Authenticate` and `List`
+  now reject a key past `IssuedAt + TTL`. Until now the in-memory store
+  applied TTL only by not reloading expired rows at boot, while the
+  DB-backed `apikeystore` already enforced `expires_at`. `ttl=0` still
+  means no expiry, which the env `ATLAS_BOOTSTRAP_TOKEN` key, the
+  `ATLAS_BOOTSTRAP_TENANT` key and the chaos and CI keys (`--ttl 0`) rely on.
+- **Marked, durably.** The key is minted with `api_keys.purpose =
+'bootstrap-recovery'` (migration `20260813000000_api_keys_purpose`). It is
+  reloaded at boot, and a rotated successor inherits it. Revocation finds
+  recovery keys by this marker and the credential id, never by the bearer.
+  The env `ATLAS_BOOTSTRAP_TOKEN` key is memory-only and unmarked, and no
+  other issue path sets the marker, so neither revocation below can reach
+  any key but a recovery key.
+- **Each reset revokes the recovery keys earlier resets minted.** This runs
+  after the new bearer is in the file, so the file only ever names a live
+  key.
+- **First sign-in by a different credential revokes it.** When
+  `mark-first-signin` flips the marker, it revokes every recovery key except
+  the caller's own. When the caller _is_ the recovery key (the bearer-paste
+  sign-in uses the pasted key as the session), it is kept live until it
+  expires, because revoking it would sign the operator straight back out.
+  The response says which happened (`revoked_credential_ids`,
+  `recovery_key_kept`). The documented step is to sign in another way and
+  revoke it: `atlas-cli credentials revoke --id <credential_id>`.
+- **Traceable.** The mint is logged at Info with `credential_id`,
+  `tenant_id`, `expires_at`, the caller's credential id and subject, and the
+  ids it revoked. The bearer is never logged, in whole or in part. A caller
+  that is a user (a JWT `user:<uuid>` subject, or a key issued by a user) is
+  recorded as `api_keys.issued_by`. The store carries the issuer as the
+  key's `UserID`, which is how `issued_by` is written and reloaded, so the
+  key resolves to the same user before and after a restart. An API-key
+  caller with no user records no issuer. The log line names its credential
+  id. There is no separate admin audit-event sink. The OPA decision audit
+  already records the request.
+- **The all-zeros tenant is refused.** A super_admin JWT with no current
+  tenant carries `00000000-…`, which passed the empty-tenant check. It is now
+  refused with 400 before the reset, as the empty tenant is.
+- **The CLI no longer drops flags.** `--reset-bootstrap` refuses `--scope`
+  and `--kinds`, which do not apply to an admin key, and sends `--ttl` as
+  `ttl_seconds`.
+
+**Rejected: track reset-minted ids in memory.** A restart between the reset
+and the sign-in would lose the id, and the next reset would silently stop
+revoking. The marker costs one nullable column.
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block

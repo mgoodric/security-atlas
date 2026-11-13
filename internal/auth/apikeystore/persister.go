@@ -230,6 +230,10 @@ func (p *Persister) insertRow(ctx context.Context, q *dbx.Queries, rec credstore
 	if u, uerr := uuid.Parse(rec.Cred.UserID); uerr == nil {
 		issuedBy = pgtype.UUID{Bytes: u, Valid: true}
 	}
+	var purpose *string
+	if rec.Cred.Purpose != "" {
+		purpose = &rec.Cred.Purpose
+	}
 	_, err = q.InsertAPIKey(ctx, dbx.InsertAPIKeyParams{
 		ID:             id,
 		TenantID:       tid,
@@ -244,6 +248,7 @@ func (p *Persister) insertRow(ctx context.Context, q *dbx.Queries, rec credstore
 		OwnerRoles:     roles,
 		Last4:          rec.Cred.Last4,
 		TtlSeconds:     int64(rec.Cred.TTL.Seconds()),
+		Purpose:        purpose,
 	})
 	return err
 }
