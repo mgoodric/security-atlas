@@ -36,6 +36,12 @@ type Report struct {
 	// untouched, provenance and mapping_tier included.
 	EdgesSkipped []SkippedEdge
 
+	// EdgesUpgradedOntoRejected lists edges whose provenance this import
+	// raised while their mapping_tier is 'rejected'. The importer never
+	// touches the tier (provenance and trust are separate axes, ADR 0018),
+	// so these stay hidden from coverage until a reviewer acts on them.
+	EdgesUpgradedOntoRejected []UpgradedEdge
+
 	// MappingsByAttribution tallies edges by their source_attribution
 	// label. Exposed for the HITL audit summary so the orchestrator
 	// can read "X community-draft mappings ingested, 0 scf_official"
@@ -49,6 +55,14 @@ type SkippedEdge struct {
 	RequirementCode     string
 	SCFAnchor           string
 	ExistingAttribution string
+	IncomingAttribution string
+}
+
+// UpgradedEdge names one existing edge whose provenance an import raised.
+type UpgradedEdge struct {
+	RequirementCode     string
+	SCFAnchor           string
+	PreviousAttribution string
 	IncomingAttribution string
 }
 
@@ -247,7 +261,10 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 
 		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.RequirementCode + "-" + m.SCFAnchor)
 
-		existing, lookupErr := q.GetFwToScfEdge(ctx, dbx.GetFwToScfEdgeParams{
+		// FOR UPDATE: the precedence check below reads, then writes. Without
+		// the row lock a concurrent weaker import that passed its check
+		// against the old row would overwrite a just-committed stronger edge.
+		existing, lookupErr := q.GetFwToScfEdgeForUpdate(ctx, dbx.GetFwToScfEdgeForUpdateParams{
 			FrameworkRequirementID: reqID,
 			ScfAnchorID:            anchor.ID,
 		})
@@ -277,6 +294,14 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				return Report{}, fmt.Errorf("crosswalk: update edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 			}
 			report.EdgesUpdated++
+			if existing.MappingTier == dbx.CrosswalkMappingTierRejected && srcAttr != existing.SourceAttribution {
+				report.EdgesUpgradedOntoRejected = append(report.EdgesUpgradedOntoRejected, UpgradedEdge{
+					RequirementCode:     m.RequirementCode,
+					SCFAnchor:           m.SCFAnchor,
+					PreviousAttribution: string(existing.SourceAttribution),
+					IncomingAttribution: attribution,
+				})
+			}
 		case errors.Is(lookupErr, pgx.ErrNoRows):
 			report.MappingsByAttribution[attribution]++
 			if _, err := q.InsertFwToScfEdge(ctx, dbx.InsertFwToScfEdgeParams{

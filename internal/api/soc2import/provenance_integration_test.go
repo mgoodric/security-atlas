@@ -5,6 +5,7 @@ package soc2import_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -139,7 +140,140 @@ func TestImport_StrongerSourceReplacesWeakerEdge(t *testing.T) {
 	if report.EdgesUpdated != 1 || len(report.EdgesSkipped) != 0 {
 		t.Fatalf("upgrade report = %+v; want one update, no skips", report)
 	}
-	if got := readProvenanceEdge(t, pool); got.attribution != "community_draft" || got.rationale != "draft rationale" {
-		t.Fatalf("after upgrade edge = %+v", got)
+	// Provenance and trust are separate axes (ADR 0018): the upgrade raises
+	// source_attribution and leaves the tier where it was.
+	want := edgeState{attribution: "community_draft", tier: "draft", rationale: "draft rationale"}
+	if got := readProvenanceEdge(t, pool); got != want {
+		t.Fatalf("after upgrade edge = %+v; want %+v", got, want)
+	}
+	if len(report.EdgesUpgradedOntoRejected) != 0 {
+		t.Fatalf("upgrade onto a draft edge reported as rejected: %+v", report.EdgesUpgradedOntoRejected)
+	}
+}
+
+func setProvenanceTier(t *testing.T, pool *pgxpool.Pool, tier string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE fw_to_scf_edges SET mapping_tier = $2::crosswalk_mapping_tier
+		WHERE framework_requirement_id IN (
+			SELECT fr.id FROM framework_requirements fr
+			JOIN framework_versions fv ON fv.id = fr.framework_version_id
+			JOIN frameworks f ON f.id = fv.framework_id
+			WHERE f.slug = $1 AND f.tenant_id IS NULL)`, provenanceSlug, tier); err != nil {
+		t.Fatalf("set tier %s: %v", tier, err)
+	}
+}
+
+// An upgrade onto a 'rejected' edge keeps the tier (the importer never
+// touches trust) and is listed in the report so an operator can act on it.
+func TestImport_UpgradeOntoRejectedEdgeIsReported(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	ctx := context.Background()
+	resetFrameworkCatalog(t, pool, provenanceSlug)
+	t.Cleanup(func() { resetFrameworkCatalog(t, pool, provenanceSlug) })
+	ensureSCFLoaded(t, pool)
+
+	if _, err := soc2import.Import(ctx, pool, provenanceCrosswalk("community_draft", "draft rationale")); err != nil {
+		t.Fatalf("draft Import: %v", err)
+	}
+	setProvenanceTier(t, pool, "rejected")
+
+	report, err := soc2import.Import(ctx, pool, provenanceCrosswalk("scf_official", "official rationale"))
+	if err != nil {
+		t.Fatalf("official Import: %v", err)
+	}
+	if len(report.EdgesUpgradedOntoRejected) != 1 {
+		t.Fatalf("upgraded-onto-rejected = %+v; want exactly one", report.EdgesUpgradedOntoRejected)
+	}
+	up := report.EdgesUpgradedOntoRejected[0]
+	if up.RequirementCode != "P-1" || up.SCFAnchor != "GOV-01" ||
+		up.PreviousAttribution != "community_draft" || up.IncomingAttribution != "scf_official" {
+		t.Fatalf("upgraded entry = %+v", up)
+	}
+	want := edgeState{attribution: "scf_official", tier: "rejected", rationale: "official rationale"}
+	if got := readProvenanceEdge(t, pool); got != want {
+		t.Fatalf("after upgrade edge = %+v; want %+v", got, want)
+	}
+}
+
+// A weaker import racing a concurrent stronger write must still skip. The
+// test holds the edge's row lock in its own transaction, raises the edge to
+// scf_official there, and starts a community_draft import. Once that import
+// is waiting on the lock the test commits. With a plain read the import
+// would have checked against the old org_internal row and then overwritten
+// the official edge; with FOR UPDATE it re-reads after the commit and skips.
+func TestImport_ConcurrentWeakerImportDoesNotOverwriteOfficialEdge(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	ctx := context.Background()
+	resetFrameworkCatalog(t, pool, provenanceSlug)
+	t.Cleanup(func() { resetFrameworkCatalog(t, pool, provenanceSlug) })
+	ensureSCFLoaded(t, pool)
+
+	if _, err := soc2import.Import(ctx, pool, provenanceCrosswalk("org_internal", "org rationale")); err != nil {
+		t.Fatalf("org Import: %v", err)
+	}
+
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `
+		UPDATE fw_to_scf_edges
+		SET source_attribution = 'scf_official', rationale = 'official rationale'
+		WHERE framework_requirement_id IN (
+			SELECT fr.id FROM framework_requirements fr
+			JOIN framework_versions fv ON fv.id = fr.framework_version_id
+			JOIN frameworks f ON f.id = fv.framework_id
+			WHERE f.slug = $1 AND f.tenant_id IS NULL)`, provenanceSlug); err != nil {
+		t.Fatalf("raise edge in held tx: %v", err)
+	}
+
+	type result struct {
+		report soc2import.Report
+		err    error
+	}
+	done := make(chan result, 1)
+	go func() {
+		r, err := soc2import.Import(ctx, pool, provenanceCrosswalk("community_draft", "draft rationale"))
+		done <- result{r, err}
+	}()
+
+	// Wait until the import is blocked on the held row lock.
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		var waiting int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*) FROM pg_stat_activity
+			WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
+			t.Fatalf("poll lock waiters: %v", err)
+		}
+		if waiting > 0 {
+			break
+		}
+		select {
+		case r := <-done:
+			t.Fatalf("import finished without waiting on the edge lock: %+v err=%v", r.report, r.err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("import never waited on the edge lock")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit held tx: %v", err)
+	}
+
+	r := <-done
+	if r.err != nil {
+		t.Fatalf("draft Import: %v", r.err)
+	}
+	if len(r.report.EdgesSkipped) != 1 || r.report.EdgesUpdated != 0 {
+		t.Fatalf("racing draft import report = %+v; want one skip, no update", r.report)
+	}
+	got := readProvenanceEdge(t, pool)
+	if got.attribution != "scf_official" || got.rationale != "official rationale" {
+		t.Fatalf("racing draft import overwrote the official edge: %+v", got)
 	}
 }

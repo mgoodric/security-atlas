@@ -147,6 +147,10 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 				fmt.Printf("edge skipped %s->%s: existing source_attribution=%s outranks incoming %s\n",
 					sk.RequirementCode, sk.SCFAnchor, sk.ExistingAttribution, sk.IncomingAttribution)
 			}
+			for _, up := range report.EdgesUpgradedOntoRejected {
+				fmt.Printf("edge upgraded onto rejected tier %s->%s: source_attribution %s -> %s; mapping_tier stays rejected\n",
+					up.RequirementCode, up.SCFAnchor, up.PreviousAttribution, up.IncomingAttribution)
+			}
 			keys := make([]string, 0, len(report.MappingsByAttribution))
 			for k := range report.MappingsByAttribution {
 				keys = append(keys, k)
