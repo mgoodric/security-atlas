@@ -59,3 +59,30 @@ integration servers that mint super_admin JWTs with synthetic subjects keep
 working unchanged. The exchange and device-approve paths fail closed on a nil
 checker instead, because a missing wiring there would otherwise grant the
 claim. In production all three are wired from the same checker.
+
+### D4 — The test-mode JWT issuer records the super_admin grant. **Confidence: HIGH.**
+
+The Playwright harness mints its tokens through the test-only
+`/v1/test/issue-jwt`, which defaults to `super_admin: true`. With the D2
+re-check, those claims were dropped (no `super_admins` row backs them) and
+49 e2e specs lost admin access. The fix is in the test issuer, the mint
+that sets the claim in test mode: when it mints a super_admin token it
+inserts the subject into `super_admins` (`ON CONFLICT DO NOTHING`), the
+test-mode analogue of the production mint reading the claim from that
+table. The insert lives only in the issue-jwt handler, behind the same
+`ATLAS_TEST_MODE` gate (checked again inside `grantTestSuperAdmin`).
+Production wiring is unchanged, and e2e keeps exercising the real
+re-check.
+
+Rejected: skipping the middleware re-check when `ATLAS_TEST_MODE=1`. That
+is a test-mode carve-out in production wiring, and e2e would never run the
+demote path.
+
+**Default subject change.** The issuer's default subject was
+`test-admin:<tenant>`, which is not a UUID and so cannot hold a
+`super_admins` row. It is now a deterministic UUIDv5 of the tenant
+(`testSubjectFor`). No spec asserts on the old string. Handlers that parse
+the subject as a UUID now see a UUID with no `users` row instead of a
+parse failure, and both end in the same not-found paths. A super_admin
+request with an explicit non-UUID `user_id` is refused with 500 rather
+than minted with a claim the middleware would drop.
