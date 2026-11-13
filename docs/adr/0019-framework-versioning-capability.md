@@ -76,3 +76,14 @@ Recorded when the capability landed; these refine the decision above against the
 4. **The migration-suggest job is an admin ENDPOINT** (`POST /v1/admin/framework-versions/migrations:suggest`), not a CLI subcommand. The issue allowed either ("CLI/admin job"); the endpoint reuses the same admin-gated `/v1` surface as the promotion + approve/reject routes, so the whole capability has one authz boundary and one audit path.
 
 5. **The version-migration review queue is an intra-framework table, not an invariant-#1 crosswalk.** `framework_version_migrations` is catalog-level (no `tenant_id`) and carries two FKs into `framework_requirements` (`from_requirement_id`, `to_requirement_id`). Its rows are intra-framework version carryovers between two adjacent versions of the SAME framework (P0-484-4 / invariant #7) — never a cross-framework requirement→requirement bridge. The slice-007 invariant-#1 FK guard (`TestImport_NoDirectRequirementToRequirementTableExists`) was refined to exclude this table by name, exactly as `fw_to_scf_edges` is the one allowed crosswalk referencer; a genuinely-new cross-framework bridge with any other name is still caught.
+
+## Amendment (2026-11-13, #1757): super_admin gate on writes
+
+The admin gate on the write routes (`promote`, `revert`, `migrations:suggest`,
+`migrations/{id}/decision`) is narrowed to **`super_admin`**: the verified JWT's
+`atlas:super_admin` claim (the slice-142 check). The versions these routes reach
+are global catalog rows (`tenant_id IS NULL`; the store sets no tenant GUC, so
+RLS hides tenant-private rows from it), so a tenant-scoped admin, including a
+per-tenant admin API key, changing them is a cross-tenant write. The read-only
+`GET /v1/admin/framework-versions/migrations` keeps the admin gate. On a
+single-tenant install the bootstrap admin holds `super_admin` (#1759).
