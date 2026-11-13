@@ -4,9 +4,11 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	artifactsapi "github.com/mgoodric/security-atlas/internal/api/artifacts"
+	controlimportsapi "github.com/mgoodric/security-atlas/internal/api/controlimports"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/controlimport"
 )
 
 // registerControls registers its domain's routes onto the shared root
@@ -54,6 +56,11 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// multi-product orgs are large.
 	controlsExportH := controlsapi.NewExportHandler(s.dbPool)
 	root.Get("/v1/controls/export", controlsExportH.ExportControls)
+	// #1779: bring-your-own-controls import — upload a CSV/XLSX control
+	// sheet and get back a staged import batch, every row staged or
+	// rejected with a reason. Literal /v1/controls/imports segment, so it
+	// sits ahead of the /v1/controls/{id}/... patterns like /export.
+	controlimportsapi.New(controlimport.NewStager(controlimport.NewStore(s.dbPool))).RegisterRoutes(root)
 	// Slice 175: controls history export (lineage incl. superseded
 	// versions). Sibling endpoint to /v1/controls/export — same shape,
 	// 17-column projection (slice 137's 15 + superseded_by +

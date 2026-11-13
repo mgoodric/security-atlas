@@ -75,6 +75,93 @@ func TestParseXLSXControlSetRoundTrip(t *testing.T) {
 	if !strings.Contains(c.Description, "quarterly") {
 		t.Fatalf("description did not round-trip: %+v", c)
 	}
+	// The incomplete row is reported, not dropped.
+	if len(got.Rejected) != 1 || got.Rejected[0].RowNumber != 5 || got.Rejected[0].Reason != RejectMissingField ||
+		got.Rejected[0].Detail != "missing title" {
+		t.Fatalf("rejected = %+v, want row 5 missing title", got.Rejected)
+	}
+}
+
+func TestParseAccountsForEveryRow(t *testing.T) {
+	raw := []byte("Control ID,Title,Description,Tested Under,Implementation Type,Applicability\n" +
+		"AC-1,MFA,Users use MFA,\"CC6.1; CC6.2\nCC6.1\",Semi-Automated,env:prod\n" +
+		",No ID,Has no id,,,\n" +
+		"AC-2,,Has no title,,,\n" +
+		"ac-1,Dup,Duplicate id in another case,,,\n" +
+		"AC-3,Bad type,Unknown implementation type,,sometimes,\n" +
+		"AC-4,Plain,No tested-under data,N/A,,\n")
+	got, err := ParseCSV(raw)
+	if err != nil {
+		t.Fatalf("ParseCSV: %v", err)
+	}
+	if len(got.Controls)+len(got.Rejected) != 6 {
+		t.Fatalf("staged %d + rejected %d != 6 data rows", len(got.Controls), len(got.Rejected))
+	}
+	if len(got.Controls) != 2 {
+		t.Fatalf("controls = %+v", got.Controls)
+	}
+	first := got.Controls[0]
+	if strings.Join(first.TestedUnder, ",") != "CC6.1,CC6.2" {
+		t.Errorf("tested under = %v, want split and de-duplicated", first.TestedUnder)
+	}
+	if first.ImplementationType != "semi_automated" || first.Applicability != "env:prod" {
+		t.Errorf("optional fields = %q / %q", first.ImplementationType, first.Applicability)
+	}
+	if got.Controls[1].ExternalID != "AC-4" || len(got.Controls[1].TestedUnder) != 0 {
+		t.Errorf("no-tested-under row = %+v", got.Controls[1])
+	}
+	want := []struct {
+		row    int
+		reason string
+	}{
+		{3, RejectMissingField}, {4, RejectMissingField}, {5, RejectDuplicateID}, {6, RejectInvalidImplementationType},
+	}
+	for i, w := range want {
+		if got.Rejected[i].RowNumber != w.row || got.Rejected[i].Reason != w.reason {
+			t.Errorf("rejected[%d] = %+v, want row %d %s", i, got.Rejected[i], w.row, w.reason)
+		}
+	}
+}
+
+func TestParseColumnMap(t *testing.T) {
+	raw := []byte("Ref No.,Control Name,What we do,ID\nX-1,MFA,Users use MFA,ignored\n")
+	got, err := ParseCSVWith(raw, ParseOptions{ColumnMap: map[string]string{
+		FieldID: "ref no.", FieldDescription: "What We Do",
+	}})
+	if err != nil {
+		t.Fatalf("ParseCSVWith: %v", err)
+	}
+	if len(got.Controls) != 1 || got.Controls[0].ExternalID != "X-1" || got.Controls[0].Description != "Users use MFA" {
+		t.Fatalf("controls = %+v", got.Controls)
+	}
+	// The mapped field wins over the column the aliases would have picked.
+	if strings.Join(got.UnmappedColumns, ",") != "ID" {
+		t.Errorf("unmapped = %v, want [ID]", got.UnmappedColumns)
+	}
+
+	if _, err := ParseCSVWith(raw, ParseOptions{ColumnMap: map[string]string{"owner": "Ref No."}}); !errors.Is(err, ErrInvalidColumnMap) {
+		t.Errorf("unknown field err = %v", err)
+	}
+	if _, err := ParseCSVWith(raw, ParseOptions{ColumnMap: map[string]string{FieldID: "Ref No.", FieldTestedUnder: "Criteria"}}); !errors.Is(err, ErrMappedColumnAbsent) {
+		t.Errorf("absent header err = %v", err)
+	}
+}
+
+func TestParseRowCapAndFormat(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("Control ID,Title,Description\n")
+	for i := 0; i < MaxRows; i++ {
+		b.WriteString("C,T,D\n")
+	}
+	if _, err := ParseCSV([]byte(b.String())); !errors.Is(err, ErrTooManyRows) {
+		t.Errorf("row cap err = %v", err)
+	}
+	if _, err := Parse("controls.pdf", []byte("x"), ParseOptions{}); !errors.Is(err, ErrUnsupportedFormat) {
+		t.Errorf("format err = %v", err)
+	}
+	if FormatOf("A.XLSX") != "xlsx" || FormatOf("a.csv") != "csv" {
+		t.Errorf("FormatOf is not case-insensitive")
+	}
 }
 
 func TestParseRequiresMinimumColumns(t *testing.T) {

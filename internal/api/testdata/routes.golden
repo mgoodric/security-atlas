@@ -84,6 +84,8 @@ GET /v1/controls/checklist/{generationID}/export.md
 GET /v1/controls/drift
 GET /v1/controls/export
 GET /v1/controls/history/export
+GET /v1/controls/imports/{id}
+POST /v1/controls/imports
 GET /v1/controls/{id}/action-plans
 GET /v1/controls/{id}/applicability
 GET /v1/controls/{id}/attest-form

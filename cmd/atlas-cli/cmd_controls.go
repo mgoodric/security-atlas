@@ -125,11 +125,12 @@ func resolveControlsAuth() error {
 func newControlsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "controls",
-		Short: "control-as-code bundle authoring (validate / upload)",
+		Short: "control-as-code bundle authoring (validate / upload) and control sheet import",
 	}
 	cmd.AddCommand(newControlsValidateCmd())
 	cmd.AddCommand(newControlsUploadCmd())
 	cmd.AddCommand(newControlsTestCmd())
+	cmd.AddCommand(newControlsImportCmd())
 	return cmd
 }
 
