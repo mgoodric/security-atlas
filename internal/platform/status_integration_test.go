@@ -351,8 +351,9 @@ func TestStatus_BootstrapTenantID_NoBootstrapAtAll(t *testing.T) {
 }
 
 // TestStatus_TenantCount counts every tenant through the BYPASSRLS write
-// pool (#1851): the reset-bootstrap gate reads it to decide whether a tenant
-// admin key may stand in for super_admin.
+// pool (#1851), excluding the all-zeros row (#1885): the reset-bootstrap
+// gate reads it to decide whether a tenant admin key may stand in for
+// super_admin.
 func TestStatus_TenantCount(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -360,6 +361,18 @@ func TestStatus_TenantCount(t *testing.T) {
 	t.Cleanup(func() { resetBootstrapFixtures(t, admin) })
 
 	s := platform.NewStatus(app, admin)
+
+	// The all-zeros tenant is not a tenant (#1885): with only that row the
+	// install has zero tenants, and it never counts toward the total below.
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO tenants (id, name) VALUES ($1, $2)`,
+		uuid.Nil, "all-zeros"); err != nil {
+		t.Fatalf("seed all-zeros tenant: %v", err)
+	}
+	if got, err := s.TenantCount(context.Background()); err != nil || got != 0 {
+		t.Fatalf("TenantCount with only the all-zeros row = %d, %v; want 0, nil", got, err)
+	}
+
 	for i, id := range []string{
 		"e0000000-0000-4000-8000-000000000001",
 		"e0000000-0000-4000-8000-000000000002",
