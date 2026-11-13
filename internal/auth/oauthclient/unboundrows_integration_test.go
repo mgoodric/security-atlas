@@ -3,14 +3,19 @@
 // Integration tests for security-atlas#1876: rows left in the all-zeros
 // tenant by OAuth clients that were unbound before #1739.
 //
-//   - ListUnboundRows counts all-zeros rows per tenant-scoped table and
-//     ignores other tenants' rows.
+//   - LedgerTables classifies every append-only table (the evidence ledger,
+//     every *_audit / *_audit_log / *_log table) as a ledger, so a new one
+//     the schema rule misses fails here.
+//   - ListUnboundRows counts all-zeros rows per tenant-scoped table, ignores
+//     other tenants' rows, and marks ledger tables, and tables whose rows a
+//     ledger row references, as retained.
 //   - PurgeUnboundRows refuses a confirmation that does not match the
-//     listing and deletes nothing.
-//   - PurgeUnboundRows deletes a parent table's rows after the child rows
-//     that reference them (controls before evidence_records by name, so
-//     the first pass trips the composite foreign key), and leaves other
-//     tenants' rows alone.
+//     purgeable total and deletes nothing.
+//   - PurgeUnboundRows deletes a parent after the child rows that reference
+//     it (controls before personnel_security_checklists by name, so the
+//     first pass trips the composite foreign key), spares other tenants,
+//     and writes an append-only tenant_data_purges row.
+//   - PurgeUnboundRows keeps ledger rows and the parents they reference.
 //
 // Each test runs inside a transaction on the BYPASSRLS migrate pool and
 // rolls it back, so the purge never touches rows outside the test, even
@@ -19,7 +24,10 @@ package oauthclient_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -29,12 +37,12 @@ import (
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
-// beginRolledBack opens a transaction on the migrate pool that is rolled
-// back when the test ends.
+// beginRolledBack opens a REPEATABLE READ transaction on the migrate pool
+// that is rolled back when the test ends.
 func beginRolledBack(t *testing.T) pgx.Tx {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := dbtest.NewMigratePool(t).Begin(ctx)
+	tx, err := dbtest.NewMigratePool(t).BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
@@ -42,19 +50,21 @@ func beginRolledBack(t *testing.T) pgx.Tx {
 	return tx
 }
 
-// seedControlWithEvidence inserts one control and one evidence record that
-// references it, both in tenant.
-func seedControlWithEvidence(t *testing.T, tx pgx.Tx, tenant uuid.UUID) {
+func seedControl(t *testing.T, tx pgx.Tx, tenant uuid.UUID) uuid.UUID {
 	t.Helper()
-	ctx := context.Background()
-	control := uuid.New()
-	if _, err := tx.Exec(ctx,
+	id := uuid.New()
+	if _, err := tx.Exec(context.Background(),
 		`INSERT INTO controls (id, tenant_id, title, control_family, implementation_type, bundle_id)
-		 VALUES ($1, $2, 'unbound-rows test', 'IAC', 'manual_attested', $3)`, control, tenant, "unbound-rows-"+control.String(),
+		 VALUES ($1, $2, 'unbound-rows test', 'IAC', 'manual_attested', $3)`, id, tenant, "unbound-rows-"+id.String(),
 	); err != nil {
 		t.Fatalf("insert control: %v", err)
 	}
-	if _, err := tx.Exec(ctx,
+	return id
+}
+
+func seedEvidence(t *testing.T, tx pgx.Tx, tenant, control uuid.UUID) {
+	t.Helper()
+	if _, err := tx.Exec(context.Background(),
 		`INSERT INTO evidence_records (id, tenant_id, control_id, control_ref, observed_at, provenance, result, hash)
 		 VALUES ($1, $2, $3, 'IAC-01', now(), '{}'::jsonb, 'pass', 'sha256:test')`, uuid.New(), tenant, control,
 	); err != nil {
@@ -62,13 +72,33 @@ func seedControlWithEvidence(t *testing.T, tx pgx.Tx, tenant uuid.UUID) {
 	}
 }
 
-func countOf(counts []oauthclient.UnboundTableCount, table string) int64 {
+func seedChecklist(t *testing.T, tx pgx.Tx, tenant, control uuid.UUID) {
+	t.Helper()
+	if _, err := tx.Exec(context.Background(),
+		`INSERT INTO personnel_security_checklists (tenant_id, workflow_kind, source, person_external_id, control_id, due_at)
+		 VALUES ($1, 'onboarding', 'manual', 'unbound-rows-test', $2, now())`, tenant, control,
+	); err != nil {
+		t.Fatalf("insert checklist: %v", err)
+	}
+}
+
+func seedRisk(t *testing.T, tx pgx.Tx, tenant uuid.UUID) {
+	t.Helper()
+	if _, err := tx.Exec(context.Background(),
+		`INSERT INTO risks (id, tenant_id, title, category) VALUES ($1, $2, 'unbound-rows test', 'operational')`,
+		uuid.New(), tenant,
+	); err != nil {
+		t.Fatalf("insert risk: %v", err)
+	}
+}
+
+func find(counts []oauthclient.UnboundTableCount, table string) oauthclient.UnboundTableCount {
 	for _, c := range counts {
 		if c.Table == table {
-			return c.Rows
+			return c
 		}
 	}
-	return 0
+	return oauthclient.UnboundTableCount{Table: table}
 }
 
 func countTenantRows(t *testing.T, tx pgx.Tx, table string, tenant uuid.UUID) int64 {
@@ -82,7 +112,69 @@ func countTenantRows(t *testing.T, tx pgx.Tx, table string, tenant uuid.UUID) in
 	return n
 }
 
-func TestListUnboundRows_CountsOnlyAllZeros(t *testing.T) {
+// knownLedgers are append-only tables named by ADR-0012 or guarded by a
+// delete-refusing trigger. ledgerName catches the audit logs.
+var (
+	knownLedgers = []string{
+		"evidence_records", "evidence_audit_log", "control_evaluations", "control_drift_snapshots",
+		"action_plan_audit_log", "change_audit_log",
+	}
+	ledgerName = regexp.MustCompile(`(_audit|_audit_log|_log)$`)
+	// notLedgers match ledgerName but are deliberately deletable: each
+	// migration grants a tenant_delete policy (delivery and rollup
+	// bookkeeping, not a record of fact). A new *_log table must be a
+	// ledger or be added here on purpose.
+	notLedgers = map[string]bool{
+		"channel_delivery_log": true, // 20260608000000_slack_webhook_channels.sql
+		"email_delivery_log":   true, // 20260607020000_email_delivery_channel.sql
+		"staleness_rollup_log": true, // 20260609000000_staleness_rollup_log.sql
+	}
+)
+
+func TestLedgerTables_CoverAppendOnlyTables(t *testing.T) {
+	tx := beginRolledBack(t)
+	ctx := context.Background()
+
+	ledger, err := oauthclient.LedgerTables(ctx, tx)
+	if err != nil {
+		t.Fatalf("LedgerTables: %v", err)
+	}
+	isLedger := map[string]bool{}
+	for _, l := range ledger {
+		isLedger[l] = true
+	}
+	want := append([]string{}, knownLedgers...)
+	rows, err := tx.Query(ctx,
+		`SELECT c.relname FROM pg_class c
+		 JOIN pg_namespace n ON n.oid = c.relnamespace
+		 JOIN pg_attribute a ON a.attrelid = c.oid
+		 WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND NOT c.relispartition
+		   AND a.attname = 'tenant_id' AND NOT a.attisdropped`)
+	if err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	names, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatalf("list tables: %v", err)
+	}
+	for _, n := range names {
+		if ledgerName.MatchString(n) && !notLedgers[n] {
+			want = append(want, n)
+		}
+	}
+	for _, table := range want {
+		if !isLedger[table] {
+			t.Errorf("%s is append-only but not classified as a ledger; a purge would delete from it", table)
+		}
+	}
+	for _, purgeable := range []string{"controls", "risks", "personnel_security_checklists"} {
+		if isLedger[purgeable] {
+			t.Errorf("%s is classified as a ledger, want purgeable", purgeable)
+		}
+	}
+}
+
+func TestListUnboundRows_CountsAndRetains(t *testing.T) {
 	tx := beginRolledBack(t)
 	ctx := context.Background()
 
@@ -90,21 +182,28 @@ func TestListUnboundRows_CountsOnlyAllZeros(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListUnboundRows: %v", err)
 	}
-	seedControlWithEvidence(t, tx, uuid.Nil)
-	seedControlWithEvidence(t, tx, uuid.Nil)
-	seedControlWithEvidence(t, tx, uuid.New())
+	referenced := seedControl(t, tx, uuid.Nil)
+	seedEvidence(t, tx, uuid.Nil, referenced)
+	seedRisk(t, tx, uuid.Nil)
+	seedRisk(t, tx, uuid.New())
 
 	after, err := oauthclient.ListUnboundRows(ctx, tx)
 	if err != nil {
 		t.Fatalf("ListUnboundRows: %v", err)
 	}
-	for _, table := range []string{"controls", "evidence_records"} {
-		if got, want := countOf(after, table), countOf(before, table)+2; got != want {
+	for table, added := range map[string]int64{"controls": 1, "evidence_records": 1, "risks": 1} {
+		if got, want := find(after, table).Rows, find(before, table).Rows+added; got != want {
 			t.Errorf("%s = %d, want %d", table, got, want)
 		}
 	}
-	if got, want := oauthclient.TotalRows(after), oauthclient.TotalRows(before)+4; got != want {
-		t.Errorf("total = %d, want %d", got, want)
+	if got := find(after, "evidence_records").Retained; got != oauthclient.RetainedLedger {
+		t.Errorf("evidence_records retained = %q, want %q", got, oauthclient.RetainedLedger)
+	}
+	if got := find(after, "controls").Retained; !strings.Contains(got, "evidence_records") {
+		t.Errorf("controls retained = %q, want it kept because evidence_records references it", got)
+	}
+	if got := find(after, "risks").Retained; got != "" {
+		t.Errorf("risks retained = %q, want purgeable", got)
 	}
 	for _, c := range after {
 		if c.Rows <= 0 {
@@ -116,15 +215,15 @@ func TestListUnboundRows_CountsOnlyAllZeros(t *testing.T) {
 func TestPurgeUnboundRows_RefusesWrongConfirmation(t *testing.T) {
 	tx := beginRolledBack(t)
 	ctx := context.Background()
-	seedControlWithEvidence(t, tx, uuid.Nil)
+	seedRisk(t, tx, uuid.Nil)
 
 	listed, err := oauthclient.ListUnboundRows(ctx, tx)
 	if err != nil {
 		t.Fatalf("ListUnboundRows: %v", err)
 	}
-	total := oauthclient.TotalRows(listed)
+	total := oauthclient.PurgeableRows(listed)
 
-	_, err = oauthclient.PurgeUnboundRows(ctx, tx, total+1)
+	_, err = oauthclient.PurgeUnboundRows(ctx, tx, total+1, "tester")
 	if !errors.Is(err, oauthclient.ErrPurgeNotConfirmed) {
 		t.Fatalf("err = %v, want ErrPurgeNotConfirmed", err)
 	}
@@ -132,42 +231,106 @@ func TestPurgeUnboundRows_RefusesWrongConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListUnboundRows: %v", err)
 	}
-	if got := oauthclient.TotalRows(again); got != total {
-		t.Errorf("after refused purge total = %d, want %d (nothing deleted)", got, total)
+	if got := oauthclient.PurgeableRows(again); got != total {
+		t.Errorf("after refused purge purgeable total = %d, want %d (nothing deleted)", got, total)
 	}
 }
 
-func TestPurgeUnboundRows_DeletesChildrenFirstAndSparesOtherTenants(t *testing.T) {
+func TestPurgeUnboundRows_PurgesInOrderSparesOthersAndRecords(t *testing.T) {
 	tx := beginRolledBack(t)
 	ctx := context.Background()
 	other := uuid.New()
-	seedControlWithEvidence(t, tx, uuid.Nil)
-	seedControlWithEvidence(t, tx, other)
+
+	control := seedControl(t, tx, uuid.Nil)
+	seedChecklist(t, tx, uuid.Nil, control)
+	seedRisk(t, tx, uuid.Nil)
+	otherControl := seedControl(t, tx, other)
+	seedEvidence(t, tx, other, otherControl)
+	seedRisk(t, tx, other)
 
 	listed, err := oauthclient.ListUnboundRows(ctx, tx)
 	if err != nil {
 		t.Fatalf("ListUnboundRows: %v", err)
 	}
-	purged, err := oauthclient.PurgeUnboundRows(ctx, tx, oauthclient.TotalRows(listed))
+	res, err := oauthclient.PurgeUnboundRows(ctx, tx, oauthclient.PurgeableRows(listed), "tester")
 	if err != nil {
 		t.Fatalf("PurgeUnboundRows: %v", err)
 	}
-	if got, want := oauthclient.TotalRows(purged), oauthclient.TotalRows(listed); got != want {
+	if got, want := oauthclient.PurgeableRows(res.Purged), oauthclient.PurgeableRows(listed); got != want {
 		t.Errorf("purged total = %d, want %d", got, want)
 	}
-	if countOf(purged, "controls") == 0 || countOf(purged, "evidence_records") == 0 {
-		t.Errorf("purge log %v is missing controls or evidence_records", purged)
+	for _, table := range []string{"controls", "personnel_security_checklists", "risks"} {
+		if find(res.Purged, table).Rows == 0 {
+			t.Errorf("purge log %v is missing %s", res.Purged, table)
+		}
+		if got := countTenantRows(t, tx, table, uuid.Nil); got != 0 {
+			t.Errorf("all-zeros %s after purge = %d, want 0", table, got)
+		}
 	}
-	remaining, err := oauthclient.ListUnboundRows(ctx, tx)
+	for table, want := range map[string]int64{"controls": 1, "evidence_records": 1, "risks": 1} {
+		if got := countTenantRows(t, tx, table, other); got != want {
+			t.Errorf("other tenant's %s = %d, want %d (purge must not touch it)", table, got, want)
+		}
+	}
+
+	var (
+		osUser string
+		total  int64
+		purged []byte
+		dbRole string
+	)
+	if err := tx.QueryRow(ctx,
+		`SELECT os_user, total_rows, purged, db_role FROM tenant_data_purges WHERE id = $1`, res.AuditID,
+	).Scan(&osUser, &total, &purged, &dbRole); err != nil {
+		t.Fatalf("read tenant_data_purges row %s: %v", res.AuditID, err)
+	}
+	var logged []oauthclient.UnboundTableCount
+	if err := json.Unmarshal(purged, &logged); err != nil {
+		t.Fatalf("decode purged: %v", err)
+	}
+	if osUser != "tester" || total != oauthclient.PurgeableRows(res.Purged) || len(logged) != len(res.Purged) || dbRole == "" {
+		t.Errorf("tenant_data_purges row = (%q, %d, %v, %q), want (tester, %d, %v, <role>)",
+			osUser, total, logged, dbRole, oauthclient.PurgeableRows(res.Purged), res.Purged)
+	}
+
+	if _, err := tx.Exec(ctx, `SAVEPOINT append_only`); err != nil {
+		t.Fatalf("savepoint: %v", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM tenant_data_purges WHERE id = $1`, res.AuditID); err == nil {
+		t.Error("deleting a tenant_data_purges row succeeded; the table must be append-only")
+	}
+	if _, err := tx.Exec(ctx, `ROLLBACK TO SAVEPOINT append_only`); err != nil {
+		t.Fatalf("rollback to savepoint: %v", err)
+	}
+}
+
+func TestPurgeUnboundRows_KeepsLedgerRowsAndTheirParents(t *testing.T) {
+	tx := beginRolledBack(t)
+	ctx := context.Background()
+	control := seedControl(t, tx, uuid.Nil)
+	seedEvidence(t, tx, uuid.Nil, control)
+	seedRisk(t, tx, uuid.Nil)
+
+	evidenceBefore := countTenantRows(t, tx, "evidence_records", uuid.Nil)
+	controlsBefore := countTenantRows(t, tx, "controls", uuid.Nil)
+	listed, err := oauthclient.ListUnboundRows(ctx, tx)
 	if err != nil {
 		t.Fatalf("ListUnboundRows: %v", err)
 	}
-	if len(remaining) != 0 {
-		t.Errorf("after purge %v remain, want none", remaining)
+	res, err := oauthclient.PurgeUnboundRows(ctx, tx, oauthclient.PurgeableRows(listed), "tester")
+	if err != nil {
+		t.Fatalf("PurgeUnboundRows: %v", err)
 	}
-	for _, table := range []string{"controls", "evidence_records"} {
-		if got := countTenantRows(t, tx, table, other); got != 1 {
-			t.Errorf("other tenant's %s = %d, want 1 (purge must not touch it)", table, got)
-		}
+	if got := countTenantRows(t, tx, "evidence_records", uuid.Nil); got != evidenceBefore {
+		t.Errorf("all-zeros evidence_records after purge = %d, want %d (ledger is never purged)", got, evidenceBefore)
+	}
+	if got := countTenantRows(t, tx, "controls", uuid.Nil); got != controlsBefore {
+		t.Errorf("all-zeros controls after purge = %d, want %d (referenced by the ledger)", got, controlsBefore)
+	}
+	if got := countTenantRows(t, tx, "risks", uuid.Nil); got != 0 {
+		t.Errorf("all-zeros risks after purge = %d, want 0", got)
+	}
+	if find(res.Retained, "evidence_records").Rows == 0 || find(res.Retained, "controls").Rows == 0 {
+		t.Errorf("purge result retained = %v, want evidence_records and controls", res.Retained)
 	}
 }

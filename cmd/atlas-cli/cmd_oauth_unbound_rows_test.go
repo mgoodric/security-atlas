@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 )
 
@@ -56,24 +58,46 @@ func TestWriteUnboundListing(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	counts := []oauthclient.UnboundTableCount{{Table: "controls", Rows: 2}, {Table: "evidence_records", Rows: 5}}
+	counts := []oauthclient.UnboundTableCount{
+		{Table: "controls", Rows: 2},
+		{Table: "evidence_records", Rows: 5, Retained: oauthclient.RetainedLedger},
+		{Table: "risks", Rows: 1},
+	}
 	if err := writeUnboundListing(&out, counts); err != nil {
 		t.Fatal(err)
 	}
-	want := "controls\t2\nevidence_records\t5\ntotal\t7\nto delete them: atlas-cli oauth unbound-rows --purge --confirm-rows 7\n"
+	want := "controls\t2\n" +
+		"evidence_records\t5\tretained: append-only ledger (ADR-0012, tombstone only)\n" +
+		"risks\t1\n" +
+		"purgeable total\t3\nto delete them: atlas-cli oauth unbound-rows --purge --confirm-rows 3\n"
 	if got := out.String(); got != want {
 		t.Errorf("listing = %q, want %q", got, want)
+	}
+
+	var retainedOnly bytes.Buffer
+	if err := writeUnboundListing(&retainedOnly, counts[1:2]); err != nil {
+		t.Fatal(err)
+	}
+	if got := retainedOnly.String(); !strings.HasSuffix(got, "purgeable total\t0\nnothing to purge: every listed row is retained\n") {
+		t.Errorf("retained-only listing = %q", got)
 	}
 }
 
 func TestWriteUnboundPurge(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
-	purged := []oauthclient.UnboundTableCount{{Table: "controls", Rows: 2}, {Table: "evidence_records", Rows: 5}}
-	if err := writeUnboundPurge(&out, purged); err != nil {
+	id := uuid.MustParse("0e3b4a7e-4ad8-4c14-9c9a-6f8e2b13c92d")
+	res := oauthclient.PurgeResult{
+		AuditID:  id,
+		Purged:   []oauthclient.UnboundTableCount{{Table: "controls", Rows: 2}, {Table: "risks", Rows: 5}},
+		Retained: []oauthclient.UnboundTableCount{{Table: "evidence_records", Rows: 4, Retained: oauthclient.RetainedLedger}},
+	}
+	if err := writeUnboundPurge(&out, res); err != nil {
 		t.Fatal(err)
 	}
-	want := "purged\tcontrols\t2\npurged\tevidence_records\t5\npurged total\t7\n"
+	want := "purged\tcontrols\t2\npurged\trisks\t5\n" +
+		"kept\tevidence_records\t4\tretained: append-only ledger (ADR-0012, tombstone only)\n" +
+		"purged total\t7\nrecorded in tenant_data_purges\t" + id.String() + "\n"
 	if got := out.String(); got != want {
 		t.Errorf("purge log = %q, want %q", got, want)
 	}

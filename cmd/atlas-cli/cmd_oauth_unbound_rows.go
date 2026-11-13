@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/user"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -33,10 +34,14 @@ func newOAuthUnboundRowsCmd() *cobra.Command {
 OAuth clients that were not bound to a tenant, before such writes were
 refused; no user can see them, and any unbound client token can read them.
 
-Without flags the command only reads. To delete every listed row, run it
-again with --purge and --confirm-rows set to the total the listing printed.
+Without flags the command only reads. Append-only ledger tables (such as
+evidence_records and every *_audit_log) are listed as retained and are never
+purged (ADR-0012: ledger disposal is by tombstone only), and so is any table
+whose rows a retained row references. To delete the rest, run it again with
+--purge and --confirm-rows set to the purgeable total the listing printed.
 The purge runs in one transaction and changes nothing when the total no
-longer matches. It prints each table it purged and how many rows.
+longer matches. It prints each table it purged and kept, and records the
+purge in the tenant_data_purges table.
 
 There is no reassign. To keep the data, re-create it in the right tenant
 with a bound client (for controls, re-run 'atlas-cli controls upload'
@@ -65,7 +70,7 @@ Examples:
 			}
 			defer pool.Close()
 			if purge {
-				return runPurgeUnboundRows(ctx, cmd.OutOrStdout(), pool, confirmRows)
+				return runPurgeUnboundRows(ctx, cmd.OutOrStdout(), pool, confirmRows, currentOSUser())
 			}
 			return runListUnboundRows(ctx, cmd.OutOrStdout(), pool)
 		},
@@ -95,7 +100,7 @@ type txBeginner interface {
 }
 
 func runListUnboundRows(ctx context.Context, out io.Writer, db txBeginner) error {
-	tx, err := db.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
@@ -107,13 +112,13 @@ func runListUnboundRows(ctx context.Context, out io.Writer, db txBeginner) error
 	return writeUnboundListing(out, counts)
 }
 
-func runPurgeUnboundRows(ctx context.Context, out io.Writer, db txBeginner, confirmRows int64) error {
-	tx, err := db.BeginTx(ctx, pgx.TxOptions{})
+func runPurgeUnboundRows(ctx context.Context, out io.Writer, db txBeginner, confirmRows int64, osUser string) error {
+	tx, err := db.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	purged, err := oauthclient.PurgeUnboundRows(ctx, tx, confirmRows)
+	res, err := oauthclient.PurgeUnboundRows(ctx, tx, confirmRows, osUser)
 	if errors.Is(err, oauthclient.ErrPurgeNotConfirmed) {
 		return fmt.Errorf("%w; nothing was deleted. Run without --purge and restate the total", err)
 	}
@@ -123,7 +128,15 @@ func runPurgeUnboundRows(ctx context.Context, out io.Writer, db txBeginner, conf
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit purge: %w", err)
 	}
-	return writeUnboundPurge(out, purged)
+	return writeUnboundPurge(out, res)
+}
+
+// currentOSUser names who ran the purge for its tenant_data_purges row.
+func currentOSUser() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return os.Getenv("USER")
 }
 
 func writeUnboundListing(out io.Writer, counts []oauthclient.UnboundTableCount) error {
@@ -132,21 +145,40 @@ func writeUnboundListing(out io.Writer, counts []oauthclient.UnboundTableCount) 
 		return err
 	}
 	for _, c := range counts {
-		if _, err := fmt.Fprintf(out, "%s\t%d\n", c.Table, c.Rows); err != nil {
+		if err := writeCountLine(out, "", c); err != nil {
 			return err
 		}
 	}
-	total := oauthclient.TotalRows(counts)
-	_, err := fmt.Fprintf(out, "total\t%d\nto delete them: atlas-cli oauth unbound-rows --purge --confirm-rows %d\n", total, total)
+	total := oauthclient.PurgeableRows(counts)
+	if total == 0 {
+		_, err := fmt.Fprintln(out, "purgeable total\t0\nnothing to purge: every listed row is retained")
+		return err
+	}
+	_, err := fmt.Fprintf(out, "purgeable total\t%d\nto delete them: atlas-cli oauth unbound-rows --purge --confirm-rows %d\n", total, total)
 	return err
 }
 
-func writeUnboundPurge(out io.Writer, purged []oauthclient.UnboundTableCount) error {
-	for _, c := range purged {
-		if _, err := fmt.Fprintf(out, "purged\t%s\t%d\n", c.Table, c.Rows); err != nil {
+func writeUnboundPurge(out io.Writer, res oauthclient.PurgeResult) error {
+	for _, c := range res.Purged {
+		if err := writeCountLine(out, "purged\t", c); err != nil {
 			return err
 		}
 	}
-	_, err := fmt.Fprintf(out, "purged total\t%d\n", oauthclient.TotalRows(purged))
+	for _, c := range res.Retained {
+		if err := writeCountLine(out, "kept\t", c); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintf(out, "purged total\t%d\nrecorded in tenant_data_purges\t%s\n",
+		oauthclient.PurgeableRows(res.Purged), res.AuditID)
+	return err
+}
+
+func writeCountLine(out io.Writer, prefix string, c oauthclient.UnboundTableCount) error {
+	if c.Retained != "" {
+		_, err := fmt.Fprintf(out, "%s%s\t%d\tretained: %s\n", prefix, c.Table, c.Rows, c.Retained)
+		return err
+	}
+	_, err := fmt.Fprintf(out, "%s%s\t%d\n", prefix, c.Table, c.Rows)
 	return err
 }
