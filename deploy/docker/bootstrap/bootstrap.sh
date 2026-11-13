@@ -45,7 +45,7 @@
 #
 # Slice 196: ATLAS_BOOTSTRAP_TOKEN is no longer consumed by this script.
 # Phase 5 issues an OAuth client at runtime via `atlas-cli oauth
-# issue-client`, persists credentials to
+# issue-client --tenant $ATLAS_BOOTSTRAP_TENANT`, persists credentials to
 # ${ATLAS_DATA_DIR}/oauth-bootstrap-credentials.json (mode 0600), and
 # drives `atlas-cli controls upload --client-id ... --client-secret ...`.
 # The atlas service still consumes ATLAS_BOOTSTRAP_TOKEN to mint the
@@ -152,7 +152,11 @@ else
     # fall back to a unix-second-suffixed retry name so bootstrap stays
     # idempotent against operator volume wipes.
     set +e
-    ISSUE_OUT="$(atlas-cli oauth issue-client "$OAUTH_CLIENT_NAME" 2>&1)"
+    #
+    # security-atlas#1739: the client is bound to ATLAS_BOOTSTRAP_TENANT so
+    # the controls it uploads land in the tenant the default user signs in
+    # to. An unbound client's writes are refused.
+    ISSUE_OUT="$(atlas-cli oauth issue-client "$OAUTH_CLIENT_NAME" --tenant "$ATLAS_BOOTSTRAP_TENANT" 2>&1)"
     ISSUE_RC=$?
     set -e
     if [ "$ISSUE_RC" -ne 0 ]; then
@@ -160,7 +164,7 @@ else
             *"already exists"*)
                 RETRY_NAME="${OAUTH_CLIENT_NAME}-retry-$(date -u +%s)"
                 log "  '$OAUTH_CLIENT_NAME' already exists — issuing '$RETRY_NAME' instead"
-                ISSUE_OUT="$(atlas-cli oauth issue-client "$RETRY_NAME")"
+                ISSUE_OUT="$(atlas-cli oauth issue-client "$RETRY_NAME" --tenant "$ATLAS_BOOTSTRAP_TENANT")"
                 OAUTH_CLIENT_NAME="$RETRY_NAME"
                 ;;
             *)
@@ -191,6 +195,12 @@ if [ -z "$OAUTH_CLIENT_ID" ] || [ -z "$OAUTH_CLIENT_SECRET" ]; then
     log "ERROR: persisted credentials file at $OAUTH_CREDS_FILE missing client_id/secret"
     exit 1
 fi
+
+# security-atlas#1739: a client persisted by an older bootstrap was issued
+# unbound. Bind it to the bootstrap tenant; for a client already bound
+# there this is a no-op, and a client bound elsewhere fails loudly here
+# rather than uploading into the wrong tenant.
+atlas-cli oauth bind-client "$OAUTH_CLIENT_ID" --tenant "$ATLAS_BOOTSTRAP_TENANT" >/dev/null
 
 # ----- Phase 5b: upload the 50 SOC 2 control bundles -----
 log "uploading control bundles from $CONTROLS_DIR ..."
