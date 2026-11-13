@@ -329,7 +329,7 @@
             "type": "string"
           },
           "observed_at": {
-            "description": "ISO-8601 timestamp; defaults to now if omitted.",
+            "description": "ISO-8601 timestamp; defaults to now if omitted. Must be within 24h of the time the proposal is confirmed, or the confirm is rejected.",
             "format": "date-time",
             "type": "string"
           },
@@ -344,6 +344,10 @@
               "na",
               "inconclusive"
             ],
+            "type": "string"
+          },
+          "schema_version": {
+            "description": "Semver of the evidence_kind schema the payload conforms to; defaults to 1.0.0.",
             "type": "string"
           }
         },

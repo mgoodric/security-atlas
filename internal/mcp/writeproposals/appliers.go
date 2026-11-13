@@ -3,8 +3,15 @@
 // confirm transaction so a downstream-write failure rolls the proposal
 // back to state=ai_proposed.
 //
-// Applier SQL is HAND-WRITTEN here rather than routed through the sqlc-
-// wrapped domain stores. Two reasons:
+// The two evidence appliers (update_control_state, push_evidence) never
+// write evidence_records themselves. They hand the record to
+// ingest.Service.Process, the one ingestion stage every other evidence
+// path uses (#1751), so an approved proposal gets the same observed_at
+// skew check, schema validation, credential kind scope, provenance and
+// evidence_audit_log row as a REST or gRPC push.
+//
+// Risk applier SQL is HAND-WRITTEN here rather than routed through the
+// sqlc-wrapped domain stores. Two reasons:
 //
 //   1. The domain stores own their own transactions; calling them from
 //      inside our tx would either nest (pgx doesn't natively support
@@ -16,7 +23,7 @@
 //      domain-store CreateInput. Hand-writing the INSERT keeps the
 //      attack surface scoped to exactly what the tool advertises.
 //
-// All four appliers run as atlas_app, under the proposal's tenant GUC
+// The risk appliers run as atlas_app, under the proposal's tenant GUC
 // (already set by writeproposals.Store.inTx before the applier executes).
 // RLS therefore gates every INSERT/UPDATE; cross-tenant writes are
 // impossible at the DB layer.
@@ -26,11 +33,19 @@ package writeproposals
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
 // CreateRiskInput is the bounded shape the create_risk MCP tool ships
@@ -92,10 +107,32 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	return id.String(), nil
 }
 
+// EvidenceProcessor is the ingestion stage the evidence appliers hand
+// their record to. *ingest.Service satisfies it.
+type EvidenceProcessor interface {
+	Process(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential) (ingest.Receipt, ingest.Decision, error)
+}
+
+// ErrIngestUnavailable is returned by the evidence appliers when no ingest
+// service was wired. They fail closed rather than write the ledger
+// directly.
+var ErrIngestUnavailable = errors.New("ingest service not configured")
+
+// The override evidence kind, registered in the platform schema registry
+// (internal/api/schemaregistry/schemas/manual.control_state_override/).
+const (
+	ControlStateOverrideKind    = "manual.control_state_override.v1"
+	ControlStateOverrideVersion = "1.0.0"
+)
+
+// DefaultPushSchemaVersion is the schema version a push_evidence proposal
+// is validated against when it names none.
+const DefaultPushSchemaVersion = "1.0.0"
+
 // UpdateControlStateInput is the bounded shape the update_control_state
 // MCP tool ships. Constitutional invariant #2 forbids the AI from
 // directly writing control_evaluations; instead we synthesise an
-// evidence_records row with kind=`manual.control_state_override.v1` so
+// evidence record with kind=`manual.control_state_override.v1` so
 // the eval engine sees a valid evidence source and the override flows
 // through the existing pipeline.
 type UpdateControlStateInput struct {
@@ -104,48 +141,44 @@ type UpdateControlStateInput struct {
 	Rationale string `json:"rationale"`
 }
 
-// ApplyUpdateControlState appends a manual override evidence record.
-// Returns the new evidence_records row's UUID for applied_subject.
-func ApplyUpdateControlState(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
-	var in UpdateControlStateInput
-	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
-		return "", fmt.Errorf("apply update_control_state: parse input: %w", err)
+// NewUpdateControlStateApplier returns the update_control_state applier:
+// it ingests a manual override evidence record through ing and returns
+// the record id for applied_subject.
+func NewUpdateControlStateApplier(ing EvidenceProcessor) Applier {
+	return func(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
+		var in UpdateControlStateInput
+		if err := json.Unmarshal(p.ToolInput, &in); err != nil {
+			return "", fmt.Errorf("apply update_control_state: parse input: %w", err)
+		}
+		if in.ControlID == "" || in.State == "" {
+			return "", fmt.Errorf("apply update_control_state: control_id and state are required")
+		}
+		controlID, err := uuid.Parse(in.ControlID)
+		if err != nil {
+			return "", fmt.Errorf("apply update_control_state: control_id must be UUID: %w", err)
+		}
+		result, err := stateToProtoResult(in.State)
+		if err != nil {
+			return "", err
+		}
+		payload := map[string]any{
+			"override_state": in.State,
+			"ai_proposed":    true,
+		}
+		if in.Rationale != "" {
+			payload["rationale"] = in.Rationale
+		}
+		rec, err := proposalRecord(p, ToolUpdateControlState, ControlStateOverrideKind,
+			ControlStateOverrideVersion, controlID, time.Now().UTC(), result, payload)
+		if err != nil {
+			return "", fmt.Errorf("apply update_control_state: %w", err)
+		}
+		id, err := ingestProposalRecord(ctx, ing, tx, p, rec)
+		if err != nil {
+			return "", fmt.Errorf("apply update_control_state: %w", err)
+		}
+		return id, nil
 	}
-	if in.ControlID == "" || in.State == "" {
-		return "", fmt.Errorf("apply update_control_state: control_id and state are required")
-	}
-	controlID, err := uuid.Parse(in.ControlID)
-	if err != nil {
-		return "", fmt.Errorf("apply update_control_state: control_id must be UUID: %w", err)
-	}
-	result, err := stateToEvidenceResult(in.State)
-	if err != nil {
-		return "", err
-	}
-
-	payload, _ := json.Marshal(map[string]any{
-		"override_state": in.State,
-		"rationale":      in.Rationale,
-		"ai_proposed":    true,
-	})
-	id := uuid.New()
-	hash := "mcp-override-" + id.String()
-	_, err = tx.Exec(ctx, `
-		INSERT INTO evidence_records (
-			id, tenant_id, control_id, observed_at, ingested_at,
-			provenance, result, payload, hash, control_ref,
-			evidence_kind, ingestion_path, source_attribution
-		)
-		VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8, $9, $10, 'manual_upload', $11)
-	`, id, p.TenantID, controlID, time.Now().UTC(),
-		[]byte(`{"source":"mcp.write_tool"}`), result, payload, hash,
-		"mcp/control_state_override",
-		"manual.control_state_override.v1",
-		[]byte(`{"actor":"mcp.update_control_state","ai_assisted":true}`))
-	if err != nil {
-		return "", fmt.Errorf("apply update_control_state: insert evidence: %w", err)
-	}
-	return id.String(), nil
 }
 
 // PushEvidenceInput is the bounded shape the push_evidence MCP tool
@@ -153,54 +186,126 @@ func ApplyUpdateControlState(ctx context.Context, tx pgx.Tx, p Proposal) (string
 // 003) but mediated by the HITL approval flow because the LLM is the
 // origin.
 type PushEvidenceInput struct {
-	ControlID  string          `json:"control_id"`
-	Kind       string          `json:"kind"`
-	Result     string          `json:"result"`
-	ObservedAt time.Time       `json:"observed_at,omitempty"`
-	Payload    json.RawMessage `json:"payload,omitempty"`
+	ControlID     string          `json:"control_id"`
+	Kind          string          `json:"kind"`
+	SchemaVersion string          `json:"schema_version,omitempty"`
+	Result        string          `json:"result"`
+	ObservedAt    time.Time       `json:"observed_at,omitempty"`
+	Payload       json.RawMessage `json:"payload,omitempty"`
 }
 
-// ApplyPushEvidence inserts an evidence record.
-func ApplyPushEvidence(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
-	var in PushEvidenceInput
-	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
-		return "", fmt.Errorf("apply push_evidence: parse input: %w", err)
+// NewPushEvidenceApplier returns the push_evidence applier. A proposal
+// whose observed_at is outside ingest.MaxObservedAtSkew fails at confirm
+// with ingest.ErrObservedAtSkew and leaves a rejected_observed_at_skew
+// row in evidence_audit_log, exactly as the same record pushed over REST.
+func NewPushEvidenceApplier(ing EvidenceProcessor) Applier {
+	return func(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
+		var in PushEvidenceInput
+		if err := json.Unmarshal(p.ToolInput, &in); err != nil {
+			return "", fmt.Errorf("apply push_evidence: parse input: %w", err)
+		}
+		if in.ControlID == "" || in.Kind == "" || in.Result == "" {
+			return "", fmt.Errorf("apply push_evidence: control_id, kind, result are required")
+		}
+		controlID, err := uuid.Parse(in.ControlID)
+		if err != nil {
+			return "", fmt.Errorf("apply push_evidence: control_id must be UUID: %w", err)
+		}
+		result, err := stateToProtoResult(in.Result)
+		if err != nil {
+			return "", err
+		}
+		observed := in.ObservedAt
+		if observed.IsZero() {
+			observed = time.Now().UTC()
+		}
+		version := in.SchemaVersion
+		if version == "" {
+			version = DefaultPushSchemaVersion
+		}
+		payload := map[string]any{}
+		if len(in.Payload) > 0 {
+			if err := json.Unmarshal(in.Payload, &payload); err != nil {
+				return "", fmt.Errorf("apply push_evidence: payload must be a JSON object: %w", err)
+			}
+		}
+		rec, err := proposalRecord(p, ToolPushEvidence, in.Kind, version, controlID, observed, result, payload)
+		if err != nil {
+			return "", fmt.Errorf("apply push_evidence: %w", err)
+		}
+		id, err := ingestProposalRecord(ctx, ing, tx, p, rec)
+		if err != nil {
+			return "", fmt.Errorf("apply push_evidence: %w", err)
+		}
+		return id, nil
 	}
-	if in.ControlID == "" || in.Kind == "" || in.Result == "" {
-		return "", fmt.Errorf("apply push_evidence: control_id, kind, result are required")
-	}
-	controlID, err := uuid.Parse(in.ControlID)
+}
+
+// proposalRecord builds the wire record for an approved proposal.
+//
+// The idempotency key derives from the proposal id. Ingest writes the
+// record in its own transaction, not the confirm tx (the audit row of a
+// rejection must survive the confirm rollback), so the key is how a
+// confirm that fails after ingest and is retried finds the first record
+// instead of writing a second one; see ingestProposalRecord.
+func proposalRecord(p Proposal, tool, kind, version string, controlID uuid.UUID, observed time.Time,
+	result evidencev1.Result, payload map[string]any) (*evidencev1.EvidenceRecord, error) {
+	st, err := structpb.NewStruct(payload)
 	if err != nil {
-		return "", fmt.Errorf("apply push_evidence: control_id must be UUID: %w", err)
+		return nil, fmt.Errorf("build payload: %w", err)
 	}
-	if _, err := stateToEvidenceResult(in.Result); err != nil {
+	return &evidencev1.EvidenceRecord{
+		IdempotencyKey: "mcp-proposal:" + p.ID.String(),
+		EvidenceKind:   kind,
+		SchemaVersion:  version,
+		ControlId:      controlID.String(),
+		Scope: []*evidencev1.ScopeDimension{{
+			Key:    "mcp_tool",
+			Values: []string{tool},
+		}},
+		ObservedAt: timestamppb.New(observed),
+		Result:     result,
+		Payload:    st,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "system",
+			ActorId:   "mcp." + tool,
+			SessionId: p.ID.String(),
+		},
+	}, nil
+}
+
+// ingestProposalRecord runs rec through ing under the approving
+// operator's credential, read from ctx. That credential must belong to the
+// proposal's tenant, and its kind scope applies as on any other push.
+//
+// A record already ingested for this proposal (an earlier confirm whose
+// state flip rolled back after ingest committed) is returned as is. The
+// record's observed_at may default to the apply time, so re-ingesting
+// would hash differently and trip ingest's idempotency-mismatch reject.
+func ingestProposalRecord(ctx context.Context, ing EvidenceProcessor, tx pgx.Tx, p Proposal, rec *evidencev1.EvidenceRecord) (string, error) {
+	if ing == nil {
+		return "", ErrIngestUnavailable
+	}
+	cred, ok := authctx.CredentialFromContext(ctx)
+	if !ok || cred.TenantID != p.TenantID.String() {
+		return "", fmt.Errorf("%w: approver credential missing or outside the proposal's tenant", ErrInvalidInput)
+	}
+	var existing uuid.UUID
+	err := tx.QueryRow(ctx, `
+		SELECT id FROM evidence_records
+		WHERE tenant_id = $1 AND idempotency_key = $2
+	`, p.TenantID, rec.IdempotencyKey).Scan(&existing)
+	switch {
+	case err == nil:
+		return existing.String(), nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return "", fmt.Errorf("look up prior ingest: %w", err)
+	}
+	receipt, _, err := ing.Process(ctx, rec, cred)
+	if err != nil {
 		return "", err
 	}
-	observed := in.ObservedAt
-	if observed.IsZero() {
-		observed = time.Now().UTC()
-	}
-	payload := in.Payload
-	if len(payload) == 0 {
-		payload = json.RawMessage(`{}`)
-	}
-	id := uuid.New()
-	hash := "mcp-push-" + id.String()
-	_, err = tx.Exec(ctx, `
-		INSERT INTO evidence_records (
-			id, tenant_id, control_id, observed_at, ingested_at,
-			provenance, result, payload, hash, control_ref,
-			evidence_kind, ingestion_path, source_attribution
-		)
-		VALUES ($1, $2, $3, $4, now(), $5, $6, $7, $8, $9, $10, 'push', $11)
-	`, id, p.TenantID, controlID, observed,
-		[]byte(`{"source":"mcp.write_tool"}`), in.Result, []byte(payload),
-		hash, "mcp/push_evidence", in.Kind,
-		[]byte(`{"actor":"mcp.push_evidence","ai_assisted":true}`))
-	if err != nil {
-		return "", fmt.Errorf("apply push_evidence: insert: %w", err)
-	}
-	return id.String(), nil
+	return receipt.RecordID, nil
 }
 
 // UpdateRiskTreatmentInput is the bounded shape the update_risk_treatment
@@ -241,23 +346,38 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 }
 
 // RegisterDefaultAppliers wires all four canonical appliers onto the
-// store. Callers may register custom appliers (e.g., tests) BEFORE or
-// AFTER this — later registrations win.
-func RegisterDefaultAppliers(s *Store) *Store {
+// store. The evidence appliers ingest through ing — push_evidence under
+// ingestion_path=push, update_control_state under manual_upload — and a
+// nil ing makes them fail closed with ErrIngestUnavailable. Callers may
+// register custom appliers (e.g., tests) BEFORE or AFTER this — later
+// registrations win.
+func RegisterDefaultAppliers(s *Store, ing *ingest.Service) *Store {
+	var push, manual EvidenceProcessor
+	if ing != nil {
+		push = ing.WithPath("push")
+		manual = ing.WithPath("manual_upload")
+	}
 	return s.
 		WithApplier(ToolCreateRisk, ApplyCreateRisk).
-		WithApplier(ToolUpdateControlState, ApplyUpdateControlState).
-		WithApplier(ToolPushEvidence, ApplyPushEvidence).
+		WithApplier(ToolUpdateControlState, NewUpdateControlStateApplier(manual)).
+		WithApplier(ToolPushEvidence, NewPushEvidenceApplier(push)).
 		WithApplier(ToolUpdateRiskTreatment, ApplyUpdateRiskTreatment)
 }
 
-// stateToEvidenceResult validates that a string is one of the four
-// evidence_result enum values. Returns the canonical lowercased form.
-func stateToEvidenceResult(s string) (string, error) {
+// stateToProtoResult validates that a string is one of the four
+// evidence_result enum values and maps it to the wire enum.
+func stateToProtoResult(s string) (evidencev1.Result, error) {
 	switch s {
-	case "pass", "fail", "na", "inconclusive":
-		return s, nil
+	case "pass":
+		return evidencev1.Result_RESULT_PASS, nil
+	case "fail":
+		return evidencev1.Result_RESULT_FAIL, nil
+	case "na":
+		return evidencev1.Result_RESULT_NA, nil
+	case "inconclusive":
+		return evidencev1.Result_RESULT_INCONCLUSIVE, nil
 	default:
-		return "", fmt.Errorf("invalid evidence result/state %q (want pass|fail|na|inconclusive)", s)
+		return evidencev1.Result_RESULT_UNSPECIFIED,
+			fmt.Errorf("invalid evidence result/state %q (want pass|fail|na|inconclusive)", s)
 	}
 }

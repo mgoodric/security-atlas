@@ -208,6 +208,10 @@ const pushEvidenceInputSchema = `{
       "minLength": 1,
       "description": "evidence_kind slug (e.g., aws.s3.bucket_encryption.v1)."
     },
+    "schema_version": {
+      "type": "string",
+      "description": "Semver of the evidence_kind schema the payload conforms to; defaults to 1.0.0."
+    },
     "result": {
       "type": "string",
       "enum": ["pass", "fail", "na", "inconclusive"]
@@ -215,7 +219,7 @@ const pushEvidenceInputSchema = `{
     "observed_at": {
       "type": "string",
       "format": "date-time",
-      "description": "ISO-8601 timestamp; defaults to now if omitted."
+      "description": "ISO-8601 timestamp; defaults to now if omitted. Must be within 24h of the time the proposal is confirmed, or the confirm is rejected."
     },
     "payload": {
       "type": "object",
