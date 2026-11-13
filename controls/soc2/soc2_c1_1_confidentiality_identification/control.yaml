@@ -2,13 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_c1_1_confidentiality_identification
 title: "Confidential information identified per data classification scheme"
 description: |
-  Confidential information is identified and tracked so it can be handled
-  accordingly (TSC C1.1). The control owner attests annually that the data
-  classification scheme (see CC6.7's data_classification control)
-  identifies which fields, tables, and data flows are designated
-  "confidential", and that the designation is reflected in handling
-  controls (access restrictions, encryption-at-rest requirements,
-  retention rules).
+  The entity identifies and maintains confidential information to meet
+  the entity's objectives related to confidentiality (TSC C1.1). The
+  control owner attests annually that the data classification scheme
+  (see CC6.7's data_classification control) identifies which fields,
+  tables, and data flows are designated "confidential", and that the
+  designation is reflected in handling controls (access restrictions,
+  encryption-at-rest requirements, retention rules).
 
 scf_anchor_id: DCH-01
 control_family: DCH

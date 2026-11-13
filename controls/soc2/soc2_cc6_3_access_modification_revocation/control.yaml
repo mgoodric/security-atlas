@@ -2,10 +2,11 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc6_3_access_modification_revocation
 title: "Terminated users revoked from IdP within 24 hours of termination"
 description: |
-  Access is granted, changed and taken away on approval and on time (TSC
-  CC6.3). The query joins the HRIS termination stream against the Okta
-  user lifecycle and asserts that every termination event was followed by
-  an Okta user-deactivate or user-delete event within 24 hours. This is
+  The entity authorizes, modifies, or removes access to data, software,
+  functions, and other protected information assets (TSC CC6.3). The
+  query joins the HRIS termination stream against the Okta user
+  lifecycle and asserts that every termination event was followed by an
+  Okta user-deactivate or user-delete event within 24 hours. This is
   the auditor's most-sampled CC6.3 manifestation.
 
 scf_anchor_id: IAC-07

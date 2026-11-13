@@ -2,12 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc3_1_risk_objectives
 title: "Risk management program defines and reviews security objectives"
 description: |
-  Security objectives are written down clearly enough that risks to them
-  can be found and weighed (TSC CC3.1). The control owner attests annually
-  that the risk management program documents security objectives in
-  measurable terms (e.g. confidentiality of customer data, availability
-  targets, regulatory obligations) and that those objectives are linked to
-  specific risks in the register.
+  The entity specifies objectives with sufficient clarity to enable the
+  identification and assessment of risks (TSC CC3.1). The control owner
+  attests annually that the risk management program documents security
+  objectives in measurable terms (e.g. confidentiality of customer data,
+  availability targets, regulatory obligations) and that those objectives
+  are linked to specific risks in the register.
 
 scf_anchor_id: RSK-01
 control_family: RSK

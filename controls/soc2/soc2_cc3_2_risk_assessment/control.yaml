@@ -2,11 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc3_2_risk_assessment
 title: "Annual risk assessment completed and reviewed"
 description: |
-  Risks to those objectives are found and analysed, and the analysis
-  decides how each one is treated (TSC CC3.2). The control owner uploads
-  the most recent completed risk assessment — methodology (NIST 800-30
-  default), date, participants, and a count of risks identified by
-  severity tier. The evidence is the PDF or signed report.
+  The entity identifies risks to the achievement of its objectives and
+  analyzes risks as a basis for determining how the risks should be
+  managed (TSC CC3.2). The control owner uploads the most recent
+  completed risk assessment — methodology (NIST 800-30 default), date,
+  participants, and a count of risks identified by severity tier. The
+  evidence is the PDF or signed report.
 
 scf_anchor_id: RSK-04
 control_family: RSK

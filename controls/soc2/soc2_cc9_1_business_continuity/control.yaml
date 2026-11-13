@@ -2,7 +2,8 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc9_1_business_continuity
 title: "Business continuity plan reviewed annually"
 description: |
-  Plans exist to limit the damage a business disruption can do (TSC
+  The entity identifies, selects, and develops risk mitigation
+  activities for risks arising from potential business disruptions (TSC
   CC9.1). The control owner uploads the current business continuity /
   disaster recovery plan annually, alongside a confirmation that the
   document was reviewed and is current — including stated RTO / RPO

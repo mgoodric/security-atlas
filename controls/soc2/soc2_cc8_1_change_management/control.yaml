@@ -2,12 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc8_1_change_management
 title: "Production-deploying repositories enforce branch protection"
 description: |
-  Changes to infrastructure, data, software and procedures reach
-  production only by a controlled, approved path (TSC CC8.1). For a SaaS
-  codebase the testable manifestation is: every repository that deploys to
-  production has GitHub branch protection enabled on the production branch
-  — required pull-request reviews, status checks, no force-push, no direct
-  push by non-admins.
+  The entity authorizes, designs, develops or acquires, configures,
+  documents, tests, approves, and implements changes to infrastructure,
+  data, software, and procedures (TSC CC8.1). For a SaaS codebase the
+  testable manifestation is: every repository that deploys to
+  production has GitHub branch protection enabled on the production
+  branch — required pull-request reviews, status checks, no force-push,
+  no direct push by non-admins.
 
 scf_anchor_id: CHG-02
 control_family: CHG

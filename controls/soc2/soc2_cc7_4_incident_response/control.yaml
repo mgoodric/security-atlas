@@ -2,12 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc7_4_incident_response
 title: "Incident response plan exists and incidents are logged"
 description: |
-  Confirmed incidents are handled by following a written response plan
-  (TSC CC7.4). The control owner uploads quarterly evidence of: (a) the
-  current IR plan version on file, (b) a list of incidents declared in the
-  period (zero is a valid count, but the listing itself is required
-  evidence), and (c) for each declared incident, a link to the
-  post-incident report or ticket showing the IR playbook was followed.
+  The entity responds to identified security incidents by executing a
+  defined incident response program (TSC CC7.4). The control owner
+  uploads quarterly evidence of: (a) the current IR plan version on
+  file, (b) a list of incidents declared in the period (zero is a
+  valid count, but the listing itself is required evidence), and (c)
+  for each declared incident, a link to the post-incident report or
+  ticket showing the IR playbook was followed.
 
 scf_anchor_id: IRO-04
 control_family: IRO

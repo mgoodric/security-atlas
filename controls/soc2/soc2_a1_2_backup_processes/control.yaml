@@ -2,11 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_a1_2_backup_processes
 title: "Backup processes documented and operational"
 description: |
-  Backups, and the infrastructure needed to restore from them, are in
-  place and kept running (TSC A1.2). The control owner uploads quarterly
-  evidence: the list of backed-up data stores, the backup schedule per
-  store, the most recent successful backup timestamp per store, and the
-  retention configuration.
+  The entity authorizes, designs, develops or acquires, implements,
+  operates, approves, maintains, and monitors environmental
+  protections, software, data backup processes, and recovery
+  infrastructure to meet its objectives (TSC A1.2). The control owner
+  uploads quarterly evidence: the list of backed-up data stores, the
+  backup schedule per store, the most recent successful backup
+  timestamp per store, and the retention configuration.
 
 scf_anchor_id: BCD-09
 control_family: BCD

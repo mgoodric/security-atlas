@@ -27,31 +27,16 @@ redistribution item.
 
 ## D2 — What changed
 
-| File                                     | Change                                                                                                                                                                                                                                                                                                                                      |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `controls/soc2/*/control.yaml`           | 45 of 50 descriptions. 43 opened with the criterion sentence and 2 (CC6.3 periodic review, CC6.3 privileged accounts) quoted a criterion fragment; the opener is replaced and the rest of each description (the operational test) is kept. The other 5 already opened with project text. `(TSC …)` and `COSO Principle N` citations remain. |
-| `controls/soc2/README.md`                | New "Licensing posture" section so the rule survives the next bundle edit.                                                                                                                                                                                                                                                                  |
-| `internal/api/anchorseed/data.go`        | 5 SOC 2 and 5 ISO 27001 sample `Text` values (both had the source sentence, ISO with "shall"). NIST CSF texts stay: public domain.                                                                                                                                                                                                          |
-| `data/crosswalks/iso27001-2022.yaml`     | All 93 bodies. Nearly all were the Annex A control sentence with "shall" swapped for the indicative, which the header said the file did not do. Titles stay: the header treats the Annex A short titles as factual references.                                                                                                              |
-| `data/crosswalks/pci-dss-4.0.yaml`       | All 31 bodies. Most tracked the requirement sentence. Titles stay (see D4).                                                                                                                                                                                                                                                                 |
-| `data/crosswalks/soc2-tsc-2017.yaml`     | PI1.1 body, the closest to the source phrasing after #1891 (from the #1891 review).                                                                                                                                                                                                                                                         |
-| `deploy/docker/docker-compose.proxy.yml` | `atlas-bootstrap` sets `ATLAS_COMPOSE_ARGS` to both `-f` files, so the printed opt-in command targets the proxy stack (from the #1891 review). `test-self-host-bundle.sh` expects the overlay in proxy mode.                                                                                                                                |
+| File                                     | Change                                                                                                                                                                                                                         |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `internal/api/anchorseed/data.go`        | 5 SOC 2 and 5 ISO 27001 sample `Text` values (both had the source sentence, ISO with "shall"). NIST CSF texts stay: public domain.                                                                                             |
+| `data/crosswalks/iso27001-2022.yaml`     | All 93 bodies. Nearly all were the Annex A control sentence with "shall" swapped for the indicative, which the header said the file did not do. Titles stay: the header treats the Annex A short titles as factual references. |
+| `data/crosswalks/pci-dss-4.0.yaml`       | All 31 bodies. Most tracked the requirement sentence. Titles stay (see D4).                                                                                                                                                    |
+| `data/crosswalks/soc2-tsc-2017.yaml`     | PI1.1 body, the closest to the source phrasing after #1891 (from the #1891 review).                                                                                                                                            |
+| `deploy/docker/docker-compose.proxy.yml` | `atlas-bootstrap` sets `ATLAS_COMPOSE_ARGS` to both `-f` files, so the printed opt-in command targets the proxy stack (from the #1891 review). `test-self-host-bundle.sh` expects the overlay in proxy mode.                   |
 
 ## D3 — What the next boot updates
 
-- **Stock controls:** phase 5b re-uploads every bundle on every boot.
-  `control.Store.Upload` (`internal/control/store.go`) hashes the raw
-  manifest; a byte-identical bundle is a no-op, and a changed one
-  supersedes the active row (`superseded_by` set) and inserts a new
-  version with `version + 1` and the new description. So the next boot
-  creates a new version for each of the 45 edited controls, in each
-  tenant the bootstrap uploads to. Upload writes no evidence, runs no
-  evaluation and touches no framework edge or tier; SCF anchor, queries
-  and schema are unchanged. Rows keyed on the old `control_id`
-  (evaluations, owner assignments) stay on the superseded version; the
-  new version's evaluation fills in on the next evaluation run. This is
-  the same path any shipped bundle edit takes, not something this change
-  introduces.
 - **SOC 2 crosswalk:** the bootstrap imports it on every boot.
   `soc2import.Import` sees PI1.1's body differ and updates that one
   requirement row. Edge re-seeding (#1873, ADR 0018 §2) keys on
@@ -63,7 +48,21 @@ redistribution item.
   rows and, with no mapping change, re-seeds no edge or tier.
 - **anchorseed:** compiled in; the next server build serves the new text.
 
-## D4 — Left as is
+## D4 — Stock control descriptions deferred to #1909
+
+The first push of this PR also reworded 45 `controls/soc2/*/control.yaml`
+descriptions and added a licensing note to `controls/soc2/README.md`
+(commit `f2fbdcd1`). Review blocked it on the upgrade path, not the
+wording. Phase 5b re-uploads every bundle on every boot, and
+`control.Store.Upload` (`internal/control/store.go`) supersedes a control
+whenever the manifest hash changes, carrying nothing forward. On an
+upgraded install those 45 controls would have lost their owners, evidence
+and freshness, evaluations, exceptions, and their risk, decision,
+action-plan, change and incident links. Those edits are reverted here.
+#1908 adds in-place, description-only updates; #1909 re-applies the
+descriptions from `f2fbdcd1` once #1908 lands.
+
+## D5 — Left as is
 
 - **PCI titles.** Several titles are close to the PCI DSS section headings
   (e.g. 6.2.1 "Bespoke and custom software is developed securely"). The

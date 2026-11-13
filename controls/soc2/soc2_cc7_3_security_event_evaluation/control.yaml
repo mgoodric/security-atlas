@@ -2,12 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc7_3_security_event_evaluation
 title: "Security-relevant GitHub events are reviewed within review SLA"
 description: |
-  Security events are triaged to decide whether they amount to, or could
-  become, an incident (TSC CC7.3). For a SaaS startup the highest-signal
-  evaluable event stream is GitHub's audit log — branch protection
-  toggles, secret scanning alerts, repo visibility changes, key/token
-  creation. The query asserts every security-tagged GitHub event in the
-  period was acknowledged in the evidence ledger within 24 hours.
+  The entity evaluates security events to determine whether they could
+  or have resulted in a failure of the entity to meet its objectives
+  (TSC CC7.3). For a SaaS startup the highest-signal evaluable event
+  stream is GitHub's audit log — branch protection toggles, secret
+  scanning alerts, repo visibility changes, key/token creation. The
+  query asserts every security-tagged GitHub event in the period was
+  acknowledged in the evidence ledger within 24 hours.
 
 scf_anchor_id: AAA-01
 control_family: AAA

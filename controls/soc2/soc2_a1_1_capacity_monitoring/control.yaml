@@ -2,11 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_a1_1_capacity_monitoring
 title: "Production endpoints reporting performance posture"
 description: |
-  Production capacity is tracked against demand so headroom can be added
-  before load outgrows it (TSC A1.1). Endpoint posture from osquery
-  surfaces CPU / memory / disk saturation for the in-scope production
-  hosts; the query asserts each reports values within healthy thresholds
-  on the most recent sample.
+  The entity maintains, monitors, and evaluates current processing
+  capacity and use of system components to manage capacity demand and
+  to enable the implementation of additional capacity (TSC A1.1).
+  Endpoint posture from osquery surfaces CPU / memory / disk
+  saturation for the in-scope production hosts; the query asserts each
+  reports values within healthy thresholds on the most recent sample.
 
 scf_anchor_id: MON-01
 control_family: MON

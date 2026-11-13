@@ -2,11 +2,14 @@ bundle_schema_version: "1"
 bundle_id: soc2_pi1_5_storage_integrity
 title: "Storage retention and integrity controls documented per data class"
 description: |
-  Stored data stays complete and intact at every stage of processing (TSC
-  PI1.5). The control owner attests annually that retention durations are
-  documented for each data class, integrity mechanisms (checksums, signed
-  records, append-only ledgers where applicable) are in place for
-  restricted data, and recovery / re-replay procedures are tested.
+  The entity implements policies and procedures to store inputs, items
+  in processing, and outputs completely, accurately, and timely in
+  accordance with system specifications to meet the entity's objectives
+  (TSC PI1.5). The control owner attests annually that retention
+  durations are documented for each data class, integrity mechanisms
+  (checksums, signed records, append-only ledgers where applicable)
+  are in place for restricted data, and recovery / re-replay
+  procedures are tested.
 
 scf_anchor_id: DCH-03
 control_family: DCH
