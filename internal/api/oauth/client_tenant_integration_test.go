@@ -67,7 +67,7 @@ func TestIntegrationClientCredentials_BoundClientCarriesTenant(t *testing.T) {
 }
 
 // seedOAuthTenantRow inserts a tenants row through the BYPASSRLS pool
-// (oauth_clients.tenant_id is a foreign key to tenants) and removes it,
+// (oauth_clients.bound_tenant_id is a foreign key to tenants) and removes it,
 // with any client bound to it, when the test ends.
 func seedOAuthTenantRow(t *testing.T) uuid.UUID {
 	t.Helper()
@@ -90,7 +90,7 @@ func seedOAuthTenantRow(t *testing.T) uuid.UUID {
 	t.Cleanup(func() {
 		defer admin.Close()
 		c := context.Background()
-		_, _ = admin.Exec(c, `DELETE FROM oauth_clients WHERE tenant_id = $1`, id)
+		_, _ = admin.Exec(c, `DELETE FROM oauth_clients WHERE bound_tenant_id = $1`, id)
 		_, _ = admin.Exec(c, `DELETE FROM tenants WHERE id = $1`, id)
 	})
 	return id

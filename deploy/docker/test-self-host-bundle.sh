@@ -578,7 +578,7 @@ IN_TENANT="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${BOOTST
 [ "${IN_TENANT}" = "50" ] || fail "controls in bootstrap tenant = ${IN_TENANT}, want 50"
 IN_NIL="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${NIL_TENANT_ID}'")"
 [ "${IN_NIL}" = "0" ] || fail "controls in the all-zeros tenant = ${IN_NIL}, want 0"
-UNBOUND="$(db_count "SELECT count(*) FROM oauth_clients WHERE name LIKE 'atlas-bootstrap-controls-%' AND tenant_id IS DISTINCT FROM '${BOOTSTRAP_TENANT_ID}'")"
+UNBOUND="$(db_count "SELECT count(*) FROM oauth_clients WHERE name LIKE 'atlas-bootstrap-controls-%' AND bound_tenant_id IS DISTINCT FROM '${BOOTSTRAP_TENANT_ID}'")"
 [ "${UNBOUND}" = "0" ] || fail "${UNBOUND} bootstrap OAuth client(s) not bound to the bootstrap tenant"
 
 CONTROLS_RESP="$(mktemp)"

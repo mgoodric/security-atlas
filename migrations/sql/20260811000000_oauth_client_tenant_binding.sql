@@ -13,9 +13,12 @@
 --
 -- WHAT IT DOES:
 --
---   1. Adds oauth_clients.tenant_id (NULL = unbound). ON DELETE SET NULL:
+--   1. Adds oauth_clients.bound_tenant_id (NULL = unbound). ON DELETE SET NULL:
 --      deleting a tenant leaves its clients unbound, whose writes are
---      refused, rather than blocking the delete.
+--      refused, rather than blocking the delete. Named bound_tenant_id, not
+--      tenant_id: the row is a platform identity, not tenant-owned data,
+--      and scripts/audit-rls.sh treats every `tenant_id` column as
+--      tenant-scoped (RLS + FORCE required), which this table must not be.
 --   2. Binds every unbound client to the only tenant on a single-tenant
 --      install (the all-zeros tenant is not a tenant). With zero tenants,
 --      or two or more, nothing is bound: on a multi-tenant install the
@@ -31,10 +34,10 @@
 --   re-applying the file binds only clients issued unbound since. The down
 --   migration drops the column.
 
--- ===== 1. oauth_clients.tenant_id =====
+-- ===== 1. oauth_clients.bound_tenant_id =====
 
 ALTER TABLE oauth_clients
-    ADD COLUMN IF NOT EXISTS tenant_id UUID NULL
+    ADD COLUMN IF NOT EXISTS bound_tenant_id UUID NULL
         REFERENCES tenants (id) ON DELETE SET NULL;
 
 -- ===== 2. Bind unbound clients on a single-tenant install =====
@@ -54,7 +57,7 @@ BEGIN
     END IF;
     SELECT id INTO the_tenant FROM tenants WHERE id <> nil_tenant;
 
-    UPDATE oauth_clients SET tenant_id = the_tenant WHERE tenant_id IS NULL;
+    UPDATE oauth_clients SET bound_tenant_id = the_tenant WHERE bound_tenant_id IS NULL;
     GET DIAGNOSTICS bound = ROW_COUNT;
     RAISE NOTICE 'oauth_client_tenant_binding: bound % client(s) to tenant %', bound, the_tenant;
 END

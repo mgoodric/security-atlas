@@ -54,7 +54,7 @@ func clientTenant(t *testing.T, id uuid.UUID) *uuid.UUID {
 	t.Helper()
 	var tenant *uuid.UUID
 	if err := bootstrapAdminPool.QueryRow(context.Background(),
-		`SELECT tenant_id FROM oauth_clients WHERE id = $1`, id,
+		`SELECT bound_tenant_id FROM oauth_clients WHERE id = $1`, id,
 	).Scan(&tenant); err != nil {
 		t.Fatalf("read client tenant: %v", err)
 	}

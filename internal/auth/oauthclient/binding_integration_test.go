@@ -9,7 +9,7 @@
 //     tenant, and refuses a client bound elsewhere (ErrAlreadyBound), a
 //     disabled or missing client (ErrUnknownClient) and uuid.Nil.
 //
-// oauth_clients.tenant_id is a foreign key to tenants, so each test seeds
+// oauth_clients.bound_tenant_id is a foreign key to tenants, so each test seeds
 // real tenant rows through the BYPASSRLS migrate pool.
 package oauthclient_test
 
@@ -38,7 +38,7 @@ func seedTenantRow(t *testing.T, migrate *pgxpool.Pool) uuid.UUID {
 	}
 	t.Cleanup(func() {
 		ctx := context.Background()
-		_, _ = migrate.Exec(ctx, `DELETE FROM oauth_clients WHERE tenant_id = $1`, id)
+		_, _ = migrate.Exec(ctx, `DELETE FROM oauth_clients WHERE bound_tenant_id = $1`, id)
 		_, _ = migrate.Exec(ctx, `DELETE FROM tenants WHERE id = $1`, id)
 	})
 	return id

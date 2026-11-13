@@ -81,7 +81,7 @@ func setupOAuthTenantHTTP(t *testing.T) oauthTenantSetup {
 	return oauthTenantSetup{server: ts, clients: clients, signer: signer, admin: admin}
 }
 
-// seedBoundTenant inserts a tenants row (oauth_clients.tenant_id is a
+// seedBoundTenant inserts a tenants row (oauth_clients.bound_tenant_id is a
 // foreign key to it) and cleans up the tenant's controls, its clients and
 // the row itself.
 func seedBoundTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
@@ -96,7 +96,7 @@ func seedBoundTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 		ctx := context.Background()
 		for _, stmt := range []string{
 			`DELETE FROM controls WHERE tenant_id = $1`,
-			`DELETE FROM oauth_clients WHERE tenant_id = $1`,
+			`DELETE FROM oauth_clients WHERE bound_tenant_id = $1`,
 			`DELETE FROM tenants WHERE id = $1`,
 		} {
 			if _, err := admin.Exec(ctx, stmt, id); err != nil {

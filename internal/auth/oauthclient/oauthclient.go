@@ -158,7 +158,7 @@ func (s *Store) issue(ctx context.Context, name string, tenant *uuid.UUID) (*Cli
 	}
 
 	const q = `
-		INSERT INTO oauth_clients (id, client_id, client_secret_hash, name, tenant_id)
+		INSERT INTO oauth_clients (id, client_id, client_secret_hash, name, bound_tenant_id)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING created_at
 	`
@@ -188,7 +188,7 @@ func (s *Store) Verify(ctx context.Context, clientID, secretPlaintext string) (*
 		return nil, ErrUnknownClient
 	}
 	const q = `
-		SELECT id, client_id, client_secret_hash, name, disabled_at, created_at, tenant_id
+		SELECT id, client_id, client_secret_hash, name, disabled_at, created_at, bound_tenant_id
 		FROM oauth_clients
 		WHERE client_id = $1
 	`
@@ -241,7 +241,7 @@ func (s *Store) Lookup(ctx context.Context, clientID string) (*Client, error) {
 		return nil, ErrUnknownClient
 	}
 	const q = `
-		SELECT id, client_id, name, disabled_at, created_at, tenant_id
+		SELECT id, client_id, name, disabled_at, created_at, bound_tenant_id
 		FROM oauth_clients
 		WHERE client_id = $1
 	`
@@ -270,7 +270,7 @@ func (s *Store) Lookup(ctx context.Context, clientID string) (*Client, error) {
 // (security-atlas#1739). Binding an unbound client, or re-binding to the
 // tenant it already has, succeeds; a client bound to a different tenant
 // returns ErrAlreadyBound. A disabled or missing client returns
-// ErrUnknownClient. The tenant must exist (oauth_clients.tenant_id is a
+// ErrUnknownClient. The tenant must exist (oauth_clients.bound_tenant_id is a
 // foreign key to tenants).
 func (s *Store) Bind(ctx context.Context, clientID string, tenant uuid.UUID) (*Client, error) {
 	if tenant == uuid.Nil {
@@ -281,11 +281,11 @@ func (s *Store) Bind(ctx context.Context, clientID string, tenant uuid.UUID) (*C
 	}
 	const q = `
 		UPDATE oauth_clients
-		SET tenant_id = $2
+		SET bound_tenant_id = $2
 		WHERE client_id = $1
 		  AND disabled_at IS NULL
-		  AND (tenant_id IS NULL OR tenant_id = $2)
-		RETURNING id, client_id, name, created_at, tenant_id
+		  AND (bound_tenant_id IS NULL OR bound_tenant_id = $2)
+		RETURNING id, client_id, name, created_at, bound_tenant_id
 	`
 	var c Client
 	err := s.pool.QueryRow(ctx, q, clientID, tenant).Scan(

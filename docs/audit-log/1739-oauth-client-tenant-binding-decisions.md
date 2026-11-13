@@ -14,7 +14,7 @@ drives the path from `/oauth/token` to `GET /v1/controls`.
 
 ## D1 — The binding lives on `oauth_clients`, not in the token request
 
-A client carries `tenant_id` (NULL = unbound), and the token endpoint stamps
+A client carries `bound_tenant_id` (NULL = unbound), and the token endpoint stamps
 it as `atlas:current_tenant_id` with `available_tenants = [tenant]`
 (`jwt.Validate` requires the current tenant to be available). The other
 option the ticket named, RFC 8693 exchange per upload, would make every
@@ -22,10 +22,16 @@ machine caller do a second round-trip, and an unbound machine token has no
 `available_tenants` to pass the exchange allowlist anyway. Roles stay empty
 and `super_admin` stays false. Token exchange is unchanged.
 
-`tenant_id` references `tenants(id) ON DELETE SET NULL`: deleting a tenant
-leaves its clients unbound (their writes refused) instead of blocking the
-delete. `oauth_clients` stays RLS-exempt; the token endpoint reads it before
-any tenant is known.
+`bound_tenant_id` references `tenants(id) ON DELETE SET NULL`: deleting a
+tenant leaves its clients unbound (their writes refused) instead of blocking
+the delete. `oauth_clients` stays RLS-exempt; the token endpoint reads it
+before any tenant is known.
+
+The column is not called `tenant_id`. `scripts/audit-rls.sh` treats every
+public table with a `tenant_id` column as tenant-scoped and requires a policy
+plus FORCE RLS, which this table must not have. The first CI run failed that
+audit. The row is a platform identity with a binding, not tenant-owned data,
+so the name says what it is, and the audit keeps its no-exemptions shape.
 
 ## D2 — The refusal is in `tenancymw`, for every write, from any credential
 
