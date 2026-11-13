@@ -27,6 +27,13 @@ vi.mock("next/headers", () => ({
 
 import { GET } from "./route";
 
+// Issue #1741 — the handler reads `req.nextUrl.searchParams`; the fake
+// carries only that call path.
+function makeReq(url: string): { nextUrl: { searchParams: URLSearchParams } } {
+  const u = new URL(url, "http://test.local");
+  return { nextUrl: { searchParams: u.searchParams } };
+}
+
 describe("GET /api/controls-list", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -119,5 +126,68 @@ describe("GET /api/controls-list", () => {
     const body = (await res.json()) as { controls: unknown[]; count: number };
     expect(body.controls).toEqual([]);
     expect(body.count).toBe(0);
+  });
+
+  // Issue #1741 — `?include=state` switches to the paged per-control read
+  // the /controls page lists by default; scope / limit / offset pass
+  // through, malformed paging values are dropped for the platform default.
+  test("issue 1741: include=state forwards paging + scope and returns total", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1741" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          controls: [
+            {
+              id: "00000000-0000-0000-0000-000000001741",
+              title: "Quarterly access review",
+              control_family: "IAC",
+              scf_id: "IAC-06",
+              lifecycle_state: "active",
+              bundle_id: "ctrl-iac-06",
+              scf_anchor_id: null,
+              state: null,
+              frameworks: [],
+            },
+          ],
+          count: 1,
+          total: 39,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const cell = "00000000-0000-0000-0000-000000000aaa";
+    const res = await GET(
+      makeReq(
+        `/api/controls-list?include=state&limit=500&offset=500&scope=${cell}`,
+      ) as never,
+    );
+    expect(res.status).toBe(200);
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).toContain("/v1/controls?");
+    expect(calledURL).toContain("include=state");
+    expect(calledURL).toContain("limit=500");
+    expect(calledURL).toContain("offset=500");
+    expect(calledURL).toContain(`scope=${cell}`);
+    const body = (await res.json()) as { count: number; total: number };
+    expect(body.count).toBe(1);
+    expect(body.total).toBe(39);
+  });
+
+  test("issue 1741: include=state drops malformed paging values", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1741" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ controls: [], count: 0, total: 0 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const res = await GET(
+      makeReq("/api/controls-list?include=state&limit=-1&offset=abc") as never,
+    );
+    expect(res.status).toBe(200);
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).not.toContain("limit=");
+    expect(calledURL).not.toContain("offset=");
   });
 });

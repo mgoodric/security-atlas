@@ -115,6 +115,19 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Issue #1741: optional `?has_control=true|false` filter, applied in
+	// SQL ahead of LIMIT/OFFSET. Tenant controls only exist on the
+	// with-state read of the current SCF version, so the filter is
+	// refused elsewhere rather than silently ignored.
+	hasControl, ok := h.hasControl(w, r)
+	if !ok {
+		return
+	}
+	if hasControl != nil && (!withState || r.URL.Query().Get("framework_version_id") != "") {
+		httpresp.WriteError(w, http.StatusBadRequest, "has_control requires include=state on the current SCF version")
+		return
+	}
+
 	if fvID := r.URL.Query().Get("framework_version_id"); fvID != "" {
 		uid, err := uuid.Parse(fvID)
 		if err != nil {
@@ -154,21 +167,34 @@ func (h *Handler) listAnchors(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if withState {
-		var rows []dbx.ListSCFAnchorsLatestWithStateRow
+		var (
+			rows   []dbx.ListSCFAnchorsLatestWithStateRow
+			counts dbx.CountSCFAnchorsLatestRow
+		)
 		err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 			var inner error
 			rows, inner = q.ListSCFAnchorsLatestWithState(ctx, dbx.ListSCFAnchorsLatestWithStateParams{
 				Limit:       limit,
 				Offset:      offset,
+				HasControl:  hasControl,
 				ScopeCellID: scopeCell,
 			})
+			if inner != nil {
+				return inner
+			}
+			counts, inner = q.CountSCFAnchorsLatest(ctx)
 			return inner
 		})
 		if err != nil {
 			httperr.WriteInternal(w, r, "list anchors latest (with state)", err)
 			return
 		}
-		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchors": latestRowsToStateWire(rows)})
+		httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+			"anchors":            latestRowsToStateWire(rows),
+			"total":              filteredAnchorTotal(counts, hasControl),
+			"catalog_total":      counts.CatalogTotal,
+			"with_control_total": counts.WithControlTotal,
+		})
 		return
 	}
 
@@ -230,6 +256,35 @@ func (h *Handler) scopeCell(w http.ResponseWriter, r *http.Request) (pgtype.UUID
 		return pgtype.UUID{}, false
 	}
 	return pgtype.UUID{Bytes: uid, Valid: true}, true
+}
+
+// hasControl parses the optional `?has_control=` query parameter (issue
+// #1741). Unset or empty is the no-filter sentinel (nil); anything other
+// than a strconv boolean is a 400.
+func (h *Handler) hasControl(w http.ResponseWriter, r *http.Request) (*bool, bool) {
+	v := r.URL.Query().Get("has_control")
+	if v == "" {
+		return nil, true
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "has_control must be true or false")
+		return nil, false
+	}
+	return &b, true
+}
+
+// filteredAnchorTotal is the row total that matches the request's
+// has_control filter, so a pager can size itself without a second call.
+func filteredAnchorTotal(c dbx.CountSCFAnchorsLatestRow, hasControl *bool) int64 {
+	switch {
+	case hasControl == nil:
+		return c.CatalogTotal
+	case *hasControl:
+		return c.WithControlTotal
+	default:
+		return c.CatalogTotal - c.WithControlTotal
+	}
 }
 
 // includesState returns true when the request asked for the joined state
@@ -530,10 +585,17 @@ type anchorStateCellWire struct {
 // the bare anchor list (no `?include=state`); it MAY be an empty array
 // when an anchor has no satisfaction edges yet (e.g. SCF anchor in a
 // family no framework has crosswalked).
+//
+// Issue #1741: on the current-version read, `control_id` is the tenant
+// control behind the anchor (the id the control detail page resolves)
+// and `control_count` how many active controls anchor to it. Both are
+// absent on the framework-version read, which does not join controls.
 type anchorWithStateWire struct {
 	anchorWire
-	State      *anchorStateCellWire `json:"state"`
-	Frameworks []string             `json:"frameworks"`
+	State        *anchorStateCellWire `json:"state"`
+	Frameworks   []string             `json:"frameworks"`
+	ControlID    *string              `json:"control_id,omitempty"`
+	ControlCount *int64               `json:"control_count,omitempty"`
 }
 
 // stateRowMeta is the subset of fields the wire-encoding step needs from
@@ -645,6 +707,12 @@ func latestRowsToStateWire(rows []dbx.ListSCFAnchorsLatestWithStateRow) []anchor
 			},
 			State:      anchorStateWireFrom(latestStateRow{r: r}),
 			Frameworks: frameworksWire(r.FrameworkSlugs),
+		}
+		count := r.ControlCount
+		out[i].ControlCount = &count
+		if r.ControlID.Valid {
+			id := uuidStr(r.ControlID)
+			out[i].ControlID = &id
 		}
 	}
 	return out

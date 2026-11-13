@@ -279,6 +279,38 @@ func (s *Store) List(ctx context.Context) ([]ActiveControl, error) {
 	return out, nil
 }
 
+// ListWithState returns one page of the active tenant's active controls,
+// each with its own worst-state-wins evaluation rollup and its anchor's
+// framework slugs, plus the unpaged total (issue #1741). A valid
+// scopeCell narrows the rollup to that cell; the zero value is no filter.
+func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCell pgtype.UUID) ([]dbx.ListActiveControlsWithStateRow, int64, error) {
+	var (
+		rows  []dbx.ListActiveControlsWithStateRow
+		total int64
+	)
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var err error
+		rows, err = q.ListActiveControlsWithState(ctx, dbx.ListActiveControlsWithStateParams{
+			TenantID:    pgUUID(tenantID),
+			RowLimit:    limit,
+			RowOffset:   offset,
+			ScopeCellID: scopeCell,
+		})
+		if err != nil {
+			return fmt.Errorf("list active controls with state: %w", err)
+		}
+		total, err = q.CountActiveControls(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("count active controls: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return rows, total, nil
+}
+
 // resolveSCFAnchor accepts either a uuid string or an SCF code (e.g.,
 // "IAC-06") and returns the anchor's uuid. Unknown values fail with
 // ErrSCFAnchorUnknown.

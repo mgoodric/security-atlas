@@ -22,6 +22,35 @@ func (q *Queries) CountSCFAnchorsForVersion(ctx context.Context, frameworkVersio
 	return count, err
 }
 
+const countSCFAnchorsLatest = `-- name: CountSCFAnchorsLatest :one
+SELECT
+    count(*)::bigint AS catalog_total,
+    count(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM controls c
+        WHERE c.scf_anchor_id = a.id AND c.superseded_by IS NULL
+    ))::bigint AS with_control_total
+FROM scf_anchors a
+JOIN framework_versions fv ON fv.id = a.framework_version_id
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+`
+
+type CountSCFAnchorsLatestRow struct {
+	CatalogTotal     int64 `json:"catalog_total"`
+	WithControlTotal int64 `json:"with_control_total"`
+}
+
+// Issue #1741: totals for the paged `/v1/anchors?include=state` read on
+// the current SCF version: the whole catalog, and the anchors the
+// caller's tenant has at least one active control on. `controls` is
+// tenant-scoped under FORCE RLS, so with_control_total is per tenant.
+func (q *Queries) CountSCFAnchorsLatest(ctx context.Context) (CountSCFAnchorsLatestRow, error) {
+	row := q.db.QueryRow(ctx, countSCFAnchorsLatest)
+	var i CountSCFAnchorsLatestRow
+	err := row.Scan(&i.CatalogTotal, &i.WithControlTotal)
+	return i, err
+}
+
 const demoteCurrentFrameworkVersions = `-- name: DemoteCurrentFrameworkVersions :exec
 UPDATE framework_versions
 SET status = 'legacy'
@@ -728,7 +757,7 @@ worst_per_anchor AS (
       -- Slice 224: optional scope cell filter via sqlc.narg('scope_cell_id').
       -- When the param is the NULL UUID sentinel, this predicate is a no-op
       -- (every evaluation participates). When valid uuid, narrows to that cell.
-      AND ($3::uuid IS NULL OR le.scope_cell_id = $3::uuid)
+      AND ($4::uuid IS NULL OR le.scope_cell_id = $4::uuid)
     GROUP BY c.scf_anchor_id
 ),
 anchor_frameworks AS (
@@ -746,6 +775,23 @@ anchor_frameworks AS (
       AND af.tenant_id IS NULL
       AND af.slug <> 'scf'
     GROUP BY e.scf_anchor_id
+),
+anchor_controls AS (
+    -- Issue #1741: the tenant's active controls per anchor, so each
+    -- row links to a control id (not the anchor id the control detail
+    -- page cannot resolve) and the ` + "`" + `has_control` + "`" + ` filter runs here, in
+    -- SQL, ahead of LIMIT/OFFSET. ` + "`" + `controls` + "`" + ` is tenant-scoped under
+    -- FORCE RLS; the GUC limits this CTE to the caller's tenant. The
+    -- representative control is the lowest bundle_id, deterministic
+    -- when more than one bundle anchors to the same SCF control.
+    SELECT
+        c.scf_anchor_id AS anchor_id,
+        (array_agg(c.id ORDER BY c.bundle_id))[1]::uuid AS control_id,
+        count(*)::bigint AS control_count
+    FROM controls c
+    WHERE c.superseded_by IS NULL
+      AND c.scf_anchor_id IS NOT NULL
+    GROUP BY c.scf_anchor_id
 )
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
@@ -773,13 +819,21 @@ SELECT
     -- nil → empty array). The LEFT JOIN ensures every anchor row
     -- carries the column; anchors with no satisfaction edges return
     -- NULL → empty slice → wire ` + "`" + `[]` + "`" + `.
-    af.framework_slugs::text[]        AS framework_slugs
+    af.framework_slugs::text[]        AS framework_slugs,
+    ac.control_id                     AS control_id,
+    COALESCE(ac.control_count, 0)::bigint AS control_count
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
 LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
 LEFT JOIN anchor_frameworks af ON af.anchor_id = a.id
+LEFT JOIN anchor_controls ac ON ac.anchor_id = a.id
 WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+  -- Issue #1741: optional server-side "has control" filter. NULL is
+  -- no filter; true keeps anchors the tenant has a control on; false
+  -- keeps the rest.
+  AND ($3::boolean IS NULL
+       OR (ac.anchor_id IS NOT NULL) = $3::boolean)
 ORDER BY a.scf_id
 LIMIT $1 OFFSET $2
 `
@@ -787,6 +841,7 @@ LIMIT $1 OFFSET $2
 type ListSCFAnchorsLatestWithStateParams struct {
 	Limit       int32       `json:"limit"`
 	Offset      int32       `json:"offset"`
+	HasControl  *bool       `json:"has_control"`
 	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
 }
 
@@ -805,6 +860,8 @@ type ListSCFAnchorsLatestWithStateRow struct {
 	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
 	StateEvaluatedAt     pgtype.Timestamptz `json:"state_evaluated_at"`
 	FrameworkSlugs       []string           `json:"framework_slugs"`
+	ControlID            pgtype.UUID        `json:"control_id"`
+	ControlCount         int64              `json:"control_count"`
 }
 
 // Slice 104: paginated anchor list for the latest current SCF
@@ -869,7 +926,12 @@ type ListSCFAnchorsLatestWithStateRow struct {
 // (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
 // regen-on-rebase note in MEMORY.md). Keep the two in sync.
 func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error) {
-	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState, arg.Limit, arg.Offset, arg.ScopeCellID)
+	rows, err := q.db.Query(ctx, listSCFAnchorsLatestWithState,
+		arg.Limit,
+		arg.Offset,
+		arg.HasControl,
+		arg.ScopeCellID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -892,6 +954,8 @@ func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCF
 			&i.StateLastObservedAt,
 			&i.StateEvaluatedAt,
 			&i.FrameworkSlugs,
+			&i.ControlID,
+			&i.ControlCount,
 		); err != nil {
 			return nil, err
 		}

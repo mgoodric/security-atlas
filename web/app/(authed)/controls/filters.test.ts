@@ -34,6 +34,8 @@ function row(
   frameworks: string[] = [],
 ): AnchorRow {
   return {
+    key: `00000000-0000-0000-0000-0000000000${scfSuffix}`,
+    controlId: null,
     anchor: {
       id: `00000000-0000-0000-0000-0000000000${scfSuffix}`,
       scf_id: `test-${scfSuffix}`,

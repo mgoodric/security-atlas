@@ -58,7 +58,9 @@ test.describe("/controls header/footer count consistency (slice 666)", () => {
       });
     });
 
-    await authedPage.goto("/controls");
+    // Issue #1741: the anchor catalog is the opt-in `?view=catalog`; the
+    // default view lists the tenant's controls.
+    await authedPage.goto("/controls?view=catalog");
 
     // Header count label — present, reads "53 SCF anchors", and does
     // NOT use the verb "Showing".
