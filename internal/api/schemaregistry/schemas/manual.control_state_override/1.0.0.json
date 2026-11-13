@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/manual.control_state_override/1.0.0.json",
+  "x-evidence-kind": "manual.control_state_override.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["GOV-04"],
+  "title": "Control state override",
+  "description": "A human-approved override of a control's state, filed through the MCP update_control_state write tool. Recorded as evidence so the override reaches evaluation through the ledger instead of writing control_evaluations directly.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["override_state", "ai_proposed"],
+  "properties": {
+    "override_state": {
+      "type": "string",
+      "enum": ["pass", "fail", "na", "inconclusive"]
+    },
+    "rationale": { "type": "string" },
+    "ai_proposed": { "type": "boolean" }
+  }
+}

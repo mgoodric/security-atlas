@@ -40,6 +40,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -271,8 +272,53 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 	case errors.Is(err, writeproposals.ErrUnknownTool):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 	default:
+		if status, code, ok := applyErrStatus(err); ok {
+			if status >= http.StatusInternalServerError {
+				// CWE-209: a 5xx body never carries the wrapped error.
+				httpresp.WriteJSON(w, status, transitionErrBody{Error: "evidence ingest unavailable", Code: code})
+				return
+			}
+			httpresp.WriteJSON(w, status, transitionErrBody{Error: err.Error(), Code: code})
+			return
+		}
 		httperr.WriteInternal(w, r, "transition", err)
 	}
+}
+
+// transitionErrBody is the error shape for a confirm refused by the
+// applier. Code is stable; clients route on it, not on Error.
+type transitionErrBody struct {
+	Error string `json:"error"`
+	Code  string `json:"code"`
+}
+
+// applyErrStatus maps an applier refusal on confirm to a status and a
+// stable code. The evidence appliers return ingest's sentinels (#1751), so
+// the codes match the REST push surface (internal/api/evidence/http.go);
+// an unknown kind is a 400 here because the proposal's input is at fault,
+// not a precondition the caller can fix by registering a schema first.
+func applyErrStatus(err error) (int, string, bool) {
+	switch {
+	case errors.Is(err, ingest.ErrObservedAtSkew):
+		return http.StatusBadRequest, "observed_at_skew", true
+	case errors.Is(err, ingest.ErrValidation):
+		return http.StatusBadRequest, "schema_validation_failed", true
+	case errors.Is(err, ingest.ErrUnknownKind):
+		return http.StatusBadRequest, "unknown_evidence_kind", true
+	case errors.Is(err, ingest.ErrMissingField):
+		return http.StatusBadRequest, "missing_field", true
+	case errors.Is(err, ingest.ErrOversized):
+		return http.StatusRequestEntityTooLarge, "oversized_payload", true
+	case errors.Is(err, ingest.ErrScopeViolation):
+		return http.StatusForbidden, "scope_violation", true
+	case errors.Is(err, ingest.ErrIdempotencyMismatch):
+		return http.StatusConflict, "idempotency_mismatch", true
+	case errors.Is(err, writeproposals.ErrInvalidInput):
+		return http.StatusBadRequest, "invalid_input", true
+	case errors.Is(err, writeproposals.ErrIngestUnavailable):
+		return http.StatusServiceUnavailable, "ingest_unavailable", true
+	}
+	return 0, "", false
 }
 
 func (h *Handler) tenantCredContext(r *http.Request) (context.Context, credstore.Credential, bool) {
