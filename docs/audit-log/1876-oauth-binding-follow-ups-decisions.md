@@ -131,7 +131,7 @@ once it was dropped.
 There is no platform-level audit table a CLI purge can write to. The unified
 audit sink (`internal/audit/sink`) is an opt-in stream that the server
 process configures, and `super_admin_audit_log` is shaped for role grants.
-So migration `20260812000000_tenant_data_purges.sql` adds
+So migration `20260813000000_tenant_data_purges.sql` adds
 `tenant_data_purges`, one row per committed purge, written in the purge's own
 transaction. It holds the time, `session_user`, the OS user, the per-table
 counts purged and kept (JSONB), and the total. It is platform-global (no
