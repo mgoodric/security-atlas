@@ -24,18 +24,23 @@ evidence_queries:
     evidence_kind: github.audit_event.v1
     description: "Every push to a protected branch had a non-author PR approval"
     expression: |
-      package atlas.controls.soc2.cc3_4
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every e in input.audit_events {
-          e.action == "git.push"
-          e.protected_branch == true
-          some pr in input.pull_requests
-          pr.merge_commit_sha == e.commit_sha
-          some r in pr.reviews
-          r.state == "approved"
-          r.user != pr.author
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"

@@ -25,13 +25,23 @@ evidence_queries:
     evidence_kind: aws.s3.bucket_encryption_state.v1
     description: "Every S3 bucket has default encryption enabled with SSE-S3 or SSE-KMS"
     expression: |
-      package atlas.controls.soc2.cc6_7
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every b in input.buckets {
-          b.server_side_encryption.enabled == true
-          b.server_side_encryption.algorithm in {"AES256", "aws:kms"}
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"

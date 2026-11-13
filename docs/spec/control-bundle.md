@@ -129,16 +129,23 @@ evidence_queries:
     evidence_kind: aws.iam_user.access_state
     description: "All human IAM users must have MFA enabled"
     expression: |
-      package atlas.controls.aws_iam_mfa_prod
-      default allow := false
-      allow if {
-        every u in input.iam_users {
-          u.is_service_account == true
-        } or {
-          u.mfa_enabled == true
-        }
+      package evidence.query
+      default result := "inconclusive"
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      }
+      result := "pass" if {
+        count(input.records) > 0
+        every r in input.records { r.result == "pass" }
       }
 ```
+
+A Rego evidence query lives in `package evidence.query` and assigns `result`
+(`pass | fail | na | inconclusive`). Its only input is
+`{records: [{result}]}`: the per-record verdicts the connector
+already decided. It never sees the payload; use the SQL or JSON-path languages
+to read payload fields.
 
 A minimal **manual** control:
 
