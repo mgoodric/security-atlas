@@ -201,3 +201,70 @@ test.describe("/controls lists the tenant's controls (issue #1741)", () => {
     expect(seen.some((u) => u.includes("has_control=true"))).toBe(true);
   });
 });
+
+// Issue #1740 — the catalog view walked only the platform's first page,
+// so 100 of SCF's ~1,600 anchors were reachable and the Family pill only
+// knew the families on that page. The fake BFF pages a 1,200-anchor
+// catalog the way the platform does (limit/offset, capped at 500); the
+// last 200 anchors sit in a family only the third page carries.
+const CATALOG_SIZE = 1200;
+const catalogAnchors = Array.from({ length: CATALOG_SIZE }, (_, i) => ({
+  id: `a1740000-0000-4000-8000-${String(i).padStart(12, "0")}`,
+  scf_id: `TST-${String(i).padStart(4, "0")}`,
+  family: i >= 1000 ? "Late Family (1740)" : "Early Family (1740)",
+  name: `Catalog anchor ${i}`,
+  description: "",
+  state: null,
+  frameworks: [],
+  control_count: 0,
+}));
+
+test.describe("/controls SCF catalog walks every page (issue #1740)", () => {
+  test("the catalog lists every anchor and the Family pill reaches the last page", async ({
+    authedPage: page,
+  }) => {
+    const seen: string[] = [];
+    await page.route("**/api/controls**", async (route: Route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname !== "/api/controls") {
+        await route.fallback();
+        return;
+      }
+      seen.push(url.search);
+      const limit = Math.min(Number(url.searchParams.get("limit") ?? 100), 500);
+      const offset = Number(url.searchParams.get("offset") ?? 0);
+      const anchors = catalogAnchors.slice(offset, offset + limit);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          anchors,
+          total: CATALOG_SIZE,
+          catalog_total: CATALOG_SIZE,
+          with_control_total: 0,
+        }),
+      });
+    });
+    await page.route("**/api/scope-cells**", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ cells: [] }),
+      });
+    });
+
+    await page.goto("/controls?view=catalog");
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      "Showing 1–50 of 1200",
+    );
+    expect(seen.filter((s) => s.includes("offset=1000"))).toHaveLength(1);
+
+    await page.getByLabel("Family").selectOption("Late Family (1740)");
+    await expect(page.getByTestId("controls-pagination-summary")).toHaveText(
+      "Showing 1–50 of 200",
+    );
+    await expect(
+      page.getByTestId("list-table-wrap").getByTestId("list-table-row").first(),
+    ).toContainText("TST-1000");
+  });
+});
