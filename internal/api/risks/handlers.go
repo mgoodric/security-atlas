@@ -196,9 +196,15 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 	created, err := h.store.Create(ctx, in)
 	if err != nil {
 		switch {
+		case risk.IsTreatmentValidation(err):
+			// The MCP confirm surface returns the same code for the same
+			// refusal (internal/api/mcpwriteproposals, #1844).
+			httpresp.WriteJSON(w, http.StatusBadRequest, map[string]string{
+				"error": err.Error(),
+				"code":  "treatment_validation_failed",
+			})
 		case errors.Is(err, risk.ErrInvalidMethodology),
-			errors.Is(err, risk.ErrInherentScoreInvalid),
-			risk.IsTreatmentValidation(err):
+			errors.Is(err, risk.ErrInherentScoreInvalid):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "create risk", err)
