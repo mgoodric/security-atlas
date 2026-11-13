@@ -19,10 +19,11 @@ import (
 	"html"
 	"os"
 	"strings"
-	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
+	"github.com/chromedp/chromedp/remote"
 
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
@@ -33,13 +34,6 @@ import (
 //
 // Deprecated: use pdfrender.Default().RenderTimeout().
 const PDFTimeout = pdfrender.DefaultRenderTimeout
-
-// chromedpWSURLReadTimeout overrides chromedp's hardcoded 20s
-// wsURLReadTimeout watchdog (see chromedp v0.15.1 allocate.go:249).
-// Slice 340 diagnosed this watchdog firing on Harden-Runner audit-
-// mode-stretched Chrome startup; this slice fans the fix out to
-// the four sibling PDF renderers. See slice 341.
-const chromedpWSURLReadTimeout = 60 * time.Second
 
 // ErrChromeUnavailable signals the headless browser isn't available
 // in this environment. The HTTP handler maps this to 503 so operators
@@ -113,9 +107,9 @@ func renderQuestionnaireBytes(ctx context.Context, htmlDoc string) ([]byte, erro
 	var browserCtx context.Context
 	var cancelAlloc context.CancelFunc
 	var cancelBrowser context.CancelFunc
-	if remote := os.Getenv("CHROME_DEBUG_URL"); remote != "" {
+	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
 		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewRemoteAllocator(ctx, remote)
+		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
 		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
 	} else {
 		opts := append(
@@ -124,7 +118,6 @@ func renderQuestionnaireBytes(ctx context.Context, htmlDoc string) ([]byte, erro
 			chromedp.DisableGPU,
 			chromedp.Headless,
 			chromedp.Flag("hide-scrollbars", true),
-			chromedp.WSURLReadTimeout(chromedpWSURLReadTimeout),
 		)
 		var allocCtx context.Context
 		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
@@ -138,17 +131,17 @@ func renderQuestionnaireBytes(ctx context.Context, htmlDoc string) ([]byte, erro
 	// data, so XSS / SSRF risk is bounded by the renderer interface.
 	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
 	var buf []byte
-	err := chromedp.Run(browserCtx,
+	err := chromedp.Do(browserCtx,
 		chromedp.Navigate(dataURL),
-		chromedp.ActionFunc(func(ctx context.Context) error {
-			var err error
-			buf, _, err = page.PrintToPDF().
-				WithPrintBackground(true).
-				WithMarginTop(0.4).
-				WithMarginBottom(0.4).
-				WithMarginLeft(0.4).
-				WithMarginRight(0.4).
-				Do(ctx)
+		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
+				PrintBackground: new(true),
+				MarginTop:       new(0.4),
+				MarginBottom:    new(0.4),
+				MarginLeft:      new(0.4),
+				MarginRight:     new(0.4),
+			})
+			buf = res.Data
 			return err
 		}),
 	)

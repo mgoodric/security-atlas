@@ -155,22 +155,25 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Delete("/v1/admin/group-role-mappings/{id}", groupMapH.Delete)
 
 	// Slice 483: crosswalk-mapping verified-tier governance (ADR 0018).
-	// Admin-gated (cred.IsAdmin; a non-admin transition is 403 — threat-model
-	// E) transition of a fw_to_scf_edges row's trust tier. The store flips the
-	// tier and appends an immutable audit row in the same transaction. The
-	// target table is a CATALOG table (no tenant RLS); the gate is this
-	// admin-role authz + the append-only audit trail. Route appended per the
-	// parallel-batch convention (chi.Mux rejects two Mounts at "/").
+	// super_admin-gated (the verified JWT's atlas:super_admin claim; a tenant
+	// admin is 403 — threat-model E, #1757) transition of a fw_to_scf_edges
+	// row's trust tier. The store flips the tier and appends an immutable audit
+	// row in the same transaction. The target table is a global CATALOG table
+	// (no tenant RLS), so a tenant admin changing it would be a cross-tenant
+	// write; the gate is super_admin + the append-only audit trail. Route
+	// appended per the parallel-batch convention (chi.Mux rejects two Mounts
+	// at "/").
 	crosswalkTierH := admincrosswalktier.New(crosswalktier.NewStore(s.dbPool))
 	root.Post("/v1/admin/crosswalk-edges/{id}/tier", crosswalkTierH.Transition)
 
-	// Slice 484: framework-versioning capability (ADR 0019). Admin-gated
-	// (cred.IsAdmin; a non-admin promotion is 403 — threat-model E /
-	// P0-484-3) version lifecycle (promote a version to current + demote the
+	// Slice 484: framework-versioning capability (ADR 0019). The write routes
+	// are super_admin-gated (global catalog rows; a tenant admin is 403 —
+	// threat-model E / P0-484-3 / #1757); the read-only queue listing is
+	// admin-gated. Version lifecycle (promote a version to current + demote the
 	// prior to legacy, audited + reversible), the migration-suggest job
 	// (exact requirement-code 1:1 carryovers into a human-reviewed queue,
 	// NEVER auto-applied — P0-484-1), and the suggestion approve/reject path.
-	// Targets are CATALOG tables (no tenant RLS); the gate is admin-role
+	// Targets are global CATALOG tables (no tenant RLS); the gate is that
 	// authz + the append-only framework_version_audit. Routes appended per the
 	// parallel-batch convention.
 	frameworkVersionsH := adminframeworkversions.New(frameworkversion.NewStore(s.dbPool))
