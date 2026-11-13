@@ -85,8 +85,12 @@ and neither when there was none.
 
 - **Additive and safe on existing rows.** Every existing row satisfies the new
   CHECK (non-fired rows have both NULL), so nothing is rewritten. It is added
-  `NOT VALID` and then validated, so the scan runs under `SHARE UPDATE
-EXCLUSIVE` rather than the `ACCESS EXCLUSIVE` of a plain `ADD`.
+  `NOT VALID` and then validated. Corrected in #1880: that does not keep the
+  migration off `ACCESS EXCLUSIVE`, since the `DROP CONSTRAINT` and the
+  `ADD CONSTRAINT ... NOT VALID` both take it. The split only moves the scan
+  out from under that lock when each statement commits on its own, as
+  `just migrate-up` runs the file. The table is small and append-only, so
+  the lock is brief either way.
 - **The down migration fails rather than rewrites.** A non-fired row that
   names a meta-risk cannot satisfy the old CHECK. Clearing the pointer would
   edit the append-only ledger, so the down stops and an operator decides, as
@@ -120,4 +124,6 @@ covered by vitest).
   pre-lock and the evaluation. Both need two concurrent writes to the same
   risk, or a write racing an activation, and the worst result is a 40P01
   retry rather than wrong data. Closing it fully would need a retry loop
-  around the pre-lock; not done here.
+  around the pre-lock; not done here. #1880 closed the theme-write half:
+  the store checks the locked themes against the pre-locked set and retries
+  the transaction once. The activation half remains.
