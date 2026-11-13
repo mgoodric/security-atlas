@@ -45,10 +45,10 @@ lint: lint-go lint-errleak lint-duphelper lint-frontend lint-python
 # no review (slice 416; same class as slice 090's govulncheck@latest). Bump
 # this AND the ci.yml pin together in a dedicated `chore(golangci):` slice so
 # the new analyzer set lands as an auditable diff (mirrors SQLC_VERSION).
-GOLANGCI_VERSION := "v2.12.2"
+GOLANGCI_VERSION := "v2.15.0"
 
 # Verify the installed golangci-lint matches the pin. `golangci-lint version`
-# prints e.g. "golangci-lint has version 2.12.2 built with ..." — extract the
+# prints e.g. "golangci-lint has version 2.15.0 built with ..." — extract the
 # bare X.Y.Z and compare against the pin (sans leading `v`).
 golangci-version-check:
     @installed=$(golangci-lint version 2>/dev/null | sed -nE 's/.*has version ([0-9]+\.[0-9]+\.[0-9]+).*/\1/p'); \
