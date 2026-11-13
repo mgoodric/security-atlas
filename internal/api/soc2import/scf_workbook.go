@@ -66,16 +66,9 @@ func LoadSCFWorkbook(path string, opts SCFWorkbookOptions) (*Crosswalk, error) {
 }
 
 func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*Crosswalk, error) {
-	sheet := ""
-	for _, name := range f.GetSheetList() {
-		norm := normalizeHeader(name)
-		if strings.HasPrefix(norm, "SCF ") {
-			sheet = name
-			break
-		}
-	}
-	if sheet == "" {
-		return nil, fmt.Errorf("crosswalk: SCF workbook %s missing an \"SCF <version>\" sheet", path)
+	sheet, err := selectWideSCFSheet(f)
+	if err != nil {
+		return nil, fmt.Errorf("crosswalk: SCF workbook %s: %w", path, err)
 	}
 
 	rows, err := f.GetRows(sheet)
@@ -157,6 +150,53 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 	return cw, nil
 }
 
+// scfVersionSheetRe matches the control sheet's name in the published SCF
+// workbook ("SCF 2026.3"). Other "SCF ..." sheets, such as "SCF Domains &
+// Principles", sort ahead of it and must not be taken for it.
+var scfVersionSheetRe = regexp.MustCompile(`^SCF \d{4}\.\d+$`)
+
+// selectWideSCFSheet picks the wide control sheet by name, never by position:
+// the first "SCF <yyyy>.<n>" sheet, else the first "SCF ..." sheet whose header
+// row carries an "SCF #" column.
+func selectWideSCFSheet(f *excelize.File) (string, error) {
+	var fallback []string
+	for _, name := range f.GetSheetList() {
+		norm := normalizeHeader(name)
+		if scfVersionSheetRe.MatchString(norm) {
+			return name, nil
+		}
+		if strings.HasPrefix(norm, "SCF ") {
+			fallback = append(fallback, name)
+		}
+	}
+	for _, name := range fallback {
+		rows, err := f.GetRows(name)
+		if err == nil && len(rows) > 0 && findHeader(rows[0], "SCF #") >= 0 {
+			return name, nil
+		}
+	}
+	if len(fallback) > 0 {
+		quoted := make([]string, len(fallback))
+		for i, name := range fallback {
+			quoted[i] = strconv.Quote(name)
+		}
+		return "", fmt.Errorf("missing an \"SCF <version>\" sheet with an \"SCF #\" column (found %s)", strings.Join(quoted, ", "))
+	}
+	return "", errors.New("missing an \"SCF <version>\" sheet")
+}
+
+// focalDocumentsSheet finds the focal-document metadata sheet, published as
+// "Focal Documents (FD)" in 2026.3 and as "Focal Documents" earlier.
+func focalDocumentsSheet(f *excelize.File) string {
+	for _, name := range f.GetSheetList() {
+		norm := normalizeHeader(name)
+		if norm == "Focal Documents" || strings.HasPrefix(norm, "Focal Documents (") {
+			return name
+		}
+	}
+	return ""
+}
+
 func loadOLIRWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*Crosswalk, error) {
 	for _, sheet := range f.GetSheetList() {
 		rows, err := f.GetRows(sheet)
@@ -235,7 +275,11 @@ func loadOLIRWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*
 
 func loadFocalDocuments(f *excelize.File) map[string]focalDocument {
 	out := map[string]focalDocument{}
-	rows, err := f.GetRows("Focal Documents")
+	sheet := focalDocumentsSheet(f)
+	if sheet == "" {
+		return out
+	}
+	rows, err := f.GetRows(sheet)
 	if err != nil || len(rows) < 2 {
 		return out
 	}

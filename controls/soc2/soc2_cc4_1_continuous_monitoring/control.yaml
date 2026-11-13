@@ -24,14 +24,23 @@ evidence_queries:
     evidence_kind: osquery.host_posture.v1
     description: "Every managed endpoint has a posture record observed within 24h"
     expression: |
-      package atlas.controls.soc2.cc4_1
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every h in input.managed_endpoints {
-          some p in input.posture_records
-          p.host_uuid == h.host_uuid
-          time.parse_rfc3339_ns(p.observed_at) > (time.now_ns() - (24 * 60 * 60 * 1000000000))
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
