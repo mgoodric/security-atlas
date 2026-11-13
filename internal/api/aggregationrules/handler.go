@@ -8,6 +8,7 @@
 //	GET    /v1/aggregation-rules/{id}           get one rule
 //	PATCH  /v1/aggregation-rules/{id}/activate    HITL: staged|inactive -> active
 //	PATCH  /v1/aggregation-rules/{id}/deactivate  active -> inactive
+//	POST   /v1/aggregation-rules/evaluate         run every active rule now
 //
 // POST accepts BOTH application/json and application/yaml — the Content-Type
 // header selects the parser, and either way the body is decoded into the
@@ -240,6 +241,57 @@ func (h *Handler) transition(w http.ResponseWriter, r *http.Request, activate bo
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"rule": ruleWireFrom(sr)})
+}
+
+// evaluationWire is one aggregation_rule_evaluations row on the wire.
+type evaluationWire struct {
+	ID          string `json:"id"`
+	RuleID      string `json:"rule_id"`
+	Outcome     string `json:"outcome"`
+	RiskCount   int    `json:"risk_count"`
+	TeamCount   int    `json:"team_count"`
+	WindowStart string `json:"window_start,omitempty"`
+	MetaRiskID  string `json:"meta_risk_id,omitempty"`
+	EvaluatedAt string `json:"evaluated_at"`
+}
+
+func evaluationWireFrom(ev aggrule.Evaluation) evaluationWire {
+	w := evaluationWire{
+		ID:          ev.ID.String(),
+		RuleID:      ev.RuleID.String(),
+		Outcome:     ev.Outcome,
+		RiskCount:   ev.RiskCount,
+		TeamCount:   ev.TeamCount,
+		EvaluatedAt: ev.EvaluatedAt.UTC().Format("2006-01-02T15:04:05Z07:00"),
+	}
+	if ev.WindowStart != nil {
+		w.WindowStart = ev.WindowStart.UTC().Format("2006-01-02T15:04:05Z07:00")
+	}
+	if ev.MetaRiskID != nil {
+		w.MetaRiskID = ev.MetaRiskID.String()
+	}
+	return w
+}
+
+// EvaluateNow handles POST /v1/aggregation-rules/evaluate — runs every active
+// rule of the tenant in one sweep, outside any risk write (#1750). Each rule
+// evaluated appends one aggregation_rule_evaluations row; a met threshold
+// creates or updates its meta-risk exactly as a risk write would.
+func (h *Handler) EvaluateNow(w http.ResponseWriter, r *http.Request) {
+	if _, err := tenancy.TenantFromContext(r.Context()); err != nil {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	evals, err := h.store.Evaluate(r.Context(), nil)
+	if err != nil {
+		httperr.WriteInternal(w, r, "evaluate aggregation rules", err)
+		return
+	}
+	out := make([]evaluationWire, len(evals))
+	for i, ev := range evals {
+		out[i] = evaluationWireFrom(ev)
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"evaluations": out, "count": len(out)})
 }
 
 // ----- helpers -----

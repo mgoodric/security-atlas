@@ -119,7 +119,7 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 		for i, l := range links {
 			out.LinkedControlIDs[i] = uuid.UUID(l.ControlID.Bytes)
 		}
-		return nil
+		return s.runAfterRiskWrite(ctx, q, tenantID, out.Themes)
 	})
 	return out, err
 }
