@@ -138,6 +138,7 @@ func (s *Server) buildRouter() *chi.Mux {
 			ExpectedIssuer:   s.jwtIssuer,
 			ExpectedAudience: s.jwtAudience,
 			CookieName:       jwtmw.DefaultCookieName,
+			SuperAdmins:      s.jwtSuperAdmins,
 		}), "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state",
 			"/v1/calendar.ics", "/.well-known/", "/oauth/token",
 			"/oauth/authorize", "/oauth/revoke", "/oauth/introspect",
