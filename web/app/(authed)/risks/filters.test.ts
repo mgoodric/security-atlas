@@ -18,6 +18,7 @@ import {
   DEFAULT_FILTERS,
   fairScore,
   formatDollars,
+  patternNoLongerMet,
   formatResidualScore,
   isDefault,
   residualClass,
@@ -540,5 +541,24 @@ describe("reviewDuePending (slice 680 / ATLAS-029)", () => {
 
   test("a real ISO date is not pending", () => {
     expect(reviewDuePending("2026-09-30T00:00:00Z")).toBe(false);
+  });
+});
+
+describe("patternNoLongerMet (#1867)", () => {
+  test("a rule-generated meta-risk with 0 children is flagged", () => {
+    expect(
+      patternNoLongerMet({ rule_generated: true, child_count: 0, severity: 0 }),
+    ).toBe(true);
+  });
+  test("a meta-risk that still has children is not", () => {
+    expect(patternNoLongerMet({ rule_generated: true, child_count: 2 })).toBe(
+      false,
+    );
+  });
+  test("a manual risk or a malformed score is not", () => {
+    expect(patternNoLongerMet({ likelihood: 1, impact: 1 })).toBe(false);
+    expect(patternNoLongerMet({ child_count: 0 })).toBe(false);
+    expect(patternNoLongerMet(null)).toBe(false);
+    expect(patternNoLongerMet("x")).toBe(false);
   });
 });

@@ -37,8 +37,9 @@ var ErrLinkWeightOutOfRange = errors.New("risk: link weight must be between 0 an
 // Same shape as scope.Store: every method opens a tx, applies the tenant GUC,
 // runs queries inside that transaction.
 type Store struct {
-	pool      *pgxpool.Pool
-	afterRisk AfterRiskWrite
+	pool       *pgxpool.Pool
+	beforeRisk BeforeRiskWrite
+	afterRisk  AfterRiskWrite
 }
 
 // NewStore constructs a Store over an existing pgx pool. The pool must be
@@ -60,6 +61,30 @@ type AfterRiskWrite func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID
 func (s *Store) WithAfterRiskWrite(fn AfterRiskWrite) *Store {
 	s.afterRisk = fn
 	return s
+}
+
+// BeforeRiskWrite runs inside the transaction of a theme assignment or a
+// delete, before the write locks or deletes the risk row, with the themes
+// the write may touch. The aggregation engine uses it to take its rules'
+// advisory locks first, in the order an evaluation takes them, so the write
+// and a concurrent evaluation never wait on each other in opposite orders
+// (#1867). An error rolls the write back. Set it together with
+// AfterRiskWrite (httpserver.go wires both).
+type BeforeRiskWrite func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error
+
+// WithBeforeRiskWrite sets the hook run before a theme assignment or delete
+// locks the risk row, and returns the Store.
+func (s *Store) WithBeforeRiskWrite(fn BeforeRiskWrite) *Store {
+	s.beforeRisk = fn
+	return s
+}
+
+// runBeforeRiskWrite invokes the BeforeRiskWrite hook, if one is set.
+func (s *Store) runBeforeRiskWrite(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error {
+	if s.beforeRisk == nil {
+		return nil
+	}
+	return s.beforeRisk(ctx, q, tenantID, themes)
 }
 
 // runAfterRiskWrite invokes the AfterRiskWrite hook, if one is set.
@@ -440,6 +465,26 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 				return ErrNotFound
 			}
 			return fmt.Errorf("delete risk get: %w", err)
+		}
+		// Lock order (#1867): the rules' advisory locks before the row. An
+		// evaluation holding a rule's lock may be about to link this risk
+		// as a child; deleting first and locking second deadlocks with it.
+		// A meta-risk's themes include its rule's target theme, so deleting
+		// one also waits out an evaluation that is updating it.
+		if err := s.runBeforeRiskWrite(ctx, q, tenantID, row.Themes); err != nil {
+			return err
+		}
+		// Re-read under a row lock: the themes may have changed since the
+		// unlocked read, and the hook below must see the deleted row's own.
+		row, err = q.LockRiskByID(ctx, dbx.LockRiskByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(id),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("delete risk lock: %w", err)
 		}
 		if err := q.DeleteRisk(ctx, dbx.DeleteRiskParams{
 			TenantID: pgUUID(tenantID),
