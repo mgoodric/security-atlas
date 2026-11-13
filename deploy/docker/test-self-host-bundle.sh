@@ -408,7 +408,12 @@ log "evidence_kind_schemas exists — stage-1 migrations complete"
 # and the recreated container is no longer a first install. Phase 4 (wait
 # for atlas /health) follows the crosswalk phase, and atlas is not up in
 # stage 1, so the bootstrap is parked there once the line appears.
-OPTIN_CMD="docker compose -f deploy/docker/docker-compose.yml run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/iso27001-2022.yaml"
+# security-atlas#1896: proxy mode's command carries the overlay as well.
+OPTIN_ARGS="-f deploy/docker/docker-compose.yml"
+if [ "${MODE}" = "proxy" ]; then
+    OPTIN_ARGS="${OPTIN_ARGS} -f deploy/docker/docker-compose.proxy.yml"
+fi
+OPTIN_CMD="docker compose ${OPTIN_ARGS} run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/iso27001-2022.yaml"
 PHASE4_SEEN=""
 for i in $(seq 1 60); do
     if "${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 | grep -qF "waiting for atlas /health"; then
