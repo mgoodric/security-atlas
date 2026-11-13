@@ -72,6 +72,10 @@ type Handler struct {
 	// groupDeriver, when set, reconciles group-derived roles on OIDC login
 	// (slice 733 AC-1). nil leaves the pre-733 behavior (no derivation).
 	groupDeriver OIDCGroupDeriver
+
+	// implicitTenant, when set, supplies the tenant for a local login that
+	// omits tenant_id (#1727). nil keeps tenant_id required.
+	implicitTenant ImplicitTenantResolver
 }
 
 // New constructs a Handler. secureCookies=false is for local-dev HTTP
@@ -103,24 +107,86 @@ func New(
 // its pre-733 behavior. Set once at startup from cmd/atlas.
 func (h *Handler) AttachGroupDeriver(d OIDCGroupDeriver) { h.groupDeriver = d }
 
-// LocalLoginRequest is the JSON body for POST /auth/local/login.
+// LocalLoginRequest is the JSON body for POST /auth/local/login. TenantID
+// may be empty on a single-tenant install; see LocalLogin.
 type LocalLoginRequest struct {
 	TenantID string `json:"tenant_id"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
+// ImplicitTenantResolver answers which tenant a login that names none
+// means (#1727): the only tenant on a single-tenant install. It returns
+// tenancy.ErrNoTenants or a *tenancy.AmbiguousTenantError when no tenant is
+// implied, and never the all-zeros tenant.
+type ImplicitTenantResolver interface {
+	ImplicitTenant(ctx context.Context) (uuid.UUID, error)
+}
+
+// PoolImplicitTenantResolver resolves the implicit tenant with
+// tenancy.ResolveImplicitTenant. Q must be a BYPASSRLS connection: the
+// question is asked before any tenant context exists.
+type PoolImplicitTenantResolver struct{ Q tenancy.Querier }
+
+// ImplicitTenant implements ImplicitTenantResolver.
+func (p PoolImplicitTenantResolver) ImplicitTenant(ctx context.Context) (uuid.UUID, error) {
+	ref, err := tenancy.ResolveImplicitTenant(ctx, p.Q)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return ref.ID, nil
+}
+
+// AttachImplicitTenantResolver lets POST /auth/local/login omit tenant_id
+// on a single-tenant install. Without it, tenant_id stays required.
+func (h *Handler) AttachImplicitTenantResolver(r ImplicitTenantResolver) { h.implicitTenant = r }
+
+// ErrMsgTenantIDRequired is the 400 body for a login without tenant_id when
+// no tenant is implied. It is the same whether the install has no tenant or
+// several, and names none: the caller is unauthenticated.
+const ErrMsgTenantIDRequired = "tenant_id is required"
+
+// loginTenant picks the tenant for a local login. An explicit tenant_id
+// wins; the all-zeros id is never accepted. An empty tenant_id falls back
+// to the implicit tenant. On failure it returns the HTTP status and message
+// to answer with.
+func loginTenant(ctx context.Context, raw string, resolver ImplicitTenantResolver) (uuid.UUID, int, string) {
+	if raw != "" {
+		id, err := uuid.Parse(raw)
+		if err != nil || id == uuid.Nil {
+			return uuid.Nil, http.StatusBadRequest, "invalid tenant_id"
+		}
+		return id, 0, ""
+	}
+	if resolver == nil {
+		return uuid.Nil, http.StatusBadRequest, ErrMsgTenantIDRequired
+	}
+	id, err := resolver.ImplicitTenant(ctx)
+	var ambiguous *tenancy.AmbiguousTenantError
+	switch {
+	case err == nil && id != uuid.Nil:
+		return id, 0, ""
+	case err == nil, errors.Is(err, tenancy.ErrNoTenants), errors.As(err, &ambiguous):
+		return uuid.Nil, http.StatusBadRequest, ErrMsgTenantIDRequired
+	default:
+		slog.ErrorContext(ctx, "local login: resolve implicit tenant", "err", err)
+		return uuid.Nil, http.StatusInternalServerError, "login failed"
+	}
+}
+
 // LocalLogin verifies (tenant, email, password) and on success establishes
-// a session cookie. Returns 401 on any failure (no oracle).
+// a session cookie. Returns 401 on any failure (no oracle). tenant_id may be
+// omitted on a single-tenant install when an ImplicitTenantResolver is
+// attached (#1727).
 func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
 	var req LocalLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	tenantID, err := uuid.Parse(req.TenantID)
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, "invalid tenant_id")
+	tenantID, status, msg := loginTenant(r.Context(), req.TenantID, h.implicitTenant)
+	if status != 0 {
+		writeAuthError(w, status, msg)
 		return
 	}
 	ctx, err := tenancy.WithTenant(r.Context(), tenantID.String())
