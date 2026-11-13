@@ -6,8 +6,9 @@
 // canonical pair.
 //
 // Slice 198 adds BootstrapFirstInstallOrUpsert — the OIDC-first-install
-// path that creates the Default Tenant + super_admin grant when the
-// `tenants` table is empty. The bootstrap branch is wired to an optional
+// path that attaches the first user to the bootstrap tenant (creating it
+// only when no tenant exists) with a super_admin grant. The bootstrap
+// branch is wired to an optional
 // BYPASSRLS auth pool because the standard `users` RLS context cannot
 // apply when no tenant exists yet.
 package users
@@ -46,6 +47,12 @@ const BootstrapGrantVia = "bootstrap_first_install"
 // race per P0-198-3) — the loser retries the count check and falls
 // through to the established-install path.
 const pgUniqueViolation = "23505"
+
+// bootstrapAdvisoryLockKey is the fixed pg_advisory_xact_lock(BIGINT) key
+// that serializes OIDC first-installers (#1759). Fixed and documented, like
+// slice 142's 0x142142142142 super-admin lock: 0x198 names slice 198, which
+// introduced this bootstrap path. Do not reuse it for another lock.
+const bootstrapAdvisoryLockKey int64 = 0x198198198198
 
 // ErrNotFound is the sentinel for "no such user under this tenant."
 var ErrNotFound = errors.New("users: not found")
@@ -221,16 +228,15 @@ type BootstrapInput struct {
 
 // BootstrapResult is what BootstrapFirstInstallOrUpsert returns.
 //
-//   - Bootstrapped=true means this call landed the first row in tenants
+//   - Bootstrapped=true means this call created the first user, in the
+//     bootstrap tenant, granted super_admin + tenant_admin and wrote the
+//     audit row. TenantID is the bootstrap tenant; UserID is the new
+//     user. The caller MUST NOT call UpsertOIDC after this; the
+//     bootstrap branch already created the row.
 //
-//   - created the OIDC user + granted super_admin + tenant_admin +
-//     wrote the audit row. The TenantID + UserID fields carry the
-//     synthesized IDs. The caller MUST NOT call UpsertOIDC after this;
-//     the bootstrap branch already created the row.
-//
-//   - Bootstrapped=false means the count(*) gate found ≥1 tenant. The
-//     caller falls through to the existing UpsertOIDC path. The
-//     TenantID and UserID fields are zero-valued.
+//   - Bootstrapped=false means a user or a super_admin already exists. The caller falls
+//     through to the existing UpsertOIDC path. The TenantID and UserID
+//     fields are zero-valued.
 type BootstrapResult struct {
 	Bootstrapped bool
 	TenantID     uuid.UUID
@@ -238,22 +244,25 @@ type BootstrapResult struct {
 }
 
 // BootstrapFirstInstallOrUpsert is the slice 198 OIDC-first-install
-// path. The method runs the count(*) gate, and if zero, atomically:
+// path. Under a transaction-scoped advisory lock (READ COMMITTED) it checks
+// whether any user or super_admin exists, and if none does, atomically:
 //
-//  1. Creates the Default Tenant row with is_bootstrap_tenant=true.
-//     (slice 144 partial UNIQUE index serializes against concurrent
-//     first-installers.)
-//  2. Creates the OIDC users row under the new tenant.
-//  3. Inserts user_roles(role='admin') for the user under the new
-//     tenant.
+//  1. Resolves the implied tenant (tenancy.ResolveImplicitTenant). The
+//     bootstrap tenant is canonical: with one tenant (e.g. the one
+//     bootstrap.sh seeded) the user attaches to it, flagging it
+//     is_bootstrap_tenant if no tenant is flagged yet; with none it
+//     creates the Default Tenant row with is_bootstrap_tenant=true. With
+//     several it returns an error wrapping *tenancy.AmbiguousTenantError.
+//  2. Creates the OIDC users row under that tenant.
+//  3. Inserts user_roles(role='admin') for the user under that tenant.
 //  4. Inserts super_admins(user_id, granted_via='bootstrap_first_install').
 //  5. Inserts me_audit_log(action='bootstrap_first_install').
 //  6. Commits.
 //
-// Race-handling: on SQLSTATE 23505 from the tenants insert (concurrent
-// first-installer beat us to the partial UNIQUE index), the
-// transaction rolls back, we recheck count(*), and fall through with
-// Bootstrapped=false.
+// Race-handling: the advisory lock serializes first-installers; the
+// loser sees the winner's user and falls through. On SQLSTATE 23505
+// from the tenants insert (partial UNIQUE index, second leg) the
+// transaction rolls back and the gate is re-run once.
 //
 // When the Store lacks an authPool, returns ErrBootstrapUnavailable —
 // the caller's existing UpsertOIDC path is unaffected.
@@ -261,7 +270,7 @@ type BootstrapResult struct {
 // Constitutional invariants honored:
 //
 //   - P0-198-1: single transaction across all five inserts.
-//   - P0-198-2: count(*) gate is the first read.
+//   - P0-198-2: the first-user gate is the first read.
 //   - P0-198-3: race-handling via 23505 retry-then-fall-through.
 //   - P0-198-4: me_audit_log row in same tx as the grants.
 //   - P0-198-5: super_admins INSERT carries no tenant_id (the table
@@ -286,53 +295,92 @@ func (s *Store) BootstrapFirstInstallOrUpsert(ctx context.Context, in BootstrapI
 			return res, nil
 		}
 	}
-	// Should be unreachable — second attempt's count(*) check sees
+	// Should be unreachable — second attempt's first-user gate sees
 	// the winning row and returns Bootstrapped=false.
 	return BootstrapResult{Bootstrapped: false}, nil
 }
 
-// bootstrapAttempt runs one count-gate + bootstrap-or-skip pass. The
+// bootstrapAttempt runs one first-user gate + bootstrap-or-skip pass. The
 // retry boolean is true when the partial UNIQUE index trip indicates a
 // concurrent first-installer beat us; the caller re-enters the loop
 // once.
 func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (BootstrapResult, bool, error) {
-	tx, err := s.authPool.BeginTx(ctx, pgx.TxOptions{})
+	// READ COMMITTED is load-bearing: each statement takes a fresh
+	// snapshot, so the gate below, read after the advisory lock is
+	// granted, sees the user a concurrent winner committed while we
+	// waited. Under REPEATABLE READ the snapshot would predate the lock
+	// and the loser would bootstrap a second admin.
+	tx, err := s.authPool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	// P0-198-2: count gate is the first read inside the tx so the
-	// established-install path falls through without writes.
-	var count int
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM tenants`).Scan(&count); err != nil {
-		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap count tenants: %w", err)
+	// Serialize concurrent first-installers. When the bootstrap tenant
+	// already exists (seeded by bootstrap.sh) no tenants INSERT happens,
+	// so the partial UNIQUE index cannot do it; the advisory lock does.
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, bootstrapAdvisoryLockKey); err != nil {
+		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap lock: %w", err)
 	}
-	if count > 0 {
+
+	// P0-198-2: the gate is the first read inside the tx so the
+	// established-install path falls through without writes. The gate
+	// is "nobody has been provisioned yet": no user and no super_admin.
+	// The first user is the bootstrap admin, whether or not the bootstrap
+	// tenant was seeded before them. Requiring no super_admins row too
+	// keeps the gate shut on an install whose users were all deleted:
+	// super_admins has no FK to users, so the grant outlives them.
+	var provisioned bool
+	if err := tx.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM users) OR EXISTS (SELECT 1 FROM super_admins)`,
+	).Scan(&provisioned); err != nil {
+		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap check provisioned: %w", err)
+	}
+	if provisioned {
 		// Established-install path — caller falls through to UpsertOIDC.
 		return BootstrapResult{Bootstrapped: false}, false, nil
 	}
 
-	// Synthesize the new tenant + user IDs up front so the audit-log
-	// row references them.
-	tenantID := uuid.New()
 	userID := uuid.New()
 
-	// 1. tenants row with is_bootstrap_tenant=true. The slice 144
-	//    partial UNIQUE index `idx_tenants_bootstrap_singleton`
-	//    serializes against concurrent first-installers.
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, $2, true)`,
-		tenantID, DefaultBootstrapTenantName,
-	); err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			// P0-198-3: concurrent first-installer beat us. Roll back,
-			// caller re-enters loop, second pass sees count > 0 and
-			// returns Bootstrapped=false.
-			return BootstrapResult{}, true, nil
+	// 1. The bootstrap tenant is canonical: attach the first user to the
+	//    implied tenant, and create + flag it only when none exists.
+	var tenantID uuid.UUID
+	tenant, err := tenancy.ResolveImplicitTenant(ctx, tx)
+	switch {
+	case err == nil:
+		tenantID = tenant.ID
+		// Flag it as the bootstrap tenant unless some tenant already is.
+		if _, err := tx.Exec(ctx,
+			`UPDATE tenants SET is_bootstrap_tenant = true
+			 WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM tenants WHERE is_bootstrap_tenant)`,
+			tenantID,
+		); err != nil {
+			return BootstrapResult{}, false, fmt.Errorf("users: bootstrap flag tenant: %w", err)
 		}
-		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap insert tenants: %w", err)
+	case errors.Is(err, tenancy.ErrNoTenants):
+		// The slice 144 partial UNIQUE index
+		// `idx_tenants_bootstrap_singleton` is the second leg of defense
+		// against concurrent first-installers.
+		tenantID = uuid.New()
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO tenants (id, name, is_bootstrap_tenant) VALUES ($1, $2, true)`,
+			tenantID, DefaultBootstrapTenantName,
+		); err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
+				// P0-198-3: concurrent first-installer beat us. Roll back,
+				// caller re-enters loop, second pass sees the user and
+				// returns Bootstrapped=false.
+				return BootstrapResult{}, true, nil
+			}
+			return BootstrapResult{}, false, fmt.Errorf("users: bootstrap insert tenants: %w", err)
+		}
+	default:
+		// Several tenants and no user: no tenant is implied, so the first
+		// user cannot be placed. The wrapped *tenancy.AmbiguousTenantError
+		// lists the tenants for the caller.
+		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap resolve tenant: %w", err)
 	}
 
 	// 2. users row keyed on (tenant_id, idp_issuer, idp_subject).

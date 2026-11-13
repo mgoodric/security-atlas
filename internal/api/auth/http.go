@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -229,6 +230,12 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, result.AuthURL, http.StatusFound)
 }
 
+// ErrMsgBootstrapAmbiguousTenant is the 409 body for an OIDC first login on
+// an install with several tenants and no user. It names no tenant: the
+// caller has only proven an IdP login.
+const ErrMsgBootstrapAmbiguousTenant = "several organisations exist and no user is provisioned; " +
+	"provision the first admin with atlas-cli"
+
 // OIDCCallback handles GET /auth/oidc/callback?code=...&state=...
 // It verifies state (CSRF), exchanges code, upserts user, and sets the
 // session cookie. The tenant_id is bound to the flow via the IdP cookie's
@@ -237,15 +244,16 @@ func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
 // Slice 198 — OIDC-first-install bootstrap branch:
 //
 // AFTER the OIDC callback succeeds but BEFORE the standard UpsertOIDC
-// call, the handler invokes BootstrapFirstInstallOrUpsert. When the
-// tenants table is empty, the bootstrap branch atomically creates the
-// Default Tenant + the OIDC user + the admin role + the super_admin
-// grant + the audit-log row, and the handler establishes the session
-// against the newly-synthesized tenant_id (the URL query parameter is
-// ignored on this branch — the operator's browser hit /auth/oidc/login
-// with no tenants yet, so any tenant_id they supplied is a placeholder).
+// call, the handler invokes BootstrapFirstInstallOrUpsert. When no user and
+// no super_admin exists yet, the bootstrap branch atomically attaches the OIDC user to
+// the bootstrap tenant (creating it only when no tenant exists) with the
+// admin role + the super_admin grant + the audit-log row, and the handler
+// establishes the session against that tenant (the URL query parameter
+// is ignored on this branch). With several tenants and no user, no
+// tenant is implied: the handler logs the tenant list server-side, clears
+// the flow cookies and answers a generic 409 that names no tenant.
 //
-// On the established-install branch (count(*) > 0), the bootstrap call
+// On the established-install branch (a user or super_admin exists), the bootstrap call
 // returns Bootstrapped=false and the handler falls through to the
 // existing UpsertOIDC + session-create path unchanged.
 func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
@@ -273,8 +281,8 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 
 	// Slice 198 bootstrap branch. The call is a no-op (returns
 	// Bootstrapped=false) when the Store has no auth pool wired OR
-	// when count(*) FROM tenants > 0 — i.e., on every login after the
-	// first install. The branch returns ErrBootstrapUnavailable when
+	// when any user or super_admin exists — i.e., on every login after the first
+	// user. The branch returns ErrBootstrapUnavailable when
 	// the auth pool isn't wired; on that path we fall through to the
 	// existing UpsertOIDC code (which itself enforces the
 	// pre-slice-198 "tenant_id required" guarantee).
@@ -285,6 +293,16 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		Subject:     result.Subject,
 	})
 	if bootErr != nil && !errors.Is(bootErr, users.ErrBootstrapUnavailable) {
+		var ambiguous *tenancy.AmbiguousTenantError
+		if errors.As(bootErr, &ambiguous) {
+			// Reaching this needs only an IdP login, so the tenant list
+			// stays in the server log; the browser gets a generic 409.
+			slog.WarnContext(r.Context(), "oidc first login refused: several tenants and no user provisioned",
+				"idp_issuer", result.Issuer, "tenants", ambiguous.Error())
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusConflict, ErrMsgBootstrapAmbiguousTenant)
+			return
+		}
 		writeAuthError(w, http.StatusInternalServerError, "bootstrap: "+bootErr.Error())
 		return
 	}

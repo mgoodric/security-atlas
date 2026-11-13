@@ -180,7 +180,10 @@ export async function patchFeatureFlag(
 export type SuperAdminRow = {
   user_id: string;
   granted_at: string;
-  granted_via: "bootstrap_first_install" | "manual_grant";
+  granted_via:
+    | "bootstrap_first_install"
+    | "manual_grant"
+    | "single_tenant_upgrade";
   display_name?: string | null;
   email?: string | null;
 };
