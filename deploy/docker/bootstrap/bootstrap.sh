@@ -65,6 +65,22 @@ CROSSWALKS_DIR="${CROSSWALKS_DIR:-$REPO_ROOT/data/crosswalks}"
 
 log() { echo "[bootstrap] $*"; }
 
+# security-atlas#1723: the script also runs outside the bundled image (an
+# adopter running it by hand on macOS), so it must not assume busybox wget
+# or a compose stack. in_container gates every `docker compose` hint;
+# http_ok uses curl when present (macOS, most Linux) and wget otherwise
+# (the postgres:alpine image ships busybox wget, not curl).
+in_container() { [ -f /.dockerenv ] || [ -f /run/.containerenv ]; }
+
+if command -v curl >/dev/null 2>&1; then
+    http_ok() { curl -fsS -o /dev/null "$1" 2>/dev/null; }
+elif command -v wget >/dev/null 2>&1; then
+    http_ok() { wget -q -O /dev/null "$1" 2>/dev/null; }
+else
+    log "ERROR: neither curl nor wget is installed; one is needed to poll atlas /health"
+    exit 1
+fi
+
 # ----- Phase 1: wait for Postgres -----
 #
 # Slice 473: this bootstrap is gated on `atlas-migrate` via
@@ -122,17 +138,25 @@ SOC2_PRESENT="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM frameworks WHERE
 log "importing SOC 2 crosswalk from $CROSSWALKS_DIR/soc2-tsc-2017.yaml ..."
 atlas-cli catalog import-crosswalk "$CROSSWALKS_DIR/soc2-tsc-2017.yaml"
 if [ "$SOC2_PRESENT" = "0" ]; then
-    log "other bundled framework crosswalks are not imported; to add one, run from the repo root:"
+    if in_container; then
+        log "other bundled framework crosswalks are not imported; to add one, run from the repo root:"
+    else
+        log "other bundled framework crosswalks are not imported; to add one, run:"
+    fi
     for cw in "$CROSSWALKS_DIR"/*.yaml; do
         [ "$(basename "$cw")" = "soc2-tsc-2017.yaml" ] && continue
-        log "  docker compose $COMPOSE_ARGS run --rm --entrypoint atlas-cli $BOOTSTRAP_SERVICE catalog import-crosswalk /repo/data/crosswalks/$(basename "$cw")"
+        if in_container; then
+            log "  docker compose $COMPOSE_ARGS run --rm --entrypoint atlas-cli $BOOTSTRAP_SERVICE catalog import-crosswalk /repo/data/crosswalks/$(basename "$cw")"
+        else
+            log "  atlas-cli catalog import-crosswalk $cw"
+        fi
     done
 fi
 
 # ----- Phase 4: wait for the atlas server /health -----
 log "waiting for atlas /health at $ATLAS_HTTP_URL/health ..."
 i=0
-until wget -q -O /dev/null "$ATLAS_HTTP_URL/health" 2>/dev/null; do
+until http_ok "$ATLAS_HTTP_URL/health"; do
     i=$((i + 1))
     if [ "$i" -ge 90 ]; then
         log "ERROR: atlas /health not 200 after 90 attempts"
@@ -267,7 +291,11 @@ if [ -n "${ATLAS_BOOTSTRAP_TOKEN:-}" ]; then
             && chmod 0600 "$TOKEN_FILE" 2>/dev/null \
             && log "bootstrap-token file written at $TOKEN_FILE (mode 0600)"
     fi
-    log "first-time sign-in: see ${TOKEN_FILE} or 'docker compose logs atlas-bootstrap | grep BOOTSTRAP_TOKEN'"
+    if in_container; then
+        log "first-time sign-in: see ${TOKEN_FILE} or 'docker compose logs atlas-bootstrap | grep BOOTSTRAP_TOKEN'"
+    else
+        log "first-time sign-in: see ${TOKEN_FILE}"
+    fi
 fi
 
 log "bootstrap complete — security-atlas is seeded and ready"
