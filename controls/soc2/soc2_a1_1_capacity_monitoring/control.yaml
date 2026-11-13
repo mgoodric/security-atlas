@@ -22,15 +22,23 @@ evidence_queries:
     evidence_kind: osquery.host_posture.v1
     description: "Every production host reports capacity headroom on the most recent sample"
     expression: |
-      package atlas.controls.soc2.a1_1
+      package evidence.query
 
-      default allow := false
+      # The sandbox input is {records: [{result}]}: one verdict per in-window
+      # record, decided by the connector that emitted it against the check the
+      # description above names. This rolls them up with the engine's precedence
+      # (any fail, then any pass, then any inconclusive, else na; empty ledger is
+      # inconclusive). See internal/eval/rego.go.
 
-      allow if {
-        every p in input.posture_records {
-          p.host_role == "production"
-          p.capacity.disk_pct_used < 85
-          p.capacity.memory_pct_used < 90
-          p.capacity.cpu_pct_used_p95_5m < 90
-        }
-      }
+      result := "fail" if {
+        some r in input.records
+        r.result == "fail"
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
+        count(input.records) > 0
+      } else := "inconclusive"
