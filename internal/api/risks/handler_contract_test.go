@@ -129,6 +129,7 @@ func TestContract_Risks(t *testing.T) {
 		Methodology:         dbx.RiskMethodologyNist80030,
 		InherentScore:       []byte(`{"likelihood":4,"impact":5,"severity":20}`),
 		Treatment:           dbx.RiskTreatmentMitigate,
+		Level:               dbx.RiskLevelOrg,
 		TreatmentOwner:      "security-eng",
 		ResidualScore:       []byte(`{"likelihood":2,"impact":4,"severity":8}`),
 		ReviewDueAt:         &reviewDue,

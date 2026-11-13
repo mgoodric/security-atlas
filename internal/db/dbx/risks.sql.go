@@ -115,13 +115,13 @@ INSERT INTO risks (
     id, tenant_id, title, description, category, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     review_due_at, accepted_until, accepter, instrument_reference,
-    acceptance_status
+    acceptance_status, level, org_unit_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
-    $15
+    $15, $16, $17
 )
 RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status
 `
@@ -142,6 +142,8 @@ type CreateRiskParams struct {
 	Accepter            string                `json:"accepter"`
 	InstrumentReference string                `json:"instrument_reference"`
 	AcceptanceStatus    *RiskAcceptanceStatus `json:"acceptance_status"`
+	Level               RiskLevel             `json:"level"`
+	OrgUnitID           pgtype.UUID           `json:"org_unit_id"`
 }
 
 // Insert a new risk. The application validates methodology-specific
@@ -165,6 +167,8 @@ func (q *Queries) CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, e
 		arg.Accepter,
 		arg.InstrumentReference,
 		arg.AcceptanceStatus,
+		arg.Level,
+		arg.OrgUnitID,
 	)
 	var i Risk
 	err := row.Scan(
@@ -383,6 +387,35 @@ func (q *Queries) HeatmapBuckets(ctx context.Context, tenantID pgtype.UUID) ([]H
 	return items, nil
 }
 
+const insertRiskAuditLog = `-- name: InsertRiskAuditLog :exec
+INSERT INTO risk_audit_log (
+    tenant_id, risk_id, actor, action_type, before_state, after_state
+)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertRiskAuditLogParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	RiskID      pgtype.UUID `json:"risk_id"`
+	Actor       string      `json:"actor"`
+	ActionType  string      `json:"action_type"`
+	BeforeState []byte      `json:"before_state"`
+	AfterState  []byte      `json:"after_state"`
+}
+
+// #1749: one append-only row per placement change, in the write's tx.
+func (q *Queries) InsertRiskAuditLog(ctx context.Context, arg InsertRiskAuditLogParams) error {
+	_, err := q.db.Exec(ctx, insertRiskAuditLog,
+		arg.TenantID,
+		arg.RiskID,
+		arg.Actor,
+		arg.ActionType,
+		arg.BeforeState,
+		arg.AfterState,
+	)
+	return err
+}
+
 const linkRiskControl = `-- name: LinkRiskControl :exec
 INSERT INTO risk_control_links (risk_id, control_id, tenant_id)
 VALUES ($1, $2, $3)
@@ -440,6 +473,48 @@ func (q *Queries) LinkRiskControlWithWeights(ctx context.Context, arg LinkRiskCo
 		arg.WeightCoverage,
 	)
 	return err
+}
+
+const listRiskAuditLog = `-- name: ListRiskAuditLog :many
+SELECT id, tenant_id, risk_id, actor, action_type, before_state, after_state, created_at, subject_module
+FROM risk_audit_log
+WHERE tenant_id = $1 AND risk_id = $2
+ORDER BY created_at DESC, id DESC
+`
+
+type ListRiskAuditLogParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	RiskID   pgtype.UUID `json:"risk_id"`
+}
+
+func (q *Queries) ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error) {
+	rows, err := q.db.Query(ctx, listRiskAuditLog, arg.TenantID, arg.RiskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RiskAuditLog
+	for rows.Next() {
+		var i RiskAuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.RiskID,
+			&i.Actor,
+			&i.ActionType,
+			&i.BeforeState,
+			&i.AfterState,
+			&i.CreatedAt,
+			&i.SubjectModule,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listRiskControlLinkWeights = `-- name: ListRiskControlLinkWeights :many
@@ -796,6 +871,58 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 		arg.Accepter,
 		arg.InstrumentReference,
 		arg.AcceptanceStatus,
+	)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Category,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+		&i.AcceptanceStatus,
+	)
+	return i, err
+}
+
+const updateRiskPlacement = `-- name: UpdateRiskPlacement :one
+UPDATE risks
+SET level = $3,
+    org_unit_id = $4,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status
+`
+
+type UpdateRiskPlacementParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ID        pgtype.UUID `json:"id"`
+	Level     RiskLevel   `json:"level"`
+	OrgUnitID pgtype.UUID `json:"org_unit_id"`
+}
+
+// #1749: move a risk between hierarchy levels and org units. The caller
+// holds the row via LockRiskByID and has checked that level matches the
+// org unit's level.
+func (q *Queries) UpdateRiskPlacement(ctx context.Context, arg UpdateRiskPlacementParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, updateRiskPlacement,
+		arg.TenantID,
+		arg.ID,
+		arg.Level,
+		arg.OrgUnitID,
 	)
 	var i Risk
 	err := row.Scan(

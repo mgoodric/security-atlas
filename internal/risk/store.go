@@ -200,11 +200,19 @@ type CreateInput struct {
 	Accepter            string
 	InstrumentReference string
 	LinkedControlIDs    []uuid.UUID
+	// Level and OrgUnitID place the risk in the hierarchy (#1749). With an
+	// org unit and no level, the risk takes the unit's level; with neither,
+	// it is a team risk with no unit. A level that differs from the unit's
+	// is ErrLevelMismatch.
+	Level     dbx.RiskLevel
+	OrgUnitID *uuid.UUID
 }
 
 // Create inserts a new risk row plus its control links. Methodology defaults
 // to DefaultMethodology if empty. Returns ErrInvalidMethodology /
-// ErrInherentScoreInvalid / ErrTreatmentValidation on validation failure.
+// ErrInherentScoreInvalid / ErrTreatmentValidation on validation failure, and
+// a placement validation error (IsPlacementValidation) for a bad level or
+// org unit.
 func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 	if in.Methodology == "" {
 		in.Methodology = DefaultMethodology
@@ -244,6 +252,14 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 
 	var out Risk
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		unitLevel, err := orgUnitLevel(ctx, q, tenantID, in.OrgUnitID)
+		if err != nil {
+			return err
+		}
+		level, err := resolveLevel(in.Level, unitLevel, dbx.RiskLevelTeam)
+		if err != nil {
+			return err
+		}
 		id := uuid.New()
 		row, err := q.CreateRisk(ctx, dbx.CreateRiskParams{
 			ID:                  pgUUID(id),
@@ -261,6 +277,8 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 			Accepter:            in.Accepter,
 			InstrumentReference: in.InstrumentReference,
 			AcceptanceStatus:    NullAcceptanceStatus(in.AcceptanceStatus),
+			Level:               level,
+			OrgUnitID:           pgUUIDPtr(in.OrgUnitID),
 		})
 		if err != nil {
 			return fmt.Errorf("create risk: %w", err)

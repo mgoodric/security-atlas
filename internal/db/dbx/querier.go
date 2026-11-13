@@ -1294,6 +1294,8 @@ type Querier interface {
 	// (questionnaire_id, code) UNIQUE constraint protects against duplicate
 	// imports of the same row.
 	InsertQuestionnaireQuestion(ctx context.Context, arg InsertQuestionnaireQuestionParams) (QuestionnaireQuestion, error)
+	// #1749: one append-only row per placement change, in the write's tx.
+	InsertRiskAuditLog(ctx context.Context, arg InsertRiskAuditLogParams) error
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
@@ -2411,6 +2413,7 @@ type Querier interface {
 	// parents (e.g., an ownership-themed risk feeds both an org-level ownership
 	// meta-risk and a team-level meta-risk).
 	ListRiskAggregationParents(ctx context.Context, arg ListRiskAggregationParentsParams) ([]ListRiskAggregationParentsRow, error)
+	ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error)
 	// Slice 020: returns each control link for a risk WITH the per-link
 	// effectiveness weighting columns (migration `_029`). The residual derivation
 	// reads design_score + the three weights here; operational_score and
@@ -3164,6 +3167,10 @@ type Querier interface {
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
 	UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error)
+	// #1749: move a risk between hierarchy levels and org units. The caller
+	// holds the row via LockRiskByID and has checked that level matches the
+	// org unit's level.
+	UpdateRiskPlacement(ctx context.Context, arg UpdateRiskPlacementParams) (Risk, error)
 	// Slice 020: writes the freshly-derived residual_score JSONB onto a risk.
 	// This is the ONLY column the residual derivation mutates — it never touches
 	// inherent_score, never touches evidence (constitutional invariant #2). The
