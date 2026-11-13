@@ -174,6 +174,19 @@ describe("GET /api/controls-list", () => {
     expect(body.total).toBe(39);
   });
 
+  test("issue 1741: include=state propagates upstream error status", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1741" });
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response("bad scope", { status: 400 }),
+    );
+    const res = await GET(
+      makeReq("/api/controls-list?include=state&scope=not-a-uuid") as never,
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: string };
+    expect(body.error).toBeTruthy();
+  });
+
   test("issue 1741: include=state drops malformed paging values", async () => {
     mockCookieGet.mockReturnValue({ value: "test-bearer-1741" });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
