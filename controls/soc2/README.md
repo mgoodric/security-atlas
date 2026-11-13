@@ -13,6 +13,15 @@ out of the box without authoring controls from scratch.
 - **SCF anchor catalog:** `migrations/fixtures/scf-sample.json` (slice 006)
 - **HITL review log:** `docs/audit-log/control-kit-review.md`
 
+## Licensing posture
+
+The AICPA Trust Services Criteria are copyrighted, and the bootstrap image
+ships this directory. Each `description` cites its criterion by id (for
+example `TSC CC6.1`) and summarises the criterion's intent in original
+words; none reproduces the criterion text (#1896, following the crosswalk
+posture in `data/crosswalks/soc2-tsc-2017.yaml`). Keep it that way when
+editing or adding a bundle.
+
 ## Architectural invariants honored
 
 - **Invariant 1 (one control, N framework satisfactions).** Each bundle

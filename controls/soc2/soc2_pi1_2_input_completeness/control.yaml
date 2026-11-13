@@ -2,12 +2,11 @@ bundle_schema_version: "1"
 bundle_id: soc2_pi1_2_input_completeness
 title: "Input validation is exercised by SAST and contract tests"
 description: |
-  The entity implements policies and procedures over system inputs,
-  including controls over completeness and accuracy (TSC PI1.2). The
-  SAST scanner is configured with input-validation taint rules; the
-  evidence query asserts every in-scope repo's most recent scan
-  surfaces zero unsuppressed findings in the rule set covering
-  injection, deserialization, and schema-violation patterns.
+  Inputs are checked so that only complete, accurate data enters
+  processing (TSC PI1.2). The SAST scanner is configured with
+  input-validation taint rules; the evidence query asserts every in-scope
+  repo's most recent scan surfaces zero unsuppressed findings in the rule
+  set covering injection, deserialization, and schema-violation patterns.
 
 scf_anchor_id: SEA-05
 control_family: SEA

@@ -2,11 +2,10 @@ bundle_schema_version: "1"
 bundle_id: soc2_pi1_3_processing_validity
 title: "Authorization checks asserted by SAST in processing-path code"
 description: |
-  The entity implements policies and procedures over system processing
-  to result in products, services, and reporting to meet the entity's
-  objectives (TSC PI1.3). The SAST rule set covering authorization /
-  IDOR / privilege-escalation patterns surfaces zero unsuppressed
-  findings on the most recent scan of every in-scope repo.
+  Processing logic is controlled so it produces the intended results (TSC
+  PI1.3). The SAST rule set covering authorization / IDOR /
+  privilege-escalation patterns surfaces zero unsuppressed findings on the
+  most recent scan of every in-scope repo.
 
 scf_anchor_id: SEA-05
 control_family: SEA

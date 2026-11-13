@@ -2,10 +2,9 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc7_2_anomaly_detection
 title: "Anomalous behavior detection is operational on production endpoints"
 description: |
-  The entity monitors system components and the operation of those
-  components for anomalies indicative of malicious acts, natural
-  disasters, and errors (TSC CC7.2). The osquery posture stream
-  surfaces the EDR / behavioral-detection engine state on each
+  Systems are watched for abnormal behaviour, whether it comes from an
+  attack, a mistake or an outside event (TSC CC7.2). The osquery posture
+  stream surfaces the EDR / behavioral-detection engine state on each
   endpoint; the query asserts every managed endpoint has the engine
   running and reporting healthy.
 
