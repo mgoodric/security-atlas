@@ -33,7 +33,7 @@ func TestRunResetBootstrap_SendsOperatorTokenAsBearer(t *testing.T) {
 	cmdCredentialsStdout = func() io.Writer { return &out }
 	defer func() { cmdCredentialsStdout = prevStdout }()
 
-	if err := runResetBootstrap("t-1", true, srv.URL); err != nil {
+	if err := runResetBootstrap("t-1", true, srv.URL, 0); err != nil {
 		t.Fatalf("runResetBootstrap: %v", err)
 	}
 	if gotAuth != "Bearer operator-token" {
@@ -59,7 +59,7 @@ func TestRunResetBootstrap_ConflictSuggestsForce(t *testing.T) {
 		w.WriteHeader(http.StatusConflict)
 	}))
 	defer srv.Close()
-	err := runResetBootstrap("t-1", false, srv.URL)
+	err := runResetBootstrap("t-1", false, srv.URL, 0)
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("err = %v, want the --force hint", err)
 	}

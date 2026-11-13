@@ -224,7 +224,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "PATCH", Path: "/v1/questionnaires/{id}/answers/{qid}", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "PATCH /v1/questionnaires/{id}/answers/{qid}"},
 	{Method: "PATCH", Path: "/v1/tenants/{id}", Tag: "tenants", Tier: "bearer", Internal: false, Summary: "PATCH /v1/tenants/{id} — rename a tenant and/or set its control-bundle gate policy (per-tenant admin or super_admin)"},
 	{Method: "PATCH", Path: "/v1/vendors/{id}", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "PATCH /v1/vendors/{id}"},
-	{Method: "POST", Path: "/auth/local/login", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/local/login"},
+	{Method: "POST", Path: "/auth/local/login", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/local/login — local sign-in; JSON body {tenant_id, email, password}. tenant_id may be omitted when the install has exactly one tenant; otherwise 400 tenant_id is required"},
 	{Method: "POST", Path: "/auth/logout", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/logout"},
 	{Method: "POST", Path: "/oauth/device_authorization", Tag: "oauth", Tier: "none", Internal: false, Summary: "POST /oauth/device_authorization — device authorization endpoint (RFC 8628)"},
 	{Method: "POST", Path: "/oauth/device_authorization/approve", Tag: "oauth", Tier: "none", Internal: false, Summary: "POST /oauth/device_authorization/approve — atlas-internal device approval hook"},

@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -437,6 +438,25 @@ func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (Bootst
 	}, false, nil
 }
 
+// timingDummyHash is a password hash no login input is expected to match.
+// VerifyLocalLogin verifies against it when the user or credential is
+// missing, so an unknown email or tenant costs the same argon2id work as a
+// wrong password and response time is no enumeration oracle (#1727).
+var timingDummyHash = sync.OnceValue(func() string {
+	h, err := password.Hash("atlas-login-timing-equalizer")
+	if err != nil {
+		return ""
+	}
+	return h
+})
+
+// burnPasswordVerify spends one password verification and discards the result.
+func burnPasswordVerify(plaintext string) {
+	if h := timingDummyHash(); h != "" {
+		_, _ = password.Verify(plaintext, h)
+	}
+}
+
 // VerifyLocalLogin returns the User on a successful (tenant, email, password)
 // triple. Returns ErrInvalidCredentials when either no user exists or the
 // password does not verify — never both. The caller (HTTP login handler)
@@ -456,6 +476,7 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	row, err := q.GetUserByEmail(ctx, dbx.GetUserByEmailParams{TenantID: tIDU, Email: email})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			burnPasswordVerify(plaintextPassword)
 			return User{}, ErrInvalidCredentials
 		}
 		return User{}, err
@@ -463,6 +484,7 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	cred, err := q.GetLocalCredentialByUserID(ctx, dbx.GetLocalCredentialByUserIDParams{TenantID: tIDU, UserID: row.ID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			burnPasswordVerify(plaintextPassword)
 			return User{}, ErrInvalidCredentials
 		}
 		return User{}, err

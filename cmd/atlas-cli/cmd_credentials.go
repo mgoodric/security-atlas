@@ -71,13 +71,20 @@ func newCredentialsIssueCmd() *cobra.Command {
 					})
 				})
 			}
-			return runResetBootstrap(f.tenant, f.force, f.httpEndpoint)
+			// The recovery key is a tenant admin key: --scope and --kinds
+			// do not apply, and are refused rather than silently dropped
+			// (#1892). --ttl sets its lifetime; the server defaults it to
+			// 24h and caps it at 7d.
+			if cmd.Flags().Changed("scope") || cmd.Flags().Changed("kinds") {
+				return fmt.Errorf("--scope and --kinds do not apply to --reset-bootstrap (it mints a tenant admin key)")
+			}
+			return runResetBootstrap(f.tenant, f.force, f.httpEndpoint, ttl)
 		},
 	}
 	cmd.Flags().StringVar(&f.tenant, "tenant", "", "tenant id [required]")
 	cmd.Flags().StringVar(&f.scope, "scope", "", "scope predicate (JSON string)")
 	cmd.Flags().StringVar(&f.kinds, "kinds", "", "comma-separated evidence_kind identifiers (empty = all)")
-	cmd.Flags().StringVar(&f.ttl, "ttl", "0", "time-to-live (e.g., 24h, 30d; 0 = no expiry)")
+	cmd.Flags().StringVar(&f.ttl, "ttl", "0", "time-to-live (e.g., 24h, 30d; 0 = no expiry). With --reset-bootstrap: 0 = the server default of 24h, at most 168h")
 	// Slice 073 — recovery flags. --reset-bootstrap is the discoverable
 	// flag; --force is the foot-gun gate. See docs/issues/073-*.md AC-8.
 	cmd.Flags().BoolVar(&f.resetBootstrap, "reset-bootstrap", false,
@@ -100,7 +107,9 @@ func newCredentialsIssueCmd() *cobra.Command {
 // Before #1885 the CLI minted the token itself over the admin gRPC Issue
 // RPC, which mints only non-admin keys, so signing in with the recovered
 // token gave a non-admin session.
-func runResetBootstrap(tenant string, force bool, httpEndpoint string) error {
+//
+// ttl is the recovery key's lifetime; 0 leaves the server default (#1892).
+func runResetBootstrap(tenant string, force bool, httpEndpoint string, ttl time.Duration) error {
 	endpoint := httpEndpoint
 	if endpoint == "" {
 		endpoint = deriveHTTPEndpoint(common.endpoint)
@@ -110,7 +119,7 @@ func runResetBootstrap(tenant string, force bool, httpEndpoint string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	respBody, err := postResetBootstrap(ctx, endpoint, common.token, tenant, force)
+	respBody, err := postResetBootstrap(ctx, endpoint, common.token, tenant, force, ttl)
 	if err != nil {
 		return err
 	}
@@ -122,16 +131,24 @@ func runResetBootstrap(tenant string, force bool, httpEndpoint string) error {
 	}
 	_, _ = fmt.Fprintln(cmdCredentialsStdout(), out.String())
 	_, _ = fmt.Fprintln(cmdCredentialsStdout(), "reset-bootstrap: platform_status cleared and bootstrap-token file rewritten with a new admin credential")
+	_, _ = fmt.Fprintln(cmdCredentialsStdout(), "reset-bootstrap: the key expires at expires_at; after you sign in another way, revoke it with `atlas-cli credentials revoke --id <credential_id>`")
 	return nil
 }
 
 // postResetBootstrap sends the reset POST to endpoint with operatorToken as
 // the bearer and returns the 200 response body.
-func postResetBootstrap(ctx context.Context, endpoint, operatorToken, tenant string, force bool) ([]byte, error) {
-	body, err := json.Marshal(map[string]any{
+func postResetBootstrap(ctx context.Context, endpoint, operatorToken, tenant string, force bool, ttl time.Duration) ([]byte, error) {
+	if ttl < 0 || (ttl > 0 && ttl < time.Second) {
+		return nil, fmt.Errorf("--ttl %s: must be at least 1s with --reset-bootstrap", ttl)
+	}
+	payload := map[string]any{
 		"tenant_id": tenant,
 		"force":     force,
-	})
+	}
+	if ttl > 0 {
+		payload["ttl_seconds"] = int64(ttl / time.Second)
+	}
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}

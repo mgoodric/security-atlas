@@ -13,6 +13,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/platform"
 )
 
@@ -116,9 +118,16 @@ func (s *Server) handleInstallState(w http.ResponseWriter, r *http.Request) {
 
 // markFirstSigninResponse is the response shape for the elevated POST
 // /v1/install/mark-first-signin endpoint.
+//
+// RevokedCredentialIDs lists the bootstrap-recovery keys this sign-in
+// revoked (#1892). RecoveryKeyKept is true when the caller is itself a
+// recovery key: it is left live, to expire on its TTL, because revoking it
+// would end the session that just signed in.
 type markFirstSigninResponse struct {
-	Marked     bool `json:"marked"`
-	FileDelete bool `json:"file_deleted"`
+	Marked               bool     `json:"marked"`
+	FileDelete           bool     `json:"file_deleted"`
+	RevokedCredentialIDs []string `json:"revoked_credential_ids"`
+	RecoveryKeyKept      bool     `json:"recovery_key_kept"`
 }
 
 // handleMarkFirstSignin flips platform_status.first_signin_at if it is
@@ -158,7 +167,7 @@ func (s *Server) handleMarkFirstSignin(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":"mark first signin failed"}`))
 		return
 	}
-	resp := markFirstSigninResponse{Marked: marked, FileDelete: false}
+	resp := markFirstSigninResponse{Marked: marked, FileDelete: false, RevokedCredentialIDs: []string{}}
 	if marked && s.bootstrapTokenPath != "" {
 		// Only the FIRST flip should attempt file deletion; idempotent
 		// re-calls (marked=false) leave the (already-absent) file alone.
@@ -175,7 +184,44 @@ func (s *Server) handleMarkFirstSignin(w http.ResponseWriter, r *http.Request) {
 		// exactly one handler observes marked=true across all concurrent
 		// callers; no in-process dedup is needed.
 	}
+	if marked {
+		s.revokeRecoveryKeysOnSignin(r.Context(), &resp)
+	}
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// revokeRecoveryKeysOnSignin revokes the bootstrap-recovery keys
+// reset-bootstrap minted, now that someone has signed in (#1892). It
+// matches on the api_keys.purpose marker and the credential id, never on
+// the bearer, so the env ATLAS_BOOTSTRAP_TOKEN key and every ordinary key
+// are out of reach. The caller's own key is spared: the bearer-paste
+// sign-in uses the pasted key as the session, and revoking it would sign
+// the operator straight back out. That key expires on its TTL instead,
+// and the operator can revoke it after signing in another way.
+func (s *Server) revokeRecoveryKeysOnSignin(ctx context.Context, resp *markFirstSigninResponse) {
+	if s.credStore == nil {
+		return
+	}
+	cred, _ := authctx.CredentialFromContext(ctx)
+	if cred.Purpose == credstore.PurposeBootstrapRecovery {
+		resp.RecoveryKeyKept = true
+		s.installLogger().Info("first sign-in used the recovery key; it stays live until it expires",
+			slog.String("credential_id", cred.ID),
+			slog.String("expires_at", cred.ExpiresAt().Format(time.RFC3339)))
+	}
+	revoked, err := s.credStore.RevokePurpose(credstore.PurposeBootstrapRecovery, cred.ID)
+	if err != nil {
+		s.installLogger().Warn("revoke of recovery keys on first sign-in failed",
+			slog.String("error", err.Error()))
+	}
+	if revoked != nil {
+		resp.RevokedCredentialIDs = revoked
+	}
+	if len(revoked) > 0 {
+		s.installLogger().Info("first sign-in revoked recovery keys",
+			slog.String("caller_credential_id", cred.ID),
+			slog.Any("revoked_credential_ids", revoked))
+	}
 }
 
 // installLogger returns a non-nil slog.Logger, falling back to the
