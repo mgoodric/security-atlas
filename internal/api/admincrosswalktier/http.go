@@ -2,12 +2,15 @@
 // crosswalk-mapping verified-tier governance: POST
 // /v1/admin/crosswalk-edges/{id}/tier transitions a mapping's trust tier.
 //
-// The route requires an ADMIN atlas credential (cred.IsAdmin) — promotion to
-// verified is the trust act and a privileged catalog-write capability (ADR 0018
-// §3 / threat-model E / AC-4). A non-admin caller gets 403; this is the
-// load-bearing E mitigation, asserted in the integration test. ADR 0018 chose
-// "any admin/maintainer role" over super_admin-only, so this reuses the same
-// cred.IsAdmin gate the slice-509 admingroupmappings surface uses.
+// The route requires a SUPER_ADMIN caller — the verified JWT's
+// `atlas:super_admin` claim, the same check the slice-142 super-admin surface
+// makes. fw_to_scf_edges rows are global catalog data shared by every tenant,
+// so a tenant-scoped admin (including a per-tenant admin API key, which sets
+// cred.IsAdmin) must not change them: that would be a cross-tenant write
+// (#1757). This narrows ADR 0018's original "any admin/maintainer role" choice.
+// On a single-tenant install the bootstrap admin holds super_admin (#1759), so
+// single-tenant operators keep the capability. A caller without the claim gets
+// 403; the integration test asserts it.
 //
 // fw_to_scf_edges is a CATALOG table (no tenant_id, no RLS): the trust gate is
 // this admin-role authz check plus the append-only audit trail the store writes
@@ -61,7 +64,7 @@ type TransitionResponse struct {
 
 // Transition handles POST /v1/admin/crosswalk-edges/{id}/tier (AC-4).
 func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
-	cred, ok := requireAdmin(w, r)
+	cred, ok := requireSuperAdmin(w, r)
 	if !ok {
 		return
 	}
@@ -86,10 +89,10 @@ func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
 
 	reviewer, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
 	if err != nil {
-		// A verified admin JWT always carries a parseable user subject; if it
-		// does not, fail closed rather than write an audit row with a nil
+		// A verified super_admin JWT always carries a parseable user subject;
+		// if it does not, fail closed rather than write an audit row with a nil
 		// reviewer.
-		httpresp.WriteError(w, http.StatusForbidden, "admin credential lacks a resolvable user id")
+		httpresp.WriteError(w, http.StatusForbidden, "super_admin credential lacks a resolvable user id")
 		return
 	}
 
@@ -131,17 +134,19 @@ type adminCred struct {
 	UserID   string
 }
 
-// requireAdmin enforces the admin gate (AC-4 / threat-model E). A missing
-// credential is 401; a non-admin credential is 403. Authority is enforced
-// server-side, never in the UI.
-func requireAdmin(w http.ResponseWriter, r *http.Request) (adminCred, bool) {
+// requireSuperAdmin enforces the super_admin gate (#1757 / threat-model E). A
+// missing credential is 401; a caller whose verified JWT lacks the
+// `atlas:super_admin` claim is 403. A per-tenant admin API key is tenant-scoped
+// and never carries the claim, so it is refused here like any tenant admin.
+// Authority is enforced server-side, never in the UI.
+func requireSuperAdmin(w http.ResponseWriter, r *http.Request) (adminCred, bool) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return adminCred{}, false
 	}
-	if !cred.IsAdmin {
-		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
+	if claims := jwtmw.FromContext(r.Context()); claims == nil || !claims.SuperAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "super_admin required")
 		return adminCred{}, false
 	}
 	return adminCred{TenantID: cred.TenantID, UserID: cred.UserID}, true

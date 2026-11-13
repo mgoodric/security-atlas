@@ -7,10 +7,16 @@
 //	GET  /v1/admin/framework-versions/migrations              — list the review queue
 //	POST /v1/admin/framework-versions/migrations/{id}/decision — approve/reject one suggestion
 //
-// Every route requires an ADMIN atlas credential (cred.IsAdmin). Version
-// promotion is a privileged catalog-write capability (ADR 0019 §1 /
-// threat-model E / P0-484-3); a non-admin caller gets 403 — the load-bearing E
-// mitigation asserted in the integration test. The suggest job NEVER
+// Every WRITE route (promote, revert, suggest, decide) requires a SUPER_ADMIN
+// caller — the verified JWT's `atlas:super_admin` claim, the same check the
+// slice-142 super-admin surface makes. framework_versions reached here are
+// global catalog rows (tenant_id IS NULL: the store applies no tenant GUC, so
+// RLS hides tenant-private rows from it) shared by every tenant, so a
+// tenant-scoped admin (including a per-tenant admin API key, which sets
+// cred.IsAdmin) must not change them (#1757 / ADR 0019 §1 / threat-model E /
+// P0-484-3). On a single-tenant install the bootstrap admin holds super_admin
+// (#1759). The read-only queue listing keeps the admin gate. A caller without
+// the required authority gets 403, asserted in the integration test. The suggest job NEVER
 // auto-applies a carryover and the approve/reject acts only record a human
 // decision (P0-484-1 / the AI-assist "no auto-approve its own mappings"
 // boundary).
@@ -108,7 +114,7 @@ type migrationRow struct {
 
 // Promote handles POST /v1/admin/framework-versions/{id}/promote (AC-1).
 func (h *Handler) Promote(w http.ResponseWriter, r *http.Request) {
-	actor, ok := requireAdminActor(w, r)
+	actor, ok := requireSuperAdminActor(w, r)
 	if !ok {
 		return
 	}
@@ -130,7 +136,7 @@ func (h *Handler) Promote(w http.ResponseWriter, r *http.Request) {
 // Revert handles POST /v1/admin/framework-versions/{id}/revert (AC-1
 // reversibility).
 func (h *Handler) Revert(w http.ResponseWriter, r *http.Request) {
-	actor, ok := requireAdminActor(w, r)
+	actor, ok := requireSuperAdminActor(w, r)
 	if !ok {
 		return
 	}
@@ -156,7 +162,7 @@ func (h *Handler) Revert(w http.ResponseWriter, r *http.Request) {
 // Suggest handles POST /v1/admin/framework-versions/migrations:suggest (AC-3).
 // It populates the review queue; it NEVER auto-applies (P0-484-1).
 func (h *Handler) Suggest(w http.ResponseWriter, r *http.Request) {
-	_, ok := requireAdminActor(w, r)
+	_, ok := requireSuperAdminActor(w, r)
 	if !ok {
 		return
 	}
@@ -238,7 +244,7 @@ func (h *Handler) ListMigrations(w http.ResponseWriter, r *http.Request) {
 // Decide handles POST /v1/admin/framework-versions/migrations/{id}/decision
 // (AC-4). One suggestion at a time; audited. NEVER auto-applies (P0-484-1).
 func (h *Handler) Decide(w http.ResponseWriter, r *http.Request) {
-	actor, ok := requireAdminActor(w, r)
+	actor, ok := requireSuperAdminActor(w, r)
 	if !ok {
 		return
 	}
@@ -303,9 +309,9 @@ func (h *Handler) writePromotionResult(w http.ResponseWriter, r *http.Request, p
 	return true
 }
 
-// requireAdminActor enforces the admin gate (P0-484-3 / threat-model E): a
-// missing credential is 401; a non-admin credential is 403. Returns the acting
-// admin's atlas user id for the audit row.
+// requireAdminActor enforces the admin gate on the read-only queue listing: a
+// missing credential is 401; a non-admin credential is 403. Returns the caller's
+// atlas user id.
 func requireAdminActor(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
@@ -316,11 +322,34 @@ func requireAdminActor(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool)
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return uuid.UUID{}, false
 	}
-	actor, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
+	return actorID(w, cred.UserID)
+}
+
+// requireSuperAdminActor enforces the super_admin gate on the global-catalog
+// write routes (#1757 / P0-484-3 / threat-model E): a missing credential is
+// 401; a caller whose verified JWT lacks the `atlas:super_admin` claim is 403.
+// A per-tenant admin API key is tenant-scoped and never carries the claim.
+// Returns the acting super_admin's atlas user id for the audit row.
+func requireSuperAdminActor(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
+		return uuid.UUID{}, false
+	}
+	if claims := jwtmw.FromContext(r.Context()); claims == nil || !claims.SuperAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "super_admin required")
+		return uuid.UUID{}, false
+	}
+	return actorID(w, cred.UserID)
+}
+
+// actorID parses the caller's user subject. A verified JWT always carries a
+// parseable user subject; fail closed rather than write an audit row with a nil
+// actor.
+func actorID(w http.ResponseWriter, subject string) (uuid.UUID, bool) {
+	actor, err := uuid.Parse(jwtmw.SubjectUserID(subject))
 	if err != nil {
-		// A verified admin JWT always carries a parseable user subject; fail
-		// closed rather than write an audit row with a nil actor.
-		httpresp.WriteError(w, http.StatusForbidden, "admin credential lacks a resolvable user id")
+		httpresp.WriteError(w, http.StatusForbidden, "credential lacks a resolvable user id")
 		return uuid.UUID{}, false
 	}
 	return actor, true
