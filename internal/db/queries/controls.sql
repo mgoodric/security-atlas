@@ -273,6 +273,20 @@ UPDATE controls
 SET superseded_by = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 
+-- name: UpdateControlDescriptionInPlace :execrows
+-- Issue #1908: a re-upload whose manifest differs from the active row's
+-- only in `description` updates that row in place instead of versioning,
+-- so every control-keyed row (owners, evidence, exceptions, links) stays
+-- attached. The hash moves with the YAML so a repeat upload is a no-op.
+UPDATE controls
+SET description = $3,
+    bundle_manifest_yaml = $4,
+    bundle_manifest_hash = $5,
+    bundle_uploaded_at = now(),
+    bundle_uploaded_by = $6,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
+
 -- NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
 -- from internal/db/queries/scf_anchors.sql (slice 006). The bundle parser
 -- in internal/control/parser.go calls them through the same dbx.Queries

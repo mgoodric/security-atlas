@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"gopkg.in/yaml.v3"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -33,6 +35,11 @@ type UploadResult struct {
 	// version existed). It is false both for a content-change version bump
 	// (supersession) and for a byte-identical-content no-op re-upload.
 	IsNewBundle bool
+	// UpdatedInPlace is true when the manifest differed from the active
+	// version's only in `description`, so the active row was updated in
+	// place rather than superseded (issue #1908). ControlID and Version
+	// are the existing row's; SupersededID is zero.
+	UpdatedInPlace bool
 }
 
 // Store persists parsed bundles to the controls table under RLS.
@@ -48,7 +55,9 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
 // superseded and a new row is inserted in the same transaction.
 //
 // AC-6: re-uploading the same bundle id is a version bump (creates a new
-// control row, supersedes the prior).
+// control row, supersedes the prior). Two exceptions: byte-identical content
+// is a no-op, and a change confined to `description` updates the active row
+// in place (issue #1908).
 //
 // Pre-conditions:
 //   - b has been parsed and ValidateStructural has passed.
@@ -128,6 +137,47 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 			return nil
 		}
 
+		var uploader *string
+		if uploadedBy != "" {
+			u := uploadedBy
+			uploader = &u
+		}
+
+		// 3b. A manifest that differs from the active version's ONLY in
+		//     `description` (prose edit, reflow, whitespace) updates the
+		//     active row in place. Superseding would mint a new control id
+		//     and orphan everything keyed on the old one: owners, evidence,
+		//     evaluations, exceptions, risk and other links (issue #1908).
+		//     Any other difference still versions, as below. Decision:
+		//     docs/audit-log/1908-control-description-in-place-decisions.md.
+		if !isNew {
+			same, cmpErr := manifestsEqualIgnoringDescription([]byte(prior.BundleManifestYaml), b.ManifestYAMLRaw)
+			if cmpErr != nil {
+				return cmpErr
+			}
+			if same {
+				n, err := q.UpdateControlDescriptionInPlace(ctx, dbx.UpdateControlDescriptionInPlaceParams{
+					TenantID:           pgUUID(tenantID),
+					ID:                 prior.ID,
+					Description:        b.Manifest.Description,
+					BundleManifestYaml: string(b.ManifestYAMLRaw),
+					BundleManifestHash: b.ManifestHashHex,
+					BundleUploadedBy:   uploader,
+				})
+				if err != nil {
+					return fmt.Errorf("update control description in place: %w", err)
+				}
+				if n != 1 {
+					return fmt.Errorf("update control description in place: %d rows updated, want 1", n)
+				}
+				result.ControlID = uuid.UUID(prior.ID.Bytes)
+				result.BundleID = b.Manifest.BundleID
+				result.Version = prior.Version
+				result.UpdatedInPlace = true
+				return nil
+			}
+		}
+
 		// 4. Insert the new row. version = prior.version + 1 (or 1 for new).
 		newID := uuid.New()
 		nextVersion := int32(1)
@@ -150,11 +200,6 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		}
 
 		lifecycle := dbx.ControlLifecycleState(b.Manifest.LifecycleStateOrDefault())
-		var uploader *string
-		if uploadedBy != "" {
-			u := uploadedBy
-			uploader = &u
-		}
 		var freshness *string
 		if b.Manifest.FreshnessClass != "" {
 			f := b.Manifest.FreshnessClass
@@ -337,6 +382,24 @@ func resolveSCFAnchor(ctx context.Context, q *dbx.Queries, ref string) (uuid.UUI
 		return uuid.Nil, fmt.Errorf("get scf anchor by code: %w", err)
 	}
 	return uuid.UUID(row.ID.Bytes), nil
+}
+
+// manifestsEqualIgnoringDescription reports whether two control.yaml
+// documents are equal once the top-level `description` key is removed from
+// each. Both sides decode to generic maps, so key order, comments and
+// formatting do not count as differences; any other field change, including
+// a nested evidence_queries[].description, does (issue #1908).
+func manifestsEqualIgnoringDescription(priorYAML, nextYAML []byte) (bool, error) {
+	var prior, next map[string]any
+	if err := yaml.Unmarshal(priorYAML, &prior); err != nil {
+		return false, fmt.Errorf("parse prior control manifest: %w", err)
+	}
+	if err := yaml.Unmarshal(nextYAML, &next); err != nil {
+		return false, fmt.Errorf("parse control manifest: %w", err)
+	}
+	delete(prior, "description")
+	delete(next, "description")
+	return reflect.DeepEqual(prior, next), nil
 }
 
 // lookupAnchorRow returns the anchor row by uuid; thin helper so the Upload
