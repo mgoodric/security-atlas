@@ -33,6 +33,8 @@ type nopResetter struct{}
 
 func (nopResetter) ResetBootstrap(context.Context, bool) error { return nil }
 
+func (nopResetter) TenantCount(context.Context) (int, error) { return 1, nil }
+
 // nopValidator satisfies ingest.SchemaValidator so ingest.New does not
 // panic. It is never invoked — the route walk only registers routes.
 type nopValidator struct{}
