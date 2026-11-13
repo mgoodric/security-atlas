@@ -72,3 +72,25 @@ atlas-cli catalog import-crosswalk ./scf-olir-strm-nist-800-53-r5-1-1.xlsx \
 All XLSX imports land at `source_attribution=community_draft`. The database
 trust tier for new edges remains the catalog default draft tier; promotion to
 reviewed or verified is a human governance step.
+
+## Provenance Precedence
+
+An import never lowers an existing edge's provenance. Precedence is
+`scf_official` > `community_draft` > `org_internal`. A row whose source ranks
+below the existing edge for the same (requirement, anchor) pair is skipped,
+and the edge keeps its attribution, rationale, relationship, strength and
+tier. Because XLSX imports land as `community_draft`, they skip every pair that
+already has an `scf_official` edge. Each skip is printed:
+
+```text
+edge skipped CC6.1->IAC-01: existing source_attribution=scf_official outranks incoming community_draft
+```
+
+A same-source or stronger-source row updates the edge as before, but never its
+trust tier. If a stronger source lands on an edge whose tier is `rejected`, the
+edge stays out of coverage, and the import prints one line per edge so a
+reviewer can act on it:
+
+```text
+edge upgraded onto rejected tier CC6.1->IAC-01: source_attribution community_draft -> scf_official; mapping_tier stays rejected
+```

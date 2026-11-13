@@ -823,6 +823,13 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// Row-lock one edge by (requirement, anchor) inside the import transaction.
+	// The importer compares source_attribution precedence before it updates
+	// (issue #1754); without the lock a concurrent weaker import that passed its
+	// check against the old row would overwrite a just-committed scf_official
+	// edge at READ COMMITTED. Same read-validate-write guard as
+	// GetFwToScfEdgeTierForUpdate. Returns ErrNoRows when the edge doesn't exist.
+	GetFwToScfEdgeForUpdate(ctx context.Context, arg GetFwToScfEdgeForUpdateParams) (FwToScfEdge, error)
 	// ===== slice 483: crosswalk mapping-tier governance =====
 	// Read the current trust tier of one edge by id. The transition store calls
 	// this FOR UPDATE (see GetFwToScfEdgeTierForUpdate) inside the tx; this plain
