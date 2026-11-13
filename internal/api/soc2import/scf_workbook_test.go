@@ -70,6 +70,50 @@ mappings:
 	}
 }
 
+// The published 2026.3 workbook puts "SCF Domains & Principles" ahead of the
+// "SCF 2026.3" control sheet and names the metadata sheet "Focal Documents
+// (FD)". The loader must pick sheets by name, not by position.
+func TestLoadSCFWorkbook_PublishedSheetOrderPicksControlSheet(t *testing.T) {
+	t.Parallel()
+	xlsx := writePublishedLayoutSCFWorkbook(t)
+	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{
+		FrameworkColumn: "Example\nStandard\n2026",
+	})
+	if err != nil {
+		t.Fatalf("LoadSCFWorkbook: %v", err)
+	}
+	if len(cw.Mappings) != 3 {
+		t.Fatalf("mappings = %d; want 3 from the SCF 2026.3 sheet", len(cw.Mappings))
+	}
+	if !strings.Contains(cw.Mappings[0].Rationale, `sheet "SCF 2026.3"`) {
+		t.Fatalf("rationale should cite the SCF 2026.3 sheet; got %q", cw.Mappings[0].Rationale)
+	}
+	if cw.FrameworkSlug != "general-example-standard-2026" || cw.FrameworkIssuer != "Example Issuer" {
+		t.Fatalf("focal-document metadata not read from \"Focal Documents (FD)\": %+v", cw)
+	}
+}
+
+func TestLoadSCFWorkbook_NoControlSheetNamesCandidates(t *testing.T) {
+	t.Parallel()
+	f := excelize.NewFile()
+	mustSetSheetName(t, f, "Sheet1", "SCF Domains & Principles")
+	mustSetRows(t, f, "SCF Domains & Principles", [][]interface{}{
+		{"#", "SCF Domain", "SCF Identifier"},
+		{"1", "Governance", "GOV"},
+	})
+	path := filepath.Join(t.TempDir(), "no-control-sheet.xlsx")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("SaveAs: %v", err)
+	}
+	_, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{})
+	if err == nil {
+		t.Fatal("expected missing control sheet error")
+	}
+	if !strings.Contains(err.Error(), `"SCF Domains & Principles"`) {
+		t.Fatalf("error should name the SCF sheets it rejected; got %v", err)
+	}
+}
+
 func TestLoadSCFWorkbook_OLIRWorkbookUsesExplicitSTRM(t *testing.T) {
 	t.Parallel()
 	xlsx := writeOLIRWorkbook(t, "Subset Of", "10")
@@ -139,6 +183,40 @@ func writeWideSCFWorkbook(t *testing.T) string {
 		{"Identity", "Access", "IAC-01", "short", "EX-2"},
 	})
 	path := filepath.Join(t.TempDir(), "scf-wide.xlsx")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("SaveAs: %v", err)
+	}
+	return path
+}
+
+// writePublishedLayoutSCFWorkbook builds a minimal fixture with the sheet
+// order of the published SCF 2026.3 workbook. Cell contents are synthetic;
+// the real workbook is not committed.
+func writePublishedLayoutSCFWorkbook(t *testing.T) string {
+	t.Helper()
+	f := excelize.NewFile()
+	mustSetSheetName(t, f, "Sheet1", "READ THIS")
+	mustSetRows(t, f, "READ THIS", [][]interface{}{{"Synthetic fixture"}})
+	for _, name := range []string{"Change Overview", "STRM Errata", "SCF Domains & Principles", "Focal Documents (FD)", "SCF 2026.3", "Assessment Objectives 2026.3"} {
+		if _, err := f.NewSheet(name); err != nil {
+			t.Fatalf("NewSheet %q: %v", name, err)
+		}
+	}
+	mustSetRows(t, f, "Change Overview", [][]interface{}{{"Change", "SCF #"}, {"Added", "GOV-01"}})
+	mustSetRows(t, f, "SCF Domains & Principles", [][]interface{}{
+		{"#", "SCF Domain", "SCF Identifier", "Cybersecurity & Data Privacy by Design (C|P) Principles"},
+		{"1", "Governance", "GOV", "principle"},
+	})
+	mustSetRows(t, f, "Focal Documents (FD)", [][]interface{}{
+		{"Geography", "SCF Column Header", "Focal Document Identifier (FDI)", "Source", "Focal Document Name (FDN)"},
+		{"General", "Example\nStandard\n2026", "general-example-standard-2026", "Example Issuer", "Example Standard 2026"},
+	})
+	mustSetRows(t, f, "SCF 2026.3", [][]interface{}{
+		{"SCF Domain", "SCF Control", "SCF #", "Secure Controls Framework (SCF)\nControl Description", "Example\nStandard\n2026", "Other\nStandard"},
+		{"Governance", "Program", "GOV-01", "short", "EX-1\nEX-2", "OT-1"},
+		{"Identity", "Access", "IAC-01", "short", "EX-2", ""},
+	})
+	path := filepath.Join(t.TempDir(), "scf-published-layout.xlsx")
 	if err := f.SaveAs(path); err != nil {
 		t.Fatalf("SaveAs: %v", err)
 	}
