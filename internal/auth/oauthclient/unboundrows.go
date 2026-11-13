@@ -26,8 +26,9 @@ import (
 // Append-only ledger tables are never purged. ADR-0012 allows disposal from
 // the evidence ledger only by tombstone, and ADR-0020 rules out raw
 // BYPASSRLS deletes from it. A ledger table is one the application itself
-// cannot delete from: no RLS policy grants DELETE, or a BEFORE DELETE
-// trigger refuses it. A table whose all-zeros rows a retained table still
+// cannot delete from: no permissive RLS policy grants DELETE, atlas_app
+// holds no DELETE privilege on it, or a BEFORE DELETE trigger refuses it.
+// A table whose all-zeros rows a retained table still
 // references, by any foreign key, is retained too: deleting it would either
 // fail, or cascade into the ledger (ON DELETE CASCADE / SET NULL). Retained
 // tables are listed, with the reason, and are not counted toward a purge.
@@ -76,13 +77,24 @@ var ErrPurgeNotConfirmed = errors.New("oauthclient: purge not confirmed")
 // tenantTablesSQL lists every ordinary or partitioned table (never a single
 // partition, which its parent already counts) outside the system schemas
 // that has a uuid tenant_id column, and whether it is an append-only
-// ledger: no RLS policy that allows DELETE, or a user BEFORE DELETE row
-// trigger.
+// ledger. Any one of three signals makes it a ledger, so an unsure
+// classification retains:
+//
+//   - no permissive RLS policy allows DELETE (a restrictive policy only
+//     narrows what a permissive one grants; on its own it allows nothing);
+//   - atlas_app has no DELETE privilege on it, or there is no atlas_app
+//     role to ask about;
+//   - a user BEFORE DELETE row trigger.
 const tenantTablesSQL = `
 SELECT n.nspname, c.relname,
        NOT EXISTS (
            SELECT 1 FROM pg_policy p
            WHERE p.polrelid = c.oid AND p.polcmd IN ('d', '*')
+             AND p.polpermissive
+       ) OR NOT EXISTS (
+           SELECT 1 FROM pg_roles r
+           WHERE r.rolname = 'atlas_app'
+             AND has_table_privilege(r.oid, c.oid, 'DELETE')
        ) OR EXISTS (
            SELECT 1 FROM pg_trigger tg
            WHERE tg.tgrelid = c.oid AND NOT tg.tgisinternal

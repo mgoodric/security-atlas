@@ -88,6 +88,8 @@ export type AnchorWithState = Anchor & {
 // in SQL ahead of paging), and the totals the platform returns alongside
 // the page are passed through for the header count. Issue #1832 —
 // `limit` caps the page, so a caller after the totals can ask for one row.
+// Issue #1740 — `offset` skips that many rows, so the catalog can be walked
+// page by page past the platform's 500-row cap.
 export type AnchorsWithStatePage = {
   anchors: AnchorWithState[];
   total?: number;
@@ -100,11 +102,13 @@ export async function listAnchorsWithState(
   scopeCellID?: string,
   hasControl?: boolean,
   limit?: number,
+  offset?: number,
 ): Promise<AnchorsWithStatePage> {
   const qs = new URLSearchParams({ include: "state" });
   if (scopeCellID) qs.set("scope", scopeCellID);
   if (hasControl !== undefined) qs.set("has_control", String(hasControl));
   if (limit !== undefined) qs.set("limit", String(limit));
+  if (offset !== undefined) qs.set("offset", String(offset));
   const res = await apiFetch(`/v1/anchors?${qs.toString()}`, bearer);
   return (await res.json()) as AnchorsWithStatePage;
 }
