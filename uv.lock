@@ -345,7 +345,7 @@ wheels = [
 
 [[package]]
 name = "compliance-trestle"
-version = "4.0.3"
+version = "4.1.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "attrs" },
@@ -364,11 +364,12 @@ dependencies = [
     { name = "python-frontmatter" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "requests" },
+    { name = "rfc8785" },
     { name = "ruamel-yaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/26/54/9b548300fee6e67fd56810483b0e7aa2e3b6203fb46f294e198193c53c40/compliance_trestle-4.0.3.tar.gz", hash = "sha256:9084287775e34155b61938318fe59dc59efcd076b215ed041273f4286e35fd2c", size = 330189, upload-time = "2026-05-20T11:20:21.266Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/f5/49/41d82ede03010518fab9128e7bd426b20af98bcda61d58df5320055e160f/compliance_trestle-4.1.0.tar.gz", hash = "sha256:53b7c31d1d584e4bed5622d452d251cc83fe8e0cafa25853be35f8530ea3b3f6", size = 344776, upload-time = "2026-06-29T13:00:56.676Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/10/44/6e68810a33ca7b29a9f45e5765481e6eb6e0abccd401eb8f93694ff2cd11/compliance_trestle-4.0.3-py3-none-any.whl", hash = "sha256:3bcd5763574e73d5533b637179c5af18d427d8ccbb5f50354d0b5cd6d0afbcdb", size = 477341, upload-time = "2026-05-20T11:20:19.252Z" },
+    { url = "https://files.pythonhosted.org/packages/68/e1/3fd91031a74b4e18969ca455f2fb2bdb58e0751236345b6e726b5c70850d/compliance_trestle-4.1.0-py3-none-any.whl", hash = "sha256:b604a6c96958f489b7d288f54082396568150afdcccce1992b30ecc1ef71d969", size = 493819, upload-time = "2026-06-29T13:00:55.096Z" },
 ]
 
 [[package]]
@@ -1167,6 +1168,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ac/c3/e2a2b89f2d3e2179abd6d00ebd70bff6273f37fb3e0cc209f48b39d00cbf/requests-2.34.2.tar.gz", hash = "sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed", size = 142856, upload-time = "2026-05-14T19:25:27.735Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl", hash = "sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0", size = 73075, upload-time = "2026-05-14T19:25:26.443Z" },
+]
+
+[[package]]
+name = "rfc8785"
+version = "0.1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/ef/2f/fa1d2e740c490191b572d33dbca5daa180cb423c24396b856f5886371d8b/rfc8785-0.1.4.tar.gz", hash = "sha256:e545841329fe0eee4f6a3b44e7034343100c12b4ec566dc06ca9735681deb4da", size = 14321, upload-time = "2024-09-27T16:33:31.206Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4d/78/119878110660b2ad709888c8a1614fce7e2fab39080ab960656dc8605bf6/rfc8785-0.1.4-py3-none-any.whl", hash = "sha256:520d690b448ecf0703691c76e1a34a24ddcd4fc5bc41d589cb7c58ec651bcd48", size = 9240, upload-time = "2024-09-27T16:33:29.683Z" },
 ]
 
 [[package]]
