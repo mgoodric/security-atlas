@@ -8,8 +8,9 @@
 -- as the prior-state guard; zero affected rows means the transition was
 -- attempted from the wrong state (the application probes after to
 -- disambiguate ErrNotFound vs ErrWrongState, matching slice 021's pattern).
--- Publish is a two-step operation (supersede prior + insert new); the
--- application wraps both queries in a single tx so the chain is atomic.
+-- Publishing a later version is a two-step operation (supersede prior +
+-- publish the successor row in place); the application wraps both queries
+-- in a single tx so the chain is atomic.
 
 -- name: CreatePolicy :one
 INSERT INTO policies (
@@ -130,6 +131,8 @@ SELECT
     p.source_attribution, p.created_by, p.submitted_at, p.submitted_by,
     p.approved_at, p.approved_by, p.published_at, p.published_by,
     p.superseded_at, p.next_review_at,
+    p.historical_approver_name, p.historical_approved_at, p.source_url,
+    p.imported_by, p.imported_at,
     ac.ack_denominator,
     ac.ack_numerator
 FROM policies p
@@ -186,8 +189,9 @@ RETURNING *;
 
 -- name: SupersedePolicyAtPublish :one
 -- Part 1 of the two-step Publish: marks the prior 'published' row as
--- 'superseded'. Used inside the same transaction as InsertPublishedPolicy
--- so the chain transition is atomic. Returns the updated prior row so the
+-- 'superseded'. Used inside the same transaction as PublishApprovedPolicy
+-- (which publishes the successor row in place) so the chain transition is
+-- atomic. Returns the updated prior row so the
 -- handler can audit who superseded it. Only matches when the row is
 -- currently 'published' (defense-in-depth -- a chain can't supersede a
 -- draft).
@@ -201,9 +205,11 @@ WHERE tenant_id = $1
 RETURNING *;
 
 -- name: PublishApprovedPolicy :one
--- One-shot publish of an approved row that has NO predecessor (the very
--- first version). Sets status -> published, populates effective_date,
--- published_at, published_by. Predecessor_id stays NULL.
+-- Publishes an approved row in place. Sets status -> published, populates
+-- effective_date, published_at, published_by. predecessor_id is never
+-- changed: a first version keeps NULL, and a later version (a draft
+-- created with predecessor_id set) keeps the link to the row that Part 1
+-- just superseded (#1747).
 UPDATE policies
 SET status = 'published',
     effective_date = $3,
@@ -215,26 +221,57 @@ WHERE tenant_id = $1
   AND status = 'approved'
 RETURNING *;
 
--- name: InsertPublishedPolicy :one
--- Part 2 of the two-step Publish for SECOND-and-later versions: clones
--- the approved row's content into a NEW row with status='published',
--- predecessor_id pointing at the just-superseded prior. Called inside
--- the same tx as SupersedePolicyAtPublish so the version chain stays
--- atomic. The caller supplies the new row's id and version string.
+-- name: ImportPublishedPolicy :one
+-- #1747 — insert an imported policy directly as 'published', carrying its
+-- historical lifecycle. The in-tool submit/approve/publish transitions do
+-- not apply; the handler gates the import on an admin credential instead.
+-- approved_by stays NULL: the historical approver is a free-text name in
+-- historical_approver_name, not a credential.
 INSERT INTO policies (
     id, tenant_id, predecessor_id,
     title, version, body_md,
     owner_role, approver_role,
     linked_control_ids, acknowledgment_required_roles,
-    status, effective_date, source_attribution,
-    created_by, published_at, published_by
+    status, effective_date, next_review_at, source_attribution,
+    created_by, published_at, published_by,
+    historical_approver_name, historical_approved_at, source_url,
+    imported_by, imported_at
 )
 VALUES (
-    $1, $2, $3,
-    $4, $5, $6,
-    $7, $8,
-    $9, $10,
-    'published', $11, $12,
-    $13, now(), $14
+    sqlc.arg('id'), sqlc.arg('tenant_id'), NULL,
+    sqlc.arg('title'), sqlc.arg('version'), sqlc.arg('body_md'),
+    sqlc.arg('owner_role'), sqlc.arg('approver_role'),
+    sqlc.arg('linked_control_ids'), sqlc.arg('acknowledgment_required_roles'),
+    'published', sqlc.arg('effective_date'), sqlc.narg('next_review_at'), 'imported',
+    sqlc.arg('imported_by'), now(), sqlc.arg('imported_by'),
+    sqlc.arg('historical_approver_name'), sqlc.arg('historical_approved_at'), sqlc.narg('source_url'),
+    sqlc.arg('imported_by'), now()
 )
 RETURNING *;
+
+-- name: PolicyTitleVersionExists :one
+-- #1747 — duplicate check for import: a policy with this title and version
+-- already exists in the tenant (in any state).
+SELECT EXISTS (
+    SELECT 1 FROM policies
+    WHERE tenant_id = $1 AND title = $2 AND version = $3
+) AS exists;
+
+-- name: InsertPolicyAuditLog :one
+-- #1747 — append one row to the policy audit log.
+INSERT INTO policy_audit_log (
+    tenant_id, policy_id, action, actor, source_file,
+    historical_approver_name, historical_approved_at, source_url
+)
+VALUES (
+    sqlc.arg('tenant_id'), sqlc.arg('policy_id'), sqlc.arg('action'), sqlc.arg('actor'), sqlc.arg('source_file'),
+    sqlc.narg('historical_approver_name'), sqlc.narg('historical_approved_at'), sqlc.narg('source_url')
+)
+RETURNING *;
+
+-- name: ListPolicyAuditLog :many
+-- #1747 — the audit trail for one policy, oldest first.
+SELECT *
+FROM policy_audit_log
+WHERE tenant_id = $1 AND policy_id = $2
+ORDER BY created_at ASC, id ASC;

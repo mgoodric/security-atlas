@@ -2730,6 +2730,11 @@ type Policy struct {
 	PublishedBy                 *string            `json:"published_by"`
 	SupersededAt                pgtype.Timestamptz `json:"superseded_at"`
 	NextReviewAt                pgtype.Timestamptz `json:"next_review_at"`
+	HistoricalApproverName      *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt        pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl                   *string            `json:"source_url"`
+	ImportedBy                  *string            `json:"imported_by"`
+	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
 }
 
 type PolicyAcknowledgment struct {
@@ -2742,6 +2747,20 @@ type PolicyAcknowledgment struct {
 	AckToken         string             `json:"ack_token"`
 	EvidenceRecordID pgtype.UUID        `json:"evidence_record_id"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type PolicyAuditLog struct {
+	ID                     pgtype.UUID        `json:"id"`
+	TenantID               pgtype.UUID        `json:"tenant_id"`
+	PolicyID               pgtype.UUID        `json:"policy_id"`
+	Action                 string             `json:"action"`
+	Actor                  string             `json:"actor"`
+	SourceFile             string             `json:"source_file"`
+	HistoricalApproverName *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt   pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl              *string            `json:"source_url"`
+	SubjectModule          string             `json:"subject_module"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
 type Population struct {

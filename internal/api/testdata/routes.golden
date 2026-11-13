@@ -234,6 +234,7 @@ POST /v1/admin/framework-versions/{id}/promote
 POST /v1/admin/framework-versions/{id}/revert
 POST /v1/admin/group-role-mappings
 POST /v1/admin/install/reset-bootstrap
+POST /v1/admin/policies/import
 POST /v1/admin/scim-credentials
 POST /v1/admin/sso/preflight
 POST /v1/admin/super-admins

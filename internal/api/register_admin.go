@@ -27,6 +27,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/crosswalktier"
 	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/frameworkversion"
+	"github.com/mgoodric/security-atlas/internal/policy"
 	"github.com/mgoodric/security-atlas/internal/scim"
 )
 
@@ -291,6 +292,10 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	root.Get("/v1/admin/evidence/export", evidenceExportH.ExportEvidence)
 	policiesExportH := policiesapi.NewExportHandler(s.dbPool)
 	root.Get("/v1/admin/policies/export", policiesExportH.ExportPolicies)
+	// #1747: import an existing policy library as published policies with
+	// their historical lifecycle. Admin-only (handler-gated).
+	policiesImportH := policiesapi.New(policy.NewStore(s.dbPool))
+	root.Post("/v1/admin/policies/import", policiesImportH.ImportPolicies)
 	exceptionsExportH := exceptionsapi.NewExportHandler(s.dbPool)
 	root.Get("/v1/admin/exceptions/export", exceptionsExportH.ExportExceptions)
 	samplesExportH := auditapi.NewSamplesExportHandler(s.dbPool)
