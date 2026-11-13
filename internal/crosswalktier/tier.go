@@ -37,8 +37,8 @@ const (
 	// scf_official edge may seed here directly (ADR 0018 §2); a community_draft
 	// must pass through under_review first.
 	TierVerified Tier = "verified"
-	// TierRejected is a terminal tier — a mapping judged wrong. Reachable from
-	// draft or under_review.
+	// TierRejected is a mapping judged wrong. Reachable from draft or
+	// under_review; its only exit is the reopen move back to draft (#1849).
 	TierRejected Tier = "rejected"
 )
 
@@ -48,7 +48,7 @@ var ErrUnknownTier = errors.New("crosswalktier: unknown tier")
 
 // ErrIllegalTransition is returned when a requested move is not a legal edge of
 // the state machine (e.g. the draft -> verified skip a community draft must not
-// take, or any move out of the terminal rejected tier).
+// take, or a rejected mapping skipping past draft).
 var ErrIllegalTransition = errors.New("crosswalktier: illegal tier transition")
 
 // IsValid reports whether t is one of the four canonical tiers.
@@ -86,7 +86,7 @@ func TierFromDB(d dbx.CrosswalkMappingTier) Tier { return Tier(d) }
 //	draft        -> under_review | rejected
 //	under_review -> verified     | rejected
 //	verified     -> (none — a verified mapping is not demoted via this API)
-//	rejected     -> (none — terminal)
+//	rejected     -> draft  (reopen, #1849)
 //
 // The scf_official seed-to-verified path is NOT an operator transition: it is a
 // load/seed-time data step (the migration sets it), so it is deliberately
@@ -102,7 +102,12 @@ var legalTransitions = map[Tier]map[Tier]bool{
 		TierRejected: true,
 	},
 	TierVerified: {},
-	TierRejected: {},
+	// Reopen: a rejected mapping returns to the start of the ladder and must
+	// climb it again. Without this, recovering a wrongly rejected edge, or one
+	// an official import later upgraded, took a manual DB edit.
+	TierRejected: {
+		TierDraft: true,
+	},
 }
 
 // CanTransition reports whether from -> to is a legal operator transition.
@@ -117,8 +122,8 @@ func CanTransition(from, to Tier) bool {
 
 // ValidateTransition returns nil when from -> to is a legal operator
 // transition, ErrUnknownTier when either tier is malformed, or
-// ErrIllegalTransition otherwise (an illegal skip, a move out of a terminal
-// tier, or a no-op self-transition). This is the pure-Go legality check the
+// ErrIllegalTransition otherwise (an illegal skip, a move out of verified, or
+// a no-op self-transition). This is the pure-Go legality check the
 // store calls inside the transaction and the AC-8 unit test exercises without a
 // DB.
 func ValidateTransition(from, to Tier) error {
