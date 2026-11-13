@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -110,7 +111,7 @@ func (s *Store) ListRisksAsOf(ctx context.Context, asOf time.Time) ([]riskRow, e
 				ID:            uuid.UUID(r.ID.Bytes),
 				Title:         r.Title,
 				Category:      string(r.Category),
-				Treatment:     string(r.Treatment),
+				Treatment:     treatmentLabel(r),
 				ResidualScore: r.ResidualScore,
 				InherentScore: r.InherentScore,
 			}
@@ -335,4 +336,15 @@ func pgDate(t time.Time) pgtype.Date {
 		Time:  time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC),
 		Valid: true,
 	}
+}
+
+// treatmentLabel renders a risk row's treatment for the board surfaces, so
+// a pending acceptance reads "accept (proposed)" rather than passing for a
+// signed-off one (#1746).
+func treatmentLabel(r dbx.Risk) string {
+	var status dbx.RiskAcceptanceStatus
+	if r.AcceptanceStatus != nil {
+		status = *r.AcceptanceStatus
+	}
+	return risk.TreatmentLabel(r.Treatment, status)
 }

@@ -66,9 +66,16 @@ export type AnchorState = {
 // backend (`internal/catalog/framework_codes.go`), and the frontend is
 // a pure renderer (P0-226-2). Empty array means the anchor has no
 // satisfaction edges yet; the page renders `—` in that case (AC-6).
+//
+// Issue #1741 — on the current-version read, `control_id` is the tenant
+// control behind the anchor (absent when there is none) and
+// `control_count` how many active controls anchor to it. The control
+// detail page resolves `control_id`, never the anchor `id`.
 export type AnchorWithState = Anchor & {
   state: AnchorState | null;
   frameworks: string[];
+  control_id?: string;
+  control_count?: number;
 };
 
 // Slice 224 — accepts an optional `scopeCellID` that, when set, is
@@ -76,15 +83,27 @@ export type AnchorWithState = Anchor & {
 // rollup narrows to evaluations recorded against that scope cell.
 // Server-side filtering only (P0-224-2): the applicability_expr never
 // reaches the browser.
+//
+// Issue #1741 — `hasControl` forwards `?has_control=true|false` (filtered
+// in SQL ahead of paging), and the totals the platform returns alongside
+// the page are passed through for the header count.
+export type AnchorsWithStatePage = {
+  anchors: AnchorWithState[];
+  total?: number;
+  catalog_total?: number;
+  with_control_total?: number;
+};
+
 export async function listAnchorsWithState(
   bearer: string,
   scopeCellID?: string,
-): Promise<AnchorWithState[]> {
+  hasControl?: boolean,
+): Promise<AnchorsWithStatePage> {
   const qs = new URLSearchParams({ include: "state" });
   if (scopeCellID) qs.set("scope", scopeCellID);
+  if (hasControl !== undefined) qs.set("has_control", String(hasControl));
   const res = await apiFetch(`/v1/anchors?${qs.toString()}`, bearer);
-  const body = (await res.json()) as { anchors: AnchorWithState[] };
-  return body.anchors;
+  return (await res.json()) as AnchorsWithStatePage;
 }
 
 // Slice 484 — `frameworkVersion` pins the reverse traversal to one framework

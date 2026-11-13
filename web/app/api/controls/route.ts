@@ -36,9 +36,29 @@ export async function GET(req: NextRequest): Promise<Response> {
   // it to the upstream `/v1/anchors?include=state&scope=...`. Empty
   // string is treated as no-filter (parity with the upstream handler).
   const scope = req.nextUrl.searchParams.get("scope") ?? "";
+  // Issue #1741 — forward `has_control=true|false` verbatim; any other
+  // value is refused here rather than silently widening the list.
+  const hasControlParam = req.nextUrl.searchParams.get("has_control") ?? "";
+  if (
+    hasControlParam &&
+    hasControlParam !== "true" &&
+    hasControlParam !== "false"
+  ) {
+    return NextResponse.json(
+      { error: "has_control must be true or false" },
+      { status: 400 },
+    );
+  }
+  const hasControl = hasControlParam ? hasControlParam === "true" : undefined;
   try {
-    const anchors = await listAnchorsWithState(bearer, scope || undefined);
-    return NextResponse.json({ anchors });
+    const { anchors, total, catalog_total, with_control_total } =
+      await listAnchorsWithState(bearer, scope || undefined, hasControl);
+    return NextResponse.json({
+      anchors,
+      total,
+      catalog_total,
+      with_control_total,
+    });
   } catch (err) {
     const e = err as { status?: number; message?: string };
     return NextResponse.json(

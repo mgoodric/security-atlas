@@ -33,7 +33,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { APIError } from "@/lib/api/base";
-import { fetchRiskDetail } from "@/lib/api/risks";
+import { fetchRiskDetail, treatmentLabel } from "@/lib/api/risks";
 
 import {
   formatResidualScore,
@@ -137,7 +137,7 @@ export default function RiskDetailPage({
             data-testid="risk-detail-treatment"
             className="capitalize"
           >
-            {risk.treatment}
+            {treatmentLabel(risk)}
           </Badge>
           <span
             className="font-mono text-xs text-muted-foreground"

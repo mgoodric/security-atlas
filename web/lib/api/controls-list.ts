@@ -18,18 +18,31 @@ import type { AnchorWithState } from "./anchors";
 // frontend table renders the populated rows and the `—` placeholder
 // stays for the null branch (slice 098 P0-A1 — no fabrication).
 
+// Issue #1741: the totals ride along so the page can show "N of the
+// catalog's M anchors" without a second call. `total` is the row count
+// matching the request's `has_control` filter; `with_control_total` is
+// how many anchors the caller's tenant has a control on. Optional
+// because hand-rolled fixtures predate them.
 export type ControlsListResponse = {
   anchors: AnchorWithState[];
+  total?: number;
+  catalog_total?: number;
+  with_control_total?: number;
 };
 
 // Slice 224 — accepts an optional `scopeCellID` that the page forwards
 // to the BFF as `?scope=<cell_id>`. Empty / undefined value omits the
 // query param entirely so the BFF takes its no-filter branch.
+//
+// Issue #1741 — `hasControl` forwards `?has_control=true|false`, which
+// the platform applies in SQL ahead of paging.
 export async function fetchControlsList(
   scopeCellID?: string,
+  hasControl?: boolean,
 ): Promise<ControlsListResponse> {
   const qs = new URLSearchParams();
   if (scopeCellID) qs.set("scope", scopeCellID);
+  if (hasControl !== undefined) qs.set("has_control", String(hasControl));
   const url = qs.toString()
     ? `/api/controls?${qs.toString()}`
     : `/api/controls`;
@@ -145,4 +158,82 @@ export async function fetchTenantControlsList(): Promise<TenantControl[]> {
   }
   const body = (await res.json()) as TenantControlsListResponse;
   return body.controls ?? [];
+}
+
+// ----- Issue #1741: the tenant's own controls, with state -----
+//
+// `ControlWithState` mirrors `controlWithStateWire` in
+// internal/api/controls/list.go (`GET /v1/controls?include=state`). One
+// row per active tenant control, with that control's own evaluation
+// rollup, so two controls on one SCF anchor never share a state cell.
+// This is the /controls page's default "My controls" view; the SCF
+// catalog stays available as a separate view over `/api/controls`.
+export type ControlWithState = TenantControl & {
+  scf_anchor_id: string | null;
+  state: AnchorWithState["state"];
+  frameworks: string[];
+};
+
+export type ControlsWithStateResponse = {
+  controls: ControlWithState[];
+  count: number;
+  total: number;
+};
+
+/** The platform's page cap for `GET /v1/controls?include=state`. */
+export const CONTROLS_WITH_STATE_PAGE_LIMIT = 500;
+
+// Server-side fn: one page of `/v1/controls?include=state`, used by the
+// `/api/controls-list` BFF when the browser asks for state.
+export async function fetchTenantControlsWithState(
+  bearer: string,
+  opts: { scope?: string; limit?: number; offset?: number } = {},
+): Promise<ControlsWithStateResponse> {
+  const qs = new URLSearchParams({ include: "state" });
+  if (opts.scope) qs.set("scope", opts.scope);
+  if (opts.limit !== undefined) qs.set("limit", String(opts.limit));
+  if (opts.offset !== undefined) qs.set("offset", String(opts.offset));
+  const res = await apiFetch(`/v1/controls?${qs.toString()}`, bearer);
+  const body = (await res.json()) as ControlsWithStateResponse;
+  return {
+    controls: body.controls ?? [],
+    count: body.count ?? 0,
+    total: body.total ?? 0,
+  };
+}
+
+// Browser-side fn: every active control of the caller's tenant, walked
+// page by page through the BFF until `total` is reached. The page's
+// family / state / freshness filters run over the full set, so it must
+// not stop at the first page.
+export async function fetchMyControls(
+  scopeCellID?: string,
+): Promise<ControlsWithStateResponse> {
+  const controls: ControlWithState[] = [];
+  let total = 0;
+  for (;;) {
+    const qs = new URLSearchParams({
+      include: "state",
+      limit: String(CONTROLS_WITH_STATE_PAGE_LIMIT),
+      offset: String(controls.length),
+    });
+    if (scopeCellID) qs.set("scope", scopeCellID);
+    const res = await fetch(`/api/controls-list?${qs.toString()}`);
+    if (!res.ok) {
+      let msg = `${res.status} ${res.statusText}`;
+      try {
+        const j = (await res.json()) as { error?: string };
+        if (j.error) msg = j.error;
+      } catch {
+        // body not JSON — keep the status line
+      }
+      throw new APIError(res.status, msg);
+    }
+    const page = (await res.json()) as ControlsWithStateResponse;
+    const rows = page.controls ?? [];
+    total = page.total ?? rows.length;
+    controls.push(...rows);
+    if (rows.length === 0 || controls.length >= total) break;
+  }
+  return { controls, count: controls.length, total };
 }

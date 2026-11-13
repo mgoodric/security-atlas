@@ -249,4 +249,44 @@ describe("GET /api/controls", () => {
     expect(body.anchors[0].frameworks).toEqual(["CSF", "ISO", "SOC2"]);
     expect(body.anchors[1].frameworks).toEqual([]);
   });
+
+  // Issue #1741 — `has_control` is forwarded to the platform (which
+  // filters in SQL ahead of paging) and the totals come back through.
+  test("issue 1741: forwards has_control and passes the totals through", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1741" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          anchors: [],
+          total: 37,
+          catalog_total: 1451,
+          with_control_total: 37,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const res = await GET(makeReq("/api/controls?has_control=true") as never);
+    expect(res.status).toBe(200);
+    const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
+    expect(calledURL).toContain("has_control=true");
+    const body = (await res.json()) as {
+      total: number;
+      catalog_total: number;
+      with_control_total: number;
+    };
+    expect(body).toMatchObject({
+      total: 37,
+      catalog_total: 1451,
+      with_control_total: 37,
+    });
+  });
+
+  test("issue 1741: rejects a has_control value other than true/false", async () => {
+    mockCookieGet.mockReturnValue({ value: "test-bearer-1741" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const res = await GET(makeReq("/api/controls?has_control=yes") as never);
+    expect(res.status).toBe(400);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
 });

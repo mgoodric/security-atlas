@@ -59,11 +59,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
-import { type AnchorWithState } from "@/lib/api/anchors";
 import {
   fetchControlsList,
+  fetchMyControls,
   fetchScopeCells,
   type ControlsListResponse,
+  type ControlsWithStateResponse,
   type ScopeCellsListResponse,
 } from "@/lib/api/controls-list";
 import {
@@ -99,6 +100,18 @@ import {
   type ControlFilters,
 } from "./filters";
 import { controlsCountLabel } from "./count-label";
+import {
+  controlHref,
+  controlsViewSummary,
+  HAS_CONTROL_OPTIONS,
+  HAS_CONTROL_PARAM,
+  parseControlsView,
+  parseHasControl,
+  rowsFromAnchors,
+  rowsFromControls,
+  VIEW_OPTIONS,
+  VIEW_PARAM,
+} from "./view";
 import {
   NEW_CONTROL_FUTURE_REASON,
   NEW_CONTROL_FUTURE_TESTID,
@@ -279,6 +292,28 @@ function ControlsPageInner() {
     return parsed;
   }, [search]);
 
+  // Issue #1741 — which list the page shows. The default is the tenant's
+  // own controls; the SCF catalog is the opt-in `?view=catalog`, where the
+  // server-side `?has_control=` filter applies.
+  const view = parseControlsView(search.get(VIEW_PARAM));
+  const hasControlRaw = search.get(HAS_CONTROL_PARAM);
+  const hasControl =
+    view === "catalog" ? parseHasControl(hasControlRaw) : undefined;
+
+  // Switching view or the has-control filter changes the fetched set, so
+  // both reset the page index, like a filter change (slice 227 AC-8).
+  const updateParam = (key: string, value: string | null) => {
+    const sp = new URLSearchParams(search.toString());
+    if (value === null || value === ALL) {
+      sp.delete(key);
+    } else {
+      sp.set(key, value);
+    }
+    if (key === VIEW_PARAM) sp.delete(HAS_CONTROL_PARAM);
+    sp.delete(PAGE_PARAM);
+    router.replace(`/controls?${sp.toString()}`);
+  };
+
   const updateFilter = (key: keyof ControlFilters, value: string) => {
     const next = setFilter(filters, key, value);
     const sp = new URLSearchParams(search.toString());
@@ -323,10 +358,27 @@ function ControlsPageInner() {
   // TanStack invalidates correctly. `ALL` is treated as no-filter
   // (fetchControlsList drops the query param entirely).
   const scopeArg = filters.scope === ALL ? undefined : filters.scope;
-  const anchorsQ = useQuery<ControlsListResponse>({
-    queryKey: ["controls", "list", scopeArg ?? "all"],
-    queryFn: () => fetchControlsList(scopeArg),
+  // Issue #1741 — the default view reads the tenant's controls; the
+  // catalog view reads the anchors (with the server-side has_control
+  // filter). Only the active view's query runs.
+  const myControlsQ = useQuery<ControlsWithStateResponse>({
+    queryKey: ["controls", "mine", scopeArg ?? "all"],
+    queryFn: () => fetchMyControls(scopeArg),
+    enabled: view === "mine",
   });
+  const anchorsQ = useQuery<ControlsListResponse>({
+    queryKey: ["controls", "list", scopeArg ?? "all", String(hasControl)],
+    queryFn: () => fetchControlsList(scopeArg, hasControl),
+    enabled: view === "catalog",
+  });
+  // The catalog size for the "My controls" header. `has_control=true`
+  // keeps the page small; only the totals are read.
+  const catalogCountsQ = useQuery<ControlsListResponse>({
+    queryKey: ["controls", "catalog-counts"],
+    queryFn: () => fetchControlsList(undefined, true),
+    enabled: view === "mine",
+  });
+  const listQ = view === "mine" ? myControlsQ : anchorsQ;
 
   // Slice 224 — the dropdown options for the Scope filter pill come
   // from the tenant's own scope cells (RLS-scoped to the caller's
@@ -343,27 +395,17 @@ function ControlsPageInner() {
   // instantiated for the anchor). Slice 226 additionally threads the
   // per-anchor frameworks set (display abbreviations) through the row;
   // empty array when the anchor has no satisfaction edges.
-  const rows: AnchorRow[] = useMemo(() => {
-    const anchors: AnchorWithState[] = anchorsQ.data?.anchors ?? [];
-    return anchors.map<AnchorRow>((a) => {
-      const { state, frameworks, ...anchor } = a;
-      return {
-        anchor,
-        state: state
-          ? {
-              result: state.result,
-              freshness_status: state.freshness_status,
-              last_observed_at: state.last_observed_at,
-            }
-          : null,
-        // Slice 226: defensive default so older fixtures (e.g.
-        // hand-rolled mocks in route.test.ts cases that predate the
-        // backend extension) round-trip cleanly. The live BFF always
-        // ships an array.
-        frameworks: frameworks ?? [],
-      };
-    });
-  }, [anchorsQ.data]);
+  //
+  // Issue #1741 — the mapping per view lives in `./view`: control rows are
+  // keyed and linked by control id; catalog rows by anchor id, linking to
+  // the tenant control behind the anchor when there is one.
+  const rows: AnchorRow[] = useMemo(
+    () =>
+      view === "mine"
+        ? rowsFromControls(myControlsQ.data?.controls ?? [])
+        : rowsFromAnchors(anchorsQ.data?.anchors ?? []),
+    [view, myControlsQ.data, anchorsQ.data],
+  );
 
   const visible = useMemo(() => applyFilters(rows, filters), [rows, filters]);
 
@@ -389,8 +431,11 @@ function ControlsPageInner() {
   // The ids visible after the active filters (NOT page-sliced — select-
   // all-in-view operates on the full filtered set the operator narrowed
   // to, which is the mental model; pagination is a display concern).
+  //
+  // Issue #1741 — selection holds CONTROL ids, since bulk-assign posts
+  // them; a catalog anchor without a tenant control is not selectable.
   const visibleIds = useMemo(
-    () => visible.map((row) => row.anchor.id),
+    () => visible.flatMap((row) => (row.controlId ? [row.controlId] : [])),
     [visible],
   );
 
@@ -398,7 +443,10 @@ function ControlsPageInner() {
   // refetch removed an anchor). Keyed on the full row id list so a
   // filter change (which only narrows `visible`) does NOT drop a
   // selection the operator made under a broader filter.
-  const allRowIds = useMemo(() => rows.map((r) => r.anchor.id), [rows]);
+  const allRowIds = useMemo(
+    () => rows.flatMap((r) => (r.controlId ? [r.controlId] : [])),
+    [rows],
+  );
   useEffect(() => {
     // Sync local selection state when the external row source (the
     // fetched anchor set) changes — the canonical post-data-change
@@ -544,17 +592,20 @@ function ControlsPageInner() {
         clearAll();
         return;
       }
-      const view = findView(savedViews, id);
-      if (!view) return;
+      const saved = findView(savedViews, id);
+      if (!saved) return;
       const sp = new URLSearchParams();
       for (const k of FILTER_KEYS) {
-        if (view.filters[k] !== ALL) sp.set(k, view.filters[k]);
+        if (saved.filters[k] !== ALL) sp.set(k, saved.filters[k]);
       }
+      // Issue #1741 — a saved view restores filters within the view the
+      // operator is on; it does not switch between controls and catalog.
+      if (view === "catalog") sp.set(VIEW_PARAM, view);
       router.replace(`/controls?${sp.toString()}`);
     },
     // clearAll + router are stable across renders for this page.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [savedViews, router],
+    [savedViews, router, view],
   );
 
   const onSaveView = useCallback(
@@ -622,6 +673,26 @@ function ControlsPageInner() {
   }, [cappedScopeCells]);
 
   const pills: FilterPill[] = [
+    // Issue #1741 — view toggle: the tenant's controls (default) or the
+    // SCF catalog.
+    {
+      id: VIEW_PARAM,
+      label: "View",
+      value: view,
+      options: VIEW_OPTIONS,
+    },
+    // Issue #1741 — catalog only: anchors with / without a tenant
+    // control, filtered server-side ahead of paging.
+    ...(view === "catalog"
+      ? [
+          {
+            id: HAS_CONTROL_PARAM,
+            label: "Has control",
+            value: hasControl === undefined ? ALL : String(hasControl),
+            options: HAS_CONTROL_OPTIONS,
+          },
+        ]
+      : []),
     {
       id: "framework",
       label: "Framework",
@@ -667,24 +738,47 @@ function ControlsPageInner() {
   // read consistently. Copy/semantics only — page size + counts are
   // unchanged (anti-criterion). See
   // `docs/audit-log/666-controls-count-semantics-decisions.md`.
-  const countLabel = controlsCountLabel(visible.length, rows.length);
+  //
+  // Issue #1741 — the noun follows the view, and a second line states the
+  // tenant's controls against the catalog size from the server's totals
+  // (the sidebar badge counts the same controls).
+  const rowNoun = view === "mine" ? "controls" : "SCF anchors";
+  const countLabel = controlsCountLabel(visible.length, rows.length, rowNoun);
+  const viewSummary = controlsViewSummary(view, {
+    controls: myControlsQ.data?.total,
+    catalogTotal:
+      view === "mine"
+        ? catalogCountsQ.data?.catalog_total
+        : anchorsQ.data?.catalog_total,
+    withControlTotal: anchorsQ.data?.with_control_total,
+  });
   const meta = (
-    <span data-testid="controls-count-label">
-      {countLabel.isFiltered ? (
-        <>
-          <span className="text-foreground font-medium">
-            {countLabel.filtered}
-          </span>{" "}
-          of <span className="font-mono">{countLabel.total}</span> SCF anchors
-        </>
-      ) : (
-        <>
-          <span className="text-foreground font-medium">
-            {countLabel.total}
-          </span>{" "}
-          SCF anchors
-        </>
-      )}
+    <span className="inline-flex flex-wrap items-baseline gap-x-3">
+      <span data-testid="controls-count-label">
+        {countLabel.isFiltered ? (
+          <>
+            <span className="text-foreground font-medium">
+              {countLabel.filtered}
+            </span>{" "}
+            of <span className="font-mono">{countLabel.total}</span> {rowNoun}
+          </>
+        ) : (
+          <>
+            <span className="text-foreground font-medium">
+              {countLabel.total}
+            </span>{" "}
+            {rowNoun}
+          </>
+        )}
+      </span>
+      {viewSummary ? (
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="controls-view-summary"
+        >
+          {viewSummary}
+        </span>
+      ) : null}
     </span>
   );
 
@@ -711,44 +805,65 @@ function ControlsPageInner() {
           />
         </span>
       ),
-      cell: (row) => (
-        <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
-          <Checkbox
-            aria-label={`Select control ${row.anchor.scf_id}`}
-            data-testid="controls-row-select"
-            checked={selected.has(row.anchor.id)}
-            onCheckedChange={() => onToggleRow(row.anchor.id)}
-          />
-        </span>
-      ),
+      cell: (row) => {
+        const controlId = row.controlId;
+        if (!controlId) return null;
+        return (
+          <span className="inline-flex" onClick={(e) => e.stopPropagation()}>
+            <Checkbox
+              aria-label={`Select control ${row.anchor.scf_id}`}
+              data-testid="controls-row-select"
+              checked={selected.has(controlId)}
+              onCheckedChange={() => onToggleRow(controlId)}
+            />
+          </span>
+        );
+      },
       className: "w-8",
     },
     {
       id: "scf_id",
       header: "SCF anchor",
-      cell: (row) => (
-        <Link
-          href={`/controls/${encodeURIComponent(row.anchor.id)}`}
-          className="font-mono text-xs font-semibold text-primary hover:underline"
-          data-testid="controls-row-scf-id"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {row.anchor.scf_id}
-        </Link>
-      ),
+      // Issue #1741 — links open the tenant control (by control id); a
+      // catalog anchor with no control renders as plain text.
+      cell: (row) => {
+        const href = controlHref(row);
+        return href ? (
+          <Link
+            href={href}
+            className="font-mono text-xs font-semibold text-primary hover:underline"
+            data-testid="controls-row-scf-id"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {row.anchor.scf_id || "—"}
+          </Link>
+        ) : (
+          <span
+            className="font-mono text-xs text-muted-foreground"
+            data-testid="controls-row-scf-id-unlinked"
+          >
+            {row.anchor.scf_id}
+          </span>
+        );
+      },
     },
     {
       id: "name",
       header: "Name",
-      cell: (row) => (
-        <Link
-          href={`/controls/${encodeURIComponent(row.anchor.id)}`}
-          className="text-foreground hover:text-primary"
-          onClick={(e) => e.stopPropagation()}
-        >
-          {row.anchor.name}
-        </Link>
-      ),
+      cell: (row) => {
+        const href = controlHref(row);
+        return href ? (
+          <Link
+            href={href}
+            className="text-foreground hover:text-primary"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {row.anchor.name}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">{row.anchor.name}</span>
+        );
+      },
     },
     {
       id: "family",
@@ -902,11 +1017,16 @@ function ControlsPageInner() {
     </>
   );
 
-  if (anchorsQ.isLoading) {
+  const subtitle =
+    view === "mine"
+      ? "Your tenant's controls evaluated against live evidence"
+      : "The SCF anchor catalog, with the controls your tenant has on it";
+
+  if (listQ.isLoading) {
     return (
       <ListPage
         title="Controls"
-        subtitle="SCF anchors evaluated against live evidence"
+        subtitle={subtitle}
         actions={actions}
         filterRow={
           <FilterPills pills={pills} onChange={() => {}} meta={meta} />
@@ -917,18 +1037,12 @@ function ControlsPageInner() {
     );
   }
 
-  if (anchorsQ.isError) {
+  if (listQ.isError) {
     return (
-      <ListPage
-        title="Controls"
-        subtitle="SCF anchors evaluated against live evidence"
-        actions={actions}
-      >
+      <ListPage title="Controls" subtitle={subtitle} actions={actions}>
         <Alert variant="destructive" data-testid="controls-load-error">
           <AlertTitle>Could not load controls</AlertTitle>
-          <AlertDescription>
-            {(anchorsQ.error as Error).message}
-          </AlertDescription>
+          <AlertDescription>{(listQ.error as Error).message}</AlertDescription>
         </Alert>
       </ListPage>
     );
@@ -942,14 +1056,29 @@ function ControlsPageInner() {
   // vapor "use the SOC 2 starter kit" CTA — there is no in-app button
   // for kit ingestion on main and slice 152 does not invent one
   // (decisions log D-152-1 + ADR-0004).
+  //
+  // Issue #1741 — in the default view, "truly empty" means the tenant has
+  // no controls (the catalog may well be loaded), so the copy says so and
+  // offers the catalog view instead of blaming the importer.
   const isTrulyEmpty = rows.length === 0;
-  const trulyEmptyState = (
-    <EmptyState
-      icon={emptyStateIcon}
-      title="No controls in your tenant yet"
-      body="The global SCF anchor catalog is empty in this deployment. Import a framework via the atlas CLI, or run the SCF importer to populate the catalog. See the user guide for the bootstrap walkthrough."
-    />
-  );
+  const trulyEmptyState =
+    view === "mine" ? (
+      <EmptyState
+        icon={emptyStateIcon}
+        title="No controls in your tenant yet"
+        body="Upload a control bundle with the atlas CLI to add your first control. The SCF catalog view lists every anchor a control can map to."
+        cta={{
+          label: "Browse the SCF catalog",
+          onClick: () => updateParam(VIEW_PARAM, "catalog"),
+        }}
+      />
+    ) : (
+      <EmptyState
+        icon={emptyStateIcon}
+        title="No SCF anchors to show"
+        body="The global SCF anchor catalog is empty in this deployment, or no anchor matches the Has control filter. Import a framework via the atlas CLI, or run the SCF importer to populate the catalog. See the user guide for the bootstrap walkthrough."
+      />
+    );
   const filterEmptyState = (
     <EmptyState
       icon={emptyStateIcon}
@@ -967,12 +1096,16 @@ function ControlsPageInner() {
   return (
     <ListPage
       title="Controls"
-      subtitle="SCF anchors evaluated against live evidence"
+      subtitle={subtitle}
       actions={actions}
       filterRow={
         <FilterPills
           pills={pills}
-          onChange={(id, v) => updateFilter(id as keyof ControlFilters, v)}
+          onChange={(id, v) =>
+            id === VIEW_PARAM || id === HAS_CONTROL_PARAM
+              ? updateParam(id, v)
+              : updateFilter(id as keyof ControlFilters, v)
+          }
           meta={meta}
         />
       }
@@ -1021,10 +1154,11 @@ function ControlsPageInner() {
       <ListTable<AnchorRow>
         columns={columns}
         rows={pagedRows}
-        rowKey={(row) => row.anchor.id}
-        onRowClick={(row) =>
-          router.push(`/controls/${encodeURIComponent(row.anchor.id)}`)
-        }
+        rowKey={(row) => row.key}
+        onRowClick={(row) => {
+          const href = controlHref(row);
+          if (href) router.push(href);
+        }}
         emptyFallback={emptyState}
         // Slice 281 — collapse to a card stack at `< md`. Seven-column
         // anchor table horizontal-scrolls at 375px; the card variant

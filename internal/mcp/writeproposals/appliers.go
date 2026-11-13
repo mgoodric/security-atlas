@@ -26,28 +26,35 @@ package writeproposals
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 // CreateRiskInput is the bounded shape the create_risk MCP tool ships
 // in tool_input. A subset of risk.CreateInput — we accept only the
 // fields the LLM can reasonably propose (title, description, category,
-// methodology defaults, treatment with safe defaults). Score blocks are
+// methodology defaults, treatment defaulting to untreated). Score blocks are
 // JSON-RawMessage so the LLM can supply a 5x5 matrix or a NIST 800-30
 // envelope; defense-in-depth CHECK constraints on the risks table
 // catch malformed inputs.
 type CreateRiskInput struct {
-	Title          string          `json:"title"`
-	Description    string          `json:"description"`
-	Category       string          `json:"category"`
-	Methodology    string          `json:"methodology,omitempty"`
-	InherentScore  json.RawMessage `json:"inherent_score,omitempty"`
-	Treatment      string          `json:"treatment,omitempty"`
-	TreatmentOwner string          `json:"treatment_owner,omitempty"`
+	Title         string          `json:"title"`
+	Description   string          `json:"description"`
+	Category      string          `json:"category"`
+	Methodology   string          `json:"methodology,omitempty"`
+	InherentScore json.RawMessage `json:"inherent_score,omitempty"`
+	Treatment     string          `json:"treatment,omitempty"`
+	// AcceptanceStatus applies to treatment=accept only. create_risk cannot
+	// set an accepter or expiry, so only a proposed acceptance can pass.
+	AcceptanceStatus string `json:"acceptance_status,omitempty"`
+	TreatmentOwner   string `json:"treatment_owner,omitempty"`
 }
 
 // ApplyCreateRisk inserts a new risk row using the proposal's tool_input.
@@ -67,9 +74,19 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 	if methodology == "" {
 		methodology = "nist_800_30"
 	}
-	treatment := in.Treatment
+	// An omitted treatment is untreated: the applier never records a
+	// treatment decision the proposal did not make (#1746).
+	treatment := dbx.RiskTreatment(in.Treatment)
 	if treatment == "" {
-		treatment = "avoid" // safe default — no required side fields
+		treatment = dbx.RiskTreatmentUntreated
+	}
+	status := dbx.RiskAcceptanceStatus(in.AcceptanceStatus)
+	// A new risk has no linked controls or action plans and no accepter.
+	if err := risk.ValidateTreatment(risk.TreatmentInput{
+		Treatment:        treatment,
+		AcceptanceStatus: status,
+	}); err != nil {
+		return "", fmt.Errorf("apply create_risk: %w", err)
 	}
 	inherent := in.InherentScore
 	if len(inherent) == 0 {
@@ -81,11 +98,11 @@ func ApplyCreateRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error)
 		INSERT INTO risks (
 			id, tenant_id, title, description, category, methodology,
 			inherent_score, treatment, treatment_owner, residual_score,
-			accepted_until, accepter, instrument_reference
+			accepted_until, accepter, instrument_reference, acceptance_status
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, NULL, '', '')
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, '{}'::jsonb, NULL, '', '', $10)
 	`, id, p.TenantID, in.Title, in.Description, in.Category, methodology,
-		[]byte(inherent), treatment, in.TreatmentOwner)
+		[]byte(inherent), treatment, in.TreatmentOwner, risk.NullAcceptanceStatus(status))
 	if err != nil {
 		return "", fmt.Errorf("apply create_risk: insert: %w", err)
 	}
@@ -204,14 +221,22 @@ func ApplyPushEvidence(ctx context.Context, tx pgx.Tx, p Proposal) (string, erro
 }
 
 // UpdateRiskTreatmentInput is the bounded shape the update_risk_treatment
-// MCP tool ships.
+// MCP tool ships. Accepter and AcceptedUntil (YYYY-MM-DD) are optional;
+// when set they overwrite the risk's values, which is how a proposed
+// acceptance moves to approved.
 type UpdateRiskTreatmentInput struct {
-	RiskID         string `json:"risk_id"`
-	Treatment      string `json:"treatment"`
-	TreatmentOwner string `json:"treatment_owner"`
+	RiskID           string  `json:"risk_id"`
+	Treatment        string  `json:"treatment"`
+	AcceptanceStatus string  `json:"acceptance_status"`
+	TreatmentOwner   string  `json:"treatment_owner"`
+	Accepter         *string `json:"accepter,omitempty"`
+	AcceptedUntil    *string `json:"accepted_until,omitempty"`
 }
 
 // ApplyUpdateRiskTreatment updates an existing risk's treatment + owner.
+// The change runs through risk.ValidateTreatment against the risk's
+// current links and side fields, so an approved proposal cannot set a
+// treatment the REST path would reject (#1746).
 func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
 	var in UpdateRiskTreatmentInput
 	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
@@ -224,13 +249,67 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 	if err != nil {
 		return "", fmt.Errorf("apply update_risk_treatment: risk_id must be UUID: %w", err)
 	}
+
+	var (
+		acceptedUntil       *time.Time
+		accepter            string
+		instrumentReference string
+		controlCount        int
+		actionPlanCount     int
+	)
+	err = tx.QueryRow(ctx, `
+		SELECT r.accepted_until, r.accepter, r.instrument_reference,
+			(SELECT count(*) FROM risk_control_links l
+			  WHERE l.tenant_id = r.tenant_id AND l.risk_id = r.id),
+			(SELECT count(*) FROM action_plan_risks apr
+			  JOIN action_plans ap
+			    ON ap.id = apr.action_plan_id AND ap.tenant_id = apr.tenant_id
+			  WHERE apr.tenant_id = r.tenant_id AND apr.risk_id = r.id
+			    AND ap.tombstoned_at IS NULL)
+		FROM risks r
+		WHERE r.tenant_id = $1 AND r.id = $2
+	`, p.TenantID, riskID).Scan(&acceptedUntil, &accepter, &instrumentReference, &controlCount, &actionPlanCount)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", fmt.Errorf("apply update_risk_treatment: risk %s not found in tenant", riskID)
+	}
+	if err != nil {
+		return "", fmt.Errorf("apply update_risk_treatment: read risk: %w", err)
+	}
+	if in.Accepter != nil {
+		accepter = *in.Accepter
+	}
+	if in.AcceptedUntil != nil {
+		t, perr := time.Parse("2006-01-02", *in.AcceptedUntil)
+		if perr != nil {
+			return "", fmt.Errorf("apply update_risk_treatment: accepted_until must be YYYY-MM-DD: %w", perr)
+		}
+		acceptedUntil = &t
+	}
+
+	treatment := dbx.RiskTreatment(in.Treatment)
+	status := dbx.RiskAcceptanceStatus(in.AcceptanceStatus)
+	if err := risk.ValidateTreatment(risk.TreatmentInput{
+		Treatment:             treatment,
+		AcceptanceStatus:      status,
+		AcceptedUntilPresent:  acceptedUntil != nil,
+		Accepter:              accepter,
+		InstrumentReference:   instrumentReference,
+		LinkedControlCount:    controlCount,
+		LinkedActionPlanCount: actionPlanCount,
+	}); err != nil {
+		return "", fmt.Errorf("apply update_risk_treatment: %w", err)
+	}
+
 	tag, err := tx.Exec(ctx, `
 		UPDATE risks
 		SET treatment = $3,
-			treatment_owner = $4,
+			acceptance_status = $4,
+			treatment_owner = $5,
+			accepter = $6,
+			accepted_until = $7,
 			updated_at = now()
 		WHERE tenant_id = $1 AND id = $2
-	`, p.TenantID, riskID, in.Treatment, in.TreatmentOwner)
+	`, p.TenantID, riskID, treatment, risk.NullAcceptanceStatus(status), in.TreatmentOwner, accepter, acceptedUntil)
 	if err != nil {
 		return "", fmt.Errorf("apply update_risk_treatment: update: %w", err)
 	}

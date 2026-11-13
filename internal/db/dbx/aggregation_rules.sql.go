@@ -296,7 +296,7 @@ func (q *Queries) GetLastFiredEvaluation(ctx context.Context, arg GetLastFiredEv
 }
 
 const getRuleMetaRiskByKey = `-- name: GetRuleMetaRiskByKey :one
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status
 FROM risks
 WHERE tenant_id = $1
   AND inherent_score->>'aggregation_key' = $2::text
@@ -336,6 +336,7 @@ func (q *Queries) GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskB
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
 	)
 	return i, err
 }
@@ -521,7 +522,7 @@ func (q *Queries) ListAggregationRules(ctx context.Context, tenantID pgtype.UUID
 
 const listCandidateRisksForRule = `-- name: ListCandidateRisksForRule :many
 
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status
 FROM risks
 WHERE tenant_id = $1
   AND themes @> ARRAY[$2::text]
@@ -581,6 +582,7 @@ func (q *Queries) ListCandidateRisksForRule(ctx context.Context, arg ListCandida
 			&i.Level,
 			&i.OrgUnitID,
 			&i.Themes,
+			&i.AcceptanceStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -661,7 +663,7 @@ UPDATE risks
 SET inherent_score = $3,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes
+RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status
 `
 
 type UpdateMetaRiskInherentScoreParams struct {
@@ -698,6 +700,7 @@ func (q *Queries) UpdateMetaRiskInherentScore(ctx context.Context, arg UpdateMet
 		&i.Level,
 		&i.OrgUnitID,
 		&i.Themes,
+		&i.AcceptanceStatus,
 	)
 	return i, err
 }

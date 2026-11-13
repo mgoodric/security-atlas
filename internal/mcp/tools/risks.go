@@ -33,7 +33,7 @@ const listRisksInputSchema = `{
     },
     "status": {
       "type": "string",
-      "description": "Filter by treatment status: avoid | accept | transfer | mitigate. Optional; default returns all treatments."
+      "description": "Filter by treatment status: untreated | avoid | accept | transfer | mitigate. Optional; default returns all treatments."
     },
     "category": {
       "type": "string",
@@ -129,6 +129,7 @@ type riskRow struct {
 	Methodology         string          `json:"methodology"`
 	InherentScore       json.RawMessage `json:"inherent_score"`
 	Treatment           string          `json:"treatment"`
+	AcceptanceStatus    string          `json:"acceptance_status,omitempty"`
 	TreatmentOwner      string          `json:"treatment_owner"`
 	ResidualScore       json.RawMessage `json:"residual_score"`
 	ReviewDueAt         *time.Time      `json:"review_due_at,omitempty"`

@@ -87,7 +87,13 @@ CREATE TYPE risk_treatment AS ENUM (
     'accept',
     'mitigate',
     'transfer',
-    'avoid'
+    'avoid',
+    'untreated'
+);
+
+CREATE TYPE risk_acceptance_status AS ENUM (
+    'proposed',
+    'approved'
 );
 
 CREATE TYPE scope_environment AS ENUM (

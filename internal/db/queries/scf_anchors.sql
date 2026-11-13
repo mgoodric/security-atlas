@@ -239,6 +239,23 @@ anchor_frameworks AS (
       AND af.tenant_id IS NULL
       AND af.slug <> 'scf'
     GROUP BY e.scf_anchor_id
+),
+anchor_controls AS (
+    -- Issue #1741: the tenant's active controls per anchor, so each
+    -- row links to a control id (not the anchor id the control detail
+    -- page cannot resolve) and the `has_control` filter runs here, in
+    -- SQL, ahead of LIMIT/OFFSET. `controls` is tenant-scoped under
+    -- FORCE RLS; the GUC limits this CTE to the caller's tenant. The
+    -- representative control is the lowest bundle_id, deterministic
+    -- when more than one bundle anchors to the same SCF control.
+    SELECT
+        c.scf_anchor_id AS anchor_id,
+        (array_agg(c.id ORDER BY c.bundle_id))[1]::uuid AS control_id,
+        count(*)::bigint AS control_count
+    FROM controls c
+    WHERE c.superseded_by IS NULL
+      AND c.scf_anchor_id IS NOT NULL
+    GROUP BY c.scf_anchor_id
 )
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
@@ -266,13 +283,21 @@ SELECT
     -- nil → empty array). The LEFT JOIN ensures every anchor row
     -- carries the column; anchors with no satisfaction edges return
     -- NULL → empty slice → wire `[]`.
-    af.framework_slugs::text[]        AS framework_slugs
+    af.framework_slugs::text[]        AS framework_slugs,
+    ac.control_id                     AS control_id,
+    COALESCE(ac.control_count, 0)::bigint AS control_count
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
 LEFT JOIN worst_per_anchor wpa ON wpa.anchor_id = a.id
 LEFT JOIN anchor_frameworks af ON af.anchor_id = a.id
+LEFT JOIN anchor_controls ac ON ac.anchor_id = a.id
 WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
+  -- Issue #1741: optional server-side "has control" filter. NULL is
+  -- no filter; true keeps anchors the tenant has a control on; false
+  -- keeps the rest.
+  AND (sqlc.narg('has_control')::boolean IS NULL
+       OR (ac.anchor_id IS NOT NULL) = sqlc.narg('has_control')::boolean)
 ORDER BY a.scf_id
 LIMIT $1 OFFSET $2;
 
@@ -469,3 +494,19 @@ WHERE af.slug = 'scf'
   AND afv.status = 'current'
   AND af.tenant_id IS NULL
 ORDER BY a.scf_id, f.slug, fv.version, r.code;
+
+-- name: CountSCFAnchorsLatest :one
+-- Issue #1741: totals for the paged `/v1/anchors?include=state` read on
+-- the current SCF version: the whole catalog, and the anchors the
+-- caller's tenant has at least one active control on. `controls` is
+-- tenant-scoped under FORCE RLS, so with_control_total is per tenant.
+SELECT
+    count(*)::bigint AS catalog_total,
+    count(*) FILTER (WHERE EXISTS (
+        SELECT 1 FROM controls c
+        WHERE c.scf_anchor_id = a.id AND c.superseded_by IS NULL
+    ))::bigint AS with_control_total
+FROM scf_anchors a
+JOIN framework_versions fv ON fv.id = a.framework_version_id
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL;

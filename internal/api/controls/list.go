@@ -31,10 +31,18 @@ package controls
 
 import (
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/catalog"
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -87,6 +95,11 @@ func (h *ListHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if includesState(r) {
+		h.listWithState(w, r)
+		return
+	}
+
 	rows, err := h.store.List(r.Context())
 	if err != nil {
 		httperr.WriteInternal(w, r, "list controls", err)
@@ -105,4 +118,136 @@ func (h *ListHandler) List(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, listResp{Controls: out, Count: len(out)})
+}
+
+// ---- issue #1741: GET /v1/controls?include=state ----
+//
+// The /controls page's default view lists the tenant's own controls, not
+// the SCF catalog. `?include=state` returns one page of active controls,
+// each with its own evaluation rollup and its anchor's framework set,
+// plus the unpaged `total`. Without `include=state` the response above is
+// unchanged, so the slice-151 risk-form picker keeps its flat list.
+
+const (
+	stateListDefaultLimit int32 = 100
+	stateListMaxLimit     int32 = 500
+)
+
+// controlStateWire mirrors the per-anchor rollup cell on
+// `/v1/anchors?include=state` so the page renders both views with one
+// cell type.
+type controlStateWire struct {
+	Result          string  `json:"result"`
+	FreshnessStatus string  `json:"freshness_status"`
+	LastObservedAt  *string `json:"last_observed_at"`
+	EvaluatedAt     string  `json:"evaluated_at"`
+}
+
+type controlWithStateWire struct {
+	activeControlWire
+	SCFAnchorID *string           `json:"scf_anchor_id"`
+	State       *controlStateWire `json:"state"`
+	Frameworks  []string          `json:"frameworks"`
+}
+
+type listWithStateResp struct {
+	Controls []controlWithStateWire `json:"controls"`
+	Count    int                    `json:"count"`
+	Total    int64                  `json:"total"`
+}
+
+func (h *ListHandler) listWithState(w http.ResponseWriter, r *http.Request) {
+	limit, offset := listPagination(r)
+	var scopeCell pgtype.UUID
+	if v := r.URL.Query().Get("scope"); v != "" {
+		id, err := uuid.Parse(v)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "scope must be a UUID")
+			return
+		}
+		scopeCell = pgtype.UUID{Bytes: id, Valid: true}
+	}
+
+	rows, total, err := h.store.ListWithState(r.Context(), limit, offset, scopeCell)
+	if err != nil {
+		httperr.WriteInternal(w, r, "list controls with state", err)
+		return
+	}
+	out := make([]controlWithStateWire, len(rows))
+	for i, row := range rows {
+		out[i] = controlWithStateWireFrom(row)
+	}
+	httpresp.WriteJSON(w, http.StatusOK, listWithStateResp{Controls: out, Count: len(out), Total: total})
+}
+
+func controlWithStateWireFrom(row dbx.ListActiveControlsWithStateRow) controlWithStateWire {
+	scfCode := ""
+	if row.ScfID != nil {
+		scfCode = *row.ScfID
+	}
+	out := controlWithStateWire{
+		activeControlWire: activeControlWire{
+			ID:             uuid.UUID(row.ID.Bytes).String(),
+			Title:          row.Title,
+			ControlFamily:  row.ControlFamily,
+			SCFID:          scfCode,
+			LifecycleState: string(row.LifecycleState),
+			BundleID:       row.BundleID,
+		},
+		Frameworks: []string{},
+	}
+	if row.ScfAnchorID.Valid {
+		id := uuid.UUID(row.ScfAnchorID.Bytes).String()
+		out.SCFAnchorID = &id
+	}
+	if len(row.FrameworkSlugs) > 0 {
+		out.Frameworks = catalog.SortedFrameworkDisplayCodes(row.FrameworkSlugs)
+	}
+	if row.StateResult != nil {
+		cell := &controlStateWire{
+			Result:      string(*row.StateResult),
+			EvaluatedAt: row.StateEvaluatedAt.Time.UTC().Format(time.RFC3339Nano),
+		}
+		if row.StateFreshnessStatus != nil {
+			cell.FreshnessStatus = *row.StateFreshnessStatus
+		}
+		if row.StateLastObservedAt.Valid {
+			ts := row.StateLastObservedAt.Time.UTC().Format(time.RFC3339Nano)
+			cell.LastObservedAt = &ts
+		}
+		out.State = cell
+	}
+	return out
+}
+
+// includesState reports whether `?include=` names `state`; it accepts the
+// CSV form (`?include=state,coverage`) like the anchors handler.
+func includesState(r *http.Request) bool {
+	for _, v := range r.URL.Query()["include"] {
+		for _, part := range strings.Split(v, ",") {
+			if strings.TrimSpace(part) == "state" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// listPagination parses `?limit=` / `?offset=`; malformed values fall back
+// to the defaults and limit is capped at stateListMaxLimit, matching the
+// anchors handler.
+func listPagination(r *http.Request) (int32, int32) {
+	limit := stateListDefaultLimit
+	offset := int32(0)
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 32); err == nil && parsed > 0 {
+			limit = int32(min(parsed, int64(stateListMaxLimit)))
+		}
+	}
+	if v := r.URL.Query().Get("offset"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 32); err == nil && parsed >= 0 {
+			offset = int32(parsed)
+		}
+	}
+	return limit, offset
 }

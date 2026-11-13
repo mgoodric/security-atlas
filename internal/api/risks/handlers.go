@@ -90,6 +90,7 @@ type createReq struct {
 	Methodology         string          `json:"methodology"`
 	InherentScore       json.RawMessage `json:"inherent_score"`
 	Treatment           string          `json:"treatment"`
+	AcceptanceStatus    string          `json:"acceptance_status"`
 	TreatmentOwner      string          `json:"treatment_owner"`
 	ResidualScore       json.RawMessage `json:"residual_score"`
 	ReviewDueAt         *time.Time      `json:"review_due_at,omitempty"`
@@ -100,13 +101,16 @@ type createReq struct {
 }
 
 type riskWire struct {
-	ID                  string          `json:"id"`
-	Title               string          `json:"title"`
-	Description         string          `json:"description"`
-	Category            string          `json:"category"`
-	Methodology         string          `json:"methodology"`
-	InherentScore       json.RawMessage `json:"inherent_score"`
-	Treatment           string          `json:"treatment"`
+	ID            string          `json:"id"`
+	Title         string          `json:"title"`
+	Description   string          `json:"description"`
+	Category      string          `json:"category"`
+	Methodology   string          `json:"methodology"`
+	InherentScore json.RawMessage `json:"inherent_score"`
+	Treatment     string          `json:"treatment"`
+	// AcceptanceStatus is proposed | approved for treatment=accept and
+	// omitted otherwise (#1746).
+	AcceptanceStatus    string          `json:"acceptance_status,omitempty"`
 	TreatmentOwner      string          `json:"treatment_owner"`
 	ResidualScore       json.RawMessage `json:"residual_score"`
 	ReviewDueAt         *time.Time      `json:"review_due_at,omitempty"`
@@ -159,10 +163,9 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 	if methodology == "" {
 		methodology = risk.DefaultMethodology // AC-1: default nist_800_30
 	}
+	// An omitted treatment is stored as untreated (the store applies the
+	// default): no decision is recorded that the caller did not make.
 	treatment := dbx.RiskTreatment(req.Treatment)
-	if treatment == "" {
-		treatment = dbx.RiskTreatmentAvoid // sensible safe-default if caller omits
-	}
 	linkedIDs, err := parseUUIDs(req.LinkedControlIDs)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "linked_control_ids: "+err.Error())
@@ -181,6 +184,7 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		Methodology:         methodology,
 		InherentScore:       []byte(req.InherentScore),
 		Treatment:           treatment,
+		AcceptanceStatus:    dbx.RiskAcceptanceStatus(req.AcceptanceStatus),
 		TreatmentOwner:      req.TreatmentOwner,
 		ResidualScore:       []byte(req.ResidualScore),
 		ReviewDueAt:         req.ReviewDueAt,
@@ -445,6 +449,7 @@ func riskWireFrom(r risk.Risk) riskWire {
 		Methodology:         string(r.Methodology),
 		InherentScore:       jsonRaw(r.InherentScore),
 		Treatment:           string(r.Treatment),
+		AcceptanceStatus:    string(r.AcceptanceStatus),
 		TreatmentOwner:      r.TreatmentOwner,
 		ResidualScore:       jsonRaw(r.ResidualScore),
 		Accepter:            r.Accepter,
