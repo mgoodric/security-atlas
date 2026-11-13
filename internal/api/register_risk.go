@@ -99,6 +99,8 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// the HITL PATCH .../activate.
 	aggrulesH := aggregationrulesapi.New(aggrule.NewStore(s.dbPool))
 	root.Post("/v1/aggregation-rules", aggrulesH.Create)
+	// #1750: evaluate every active rule now, outside a risk write.
+	root.Post("/v1/aggregation-rules/evaluate", aggrulesH.EvaluateNow)
 	root.Get("/v1/aggregation-rules", aggrulesH.List)
 	root.Patch("/v1/aggregation-rules/{id}/activate", aggrulesH.Activate)
 	root.Patch("/v1/aggregation-rules/{id}/deactivate", aggrulesH.Deactivate)
