@@ -260,3 +260,16 @@ func TestImport_BeginTxErrorIsWrapped(t *testing.T) {
 		t.Fatalf("Import should return a zero Report on failure; got %+v", report)
 	}
 }
+
+// attributionRank orders provenance scf_official > community_draft >
+// org_internal (issue #1754); an unknown label ranks below all three.
+func TestAttributionRank_Order(t *testing.T) {
+	t.Parallel()
+	official := attributionRank(dbx.CrosswalkSourceAttributionScfOfficial)
+	draft := attributionRank(dbx.CrosswalkSourceAttributionCommunityDraft)
+	org := attributionRank(dbx.CrosswalkSourceAttributionOrgInternal)
+	unknown := attributionRank(dbx.CrosswalkSourceAttribution("bogus"))
+	if official <= draft || draft <= org || org <= unknown {
+		t.Fatalf("rank order wrong: official=%d draft=%d org=%d unknown=%d", official, draft, org, unknown)
+	}
+}

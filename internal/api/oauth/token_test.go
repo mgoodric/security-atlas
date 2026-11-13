@@ -15,6 +15,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
+	"github.com/mgoodric/security-atlas/internal/auth/superadmin"
 	"github.com/mgoodric/security-atlas/internal/auth/tokensign"
 )
 
@@ -260,14 +261,17 @@ func TestTokenEndpoint_TokenExchange_RejectsTenantNotInAllowlist(t *testing.T) {
 // available_tenants, a subject_token with super_admin=true succeeds.
 func TestTokenEndpoint_TokenExchange_SuperAdminCanCross(t *testing.T) {
 	t.Parallel()
-	srv, signer, _ := newTokenTestServer(t)
+	srv, signer, ep := newTokenTestServer(t)
+
+	adminID := uuid.New()
+	ep.AttachSuperAdminChecker(superAdminSet(adminID))
 
 	tenantA := uuid.New()
 	tenantB := uuid.New()
 	subjectTok, err := signer.Sign(context.Background(), jwt.AtlasClaims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    testIssuer,
-			Subject:   "user:platform-admin",
+			Subject:   "user:" + adminID.String(),
 			Audience:  []string{testIssuer},
 			ExpiresAt: pinnedNow().Add(time.Hour).Unix(),
 			IssuedAt:  pinnedNow().Unix(),
@@ -306,6 +310,82 @@ func TestTokenEndpoint_TokenExchange_SuperAdminCanCross(t *testing.T) {
 	}
 	if !claims.SuperAdmin {
 		t.Errorf("super_admin lost in the exchange; subject was true")
+	}
+}
+
+// superAdminSet is a stub superadmin.Checker holding exactly ids.
+func superAdminSet(ids ...uuid.UUID) superadmin.Checker {
+	return superadmin.CheckerFunc(func(_ context.Context, id uuid.UUID) (bool, error) {
+		for _, x := range ids {
+			if x == id {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+}
+
+// TestTokenEndpoint_TokenExchange_DemotedSuperAdminLosesClaim covers
+// #1850: a subject_token minted while the user was super_admin must not
+// carry the claim through an exchange once super_admins no longer holds
+// the user. The cross-tenant shortcut is refused, and an in-allowlist
+// exchange mints a token without the claim.
+func TestTokenEndpoint_TokenExchange_DemotedSuperAdminLosesClaim(t *testing.T) {
+	t.Parallel()
+	srv, signer, ep := newTokenTestServer(t)
+	ep.AttachSuperAdminChecker(superAdminSet()) // demoted: table is empty
+
+	demoted := uuid.New()
+	tenantA := uuid.New()
+	tenantB := uuid.New()
+	subjectTok, err := signer.Sign(context.Background(), jwt.AtlasClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    testIssuer,
+			Subject:   "user:" + demoted.String(),
+			Audience:  []string{testIssuer},
+			ExpiresAt: pinnedNow().Add(time.Hour).Unix(),
+			IssuedAt:  pinnedNow().Unix(),
+			ID:        "jti-subject-demoted",
+		},
+		CurrentTenantID:  tenantA,
+		AvailableTenants: []uuid.UUID{tenantA, tenantB},
+		SuperAdmin:       true,
+	})
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	exchange := func(target uuid.UUID) (*http.Response, []byte) {
+		form := url.Values{}
+		form.Set("grant_type", oauth.GrantTypeTokenExchange)
+		form.Set("subject_token", subjectTok)
+		form.Set("subject_token_type", oauth.SubjectTokenTypeJWT)
+		form.Set("atlas:target_tenant_id", target.String())
+		return postForm(t, srv.URL, form)
+	}
+
+	// Outside available_tenants: the super_admin shortcut no longer applies.
+	if resp, body := exchange(uuid.New()); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("cross-tenant status = %d, body = %s; want 403", resp.StatusCode, body)
+	}
+
+	// Inside available_tenants: allowed, but the claim is dropped.
+	resp, body := exchange(tenantB)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, body = %s; want 200", resp.StatusCode, body)
+	}
+	var out struct {
+		AccessToken string `json:"access_token"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	claims, err := signer.Verify(context.Background(), out.AccessToken)
+	if err != nil {
+		t.Fatalf("verify minted: %v", err)
+	}
+	if claims.SuperAdmin {
+		t.Errorf("demoted user's exchanged token still carries super_admin")
 	}
 }
 

@@ -823,6 +823,13 @@ type Querier interface {
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
+	// Row-lock one edge by (requirement, anchor) inside the import transaction.
+	// The importer compares source_attribution precedence before it updates
+	// (issue #1754); without the lock a concurrent weaker import that passed its
+	// check against the old row would overwrite a just-committed scf_official
+	// edge at READ COMMITTED. Same read-validate-write guard as
+	// GetFwToScfEdgeTierForUpdate. Returns ErrNoRows when the edge doesn't exist.
+	GetFwToScfEdgeForUpdate(ctx context.Context, arg GetFwToScfEdgeForUpdateParams) (FwToScfEdge, error)
 	// ===== slice 483: crosswalk mapping-tier governance =====
 	// Read the current trust tier of one edge by id. The transition store calls
 	// this FOR UPDATE (see GetFwToScfEdgeTierForUpdate) inside the tx; this plain
@@ -2833,6 +2840,15 @@ type Querier interface {
 	// ListSlackOptInUsers. enabled = false / no-row excluded (default
 	// opted-OUT). Returns only the (tenant, user) keys — no PII.
 	ListWebhookOptInUsers(ctx context.Context) ([]ListWebhookOptInUsersRow, error)
+	// #1861: serialize every evaluation of one rule's meta-risk key inside the
+	// caller's transaction. The engine's de-dup is a read (GetRuleMetaRiskByKey)
+	// then an insert (CreateAggregateRisk); without this lock two concurrent
+	// risk writes, or a risk write racing evaluate-now, can both miss the read
+	// and both create. Transaction-scoped, so it releases on commit/rollback.
+	// Under READ COMMITTED the reads issued after the lock see the winner's
+	// committed meta-risk. hashtextextended maps the hex key to the BIGINT
+	// lock space; a hash collision only over-serializes, never under-.
+	LockAggregationKey(ctx context.Context, aggregationKey string) error
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
