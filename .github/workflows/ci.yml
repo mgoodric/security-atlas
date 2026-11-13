@@ -871,7 +871,7 @@ jobs:
           # both in a dedicated `chore(golangci):` slice so the new analyzer
           # set lands as an auditable diff — never as a surprise red check on
           # an unrelated PR (mirrors the SQLC_VERSION bump convention).
-          version: v2.12.2
+          version: v2.15.0
 
       # Slice 367 — CWE-209 errleak check. Rejects new code reflecting
       # err.Error() into 5xx JSON response bodies. Background: slice 327
