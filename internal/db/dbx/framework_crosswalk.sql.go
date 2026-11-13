@@ -174,6 +174,41 @@ func (q *Queries) GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) 
 	return i, err
 }
 
+const getFwToScfEdgeForUpdate = `-- name: GetFwToScfEdgeForUpdate :one
+SELECT id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier FROM fw_to_scf_edges
+WHERE framework_requirement_id = $1 AND scf_anchor_id = $2
+FOR UPDATE
+`
+
+type GetFwToScfEdgeForUpdateParams struct {
+	FrameworkRequirementID pgtype.UUID `json:"framework_requirement_id"`
+	ScfAnchorID            pgtype.UUID `json:"scf_anchor_id"`
+}
+
+// Row-lock one edge by (requirement, anchor) inside the import transaction.
+// The importer compares source_attribution precedence before it updates
+// (issue #1754); without the lock a concurrent weaker import that passed its
+// check against the old row would overwrite a just-committed scf_official
+// edge at READ COMMITTED. Same read-validate-write guard as
+// GetFwToScfEdgeTierForUpdate. Returns ErrNoRows when the edge doesn't exist.
+func (q *Queries) GetFwToScfEdgeForUpdate(ctx context.Context, arg GetFwToScfEdgeForUpdateParams) (FwToScfEdge, error) {
+	row := q.db.QueryRow(ctx, getFwToScfEdgeForUpdate, arg.FrameworkRequirementID, arg.ScfAnchorID)
+	var i FwToScfEdge
+	err := row.Scan(
+		&i.ID,
+		&i.FrameworkRequirementID,
+		&i.ScfAnchorID,
+		&i.RelationshipType,
+		&i.Strength,
+		&i.SourceAttribution,
+		&i.Rationale,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.MappingTier,
+	)
+	return i, err
+}
+
 const getFwToScfEdgeTier = `-- name: GetFwToScfEdgeTier :one
 
 SELECT id, mapping_tier, source_attribution

@@ -30,11 +30,55 @@ type Report struct {
 	EdgesUpdated   int
 	EdgesUnchanged int
 
+	// EdgesSkipped lists the (requirement, anchor) pairs whose incoming row
+	// was dropped because the existing edge carries a higher-precedence
+	// source_attribution (see attributionRank). The stored edge is left
+	// untouched, provenance and mapping_tier included.
+	EdgesSkipped []SkippedEdge
+
+	// EdgesUpgradedOntoRejected lists edges whose provenance this import
+	// raised while their mapping_tier is 'rejected'. The importer never
+	// touches the tier (provenance and trust are separate axes, ADR 0018),
+	// so these stay hidden from coverage until a reviewer acts on them.
+	EdgesUpgradedOntoRejected []UpgradedEdge
+
 	// MappingsByAttribution tallies edges by their source_attribution
 	// label. Exposed for the HITL audit summary so the orchestrator
 	// can read "X community-draft mappings ingested, 0 scf_official"
 	// without a second query.
 	MappingsByAttribution map[string]int
+}
+
+// SkippedEdge names one crosswalk row the importer refused to apply because
+// it would downgrade an existing edge's provenance.
+type SkippedEdge struct {
+	RequirementCode     string
+	SCFAnchor           string
+	ExistingAttribution string
+	IncomingAttribution string
+}
+
+// UpgradedEdge names one existing edge whose provenance an import raised.
+type UpgradedEdge struct {
+	RequirementCode     string
+	SCFAnchor           string
+	PreviousAttribution string
+	IncomingAttribution string
+}
+
+// attributionRank orders crosswalk provenance: scf_official > community_draft
+// > org_internal. Edges are global catalog data, so a weaker source must
+// never overwrite a stronger one for every tenant at once.
+func attributionRank(a dbx.CrosswalkSourceAttribution) int {
+	switch a {
+	case dbx.CrosswalkSourceAttributionScfOfficial:
+		return 3
+	case dbx.CrosswalkSourceAttributionCommunityDraft:
+		return 2
+	case dbx.CrosswalkSourceAttributionOrgInternal:
+		return 1
+	}
+	return 0
 }
 
 // pgxBeginner is the minimum surface Import needs from the DB handle.
@@ -214,16 +258,28 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		}
 		relType := dbx.StrmRelationshipType(m.RelationshipType)
 		srcAttr := dbx.CrosswalkSourceAttribution(attribution)
-		report.MappingsByAttribution[attribution]++
 
 		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.RequirementCode + "-" + m.SCFAnchor)
 
-		existing, lookupErr := q.GetFwToScfEdge(ctx, dbx.GetFwToScfEdgeParams{
+		// FOR UPDATE: the precedence check below reads, then writes. Without
+		// the row lock a concurrent weaker import that passed its check
+		// against the old row would overwrite a just-committed stronger edge.
+		existing, lookupErr := q.GetFwToScfEdgeForUpdate(ctx, dbx.GetFwToScfEdgeForUpdateParams{
 			FrameworkRequirementID: reqID,
 			ScfAnchorID:            anchor.ID,
 		})
 		switch {
 		case lookupErr == nil:
+			if attributionRank(srcAttr) < attributionRank(existing.SourceAttribution) {
+				report.EdgesSkipped = append(report.EdgesSkipped, SkippedEdge{
+					RequirementCode:     m.RequirementCode,
+					SCFAnchor:           m.SCFAnchor,
+					ExistingAttribution: string(existing.SourceAttribution),
+					IncomingAttribution: attribution,
+				})
+				continue
+			}
+			report.MappingsByAttribution[attribution]++
 			if edgeContentEqual(existing, relType, m.Strength, srcAttr, m.Rationale) {
 				report.EdgesUnchanged++
 				continue
@@ -238,7 +294,16 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				return Report{}, fmt.Errorf("crosswalk: update edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 			}
 			report.EdgesUpdated++
+			if existing.MappingTier == dbx.CrosswalkMappingTierRejected && srcAttr != existing.SourceAttribution {
+				report.EdgesUpgradedOntoRejected = append(report.EdgesUpgradedOntoRejected, UpgradedEdge{
+					RequirementCode:     m.RequirementCode,
+					SCFAnchor:           m.SCFAnchor,
+					PreviousAttribution: string(existing.SourceAttribution),
+					IncomingAttribution: attribution,
+				})
+			}
 		case errors.Is(lookupErr, pgx.ErrNoRows):
+			report.MappingsByAttribution[attribution]++
 			if _, err := q.InsertFwToScfEdge(ctx, dbx.InsertFwToScfEdgeParams{
 				ID:                     edgeID,
 				FrameworkRequirementID: reqID,
