@@ -99,6 +99,24 @@ check_violation. The CHECK is the backstop, not the primary validator.
 
 ### D4 — Applier transaction sharing
 
+> **Superseded for the evidence appliers by #1751.** `push_evidence` and
+> `update_control_state` no longer `INSERT INTO evidence_records` inside
+> the confirm transaction. Writing the ledger directly skipped the
+> `observed_at` skew check, schema validation, credential kind scope and
+> the `evidence_audit_log` row, so an approved proposal could backdate
+> evidence into a frozen audit period. Both appliers now hand the record
+> to `ingest.Service.Process` under the approving operator's credential.
+> Ingest commits in its own transaction, because the audit row for a
+> refusal has to survive the confirm rolling back. The proposal keeps
+> D4's guarantee by other means: the idempotency key is
+> `mcp-proposal:<proposal id>`, and a retried confirm returns the record
+> already ingested for that proposal. Refusals reach the operator as 4xx
+> with the REST push surface's codes (e.g. 400 `observed_at_skew`).
+> Approvers whose credential carries a `ScopePredicate` are refused with
+> 403 `scope_violation`, since the record's only scope dimension is the
+> server-set `mcp_tool`. The risk appliers are unchanged and still follow
+> D4 as written.
+
 **Chose: applier runs inside the confirm transaction.**
 
 When an operator invokes `confirm_write`:

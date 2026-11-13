@@ -324,7 +324,7 @@
     },
     {
       "name": "push_evidence",
-      "description": "Propose an evidence record append. Same wire shape as the push SDK (slice 003) but mediated by HITL approval because the LLM is the origin. Proposal sits at state='ai_proposed' until an approver confirms.",
+      "description": "Propose an evidence record append. Same wire shape as the push SDK (slice 003) but mediated by HITL approval because the LLM is the origin. Proposal sits at state='ai_proposed' until an approver confirms. On confirm the record goes through the same ingest checks as a push: observed_at within 24h, payload valid for the kind's schema.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -333,17 +333,17 @@
             "type": "string"
           },
           "kind": {
-            "description": "evidence_kind slug (e.g., aws.s3.bucket_encryption.v1).",
+            "description": "Registered evidence_kind (e.g., aws.s3.bucket_encryption_state.v1).",
             "minLength": 1,
             "type": "string"
           },
           "observed_at": {
-            "description": "ISO-8601 timestamp; defaults to now if omitted.",
+            "description": "ISO-8601 timestamp; defaults to now if omitted. Must be within 24h of the time the proposal is confirmed, or the confirm is rejected.",
             "format": "date-time",
             "type": "string"
           },
           "payload": {
-            "description": "Evidence payload (structured per evidence_kind schema). Bounded.",
+            "description": "Evidence payload. Validated against the evidence_kind schema at confirm; a non-conforming payload is refused. Bounded.",
             "type": "object"
           },
           "result": {
@@ -353,6 +353,10 @@
               "na",
               "inconclusive"
             ],
+            "type": "string"
+          },
+          "schema_version": {
+            "description": "Semver of the evidence_kind schema the payload conforms to; defaults to 1.0.0.",
             "type": "string"
           }
         },
