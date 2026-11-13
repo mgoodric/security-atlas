@@ -5,8 +5,22 @@
 # gate. Rows flagged "strength: 0.5" or lower are explicitly low-confidence
 # and should be reviewed first.
 #
-# Source basis: the agent-authored mapping is informed by:
-#   - AICPA TSC 2017 (with 2022 points-of-focus revisions) control text
+# LICENSING POSTURE (deliberate — see
+# docs/audit-log/1888-soc2-crosswalk-licensing-decisions.md):
+#   The AICPA 2017 Trust Services Criteria are copyrighted, and the CC1-CC5
+#   criteria restate the COSO 2013 Internal Control principles, which are
+#   copyrighted by COSO. This file references only the criterion
+#   IDENTIFIERS (e.g. "CC6.1") and the COSO principle NUMBERS — factual
+#   references, not protected expression. Each `title` is a short
+#   agent-authored label and each `body` an ORIGINAL agent-authored
+#   one-line summary. Neither reproduces AICPA or COSO wording. This is the
+#   posture slice 438 set for ISO/IEC 27001 (decisions log D5). The bundled
+#   bootstrap image imports this file on every boot (#1884), so the posture
+#   matters for what the image redistributes.
+#
+# Source basis (methodology, not copied text): the agent-authored mapping
+# is informed by:
+#   - AICPA TSC 2017 (with 2022 points-of-focus revisions) criterion IDs
 #   - SCF anchor families published in the platform's slice-006 fixture
 #   - NIST IR 8477 STRM methodology (canvas §3.2; UCF_GRAPH_MODEL.md §4)
 #
@@ -33,156 +47,156 @@ source_attribution: "community_draft"
 requirements:
   # Common Criteria — Control Environment (CC1)
   - code: CC1.1
-    title: "COSO Principle 1: Commitment to integrity and ethical values"
-    body: "The entity demonstrates a commitment to integrity and ethical values."
+    title: "COSO Principle 1: Integrity and ethics"
+    body: "Leadership sets and upholds expected standards of conduct, and departures from them are found and dealt with."
   - code: CC1.2
-    title: "COSO Principle 2: Board independence and oversight"
-    body: "The board of directors demonstrates independence from management and exercises oversight of the development and performance of internal control."
+    title: "COSO Principle 2: Board oversight"
+    body: "A governing body that is independent of management supervises how internal control is designed and run."
   - code: CC1.3
-    title: "COSO Principle 3: Management establishes structure, authority, responsibility"
-    body: "Management establishes, with board oversight, structures, reporting lines, and appropriate authorities and responsibilities."
+    title: "COSO Principle 3: Structure and authority"
+    body: "Reporting lines, decision rights, and duties for internal control are set out, under the governing body's supervision."
   - code: CC1.4
-    title: "COSO Principle 4: Commitment to competence"
-    body: "The entity demonstrates a commitment to attract, develop, and retain competent individuals."
+    title: "COSO Principle 4: Competent people"
+    body: "The organization hires, trains, and keeps staff with the skills their control duties need."
   - code: CC1.5
     title: "COSO Principle 5: Accountability"
-    body: "The entity holds individuals accountable for their internal control responsibilities."
+    body: "People answer for the control duties assigned to them, with performance measures and consequences to back that up."
 
   # Common Criteria — Communication & Information (CC2)
   - code: CC2.1
-    title: "Information for internal control"
-    body: "The entity obtains or generates and uses relevant, quality information to support the functioning of internal control."
+    title: "Quality information"
+    body: "Accurate, timely, relevant information is gathered or produced and used to run the control system."
   - code: CC2.2
     title: "Internal communication"
-    body: "The entity internally communicates information necessary to support the functioning of internal control."
+    body: "Control objectives, responsibilities, and concerns are shared with the staff who need them, including a channel to raise issues."
   - code: CC2.3
     title: "External communication"
-    body: "The entity communicates with external parties regarding matters affecting the functioning of internal control."
+    body: "Customers, regulators, vendors, and other outside parties are told about, and can report, matters that bear on control."
 
   # Common Criteria — Risk Assessment (CC3)
   - code: CC3.1
-    title: "Specifies suitable objectives"
-    body: "The entity specifies objectives with sufficient clarity to enable the identification and assessment of risks."
+    title: "Clear objectives"
+    body: "Business objectives are stated precisely enough that the risks to them can be found and weighed."
   - code: CC3.2
-    title: "Identifies and analyzes risk"
-    body: "The entity identifies risks to the achievement of its objectives and analyzes risks as a basis for determining how the risks should be managed."
+    title: "Risk identification and analysis"
+    body: "Risks to objectives are identified across the organization and analysed to decide how each is handled."
   - code: CC3.3
-    title: "Considers fraud risk"
-    body: "The entity considers the potential for fraud in assessing risks to the achievement of objectives."
+    title: "Fraud risk"
+    body: "The risk assessment covers the chance of fraud, including incentives, opportunity, and management override."
   - code: CC3.4
-    title: "Identifies and assesses changes"
-    body: "The entity identifies and assesses changes that could significantly impact the system of internal control."
+    title: "Significant change"
+    body: "Internal or external changes that could materially affect controls are spotted and assessed."
 
   # Common Criteria — Monitoring (CC4)
   - code: CC4.1
-    title: "Ongoing and separate evaluations"
-    body: "The entity selects, develops, and performs ongoing and separate evaluations to ascertain whether the components of internal control are present and functioning."
+    title: "Control evaluations"
+    body: "Continuous and periodic checks confirm that each part of the control system exists and works."
   - code: CC4.2
-    title: "Evaluates and communicates deficiencies"
-    body: "The entity evaluates and communicates internal control deficiencies in a timely manner to those parties responsible for taking corrective action."
+    title: "Deficiency reporting"
+    body: "Control weaknesses found are assessed and promptly reported to whoever must fix them, including senior management where warranted."
 
   # Common Criteria — Control Activities (CC5)
   - code: CC5.1
-    title: "Selects and develops control activities"
-    body: "The entity selects and develops control activities that contribute to the mitigation of risks to the achievement of objectives to acceptable levels."
+    title: "Control activity selection"
+    body: "Controls are chosen and built so that risks to objectives fall to a tolerable level."
   - code: CC5.2
-    title: "Selects and develops general technology controls"
-    body: "The entity selects and develops general control activities over technology to support the achievement of objectives."
+    title: "Technology general controls"
+    body: "General IT controls (infrastructure, security management, acquisition and maintenance) are chosen and built to support objectives."
   - code: CC5.3
-    title: "Deploys through policies and procedures"
-    body: "The entity deploys control activities through policies that establish what is expected and procedures that put policies into action."
+    title: "Policies and procedures"
+    body: "Controls are put into practice through written policies stating expectations and procedures that carry them out."
 
   # Common Criteria — Logical & Physical Access (CC6)
   - code: CC6.1
-    title: "Logical access security software and infrastructure"
-    body: "The entity implements logical access security software, infrastructure, and architectures over protected information assets."
+    title: "Logical access controls"
+    body: "Software, infrastructure, and architecture restrict logical access to protected information assets."
   - code: CC6.2
-    title: "Registers and authorizes new users prior to issuance of credentials"
-    body: "Prior to issuing system credentials, the entity registers and authorizes new internal and external users."
+    title: "User registration"
+    body: "Internal and external users are registered and approved before they receive credentials."
   - code: CC6.3
-    title: "Authorizes, modifies, or removes access"
-    body: "The entity authorizes, modifies, or removes access to data, software, functions, and other protected information assets."
+    title: "Access changes"
+    body: "Granting, changing, and revoking access to data and systems follows an approval process, guided by least privilege and separation of duties."
   - code: CC6.4
-    title: "Restricts physical access"
-    body: "The entity restricts physical access to facilities and protected information assets."
+    title: "Physical access"
+    body: "Entry to facilities, data centres, and media holding protected assets is limited to approved people."
   - code: CC6.5
-    title: "Discontinues logical and physical protections over physical assets only after the ability to read or recover data and software has been diminished"
-    body: "The entity discontinues logical and physical protections over physical assets only after the ability to read or recover data has been diminished."
+    title: "Asset disposal"
+    body: "Protections on hardware and media stay in place until the data on them can no longer be read or recovered."
   - code: CC6.6
-    title: "Logical access security measures against threats from outside"
-    body: "The entity implements logical access security measures to protect against threats from sources outside its system boundaries."
+    title: "External threat protection"
+    body: "Boundary controls guard the system against threats coming from outside it."
   - code: CC6.7
-    title: "Restricts the transmission, movement, and removal of information"
-    body: "The entity restricts the transmission, movement, and removal of information to authorized internal and external users and processes."
+    title: "Data transmission and movement"
+    body: "Sending, moving, or taking information out of the system is confined to approved users and processes, and protected in transit."
   - code: CC6.8
-    title: "Prevents or detects and acts upon the introduction of unauthorized or malicious software"
-    body: "The entity implements controls to prevent or detect and act upon the introduction of unauthorized or malicious software."
+    title: "Malicious software"
+    body: "Unauthorized or harmful software is blocked or detected, and acted on when found."
 
   # Common Criteria — System Operations (CC7)
   - code: CC7.1
-    title: "Detection and monitoring procedures for new vulnerabilities"
-    body: "The entity uses detection and monitoring procedures to identify changes to configurations that result in the introduction of new vulnerabilities."
+    title: "Configuration and vulnerability detection"
+    body: "Configuration changes and newly exposed weaknesses are detected through monitoring and scanning."
   - code: CC7.2
-    title: "Monitors system components for anomalies"
-    body: "The entity monitors system components and the operation of those components for anomalies indicative of malicious acts, natural disasters, and errors."
+    title: "Anomaly monitoring"
+    body: "System components and their behaviour are watched for signs of attack, failure, or other abnormal activity."
   - code: CC7.3
-    title: "Evaluates security events"
-    body: "The entity evaluates security events to determine whether they could or have resulted in a failure of the entity to meet its objectives."
+    title: "Security event evaluation"
+    body: "Detected security events are triaged to decide whether they amount to an incident that threatens objectives."
   - code: CC7.4
-    title: "Responds to identified security incidents"
-    body: "The entity responds to identified security incidents by executing a defined incident response program."
+    title: "Incident response"
+    body: "Confirmed incidents are contained and remediated under a documented response plan with assigned roles."
   - code: CC7.5
-    title: "Recovery from identified security incidents"
-    body: "The entity identifies, develops, and implements activities to recover from identified security incidents."
+    title: "Incident recovery"
+    body: "Recovery from incidents is planned and carried out, and lessons learned feed back into controls."
 
   # Common Criteria — Change Management (CC8)
   - code: CC8.1
-    title: "Authorizes, designs, develops or acquires, configures, documents, tests, approves, and implements changes"
-    body: "The entity authorizes, designs, develops or acquires, configures, documents, tests, approves, and implements changes to infrastructure, data, software, and procedures."
+    title: "Change management"
+    body: "Changes to infrastructure, data, software, and procedures go through a controlled path: approval, design, testing, documentation, and release."
 
   # Common Criteria — Risk Mitigation (CC9)
   - code: CC9.1
-    title: "Identifies, selects, and develops risk mitigation activities"
-    body: "The entity identifies, selects, and develops risk mitigation activities for risks arising from potential business disruptions."
+    title: "Business disruption risk"
+    body: "Mitigations, including insurance and continuity measures, are chosen for risks of business interruption."
   - code: CC9.2
-    title: "Vendor and business partner risk management"
-    body: "The entity assesses and manages risks associated with vendors and business partners."
+    title: "Vendor and partner risk"
+    body: "Risks from vendors and business partners are assessed and managed through their lifecycle."
 
   # Availability (A1)
   - code: A1.1
-    title: "Maintains, monitors, and evaluates current processing capacity"
-    body: "The entity maintains, monitors, and evaluates current processing capacity and use of system components to manage capacity demand and to enable the implementation of additional capacity."
+    title: "Capacity management"
+    body: "Processing capacity and usage are tracked and forecast so demand can be met and capacity added when needed."
   - code: A1.2
-    title: "Authorizes, designs, develops, implements, operates, approves, maintains, and monitors environmental protections, software, data backup processes, and recovery infrastructure"
-    body: "The entity authorizes, designs, develops or acquires, implements, operates, approves, maintains, and monitors environmental protections, software, data backup processes, and recovery infrastructure to meet its objectives."
+    title: "Environmental protection, backup, and recovery infrastructure"
+    body: "Environmental safeguards, backups, and recovery infrastructure are put in place, run, and monitored to keep the system available."
   - code: A1.3
-    title: "Tests recovery plan procedures"
-    body: "The entity tests recovery plan procedures supporting system recovery to meet its objectives."
+    title: "Recovery testing"
+    body: "Recovery plans are exercised periodically to show the system can be restored."
 
   # Confidentiality (C1)
   - code: C1.1
-    title: "Identifies and maintains confidential information"
-    body: "The entity identifies and maintains confidential information to meet the entity's objectives related to confidentiality."
+    title: "Confidential information handling"
+    body: "Information designated confidential is identified and protected while it is held."
   - code: C1.2
-    title: "Disposes of confidential information"
-    body: "The entity disposes of confidential information to meet the entity's objectives related to confidentiality."
+    title: "Confidential information disposal"
+    body: "Confidential information is securely destroyed once it is no longer needed."
 
   # Processing Integrity (PI1)
   - code: PI1.1
-    title: "Obtains or generates, uses, and communicates relevant, quality information regarding processing objectives"
-    body: "The entity obtains or generates, uses, and communicates relevant, quality information regarding the objectives related to processing, including definitions of data processed and product and service specifications, to support the use of products and services."
+    title: "Processing specifications"
+    body: "Definitions of the data processed and of product and service specifications are maintained and shared so the service can be used correctly."
   - code: PI1.2
-    title: "System inputs are complete and accurate"
-    body: "The entity implements policies and procedures over system inputs, including controls over completeness and accuracy, to result in products, services, and reporting to meet the entity's objectives."
+    title: "Input controls"
+    body: "Inputs to the system are checked for completeness and accuracy."
   - code: PI1.3
-    title: "System processing is complete, valid, accurate, timely, and authorized"
-    body: "The entity implements policies and procedures over system processing to result in products, services, and reporting to meet the entity's objectives."
+    title: "Processing controls"
+    body: "Processing is checked so that results are complete, accurate, valid, timely, and authorized."
   - code: PI1.4
-    title: "System output is complete, accurate, distributed to meet objectives"
-    body: "The entity implements policies and procedures to make available or deliver output completely, accurately, and timely in accordance with specifications to meet the entity's objectives."
+    title: "Output controls"
+    body: "Outputs reach the intended recipients complete, accurate, and on time, as specified."
   - code: PI1.5
-    title: "Stores inputs, items in processing, and outputs completely, accurately, and timely"
-    body: "The entity implements policies and procedures to store inputs, items in processing, and outputs completely, accurately, and timely in accordance with system specifications to meet the entity's objectives."
+    title: "Storage controls"
+    body: "Inputs, work in progress, and outputs are stored completely and accurately, as specified."
 
 mappings:
   # =====================================================================

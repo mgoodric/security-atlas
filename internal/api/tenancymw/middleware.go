@@ -114,6 +114,12 @@ func isUnboundTenant(tenantID string) bool {
 // isSafeMethod reports the RFC 9110 §9.2.1 safe methods. Reads under the
 // all-zeros tenant return nothing and are left alone; only writes are
 // refused.
+//
+// Every POST counts as a write, including the three bearer POSTs that write
+// nothing (oscal-export, oscal-export:download, questionnaires export-pdf):
+// under the all-zeros tenant they would export an empty tenant, and the
+// OSCAL export signs what it exports (security-atlas#1876, decisions log
+// docs/audit-log/1876-oauth-binding-follow-ups-decisions.md D3).
 func isSafeMethod(m string) bool {
 	switch m {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
