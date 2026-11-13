@@ -345,7 +345,7 @@ anchor_frameworks AS (
     SELECT
         e.scf_anchor_id AS anchor_id,
         array_agg(DISTINCT af.slug) AS framework_slugs
-    FROM fw_to_scf_edges e
+    FROM effective_fw_to_scf_edges e
     JOIN framework_requirements ar ON ar.id = e.framework_requirement_id
     JOIN framework_versions afv    ON afv.id = ar.framework_version_id
     JOIN frameworks af             ON af.id = afv.framework_id
