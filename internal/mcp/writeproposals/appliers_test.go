@@ -16,9 +16,9 @@ package writeproposals
 // Load-bearing functions / branches covered here:
 //
 //   - ApplyCreateRisk         — invalid JSON, empty title, empty category
-//   - ApplyUpdateControlState — invalid JSON, missing control_id, missing
+//   - NewUpdateControlStateApplier — invalid JSON, missing control_id, missing
 //                               state, non-UUID control_id, invalid state
-//   - ApplyPushEvidence       — invalid JSON, missing required fields,
+//   - NewPushEvidenceApplier  — invalid JSON, missing required fields,
 //                               non-UUID control_id, invalid result enum
 //   - ApplyUpdateRiskTreatment— invalid JSON, missing risk_id, missing
 //                               treatment, non-UUID risk_id
@@ -80,7 +80,7 @@ func TestApplyCreateRisk_RejectsEmptyCategory(t *testing.T) {
 func TestApplyUpdateControlState_RejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 	p := Proposal{ToolName: ToolUpdateControlState, ToolInput: json.RawMessage(`}}`)}
-	if _, err := ApplyUpdateControlState(context.Background(), nil, p); err == nil ||
+	if _, err := NewUpdateControlStateApplier(nil)(context.Background(), nil, p); err == nil ||
 		!strings.Contains(err.Error(), "parse input") {
 		t.Fatalf("ApplyUpdateControlState(bad JSON) = %v, want parse-input err", err)
 	}
@@ -92,7 +92,7 @@ func TestApplyUpdateControlState_RejectsMissingControlID(t *testing.T) {
 		ToolName:  ToolUpdateControlState,
 		ToolInput: json.RawMessage(`{"control_id":"","state":"pass"}`),
 	}
-	if _, err := ApplyUpdateControlState(context.Background(), nil, p); err == nil ||
+	if _, err := NewUpdateControlStateApplier(nil)(context.Background(), nil, p); err == nil ||
 		!strings.Contains(err.Error(), "control_id and state are required") {
 		t.Fatalf("err = %v, want control_id+state-required", err)
 	}
@@ -104,7 +104,7 @@ func TestApplyUpdateControlState_RejectsMissingState(t *testing.T) {
 		ToolName:  ToolUpdateControlState,
 		ToolInput: json.RawMessage(`{"control_id":"a","state":""}`),
 	}
-	if _, err := ApplyUpdateControlState(context.Background(), nil, p); err == nil ||
+	if _, err := NewUpdateControlStateApplier(nil)(context.Background(), nil, p); err == nil ||
 		!strings.Contains(err.Error(), "control_id and state are required") {
 		t.Fatalf("err = %v, want control_id+state-required", err)
 	}
@@ -116,7 +116,7 @@ func TestApplyUpdateControlState_RejectsNonUUIDControlID(t *testing.T) {
 		ToolName:  ToolUpdateControlState,
 		ToolInput: json.RawMessage(`{"control_id":"not-a-uuid","state":"pass"}`),
 	}
-	if _, err := ApplyUpdateControlState(context.Background(), nil, p); err == nil ||
+	if _, err := NewUpdateControlStateApplier(nil)(context.Background(), nil, p); err == nil ||
 		!strings.Contains(err.Error(), "control_id must be UUID") {
 		t.Fatalf("err = %v, want UUID-parse error", err)
 	}
@@ -128,7 +128,7 @@ func TestApplyUpdateControlState_RejectsInvalidState(t *testing.T) {
 		ToolName:  ToolUpdateControlState,
 		ToolInput: json.RawMessage(`{"control_id":"11111111-1111-1111-1111-111111111111","state":"PASS"}`),
 	}
-	if _, err := ApplyUpdateControlState(context.Background(), nil, p); err == nil ||
+	if _, err := NewUpdateControlStateApplier(nil)(context.Background(), nil, p); err == nil ||
 		!strings.Contains(err.Error(), "invalid evidence result/state") {
 		t.Fatalf("err = %v, want invalid-state err", err)
 	}
@@ -139,7 +139,7 @@ func TestApplyUpdateControlState_RejectsInvalidState(t *testing.T) {
 func TestApplyPushEvidence_RejectsInvalidJSON(t *testing.T) {
 	t.Parallel()
 	p := Proposal{ToolName: ToolPushEvidence, ToolInput: json.RawMessage(`[`)}
-	if _, err := ApplyPushEvidence(context.Background(), nil, p); err == nil ||
+	if _, err := NewPushEvidenceApplier(nil)(context.Background(), nil, p); err == nil ||
 		!strings.Contains(err.Error(), "parse input") {
 		t.Fatalf("err = %v, want parse-input err", err)
 	}
@@ -154,7 +154,7 @@ func TestApplyPushEvidence_RejectsMissingRequiredFields(t *testing.T) {
 	}
 	for i, body := range cases {
 		p := Proposal{ToolName: ToolPushEvidence, ToolInput: json.RawMessage(body)}
-		if _, err := ApplyPushEvidence(context.Background(), nil, p); err == nil ||
+		if _, err := NewPushEvidenceApplier(nil)(context.Background(), nil, p); err == nil ||
 			!strings.Contains(err.Error(), "control_id, kind, result are required") {
 			t.Fatalf("case %d: err = %v, want required-fields err", i, err)
 		}
@@ -167,7 +167,7 @@ func TestApplyPushEvidence_RejectsNonUUIDControlID(t *testing.T) {
 		ToolName:  ToolPushEvidence,
 		ToolInput: json.RawMessage(`{"control_id":"x","kind":"k","result":"pass"}`),
 	}
-	if _, err := ApplyPushEvidence(context.Background(), nil, p); err == nil ||
+	if _, err := NewPushEvidenceApplier(nil)(context.Background(), nil, p); err == nil ||
 		!strings.Contains(err.Error(), "control_id must be UUID") {
 		t.Fatalf("err = %v, want UUID-parse err", err)
 	}
@@ -179,7 +179,7 @@ func TestApplyPushEvidence_RejectsInvalidResultEnum(t *testing.T) {
 		ToolName:  ToolPushEvidence,
 		ToolInput: json.RawMessage(`{"control_id":"11111111-1111-1111-1111-111111111111","kind":"k","result":"unknown"}`),
 	}
-	if _, err := ApplyPushEvidence(context.Background(), nil, p); err == nil ||
+	if _, err := NewPushEvidenceApplier(nil)(context.Background(), nil, p); err == nil ||
 		!strings.Contains(err.Error(), "invalid evidence result/state") {
 		t.Fatalf("err = %v, want invalid-result err", err)
 	}
@@ -248,7 +248,7 @@ func TestApplyUpdateRiskTreatment_RejectsNonUUIDRiskID(t *testing.T) {
 func TestRegisterDefaultAppliers_RegistersAllFourTools(t *testing.T) {
 	t.Parallel()
 	s := NewStore(nil)
-	RegisterDefaultAppliers(s)
+	RegisterDefaultAppliers(s, nil)
 	for _, want := range []string{
 		ToolCreateRisk, ToolUpdateControlState, ToolPushEvidence, ToolUpdateRiskTreatment,
 	} {
