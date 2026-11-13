@@ -144,7 +144,10 @@ func runResetBootstrap(tenant, scope string, kinds []string, ttl time.Duration, 
 	if err != nil {
 		return fmt.Errorf("new request: %w", err)
 	}
-	req.Header.Set("Authorization", "Bearer "+bearer)
+	// The reset is authorized by the operator's own credential, not the key
+	// just minted (a non-admin key): a super_admin JWT, or an admin API key
+	// on a single-tenant install (#1851, ADR 0003 amendment).
+	req.Header.Set("Authorization", "Bearer "+common.token)
 	req.Header.Set("Content-Type", "application/json")
 	// Slice 088: explicit per-call timeout via cmdhttp.Client.
 	// Credential bootstrap-reset may invoke cosign for issuance
