@@ -79,6 +79,9 @@ describe("active control count (issue 1832)", () => {
       expect(page.total).toBe(badge);
       expect(page.controls).toHaveLength(badge);
       expect(seen[0]).toContain("limit=1");
+      for (const u of seen) {
+        expect(u.startsWith("/api/controls-list?include=state")).toBe(true);
+      }
     },
   );
 

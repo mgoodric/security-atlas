@@ -224,9 +224,9 @@ export function activeControlsTotal(
 // Browser-side fn: one page of the caller's controls with state, through
 // the BFF.
 async function fetchMyControlsPage(
-  qs: URLSearchParams,
+  params: Record<string, string>,
 ): Promise<Partial<ControlsWithStateResponse>> {
-  qs.set("include", "state");
+  const qs = new URLSearchParams({ include: "state", ...params });
   const res = await fetch(`/api/controls-list?${qs.toString()}`);
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
@@ -244,7 +244,7 @@ async function fetchMyControlsPage(
 // Browser-side fn: the caller's active-control count for the sidebar
 // badge. One row is fetched; only the total is read.
 export async function fetchMyControlsTotal(): Promise<number> {
-  const page = await fetchMyControlsPage(new URLSearchParams({ limit: "1" }));
+  const page = await fetchMyControlsPage({ limit: "1" });
   return activeControlsTotal(page);
 }
 
@@ -258,12 +258,12 @@ export async function fetchMyControls(
   const controls: ControlWithState[] = [];
   let total = 0;
   for (;;) {
-    const qs = new URLSearchParams({
+    const params: Record<string, string> = {
       limit: String(CONTROLS_WITH_STATE_PAGE_LIMIT),
       offset: String(controls.length),
-    });
-    if (scopeCellID) qs.set("scope", scopeCellID);
-    const page = await fetchMyControlsPage(qs);
+    };
+    if (scopeCellID) params.scope = scopeCellID;
+    const page = await fetchMyControlsPage(params);
     const rows = page.controls ?? [];
     total = activeControlsTotal(page);
     controls.push(...rows);
