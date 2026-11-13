@@ -74,12 +74,14 @@ function pickTenant(): string {
   return ids[0];
 }
 
+// The test types a real password. A retained trace or video would carry it
+// into the uploaded failure artifact. Top level: Playwright refuses trace
+// and video options inside a describe group.
+test.use({ trace: "off", video: "off" });
+
 test.describe("local email/password sign-in after first install", () => {
   // `go run` compiles atlas-cli on a cold cache.
   test.describe.configure({ timeout: 300_000 });
-  // The test types a real password. A retained trace or video would carry
-  // it into the uploaded failure artifact.
-  test.use({ trace: "off", video: "off" });
 
   const password = randomBytes(18).toString("base64url");
   const email = `local-login-${randomUUID()}@example.invalid`;
