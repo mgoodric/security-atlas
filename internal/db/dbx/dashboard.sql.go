@@ -36,6 +36,7 @@ req_anchor AS (
     JOIN fw_to_scf_edges e
       ON e.framework_requirement_id = vr.requirement_id
      AND e.relationship_type <> 'no_relationship'
+     AND e.mapping_tier <> 'rejected'
 ),
 covering_control AS (
     -- Each (requirement, anchor) pair joined to the tenant's active controls
