@@ -911,11 +911,14 @@ type Querier interface {
 	// Slice 020: one link row by (risk, control). Used to confirm a link exists
 	// before returning its effectiveness breakdown.
 	GetRiskControlLink(ctx context.Context, arg GetRiskControlLinkParams) (GetRiskControlLinkRow, error)
-	// Idempotency lookup: find the meta-risk a rule already created for a
-	// given (rule_id, window_start) window. The key is stored on the
+	// Idempotency lookup: find the meta-risk a rule activation already created.
+	// The key, sha256(rule_id|activated_at) since #1861, is stored on the
 	// meta-risk's inherent_score JSONB as 'aggregation_key' (slice 053
 	// pattern). If found, the engine UPDATEs it rather than creating a
-	// duplicate (canvas §6.6: one meta-risk per rule per window).
+	// duplicate (canvas §6.6: one meta-risk per rule activation). The ORDER BY
+	// makes the pick deterministic on installs that already hold same-key
+	// duplicates from before the #1861 advisory lock: every evaluation updates
+	// the oldest one (#1867).
 	GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskByKeyParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
 	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
@@ -2842,6 +2845,12 @@ type Querier interface {
 	// committed meta-risk. hashtextextended maps the hex key to the BIGINT
 	// lock space; a hash collision only over-serializes, never under-.
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// #1867: read a risk and hold its row against concurrent theme writes and
+	// deletes until the transaction ends, so a theme write or delete sees the
+	// themes it actually replaces. FOR NO KEY UPDATE, not FOR UPDATE: it does
+	// not conflict with the FOR KEY SHARE an aggregation evaluation takes when
+	// it links this risk as a child, so an evaluation is never blocked by it.
+	LockRiskByID(ctx context.Context, arg LockRiskByIDParams) (Risk, error)
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
@@ -3352,8 +3361,9 @@ type Querier interface {
 	// ===== aggregation_rule_evaluations (append-only) =====
 	// Append-only. EVERY evaluation cycle writes exactly one row, including
 	// 'no_match' (canvas §6.6 + AC-8: the audit trail proves the engine ran).
-	// window_start + meta_risk_id are non-NULL only for outcome='fired' (the
-	// fired-coherent CHECK enforces this).
+	// window_start + meta_risk_id are set together: always for outcome='fired',
+	// and for a near_miss / no_match that refreshed an existing meta-risk
+	// (#1867). The fired-coherent CHECK enforces this.
 	WriteAggregationRuleEvaluation(ctx context.Context, arg WriteAggregationRuleEvaluationParams) (AggregationRuleEvaluation, error)
 	// Append-only lifecycle log. action is constrained at the DB layer
 	// (period_created | period_frozen | freeze_rejected_already_frozen |

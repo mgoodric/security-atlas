@@ -39,6 +39,7 @@ import {
   formatResidualScore,
   fairScore,
   formatDollars,
+  patternNoLongerMet,
   residualState,
   reviewDuePending,
   severityBand,
@@ -179,6 +180,18 @@ export default function RiskDetailPage({
           </div>
         </dl>
       </header>
+
+      {patternNoLongerMet(risk.inherent_score) ? (
+        <Alert data-testid="risk-detail-pattern-lapsed">
+          <AlertTitle>Pattern no longer met</AlertTitle>
+          <AlertDescription>
+            This rule-generated meta-risk has 0 child risks in its rule&apos;s
+            current window, so its score is empty. The aggregation engine never
+            closes a meta-risk: review it and close or delete it if the pattern
+            is over.
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {/* ============ SCORING (independent axes — canvas §6.2) ============ */}
       <div className="grid gap-4 sm:grid-cols-2">

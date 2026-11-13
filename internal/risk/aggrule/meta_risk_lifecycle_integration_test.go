@@ -25,7 +25,6 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
-	"github.com/mgoodric/security-atlas/internal/risk"
 	"github.com/mgoodric/security-atlas/internal/risk/aggrule"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -250,7 +249,7 @@ func TestEngine_ThemeRemovalAndDeleteRefreshMetaRisk_1861(t *testing.T) {
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 	rules := aggrule.NewStore(app)
-	risks := risk.NewStore(app).WithAfterRiskWrite(aggrule.EvaluateOnRiskWrite)
+	risks := riskStoreAsWired(app)
 
 	team1 := seedOrgUnit(t, admin, tenant, "team-1")
 	createAndActivate(t, rules, ctx, makeRule("ownership-stale", "ownership", 3, 1, 90, "max"))

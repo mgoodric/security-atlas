@@ -97,7 +97,14 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 		// The themes the risk carried before this write: a rule targeting a
 		// theme being removed must re-evaluate too, or its meta-risk keeps
 		// the stale child link and score (#1861).
-		before, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
+		//
+		// Lock order (#1867): take the rules' advisory locks for the old
+		// and new themes before the row lock, as Delete does. The unlocked
+		// read only picks which rules to lock; the locked read is the one
+		// that counts, because a concurrent theme write may have committed
+		// in between, and without the row lock it could commit after this
+		// read and leave a removed theme unevaluated.
+		unlocked, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(riskID),
 		})
@@ -106,6 +113,19 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 				return ErrNotFound
 			}
 			return fmt.Errorf("get risk themes: %w", err)
+		}
+		if err := s.runBeforeRiskWrite(ctx, q, tenantID, unionThemes(unlocked.Themes, normalised)); err != nil {
+			return err
+		}
+		before, err := q.LockRiskByID(ctx, dbx.LockRiskByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(riskID),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("lock risk themes: %w", err)
 		}
 		row, err := q.UpdateRiskThemes(ctx, dbx.UpdateRiskThemesParams{
 			TenantID: pgUUID(tenantID),
