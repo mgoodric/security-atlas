@@ -228,8 +228,9 @@ RLS-bound role sees none of these rows.
 **Retained rows are never purged.**
 
 - **Append-only ledgers.** The evidence ledger and every audit log
-  (any table the application itself cannot delete from: no RLS policy
-  allows DELETE, or a trigger refuses it, as on
+  (any table the application itself cannot delete from: no permissive
+  RLS policy allows DELETE, `atlas_app` has no DELETE grant on it, or a
+  trigger refuses it, as on
   `action_plan_audit_log` and `change_audit_log`) are kept. ADR-0012
   allows ledger disposal only by tombstone, and that path does not
   exist yet. (The `RESTRICT` keys from `sample_evidence` and
@@ -275,6 +276,12 @@ recorded in tenant_data_purges	64c4346e-85af-452f-8e82-f0e384fe58a0
   with
   `SELECT * FROM tenant_data_purges ORDER BY purged_at` on the same
   connection.
+- **A five-minute limit.** The CLI gives the whole purge five minutes.
+  Besides the per-table counts, the ledger check counts every row of
+  every ledger table, across all tenants, twice (before and after). On
+  a large install that can run past the limit. A purge that times out
+  rolls back and deletes nothing, so it is safe to run again in a
+  quieter window.
 - **Cascades are not counted.** The counts cover tables with a
   `tenant_id` column. A foreign-key cascade into a table without one
   deletes rows the purge does not count.
