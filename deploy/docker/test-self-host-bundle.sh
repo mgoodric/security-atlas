@@ -566,6 +566,33 @@ log "JWT carries super_admin=true + admin role in bootstrap tenant"
 rm -f "${LOGIN_RESP}"
 
 # ---------------------------------------------------------------------
+# Assertion 8 (security-atlas#1739): the stock controls the bootstrap
+# uploaded with its OAuth client land in the bootstrap tenant, and the
+# default user sees them. Before the fix the client's tokens were
+# tenant-free, so all 50 rows landed in the all-zeros tenant and the
+# signed-in user's GET /v1/controls returned count 0.
+# ---------------------------------------------------------------------
+BOOTSTRAP_TENANT_ID="00000000-0000-4000-8000-000000000001"
+NIL_TENANT_ID="00000000-0000-0000-0000-000000000000"
+IN_TENANT="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${BOOTSTRAP_TENANT_ID}'")"
+[ "${IN_TENANT}" = "50" ] || fail "controls in bootstrap tenant = ${IN_TENANT}, want 50"
+IN_NIL="$(db_count "SELECT count(*) FROM controls WHERE tenant_id = '${NIL_TENANT_ID}'")"
+[ "${IN_NIL}" = "0" ] || fail "controls in the all-zeros tenant = ${IN_NIL}, want 0"
+UNBOUND="$(db_count "SELECT count(*) FROM oauth_clients WHERE name LIKE 'atlas-bootstrap-controls-%' AND tenant_id IS DISTINCT FROM '${BOOTSTRAP_TENANT_ID}'")"
+[ "${UNBOUND}" = "0" ] || fail "${UNBOUND} bootstrap OAuth client(s) not bound to the bootstrap tenant"
+
+CONTROLS_RESP="$(mktemp)"
+CONTROLS_CODE="$(curl -sS -o "${CONTROLS_RESP}" -w "%{http_code}" \
+    -H "Authorization: Bearer ${TOKEN}" \
+    "http://127.0.0.1:${ATLAS_HOSTPORT}/v1/controls?limit=100")"
+[ "${CONTROLS_CODE}" = "200" ] \
+    || fail "GET /v1/controls: HTTP ${CONTROLS_CODE} (want 200); body: $(head -c 400 "${CONTROLS_RESP}")"
+API_COUNT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("count", -1))' "${CONTROLS_RESP}")"
+rm -f "${CONTROLS_RESP}"
+[ "${API_COUNT}" = "50" ] || fail "default user's GET /v1/controls count = ${API_COUNT}, want 50"
+log "default user sees the 50 stock controls in the bootstrap tenant; none in the all-zeros tenant"
+
+# ---------------------------------------------------------------------
 # Assertions 9 + 10 (slice 470) — PROXY MODE ONLY: the trusted-proxy
 # X-Forwarded-For walk (internal/api/auth/clientip.go, slice 466) proven
 # end-to-end across a real multi-container topology.
