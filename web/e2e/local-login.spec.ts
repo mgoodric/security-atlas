@@ -11,6 +11,11 @@
 // `atlas-cli bootstrap hash-password` (the same argon2id encoding the
 // server verifies), inserted with psql. No credential is committed.
 //
+// Marking first sign-in is not undone: afterAll removes the user, but
+// platform_status.first_signin_at stays set in the shared e2e database,
+// so specs that run later see a post-first-install platform. Specs that
+// depend on first-install state mock /api/install-state rather than read it.
+//
 // The e2e database is shared by every spec, and other specs add tenants,
 // so the install may be single- or multi-tenant when this runs. The form
 // follows install-state: with one tenant it shows no tenant field and the
@@ -72,6 +77,9 @@ function pickTenant(): string {
 test.describe("local email/password sign-in after first install", () => {
   // `go run` compiles atlas-cli on a cold cache.
   test.describe.configure({ timeout: 300_000 });
+  // The test types a real password. A retained trace or video would carry
+  // it into the uploaded failure artifact.
+  test.use({ trace: "off", video: "off" });
 
   const password = randomBytes(18).toString("base64url");
   const email = `local-login-${randomUUID()}@example.invalid`;
