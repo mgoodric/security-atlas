@@ -206,10 +206,10 @@ func (s *Store) Aggregate(ctx context.Context, in AggregateInput) (AggregateResu
 			return fmt.Errorf("marshal inherent_score: %w", err)
 		}
 
-		// Parent risk: qualitative_5x5 + treatment=avoid (passes slice 019
-		// validation without requiring linked controls — the parent is a
-		// pattern tracker, not actively mitigated through its own controls).
-		// Category derived from the first child's category.
+		// Parent risk: qualitative_5x5 + treatment=untreated. Nobody has
+		// decided how to treat the pattern yet, so the parent records no
+		// decision (#1746); untreated needs no linked controls or side
+		// fields. Category derived from the first child's category.
 		parentID := uuid.New()
 		category := childRows[0].Category
 		row, err := q.CreateAggregateRisk(ctx, dbx.CreateAggregateRiskParams{
@@ -220,7 +220,7 @@ func (s *Store) Aggregate(ctx context.Context, in AggregateInput) (AggregateResu
 			Category:            category,
 			Methodology:         dbx.RiskMethodologyQualitative5x5,
 			InherentScore:       inherentBytes,
-			Treatment:           dbx.RiskTreatmentAvoid,
+			Treatment:           dbx.RiskTreatmentUntreated,
 			TreatmentOwner:      "",
 			ResidualScore:       []byte("{}"),
 			Accepter:            "",

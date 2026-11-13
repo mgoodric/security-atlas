@@ -44,6 +44,7 @@ package eval_test
 import (
 	"context"
 	"math"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
@@ -493,6 +494,52 @@ func TestOpenRiskFinancialExposure_EmptyAndPopulated(t *testing.T) {
 	}
 	if res2.Dimensions["v1_proxy"] != "likelihood_times_impact" {
 		t.Errorf("Compute(populated) dims['v1_proxy'] = %q; want likelihood_times_impact", res2.Dimensions["v1_proxy"])
+	}
+}
+
+// TestOpenRiskFinancialExposure_TreatmentStates pins #1746: untreated and
+// proposed-accept risks count as open exposure; an approved acceptance does
+// not. The evaluator reads every tenant, so the test asserts on deltas.
+func TestOpenRiskFinancialExposure_TreatmentStates(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ctx := context.Background()
+
+	e, ok := eval.NewRegistry(admin).Get("open_risk_financial_exposure")
+	if !ok {
+		t.Fatal("open_risk_financial_exposure not registered")
+	}
+	before, err := e.Compute(ctx)
+	if err != nil {
+		t.Fatalf("Compute(before): %v", err)
+	}
+
+	for _, ins := range []string{
+		`INSERT INTO risks (id, tenant_id, title, category, residual_score)
+		 VALUES ($1, $2, 'untreated risk', 'operational', '{"likelihood": 2, "impact": 3}'::jsonb)`,
+		`INSERT INTO risks (id, tenant_id, title, category, treatment, acceptance_status, residual_score)
+		 VALUES ($1, $2, 'proposed accept', 'operational', 'accept', 'proposed', '{"likelihood": 1, "impact": 5}'::jsonb)`,
+		`INSERT INTO risks (id, tenant_id, title, category, treatment, acceptance_status,
+		                    accepted_until, accepter, residual_score)
+		 VALUES ($1, $2, 'approved accept', 'operational', 'accept', 'approved',
+		         CURRENT_DATE + 30, 'ciso', '{"likelihood": 4, "impact": 4}'::jsonb)`,
+	} {
+		if _, err := admin.Exec(ctx, ins, uuid.New(), tenant); err != nil {
+			t.Fatalf("seed risk: %v", err)
+		}
+	}
+
+	after, err := e.Compute(ctx)
+	if err != nil {
+		t.Fatalf("Compute(after): %v", err)
+	}
+	if got := after.Value - before.Value; got != 11 {
+		t.Errorf("magnitude delta = %v; want 11 (untreated 6 + proposed 5, approved excluded)", got)
+	}
+	bc, _ := strconv.Atoi(before.Dimensions["open_risks_count"])
+	ac, _ := strconv.Atoi(after.Dimensions["open_risks_count"])
+	if ac-bc != 2 {
+		t.Errorf("open_risks_count delta = %d; want 2", ac-bc)
 	}
 }
 

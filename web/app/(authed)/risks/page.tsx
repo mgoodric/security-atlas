@@ -72,6 +72,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
   fetchRisksList,
+  treatmentLabel,
   type Risk,
   type RisksListResponse,
 } from "@/lib/api/risks";
@@ -187,6 +188,7 @@ const PENDING_EVAL_TOOLTIP =
 
 const TREATMENT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All treatments" },
+  { value: "untreated", label: "untreated" },
   { value: "mitigate", label: "mitigate" },
   { value: "transfer", label: "transfer" },
   { value: "accept", label: "accept" },
@@ -521,7 +523,7 @@ function RisksPageInner() {
           className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-muted text-foreground"
           data-testid="risks-row-treatment"
         >
-          {row.treatment}
+          {treatmentLabel(row)}
         </span>
       ),
     },

@@ -251,6 +251,15 @@ func TestEngine_WindowIdempotency_ISC18(t *testing.T) {
 	if n := metaRiskCount(t, admin, tenant); n != 1 {
 		t.Fatalf("after eval #1: %d meta-risks, want 1", n)
 	}
+	// #1746: a rule-generated meta-risk carries no treatment decision.
+	var metaTreatment string
+	if err := admin.QueryRow(context.Background(),
+		`SELECT treatment::text FROM risks WHERE id = $1`, *firstMeta).Scan(&metaTreatment); err != nil {
+		t.Fatalf("read meta-risk treatment: %v", err)
+	}
+	if metaTreatment != "untreated" {
+		t.Fatalf("meta-risk treatment = %q; want untreated", metaTreatment)
+	}
 
 	// Add a fourth risk in the SAME window, re-evaluate. Must UPDATE the
 	// existing meta-risk, not create a second.

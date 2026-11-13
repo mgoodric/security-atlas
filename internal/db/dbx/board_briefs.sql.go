@@ -227,7 +227,7 @@ func (q *Queries) ListFrameworksForTenant(ctx context.Context, tenantID pgtype.U
 }
 
 const listRisksForBoardBrief = `-- name: ListRisksForBoardBrief :many
-SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes FROM risks
+SELECT id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status FROM risks
 WHERE tenant_id = $1
   AND created_at <= $2
 ORDER BY updated_at ASC, id ASC
@@ -278,6 +278,7 @@ func (q *Queries) ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBo
 			&i.Level,
 			&i.OrgUnitID,
 			&i.Themes,
+			&i.AcceptanceStatus,
 		); err != nil {
 			return nil, err
 		}
