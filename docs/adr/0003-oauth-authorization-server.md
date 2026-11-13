@@ -240,6 +240,55 @@ the login page points operators at that file. Authenticating the token is
 stricter than checking its shape: a well-formed string that was never issued
 is refused too.
 
+(Superseded by the #1885 amendment below: the endpoint no longer takes a
+token.)
+
+## Amendment (2026-11-13, #1885): recovery mints an admin bootstrap credential
+
+**What the #1851 token check proved.** It accepted any live, unrevoked
+credential in the store: every rehydrated `api_keys` row, of any tenant and
+any privilege. It proved the token was live. It did not prove the token was
+an admin credential, or bound to the caller's tenant.
+
+**The re-issued token was not an admin credential.** `--reset-bootstrap`
+minted the token through `AdminCredentialsService.Issue` → `admin.Service.Issue`
+→ `credstore.Store.Issue`, which mints non-admin keys only. The cold-start
+bootstrap credential is an admin credential (`IssueBootstrapFixedAdminCredential`),
+and the login page stores the pasted token as the session bearer, so signing
+in with a recovered token gave a non-admin session. The recovery path did not
+recover admin access.
+
+**Decision: recovery mints an admin credential, server-side, behind the
+gate.** `POST /v1/admin/install/reset-bootstrap` no longer accepts a token.
+After `authorizeResetBootstrap` admits the caller (super_admin, or an admin
+credential on a single-tenant install) and the foot-gun gate passes, the
+handler mints an admin credential (`credstore.Store.IssueAdmin`, no expiry,
+like the cold-start credential) for the caller's tenant, writes its bearer
+to the bootstrap-token file, and returns it once in the response.
+
+- **Reachable only through the gate.** No other runtime path mints an admin
+  credential for the file. The admin gRPC `Issue` RPC still mints non-admin
+  keys only; it is not widened. A non-gated caller (non-admin key, missing
+  credential, tenant admin key on a multi-tenant install) is refused before
+  anything is minted, and a reset refused by the foot-gun gate (409) mints
+  nothing, because the mint runs after the status reset.
+- **Tenant-bound.** The credential is for the caller's own tenant. The CLI
+  sends `--tenant` as `tenant_id`; a value other than the caller's tenant is
+  refused with 400 rather than ignored. The credential is a tenant admin
+  credential, not super_admin: it carries `IsAdmin`, never
+  `atlas:super_admin`. On a single-tenant install that is the whole install,
+  and it passes this same gate again for a later recovery.
+- **Caller tokens are ignored.** A `token` field sent by an older CLI is
+  dropped; the file never holds a caller-chosen string. This retires the
+  #1851 token check rather than tightening it.
+- **No orphaned admin key.** If the file write fails after the mint, the
+  credential is revoked, since its bearer is not returned on that path.
+
+**Rejected: keep the non-admin re-issue and document it.** Recovery exists
+for an operator who has lost admin access. A recovered non-admin session
+cannot reach admin pages or re-run this gate, so the operator would still
+need an admin key from elsewhere, which is the situation recovery is for.
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block

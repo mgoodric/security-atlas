@@ -87,6 +87,52 @@ func (s *Store) runBeforeRiskWrite(ctx context.Context, q *dbx.Queries, tenantID
 	return s.beforeRisk(ctx, q, tenantID, themes)
 }
 
+// errStaleRuleLocks is returned inside a risk write's transaction when the
+// themes read under the row lock are not covered by the themes whose rule
+// locks BeforeRiskWrite took from the unlocked read: a concurrent theme
+// write committed in between. inTxRuleLocked rolls back and retries once.
+var errStaleRuleLocks = errors.New("risk: themes changed between rule lock and row lock")
+
+// checkRuleLocks returns errStaleRuleLocks when lockedThemes, read under the
+// row lock, has a theme outside preLocked, the themes BeforeRiskWrite was
+// called with. AfterRiskWrite would then take a rule lock while holding the
+// row lock, the order #1867 removed, and could deadlock with an evaluation
+// (40P01). Theme coverage is sufficient: every rule the after-hook
+// evaluates for a covered theme was locked before the row. The store cannot
+// see the rules, so a new theme no rule targets retries too, at the cost of
+// one extra transaction. On the last attempt it reports nothing and the
+// write proceeds, no worse than before #1880.
+func (s *Store) checkRuleLocks(lastAttempt bool, preLocked, lockedThemes []string) error {
+	if s.beforeRisk == nil || lastAttempt {
+		return nil
+	}
+	set := make(map[string]struct{}, len(preLocked))
+	for _, t := range preLocked {
+		set[t] = struct{}{}
+	}
+	for _, t := range lockedThemes {
+		if _, ok := set[t]; !ok {
+			return errStaleRuleLocks
+		}
+	}
+	return nil
+}
+
+// inTxRuleLocked runs fn in a transaction like inTx, and once more in a
+// fresh one if fn returns errStaleRuleLocks (#1880). lastAttempt is true on
+// the retry, so fn's checkRuleLocks lets it proceed.
+func (s *Store) inTxRuleLocked(ctx context.Context, fn func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error) error {
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		return fn(ctx, q, tenantID, false)
+	})
+	if !errors.Is(err, errStaleRuleLocks) {
+		return err
+	}
+	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		return fn(ctx, q, tenantID, true)
+	})
+}
+
 // runAfterRiskWrite invokes the AfterRiskWrite hook, if one is set.
 func (s *Store) runAfterRiskWrite(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error {
 	if s.afterRisk == nil {
@@ -453,7 +499,7 @@ func (s *Store) Heatmap(ctx context.Context) ([]HeatmapCell, error) {
 
 // Delete removes a risk by id. ErrNotFound if no row was matched.
 func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
-	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	return s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
 		// Check existence first so we can return ErrNotFound rather than a
 		// silent success on a missing row.
 		row, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
@@ -471,7 +517,8 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 		// as a child; deleting first and locking second deadlocks with it.
 		// A meta-risk's themes include its rule's target theme, so deleting
 		// one also waits out an evaluation that is updating it.
-		if err := s.runBeforeRiskWrite(ctx, q, tenantID, row.Themes); err != nil {
+		preLocked := row.Themes
+		if err := s.runBeforeRiskWrite(ctx, q, tenantID, preLocked); err != nil {
 			return err
 		}
 		// Re-read under a row lock: the themes may have changed since the
@@ -485,6 +532,9 @@ func (s *Store) Delete(ctx context.Context, id uuid.UUID) error {
 				return ErrNotFound
 			}
 			return fmt.Errorf("delete risk lock: %w", err)
+		}
+		if err := s.checkRuleLocks(lastAttempt, preLocked, row.Themes); err != nil {
+			return err
 		}
 		if err := q.DeleteRisk(ctx, dbx.DeleteRiskParams{
 			TenantID: pgUUID(tenantID),

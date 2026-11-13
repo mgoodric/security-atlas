@@ -1,18 +1,16 @@
 // Slice 073 — admin endpoint that re-arms the bootstrap-token file.
 //
 // Used by `atlas-cli credentials issue --reset-bootstrap [--force]`
-// (AC-8). The CLI:
-//   1. Calls the existing AdminCredentialsService.Issue RPC to mint a
-//      fresh admin bearer.
-//   2. Calls this endpoint with {token, force} to ask the platform to
-//      (a) clear platform_status.bootstrap_token_consumed_at
-//      (b) write the new token to ${ATLAS_DATA_DIR}/bootstrap-token.
+// (AC-8). The CLI calls this endpoint with {force}, and the platform
+//   (a) clears platform_status.bootstrap_token_consumed_at,
+//   (b) mints a fresh admin credential for the caller's tenant, and
+//   (c) writes its bearer to ${ATLAS_DATA_DIR}/bootstrap-token.
 //
 // The endpoint requires super_admin, or an admin credential on a
-// single-tenant install (#1851), accepts only a live credential this server
-// issued as the token, runs the foot-gun gate (refuse without --force if first_signin_at is
-// set), and is the ONLY runtime path that writes the bootstrap-token
-// file outside of the cold-start path in cmd/atlas.
+// single-tenant install (#1851), and runs the foot-gun gate (refuse without
+// --force if first_signin_at is set). It is the ONLY runtime path that
+// mints an admin credential for the bootstrap-token file or writes that
+// file outside of the cold-start path in cmd/atlas (#1885, ADR 0003).
 
 package api
 
@@ -43,16 +41,24 @@ func (s *Server) AttachPlatformResetter(pr PlatformResetter) {
 	s.platformResetter = pr
 }
 
-// resetBootstrapRequest is the JSON body for the admin endpoint.
+// resetBootstrapRequest is the JSON body for the admin endpoint. The
+// bootstrap credential is minted server-side, so the caller supplies no
+// token (#1885); a `token` field sent by an older CLI is ignored. TenantID,
+// when set, must be the caller's tenant: the credential is always minted
+// for the caller's tenant, and a mismatch is refused rather than ignored.
 type resetBootstrapRequest struct {
-	Token string `json:"token"`
-	Force bool   `json:"force"`
+	Force    bool   `json:"force"`
+	TenantID string `json:"tenant_id,omitempty"`
 }
 
-// resetBootstrapResponse is the JSON response shape.
+// resetBootstrapResponse is the JSON response shape. BearerToken is the
+// re-issued bootstrap admin credential's plaintext, returned once.
 type resetBootstrapResponse struct {
-	FileWritten bool `json:"file_written"`
-	StatusReset bool `json:"status_reset"`
+	FileWritten  bool   `json:"file_written"`
+	StatusReset  bool   `json:"status_reset"`
+	CredentialID string `json:"credential_id"`
+	TenantID     string `json:"tenant_id"`
+	BearerToken  string `json:"bearer_token"`
 }
 
 // handleResetBootstrap is the admin-only recovery endpoint.
@@ -61,12 +67,12 @@ type resetBootstrapResponse struct {
 //
 //	(1) super_admin, or an admin credential on a single-tenant install
 //	    (authorizeResetBootstrap).
-//	(2) token authenticates as a live credential in the credential store.
-//	(3) Either first_signin_at IS NULL, or force == true.
+//	(2) Either first_signin_at IS NULL, or force == true.
 //
 // Either failure returns a non-2xx without writing anything. On success
-// the platform_status row is reset AND the new token is written to the
-// bootstrap-token file at the configured path.
+// the platform_status row is reset, a fresh admin credential is minted for
+// the caller's tenant, and its bearer is written to the bootstrap-token
+// file at the configured path and returned once in the response.
 func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
@@ -86,23 +92,26 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"error":"invalid JSON body"}`))
 		return
 	}
-	if req.Token == "" {
-		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"token is required"}`))
-		return
-	}
-	// The token lands in the bootstrap-token file that the login page
-	// points operators at, so it must be a live credential this server
-	// issued, not a caller-chosen string (#1851). Fail closed without a
-	// credential store.
+	// The re-issued bootstrap credential is an admin credential, so that
+	// signing in with it after recovery gives an admin session (#1885). It
+	// is minted here, behind authorizeResetBootstrap, never taken from the
+	// caller: the admin gRPC Issue RPC mints only non-admin keys, and a
+	// caller-supplied token cannot be trusted to be an admin one. Fail
+	// closed without a credential store.
 	if s.credStore == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"error":"credential store not configured"}`))
 		return
 	}
-	if _, err := s.credStore.Authenticate(req.Token); err != nil {
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	if cred.TenantID == "" {
 		w.WriteHeader(http.StatusBadRequest)
-		_, _ = w.Write([]byte(`{"error":"token is not a live atlas credential"}`))
+		_, _ = w.Write([]byte(`{"error":"caller credential carries no tenant"}`))
+		return
+	}
+	if req.TenantID != "" && req.TenantID != cred.TenantID {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"error":"tenant_id must be the caller's tenant"}`))
 		return
 	}
 
@@ -124,12 +133,34 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := resetBootstrapResponse{StatusReset: true}
+	// Minted after the status reset, so a refused reset (409) leaves no
+	// live admin credential behind.
+	issued, bearer, err := s.credStore.IssueAdmin(cred.TenantID, 0)
+	if err != nil {
+		s.installLogger().Warn("reset-bootstrap credential issue failed",
+			slog.String("error", err.Error()))
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":"status reset succeeded but credential issue failed"}`))
+		return
+	}
+
+	resp := resetBootstrapResponse{
+		StatusReset:  true,
+		CredentialID: issued.ID,
+		TenantID:     issued.TenantID,
+		BearerToken:  bearer,
+	}
 	if s.bootstrapTokenPath != "" {
-		if err := platform.WriteBootstrapToken(s.bootstrapTokenPath, req.Token); err != nil {
+		if err := platform.WriteBootstrapToken(s.bootstrapTokenPath, bearer); err != nil {
 			// The marker is already reset; the file write failure is
 			// surfaced but does not undo the status reset (operators can
-			// inspect stderr / re-run the CLI to retry the file write).
+			// inspect stderr / re-run the CLI to retry). The bearer is not
+			// returned on this path, so revoke the credential rather than
+			// leave an admin key that no one holds.
+			if rerr := s.credStore.Revoke(issued.ID); rerr != nil {
+				s.installLogger().Warn("reset-bootstrap revoke after failed file write failed",
+					slog.String("error", rerr.Error()))
+			}
 			s.installLogger().Warn("reset-bootstrap file write failed",
 				slog.String("error", err.Error()))
 			w.WriteHeader(http.StatusInternalServerError)
