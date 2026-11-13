@@ -440,6 +440,15 @@ func EvaluateOnRiskWrite(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID
 	return err
 }
 
+// LockOnRiskWrite is the risk.BeforeRiskWrite hook: before a risk write
+// locks or deletes the risk row, it takes the advisory locks of the rules
+// EvaluateOnRiskWrite will evaluate for those themes, in the same order, so
+// the write and a concurrent evaluation take their locks in one order
+// (#1867).
+func LockOnRiskWrite(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error {
+	return NewEngine(q).LockRules(ctx, tenantID, themes)
+}
+
 // inTx mirrors risk.Store.inTx — sets the tenant GUC inside a transaction so
 // RLS sees it, runs fn, commits on success.
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries, uuid.UUID) error) error {

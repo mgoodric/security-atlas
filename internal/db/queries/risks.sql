@@ -22,6 +22,17 @@ SELECT *
 FROM risks
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: LockRiskByID :one
+-- #1867: read a risk and hold its row against concurrent theme writes and
+-- deletes until the transaction ends, so a theme write or delete sees the
+-- themes it actually replaces. FOR NO KEY UPDATE, not FOR UPDATE: it does
+-- not conflict with the FOR KEY SHARE an aggregation evaluation takes when
+-- it links this risk as a child, so an evaluation is never blocked by it.
+SELECT *
+FROM risks
+WHERE tenant_id = $1 AND id = $2
+FOR NO KEY UPDATE;
+
 -- name: ListRisks :many
 -- Enumerate all risks for the tenant, newest first. Filters are applied
 -- in the application layer because sqlc's static typing makes optional
