@@ -243,3 +243,18 @@ func (s *Status) ResetBootstrap(ctx context.Context, force bool) error {
 	}
 	return nil
 }
+
+// TenantCount returns the number of tenants on the install. It reads through
+// the writePool (BYPASSRLS migrate role): `tenants` is RLS-scoped, so the app
+// pool without a tenant GUC would count zero. The reset-bootstrap endpoint
+// uses it to admit a tenant admin key only on a single-tenant install (#1851).
+func (s *Status) TenantCount(ctx context.Context) (int, error) {
+	if s.writePool == nil {
+		return 0, ErrWriteNotConfigured
+	}
+	var n int
+	if err := s.writePool.QueryRow(ctx, `SELECT count(*) FROM tenants`).Scan(&n); err != nil {
+		return 0, fmt.Errorf("platform: count tenants: %w", err)
+	}
+	return n, nil
+}

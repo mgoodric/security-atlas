@@ -43,6 +43,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
+	"github.com/mgoodric/security-atlas/internal/auth/jwt"
+	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 )
 
@@ -205,6 +207,13 @@ func newRouter(t *testing.T, tenantID, userID uuid.UUID, isAdmin, enabled bool) 
 				IsAdmin:  isAdmin,
 			}
 			ctx := authctx.WithCredential(req.Context(), cred)
+			if isAdmin {
+				// Seed/Teardown require the super_admin claim (#1851).
+				ctx = jwtmw.WithClaimsForTest(ctx, &jwt.AtlasClaims{
+					RegisteredClaims: jwt.RegisteredClaims{Subject: "user:" + userID.String()},
+					SuperAdmin:       true,
+				})
+			}
 			next.ServeHTTP(w, req.WithContext(ctx))
 		})
 	})
@@ -394,6 +403,10 @@ func TestSeed_RateLimited(t *testing.T) {
 				IsAdmin:  true,
 			}
 			ctx := authctx.WithCredential(req.Context(), cred)
+			ctx = jwtmw.WithClaimsForTest(ctx, &jwt.AtlasClaims{
+				RegisteredClaims: jwt.RegisteredClaims{Subject: "user:" + actor.String()},
+				SuperAdmin:       true,
+			})
 			next.ServeHTTP(w, req.WithContext(ctx))
 		})
 	})

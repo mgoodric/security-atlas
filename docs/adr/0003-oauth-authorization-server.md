@@ -202,6 +202,44 @@ Slice 192 (2026-05-21) closes the auth-substrate-v2 spine. With slice 192 merged
 
 The binary vCISO success criterion from slice 141 is fulfilled.
 
+## Amendment (2026-11-13, #1851): super_admin on install-wide admin routes
+
+A per-tenant admin API key sets `cred.IsAdmin` but never carries
+`atlas:super_admin`. Two `/v1/admin` routes had install-wide effects behind
+`cred.IsAdmin` alone, so any tenant's admin could reach them. They now use the
+verified-JWT `atlas:super_admin` check that #1757 put on the global catalog
+write routes (re-read per request since #1853):
+
+- **`POST /v1/admin/demo/seed` and `POST /v1/admin/demo/teardown`** create or
+  delete a whole tenant through the BYPASSRLS pool. They require
+  `atlas:super_admin`, in addition to the OPA admin-role check. No fallback.
+- **`POST /v1/admin/install/reset-bootstrap`** clears the install-wide
+  `first_signin_at` and `bootstrap_token_consumed_at` markers and rewrites the
+  install's `bootstrap-token` file. It admits `atlas:super_admin`, **or** an
+  admin credential while the install has exactly one tenant.
+
+**Why the reset keeps an admin-key fallback.** The reset is the recovery path
+for an install whose sign-in is broken, run from `atlas-cli credentials issue
+--reset-bootstrap`. Then there may be no way to get a JWT, and the operator
+holds only an admin API key. On a single-tenant install that key's tenant is
+the whole install, so admitting it is no cross-tenant effect. Once a second
+tenant exists, a tenant admin key is refused (403) and the operator signs in
+as a super_admin and passes that JWT as `--token`. The tenant count is read
+on each request through the BYPASSRLS pool (`platform.Status.TenantCount`).
+
+**The CLI presents the operator's credential.** `--reset-bootstrap` now sends
+the caller's `--token` as the bearer for the reset POST. It used to send the
+key it had just minted, which is a non-admin key and could never pass the
+gate.
+
+**The token is validated.** The request's `token` must authenticate as a
+live (unrevoked, unexpired) credential in the server's credential store, the
+store the CLI's `AdminCredentialsService.Issue` call mints into. A
+caller-chosen string is refused with 400 before anything is written, because
+the login page points operators at that file. Authenticating the token is
+stricter than checking its shape: a well-formed string that was never issued
+is refused too.
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block
