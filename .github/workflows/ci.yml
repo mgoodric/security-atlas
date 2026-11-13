@@ -752,7 +752,7 @@ jobs:
           cache: true
       # Slice 279 — the unit-coverage artifact (uploaded by build-go).
       - name: Download unit coverage artifact
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: go-unit-coverage
           path: /tmp/cov/unit
@@ -761,7 +761,7 @@ jobs:
       # with a name pattern + merge-multiple pulls all four leg artifacts
       # (go-integration-coverage-A / -B1 / -B2 / -B3) into one directory.
       - name: Download all integration shard coverage profiles
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: go-integration-coverage-*
           path: /tmp/cov/shards
@@ -1626,7 +1626,7 @@ jobs:
       # Unix executable bit, so `install -m 0755` is REQUIRED to make the
       # downloaded file runnable at /usr/local/bin/atlas.
       - name: Download prebuilt atlas binary
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: atlas-binary
           path: /tmp/atlas-bin
@@ -1838,7 +1838,7 @@ jobs:
       # Unix executable bit, so `install -m 0755` is REQUIRED. The web
       # standalone build below is unrelated and stays.
       - name: Download prebuilt atlas binary
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: atlas-binary
           path: /tmp/atlas-bin
@@ -2033,7 +2033,7 @@ jobs:
       # of recompiling ./cmd/atlas here. upload-artifact does NOT preserve the
       # Unix executable bit, so `install -m 0755` is REQUIRED.
       - name: Download prebuilt atlas binary
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v4.1.8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: atlas-binary
           path: /tmp/atlas-bin
