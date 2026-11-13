@@ -274,6 +274,12 @@ func (e *Engine) EvaluateAll(ctx context.Context, trigger string, asOf time.Time
 	total := 0
 	var errs []error
 	for _, id := range controlIDs {
+		// A cancelled sweep stops here rather than logging and joining one
+		// context error per remaining control (#1865).
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			errs = append(errs, ctxErr)
+			break
+		}
 		n, err := e.EvaluateControl(ctx, id, trigger, asOf)
 		if err != nil {
 			slog.ErrorContext(ctx, "eval: evaluate control", "control_id", id, "tenant", tenant, "trigger", trigger, "err", err.Error())

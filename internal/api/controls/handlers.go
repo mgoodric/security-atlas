@@ -21,6 +21,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/control/bundletest"
+	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -175,8 +176,13 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 	// (compile error, eval error, never assigns `result`). Unlike red tests,
 	// this is not subject to the tenant's gate mode: a broken query errors on
 	// every live evaluation of the control.
-	if err := dryRunQueries(ctx, gateRunner, bundle); err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "control bundle rejected: "+err.Error())
+	if err := dryRunQueries(ctx, gateRunner, bundle, eval.QueryDryRunTimeout); err != nil {
+		var qerr *queryDryRunError
+		if errors.As(err, &qerr) {
+			httpresp.WriteError(w, http.StatusBadRequest, "control bundle rejected: "+err.Error())
+			return
+		}
+		httperr.WriteInternal(w, r, "bundle query dry-run", err)
 		return
 	}
 	// Slice 608: resolve the per-tenant gate policy. A nil store (unit servers)
