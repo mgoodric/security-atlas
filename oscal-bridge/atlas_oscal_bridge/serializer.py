@@ -24,6 +24,7 @@ import shutil
 import tempfile
 import uuid
 from datetime import UTC, datetime
+from enum import Enum
 
 from trestle.core.control_interface import ParameterRep
 from trestle.core.profile_resolver import ProfileResolver
@@ -79,10 +80,17 @@ def _scalar_str(value) -> str:
     trestle 5.x wraps some OSCAL scalars (``oscal-version``, a component's
     ``type``) in pydantic ``RootModel`` datatypes, whose ``str()`` is the
     model repr (``root='1.1.2'``), not the value. Unwrap ``.root`` first.
+    A field typed as a union with a plain ``Enum`` (``DefinedComponent.type``
+    is ``StringDatatype | DefinedComponentTypeValidValues``) parses to the
+    enum member, whose ``str()`` is ``Class.member``; unwrap ``.value`` too.
     """
-    while hasattr(value, "root"):
-        value = value.root
-    return str(value or "")
+    while True:
+        if hasattr(value, "root"):
+            value = value.root
+        elif isinstance(value, Enum):
+            value = value.value
+        else:
+            return str(value or "")
 
 
 class SerializeError(ValueError):
@@ -1180,13 +1188,15 @@ def import_profile(
         if not controls:
             return _profile_reject(["resolved profile contains zero controls"])
 
-        rmeta = resolved.metadata
-        oscal_version = _scalar_str(getattr(rmeta, "oscal_version", ""))
-        # The profile's OWN declared title is the provenance label, not the
-        # resolved catalog's (trestle stamps the resolved catalog with the
-        # profile's metadata, so this is the same value either way).
+        # Provenance comes from the profile's OWN declared metadata, not the
+        # resolved catalog's: trestle stamps the resolved catalog with its own
+        # OSCAL_VERSION (1.2.1 on 5.2.1), which is the resolver's version, not
+        # the one the imported document declared (issue #1875).
         pmeta = profile.get("metadata", {}) if isinstance(profile, dict) else {}
-        profile_title = str(pmeta.get("title", "")) if isinstance(pmeta, dict) else ""
+        if not isinstance(pmeta, dict):
+            pmeta = {}
+        oscal_version = str(pmeta.get("oscal-version", "") or "")
+        profile_title = str(pmeta.get("title", "") or "")
         return ProfileImportResult(True, [], controls, oscal_version, profile_title)
     finally:
         shutil.rmtree(root, ignore_errors=True)
