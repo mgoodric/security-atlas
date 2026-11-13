@@ -240,8 +240,10 @@ type Querier interface {
 	// Issue #1741: totals for the paged `/v1/anchors?include=state` read on
 	// the current SCF version: the whole catalog, and the anchors the
 	// caller's tenant has at least one active control on. `controls` is
-	// tenant-scoped under FORCE RLS, so with_control_total is per tenant.
-	CountSCFAnchorsLatest(ctx context.Context) (CountSCFAnchorsLatestRow, error)
+	// tenant-scoped under FORCE RLS; the explicit `c.tenant_id` predicate
+	// (issue #1832) keeps with_control_total per tenant even where RLS is
+	// bypassed.
+	CountSCFAnchorsLatest(ctx context.Context, tenantID pgtype.UUID) (CountSCFAnchorsLatestRow, error)
 	// Total group count in the tenant (List envelope totalResults).
 	CountSCIMGroups(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	CountSCIMUsers(ctx context.Context, tenantID pgtype.UUID) (int64, error)
@@ -2522,8 +2524,10 @@ type Querier interface {
 	//      column SURFACES this invariant on the controls list.
 	//   #6 RLS: `controls` and `control_evaluations` are tenant-scoped under
 	//      FORCE ROW LEVEL SECURITY. The tenant GUC set by `tenancymw`
-	//      filters those rows; the global `scf_anchors` rows + the
-	//      catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
+	//      filters those rows, and each `controls` read also carries an
+	//      explicit `c.tenant_id = sqlc.arg(tenant_id)` predicate (issue
+	//      #1832, belt-and-suspenders as in ListActiveControlsWithState);
+	//      the global `scf_anchors` rows + the catalog-global `fw_to_scf_edges` (`tenant_id IS NULL`) are
 	//      visible to every tenant by design.
 	//   #2 Engine is sole writer of control_evaluations: this is a pure read
 	//      over the engine's output table, never a parallel computation.

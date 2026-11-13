@@ -6,7 +6,7 @@ Thanks for your interest in contributing. This document covers the local dev set
 
 ## Prerequisites
 
-- Go 1.26+ (matches `go.mod`; slice 089/090 hardened the govulncheck pin under Go 1.26)
+- Go 1.27 toolchain (CI, images and releases build on 1.27; `go.mod` keeps the `go 1.26.0` language floor; slice 089/090 hardened the govulncheck pin under Go 1.26)
 - Node.js 20+
 - Python 3.11+ (for `oscal-bridge` and ruff)
 - Postgres 16+ (for migrations + integration tests) — `brew install postgresql@16` or via Docker

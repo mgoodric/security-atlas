@@ -46,10 +46,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
-import {
-  fetchTenantControlsList,
-  type TenantControl,
-} from "@/lib/api/controls-list";
+import { fetchMyControlsTotal } from "@/lib/api/controls-list";
 import {
   fetchRisksList,
   type Risk,
@@ -130,14 +127,19 @@ function pulseClass(isFetching: boolean): string {
   return isFetching ? "animate-pulse" : "";
 }
 
-// Issue #1741 — the badge counts the tenant's own active controls
-// (`/api/controls-list` → `GET /v1/controls`), the same set the /controls
-// page lists by default. It used to count the first page of SCF catalog
-// anchors, which read "100" on a tenant with 39 controls.
+// Issue #1741 — the badge counts the tenant's own active controls, the
+// same set the /controls page lists by default. It used to count the
+// first page of SCF catalog anchors, which read "100" on a tenant with
+// 39 controls.
+//
+// Issue #1832 — the badge reads the same `total` as the page
+// (`/api/controls-list?include=state` → CountActiveControls) off a
+// one-row page, through the shared `activeControlsTotal`, so the two
+// numbers come from one query and cannot drift.
 export function ControlsCountBadge() {
-  const q = useQuery<TenantControl[]>({
+  const q = useQuery<number>({
     queryKey: ["sidebar", "controls-count"],
-    queryFn: fetchTenantControlsList,
+    queryFn: fetchMyControlsTotal,
     staleTime: 60_000,
     refetchInterval: 60_000,
     // Fail closed: any error => render nothing.
@@ -146,8 +148,7 @@ export function ControlsCountBadge() {
 
   if (q.isLoading || q.isError || !q.data) return null;
 
-  const count = q.data.length;
-  if (count === 0) return null;
+  const count = q.data;
 
   return (
     <span
