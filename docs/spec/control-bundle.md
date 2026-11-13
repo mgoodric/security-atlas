@@ -130,15 +130,18 @@ evidence_queries:
     description: "All human IAM users must have MFA enabled"
     expression: |
       package evidence.query
-      default result := "inconclusive"
       result := "fail" if {
         some r in input.records
         r.result == "fail"
-      }
-      result := "pass" if {
+      } else := "pass" if {
+        some r in input.records
+        r.result == "pass"
+      } else := "inconclusive" if {
+        some r in input.records
+        r.result == "inconclusive"
+      } else := "na" if {
         count(input.records) > 0
-        every r in input.records { r.result == "pass" }
-      }
+      } else := "inconclusive"
 ```
 
 A Rego evidence query lives in `package evidence.query` and assigns `result`

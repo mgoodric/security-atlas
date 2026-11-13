@@ -35,6 +35,11 @@ func TestStockControlPoliciesEvaluateOnFreshInstall(t *testing.T) {
 			{Result: eval.ResultFail, ObservedAt: now},
 		}, want: eval.ResultFail},
 		{name: "one na", records: []eval.FixtureRecord{{Result: eval.ResultNA, ObservedAt: now}}, want: eval.ResultNA},
+		{name: "one inconclusive", records: []eval.FixtureRecord{{Result: eval.ResultInconclusive, ObservedAt: now}}, want: eval.ResultInconclusive},
+		{name: "pass and na", records: []eval.FixtureRecord{
+			{Result: eval.ResultPass, ObservedAt: now},
+			{Result: eval.ResultNA, ObservedAt: now},
+		}, want: eval.ResultPass},
 	}
 
 	withQueries := 0
