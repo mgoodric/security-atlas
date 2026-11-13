@@ -24,7 +24,8 @@ package mcpwriteproposals
 //                          Invalid input / Pending cap exceeded /
 //                          fallthrough server error)
 //   - writeTransitionErr — every documented branch (NotFound /
-//                          WrongState / UnknownTool / fallthrough)
+//                          WrongState / UnknownTool / applier refusals
+//                          from ingest (#1751) / fallthrough)
 //   - writeServerErr     — direct call exercises the 500 wrap
 //   - proposalWireFrom   — empty-ToolInput defaults to "{}"
 //
@@ -37,6 +38,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -48,6 +50,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/mcp/writeproposals"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -407,6 +410,52 @@ func TestWriteCreateErr_Fallthrough500(t *testing.T) {
 	h.writeCreateErr(w, httptest.NewRequest(http.MethodGet, "/", nil), errors.New("unexpected"))
 	if w.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want 500", w.Code)
+	}
+}
+
+// ----- writeTransitionErr: applier refusals (#1751) -----
+
+// An ingest refusal at confirm is a client error with a stable code, not
+// an opaque 500. The applier wraps the sentinel, so the mapping must use
+// errors.Is.
+func TestWriteTransitionErr_ApplierRefusals(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		err    error
+		status int
+		code   string
+	}{
+		{ingest.ErrObservedAtSkew, http.StatusBadRequest, "observed_at_skew"},
+		{ingest.ErrValidation, http.StatusBadRequest, "schema_validation_failed"},
+		{ingest.ErrUnknownKind, http.StatusBadRequest, "unknown_evidence_kind"},
+		{ingest.ErrMissingField, http.StatusBadRequest, "missing_field"},
+		{ingest.ErrOversized, http.StatusRequestEntityTooLarge, "oversized_payload"},
+		{ingest.ErrScopeViolation, http.StatusForbidden, "scope_violation"},
+		{ingest.ErrIdempotencyMismatch, http.StatusConflict, "idempotency_mismatch"},
+		{writeproposals.ErrInvalidInput, http.StatusBadRequest, "invalid_input"},
+		{writeproposals.ErrIngestUnavailable, http.StatusServiceUnavailable, "ingest_unavailable"},
+	}
+	h := New(nil)
+	for _, tc := range cases {
+		w := httptest.NewRecorder()
+		wrapped := fmt.Errorf("apply: apply push_evidence: %w: skew=-720h0m0s", tc.err)
+		h.writeTransitionErr(w, httptest.NewRequest(http.MethodPost, "/", nil), wrapped)
+		if w.Code != tc.status {
+			t.Fatalf("%v: status = %d, want %d", tc.err, w.Code, tc.status)
+		}
+		var body struct {
+			Error string `json:"error"`
+			Code  string `json:"code"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatalf("%v: decode body: %v", tc.err, err)
+		}
+		if body.Code != tc.code {
+			t.Fatalf("%v: code = %q, want %q", tc.err, body.Code, tc.code)
+		}
+		if tc.status >= http.StatusInternalServerError && strings.Contains(body.Error, "skew=") {
+			t.Fatalf("%v: 5xx body leaks the wrapped error: %q", tc.err, body.Error)
+		}
 	}
 }
 

@@ -206,7 +206,7 @@ const pushEvidenceInputSchema = `{
     "kind": {
       "type": "string",
       "minLength": 1,
-      "description": "evidence_kind slug (e.g., aws.s3.bucket_encryption.v1)."
+      "description": "Registered evidence_kind (e.g., aws.s3.bucket_encryption_state.v1)."
     },
     "schema_version": {
       "type": "string",
@@ -223,7 +223,7 @@ const pushEvidenceInputSchema = `{
     },
     "payload": {
       "type": "object",
-      "description": "Evidence payload (structured per evidence_kind schema). Bounded."
+      "description": "Evidence payload. Validated against the evidence_kind schema at confirm; a non-conforming payload is refused. Bounded."
     }
   }
 }`
@@ -244,7 +244,9 @@ func (t *PushEvidenceTool) Definition() mcp.ToolDefinition {
 		Name: "push_evidence",
 		Description: "Propose an evidence record append. Same wire shape as the push SDK " +
 			"(slice 003) but mediated by HITL approval because the LLM is the origin. " +
-			"Proposal sits at state='ai_proposed' until an approver confirms.",
+			"Proposal sits at state='ai_proposed' until an approver confirms. On confirm the " +
+			"record goes through the same ingest checks as a push: observed_at within 24h, " +
+			"payload valid for the kind's schema.",
 		InputSchema: json.RawMessage(pushEvidenceInputSchema),
 	}
 }
