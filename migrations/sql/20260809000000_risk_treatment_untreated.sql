@@ -1,0 +1,21 @@
+-- security-atlas -- #1746: an honest "no decision yet" risk treatment.
+--
+-- Adds `untreated` to the risk_treatment enum. Until now every create path
+-- that omitted a treatment silently recorded `avoid`, a decision nobody
+-- made, because avoid was the only value with no required side fields.
+--
+-- This file only adds the enum value. Postgres refuses to use a value added
+-- by ALTER TYPE ... ADD VALUE inside the transaction that added it, and the
+-- self-host runner (deploy/docker/bootstrap/migrate.sh) applies each file
+-- with --single-transaction. The default, the acceptance status and the
+-- CHECK that use the new value live in the next file,
+-- 20260809000001_risk_acceptance_status.sql.
+--
+-- Existing rows are untouched: there is no way to tell a silent `avoid`
+-- default from a real avoid decision, so no row is rewritten.
+--
+-- No .down.sql: Postgres cannot drop an enum value. The type itself is
+-- dropped by 20260511000000_init.down.sql. IF NOT EXISTS keeps an
+-- up -> down -> up round-trip idempotent.
+
+ALTER TYPE risk_treatment ADD VALUE IF NOT EXISTS 'untreated';

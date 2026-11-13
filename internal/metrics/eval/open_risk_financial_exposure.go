@@ -8,7 +8,9 @@ import (
 )
 
 // openRiskFinancialExposureEvaluator sums a unit-of-risk magnitude across
-// open (treatment != 'accept') risks. v1 proxy: residual_score's
+// open risks: every risk except an approved acceptance. Untreated risks and
+// acceptances pending sign-off stay open (#1746; the predicate mirrors
+// risk.IsOpenTreatment). v1 proxy: residual_score's
 // likelihood × impact product (extracted from the JSONB column), because
 // v1's risk register stores residual as {likelihood, impact} not as a
 // dollar ALE. Documented in the slice's decisions log (D6).
@@ -33,6 +35,7 @@ func (e *openRiskFinancialExposureEvaluator) Compute(ctx context.Context) (Resul
 			COUNT(*) AS open_risks_count
 		FROM risks
 		WHERE treatment <> 'accept'
+		   OR acceptance_status IS DISTINCT FROM 'approved'
 	`
 	var magnitude float64
 	var count int

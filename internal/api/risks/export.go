@@ -116,24 +116,27 @@ type exportSource interface {
 // re-export every field the riskWire shape carries — the canonical
 // column set in `riskExportHeader` is the single source of truth.
 type riskRow struct {
-	ID             uuid.UUID
-	Title          string
-	Description    string
-	Category       string
-	Methodology    string
-	InherentScore  []byte
-	Treatment      string
-	TreatmentOwner string
-	ResidualScore  []byte
-	ReviewDueAt    *time.Time
-	AcceptedUntil  *time.Time
-	Accepter       string
-	InstrumentRef  string
-	OrgUnitID      *uuid.UUID
-	Themes         []string
-	Severity       int
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID            uuid.UUID
+	Title         string
+	Description   string
+	Category      string
+	Methodology   string
+	InherentScore []byte
+	Treatment     string
+	// AcceptanceStatus is proposed | approved for treatment=accept, empty
+	// otherwise (#1746).
+	AcceptanceStatus string
+	TreatmentOwner   string
+	ResidualScore    []byte
+	ReviewDueAt      *time.Time
+	AcceptedUntil    *time.Time
+	Accepter         string
+	InstrumentRef    string
+	OrgUnitID        *uuid.UUID
+	Themes           []string
+	Severity         int
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 // NewExportHandler constructs the slice 136 export handler. The pool
@@ -398,6 +401,8 @@ func riskExportHeader() []string {
 		"accepted_until",
 		"created_at",
 		"updated_at",
+		// #1746: appended, not inserted, so existing column positions hold.
+		"acceptance_status",
 	}
 }
 
@@ -454,6 +459,7 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 				acceptedUntil,
 				r.CreatedAt.UTC().Format(time.RFC3339),
 				r.UpdatedAt.UTC().Format(time.RFC3339),
+				r.AcceptanceStatus,
 			}
 			if !yield(row) {
 				return
@@ -535,6 +541,9 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 			InstrumentRef:  r.InstrumentReference,
 			Themes:         append([]string(nil), r.Themes...),
 			Severity:       severityOf(r.InherentScore),
+		}
+		if r.AcceptanceStatus != nil {
+			out[i].AcceptanceStatus = string(*r.AcceptanceStatus)
 		}
 		if r.ReviewDueAt.Valid {
 			t := r.ReviewDueAt.Time

@@ -15,7 +15,10 @@
 //   RiskMethodology: OE-592 — deliberately NARROWER than the dbx enum.
 //                    The form offers only methodologies that have a matching
 //                    score widget here: nist_800_30, qualitative_5x5, and FAIR.
-//   RiskTreatment:   accept | mitigate (default) | transfer | avoid
+//   RiskTreatment:   untreated (default) | mitigate | transfer | accept
+//                    | avoid. accept is posted as a proposed acceptance
+//                    (acceptance_status=proposed): the form has no
+//                    accepter / expiry inputs, so it cannot approve one.
 //
 // 5x5 inherent_score widget: two native `<select>` dropdowns (1..5 each)
 // that serialize into `inherent_score: {likelihood, impact}`. This is
@@ -55,7 +58,23 @@ const CATEGORIES = [
   "financial",
 ] as const;
 
-const TREATMENTS = ["mitigate", "transfer", "accept", "avoid"] as const;
+const TREATMENTS = [
+  "untreated",
+  "mitigate",
+  "transfer",
+  "accept",
+  "avoid",
+] as const;
+
+// #1746: the option text says what each value records, so the opening
+// "untreated" reads as "no decision yet" rather than a choice.
+const TREATMENT_LABELS: Record<(typeof TREATMENTS)[number], string> = {
+  untreated: "untreated (not yet decided)",
+  mitigate: "mitigate",
+  transfer: "transfer",
+  accept: "accept (proposed, pending approval)",
+  avoid: "avoid",
+};
 
 const SCORE_LEVELS = [1, 2, 3, 4, 5] as const;
 
@@ -83,11 +102,8 @@ function initialState(): FormState {
     description: "",
     category: "operational",
     methodology: "nist_800_30",
-    // Slice 663: open on "avoid" (zero required satellite fields) instead
-    // of "mitigate" so a fresh tenant with zero instantiated controls can
-    // create its first risk through the default flow without hitting the
-    // unsatisfiable mitigate-requires-control rule. See validate.ts
-    // DEFAULT_TREATMENT and docs/audit-log/663-*-decisions.md.
+    // #1746: open on "untreated" (no decision yet, no required fields).
+    // See validate.ts DEFAULT_TREATMENT.
     treatment: DEFAULT_TREATMENT,
     treatment_owner: "",
     likelihood: 3,
@@ -123,6 +139,9 @@ function toCreateInput(s: FormState): RiskCreateInput {
     treatment_owner: s.treatment_owner.trim(),
     inherent_score: inherentScore,
   };
+  if (s.treatment === "accept") {
+    body.acceptance_status = "proposed";
+  }
   // Slice 151: only post linked_control_ids when treatment requires
   // them. Sending an empty array for non-mitigate is noise; the
   // backend defaults to no links absent the field (D-151-4).
@@ -325,7 +344,7 @@ export function RiskForm({ onSubmit }: Props) {
           >
             {TREATMENTS.map((t) => (
               <option key={t} value={t}>
-                {t}
+                {TREATMENT_LABELS[t]}
               </option>
             ))}
           </select>

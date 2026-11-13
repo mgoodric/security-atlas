@@ -14,7 +14,10 @@ export type RiskAgingRow = {
   age_days: number;
 };
 
+// Keyed on the bare treatment: the board label carries an acceptance
+// status suffix ("accept (proposed)", #1746), stripped before lookup.
 const treatmentTone: Record<string, string> = {
+  untreated: "bg-slate-100 text-slate-700",
   mitigate: "bg-rose-50 text-rose-700",
   accept: "bg-sky-50 text-sky-700",
   transfer: "bg-violet-50 text-violet-700",
@@ -56,7 +59,7 @@ export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
               <span
                 className={cn(
                   "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
-                  treatmentTone[risk.treatment] ??
+                  treatmentTone[risk.treatment.split(" ")[0]] ??
                     "bg-slate-100 text-slate-700",
                 )}
               >

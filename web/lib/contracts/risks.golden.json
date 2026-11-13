@@ -59,6 +59,48 @@
           "updated_at": "2026-05-12T00:00:00Z"
         }
       ]
+    },
+    "treatment_states": {
+      "count": 2,
+      "risks": [
+        {
+          "accepter": "",
+          "category": "operational",
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "",
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {},
+          "instrument_reference": "",
+          "linked_control_ids": [],
+          "methodology": "nist_800_30",
+          "residual_score": {},
+          "severity": 0,
+          "themes": [],
+          "title": "Intake risk not yet triaged",
+          "treatment": "untreated",
+          "treatment_owner": "",
+          "updated_at": "2026-05-12T00:00:00Z"
+        },
+        {
+          "acceptance_status": "proposed",
+          "accepter": "",
+          "category": "technology",
+          "created_at": "2026-05-01T00:00:00Z",
+          "description": "",
+          "id": "44444444-4444-4444-8444-444444444444",
+          "inherent_score": {},
+          "instrument_reference": "",
+          "linked_control_ids": [],
+          "methodology": "nist_800_30",
+          "residual_score": {},
+          "severity": 0,
+          "themes": [],
+          "title": "Legacy TLS endpoint, acceptance pending sign-off",
+          "treatment": "accept",
+          "treatment_owner": "",
+          "updated_at": "2026-05-12T00:00:00Z"
+        }
+      ]
     }
   }
 }

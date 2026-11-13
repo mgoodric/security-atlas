@@ -115,8 +115,11 @@ describe("DEFAULT_TREATMENT — slice 663 fresh-tenant dead-end", () => {
     expect(DEFAULT_TREATMENT).not.toBe("mitigate");
   });
 
-  test("the default treatment is avoid (status-only, zero required fields)", () => {
-    expect(DEFAULT_TREATMENT).toBe("avoid");
+  test("#1746: the default treatment is untreated, never a real decision", () => {
+    expect(DEFAULT_TREATMENT).toBe("untreated");
+    for (const decision of ["accept", "mitigate", "transfer", "avoid"]) {
+      expect(DEFAULT_TREATMENT).not.toBe(decision);
+    }
   });
 
   test("AC-1: an empty-tenant default-flow submit is valid with zero linked controls", () => {

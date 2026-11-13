@@ -469,6 +469,10 @@ func TestAggregate_EndToEnd_AC5_AC6_AC8_AC22(t *testing.T) {
 	if len(res.Parent.Themes) != 1 || res.Parent.Themes[0] != "ownership" {
 		t.Fatalf("parent themes union: got %v, want [ownership]", res.Parent.Themes)
 	}
+	// #1746: a generated parent carries no treatment decision.
+	if res.Parent.Treatment != dbx.RiskTreatmentUntreated {
+		t.Fatalf("parent treatment: got %q, want untreated", res.Parent.Treatment)
+	}
 	parentID := res.Parent.ID
 
 	// AC-8: delete one child (the highest-severity one). Parent severity
