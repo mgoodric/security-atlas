@@ -6,13 +6,18 @@ import (
 	"compress/gzip"
 	"context"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/mgoodric/security-atlas/internal/control"
+	"github.com/mgoodric/security-atlas/internal/eval"
 )
 
 // jsonpathManifest is a control whose single jsonpath query resolves
@@ -404,7 +409,139 @@ func TestDryRunQueries_AcceptsWorkingQueries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
-	if err := dryRunQueries(context.Background(), nil, bundle); err != nil {
+	if err := dryRunQueries(context.Background(), nil, bundle, eval.QueryDryRunTimeout); err != nil {
 		t.Fatalf("a working query must pass the dry-run: %v", err)
+	}
+}
+
+// runawayRegoManifest declares a Rego query that walks 10^10 pairs before it
+// can assign `result`: it never finishes in any useful time.
+const runawayRegoManifest = `bundle_schema_version: "1"
+bundle_id: gate_runaway_rego
+title: "Runaway Rego"
+scf_anchor_id: IAC-06
+implementation_type: automated
+freshness_class: daily
+evidence_queries:
+  - id: runaway
+    language: rego
+    expression: |
+      package evidence.query
+
+      n := numbers.range(1, 100000)
+
+      result := "pass" if {
+        count([a | some a in n; some b in n; a == b + 1000000]) > 0
+      }
+`
+
+// dryRunSQLManifest declares one sql query, so the dry-run needs the runner.
+const dryRunSQLManifest = `bundle_schema_version: "1"
+bundle_id: gate_dry_run_sql
+title: "SQL control"
+scf_anchor_id: IAC-06
+implementation_type: automated
+freshness_class: daily
+evidence_queries:
+  - id: sql_query
+    language: sql
+    expression: "SELECT 'pass'::text AS result"
+`
+
+// stubRunner is a txRunner whose WithReadOnlyTenantTx either fails before
+// running fn (an infrastructure failure) or runs fn with a nil tx.
+type stubRunner struct{ beginErr error }
+
+func (s stubRunner) WithReadOnlyTenantTx(_ context.Context, fn func(pgx.Tx) error) error {
+	if s.beginErr != nil {
+		return s.beginErr
+	}
+	return fn(nil)
+}
+
+func parseBundle(t *testing.T, manifest string) *control.Bundle {
+	t.Helper()
+	bundle, err := control.ParseTarball(bytes.NewReader(buildBundleTarball(t, manifest, nil)))
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	return bundle
+}
+
+// TestDryRunQueries_InfraErrorIsNotAQueryError (#1865): a failure to open the
+// read-only tx says nothing about the query, so it must not come back as a
+// queryDryRunError (which the handler turns into a 400).
+func TestDryRunQueries_InfraErrorIsNotAQueryError(t *testing.T) {
+	t.Parallel()
+	beginErr := errors.New("control: begin read-only tx: connection refused")
+	err := dryRunQueries(context.Background(), stubRunner{beginErr: beginErr}, parseBundle(t, dryRunSQLManifest), eval.QueryDryRunTimeout)
+	if !errors.Is(err, beginErr) {
+		t.Fatalf("want the begin error back, got %v", err)
+	}
+	var qerr *queryDryRunError
+	if errors.As(err, &qerr) {
+		t.Fatalf("an infrastructure error must not be a queryDryRunError: %v", err)
+	}
+}
+
+// TestDryRunQueries_SQLNeedsDBIsAQueryError: ErrFixtureSQLNeedsDB stays a 400.
+func TestDryRunQueries_SQLNeedsDBIsAQueryError(t *testing.T) {
+	t.Parallel()
+	err := dryRunQueries(context.Background(), stubRunner{}, parseBundle(t, dryRunSQLManifest), eval.QueryDryRunTimeout)
+	var qerr *queryDryRunError
+	if !errors.As(err, &qerr) || !errors.Is(err, eval.ErrFixtureSQLNeedsDB) {
+		t.Fatalf("want a queryDryRunError wrapping ErrFixtureSQLNeedsDB, got %v", err)
+	}
+}
+
+// TestDryRunQueries_CancelledRequestIsNotAQueryError (#1865): when the request
+// context is already gone, the query is not at fault.
+func TestDryRunQueries_CancelledRequestIsNotAQueryError(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := dryRunQueries(ctx, nil, parseBundle(t, runawayRegoManifest), eval.QueryDryRunTimeout)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("want context.Canceled, got %v", err)
+	}
+	var qerr *queryDryRunError
+	if errors.As(err, &qerr) {
+		t.Fatalf("a cancelled request must not be a queryDryRunError: %v", err)
+	}
+}
+
+// TestUpload_DryRunInfraErrorIs500 (#1865): a dry-run failure that is not the
+// query's fault (here, the request context is gone) is an internal error, not
+// a 400 blaming the bundle.
+func TestUpload_DryRunInfraErrorIs500(t *testing.T) {
+	t.Parallel()
+	h := New(nil, nil)
+	req, rr := multipartUpload(t, buildBundleTarball(t, runawayRegoManifest, nil))
+	ctx, cancel := context.WithCancel(req.Context())
+	cancel()
+	h.UploadBundle(rr, req.WithContext(ctx))
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for a non-query dry-run failure; got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), "evidence_queries[0]") {
+		t.Fatalf("a 500 must not blame the query: %s", rr.Body.String())
+	}
+}
+
+// TestDryRunQueries_RunawayRegoTimesOut (#1865): a non-terminating policy is
+// cut off at the dry-run time limit and refused as a query error.
+func TestDryRunQueries_RunawayRegoTimesOut(t *testing.T) {
+	t.Parallel()
+	start := time.Now()
+	err := dryRunQueries(context.Background(), nil, parseBundle(t, runawayRegoManifest), 200*time.Millisecond)
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("dry-run ran %s; the time limit did not stop it", elapsed)
+	}
+	var qerr *queryDryRunError
+	if !errors.As(err, &qerr) || !errors.Is(err, errDryRunTimeout) {
+		t.Fatalf("want a queryDryRunError wrapping errDryRunTimeout, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "evidence_queries[0]") {
+		t.Fatalf("error must name the query: %v", err)
 	}
 }

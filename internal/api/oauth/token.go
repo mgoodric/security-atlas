@@ -272,13 +272,18 @@ func (t *TokenEndpoint) handleClientCredentials(w http.ResponseWriter, r *http.R
 			NotBefore: now.Unix(),
 			ID:        uuid.NewString(),
 		},
-		IDPIssuer: MachineIDPIssuer,
-		// CurrentTenantID intentionally zero — machine tokens are
-		// tenant-free by default; the caller scopes a tenant via the
-		// slice-191 wire convention or via a follow-on token-exchange.
+		IDPIssuer:        MachineIDPIssuer,
 		AvailableTenants: []uuid.UUID{},
 		Roles:            map[uuid.UUID][]string{},
 		SuperAdmin:       false,
+	}
+	// security-atlas#1739: a client bound to a tenant mints tokens that
+	// act in that tenant. An unbound client's token stays tenant-free
+	// (CurrentTenantID zero), and tenancymw refuses every write it makes,
+	// so a machine write can never land in the all-zeros tenant.
+	if client.TenantID != nil && *client.TenantID != uuid.Nil {
+		claims.CurrentTenantID = *client.TenantID
+		claims.AvailableTenants = []uuid.UUID{*client.TenantID}
 	}
 
 	tok, err := t.signer.Sign(r.Context(), claims)

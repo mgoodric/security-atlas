@@ -4,12 +4,15 @@ version = "0.1.0"
 description = "OSCAL serialization bridge wrapping IBM compliance-trestle, exposed to the Go platform over gRPC (slice 030)."
 requires-python = ">=3.11"
 dependencies = [
-    # IBM compliance-trestle — the OSCAL SDK. Pinned to a 4.0.x line:
-    # trestle 4.0.2 ships the OSCAL 1.1.x-compatible pydantic models
-    # (its OSCAL_VERSION constant is 1.2.1, a superset of 1.1.x; the
-    # bridge stamps documents with the 1.1.2 oscal-version the platform
-    # commits to in canvas §3.4 — see the slice-030 decisions log).
-    "compliance-trestle>=4.0.2,<4.3.0",
+    # IBM compliance-trestle — the OSCAL SDK. Pinned to the 5.2.x line
+    # (issue #1868): 5.x models are native pydantic v2, which the bridge
+    # now reads via ``model_fields`` / ``RootModel.root``, so 4.x no
+    # longer imports. trestle 5.2.1 ships the OSCAL 1.1.x-compatible
+    # pydantic models (its OSCAL_VERSION constant is 1.2.1, a superset of
+    # 1.1.x); the bridge stamps documents with the 1.1.2 oscal-version the
+    # platform commits to in canvas §3.4. Floor 5.2.1 is the version the
+    # bridge suite was run against. See docs/audit-log/1868-*.md.
+    "compliance-trestle>=5.2.1,<5.3.0",
     # gRPC runtime. grpcio-tools is build-time only (codegen) but kept
     # here so `uv sync` gives a hermetic dev env that can regenerate the
     # _pb2 stubs.

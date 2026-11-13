@@ -132,18 +132,8 @@ func (e *Engine) Evaluate(ctx context.Context, tenantID uuid.UUID, triggerThemes
 		return nil, fmt.Errorf("aggrule: list active rules: %w", err)
 	}
 
-	triggerSet := make(map[string]struct{}, len(triggerThemes))
-	for _, t := range triggerThemes {
-		triggerSet[t] = struct{}{}
-	}
-
 	var out []Evaluation
-	for _, ruleRow := range rules {
-		if len(triggerSet) > 0 {
-			if _, hit := triggerSet[ruleRow.TargetTheme]; !hit {
-				continue
-			}
-		}
+	for _, ruleRow := range rulesForThemes(rules, triggerThemes) {
 		ev, err := e.evaluateRule(ctx, tenantID, ruleRow)
 		if err != nil {
 			return nil, err
@@ -151,6 +141,54 @@ func (e *Engine) Evaluate(ctx context.Context, tenantID uuid.UUID, triggerThemes
 		out = append(out, ev)
 	}
 	return out, nil
+}
+
+// LockRules takes the meta-risk-key advisory lock of every active rule that
+// Evaluate(ctx, tenantID, themes) would evaluate, in the same order
+// Evaluate takes them (created_at, id). A risk write calls it BEFORE it
+// locks or deletes the risk row (#1867).
+//
+// Without it the write holds the row first and the rule's key second, while
+// an evaluation holds the key first and needs the row second (linking a
+// child takes FOR KEY SHARE on it, which a DELETE's row lock blocks), so
+// the two deadlock (40P01). With it both sides take the key first. The
+// locks are transaction-scoped and re-entrant within a session, so the
+// evaluation the write runs afterwards takes them again without waiting.
+// Empty themes lock nothing, matching EvaluateOnRiskWrite.
+func (e *Engine) LockRules(ctx context.Context, tenantID uuid.UUID, themes []string) error {
+	if len(themes) == 0 {
+		return nil
+	}
+	rules, err := e.w.ListActiveAggregationRules(ctx, pgUUID(tenantID))
+	if err != nil {
+		return fmt.Errorf("aggrule: list active rules: %w", err)
+	}
+	for _, ruleRow := range rulesForThemes(rules, themes) {
+		key := metaRiskKey(uuid.UUID(ruleRow.ID.Bytes), ruleRow.ActivatedAt)
+		if err := e.w.LockAggregationKey(ctx, key); err != nil {
+			return fmt.Errorf("aggrule: lock meta-risk key for rule %s: %w", uuid.UUID(ruleRow.ID.Bytes), err)
+		}
+	}
+	return nil
+}
+
+// rulesForThemes keeps the rules whose target_theme is in themes, in their
+// listed order. Empty themes keep every rule (a full sweep).
+func rulesForThemes(rules []dbx.AggregationRule, themes []string) []dbx.AggregationRule {
+	if len(themes) == 0 {
+		return rules
+	}
+	set := make(map[string]struct{}, len(themes))
+	for _, t := range themes {
+		set[t] = struct{}{}
+	}
+	out := make([]dbx.AggregationRule, 0, len(rules))
+	for _, r := range rules {
+		if _, hit := set[r.TargetTheme]; hit {
+			out = append(out, r)
+		}
+	}
+	return out
 }
 
 // evaluateRule runs one active rule: reads candidates, checks thresholds,
@@ -281,10 +319,13 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 		// A meta-risk this activation already created stays (the engine never
 		// closes or deletes a parent), but its links and score follow the
 		// current window so it never reports a child that has left (#1861).
+		// The ledger row names the meta-risk it refreshed (#1867).
 		if found {
 			if err := e.refreshMetaRisk(ctx, tenantID, existing, ruleID, inherent, childIDs); err != nil {
 				return Evaluation{}, err
 			}
+			refreshed := uuid.UUID(existing.ID.Bytes)
+			return e.writeEvaluation(ctx, tenantID, ruleID, outcome, riskCount, teamCount, &windowStart, &refreshed)
 		}
 		return e.writeEvaluation(ctx, tenantID, ruleID, outcome, riskCount, teamCount, nil, nil)
 	}
@@ -446,8 +487,9 @@ func (e *Engine) linkChildren(ctx context.Context, tenantID, metaRiskID, ruleID 
 }
 
 // writeEvaluation appends exactly one aggregation_rule_evaluations row and
-// returns the Go-side Evaluation. window + metaRiskID are non-nil only for
-// outcome="fired" (the DB CHECK enforces this coherence).
+// returns the Go-side Evaluation. window + metaRiskID are set together: on
+// every "fired" row, and on a near_miss / no_match row that refreshed an
+// existing meta-risk (#1867). The DB CHECK enforces this coherence.
 func (e *Engine) writeEvaluation(
 	ctx context.Context,
 	tenantID, ruleID uuid.UUID,
