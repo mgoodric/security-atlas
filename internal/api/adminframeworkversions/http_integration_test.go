@@ -285,6 +285,10 @@ func TestTenantAdminGlobalCatalogWrites_Rejected403(t *testing.T) {
 	if status != "legacy" {
 		t.Errorf("blocked promotion still changed status to %q; want legacy", status)
 	}
+	// Promote and revert both repoint frameworks.latest_version_id; the
+	// blocked writes must leave it on the seeded current version (#1851).
+	assertStatus(t, s.v1ID, "current")
+	assertLatest(t, s.frameworkID, s.v1ID)
 	var queued int
 	if err := adminPool.QueryRow(context.Background(),
 		`SELECT count(*) FROM framework_version_migrations WHERE to_version_id = $1`, s.v2ID).Scan(&queued); err != nil {

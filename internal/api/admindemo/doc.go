@@ -16,17 +16,20 @@
 //     only; production deployments never set it. 503 (NOT 404)
 //     is intentional: the path exists, the feature is disabled.
 //     Non-admin callers never see 503 because the admin gate
-//     short-circuits first (admin OPA -> 403 from authzmw).
+//     short-circuits first (admin OPA -> 403 from authzmw; the
+//     handler's super_admin check also runs before the env gate).
 //
 //  2. Admin role gate: slice-035 OPA at authzmw.Middleware. Resolves
 //     the request to resource.type='admin', resource.id='demo'.
 //     The admin.rego rule admits any action for a caller carrying
 //     RoleAdmin (DB-side user_roles grant). Every other canonical
-//     role denies. Super_admin alone does NOT admit (anti-criterion
-//     P0-278-7: admin is the only gate). The handler additionally
-//     does a defense-in-depth admin check via
-//     authctx.CredentialFromContext so a misconfigured authz mount
-//     fails closed.
+//     role denies. Super_admin alone does NOT admit at this gate.
+//     The handler then checks, for Seed and Teardown, the verified
+//     JWT's `atlas:super_admin` claim (#1851): both create or delete
+//     a whole tenant through the BYPASSRLS auth pool, an install-wide
+//     effect, so a tenant admin (including a per-tenant admin API
+//     key) gets 403. Seed and Teardown therefore need the admin role
+//     AND super_admin. Status keeps a defense-in-depth admin check.
 //
 //  3. Meta-audit row: every Seed/Teardown invocation writes ONE
 //     `me_audit_log` row with action='demo_seed' (or 'demo_teardown')
@@ -57,7 +60,8 @@
 //   - P0-278-5: no modification of slice 205's demoseed package.
 //   - P0-278-6: no bypass of slice 205's safeguards (10-row guard,
 //     forensic-mark teardown).
-//   - P0-278-7: no new authz role — admin role only.
+//   - P0-278-7: no new authz role — admin role, plus the existing
+//     super_admin claim on Seed/Teardown (#1851).
 //   - P0-278-8: no logging of seeded row contents — only counts.
 //
 // CONSTITUTIONAL INVARIANTS:
