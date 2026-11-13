@@ -25,8 +25,9 @@
 // (AC-5).
 //
 // This is complementary to slices 340/341, which fixed chromedp CONNECTION
-// SETUP (the WSURLReadTimeout watchdog). This package governs RENDER-TIME
-// behavior and does not touch the connection-setup fix.
+// SETUP (the WSURLReadTimeout watchdog). chromedp v0.23's exec allocator talks
+// to Chrome over a pipe, so that websocket watchdog no longer exists. This
+// package governs RENDER-TIME behavior either way.
 package pdfrender
 
 import (
