@@ -150,7 +150,15 @@ export function formatFrameworksCell(frameworks: string[]): string {
  * empty array when the anchor has no satisfaction edges; the page
  * renders `—` in that branch (AC-6).
  */
+//
+// Issue #1741: `key` is the row's identity (the control id in the "My
+// controls" view, the anchor id in the catalog view), and `controlId` is
+// the tenant control the row opens, or null for a catalog anchor the
+// tenant has no control on. Rows link by `controlId`, never by the
+// anchor id, which the control detail page cannot resolve.
 export type AnchorRow = {
+  key: string;
+  controlId: string | null;
   anchor: Anchor;
   state: AnchorRowState | null;
   frameworks: string[];

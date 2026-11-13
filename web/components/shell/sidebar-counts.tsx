@@ -13,8 +13,8 @@
 //
 // Behavior (parallels slice 213's `in-progress-audit-pill.tsx`):
 //
-//   - Reads the existing per-page BFF routes — `/api/controls`
-//     (slice 098) for the controls count, `/api/risks` (slice 100)
+//   - Reads the existing per-page BFF routes — `/api/controls-list`
+//     (tenant controls, issue #1741) for the controls count, `/api/risks` (slice 100)
 //     for the risks count. No new platform endpoint (P0-214-1).
 //   - TanStack Query handles the request lifecycle. `staleTime: 60_000`
 //     + `refetchInterval: 60_000` per AC-3 — a 60s low-priority
@@ -47,8 +47,8 @@
 import { useQuery } from "@tanstack/react-query";
 
 import {
-  fetchControlsList,
-  type ControlsListResponse,
+  fetchTenantControlsList,
+  type TenantControl,
 } from "@/lib/api/controls-list";
 import {
   fetchRisksList,
@@ -130,10 +130,14 @@ function pulseClass(isFetching: boolean): string {
   return isFetching ? "animate-pulse" : "";
 }
 
+// Issue #1741 — the badge counts the tenant's own active controls
+// (`/api/controls-list` → `GET /v1/controls`), the same set the /controls
+// page lists by default. It used to count the first page of SCF catalog
+// anchors, which read "100" on a tenant with 39 controls.
 export function ControlsCountBadge() {
-  const q = useQuery<ControlsListResponse>({
+  const q = useQuery<TenantControl[]>({
     queryKey: ["sidebar", "controls-count"],
-    queryFn: () => fetchControlsList(),
+    queryFn: fetchTenantControlsList,
     staleTime: 60_000,
     refetchInterval: 60_000,
     // Fail closed: any error => render nothing.
@@ -142,7 +146,7 @@ export function ControlsCountBadge() {
 
   if (q.isLoading || q.isError || !q.data) return null;
 
-  const count = q.data.anchors?.length ?? 0;
+  const count = q.data.length;
   if (count === 0) return null;
 
   return (
