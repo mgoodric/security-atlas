@@ -90,7 +90,7 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 	// Normalise: trim + lowercase + dedupe + sorted-for-stability.
 	normalised := normaliseThemes(themes)
 	var out Risk
-	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
 		if err := validateThemesAgainstVocab(ctx, q, tenantID, normalised); err != nil {
 			return err
 		}
@@ -103,7 +103,9 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 		// read only picks which rules to lock; the locked read is the one
 		// that counts, because a concurrent theme write may have committed
 		// in between, and without the row lock it could commit after this
-		// read and leave a removed theme unevaluated.
+		// read and leave a removed theme unevaluated. If that write added a
+		// theme the rule locks did not cover, the transaction is retried
+		// once (#1880).
 		unlocked, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(riskID),
@@ -114,7 +116,8 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 			}
 			return fmt.Errorf("get risk themes: %w", err)
 		}
-		if err := s.runBeforeRiskWrite(ctx, q, tenantID, unionThemes(unlocked.Themes, normalised)); err != nil {
+		preLocked := unionThemes(unlocked.Themes, normalised)
+		if err := s.runBeforeRiskWrite(ctx, q, tenantID, preLocked); err != nil {
 			return err
 		}
 		before, err := q.LockRiskByID(ctx, dbx.LockRiskByIDParams{
@@ -126,6 +129,9 @@ func (s *Store) AssignThemes(ctx context.Context, riskID uuid.UUID, themes []str
 				return ErrNotFound
 			}
 			return fmt.Errorf("lock risk themes: %w", err)
+		}
+		if err := s.checkRuleLocks(lastAttempt, preLocked, before.Themes); err != nil {
+			return err
 		}
 		row, err := q.UpdateRiskThemes(ctx, dbx.UpdateRiskThemesParams{
 			TenantID: pgUUID(tenantID),

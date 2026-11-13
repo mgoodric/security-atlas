@@ -271,6 +271,12 @@ check-integration-shard-coverage:
 check-coverage-excludes:
     bash scripts/check-coverage-excludes.sh
 
+# Refuse a migration whose timestamp prefix another migration already uses;
+# the prefixes that collided before the check are grandfathered. #1880.
+# Self-test: scripts/check-migration-timestamps_test.sh
+check-migration-timestamps:
+    bash scripts/check-migration-timestamps.sh
+
 # Count assertions per Go test file and warn where assertion density is below
 # threshold (cheap mutation-testing proxy). Slice 333 Q-6; slice 353. ADVISORY
 # only — never fails. Self-test: scripts/assertion-density_test.sh
