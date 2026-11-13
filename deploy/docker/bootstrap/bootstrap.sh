@@ -110,14 +110,24 @@ atlas-cli catalog import-scf "$SCF_CATALOG"
 # zero framework requirements and /v1/frameworks lists only SCF. The SOC 2
 # crosswalk's anchors all exist in the SCF sample imported above, so it is
 # the one imported by default. Upsert, so re-runs are no-ops. Other
-# frameworks stay opt-in: the command for each is printed below.
+# frameworks stay opt-in: the command for each is printed on first install.
+#
+# security-atlas#1888: the printed command must run from the repo root on
+# the stack that printed it, so the compose arguments and the service name
+# come from the compose file (ATLAS_COMPOSE_ARGS, ATLAS_BOOTSTRAP_SERVICE).
+# First install = the SOC 2 framework row did not exist before this import.
+COMPOSE_ARGS="${ATLAS_COMPOSE_ARGS:--f deploy/docker/docker-compose.yml}"
+BOOTSTRAP_SERVICE="${ATLAS_BOOTSTRAP_SERVICE:-atlas-bootstrap}"
+SOC2_PRESENT="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM frameworks WHERE slug = 'soc2'")"
 log "importing SOC 2 crosswalk from $CROSSWALKS_DIR/soc2-tsc-2017.yaml ..."
 atlas-cli catalog import-crosswalk "$CROSSWALKS_DIR/soc2-tsc-2017.yaml"
-log "other bundled framework crosswalks are not imported; to add one, run:"
-for cw in "$CROSSWALKS_DIR"/*.yaml; do
-    [ "$(basename "$cw")" = "soc2-tsc-2017.yaml" ] && continue
-    log "  docker compose run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/$(basename "$cw")"
-done
+if [ "$SOC2_PRESENT" = "0" ]; then
+    log "other bundled framework crosswalks are not imported; to add one, run from the repo root:"
+    for cw in "$CROSSWALKS_DIR"/*.yaml; do
+        [ "$(basename "$cw")" = "soc2-tsc-2017.yaml" ] && continue
+        log "  docker compose $COMPOSE_ARGS run --rm --entrypoint atlas-cli $BOOTSTRAP_SERVICE catalog import-crosswalk /repo/data/crosswalks/$(basename "$cw")"
+    done
+fi
 
 # ----- Phase 4: wait for the atlas server /health -----
 log "waiting for atlas /health at $ATLAS_HTTP_URL/health ..."

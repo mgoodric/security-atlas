@@ -290,6 +290,10 @@ services:
       ATLAS_DEFAULT_USER_EMAIL: ${ATLAS_DEFAULT_USER_EMAIL:-admin@example.com}
       ATLAS_DEFAULT_USER_PASSWORD: ${ATLAS_DEFAULT_USER_PASSWORD:?}
       REPO_ROOT: /repo
+      # security-atlas#1888: bootstrap.sh prints the opt-in crosswalk
+      # import commands with these, so they run from the repo root.
+      ATLAS_COMPOSE_ARGS: -f deploy/docker/docker-compose.yml
+      ATLAS_BOOTSTRAP_SERVICE: atlas-bootstrap
     volumes:
       - ../..:/repo:ro
       # Slice 196: dedicated writable volume for the OAuth bootstrap

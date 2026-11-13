@@ -253,6 +253,10 @@ services:
       ATLAS_DEFAULT_USER_EMAIL: ${ATLAS_DEFAULT_USER_EMAIL:-admin@example.com}
       ATLAS_DEFAULT_USER_PASSWORD: ${ATLAS_DEFAULT_USER_PASSWORD:?}
       REPO_ROOT: /repo
+      # security-atlas#1888: bootstrap.sh prints the opt-in crosswalk
+      # import commands with these, so they run from the repo root.
+      ATLAS_COMPOSE_ARGS: -p security-atlas-edge -f deploy/docker/docker-compose.edge.yml --env-file deploy/docker/.env.edge
+      ATLAS_BOOTSTRAP_SERVICE: atlas-bootstrap-edge
     volumes:
       # The published bootstrap image embeds its `:edge` view of the repo
       # tree (Dockerfile COPY); the bind-mount of the host repo is
