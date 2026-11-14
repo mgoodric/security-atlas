@@ -213,9 +213,9 @@ const RESULT_OPTIONS: { value: string; label: string }[] = [
 //   not_applicable        -> secondary (neutral — out of scope, no signal hue)
 //   excepted              -> info     (blue   — waived by an active exception;
 //                                      #2112: never the pass hue, never "pass")
-// `info` and `progress` from the badge family have no member in the
-// control-result enum, so they are intentionally unused here (they exist
-// for other surfaces and the design preview).
+// `progress` from the badge family has no member in the control-result
+// enum, so it is intentionally unused here (it exists for other surfaces
+// and the design preview).
 type StatusBadgeVariant =
   | "pass"
   | "info"
