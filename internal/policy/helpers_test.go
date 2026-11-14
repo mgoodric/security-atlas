@@ -480,3 +480,54 @@ func TestAcknowledgmentFreshness_PinnedToOneYear(t *testing.T) {
 		t.Fatalf("AcknowledgmentFreshness = %v, want 365d", AcknowledgmentFreshness)
 	}
 }
+
+// #1747 — validateImport and ImportReport.Failed.
+func TestValidateImport(t *testing.T) {
+	t.Parallel()
+	valid := ImportInput{
+		SourceFile: "p.md", Title: "T", Version: "1", BodyMd: "b",
+		OwnerRole: "o", ApproverRole: "a", HistoricalApproverName: "Jane",
+		HistoricalApprovedAt: time.Now(), EffectiveDate: time.Now(),
+	}
+	if err := validateImport(valid); err != nil {
+		t.Fatalf("valid input: %v", err)
+	}
+	long := strings.Repeat("x", MaxImportFieldLen+1)
+	cases := map[string]func(*ImportInput){
+		"title":            func(in *ImportInput) { in.Title = "" },
+		"version":          func(in *ImportInput) { in.Version = "" },
+		"body":             func(in *ImportInput) { in.BodyMd = "" },
+		"owner role":       func(in *ImportInput) { in.OwnerRole = "" },
+		"approver role":    func(in *ImportInput) { in.ApproverRole = "" },
+		"approver name":    func(in *ImportInput) { in.HistoricalApproverName = "" },
+		"approved at":      func(in *ImportInput) { in.HistoricalApprovedAt = time.Time{} },
+		"effective date":   func(in *ImportInput) { in.EffectiveDate = time.Time{} },
+		"long title":       func(in *ImportInput) { in.Title = long },
+		"long approver":    func(in *ImportInput) { in.HistoricalApproverName = long },
+		"long source file": func(in *ImportInput) { in.SourceFile = long },
+	}
+	for name, mutate := range cases {
+		in := valid
+		mutate(&in)
+		if err := validateImport(in); err == nil {
+			t.Errorf("%s: want error", name)
+		}
+	}
+	at := valid
+	at.Title = strings.Repeat("x", MaxImportFieldLen)
+	if err := validateImport(at); err != nil {
+		t.Errorf("title at the cap: %v", err)
+	}
+}
+
+func TestImportReport_Failed(t *testing.T) {
+	t.Parallel()
+	ok := ImportReport{Results: []ImportResult{{Status: ImportStatusImported}, {Status: ImportStatusSkipped}}}
+	if ok.Failed() {
+		t.Error("imported + skipped is not a failure")
+	}
+	bad := ImportReport{Results: []ImportResult{{Status: ImportStatusImported}, {Status: ImportStatusFailed}}}
+	if !bad.Failed() {
+		t.Error("a failed result should make the report failed")
+	}
+}

@@ -9,6 +9,7 @@
 //	PATCH  /v1/policies/{id}/approve               under_review -> approved (AC-4)
 //	POST   /v1/policies/{id}/publish               approved -> published (AC-1 versioned row + AC-7 orphan block)
 //	GET    /v1/policies/{id}/pdf                   PDF render via chromedp (AC-5)
+//	POST   /v1/admin/policies/import               import a policy library with its history (#1747, import.go)
 //
 // All handlers run with the tenant set by upstream auth middleware (slice
 // 033 tenancy.Middleware). The store opens its own transaction per call
@@ -100,6 +101,10 @@ type createReq struct {
 	LinkedControlIDs            []string `json:"linked_control_ids"`
 	AcknowledgmentRequiredRoles []string `json:"acknowledgment_required_roles"`
 	SourceAttribution           string   `json:"source_attribution,omitempty"`
+	// PredecessorID makes this draft the next version of a published
+	// policy (#1747): it publishes through the normal workflow and
+	// supersedes the predecessor.
+	PredecessorID string `json:"predecessor_id,omitempty"`
 }
 
 type publishReq struct {
@@ -147,9 +152,19 @@ type policyWire struct {
 	PublishedAt                 *time.Time `json:"published_at,omitempty"`
 	PublishedBy                 *string    `json:"published_by,omitempty"`
 	SupersededAt                *time.Time `json:"superseded_at,omitempty"`
-	CreatedAt                   time.Time  `json:"created_at"`
-	UpdatedAt                   time.Time  `json:"updated_at"`
-	Warnings                    []string   `json:"warnings,omitempty"`
+	NextReviewAt                *time.Time `json:"next_review_at,omitempty"`
+	// Import fields (#1747): set only when source_attribution is
+	// "imported". historical_approver_name is free text, never a
+	// credential id; approved_by stays empty on imported rows.
+	Imported               bool       `json:"imported"`
+	HistoricalApproverName *string    `json:"historical_approver_name,omitempty"`
+	HistoricalApprovedAt   *string    `json:"historical_approved_at,omitempty"` // YYYY-MM-DD
+	SourceURL              *string    `json:"source_url,omitempty"`
+	ImportedBy             *string    `json:"imported_by,omitempty"`
+	ImportedAt             *time.Time `json:"imported_at,omitempty"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	Warnings               []string   `json:"warnings,omitempty"`
 }
 
 // CreatePolicy handles POST /v1/policies (AC-1 part A).
@@ -173,6 +188,15 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 	if ackRoles == nil {
 		ackRoles = []string{}
 	}
+	var predecessor *uuid.UUID
+	if s := strings.TrimSpace(req.PredecessorID); s != "" {
+		u, err := uuid.Parse(s)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "predecessor_id must be a UUID")
+			return
+		}
+		predecessor = &u
+	}
 	created, err := h.store.Create(ctx, policy.CreateInput{
 		Title:                       req.Title,
 		Version:                     req.Version,
@@ -183,6 +207,7 @@ func (h *Handler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		AcknowledgmentRequiredRoles: ackRoles,
 		SourceAttribution:           req.SourceAttribution,
 		CreatedBy:                   cred.ID,
+		PredecessorID:               predecessor,
 	})
 	if err != nil {
 		h.writeCreateErr(w, r, err)
@@ -355,8 +380,18 @@ func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
 		PublishedAt:                 timestamptzPtr(r.PublishedAt),
 		PublishedBy:                 r.PublishedBy,
 		SupersededAt:                timestamptzPtr(r.SupersededAt),
+		NextReviewAt:                timestamptzPtr(r.NextReviewAt),
+		Imported:                    r.SourceAttribution == policy.SourceImported,
+		HistoricalApproverName:      r.HistoricalApproverName,
+		SourceURL:                   r.SourceUrl,
+		ImportedBy:                  r.ImportedBy,
+		ImportedAt:                  timestamptzPtr(r.ImportedAt),
 		CreatedAt:                   r.CreatedAt.Time,
 		UpdatedAt:                   r.UpdatedAt.Time,
+	}
+	if r.HistoricalApprovedAt.Valid {
+		s := r.HistoricalApprovedAt.Time.Format("2006-01-02")
+		out.HistoricalApprovedAt = &s
 	}
 	if r.PredecessorID.Valid {
 		s := uuid.UUID(r.PredecessorID.Bytes).String()
@@ -588,8 +623,13 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 		errors.Is(err, policy.ErrBodyRequired),
 		errors.Is(err, policy.ErrOwnerRoleRequired),
 		errors.Is(err, policy.ErrApproverRoleRequired),
-		errors.Is(err, policy.ErrCreatedByRequired):
+		errors.Is(err, policy.ErrCreatedByRequired),
+		errors.Is(err, policy.ErrPredecessorNotFound),
+		errors.Is(err, policy.ErrInvalidSourceAttribution):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, policy.ErrPredecessorNotPublished),
+		errors.Is(err, policy.ErrPredecessorTaken):
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
 	default:
 		httperr.WriteInternal(w, r, "create policy", err)
 	}
@@ -652,8 +692,18 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		PublishedAt:                 p.PublishedAt,
 		PublishedBy:                 p.PublishedBy,
 		SupersededAt:                p.SupersededAt,
+		NextReviewAt:                p.NextReviewAt,
+		Imported:                    p.IsImported(),
+		HistoricalApproverName:      p.HistoricalApproverName,
+		SourceURL:                   p.SourceURL,
+		ImportedBy:                  p.ImportedBy,
+		ImportedAt:                  p.ImportedAt,
 		CreatedAt:                   p.CreatedAt,
 		UpdatedAt:                   p.UpdatedAt,
+	}
+	if p.HistoricalApprovedAt != nil {
+		s := p.HistoricalApprovedAt.Format("2006-01-02")
+		out.HistoricalApprovedAt = &s
 	}
 	if p.PredecessorID != nil {
 		s := p.PredecessorID.String()
