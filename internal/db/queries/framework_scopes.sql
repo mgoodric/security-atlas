@@ -142,3 +142,21 @@ WHERE tenant_id = $1
 -- audit trail.
 DELETE FROM framework_scopes
 WHERE tenant_id = $1 AND id = $2;
+
+-- ===== framework_scope_workflow_log (issue #1786) =====
+--
+-- Append-only history of framework_scopes changes. Written by
+-- internal/frameworkscope.Store in the same tx as the change it records.
+-- No UPDATE or DELETE query exists, and atlas_app holds no grant for one.
+
+-- name: InsertFrameworkScopeWorkflowLog :exec
+INSERT INTO framework_scope_workflow_log (
+    tenant_id, framework_scope_id, action, from_state, to_state, before, after, actor
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+);
+
+-- name: ListFrameworkScopeWorkflowLog :many
+SELECT * FROM framework_scope_workflow_log
+WHERE tenant_id = $1 AND framework_scope_id = $2
+ORDER BY occurred_at, id;
