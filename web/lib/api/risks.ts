@@ -43,6 +43,9 @@ export type Risk = {
   // assessed `severity`. Only GET /v1/risks/{id} carries it, and only for a
   // risk with at least one scored child.
   rollup?: RiskRollUp;
+  // #2060: how many child risks roll up into this one. GET /v1/risks sets
+  // it on a roll-up, which the list only returns with include_rollups=true.
+  child_count?: number;
 };
 
 export type RiskLevel = "team" | "org" | "company";
@@ -167,10 +170,17 @@ export type RisksListResponse = {
 
 // Server-side fetcher used by the slice-100 BFF route. Mirrors the
 // slice-098 `listAnchors` shape: no query-string narrowing — the page
-// owns filter state client-side and the upstream `GET /v1/risks` ships
-// the full unfiltered list.
-export async function listRisks(bearer: string): Promise<Risk[]> {
-  const res = await apiFetch("/v1/risks", bearer);
+// owns filter state client-side. The one exception is roll-ups (#2060):
+// upstream leaves them out unless asked, so a parent never counts beside
+// the children it summarises.
+export async function listRisks(
+  bearer: string,
+  includeRollups = false,
+): Promise<Risk[]> {
+  const res = await apiFetch(
+    includeRollups ? "/v1/risks?include_rollups=true" : "/v1/risks",
+    bearer,
+  );
   const body = (await res.json()) as { risks: Risk[]; count: number };
   return body.risks;
 }
@@ -178,7 +188,18 @@ export async function listRisks(bearer: string): Promise<Risk[]> {
 // Browser-side fetcher used by the slice-100 page. Hits the BFF at
 // `/api/risks` which forwards the bearer cookie to upstream.
 export async function fetchRisksList(): Promise<RisksListResponse> {
-  const res = await fetch(`/api/risks`);
+  return fetchRisks(`/api/risks`);
+}
+
+// fetchRisksListWithRollUps is fetchRisksList with roll-up parents kept
+// (#2060): the register's "Show roll-ups" toggle, and the pickers where a
+// roll-up is a valid choice.
+export async function fetchRisksListWithRollUps(): Promise<RisksListResponse> {
+  return fetchRisks(`/api/risks?include_rollups=true`);
+}
+
+async function fetchRisks(url: string): Promise<RisksListResponse> {
+  const res = await fetch(url);
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try {

@@ -8,6 +8,11 @@
 //	                                 staged rows with their ranked SCF anchor
 //	                                 candidates (#1780); ?status= and
 //	                                 ?no_candidate_reaches=true filter
+//	GET  /v1/controls/imports/settings
+//	PUT  /v1/controls/imports/settings
+//	                                 the tenant's import settings: the
+//	                                 local-Ollama rerank opt-in (#2079);
+//	                                 tenant-admin only
 //
 // The upload's multipart fields:
 //
@@ -41,13 +46,19 @@ const multipartOverhead = 64 * 1024
 
 // Handler serves the control import routes.
 type Handler struct {
-	stager *controlimport.Stager
+	stager   *controlimport.Stager
+	settings SettingsStore
 }
 
 func New(stager *controlimport.Stager) *Handler { return &Handler{stager: stager} }
 
 // RegisterRoutes appends the routes onto the supplied router.
 func (h *Handler) RegisterRoutes(r chi.Router) {
+	if h.settings != nil {
+		// Literal segment, ahead of /v1/controls/imports/{id}.
+		r.Get("/v1/controls/imports/settings", h.GetSettings)
+		r.Put("/v1/controls/imports/settings", h.PutSettings)
+	}
 	r.Post("/v1/controls/imports", h.Create)
 	r.Get("/v1/controls/imports/{id}", h.Get)
 	r.Get("/v1/controls/imports/{id}/rows", h.ListRows)

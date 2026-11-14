@@ -62,13 +62,14 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// rejected with a reason. Literal /v1/controls/imports segment, so it
 	// sits ahead of the /v1/controls/{id}/... patterns like /export.
 	// #1781: candidates are LLM-reranked only for tenants whose cloud-LLM
-	// opt-in is on.
-	stager := controlimport.NewStager(controlimport.NewStore(s.dbPool)).WithReranker(controlimport.NewReranker(
+	// opt-in is on, or (#2079) who opted in to reranking on local Ollama.
+	importStore := controlimport.NewStore(s.dbPool)
+	stager := controlimport.NewStager(importStore).WithReranker(controlimport.NewReranker(
 		s.inferenceClient(),
 		controlimport.AuditRecorder(llm.NewAuditWriter(s.dbPool)),
-		s.cloudLLMOptedIn,
+		s.importRerankAllowed(importStore),
 	))
-	controlimportsapi.New(stager).RegisterRoutes(root)
+	controlimportsapi.New(stager).WithSettings(importStore).RegisterRoutes(root)
 	// Slice 175: controls history export (lineage incl. superseded
 	// versions). Sibling endpoint to /v1/controls/export — same shape,
 	// 17-column projection (slice 137's 15 + superseded_by +

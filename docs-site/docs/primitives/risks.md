@@ -62,6 +62,12 @@ risks it rolls up to.
   treatment. The page shows the **roll-up** from the children beside
   the assessed severity, and flags the parent when the children roll
   up higher than it was assessed.
+- A risk with at least one child is a **roll-up**. The register, its
+  count, the dashboard's top risks and the board's top risks leave
+  roll-ups out, so the same exposure is not counted twice. Tick **Show
+  roll-ups** on the register to list them; each carries a **Roll-up**
+  marker that links to its children. `GET /v1/risks?include_rollups=true`
+  is the API equivalent.
 - The API is `POST /v1/risks/{id}/children` with
   `{"child_risk_ids": [...]}`, `DELETE /v1/risks/{id}/children/{child_id}`,
   and `GET` on `/v1/risks/{id}/children` and `/v1/risks/{id}/parents`.
