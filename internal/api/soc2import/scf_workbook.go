@@ -44,6 +44,24 @@ type SCFWorkbookOptions struct {
 	// AllowCodeTitles lets requirements that no title source covers import
 	// with their code as their title. Without it the load fails and lists them.
 	AllowCodeTitles bool
+	// SCFRelease names the SCF release the workbook's SCF codes belong to
+	// (#1771). A wide workbook names it in its "SCF <release>" sheet, which
+	// wins; a different value here is an error. An OLIR STRM workbook has
+	// no such sheet, so this is the only way to declare its release.
+	SCFRelease string
+}
+
+// workbookSCFRelease decides a workbook crosswalk's SCF release from the
+// control sheet's name and the operator's option. The sheet is the
+// workbook's own statement, so an option that contradicts it is refused
+// rather than silently preferred.
+func workbookSCFRelease(sheet, opt string) (string, error) {
+	fromSheet := scfworkbook.SheetRelease(sheet)
+	opt = strings.TrimSpace(opt)
+	if fromSheet != "" && opt != "" && opt != fromSheet {
+		return "", fmt.Errorf("crosswalk: --scf-release %q contradicts the workbook's sheet %q (SCF release %q)", opt, sheet, fromSheet)
+	}
+	return firstNonEmpty(fromSheet, opt), nil
 }
 
 type focalDocument struct {
@@ -175,8 +193,13 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 	}
 	sort.Slice(requirements, func(i, j int) bool { return requirements[i].Code < requirements[j].Code })
 
+	scfRelease, err := workbookSCFRelease(sheet, opts.SCFRelease)
+	if err != nil {
+		return nil, err
+	}
 	cw := &Crosswalk{
 		SchemaVersion:     SchemaVersion,
+		SCFRelease:        scfRelease,
 		FrameworkSlug:     firstNonEmpty(opts.FrameworkSlug, slugFromFocal(meta, frameworkHeader)),
 		FrameworkName:     firstNonEmpty(opts.FrameworkName, meta.Name, normalizeHeader(frameworkHeader)),
 		FrameworkIssuer:   firstNonEmpty(opts.FrameworkIssuer, meta.Issuer),
@@ -267,8 +290,15 @@ func loadOLIRWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*
 		sort.Slice(requirements, func(i, j int) bool { return requirements[i].Code < requirements[j].Code })
 
 		version := firstNonEmpty(opts.FrameworkVersion, generalInfoValue(f, "Focal Document Version"), generalInfoValue(f, "Reference Version"), versionFromFocal(focalDocument{Header: sheet, FDI: sheet}, sheet))
+		// An OLIR STRM workbook has no "SCF <release>" sheet (a workbook that
+		// has one is read as the wide shape), so its release is the option.
+		scfRelease, err := workbookSCFRelease(sheet, opts.SCFRelease)
+		if err != nil {
+			return nil, err
+		}
 		cw := &Crosswalk{
 			SchemaVersion:     SchemaVersion,
+			SCFRelease:        scfRelease,
 			FrameworkSlug:     firstNonEmpty(opts.FrameworkSlug, slugify(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))), slugify(sheet)),
 			FrameworkName:     firstNonEmpty(opts.FrameworkName, sheet),
 			FrameworkIssuer:   opts.FrameworkIssuer,

@@ -2511,6 +2511,7 @@ type ImportedComponentClaim struct {
 	DispositionedBy     *string            `json:"dispositioned_by"`
 	DispositionedAt     pgtype.Timestamptz `json:"dispositioned_at"`
 	DispositionNote     string             `json:"disposition_note"`
+	ScfRelease          *string            `json:"scf_release"`
 }
 
 type ImportedComponentClaimDisposition struct {

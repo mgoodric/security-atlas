@@ -137,10 +137,11 @@ RETURNING *;
 -- Append one vendor-attributed CLAIM (an implemented-requirement) mapped (or
 -- flagged NULL for mapping) to an SCF anchor. is_vendor_claim defaults TRUE
 -- and claim_status defaults 'asserted' (the table defaults) — the import never
--- writes anything else (P0-512-1).
+-- writes anything else (P0-512-1). scf_release is the SCF release the code
+-- was bound in (#1771); NULL with an unmapped claim.
 INSERT INTO imported_component_claims
-    (id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+    (id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, scf_release)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: ListImportedComponentsForDefinition :many
@@ -241,10 +242,12 @@ ORDER BY occurred_at DESC, id ASC;
 -- SCF anchor only, invariant #7) — it is NOT a claim -> claim mapping and does
 -- NOT touch control_evaluations or the evidence ledger (the claim stays a
 -- claim; mapping only sets the crosswalk — invariant #2 / P0-512-1).
+-- scf_release records the SCF release the code was validated in (#1771).
 -- is_vendor_claim + claim_status are NOT touched. RLS rides the slice-512
 -- tenant_update policy.
 UPDATE imported_component_claims
-SET scf_anchor_id = $3
+SET scf_anchor_id = $3,
+    scf_release   = $4
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;
 

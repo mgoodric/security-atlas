@@ -1299,7 +1299,8 @@ type Querier interface {
 	// Append one vendor-attributed CLAIM (an implemented-requirement) mapped (or
 	// flagged NULL for mapping) to an SCF anchor. is_vendor_claim defaults TRUE
 	// and claim_status defaults 'asserted' (the table defaults) — the import never
-	// writes anything else (P0-512-1).
+	// writes anything else (P0-512-1). scf_release is the SCF release the code
+	// was bound in (#1771); NULL with an unmapped claim.
 	InsertImportedComponentClaim(ctx context.Context, arg InsertImportedComponentClaimParams) (ImportedComponentClaim, error)
 	// Append one append-only disposition-audit row recording the
 	// from_status -> to_status transition, the actor, and an optional note.
@@ -3057,6 +3058,7 @@ type Querier interface {
 	// SCF anchor only, invariant #7) — it is NOT a claim -> claim mapping and does
 	// NOT touch control_evaluations or the evidence ledger (the claim stays a
 	// claim; mapping only sets the crosswalk — invariant #2 / P0-512-1).
+	// scf_release records the SCF release the code was validated in (#1771).
 	// is_vendor_claim + claim_status are NOT touched. RLS rides the slice-512
 	// tenant_update policy.
 	MapImportedComponentClaimScfAnchor(ctx context.Context, arg MapImportedComponentClaimScfAnchorParams) (ImportedComponentClaim, error)
