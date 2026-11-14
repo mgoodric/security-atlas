@@ -23,17 +23,26 @@ func legacy(scfID, title, currentTitle string, current bool, successor string) d
 	return r
 }
 
-// A bundle that declares scf_release (#1770) is pinned and never re-bound.
-func TestPinnedRelease(t *testing.T) {
+// A bundle that declares scf_release, or names its anchor by UUID, is
+// pinned and never re-bound (#1770); an unreadable manifest is reported as
+// not parsed so the caller leaves it alone too.
+func TestIsPinned(t *testing.T) {
 	t.Parallel()
-	for manifest, want := range map[string]string{
-		"bundle_id: a\nscf_anchor_id: IAC-10\nscf_release: test-2026.1\n": "test-2026.1",
-		"bundle_id: a\nscf_anchor_id: IAC-10\nscf_release: '  x  '\n":     "x",
-		"bundle_id: a\nscf_anchor_id: IAC-10\n":                           "",
-		"not: [valid":                                                     "",
-	} {
-		if got := PinnedRelease(manifest); got != want {
-			t.Errorf("PinnedRelease(%q) = %q; want %q", manifest, got, want)
+	cases := []struct {
+		name           string
+		manifest       string
+		pinned, parsed bool
+	}{
+		{"declared release", "bundle_id: a\nscf_anchor_id: IAC-10\nscf_release: test-2026.1\n", true, true},
+		{"anchor uuid", "bundle_id: a\nscf_anchor_id: 2f1c6a52-6c2f-4f4e-9a0b-6f3c2a1d9e01\n", true, true},
+		{"code, no release", "bundle_id: a\nscf_anchor_id: IAC-10\n", false, true},
+		{"blank release", "bundle_id: a\nscf_anchor_id: IAC-10\nscf_release: '  '\n", false, true},
+		{"unparseable", "not: [valid", false, false},
+	}
+	for _, c := range cases {
+		pinned, parsed := IsPinned(c.manifest)
+		if pinned != c.pinned || parsed != c.parsed {
+			t.Errorf("%s: IsPinned = (%v, %v); want (%v, %v)", c.name, pinned, parsed, c.pinned, c.parsed)
 		}
 	}
 }

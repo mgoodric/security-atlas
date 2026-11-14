@@ -16,7 +16,8 @@ Left as written: existing CHANGELOG entries, `docs/audit-log/`, `docs/issues/`, 
 Matt's call (2026-11-14, on #1999 and #1717). Since #2011 an imported release is frozen: re-importing `test-2026.1` with the remapped rows would be a `ReleaseConflictError` and fail every upgraded install's bootstrap. So the sample's `release_version` moves to `test-2026.3`, and the upgrade goes down the new-release path. A new framework version is created with new anchor rows, and `test-2026.1` stays as a legacy version with its rows unchanged.
 
 - **The legacy rows are kept, not orphaned.** The old IDs (`IAC-06`, `IAC-21` and the rest) are simply the legacy release's rows. Superseded control versions still reference them (`controls.scf_anchor_id` is `ON DELETE RESTRICT`), and audit replay can read them.
-- **A pin keeps the label honest.** `internal/api/scfseed/fixturepin_test.go` pins a sha256 of the sample's anchor content (`scf_id`, `family`, `title`, `description`, `subtopics`, in file order) to its `release_version`. Editing a row without a new label fails in CI, and the failure prints the hash to pin. Entries are never edited, only added.
+- **A pin keeps the label honest.** `internal/api/scfseed/fixturepin_test.go` pins a sha256 of the sample's anchor content (`scf_id`, `family`, `title`, `description`, `subtopics`, in file order) to its `release_version`. Editing a row without updating the pin fails in CI, and the failure prints the hash to pin. A released label's entry is frozen.
+- **`test-2026.3` is an open working label until a release is cut.** The remap lands one #1717 family group at a time, and each group edits the sample and updates the `test-2026.3` entry. The entry freezes when the 2026.3 remap is complete and a release ships with it. The cost falls on development installs only: one that imported an earlier `test-2026.3` state fails its next bootstrap with `ReleaseConflictError` (#1768) and needs a catalog reset (a fresh database, or `just scratch-pg-up`). No shipped install has imported `test-2026.3`, so none is affected. This is the review's N4; bumping the label once per group instead would leave a trail of throwaway legacy releases on every install that tracks main.
 
 ## D3 — Controls on a legacy release: re-bind only what kept its meaning, flag the rest
 
@@ -29,12 +30,29 @@ The rule. A control moves to the current release's anchor only when that anchor 
 - **`scfimport.RebindControls`**, run by `atlas-cli catalog import-scf` right after the import, so on every bootstrap. It works across every tenant through the migrate role. It reads `ListControlsOnLegacySCFAnchors`, re-binds the rows that pass (`RebindControlAnchorInPlace`), and prints one `control needs re-anchoring` line per remaining control.
 - **`control.Store.Upload`**, for an unchanged re-uploaded bundle (byte-identical, or in-place metadata only). It moves the control on the same test, and otherwise leaves it in place and reports `NeedsReanchoring`. A re-upload therefore never silently changes what a control means either.
 
-**A bundle pinned to a release is never moved.** A bundle that declares `scf_release` (#1770) is bound in that release on purpose. Both paths skip it:
+**A bundle pinned to a release is never moved.** Two forms pin a bundle to one SCF release on purpose (#1770):
 
-- **Boot-time re-bind:** `RebindControls` reads the declared release from the stored `bundle_manifest_yaml` (`PinnedRelease`) and reports the control as `Pinned`, neither moved nor flagged.
-- **Upload:** the re-bind consumes what `bindSCFAnchor` resolved and returns early for a declared release.
+- a declared `scf_release`;
+- an `scf_anchor_id` written as an anchor UUID, which `scfrelease.Resolve` binds to that exact row in whichever release holds it.
 
-A pinned legacy bundle is a deliberate choice, so it does not count as needing re-anchoring. The dispatcher asked for this when #2205 merged. `TestRebind_PinnedLegacyBundleIsNeverMoved` covers it and fails when the skip is removed.
+Both re-bind paths skip both forms:
+
+- **Boot-time re-bind:** `RebindControls` reads the stored `bundle_manifest_yaml` (`IsPinned`) and reports a pinned control as `Pinned`, neither moved nor flagged.
+- **Upload:** the re-bind consumes what `bindSCFAnchor` resolved and returns early for either form.
+
+Missing the UUID form was the second review's blocking finding (B1). The boot moved such a control to 2026.3, the next unchanged re-upload resolved the UUID back and moved it back, and so it flipped on every boot.
+
+Two guards back this up:
+
+- The upload re-bind only ever moves a control to a row in the current SCF release.
+- A stored manifest that does not parse is never moved, because its pin can't be read. It is flagged for re-anchoring with a note saying to re-upload the bundle (N1).
+
+A pinned legacy bundle is a deliberate choice, so it does not count as needing re-anchoring. Tests:
+
+- `TestRebind_PinnedLegacyBundleIsNeverMoved` (declared release) fails when the skip is removed.
+- `TestRebind_UUIDRefAndUnreadableManifestAreNeverMoved` fails when the UUID pin is removed, and separately when the unparseable guard is removed.
+
+A control that a concurrent upload supersedes between the boot's listing and its update is counted as `superseded_mid_run` rather than dropped silently (N3); the new version binds through the upload path. A durable per-control re-bind record (N2) is a filed follow-up.
 
 The note says where the concept went, most specific source first:
 

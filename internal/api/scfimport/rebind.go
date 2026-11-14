@@ -52,20 +52,36 @@ type RebindReport struct {
 	// Pinned controls declare scf_release (#1770) in their bundle, so they
 	// are bound to that release on purpose and are never moved.
 	Pinned []ControlOnLegacyAnchor
+	// SupersededMidRun counts rebindable controls a concurrent upload
+	// superseded between the listing and the update. They are not moved
+	// here; the new version bound its anchor on upload.
+	SupersededMidRun int
 }
 
-// PinnedRelease returns the scf_release a stored control.yaml declares, or
-// "" when it declares none (#1770). A manifest that does not parse counts
-// as unpinned; the upload path validated it when it was stored.
-func PinnedRelease(manifestYAML string) string {
+// IsPinned reports whether a stored control.yaml binds its anchor to one SCF
+// release on purpose, so no re-bind may move it (#1770, #1971 D3). Two
+// forms pin: a declared scf_release, and an scf_anchor_id written as an
+// anchor UUID, which scfrelease.Resolve binds to that exact row in whichever
+// release holds it. parsed is false when the manifest does not decode; the
+// caller must not move such a control either.
+func IsPinned(manifestYAML string) (pinned, parsed bool) {
 	var doc struct {
-		SCFRelease string `yaml:"scf_release"`
+		SCFRelease  string `yaml:"scf_release"`
+		SCFAnchorID string `yaml:"scf_anchor_id"`
 	}
 	if err := yaml.Unmarshal([]byte(manifestYAML), &doc); err != nil {
-		return ""
+		return false, false
 	}
-	return strings.TrimSpace(doc.SCFRelease)
+	if strings.TrimSpace(doc.SCFRelease) != "" {
+		return true, true
+	}
+	_, isUUID := uuid.Parse(strings.TrimSpace(doc.SCFAnchorID))
+	return isUUID == nil, true
 }
+
+// unparseableNote is the re-anchoring note for a control whose stored
+// control.yaml does not decode: its pin cannot be read, so it is not moved.
+const unparseableNote = "stored control.yaml does not parse, so its SCF release pin cannot be read; re-upload the bundle"
 
 // Rebindable reports whether a control on a legacy anchor can move to the
 // current release's anchor without changing what it is anchored to: the
@@ -131,8 +147,15 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 	for _, r := range rows {
 		row := legacyRow(r)
 		// A bundle pinned to an SCF release (#1770) is bound there on
-		// purpose: moving it would be the silent re-point D3 forbids.
-		if PinnedRelease(r.BundleManifestYaml) != "" {
+		// purpose: moving it would be the silent re-point D3 forbids. A
+		// manifest whose pin cannot be read is not moved either.
+		pinned, parsed := IsPinned(r.BundleManifestYaml)
+		if !parsed {
+			row.Note = unparseableNote
+			report.NeedsReanchoring = append(report.NeedsReanchoring, row)
+			continue
+		}
+		if pinned {
 			report.Pinned = append(report.Pinned, row)
 			continue
 		}
@@ -155,6 +178,10 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 		}
 		if n == 1 {
 			report.Rebound = append(report.Rebound, row)
+		} else {
+			// Superseded by a concurrent upload between the list and the
+			// update; the new version binds through the upload path.
+			report.SupersededMidRun++
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {

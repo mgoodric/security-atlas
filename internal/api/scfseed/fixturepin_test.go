@@ -8,9 +8,19 @@ package scfseed_test
 // under a new release_version, or every upgraded install fails to boot.
 //
 // This guard pins a hash of the sample's anchor content to its
-// release_version. Changing a row without bumping the label fails here.
-// When you change the sample: bump release_version, then add the new label
-// with the hash this test prints. Never edit an existing entry.
+// release_version, so a content change is a deliberate act, not an accident.
+//
+// Released labels are immutable: once a release ships with a label, never
+// change its entry; ship changed content under a new label instead.
+//
+// The open working label is the exception. test-2026.3 is not released yet:
+// each SCF 2026.3 family group of #1717 edits the sample and updates this
+// entry to the hash the test prints, until the 2026.3 remap is complete and
+// a release is cut, at which point the entry freezes. Between groups, a
+// development install that already imported an earlier test-2026.3 state
+// fails its next bootstrap with ReleaseConflictError (#1768) and needs a
+// catalog reset (wipe the database or re-run `just scratch-pg-up`). No
+// shipped install is affected, because none has imported test-2026.3.
 
 import (
 	"crypto/sha256"
@@ -21,8 +31,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 )
 
-// fixtureContentByRelease maps each release_version the sample has shipped
-// under to the sha256 of its anchor content (see fixtureContentHash).
+// fixtureContentByRelease maps each release_version the sample has carried
+// to the sha256 of its anchor content (see fixtureContentHash). test-2026.3
+// is the open working label (see above); every other entry is frozen.
 var fixtureContentByRelease = map[string]string{
 	"test-2026.3": "ffa4d182efd136e46b2867d04449980c6a656d8141168001bccc67e332651739",
 }

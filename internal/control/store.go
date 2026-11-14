@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -101,13 +102,19 @@ const (
 // meaning did not change. Otherwise the control stays where it is and is
 // reported as needing re-anchoring, never silently re-pointed.
 //
-// anchorID is what bindSCFAnchor resolved the manifest to. A bundle that
-// declares scf_release (#1770) is pinned to that release and is never
-// re-bound: binding it anywhere but its declared release is exactly the
-// silent move #1770 and D3 forbid. An unanchored control (anchor_fit: none)
-// has nothing to re-bind.
-func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior dbx.LockActiveControlByBundleIDRow, anchorID uuid.UUID, pinnedRelease string) (rebindOutcome, error) {
+// anchorID is what bindSCFAnchor resolved the manifest to. A bundle pinned
+// to one release is never re-bound: one that declares scf_release (#1770),
+// and one whose scf_anchor_id is an anchor UUID, which scfrelease.Resolve
+// binds to that exact row in whichever release holds it. Moving either is
+// the silent re-point #1770 and D3 forbid, and for a UUID ref would flip
+// the control between releases on every boot and re-upload. An unanchored
+// control (anchor_fit: none) has nothing to re-bind. As a backstop, the
+// control only ever moves to a row in the current SCF release.
+func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior dbx.LockActiveControlByBundleIDRow, anchorID uuid.UUID, pinnedRelease, anchorRef string) (rebindOutcome, error) {
 	if pinnedRelease != "" || anchorID == uuid.Nil {
+		return rebindNone, nil
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(anchorRef)); err == nil {
 		return rebindNone, nil
 	}
 	if !prior.ScfAnchorID.Valid || uuid.UUID(prior.ScfAnchorID.Bytes) == anchorID {
@@ -120,6 +127,13 @@ func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior
 	newRow, err := lookupAnchorRow(ctx, q, anchorID)
 	if err != nil {
 		return rebindNone, fmt.Errorf("rebind control anchor: read resolved anchor: %w", err)
+	}
+	release, err := q.GetFrameworkVersionByID(ctx, newRow.FrameworkVersionID)
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: read resolved anchor's release: %w", err)
+	}
+	if release.Status != dbx.FrameworkVersionStatusCurrent {
+		return rebindNone, nil
 	}
 	if oldRow.ScfID != newRow.ScfID || oldRow.Title != newRow.Title {
 		return rebindNeedsReanchor, nil
@@ -259,7 +273,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		//     v2, v3, ... on every boot — the slice-065 idempotency
 		//     assertion (AC-7) exists precisely to catch that.
 		if !isNew && prior.BundleManifestHash == b.ManifestHashHex {
-			outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease)
+			outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease, b.Manifest.SCFAnchorID)
 			if err != nil {
 				return err
 			}
@@ -322,7 +336,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 				if n != 1 {
 					return ErrControlChangedConcurrently
 				}
-				outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease)
+				outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease, b.Manifest.SCFAnchorID)
 				if err != nil {
 					return err
 				}

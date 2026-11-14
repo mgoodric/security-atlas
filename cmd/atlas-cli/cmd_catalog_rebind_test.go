@@ -25,7 +25,7 @@ func TestPrintRebindReport(t *testing.T) {
 			Note:          "IAC-21 -> IAC-10 in test-2026.3 (concept)",
 		}},
 	})
-	want := "controls rebound=1 needs_reanchoring=1 pinned=0\n" +
+	want := "controls rebound=1 needs_reanchoring=1 pinned=0 superseded_mid_run=0\n" +
 		"control needs re-anchoring tenant=11111111-1111-4111-8111-111111111111 bundle=tenant-pam anchor=IAC-21@test-2026.1: IAC-21 -> IAC-10 in test-2026.3 (concept)\n"
 	if got := buf.String(); got != want {
 		t.Fatalf("output =\n%s\nwant\n%s", got, want)

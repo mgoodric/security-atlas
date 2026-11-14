@@ -20,11 +20,11 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   Coverage joins controls to crosswalk edges by anchor row, so after the new release everything has to move to the current rows:
   - **The rule:** a control is moved to the new release's anchor only when that anchor has the same SCF code **and the same title**, so its meaning did not change. It keeps its control id, version, owners and evidence. Nothing is re-pointed silently.
   - **Where it runs:** `atlas-cli catalog import-scf` runs this across every tenant right after the import, so the bootstrap does it on every boot. A bundle re-upload applies the same rule; the upload result reports `AnchorRebound` or `NeedsReanchoring`.
-  - **Pinned bundles are never moved:** a bundle that declares `scf_release` (#1770) is bound in that release on purpose. The SCF import counts it as `pinned` and leaves it where it is, and so does a re-upload.
+  - **Pinned bundles are never moved:** a bundle that declares `scf_release` (#1770), or names its anchor by UUID in `scf_anchor_id`, is bound to that release on purpose. The SCF import counts it as `pinned` and leaves it where it is, and so does a re-upload. A control whose stored `control.yaml` no longer parses is not moved either; it is listed as needing re-anchoring with a note to re-upload the bundle. Controls superseded by a concurrent upload while the import runs are counted as `superseded_mid_run`.
   - **Controls needing re-anchoring:** every other active control left on a legacy anchor stays where it is and earns no framework credit until someone re-anchors it. That covers a code that is gone (`IAC-21`) and a code whose title changed (`IAC-10`). The SCF import prints a count and one line per control, with a note on where the concept went:
 
     ```text
-    controls rebound=41 needs_reanchoring=2 pinned=0
+    controls rebound=41 needs_reanchoring=2 pinned=0 superseded_mid_run=0
     control needs re-anchoring tenant=<id> bundle=my-pam-control anchor=IAC-21@test-2026.1: IAC-21 -> IAC-10 in test-2026.3 (concept)
     control needs re-anchoring tenant=<id> bundle=my-mfa-secrets anchor=IAC-10@test-2026.1: IAC-10 -> IAC-14 in test-2026.3 (legacy)
     ```
