@@ -9,11 +9,11 @@ declares its own.
 
 ## Defaults
 
-| Artifact                                                                                                   | `retention-days`          |
-| ---------------------------------------------------------------------------------------------------------- | ------------------------- |
-| Playwright reports and traces (`playwright-report`, `playwright-report-prod-build`, `ui-honesty-report-*`) | 3                         |
-| Everything else (coverage, reports, the prebuilt `atlas-binary`)                                           | 7                         |
-| Read only by a later job in the same run (`container-publish.yml` digests)                                 | 1 (may be shorter than 7) |
+| Artifact                                                                                                                             | `retention-days`          |
+| ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------- |
+| Playwright reports and traces (`playwright-report`, `playwright-report-prod-build`, `ui-honesty-report-*`, `route-sweep-axe-report`) | 3                         |
+| Everything else (coverage, reports, the prebuilt `atlas-binary`)                                                                     | 7                         |
+| Read only by a later job in the same run (`container-publish.yml` digests)                                                           | 1 (may be shorter than 7) |
 
 A value **longer** than 7 is allowed only when something reads the
 artifact after its run finishes (another workflow, a scheduled job, a
