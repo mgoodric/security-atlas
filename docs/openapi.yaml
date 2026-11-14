@@ -87,6 +87,7 @@ tags:
   - name: frameworks
   - name: incidents
   - name: install
+  - name: mapping-overlays
   - name: mcp
   - name: me
   - name: oauth
@@ -3550,6 +3551,53 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays:
+    get:
+      summary: GET /v1/mapping-overlays — the organisation's overlay edges (requirement -> SCF anchor); ?framework, ?requirement, ?anchor, ?status=active|retired
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/mapping-overlays — add an overlay edge; body {framework, framework_version?, requirement_code, scf_release?, anchor_code, relationship_type, strength, rationale, source_ref}
+      tags: [mapping-overlays]
+      operationId: post-v1-mapping-overlays
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/{id}/retire:
+    post:
+      summary: POST /v1/mapping-overlays/{id}/retire — retire an overlay edge; body {reason}; the edge keeps its history
+      tags: [mapping-overlays]
+      operationId: post-v1-mapping-overlays-id-retire
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/mcp/write-proposals:
     get:
       summary: GET /v1/mcp/write-proposals
@@ -5826,20 +5874,6 @@ paths:
           required: true
           schema:
             type: string
-      responses:
-        default:
-          description: Default response envelope.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Ack"
-  /v1/upcoming:
-    get:
-      summary: GET /v1/upcoming
-      tags: [dashboard]
-      operationId: get-v1-upcoming
-      security:
-        - bearer: []
       responses:
         default:
           description: Default response envelope.

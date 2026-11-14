@@ -132,6 +132,7 @@ GET /v1/frameworks
 GET /v1/frameworks/posture
 GET /v1/frameworks/scf/versions
 GET /v1/install-state
+GET /v1/mapping-overlays
 GET /v1/mcp/write-proposals
 GET /v1/mcp/write-proposals/{id}
 GET /v1/me
@@ -190,7 +191,6 @@ GET /v1/themes
 DELETE /v1/themes/{ref}
 PATCH /v1/themes/{ref}
 POST /v1/themes
-GET /v1/upcoming
 GET /v1/vendors
 GET /v1/vendors/burndown
 GET /v1/vendors/spend
@@ -297,6 +297,8 @@ POST /v1/framework-scopes/{id}/applicability/bulk
 POST /v1/framework-scopes/{id}/applicability/import
 POST /v1/framework-scopes/{id}/applicability:carry-over
 POST /v1/install/mark-first-signin
+POST /v1/mapping-overlays
+POST /v1/mapping-overlays/{id}/retire
 POST /v1/mcp/write-proposals
 POST /v1/mcp/write-proposals/{id}/confirm
 POST /v1/mcp/write-proposals/{id}/reject
