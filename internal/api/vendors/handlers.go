@@ -213,7 +213,7 @@ func (h *Handler) ListVendors(w http.ResponseWriter, r *http.Request) {
 			}
 			f.Cutoff = t
 		} else {
-			f.Cutoff = h.now()
+			f.Cutoff = h.now().UTC()
 		}
 	}
 	rows, err := h.store.List(ctx, f)
@@ -407,7 +407,7 @@ func (h *Handler) Burndown(w http.ResponseWriter, r *http.Request) {
 		}
 		crit = &v
 	}
-	asOf := h.now()
+	asOf := h.now().UTC()
 	if v := strings.TrimSpace(r.URL.Query().Get("as_of")); v != "" {
 		t, err := time.Parse("2006-01-02", v)
 		if err != nil {
@@ -543,7 +543,7 @@ func (h *Handler) toWire(v vendor.Vendor) vendorWire {
 		ScopeCellIDs:  cellIDs,
 		CreatedAt:     v.CreatedAt,
 		UpdatedAt:     v.UpdatedAt,
-		Overdue:       v.IsOverdueAsOf(h.now()),
+		Overdue:       v.IsOverdueAsOf(h.now().UTC()),
 	}
 	w.ContractStart = dateString(v.ContractStart)
 	w.ContractEnd = dateString(v.ContractEnd)
