@@ -14,11 +14,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	auditapi "github.com/mgoodric/security-atlas/internal/api/audit"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
@@ -116,6 +118,49 @@ func TestDemoProvenance_MarksExactlyTheInPlaceSeedRows(t *testing.T) {
 	if got := demoColumnCounts(t, evidenceCSV); got["true"] != len(evidence) || got["false"] != 0 {
 		t.Errorf("evidence export demo column = %v, want true=%d", got, len(evidence))
 	}
+
+	// #2153: the audit-sample export counts each sample's demo members.
+	// Every sampled record here is seeded, so each count is the sample's
+	// whole draw.
+	samplesCSV := exportCSV(t, ref.ID, auditapi.NewSamplesExportHandler(app).ExportSamples, "/v1/admin/samples/export?format=csv")
+	drawn := sampleDrawSizes(t, ref.ID)
+	if len(samplesCSV) < 2 || len(drawn) == 0 {
+		t.Fatalf("samples export has %d rows and the tenant %d drawn samples, want both non-empty", len(samplesCSV)-1, len(drawn))
+	}
+	idCol, demoCol := slices.Index(samplesCSV[0], "id"), slices.Index(samplesCSV[0], "demo_evidence_count")
+	if demoCol < 0 {
+		t.Fatalf("samples export header %v has no demo_evidence_count column", samplesCSV[0])
+	}
+	for _, r := range samplesCSV[1:] {
+		if want := strconv.Itoa(drawn[r[idCol]]); r[demoCol] != want {
+			t.Errorf("sample %s demo_evidence_count = %s, want %s", r[idCol], r[demoCol], want)
+		}
+	}
+}
+
+// sampleDrawSizes returns, per sample id, how many evidence records the
+// sample drew (admin pool).
+func sampleDrawSizes(t *testing.T, tenantID uuid.UUID) map[string]int {
+	t.Helper()
+	rows, err := adminPool.Query(context.Background(),
+		`SELECT sample_id::text, count(*)::int FROM sample_evidence WHERE tenant_id = $1 GROUP BY sample_id`, tenantID)
+	if err != nil {
+		t.Fatalf("read sample_evidence: %v", err)
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			t.Fatalf("scan sample_evidence: %v", err)
+		}
+		out[id] = n
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate sample_evidence: %v", err)
+	}
+	return out
 }
 
 // exportCSV calls an export handler as an admin of tenantID and returns the

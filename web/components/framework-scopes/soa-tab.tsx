@@ -344,15 +344,14 @@ export function SoATab({
 
         <div
           className="flex flex-wrap gap-1.5"
-          role="tablist"
+          role="group"
           aria-label="Filter"
         >
           {SOA_FILTERS.map((f) => (
             <button
               key={f}
               type="button"
-              role="tab"
-              aria-selected={filter === f}
+              aria-pressed={filter === f}
               data-testid={`soa-filter-${f}`}
               onClick={() => {
                 setFilter(f);

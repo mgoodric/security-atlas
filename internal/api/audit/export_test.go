@@ -65,6 +65,7 @@ func TestSlice138_SamplesToRowIter(t *testing.T) {
 		WindowEnd:          now,
 		PopulationFrozenAt: now.Format(time.RFC3339),
 		PopulationRowCount: 1234,
+		DemoEvidenceCount:  3,
 	}
 	it := samplesToRowIter([]sampleExportRow{row})
 	var cells []string
@@ -97,6 +98,21 @@ func TestSlice138_SamplesToRowIter(t *testing.T) {
 	}
 	if cells[idx("population_row_count")] != "1234" {
 		t.Errorf("population_row_count = %q", cells[idx("population_row_count")])
+	}
+	if cells[idx("demo_evidence_count")] != "3" {
+		t.Errorf("demo_evidence_count = %q; want 3", cells[idx("demo_evidence_count")])
+	}
+}
+
+// #2153: the demo column is appended last, so every earlier column keeps
+// the position consumers already read it from.
+func TestSamplesExportHeader_DemoEvidenceCountIsLast(t *testing.T) {
+	got := samplesExportHeader()
+	if got[len(got)-1] != "demo_evidence_count" {
+		t.Errorf("last column = %q; want demo_evidence_count", got[len(got)-1])
+	}
+	if got[len(got)-2] != "population_row_count" {
+		t.Errorf("column before demo_evidence_count = %q; want population_row_count", got[len(got)-2])
 	}
 }
 
