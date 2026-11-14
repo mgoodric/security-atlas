@@ -241,6 +241,13 @@ logged.
     1-hour admin-claim JWT for any `{tenant_id, user_id, roles, super_admin}`
     body — to any HTTP client that can reach the server. It exists for the
     Playwright e2e harness. The empty default keeps production safe.
+
+    A `super_admin: true` request also writes a `super_admins` row for the
+    token's subject (any UUID), so the live super_admin re-check honours the
+    claim. That row is persistent: it outlives test mode, survives unsetting
+    `ATLAS_TEST_MODE`, and is not recorded in `super_admin_audit_log`. A
+    database that ever ran with test mode on should have its `super_admins`
+    table reviewed (`GET /v1/admin/super-admins`) before production use.
 <!-- prettier-ignore-end -->
 
 | Variable          | Default   | Required? | Scope       | Description                                                                                                                                   |
