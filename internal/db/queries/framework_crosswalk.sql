@@ -2,12 +2,15 @@
 -- Insert or update a framework_requirements row. Deterministic id derived
 -- from (framework_version_id, code) so re-imports are idempotent without
 -- relying on NULLs-distinct gotchas on the UNIQUE constraint.
-INSERT INTO framework_requirements (id, framework_version_id, code, title, body)
-VALUES ($1, $2, $3, $4, $5)
+-- points_of_focus (#1731) is the JSON array of SOC 2 points of focus rolled up
+-- onto this criterion; '[]' for a requirement with none.
+INSERT INTO framework_requirements (id, framework_version_id, code, title, body, points_of_focus)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (id) DO UPDATE
-SET title       = EXCLUDED.title,
-    body        = EXCLUDED.body,
-    updated_at  = now()
+SET title           = EXCLUDED.title,
+    body            = EXCLUDED.body,
+    points_of_focus = EXCLUDED.points_of_focus,
+    updated_at      = now()
 RETURNING *;
 
 -- name: GetFrameworkRequirementByID :one

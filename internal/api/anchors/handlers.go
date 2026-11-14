@@ -8,6 +8,7 @@ package anchors
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -419,6 +420,8 @@ func (h *Handler) anchorsForRequirement(w http.ResponseWriter, r *http.Request) 
 			Code:  req.Code,
 			Title: req.Title,
 			Body:  req.Body,
+
+			PointsOfFocus: pointsOfFocusWire(req.PointsOfFocus),
 		},
 		"anchors": out,
 	})
@@ -538,6 +541,21 @@ type requirementWire struct {
 	Code  string `json:"code"`
 	Title string `json:"title"`
 	Body  string `json:"body,omitempty"`
+	// PointsOfFocus is the requirement's rolled-up SOC 2 points of focus
+	// (#1731): [{code, scf_anchors[]}]. Omitted when there are none, so the
+	// requirement object keeps its all-string shape for every other
+	// framework. Metadata only; points of focus are never requirements.
+	PointsOfFocus json.RawMessage `json:"points_of_focus,omitempty"`
+}
+
+// pointsOfFocusWire passes the stored points_of_focus JSONB through, or nil
+// (omitted) when the requirement has none.
+func pointsOfFocusWire(stored []byte) json.RawMessage {
+	var pofs []json.RawMessage
+	if err := json.Unmarshal(stored, &pofs); err != nil || len(pofs) == 0 {
+		return nil
+	}
+	return json.RawMessage(stored)
 }
 
 // requirementEdgeWire is one row of "anchors for a requirement" — the
