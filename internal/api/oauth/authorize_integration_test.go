@@ -78,6 +78,19 @@ func newAuthorizeIntegrationServer(
 	identity oauth.UserIdentity,
 ) (*httptest.Server, *tokensign.Signer, *oauthcode.Store) {
 	t.Helper()
+	return newAuthorizeIntegrationServerWithImplicit(t, pool, sess, identity, nil)
+}
+
+// newAuthorizeIntegrationServerWithImplicit is newAuthorizeIntegrationServer
+// with an ImplicitTenant resolver wired (#1761).
+func newAuthorizeIntegrationServerWithImplicit(
+	t *testing.T,
+	pool *pgxpool.Pool,
+	sess sessions.Session,
+	identity oauth.UserIdentity,
+	implicit func(context.Context) (uuid.UUID, error),
+) (*httptest.Server, *tokensign.Signer, *oauthcode.Store) {
+	t.Helper()
 	ks, err := fsstore.Open(t.TempDir())
 	if err != nil {
 		t.Fatalf("fsstore.Open: %v", err)
@@ -92,11 +105,12 @@ func newAuthorizeIntegrationServer(
 	})
 	ep.AttachAuthCodeStore(codes)
 	authorizeEP := oauth.NewAuthorizeEndpoint(oauth.AuthorizeEndpointConfig{
-		Codes:    codes,
-		Clients:  clients,
-		Sessions: &itSessionResolver{sess: sess},
-		Users:    &itUserResolver{identity: identity},
-		Issuer:   testIssuer,
+		Codes:          codes,
+		Clients:        clients,
+		Sessions:       &itSessionResolver{sess: sess},
+		Users:          &itUserResolver{identity: identity},
+		Issuer:         testIssuer,
+		ImplicitTenant: implicit,
 	})
 	h := oauth.New(ks, oauth.Config{Issuer: testIssuer})
 	h.AttachTokenEndpoint(ep)
@@ -176,6 +190,64 @@ func TestIntegrationAuthorizeFlow_HappyPath(t *testing.T) {
 	}
 	if got := loc.Query().Get("state"); got != state {
 		t.Errorf("state echo = %q want %q", got, state)
+	}
+}
+
+// TestIntegrationAuthorizeFlow_NoTenantID_SingleTenant — #1761: on a
+// single-tenant install the web client omits tenant_id and the authorize
+// flow resolves the sole tenant.
+func TestIntegrationAuthorizeFlow_NoTenantID_SingleTenant(t *testing.T) {
+	pool := openTokenIntegrationPool(t)
+	const redirectURI = "https://atlas.example.test/oauth/callback"
+	clientID, _, sess, identity := setupAuthorizeFixture(t, pool, redirectURI)
+	resolved := 0
+	implicit := func(context.Context) (uuid.UUID, error) {
+		resolved++
+		return identity.CurrentTenantID, nil
+	}
+	srv, _, _ := newAuthorizeIntegrationServerWithImplicit(t, pool, sess, identity, implicit)
+
+	challenge := oauth.ExportComputePKCEChallengeS256("atlas-test-verifier-" + uuid.NewString())
+	params := map[string]string{
+		"response_type":         "code",
+		"client_id":             clientID,
+		"redirect_uri":          redirectURI,
+		"scope":                 "openid",
+		"state":                 "s1761",
+		"code_challenge":        challenge,
+		"code_challenge_method": "S256",
+	}
+
+	// Signed in: a code is issued.
+	req, _ := http.NewRequest(http.MethodGet, authorizeURL(srv.URL, params), nil)
+	req.AddCookie(&http.Cookie{Name: sessions.CookieName, Value: sess.ID})
+	resp := doNoFollow(t, req)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want 302; location=%q", resp.StatusCode, resp.Header.Get("Location"))
+	}
+	loc, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("parse Location: %v", err)
+	}
+	if loc.Query().Get("code") == "" {
+		t.Fatalf("redirect missing code; location=%q", resp.Header.Get("Location"))
+	}
+
+	// Not signed in: the login redirect carries the resolved tenant.
+	req, _ = http.NewRequest(http.MethodGet, authorizeURL(srv.URL, params), nil)
+	resp = doNoFollow(t, req)
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("no session: status = %d, want 302", resp.StatusCode)
+	}
+	login, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		t.Fatalf("parse login Location: %v", err)
+	}
+	if login.Path != "/auth/oidc/login" || login.Query().Get("tenant_id") != identity.CurrentTenantID.String() {
+		t.Errorf("login redirect = %q, want /auth/oidc/login with tenant_id=%s", login, identity.CurrentTenantID)
+	}
+	if resolved != 2 {
+		t.Errorf("implicit tenant resolved %d times, want 2", resolved)
 	}
 }
 

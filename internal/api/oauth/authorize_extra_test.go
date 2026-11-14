@@ -22,6 +22,7 @@ package oauth_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -58,6 +59,13 @@ func (stubUsers) ResolveForOAuth(context.Context, uuid.UUID, uuid.UUID) (oauth.U
 // parameter-validation gates run before any of these are touched.
 func newAuthorizeUnitServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	return newAuthorizeUnitServerWith(t, nil)
+}
+
+// newAuthorizeUnitServerWith is newAuthorizeUnitServer with an
+// ImplicitTenant resolver wired (#1761).
+func newAuthorizeUnitServerWith(t *testing.T, implicit func(context.Context) (uuid.UUID, error)) *httptest.Server {
+	t.Helper()
 	h, signer := newHandler(t)
 	// A token endpoint must be wired for the authorize route to leave
 	// the 501 stub (the discovery + mount logic gates authorize behind
@@ -67,12 +75,13 @@ func newAuthorizeUnitServer(t *testing.T) *httptest.Server {
 	})
 	h.AttachTokenEndpoint(tokenEP)
 	authEP := oauth.NewAuthorizeEndpoint(oauth.AuthorizeEndpointConfig{
-		Codes:    oauthcode.New(nil),
-		Clients:  oauthclient.New(nil),
-		Sessions: stubSessions{},
-		Users:    stubUsers{},
-		Issuer:   testIssuer,
-		Now:      pinnedNow,
+		Codes:          oauthcode.New(nil),
+		Clients:        oauthclient.New(nil),
+		Sessions:       stubSessions{},
+		Users:          stubUsers{},
+		Issuer:         testIssuer,
+		Now:            pinnedNow,
+		ImplicitTenant: implicit,
 	})
 	h.AttachAuthorizeEndpoint(authEP)
 	srv := httptest.NewServer(routerFor(h))
@@ -180,6 +189,39 @@ func TestAuthorize_MissingRequiredParams(t *testing.T) {
 			}
 			if !strings.Contains(string(body), "invalid_request") {
 				t.Errorf("body = %q, want invalid_request", body)
+			}
+		})
+	}
+}
+
+// TestAuthorize_NoTenantID_NoImplicitTenant covers #1761: without
+// tenant_id, a request is refused 400 naming tenant_id when no tenant is
+// implied (several tenants, none, or no resolver wired), and the body
+// names no tenant.
+func TestAuthorize_NoTenantID_NoImplicitTenant(t *testing.T) {
+	t.Parallel()
+	leaked := uuid.New()
+	cases := map[string]func(context.Context) (uuid.UUID, error){
+		"ambiguous":   func(context.Context) (uuid.UUID, error) { return uuid.Nil, errors.New("several tenants") },
+		"all-zeros":   func(context.Context) (uuid.UUID, error) { return uuid.Nil, nil },
+		"error-w-id":  func(context.Context) (uuid.UUID, error) { return leaked, errors.New("lookup failed") },
+		"no-resolver": nil,
+	}
+	for name, implicit := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			srv := newAuthorizeUnitServerWith(t, implicit)
+			q := validAuthorizeParams()
+			q.Del("tenant_id")
+			resp, body := getAuthorize(t, srv.URL, q)
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s; want 400", resp.StatusCode, body)
+			}
+			if !strings.Contains(string(body), "tenant_id is required") {
+				t.Errorf("body = %q, want it to name tenant_id", body)
+			}
+			if strings.Contains(string(body), leaked.String()) {
+				t.Errorf("body discloses a tenant: %s", body)
 			}
 		})
 	}
