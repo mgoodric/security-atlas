@@ -27,6 +27,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -87,8 +88,8 @@ func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	reviewer, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
-	if err != nil {
+	reviewer, ok := credstore.CallerUserID(cred)
+	if !ok {
 		// A verified super_admin JWT always carries a parseable user subject;
 		// if it does not, fail closed rather than write an audit row with a nil
 		// reviewer.
@@ -129,25 +130,20 @@ func (h *Handler) Transition(w http.ResponseWriter, r *http.Request) {
 
 // --- helpers ---
 
-type adminCred struct {
-	TenantID string
-	UserID   string
-}
-
 // requireSuperAdmin enforces the super_admin gate (#1757 / threat-model E). A
 // missing credential is 401; a caller whose verified JWT lacks the
 // `atlas:super_admin` claim is 403. A per-tenant admin API key is tenant-scoped
 // and never carries the claim, so it is refused here like any tenant admin.
 // Authority is enforced server-side, never in the UI.
-func requireSuperAdmin(w http.ResponseWriter, r *http.Request) (adminCred, bool) {
+func requireSuperAdmin(w http.ResponseWriter, r *http.Request) (credstore.Credential, bool) {
 	cred, ok := authctx.CredentialFromContext(r.Context())
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
-		return adminCred{}, false
+		return credstore.Credential{}, false
 	}
 	if claims := jwtmw.FromContext(r.Context()); claims == nil || !claims.SuperAdmin {
 		httpresp.WriteError(w, http.StatusForbidden, "super_admin required")
-		return adminCred{}, false
+		return credstore.Credential{}, false
 	}
-	return adminCred{TenantID: cred.TenantID, UserID: cred.UserID}, true
+	return cred, true
 }

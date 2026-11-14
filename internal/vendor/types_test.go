@@ -10,7 +10,8 @@ import (
 
 // TestIsOverdueAsOf — AC-4. The derived overdue flag must hold three contract
 // behaviors:
-//  1. NULL last_review_date => overdue (never reviewed)
+//  1. NULL last_review_date => overdue only after the first-review due day
+//     (#2061); with no first-review due date, never overdue
 //  2. last_review + cadence < cutoff => overdue
 //  3. last_review + cadence >= cutoff => NOT overdue
 //
@@ -29,18 +30,40 @@ func TestIsOverdueAsOf(t *testing.T) {
 	ptr := func(t time.Time) *time.Time { return &t }
 
 	tests := []struct {
-		name        string
-		lastReview  *time.Time
-		cadence     ReviewCadence
-		cutoff      time.Time
-		wantOverdue bool
+		name           string
+		lastReview     *time.Time
+		firstReviewDue *time.Time
+		cadence        ReviewCadence
+		cutoff         time.Time
+		wantOverdue    bool
 	}{
 		{
-			name:        "never_reviewed_is_overdue",
+			name:        "never_reviewed_without_due_date_is_not_overdue",
 			lastReview:  nil,
 			cadence:     CadenceAnnual,
 			cutoff:      parse("2026-05-11"),
-			wantOverdue: true,
+			wantOverdue: false,
+		},
+		{
+			name:           "never_reviewed_before_first_review_due",
+			firstReviewDue: ptr(parse("2026-06-10")),
+			cadence:        CadenceAnnual,
+			cutoff:         parse("2026-05-11"),
+			wantOverdue:    false,
+		},
+		{
+			name:           "never_reviewed_on_first_review_due_day",
+			firstReviewDue: ptr(parse("2026-06-10")),
+			cadence:        CadenceAnnual,
+			cutoff:         parse("2026-06-10").Add(23 * time.Hour),
+			wantOverdue:    false,
+		},
+		{
+			name:           "never_reviewed_after_first_review_due_day",
+			firstReviewDue: ptr(parse("2026-06-10")),
+			cadence:        CadenceAnnual,
+			cutoff:         parse("2026-06-11"),
+			wantOverdue:    true,
 		},
 		{
 			name:        "annual_within_window",
@@ -89,11 +112,37 @@ func TestIsOverdueAsOf(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			v := Vendor{
 				LastReviewDate: tc.lastReview,
+				FirstReviewDue: tc.firstReviewDue,
 				ReviewCadence:  tc.cadence,
 			}
 			if got := v.IsOverdueAsOf(tc.cutoff); got != tc.wantOverdue {
 				t.Fatalf("IsOverdueAsOf(%v) = %v; want %v",
 					tc.cutoff.Format(time.DateOnly), got, tc.wantOverdue)
+			}
+		})
+	}
+}
+
+// TestFirstReviewDueDate — #2061. The first review is due the creation
+// date in UTC plus the window, so a vendor created late in the evening west
+// of UTC is due a day later than its local date suggests.
+func TestFirstReviewDueDate(t *testing.T) {
+	pst := time.FixedZone("PST", -8*3600)
+	tests := []struct {
+		name    string
+		created time.Time
+		window  int
+		want    string
+	}{
+		{"default_window", time.Date(2026, 11, 14, 9, 0, 0, 0, time.UTC), DefaultInitialReviewDays, "2026-12-14"},
+		{"utc_date_not_local_date", time.Date(2026, 11, 14, 23, 30, 0, 0, pst), 30, "2026-12-15"},
+		{"configured_window", time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC), 7, "2026-02-07"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := FirstReviewDueDate(tc.created, tc.window)
+			if got.Format(time.DateOnly) != tc.want || got.Location() != time.UTC {
+				t.Fatalf("FirstReviewDueDate = %v; want %s UTC", got, tc.want)
 			}
 		})
 	}

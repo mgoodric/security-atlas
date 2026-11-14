@@ -1,0 +1,14 @@
+-- Down migration for 20261021000000_normalize_user_principal_ids.sql (#2183).
+--
+-- Intentionally a no-op. The up migration rewrote "user:<uuid>" to the bare
+-- uuid in notifications.recipient_user_id and auditor_assignments.user_id
+-- without recording which rows it touched. A rewritten row cannot be told
+-- apart from one a producer wrote bare in the first place (staleness,
+-- offboarding and the digest channels always wrote the bare uuid), so
+-- re-adding the prefix would corrupt rows that were never prefixed.
+--
+-- Leaving the bare form loses no data. Code from before #2183 matched the
+-- raw cred.UserID, so after a rollback a local-login user ("user:<uuid>")
+-- would not see the rewritten rows, the same gap they already had for every
+-- bare-uuid row before #2183.
+SELECT 1;

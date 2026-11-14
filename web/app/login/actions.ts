@@ -11,6 +11,7 @@ import {
 } from "@/lib/auth/dev-token-signin";
 import { localLoginBody } from "@/lib/auth/login-tenant";
 import { fetchInstallState } from "@/lib/auth/login.server";
+import { forwardedForHeaders } from "@/lib/client-ip";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { shouldUseSecureCookie } from "@/lib/secure-cookie";
 
@@ -135,11 +136,18 @@ export async function signInLocal(formData: FormData): Promise<void> {
     );
   }
 
+  // #2040 — forward the browser's IP, derived from this server's own
+  // trusted chain (lib/client-ip.ts), so the API's per-IP login bucket
+  // is per browser rather than one bucket for the whole BFF.
+  const reqHeaders = await headers();
   let response: Response;
   try {
     response = await fetch(`${apiBaseURL()}/auth/local/login`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...forwardedForHeaders(reqHeaders),
+      },
       body: JSON.stringify(localLoginBody(tenantID, email, password)),
     });
   } catch {
@@ -194,7 +202,6 @@ export async function signInLocal(formData: FormData): Promise<void> {
   }
 
   const jar = await cookies();
-  const reqHeaders = await headers();
   jar.set(ATLAS_JWT_COOKIE, body.token, {
     httpOnly: true,
     sameSite: "lax",

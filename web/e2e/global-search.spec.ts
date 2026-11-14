@@ -23,15 +23,13 @@
 // risk, one evidence record, each carrying the token `AcmeVault`, which
 // appears in no other fixture and in no bundled SCF anchor.
 //
-// Why the result ORDER below is deterministic (and not a guess): the
-// endpoint sorts relevance DESC, then type ASC, then id ASC. A
-// single-token query scores every matching row 1.0, so the merge is
-// ordered by type name — and the UI's flat keyboard-navigation order is
-// GROUP_ORDER (anchors, controls, risks, evidence) flattened. With zero
-// `anchors` hits the first flat row is the control and the second is the
-// risk. The spec asserts the absent anchors group explicitly so a future
-// catalog change that starts matching `AcmeVault` fails loudly on that
-// assertion instead of silently changing which row Enter opens.
+// Why the result ORDER below is deterministic (and not a guess): since
+// #2067 the endpoint groups hits by type in the order controls, risks,
+// policies, evidence, anchors, and the UI's flat keyboard-navigation
+// order is GROUP_ORDER, the same list. The first flat row is the control
+// and the second is the risk. The spec still asserts the absent anchors
+// group, so a future catalog change that starts matching `AcmeVault`
+// fails loudly there rather than shifting a count.
 //
 // Timeouts follow the slice-275 convention documented in
 // `web/e2e/README.md`: gate the first visibility assertion on the
@@ -76,6 +74,7 @@ interface SearchHitWire {
 interface SearchResponseWire {
   hits: SearchHitWire[];
   count: number;
+  groups: { type: string; count: number }[];
   partial_types: string[];
 }
 
@@ -144,6 +143,23 @@ test.describe("global ⌘K search — real endpoint (OE-398c)", () => {
     await expect(page.getByTestId("global-search-group-anchors")).toHaveCount(
       0,
     );
+
+    // #2067 — each group shows the real endpoint's match count for this
+    // tenant, and the response's groups array is in group order.
+    expect(body.groups.map((g) => g.type)).toEqual([
+      "controls",
+      "risks",
+      "policies",
+      "evidence",
+      "anchors",
+    ]);
+    for (const type of ["controls", "risks", "evidence"]) {
+      const reported = body.groups.find((g) => g.type === type)?.count;
+      expect(reported).toBeGreaterThanOrEqual(1);
+      await expect(
+        page.getByTestId(`global-search-group-count-${type}`),
+      ).toHaveText(String(reported));
+    }
 
     await expect(
       page.getByTestId("global-search-row-controls").first(),

@@ -147,12 +147,14 @@ test.describe("dashboard view", () => {
   }) => {
     // The panel's BFF route forwards to GET /v1/controls/drift?since=7d.
     // Flipped-out controls render with their last-passing date, and the
-    // signed window delta is shown.
+    // headline counts gains and losses separately (#2063).
     const requests: string[] = [];
     page.on("request", (r) => requests.push(r.url()));
     await page.goto("/dashboard");
     await expect(page.getByTestId("recent-drift-row").first()).toBeVisible();
-    await expect(page.getByTestId("drift-delta")).toBeVisible();
+    await expect(page.getByTestId("drift-summary")).toContainText(
+      "stopped passing",
+    );
     expect(
       requests.filter((u) => u.includes("/api/dashboard/drift")).length,
     ).toBeGreaterThan(0);

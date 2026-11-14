@@ -39,6 +39,12 @@ type Manifest struct {
 	Title               string `yaml:"title"                  json:"title"`
 	Description         string `yaml:"description,omitempty"  json:"description,omitempty"`
 	SCFAnchorID         string `yaml:"scf_anchor_id"          json:"scf_anchor_id"`
+	// SCFRelease names the SCF release SCFAnchorID is a code in, e.g.
+	// "2025.2" (#1770). The SCF reuses codes between releases, so upload
+	// binds the anchor within this release. Optional for now: without it
+	// the code binds in the current release and the upload returns a
+	// deprecation warning.
+	SCFRelease string `yaml:"scf_release,omitempty" json:"scf_release,omitempty"`
 	// AnchorFit states how well SCFAnchorID fits the control's intent:
 	// exact (the default when omitted), partial, or none (issue #1736).
 	// A non-exact fit needs AnchorFitNote; `none` also allows an empty

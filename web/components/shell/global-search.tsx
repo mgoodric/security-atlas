@@ -25,8 +25,8 @@
 // Backend: slice 268's unified `GET /v1/search` endpoint (merged on
 // main at d9d8e69b). Wire shape:
 //
-//   IN:  ?q=<query>&types=controls,risks,evidence&limit=N
-//   OUT: { hits: [...], count: N, partial_types: [...] }
+//   IN:  ?q=<query>&types=controls,risks,policies,evidence,anchors&limit=N
+//   OUT: { hits: [...], count: N, groups: [{type, count}], partial_types: [...] }
 //
 // Slice 398b (OE-466) — reconciled against the contract slice 398a
 // (OE-465) pinned in `docs/openapi.yaml` (`get-v1-search`): `q` is
@@ -98,13 +98,13 @@ export const SEARCH_MAX_LIMIT = 50;
  * when slice 661 added the `anchors` group and left the multiplier at
  * three, asking for 36 merged hits while the comment claimed 48.
  */
-const PER_TYPE_TARGET = 12;
+const PER_TYPE_TARGET = 10;
 
 // SearchHitType is the discriminator union. Slice 661 added `anchors` —
 // the bundled SCF anchor catalog — so an empty tenant (zero instantiated
 // controls) can still find controls by their SCF code (CRY-04) or name
-// (encryption). See web/app/api/search/route.ts.
-type SearchHitType = "anchors" | "controls" | "risks" | "evidence";
+// (encryption). #2067 added `policies`. See web/app/api/search/route.ts.
+type SearchHitType = "controls" | "risks" | "policies" | "evidence" | "anchors";
 
 interface SearchHit {
   id: string;
@@ -114,31 +114,35 @@ interface SearchHit {
   relevance_score: number;
 }
 
+/** One type's full match count (#2067). May exceed the rows returned. */
+interface SearchGroupCount {
+  type: string;
+  count: number;
+}
+
 interface SearchResponse {
   hits?: SearchHit[];
   count?: number;
+  groups?: SearchGroupCount[];
   partial_types?: string[];
 }
 
-interface Grouped {
-  anchors: SearchHit[];
-  controls: SearchHit[];
-  risks: SearchHit[];
-  evidence: SearchHit[];
-}
+type Grouped = Record<SearchHitType, SearchHit[]>;
 
 /**
  * GROUP_ORDER is the canonical render + arrow-navigation order for the
- * grouped popover. Anchors render first so an empty tenant's
- * SCF-catalog matches (the slice 661 fix) are the most prominent group.
- * The flat navigation order and the JSX both consume this single source
- * of truth so they can never drift.
+ * grouped popover, and the order the upstream returns hits in (#2067):
+ * the organisation's own records first, the bundled SCF catalog last,
+ * so a common word never lists catalog anchors above the tenant's own
+ * controls. The flat navigation order and the JSX both consume this
+ * single source of truth so they can never drift.
  */
 export const GROUP_ORDER: readonly SearchHitType[] = [
-  "anchors",
   "controls",
   "risks",
+  "policies",
   "evidence",
+  "anchors",
 ] as const;
 
 /**
@@ -179,16 +183,49 @@ export function buildSearchRequestURL(rawQuery: string): string {
 }
 
 /**
+ * buildShowAllURL returns the BFF URL that fetches one group on its own
+ * (#2067 "show all"): the same query narrowed to `type`, at the
+ * contract's hard ceiling. Pure; exported for unit coverage.
+ */
+export function buildShowAllURL(rawQuery: string, type: SearchHitType): string {
+  const trimmed = rawQuery.trim();
+  return `/api/search?q=${encodeURIComponent(
+    trimmed,
+  )}&types=${type}&limit=${SEARCH_MAX_LIMIT}`;
+}
+
+/**
  * groupByType partitions a hits array by their `type` field. Pure;
  * exported for unit coverage.
  */
 export function groupByType(hits: SearchHit[]): Grouped {
-  const out: Grouped = { anchors: [], controls: [], risks: [], evidence: [] };
+  const out: Grouped = {
+    controls: [],
+    risks: [],
+    policies: [],
+    evidence: [],
+    anchors: [],
+  };
   for (const h of hits) {
-    if (h.type === "anchors") out.anchors.push(h);
-    else if (h.type === "controls") out.controls.push(h);
-    else if (h.type === "risks") out.risks.push(h);
-    else if (h.type === "evidence") out.evidence.push(h);
+    out[h.type]?.push(h);
+  }
+  return out;
+}
+
+/**
+ * groupCounts maps each type to its full match count (#2067). A type the
+ * response's `groups` array does not mention falls back to the number of
+ * rows it returned, so an older payload still renders a count. Pure;
+ * exported for unit coverage.
+ */
+export function groupCounts(
+  groups: SearchGroupCount[] | undefined,
+  grouped: Grouped,
+): Record<SearchHitType, number> {
+  const out = {} as Record<SearchHitType, number>;
+  for (const t of GROUP_ORDER) {
+    const reported = groups?.find((g) => g.type === t)?.count;
+    out[t] = Math.max(reported ?? 0, grouped[t].length);
   }
   return out;
 }
@@ -213,6 +250,10 @@ export function hrefForHit(hit: SearchHit): string {
       return `/controls/${encodeURIComponent(hit.id)}`;
     case "risks":
       return `/risks/hierarchy?focus=${encodeURIComponent(hit.id)}`;
+    case "policies":
+      // #2067 — the policy hit id is that version's row id, which the
+      // /policies/[id] detail page reads directly.
+      return `/policies/${encodeURIComponent(hit.id)}`;
     case "evidence":
       return `/evidence`;
   }
@@ -275,6 +316,11 @@ export function GlobalSearch() {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchHit[]>([]);
+  // #2067 — per-type full match counts from the response's `groups`,
+  // and the groups the operator expanded with "show all" (that type's
+  // rows fetched on their own, replacing the shared-limit preview).
+  const [reportedGroups, setReportedGroups] = useState<SearchGroupCount[]>([]);
+  const [expanded, setExpanded] = useState<Partial<Grouped>>({});
   const [partialTypes, setPartialTypes] = useState<string[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const [open, setOpen] = useState(false);
@@ -327,6 +373,8 @@ export function GlobalSearch() {
       const microTimer = setTimeout(() => {
         if (cancelled) return;
         setResults([]);
+        setReportedGroups([]);
+        setExpanded({});
         setPartialTypes([]);
         setLoading(false);
       }, 0);
@@ -357,6 +405,8 @@ export function GlobalSearch() {
         const data = (await resp.json()) as SearchResponse;
         if (cancelled) return;
         setResults(Array.isArray(data?.hits) ? data.hits : []);
+        setReportedGroups(Array.isArray(data?.groups) ? data.groups : []);
+        setExpanded({});
         setPartialTypes(
           Array.isArray(data?.partial_types) ? data.partial_types : [],
         );
@@ -377,7 +427,42 @@ export function GlobalSearch() {
     };
   }, [query]);
 
-  const grouped = useMemo(() => groupByType(results), [results]);
+  const previewGrouped = useMemo(() => groupByType(results), [results]);
+  const counts = useMemo(
+    () => groupCounts(reportedGroups, previewGrouped),
+    [reportedGroups, previewGrouped],
+  );
+  // The rows each group renders: the shared-limit preview, or the
+  // type's own fetch once the operator chose "show all".
+  const grouped = useMemo<Grouped>(
+    () => ({ ...previewGrouped, ...expanded }),
+    [previewGrouped, expanded],
+  );
+
+  // #2067 "show all": fetch this one type at the contract's ceiling and
+  // render every row it returns in place of the preview.
+  const showAll = useCallback(
+    async (type: SearchHitType) => {
+      const trimmed = query.trim();
+      try {
+        const resp = await fetch(buildShowAllURL(trimmed, type), {
+          cache: "no-store",
+          credentials: "include",
+        });
+        if (!resp.ok) return;
+        const data = (await resp.json()) as SearchResponse;
+        if (query.trim() !== trimmed) return;
+        const rows = groupByType(Array.isArray(data?.hits) ? data.hits : [])[
+          type
+        ];
+        setExpanded((prev) => ({ ...prev, [type]: rows }));
+        inputRef.current?.focus();
+      } catch {
+        // Keep the preview; the group still shows its count.
+      }
+    },
+    [query],
+  );
 
   // Flattened list in render order — the same order the UI lists,
   // used for arrow-key navigation. Stays in lockstep with the JSX
@@ -522,6 +607,8 @@ export function GlobalSearch() {
                     key={type}
                     type={type}
                     rows={rows}
+                    total={counts[type]}
+                    onShowAll={() => void showAll(type)}
                     activeIndex={activeIndex}
                     flatIndexFor={(idx) => flatIndexFor(type, idx)}
                     onRowClick={() => {
@@ -551,6 +638,9 @@ export function GlobalSearch() {
 interface ResultGroupProps {
   type: SearchHitType;
   rows: SearchHit[];
+  /** Every match of this type the caller can see (#2067). */
+  total: number;
+  onShowAll: () => void;
   activeIndex: number;
   flatIndexFor: (idx: number) => number;
   onRowClick: () => void;
@@ -559,17 +649,41 @@ interface ResultGroupProps {
 function ResultGroup({
   type,
   rows,
+  total,
+  onShowAll,
   activeIndex,
   flatIndexFor,
   onRowClick,
 }: ResultGroupProps) {
+  // "Show all" while the group renders fewer rows than it matched and
+  // has not yet been expanded to the contract's ceiling.
+  const canShowAll = total > rows.length && rows.length < SEARCH_MAX_LIMIT;
   return (
     <div
       data-testid={`global-search-group-${type}`}
       className="border-b border-border last:border-b-0"
     >
-      <div className="px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-        {GROUP_LABELS[type]}
+      <div className="flex items-center justify-between px-3 pt-2 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+        <span>
+          {GROUP_LABELS[type]}{" "}
+          <span
+            data-testid={`global-search-group-count-${type}`}
+            className="ml-1 rounded bg-muted px-1 font-mono normal-case tabular-nums"
+            aria-label={`${total} ${total === 1 ? "match" : "matches"}`}
+          >
+            {total}
+          </span>
+        </span>
+        {canShowAll ? (
+          <button
+            type="button"
+            data-testid={`global-search-show-all-${type}`}
+            onClick={onShowAll}
+            className="normal-case tracking-normal text-primary hover:underline"
+          >
+            Show all {total}
+          </button>
+        ) : null}
       </div>
       <ul className="pb-1">
         {rows.map((hit, idx) => {
@@ -609,10 +723,11 @@ function ResultGroup({
 }
 
 const GROUP_LABELS: Record<SearchHitType, string> = {
-  anchors: "SCF anchors",
   controls: "Controls",
   risks: "Risks",
+  policies: "Policies",
   evidence: "Evidence",
+  anchors: "SCF anchors",
 };
 
 function SearchIcon() {

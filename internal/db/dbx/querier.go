@@ -274,7 +274,9 @@ type Querier interface {
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
-	// AC-3 burndown: returns total + overdue counts per criticality band. Used
+	// AC-3 burndown: returns total + overdue counts per criticality band. The
+	// overdue rule is ListOverdueVendors' (first-review window for a vendor never
+	// reviewed, #2061), so the counts match the overdue list. Used
 	// by the dashboard panel (slice 040) and the quarterly board pack (slice 032).
 	// Returns one row per criticality present in the result set; empty bands are
 	// not included (callers fill in zero where needed).
@@ -556,11 +558,13 @@ type Querier interface {
 	DeleteUserRoles(ctx context.Context, arg DeleteUserRolesParams) error
 	DeleteVendor(ctx context.Context, arg DeleteVendorParams) error
 	// #2043 demo provenance: returns the subset of ids that the in-place demo
-	// seed (#1765) added to table_name, for the caller's tenant (RLS). Read
+	// seed (#1765) added to table_name, for the caller's tenant. Read
 	// surfaces and exports mark those rows "demo" so an auditor never mistakes
 	// demo evidence for real evidence. The row_key of a single-uuid-key table is
 	// {"id": "<uuid>"}, so the lookup matches whole keys and is served by the
-	// demo_seed_rows_unique index.
+	// demo_seed_rows_unique index. The tenant_id predicate (#2153) scopes the
+	// read alongside RLS, so a connection RLS does not bind still reads one
+	// tenant's marks.
 	DemoSeededIDs(ctx context.Context, arg DemoSeededIDsParams) ([]pgtype.UUID, error)
 	// Flip every "current" framework_version for the given framework to "legacy"
 	// so a new release can take over without violating the at-most-one-current
@@ -1078,10 +1082,17 @@ type Querier interface {
 	// Fetch the current routing config for the tenant. Returns no rows when the
 	// tenant has never opted in (=> the router treats that as local-ollama).
 	GetTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID) (TenantLlmRouting, error)
+	// #2061: the caller-tenant's vendor initial-review window in days. RLS scopes
+	// the row to the current tenant. Returns ErrNoRows when no tenants row exists
+	// (bare-UUID tenant); the vendor store maps that to the 30-day default, the
+	// same COALESCE the vendor overdue queries use.
+	GetTenantVendorInitialReviewDays(ctx context.Context, id pgtype.UUID) (int32, error)
 	// Lookup by case-insensitive email within a tenant. Used by /auth/local/login.
 	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error)
 	GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error)
 	GetVendor(ctx context.Context, arg GetVendorParams) (Vendor, error)
+	// A theme the caller can see (built-in or its own), named by name or id.
+	GetVisibleThemeByRef(ctx context.Context, arg GetVisibleThemeByRefParams) (OrgTheme, error)
 	GetWalkthroughByID(ctx context.Context, arg GetWalkthroughByIDParams) (Walkthrough, error)
 	// Read a user's webhook-channel master opt-in. Missing row = OPTED-OUT.
 	GetWebhookOptIn(ctx context.Context, arg GetWebhookOptInParams) (bool, error)
@@ -2386,12 +2397,14 @@ type Querier interface {
 	ListOverdueDecisions(ctx context.Context, arg ListOverdueDecisionsParams) ([]Decision, error)
 	ListOverdueOffboardingChecklists(ctx context.Context, arg ListOverdueOffboardingChecklistsParams) ([]PersonnelSecurityChecklist, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
-	// the cutoff date. NULL last_review_date means "never reviewed" which always
-	// counts as overdue (a vendor with no review on file is by definition past
-	// due). Cadence -> interval mapping happens with a CASE in SQL so the query
-	// plan is stable. Cutoff is passed as DATE so the caller controls "now"
-	// (testability) and timezone semantics (vendor reviews are date-granular,
-	// not timestamp-granular).
+	// the cutoff date. A vendor never reviewed (NULL last_review_date) has its
+	// first review due on the UTC date of created_at plus the tenant's
+	// vendor_initial_review_days (default 30 when the tenant has no row), and is
+	// overdue only after that day (#2061). CountVendorsForBurndown and
+	// vendor.IsOverdueAsOf apply the same rule. Cadence -> interval mapping
+	// happens with a CASE in SQL so the query plan is stable. Cutoff is passed as
+	// DATE so the caller controls "now" (testability) and timezone semantics
+	// (vendor reviews are date-granular, not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
 	// Read the assignment audit ledger for the tenant, newest first. Used by
 	// the integration tests (and a future "who reassigned these?" surface).
@@ -2576,6 +2589,11 @@ type Querier interface {
 	// aggregation rules have produced a meta-risk in it. Archived categories
 	// are included only when include_archived is true.
 	ListRiskCategoriesWithUsage(ctx context.Context, arg ListRiskCategoriesWithUsageParams) ([]ListRiskCategoriesWithUsageRow, error)
+	// How many children each roll-up parent has, for the risk register (#2060).
+	// A risk with no row here is not a roll-up. The register leaves roll-ups
+	// out of its rows and counts by default, so a parent never reads as a
+	// duplicate of the children it summarises.
+	ListRiskChildCountsForTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListRiskChildCountsForTenantRow, error)
 	// The children of a parent risk with the fields the hierarchy views show
 	// (#1748). rule_id NULL means the link was made by hand.
 	ListRiskChildLinks(ctx context.Context, arg ListRiskChildLinksParams) ([]ListRiskChildLinksRow, error)
@@ -2613,6 +2631,11 @@ type Querier interface {
 	// extraction is done in Go, not a JSONB-path SQL expression that would trip
 	// pgx type inference). `created_at` lower bound is passed explicitly so pgx
 	// never has to infer a bare-placeholder type (SQLSTATE 42P08).
+	//
+	// Roll-up parents are left out (#2060): a parent summarises children that
+	// are already ranked here, so counting it too would show the same exposure
+	// twice. A risk is a roll-up when it had at least one child linked as of the
+	// brief's date.
 	ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBoardBriefParams) ([]Risk, error)
 	// AC-3: risks linked to one control via slice 020's risk_control_links.
 	// One join from the link table to risks; the per-link design_score is the
@@ -3050,6 +3073,15 @@ type Querier interface {
 	// lock (LockAggregationKey) so the two locks are always acquired in the
 	// same order.
 	LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error
+	LockTenantTheme(ctx context.Context, arg LockTenantThemeParams) (OrgTheme, error)
+	// ===== #1811: organisation theme management =====
+	// #1811: serialize a theme rename or delete with every theme assignment in
+	// one tenant. Rename and delete take it exclusively before anything else;
+	// an assignment takes the shared form (LockThemeVocabularyShared) before it
+	// validates, so it can never write a name a concurrent rename or delete has
+	// just removed. Transaction-scoped.
+	LockThemeVocabulary(ctx context.Context, tenantID pgtype.UUID) error
+	LockThemeVocabularyShared(ctx context.Context, tenantID pgtype.UUID) error
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
@@ -3143,6 +3175,12 @@ type Querier interface {
 	RemoveAllSCIMGroupMembers(ctx context.Context, arg RemoveAllSCIMGroupMembersParams) (int64, error)
 	// Removes a single (group, user) membership edge. Returns affected-row count.
 	RemoveSCIMGroupMember(ctx context.Context, arg RemoveSCIMGroupMemberParams) (int64, error)
+	// Replace a theme name in every one of the tenant's risk theme arrays,
+	// keeping the array deduplicated and sorted as AssignThemes stores it.
+	RenameThemeOnRisks(ctx context.Context, arg RenameThemeOnRisksParams) (int64, error)
+	// Retarget the tenant's aggregation rules. The engine reads target_theme
+	// from rule_body, and the column is its queryable projection, so both move.
+	RenameThemeOnRules(ctx context.Context, arg RenameThemeOnRulesParams) (int64, error)
 	// Overwrites the group's display name (Patch/Replace of displayName). Bumps
 	// updated_at.
 	ReplaceSCIMGroupDisplayName(ctx context.Context, arg ReplaceSCIMGroupDisplayNameParams) (ScimGroup, error)
@@ -3340,6 +3378,12 @@ type Querier interface {
 	// superseded_by at the new row, stamp superseded_at = now(). Skips the
 	// new row itself (id <> @new_id) so a re-running activation is idempotent.
 	SupersedePreviousActivated(ctx context.Context, arg SupersedePreviousActivatedParams) error
+	// Names are unique across the built-ins and the tenant's own themes; the
+	// two partial unique indexes only cover each namespace on its own.
+	ThemeNameTaken(ctx context.Context, arg ThemeNameTakenParams) (bool, error)
+	// How many of the tenant's risks carry the theme, and how many of its
+	// aggregation rules (any status) target it.
+	ThemeUsage(ctx context.Context, arg ThemeUsageParams) (ThemeUsageRow, error)
 	// Soft-delete (P0-384-6). Sets tombstoned_at; the row is preserved. A
 	// second tombstone is a no-op-miss (already tombstoned -> zero rows -> 404).
 	TombstoneActionPlan(ctx context.Context, arg TombstoneActionPlanParams) (ActionPlan, error)
@@ -3452,6 +3496,7 @@ type Querier interface {
 	// to 1..3650 (defense in depth atop the handler's check). Existing risks keep
 	// their review dates: the cadence is read only when a risk is inserted.
 	UpdateTenantRiskReviewCadence(ctx context.Context, arg UpdateTenantRiskReviewCadenceParams) (UpdateTenantRiskReviewCadenceRow, error)
+	UpdateTenantTheme(ctx context.Context, arg UpdateTenantThemeParams) (OrgTheme, error)
 	// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
 	// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
 	// value to leave the column unchanged. The handler builds the diff from the request

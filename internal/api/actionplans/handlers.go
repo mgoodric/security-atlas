@@ -46,7 +46,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
-	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -497,8 +496,8 @@ func (h *Handler) identity(w http.ResponseWriter, r *http.Request) (context.Cont
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return nil, uuid.Nil, false
 	}
-	actor, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
-	if err != nil {
+	actor, ok := credstore.CallerUserID(cred)
+	if !ok {
 		httpresp.WriteError(w, http.StatusForbidden, "action plan mutation requires a user credential")
 		return nil, uuid.Nil, false
 	}

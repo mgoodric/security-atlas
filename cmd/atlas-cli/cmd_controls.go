@@ -238,31 +238,40 @@ func renderGateRejection(body []byte) (string, bool) {
 }
 
 func newControlsValidateCmd() *cobra.Command {
+	var catalogs []string
 	cmd := &cobra.Command{
 		Use:   "validate <path>",
 		Short: "validate a control bundle locally (no network call)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(_ *cobra.Command, args []string) error {
+		Long: "Parse and validate a control bundle locally. Reports the SCF release the bundle " +
+			"declares (scf_release). With --scf-catalog (repeatable; the same JSON catalogs " +
+			"`catalog import-scf` loads), also flags a scf_anchor_id whose meaning changed in " +
+			"a release later than the declared one: renamed, split, reused for another control, " +
+			"renumbered or withdrawn. Flags are warnings; they do not fail validation.",
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			out := cmd.OutOrStdout()
 			path := args[0]
 			bundle, err := loadBundleFromPath(path)
 			if err != nil {
 				return err
 			}
-			fmt.Printf("OK bundle_id=%s title=%q implementation_type=%s manifest_hash=%s\n",
+			_, _ = fmt.Fprintf(out, "OK bundle_id=%s title=%q implementation_type=%s manifest_hash=%s\n",
 				bundle.Manifest.BundleID,
 				bundle.Manifest.Title,
 				bundle.Manifest.ImplementationType,
 				bundle.ManifestHashHex,
 			)
 			if len(bundle.Manifest.EvidenceQueries) > 0 {
-				fmt.Printf("    evidence_queries=%d\n", len(bundle.Manifest.EvidenceQueries))
+				_, _ = fmt.Fprintf(out, "    evidence_queries=%d\n", len(bundle.Manifest.EvidenceQueries))
 			}
 			if err := bundle.ValidateApplicabilityExpr(); err != nil {
 				return err
 			}
-			return nil
+			return reportSCFRelease(out, &bundle.Manifest, catalogs)
 		},
 	}
+	cmd.Flags().StringArrayVar(&catalogs, "scf-catalog", nil,
+		"SCF catalog JSON (repeatable); flags scf_anchor_id codes whose meaning changed in a release later than the bundle's scf_release")
 	return cmd
 }
 

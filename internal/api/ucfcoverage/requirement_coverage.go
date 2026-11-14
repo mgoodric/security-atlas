@@ -15,7 +15,17 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
+
+// releaseLabel is the `scf_release` a coverage read echoes: the pinned
+// release's label, or nil (JSON null) when the read was not pinned.
+func releaseLabel(r *scfrelease.Release) *string {
+	if r == nil {
+		return nil
+	}
+	return &r.Version
+}
 
 // ===== /v1/requirements/{id}/coverage =====
 
@@ -35,8 +45,10 @@ import (
 //   - ?as-of=<RFC3339> — accepted no-op; slice 012 will wire evidence
 //     filtering. Caller-friendly so dashboards can start sending the
 //     param ahead of slice 012's eval engine.
-//   - ?scf_release=<version> — accepted no-op until multiple SCF
-//     releases are importable in the same DB.
+//   - ?scf_release=<version> — pin the anchors to one SCF release
+//     (#1770); an unknown label is 404. `scf_release` in the response
+//     names the pinned release, or is null when the read was unpinned
+//     (no parameter: every release's anchors, as before #1770).
 //
 // Returns:
 //   - 200 { requirement, anchors[], controls[] } on success
@@ -61,8 +73,16 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scfFV := h.resolveSCFRelease(ctx, r)
-	anchors, err := h.listAnchorsForRequirement(ctx, req.ID, scfFV)
+	scfRel, err := h.resolveSCFRelease(ctx, r)
+	if errors.Is(err, scfrelease.ErrUnknownRelease) {
+		httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		httperr.WriteInternal(w, r, "resolve scf release", err)
+		return
+	}
+	anchors, err := h.listAnchorsForRequirement(ctx, req.ID, scfRel)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list anchors for requirement", err)
 		return
@@ -116,6 +136,7 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 		"coverage_strength": score,
 		"confidence_band":   string(band),
 		"exclusion":         exclusion,
+		"scf_release":       releaseLabel(scfRel),
 	})
 
 }
@@ -302,7 +323,7 @@ type anchorEdge struct {
 
 // listAnchorsForRequirement runs either the unpinned or pinned variant
 // based on whether an SCF framework_version filter was supplied.
-func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UUID, scfFV *dbx.FrameworkVersion) ([]anchorEdge, error) {
+func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UUID, scfFV *scfrelease.Release) ([]anchorEdge, error) {
 	if scfFV == nil {
 		rows, err := h.q.ListAnchorsForRequirementWithEdges(ctx, reqID)
 		if err != nil {
@@ -373,23 +394,26 @@ func (h *Handler) listControlsForAnchors(ctx context.Context, anchorIDs []pgtype
 	return out, nil
 }
 
-// resolveSCFRelease parses ?scf_release=<version> into a framework_version
-// row for the SCF framework. Returns nil on absence (no filter) or
-// when the version doesn't resolve. Distinct from
-// resolveFrameworkVersion because the slug is fixed to "scf".
-func (h *Handler) resolveSCFRelease(ctx context.Context, r *http.Request) *dbx.FrameworkVersion {
-	v := r.URL.Query().Get("scf_release")
-	if v == "" {
-		return nil
+// resolveSCFRelease resolves ?scf_release=<label> to the SCF release the
+// coverage read is pinned to (#1770). An unknown label is
+// scfrelease.ErrUnknownRelease.
+//
+// Absent, it returns a nil pin: the traversal stays unpinned, as before
+// #1770, and the response echoes `scf_release: null`. Defaulting to the
+// current release would show no anchors for every requirement between a
+// new SCF release import and the re-bind of its crosswalk edges (#1971),
+// so that default is the contract step, not this expand step. See
+// docs/audit-log/1770-release-aware-anchor-resolution-decisions.md D1.
+func (h *Handler) resolveSCFRelease(ctx context.Context, r *http.Request) (*scfrelease.Release, error) {
+	label := r.URL.Query().Get("scf_release")
+	if label == "" {
+		return nil, nil
 	}
-	row, err := h.q.GetFrameworkVersionBySlugAndVersion(ctx, dbx.GetFrameworkVersionBySlugAndVersionParams{
-		Slug:    "scf",
-		Version: v,
-	})
+	rel, err := scfrelease.Lookup(ctx, h.q, label)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return &row
+	return &rel, nil
 }
 
 // anchorWiresFromAnchors maps the internal anchorEdge slice to the

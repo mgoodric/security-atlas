@@ -473,3 +473,28 @@ func TestPatchTenant_NameAndGateModeTogether(t *testing.T) {
 		t.Fatalf("expected 1 rename + 1 gate-policy audit row; got rename=%d gate=%d", renameCount, gateCount)
 	}
 }
+
+// #2183: a local-login / PKCE / device-grant JWT bridges Subject
+// "user:<uuid>" into cred.UserID. The rename's audit row used to parse that
+// raw and record uuid.Nil as the actor; it now resolves the user through
+// credstore.CallerUserID.
+func TestPatchTenant_AuditActorFromUserPrefixedSubject(t *testing.T) {
+	tenantID := seedTenant(t, "Before Actor")
+	userID := uuid.New()
+	h := newRouter(t, tenantID, "user:"+userID.String(), true)
+
+	res, _ := patch(t, h, "/v1/tenants/"+tenantID.String(), map[string]any{"name": "After Actor"})
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("PATCH failed: status %d", res.StatusCode)
+	}
+	var actor uuid.UUID
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT user_id FROM me_audit_log WHERE tenant_id = $1 AND action = 'tenant_rename'`,
+		tenantID,
+	).Scan(&actor); err != nil {
+		t.Fatalf("read audit row: %v", err)
+	}
+	if actor != userID {
+		t.Errorf("audit actor = %s; want the subject's user %s", actor, userID)
+	}
+}
