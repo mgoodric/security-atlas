@@ -40,7 +40,7 @@ The guard ships with a `knownMismatch` allowlist that waives the 73 rows mismatc
 
 So the list can only shrink. The per-family follow-ups below each remap their rows across the repo and delete the matching entries. This is the same shape as `KNOWN_UNENROLLED` in `scripts/audit-integration-enrolment.sh`.
 
-### D3: licensing. Vendor IDs and titles only, with attribution. **Confidence: HIGH on the license, MEDIUM on the policy reading.**
+### D3: licensing. Vendor IDs and titles only, with attribution. **Confidence: HIGH. The policy reading was confirmed by Matt, 2026-11-13.**
 
 - The SCF is licensed under **CC BY-ND 4.0**. Sources: https://securecontrolsframework.com/terms-conditions/ (SCF EULA) and the upstream repo README ("free via Creative Commons licensing"). The workbook itself carries no license text.
 - CC BY-ND 4.0 §2(a)(1)(A) permits reproducing and sharing the licensed material "in whole or in part". The ND restriction applies to _Adapted Material_, so a verbatim, unmodified excerpt is permitted, with attribution under §3(a).
@@ -49,7 +49,12 @@ So the list can only shrink. The per-family follow-ups below each remap their ro
 - The file lives under a Go `testdata/` directory, so it is not in any built artifact: no container image, binary or release bundle carries it. It does travel in the GitHub source archives and the Go module zip. That is fine under CC BY-ND 4.0, because the excerpt is verbatim and attributed.
 - It carries the attribution, the license link, the source URL and the sha256 in its header.
 
-Left open, and flagged for Matt: the issue's fix says to regenerate the _sample_ with titles verbatim. The sample is seeded by the docker bootstrap (`deploy/docker/bootstrap/bootstrap.sh`), so verbatim SCF titles there arguably are bundled SCF data under OQ #1. The sample already ships SCF-shaped titles today, so this PR doesn't change that exposure. The follow-ups should keep sample descriptions as our own paraphrase rather than SCF text, or OQ #1 should be revisited explicitly.
+Matt's rulings (2026-11-13), now recorded as a clarification under OQ #1 in `docs/RELEASE_READINESS.md` and in `Plans/canvas/11-open-questions.md`:
+
+1. **The test-only ID/title pin fits OQ #1.** It is a verbatim, attributed excerpt and is not in any built artifact.
+2. **The shipped sample uses official SCF IDs and titles verbatim, and its descriptions stay in our own words.** The docker bootstrap seeds the sample (`deploy/docker/bootstrap/bootstrap.sh`), so it does ship. The CC BY-ND attribution therefore goes in its header: the `attribution` and `license` keys in `migrations/fixtures/scf-sample.json`. `scfimport.Load` ignores unknown keys, and every reader of the sample goes through it.
+
+So the follow-up groups regenerate sample titles to match the pin exactly. They write each description themselves and never copy SCF's text.
 
 ### D4: the guard lives in `internal/api/scfseed` as a unit test. **Confidence: HIGH.**
 
