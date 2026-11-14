@@ -325,6 +325,20 @@ func TestHTTP_TTLClampedToOneHour(t *testing.T) {
 			}
 		}
 	}
+
+	// #1914: a ttl that overflows time.Duration clamps to the max instead
+	// of wrapping (2^62 seconds wrapped to 0 and got the 15-minute default).
+	for _, q := range []string{"4611686018427387904", "9223372036854775807"} {
+		resp3, raw3 := getArtifact(t, s, up.Artifact.ID, q)
+		if resp3.StatusCode != http.StatusOK {
+			t.Fatalf("get ttl=%s: %d %s", q, resp3.StatusCode, raw3)
+		}
+		dn.TTLSeconds = 0
+		_ = json.Unmarshal(raw3, &dn)
+		if dn.TTLSeconds != 3600 {
+			t.Fatalf("ttl=%s: got ttl_seconds %d, want 3600", q, dn.TTLSeconds)
+		}
+	}
 }
 
 // AC-6 + ISC-22 + ISC-23 + ISC-A3 — every upload + every download adds

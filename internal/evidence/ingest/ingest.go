@@ -32,6 +32,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/structpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
@@ -165,7 +166,48 @@ var (
 	ErrScopeViolation      = errors.New("ingest: credential not authorized for this push")
 	ErrObservedAtSkew      = errors.New("ingest: observed_at outside permitted skew window")
 	ErrOversized           = errors.New("ingest: payload exceeds inline size limit; use payload_uri")
+	// ErrUnavailable is returned by ProcessInTx on a nil *Service: the
+	// domain store was built without an ingest service (#1830).
+	ErrUnavailable = errors.New("ingest: no ingest service wired")
 )
+
+// DomainWriterPath is the ingestion_path a platform-internal domain writer
+// (change register, incident register, personnel security, access review)
+// records on its evidence: the evidence is produced by an operator action
+// inside the platform rather than pushed by a connector.
+const DomainWriterPath = "manual_upload"
+
+// ForDomainWriter returns svc tagged with DomainWriterPath, or nil for a
+// nil svc so the store fails closed with ErrUnavailable.
+func ForDomainWriter(svc *Service) *Service {
+	if svc == nil {
+		return nil
+	}
+	return svc.WithPath(DomainWriterPath)
+}
+
+// SystemCredential is the credential a domain writer ingests under: a
+// fixed system id, the tenant, and the only evidence kinds it may write,
+// so the credential kind-scope check bounds it like a connector key.
+func SystemCredential(id, tenantID string, kinds ...string) credstore.Credential {
+	return credstore.Credential{ID: id, TenantID: tenantID, Kinds: kinds}
+}
+
+// PayloadStruct converts a JSON-encodable value (typically a
+// map[string]any) into the protobuf Struct an EvidenceRecord carries, by
+// way of its JSON encoding, so json.RawMessage and integer fields convert
+// the same way they would on the REST push path.
+func PayloadStruct(v any) (*structpb.Struct, error) {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("ingest: payload marshal: %w", err)
+	}
+	out := &structpb.Struct{}
+	if err := protojson.Unmarshal(raw, out); err != nil {
+		return nil, fmt.Errorf("ingest: payload to struct: %w", err)
+	}
+	return out, nil
+}
 
 // Receipt is the outcome of a successful (accepted or deduplicated)
 // push. The caller (HTTP/gRPC handler) returns it to the pusher; the
@@ -342,23 +384,140 @@ func (s *Service) Process(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 // it is valid. The stream-buffer consumer uses this to make the publish-time
 // receipt id the same id a pusher later polls for terminal status.
 func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential, recordID pgtype.UUID) (Receipt, Decision, error) {
+	p, decision, err := s.prepare(ctx, rec, cred, recordID)
+	if err != nil {
+		return Receipt{}, decision, err
+	}
+
+	// The DB write runs inside a transaction with the tenant GUC set so
+	// RLS allows the INSERT (tenant_insert WITH CHECK). The idempotency
+	// dedup also happens inside that tx so a same-key concurrent push
+	// either observes the existing row OR trips the UNIQUE index.
+	tenantCtx, terr := tenancy.WithTenant(ctx, cred.TenantID)
+	if terr != nil {
+		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "WithTenant: "+terr.Error(), recordID)
+		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: tenant context: %w", terr)
+	}
+
+	var newRecord dbx.EvidenceRecord
+	var deduped bool
+	err = pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+		if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
+			return fmt.Errorf("apply tenant: %w", terr)
+		}
+		var perr error
+		newRecord, deduped, perr = s.persist(tenantCtx, tx, p, LedgerOptions{})
+		return perr
+	})
+	if err != nil {
+		return Receipt{}, s.auditPersistFailure(ctx, p, err), err
+	}
+
+	decision = DecisionAccepted
+	if deduped {
+		decision = DecisionDeduplicated
+	}
+	s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID)
+	return receiptFor(cred, newRecord, deduped), decision, nil
+}
+
+// LedgerOptions overrides ledger columns a domain writer owns. The zero
+// value keeps the push-path defaults: monthly freshness, no valid_until.
+type LedgerOptions struct {
+	FreshnessClass dbx.EvidenceFreshnessClass
+	ValidUntil     time.Time
+}
+
+// ProcessInTx is the in-transaction variant of Process, for domain
+// writers whose evidence record must commit atomically with their own
+// rows: a change approval or verification, an incident postmortem, a
+// personnel-security item completion, an access-review completion
+// (#1830). It runs every check Process runs (required fields, observed_at
+// skew, payload size, registered kind, schema validation, redaction,
+// credential kind scope and scope predicate, canonical hash, idempotency)
+// and writes the record into the caller's transaction instead of its own.
+//
+// tx must already carry the tenant GUC for cred.TenantID, and ctx must
+// carry the same tenant. Audit rows land as follows:
+//
+//   - a refusal is audited in its own short transaction, so the
+//     rejected_* row survives the caller rolling back on the returned
+//     error (the #1751 contract: a backdated record is refused AND leaves
+//     an audit row);
+//   - an accepted or deduplicated record is audited inside tx, so the
+//     audit row and the ledger row commit or roll back together. A failed
+//     audit insert fails the call.
+//
+// Domain stores must not call dbx.InsertEvidenceRecord or raw-insert into
+// evidence_records; TestNoDirectEvidenceLedgerWrites enforces that.
+func (s *Service) ProcessInTx(ctx context.Context, tx pgx.Tx, rec *evidencev1.EvidenceRecord, cred credstore.Credential, opts LedgerOptions) (Receipt, Decision, error) {
+	if s == nil {
+		// A domain store built without an ingest service fails closed
+		// rather than writing the ledger some other way.
+		return Receipt{}, DecisionRejectedInternalError, ErrUnavailable
+	}
+	if tx == nil {
+		return Receipt{}, DecisionRejectedInternalError, errors.New("ingest: ProcessInTx needs a transaction")
+	}
+	if tenant, terr := tenancy.TenantFromContext(ctx); terr != nil || !strings.EqualFold(tenant, cred.TenantID) {
+		return Receipt{}, DecisionRejectedUnauthenticated, errors.New("ingest: context tenant does not match credential tenant")
+	}
+	p, decision, err := s.prepare(ctx, rec, cred, pgtype.UUID{})
+	if err != nil {
+		return Receipt{}, decision, err
+	}
+	newRecord, deduped, err := s.persist(ctx, tx, p, opts)
+	if err != nil {
+		return Receipt{}, s.auditPersistFailure(ctx, p, err), err
+	}
+	decision = DecisionAccepted
+	if deduped {
+		decision = DecisionDeduplicated
+	}
+	if err := s.insertAudit(ctx, dbx.New(tx), cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID); err != nil {
+		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: audit row: %w", err)
+	}
+	return receiptFor(cred, newRecord, deduped), decision, nil
+}
+
+// prepared is a record that passed every pre-write check, with the
+// derived ledger columns computed once.
+type prepared struct {
+	rec               *evidencev1.EvidenceRecord
+	cred              credstore.Credential
+	recordID          pgtype.UUID
+	observed          time.Time
+	observedAtNanos   int64
+	payloadJSON       []byte
+	hash              string
+	scopeCanonical    []byte
+	provenance        []byte
+	sourceAttribution []byte
+	controlID         pgtype.UUID
+	result            dbx.EvidenceResult
+}
+
+// prepare runs the pre-write stage shared by Process and ProcessInTx
+// (steps 1-7 in Process's doc). Every refusal is audited in its own
+// transaction before it returns.
+func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, cred credstore.Credential, recordID pgtype.UUID) (*prepared, Decision, error) {
 	receivedAt := s.clock()
 
 	if rec == nil {
 		s.writeAudit(ctx, cred, "", "", DecisionRejectedValidation, "nil record", recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: record is nil", ErrMissingField)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: record is nil", ErrMissingField)
 	}
 
 	// Anonymous credential (no tenant) must never reach Process; the
 	// auth middleware rejects unauthenticated requests upstream. Defensive
 	// belt-and-braces check.
 	if cred.TenantID == "" {
-		return Receipt{}, DecisionRejectedUnauthenticated, fmt.Errorf("ingest: credential has no tenant")
+		return nil, DecisionRejectedUnauthenticated, fmt.Errorf("ingest: credential has no tenant")
 	}
 
 	if msg := missingField(rec); msg != "" {
 		s.writeAudit(ctx, cred, rec.GetIdempotencyKey(), rec.GetEvidenceKind(), DecisionRejectedValidation, msg, recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: %s", ErrMissingField, msg)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: %s", ErrMissingField, msg)
 	}
 
 	// AC-8: observed_at skew check (replay protection).
@@ -367,7 +526,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	if skew < -MaxObservedAtSkew || skew > MaxObservedAtSkew {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedObservedAtSkew,
 			fmt.Sprintf("observed_at skew %s > %s", skew, MaxObservedAtSkew), recordID)
-		return Receipt{}, DecisionRejectedObservedAtSkew, fmt.Errorf("%w: skew=%s limit=%s", ErrObservedAtSkew, skew, MaxObservedAtSkew)
+		return nil, DecisionRejectedObservedAtSkew, fmt.Errorf("%w: skew=%s limit=%s", ErrObservedAtSkew, skew, MaxObservedAtSkew)
 	}
 
 	// AC-6 partial: oversize gate (slice 036 will redirect to S3).
@@ -392,12 +551,12 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	payloadJSON, err := protojson.Marshal(rec.GetPayload())
 	if err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, "payload marshal: "+err.Error(), recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: payload marshal: %v", ErrValidation, err)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: payload marshal: %v", ErrValidation, err)
 	}
 	if len(payloadJSON) > MaxPayloadBytes && rec.PayloadUri == nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedOversized,
 			fmt.Sprintf("payload %d > %d bytes", len(payloadJSON), MaxPayloadBytes), recordID)
-		return Receipt{}, DecisionRejectedOversized, fmt.Errorf("%w: %d > %d bytes", ErrOversized, len(payloadJSON), MaxPayloadBytes)
+		return nil, DecisionRejectedOversized, fmt.Errorf("%w: %d > %d bytes", ErrOversized, len(payloadJSON), MaxPayloadBytes)
 	}
 
 	// AC-1 + anti-criterion: schemaless push rejected via slice-014 hook.
@@ -414,11 +573,11 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	if !registered {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedUnknownKind,
 			fmt.Sprintf("kind=%s version=%s", rec.EvidenceKind, rec.SchemaVersion), recordID)
-		return Receipt{}, DecisionRejectedUnknownKind, fmt.Errorf("%w: %s/%s", ErrUnknownKind, rec.EvidenceKind, rec.SchemaVersion)
+		return nil, DecisionRejectedUnknownKind, fmt.Errorf("%w: %s/%s", ErrUnknownKind, rec.EvidenceKind, rec.SchemaVersion)
 	}
 	if err := s.valid.ValidatePayload(ctx, cred.TenantID, rec.EvidenceKind, rec.SchemaVersion, payloadJSON); err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation, err.Error(), recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: %v", ErrValidation, err)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: %v", ErrValidation, err)
 	}
 
 	// AC-6 (slice 015): apply per-kind redaction rules BEFORE hashing so
@@ -445,14 +604,14 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 		if rerr != nil {
 			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
 				"redaction lookup: "+rerr.Error(), recordID)
-			return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction lookup: %w", rerr)
+			return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction lookup: %w", rerr)
 		}
 		if len(rules) > 0 {
 			redacted, aerr := redact.Apply(rec.Payload, rules)
 			if aerr != nil {
 				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
 					"redaction apply: "+aerr.Error(), recordID)
-				return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction apply: %w", aerr)
+				return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: redaction apply: %w", aerr)
 			}
 			rec.Payload = redacted
 			// The pre-redact `payloadJSON` is discarded here; the next
@@ -466,7 +625,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 			if merr != nil {
 				s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError,
 					"payload re-marshal after redact", recordID)
-				return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: redacted re-marshal: %w", merr)
+				return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: redacted re-marshal: %w", merr)
 			}
 			payloadJSON = redactedJSON
 		}
@@ -479,7 +638,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	if len(cred.Kinds) > 0 && !contains(cred.Kinds, rec.EvidenceKind) {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
 			fmt.Sprintf("credential %s not authorized for kind %s", cred.ID, rec.EvidenceKind), recordID)
-		return Receipt{}, DecisionRejectedScopeViolation, fmt.Errorf("%w: kind=%s", ErrScopeViolation, rec.EvidenceKind)
+		return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: kind=%s", ErrScopeViolation, rec.EvidenceKind)
 	}
 
 	// Credential scope_predicate: a tiny key=value subset enforcement for
@@ -490,7 +649,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 		if !scopeSatisfiesPredicate(rec.GetScope(), cred.ScopePredicate) {
 			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedScopeViolation,
 				fmt.Sprintf("scope_predicate %q not satisfied", cred.ScopePredicate), recordID)
-			return Receipt{}, DecisionRejectedScopeViolation, fmt.Errorf("%w: predicate=%q", ErrScopeViolation, cred.ScopePredicate)
+			return nil, DecisionRejectedScopeViolation, fmt.Errorf("%w: predicate=%q", ErrScopeViolation, cred.ScopePredicate)
 		}
 	}
 
@@ -501,7 +660,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	hash, err := canonjson.HashRecord(rec)
 	if err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson: "+err.Error(), recordID)
-		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: hash: %w", err)
+		return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: hash: %w", err)
 	}
 
 	// Slice 474: persist the canonical (sorted) wire scope the hash was
@@ -514,7 +673,7 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	scopeCanonical, err := canonjson.MarshalCanonicalScope(rec.GetScope())
 	if err != nil {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "canonjson scope: "+err.Error(), recordID)
-		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: canonical scope: %w", err)
+		return nil, DecisionRejectedInternalError, fmt.Errorf("ingest: canonical scope: %w", err)
 	}
 
 	// Slice 633: persist the LOSSLESS wire observed_at as a nanosecond
@@ -560,126 +719,137 @@ func (s *Service) ProcessWithRecordID(ctx context.Context, rec *evidencev1.Evide
 	if !ok {
 		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedValidation,
 			"unrecognized result enum", recordID)
-		return Receipt{}, DecisionRejectedValidation, fmt.Errorf("%w: result=%s", ErrMissingField, rec.Result)
+		return nil, DecisionRejectedValidation, fmt.Errorf("%w: result=%s", ErrMissingField, rec.Result)
 	}
 
-	// The DB write runs inside a transaction with the tenant GUC set so
-	// RLS allows the INSERT (tenant_insert WITH CHECK). The idempotency
-	// dedup also happens inside that tx so a same-key concurrent push
-	// either observes the existing row OR trips the UNIQUE index.
-	tenantCtx, terr := tenancy.WithTenant(ctx, cred.TenantID)
-	if terr != nil {
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, "WithTenant: "+terr.Error(), recordID)
-		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: tenant context: %w", terr)
+	return &prepared{
+		rec:               rec,
+		cred:              cred,
+		recordID:          recordID,
+		observed:          observed,
+		observedAtNanos:   observedAtNanos,
+		payloadJSON:       payloadJSON,
+		hash:              hash,
+		scopeCanonical:    scopeCanonical,
+		provenance:        provenanceBytes,
+		sourceAttribution: sourceAttribJSON,
+		controlID:         controlID,
+		result:            resultEnum,
+	}, DecisionUnknown, nil
+}
+
+// persist runs the write stage shared by Process and ProcessInTx inside
+// tx, which already carries the tenant GUC: the idempotency lookup, then
+// the append-only INSERT. It returns the ledger row and whether it was a
+// deduplicated hit on an existing record.
+func (s *Service) persist(ctx context.Context, tx pgx.Tx, p *prepared, opts LedgerOptions) (dbx.EvidenceRecord, bool, error) {
+	q := dbx.New(tx)
+
+	// AC-3 / AC-4: idempotency lookup.
+	idemKey := p.rec.IdempotencyKey
+	lookup := dbx.GetEvidenceRecordByIdempotencyParams{
+		TenantID:       pgUUID(p.cred.TenantID),
+		IdempotencyKey: &idemKey,
+	}
+	existing, lerr := q.GetEvidenceRecordByIdempotency(ctx, lookup)
+	if lerr == nil {
+		// A row already exists for this idempotency_key. Either the
+		// hash matches (deduplicate, return original receipt) or it
+		// doesn't (reject with 409).
+		if existing.Hash != p.hash {
+			return dbx.EvidenceRecord{}, false, ErrIdempotencyMismatch
+		}
+		return existing, true, nil
+	} else if !errors.Is(lerr, pgx.ErrNoRows) {
+		return dbx.EvidenceRecord{}, false, fmt.Errorf("idempotency lookup: %w", lerr)
 	}
 
-	var newRecord dbx.EvidenceRecord
-	var deduped bool
+	// AC-1: append the record.
+	insertRecordID := p.recordID
+	if !insertRecordID.Valid {
+		insertRecordID = pgUUID(uuid.New().String())
+	}
+	freshness := dbx.EvidenceFreshnessClassMonthly // default; tightened by control bundle in slice 016
+	if opts.FreshnessClass != "" {
+		freshness = opts.FreshnessClass
+	}
+	validUntil := pgtype.Timestamptz{}
+	if !opts.ValidUntil.IsZero() {
+		validUntil = pgtype.Timestamptz{Time: opts.ValidUntil, Valid: true}
+	}
 
-	err = pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
-		if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
-			return fmt.Errorf("apply tenant: %w", terr)
-		}
-		q := dbx.New(tx)
-
-		// AC-3 / AC-4: idempotency lookup.
-		idemKey := rec.IdempotencyKey
-		existing, lerr := q.GetEvidenceRecordByIdempotency(tenantCtx, dbx.GetEvidenceRecordByIdempotencyParams{
-			TenantID:       pgUUID(cred.TenantID),
-			IdempotencyKey: &idemKey,
-		})
-		if lerr == nil {
-			// A row already exists for this idempotency_key. Either the
-			// hash matches (deduplicate, return original receipt) or it
-			// doesn't (reject with 409).
-			if existing.Hash != hash {
-				return ErrIdempotencyMismatch
-			}
-			newRecord = existing
-			deduped = true
-			return nil
-		} else if !errors.Is(lerr, pgx.ErrNoRows) {
-			return fmt.Errorf("idempotency lookup: %w", lerr)
-		}
-
-		// AC-1: append the record.
-		insertRecordID := recordID
-		if !insertRecordID.Valid {
-			insertRecordID = pgUUID(uuid.New().String())
-		}
-		validUntil := pgtype.Timestamptz{}
-
-		params := dbx.InsertEvidenceRecordParams{
-			ID:                insertRecordID,
-			TenantID:          pgUUID(cred.TenantID),
-			ControlID:         controlID,
-			ControlRef:        rec.ControlId,
-			ScopeID:           pgtype.UUID{},
-			ObservedAt:        pgtype.Timestamptz{Time: observed, Valid: true},
-			Provenance:        provenanceBytes,
-			Result:            resultEnum,
-			Payload:           payloadJSON,
-			PayloadUri:        rec.PayloadUri,
-			Hash:              hash,
-			FreshnessClass:    dbx.EvidenceFreshnessClassMonthly, // default; tightened by control bundle in slice 016
-			ValidUntil:        validUntil,
-			IdempotencyKey:    &idemKey,
-			EvidenceKind:      ptrStr(rec.EvidenceKind),
-			SchemaVersion:     ptrStr(rec.SchemaVersion),
-			CredentialID:      ptrStr(cred.ID),
-			IngestionPath:     s.path,
-			SourceAttribution: sourceAttribJSON,
-			ScopeCanonical:    scopeCanonical,
-			ObservedAtNanos:   &observedAtNanos,
-		}
-		inserted, ierr := q.InsertEvidenceRecord(tenantCtx, params)
-		if ierr != nil {
-			// Race: a concurrent push with the same idempotency_key won.
-			// Re-fetch and treat as dedup if the hash matches.
-			var pgErr *pgconn.PgError
-			if errors.As(ierr, &pgErr) && pgErr.Code == pgErrUniqueViolation {
-				existing, gerr := q.GetEvidenceRecordByIdempotency(tenantCtx, dbx.GetEvidenceRecordByIdempotencyParams{
-					TenantID:       pgUUID(cred.TenantID),
-					IdempotencyKey: &idemKey,
-				})
-				if gerr == nil {
-					if existing.Hash != hash {
-						return ErrIdempotencyMismatch
-					}
-					newRecord = existing
-					deduped = true
-					return nil
-				}
-			}
-			return fmt.Errorf("insert evidence: %w", ierr)
-		}
-		newRecord = inserted
-		return nil
+	observedAtNanos := p.observedAtNanos
+	params := dbx.InsertEvidenceRecordParams{
+		ID:                insertRecordID,
+		TenantID:          pgUUID(p.cred.TenantID),
+		ControlID:         p.controlID,
+		ControlRef:        p.rec.ControlId,
+		ScopeID:           pgtype.UUID{},
+		ObservedAt:        pgtype.Timestamptz{Time: p.observed, Valid: true},
+		Provenance:        p.provenance,
+		Result:            p.result,
+		Payload:           p.payloadJSON,
+		PayloadUri:        p.rec.PayloadUri,
+		Hash:              p.hash,
+		FreshnessClass:    freshness,
+		ValidUntil:        validUntil,
+		IdempotencyKey:    &idemKey,
+		EvidenceKind:      ptrStr(p.rec.EvidenceKind),
+		SchemaVersion:     ptrStr(p.rec.SchemaVersion),
+		CredentialID:      ptrStr(p.cred.ID),
+		IngestionPath:     s.path,
+		SourceAttribution: p.sourceAttribution,
+		ScopeCanonical:    p.scopeCanonical,
+		ObservedAtNanos:   &observedAtNanos,
+	}
+	// The INSERT runs under a savepoint: a lost idempotency race trips the
+	// UNIQUE index, and outside a savepoint Postgres would abort the whole
+	// transaction, the caller's included under ProcessInTx, before the
+	// re-fetch below could run.
+	var inserted dbx.EvidenceRecord
+	ierr := pgx.BeginFunc(ctx, tx, func(sp pgx.Tx) error {
+		var err error
+		inserted, err = dbx.New(sp).InsertEvidenceRecord(ctx, params)
+		return err
 	})
-
-	if err != nil {
-		if errors.Is(err, ErrIdempotencyMismatch) {
-			s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedIdempotencyMismatch,
-				"hash mismatch for idempotency_key", recordID)
-			return Receipt{}, DecisionRejectedIdempotencyMismatch, ErrIdempotencyMismatch
+	if ierr != nil {
+		// Race: a concurrent push with the same idempotency_key won.
+		// Re-fetch and treat as dedup if the hash matches.
+		var pgErr *pgconn.PgError
+		if errors.As(ierr, &pgErr) && pgErr.Code == pgErrUniqueViolation {
+			existing, gerr := q.GetEvidenceRecordByIdempotency(ctx, lookup)
+			if gerr == nil {
+				if existing.Hash != p.hash {
+					return dbx.EvidenceRecord{}, false, ErrIdempotencyMismatch
+				}
+				return existing, true, nil
+			}
 		}
-		s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, DecisionRejectedInternalError, err.Error(), recordID)
-		return Receipt{}, DecisionRejectedInternalError, err
+		return dbx.EvidenceRecord{}, false, fmt.Errorf("insert evidence: %w", ierr)
 	}
+	return inserted, false, nil
+}
 
-	decision := DecisionAccepted
-	if deduped {
-		decision = DecisionDeduplicated
+// auditPersistFailure audits a write-stage failure in its own transaction
+// and returns the decision it recorded.
+func (s *Service) auditPersistFailure(ctx context.Context, p *prepared, err error) Decision {
+	if errors.Is(err, ErrIdempotencyMismatch) {
+		s.writeAudit(ctx, p.cred, p.rec.IdempotencyKey, p.rec.EvidenceKind, DecisionRejectedIdempotencyMismatch,
+			"hash mismatch for idempotency_key", p.recordID)
+		return DecisionRejectedIdempotencyMismatch
 	}
-	s.writeAudit(ctx, cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID)
+	s.writeAudit(ctx, p.cred, p.rec.IdempotencyKey, p.rec.EvidenceKind, DecisionRejectedInternalError, err.Error(), p.recordID)
+	return DecisionRejectedInternalError
+}
 
+func receiptFor(cred credstore.Credential, rec dbx.EvidenceRecord, deduped bool) Receipt {
 	return Receipt{
-		RecordID:     uuid.UUID(newRecord.ID.Bytes).String(),
-		Hash:         newRecord.Hash,
-		IngestedAt:   newRecord.IngestedAt.Time,
+		RecordID:     uuid.UUID(rec.ID.Bytes).String(),
+		Hash:         rec.Hash,
+		IngestedAt:   rec.IngestedAt.Time,
 		CredentialID: cred.ID,
 		Deduplicated: deduped,
-	}, decision, nil
+	}
 }
 
 // writeAudit lands one row in evidence_audit_log. Best-effort: a failure
@@ -717,54 +887,62 @@ func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, ide
 		if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
 			return terr
 		}
-		q := dbx.New(tx)
-		var idemPtr, kindPtr *string
-		if idem != "" {
-			idemPtr = &idem
-		}
-		if kind != "" {
-			kindPtr = &kind
-		}
-		auditID := uuid.New()
-		_, _ = q.InsertEvidenceAuditEntry(tenantCtx, dbx.InsertEvidenceAuditEntryParams{
-			ID:             pgUUID(auditID.String()),
-			TenantID:       pgUUID(cred.TenantID),
-			CredentialID:   cred.ID,
-			Decision:       decision.String(),
-			ReasonCode:     truncate(reason, 1024),
-			IdempotencyKey: idemPtr,
-			EvidenceKind:   kindPtr,
-			RecordID:       recordID,
-		})
-		// Slice 126: fan out the audit row to the external sink. The
-		// canonical Entry shape mirrors slice 124's unifiedlog.Entry;
-		// payload fields not present on the per-domain table land in
-		// PayloadJSON. Non-blocking: this never fails the ingest path.
-		tenantUUID, _ := uuid.Parse(cred.TenantID)
-		recordIDStr := ""
-		if recordID.Valid {
-			recordIDStr = uuid.UUID(recordID.Bytes).String()
-		}
-		payload, _ := json.Marshal(map[string]any{
-			"credential_id":   cred.ID,
-			"idempotency_key": idem,
-			"evidence_kind":   kind,
-			"reason_code":     truncate(reason, 1024),
-		})
-		sink.EmitDefault(tenantCtx, unifiedlog.Entry{
-			OccurredAt:    time.Now().UTC(),
-			ActorID:       cred.ID,
-			TenantID:      tenantUUID,
-			Kind:          unifiedlog.KindEvidence,
-			TargetType:    "evidence_record",
-			TargetID:      recordIDStr,
-			Action:        decision.String(),
-			RowID:         auditID,
-			SubjectModule: unifiedlog.SubjectModuleCore,
-			PayloadJSON:   payload,
-		})
-		return nil
+		return s.insertAudit(tenantCtx, dbx.New(tx), cred, idem, kind, decision, reason, recordID)
 	})
+}
+
+// insertAudit inserts one evidence_audit_log row through q and, once the
+// row is in, fans it out to the external audit sink. writeAudit calls it
+// in its own transaction; ProcessInTx calls it inside the caller's.
+func (s *Service) insertAudit(ctx context.Context, q *dbx.Queries, cred credstore.Credential, idem, kind string, decision Decision, reason string, recordID pgtype.UUID) error {
+	var idemPtr, kindPtr *string
+	if idem != "" {
+		idemPtr = &idem
+	}
+	if kind != "" {
+		kindPtr = &kind
+	}
+	auditID := uuid.New()
+	if _, err := q.InsertEvidenceAuditEntry(ctx, dbx.InsertEvidenceAuditEntryParams{
+		ID:             pgUUID(auditID.String()),
+		TenantID:       pgUUID(cred.TenantID),
+		CredentialID:   cred.ID,
+		Decision:       decision.String(),
+		ReasonCode:     truncate(reason, 1024),
+		IdempotencyKey: idemPtr,
+		EvidenceKind:   kindPtr,
+		RecordID:       recordID,
+	}); err != nil {
+		return err
+	}
+	// Slice 126: fan out the audit row to the external sink. The
+	// canonical Entry shape mirrors slice 124's unifiedlog.Entry;
+	// payload fields not present on the per-domain table land in
+	// PayloadJSON. Non-blocking: this never fails the ingest path.
+	tenantUUID, _ := uuid.Parse(cred.TenantID)
+	recordIDStr := ""
+	if recordID.Valid {
+		recordIDStr = uuid.UUID(recordID.Bytes).String()
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"credential_id":   cred.ID,
+		"idempotency_key": idem,
+		"evidence_kind":   kind,
+		"reason_code":     truncate(reason, 1024),
+	})
+	sink.EmitDefault(ctx, unifiedlog.Entry{
+		OccurredAt:    time.Now().UTC(),
+		ActorID:       cred.ID,
+		TenantID:      tenantUUID,
+		Kind:          unifiedlog.KindEvidence,
+		TargetType:    "evidence_record",
+		TargetID:      recordIDStr,
+		Action:        decision.String(),
+		RowID:         auditID,
+		SubjectModule: unifiedlog.SubjectModuleCore,
+		PayloadJSON:   payload,
+	})
+	return nil
 }
 
 // missingField mirrors slice 003's check; duplicating it here keeps the

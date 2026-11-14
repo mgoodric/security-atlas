@@ -2,10 +2,7 @@
 package incident
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,8 +14,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -40,6 +40,10 @@ const (
 
 	EvidenceKindPostmortem = "incident.postmortem.v1"
 	SchemaVersion          = "1.0.0"
+
+	// EvidenceCredentialID is the system credential the store ingests
+	// postmortem evidence under.
+	EvidenceCredentialID = "system:incident-register"
 )
 
 var (
@@ -54,10 +58,20 @@ var (
 )
 
 type Store struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	ingest *ingest.Service
 }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// WithIngest returns a copy of s that writes postmortem evidence through
+// svc. A store without one fails Close with ingest.ErrUnavailable rather
+// than writing the ledger directly (#1830).
+func (s *Store) WithIngest(svc *ingest.Service) *Store {
+	out := *s
+	out.ingest = ingest.ForDomainWriter(svc)
+	return &out
+}
 
 type CreateInput struct {
 	Title              string
@@ -307,7 +321,7 @@ func (s *Store) Close(ctx context.Context, id uuid.UUID, in CloseInput) (Detail,
 		in.ObservedAt = time.Now().UTC()
 	}
 	var out Detail
-	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := s.withTx(ctx, func(ctx context.Context, tx pgx.Tx, q *dbx.Queries, tenantID uuid.UUID) error {
 		before, err := q.GetIncidentByID(ctx, dbx.GetIncidentByIDParams{TenantID: pgUUID(tenantID), ID: pgUUID(id)})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
@@ -326,7 +340,7 @@ func (s *Store) Close(ctx context.Context, id uuid.UUID, in CloseInput) (Detail,
 			return ErrIRControlRequired
 		}
 		for _, c := range controls {
-			evidenceID, err := insertPostmortemEvidence(ctx, q, tenantID, fromRow(before), uuid.UUID(c.ControlID.Bytes), in)
+			evidenceID, err := s.insertPostmortemEvidence(ctx, tx, tenantID, fromRow(before), uuid.UUID(c.ControlID.Bytes), in)
 			if err != nil {
 				return err
 			}
@@ -396,47 +410,49 @@ func linkEvidence(ctx context.Context, q *dbx.Queries, tenantID, incidentID, evi
 	return nil
 }
 
-func insertPostmortemEvidence(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, inc Incident, controlID uuid.UUID, in CloseInput) (uuid.UUID, error) {
-	payload, _ := json.Marshal(map[string]any{
+// insertPostmortemEvidence writes the postmortem evidence through
+// ingest.Service.ProcessInTx in the close transaction: the caller-supplied
+// observed_at is skew-checked, the payload schema-validated, and the
+// decision lands in evidence_audit_log (#1830).
+func (s *Store) insertPostmortemEvidence(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, inc Incident, controlID uuid.UUID, in CloseInput) (uuid.UUID, error) {
+	affected := json.RawMessage(inc.AffectedSystems)
+	if len(affected) == 0 {
+		affected = json.RawMessage("[]")
+	}
+	payload, err := ingest.PayloadStruct(map[string]any{
 		"incident_id":        inc.ID.String(),
 		"title":              inc.Title,
 		"severity":           inc.Severity,
 		"operator_severity":  inc.OperatorSeverity,
-		"affected_systems":   json.RawMessage(inc.AffectedSystems),
+		"affected_systems":   affected,
 		"postmortem_summary": strings.TrimSpace(in.PostmortemSummary),
 		"closed_by":          strings.TrimSpace(in.Actor),
 	})
-	provenance, _ := json.Marshal(map[string]any{"system": "security-atlas", "source": "incident_register", "incident_id": inc.ID.String()})
-	source, _ := json.Marshal(map[string]any{"type": "incident_register", "incident_id": inc.ID.String(), "actor": strings.TrimSpace(in.Actor)})
-	sum := sha256.Sum256(bytes.Join([][]byte{[]byte(EvidenceKindPostmortem), []byte(inc.ID.String()), []byte(controlID.String()), payload}, []byte{0}))
-	evidenceID := uuid.New()
-	idem := "incident:" + inc.ID.String() + ":" + controlID.String() + ":postmortem"
-	nanos := in.ObservedAt.UnixNano()
-	_, err := q.InsertEvidenceRecord(ctx, dbx.InsertEvidenceRecordParams{
-		ID:                pgUUID(evidenceID),
-		TenantID:          pgUUID(tenantID),
-		ControlID:         pgUUID(controlID),
-		ControlRef:        controlID.String(),
-		ScopeID:           pgtype.UUID{},
-		ObservedAt:        pgTS(in.ObservedAt),
-		Provenance:        provenance,
-		Result:            dbx.EvidenceResultPass,
-		Payload:           payload,
-		PayloadUri:        nil,
-		Hash:              hex.EncodeToString(sum[:]),
-		FreshnessClass:    dbx.EvidenceFreshnessClassMonthly,
-		ValidUntil:        pgtype.Timestamptz{},
-		IdempotencyKey:    &idem,
-		EvidenceKind:      strPtr(EvidenceKindPostmortem),
-		SchemaVersion:     strPtr(SchemaVersion),
-		CredentialID:      strPtr("system:incident-register"),
-		IngestionPath:     "manual_upload",
-		SourceAttribution: source,
-		ScopeCanonical:    []byte("[]"),
-		ObservedAtNanos:   &nanos,
-	})
 	if err != nil {
-		return uuid.Nil, mapWriteErr("insert incident postmortem evidence", err)
+		return uuid.Nil, err
+	}
+	rec := &evidencev1.EvidenceRecord{
+		IdempotencyKey: "incident:" + inc.ID.String() + ":" + controlID.String() + ":postmortem",
+		EvidenceKind:   EvidenceKindPostmortem,
+		SchemaVersion:  SchemaVersion,
+		ControlId:      controlID.String(),
+		Scope:          []*evidencev1.ScopeDimension{{Key: "incident_id", Values: []string{inc.ID.String()}}},
+		ObservedAt:     timestamppb.New(in.ObservedAt),
+		Result:         evidencev1.Result_RESULT_PASS,
+		Payload:        payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "system",
+			ActorId:   EvidenceCredentialID,
+		},
+	}
+	cred := ingest.SystemCredential(EvidenceCredentialID, tenantID.String(), EvidenceKindPostmortem)
+	receipt, _, err := s.ingest.ProcessInTx(ctx, tx, rec, cred, ingest.LedgerOptions{})
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("ingest incident postmortem evidence: %w", err)
+	}
+	evidenceID, err := uuid.Parse(receipt.RecordID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("incident: parse evidence id: %w", err)
 	}
 	return evidenceID, nil
 }
@@ -517,6 +533,14 @@ func writeTimeline(ctx context.Context, q *dbx.Queries, tenantID, incidentID uui
 }
 
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries, uuid.UUID) error) error {
+	return s.withTx(ctx, func(ctx context.Context, _ pgx.Tx, q *dbx.Queries, tenantID uuid.UUID) error {
+		return fn(ctx, q, tenantID)
+	})
+}
+
+// withTx is inTx with the transaction exposed, for writes that hand it to
+// ingest.Service.ProcessInTx.
+func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx, *dbx.Queries, uuid.UUID) error) error {
 	tenantStr, err := tenancy.TenantFromContext(ctx)
 	if err != nil {
 		return err
@@ -533,8 +557,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
 		return err
 	}
-	q := dbx.New(tx)
-	if err := fn(ctx, q, tenantID); err != nil {
+	if err := fn(ctx, tx, dbx.New(tx), tenantID); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
