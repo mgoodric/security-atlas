@@ -159,7 +159,15 @@ func TestCalendarICS_LeavesOutRiskAndPlanEvents(t *testing.T) {
 			t.Fatalf("ICS%s status=%d body=%s", types, resp.StatusCode, body)
 		}
 		ics := string(body)
-		for _, banned := range []string{"Risk review:", "Action plan due:", fx.A.OverdueRisk.String(), fx.A.OverduePlan.String()} {
+		// The acknowledgement lapsing in 10 days is in the feed without its
+		// user: no user id reaches an ICS subscriber.
+		if types == "" && !strings.Contains(ics, "Policy acknowledgement due:") {
+			t.Errorf("ICS lost the policy acknowledgement event")
+		}
+		for _, banned := range []string{
+			"Risk review:", "Action plan due:", fx.A.OverdueRisk.String(), fx.A.OverduePlan.String(),
+			fx.A.Owner.String(), fx.A.Other.String(),
+		} {
 			if strings.Contains(ics, banned) {
 				t.Errorf("ICS%s carries %q", types, banned)
 			}
@@ -192,6 +200,18 @@ func TestCalendar_PolicyAckExpiries(t *testing.T) {
 	if ev := events[fx.A.AckDueSoon.String()]; ev != nil {
 		if want := "Policy acknowledgement due: tenant A policy: overdue review"; ev["title"] != want {
 			t.Errorf("title=%v, want %q", ev["title"], want)
+		}
+		// Who acknowledged is not exposed: the summary names the policy.
+		if want := "tenant A policy: overdue review"; ev["summary"] != want {
+			t.Errorf("summary=%v, want %q", ev["summary"], want)
+		}
+	}
+	for id, ev := range events {
+		for _, field := range []string{"title", "summary", "related_entity_id"} {
+			v, _ := ev[field].(string)
+			if strings.Contains(v, fx.A.Owner.String()) || strings.Contains(v, fx.A.Other.String()) {
+				t.Errorf("policy_ack %s: %s carries a user id: %q", id, field, v)
+			}
 		}
 	}
 	if _, ok := events[fx.B.AckDueSoon.String()]; ok {

@@ -133,7 +133,9 @@ Review finding: retiring the rollup must not drop lapsing
 acknowledgements. `policy_ack` is the rollup's branch moved over: the
 freshest ack per (policy version, user), due 365 days on. Its title now
 names the policy (a tenant-scoped LEFT JOIN on `policies`) instead of
-printing the version UUID, its related entity is the acknowledgement,
+printing the version UUID, its summary is the policy title (never the
+acknowledging user, whom the rollup never exposed either), its related
+entity is the acknowledgement,
 and its status comes from `duedate.Status` with 14 days. It stays visible
 to every calendar reader, as it was on the dashboard rollup.
 

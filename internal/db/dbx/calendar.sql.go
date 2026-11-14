@@ -349,7 +349,9 @@ FROM (
     -- (policy_version, user) plus 365 days, when that attestation lapses.
     -- The query is the retired dashboard rollup's policy_ack branch; the
     -- title now names the policy (LEFT JOIN, tenant-scoped composite key)
-    -- instead of printing its version UUID. status is filled by the store
+    -- instead of printing its version UUID, and summary names only the
+    -- policy: who acknowledged is not shown to calendar readers or ICS
+    -- subscribers (the rollup never exposed it). status is filled by the store
     -- with duedate.Status, as for risk reviews.
     SELECT
         latest_ack.id::text                                           AS event_id,
@@ -360,7 +362,7 @@ FROM (
         NULL::timestamptz                                             AS ends_at,
         latest_ack.id::text                                           AS related_entity_id,
         'policy_acknowledgment'::text                                 AS related_entity_kind,
-        latest_ack.user_id::text                                      AS summary,
+        COALESCE(p.title, '')::text                                   AS summary,
         ''::text                                                      AS status,
         NULL::text                                                    AS cadence
     FROM (
