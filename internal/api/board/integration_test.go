@@ -495,7 +495,21 @@ func TestPDF_ReturnsPDFOrServiceUnavailable(t *testing.T) {
 	briefID := body["id"].(string)
 
 	resp, raw := doRaw(t, env, "/v1/board-briefs/"+briefID+"/pdf")
+	assertRealPDF(t, resp, raw)
+}
+
+// assertRealPDF is the happy-path check under the default limiter. It holds
+// the never-500 contract, logs which outcome the render produced, and when
+// pdfrender.RequireRealPDF() (set in CI, where Chrome is installed) treats a
+// 503 as a failure so CI proves the renderer produces a PDF (#1847).
+func assertRealPDF(t *testing.T, resp *http.Response, raw []byte) {
+	t.Helper()
 	assertPDFOrServiceUnavailable(t, resp, raw)
+	t.Logf("PDF render: status %d, %d bytes", resp.StatusCode, len(raw))
+	if resp.StatusCode != http.StatusOK && pdfrender.RequireRealPDF() {
+		t.Fatalf("ATLAS_REQUIRE_PDF is set but GET /pdf = %d, want 200 with a %%PDF- body; body=%q",
+			resp.StatusCode, raw)
+	}
 }
 
 // assertPDFOrServiceUnavailable enforces the slice-475 contract: the PDF

@@ -6,9 +6,10 @@
 //   - buildBriefHTML — assembles the print-ready HTML for the brief. The
 //     chromedp PDF render is deterministic given the same HTML, so a
 //     regression here is the proximate cause of brief visual drift.
-//   - encodeForDataURL — percent-encodes the chromedp data-URL payload.
-//   - isChromeUnavailable — error classifier that lets the HTTP handler
-//     return 503 (browser-missing) rather than 500.
+//
+// The data-URL encoder and the chrome-unavailable classifier moved to
+// internal/pdfrender with the shared render helper (#1847); their tests
+// live in internal/pdfrender/print_test.go.
 //
 // These mirror the slice-032 pack_pdf_html_test pattern for the quarterly
 // pack, and are a slice-283 coverage lift: pre-lift these three functions
@@ -144,74 +145,6 @@ func TestBuildBriefHTML_DriftDeltaIsSigned(t *testing.T) {
 	got := buildBriefHTML(sb)
 	if !strings.Contains(got, "drift count -2") {
 		t.Fatalf("drift delta must render with explicit sign; got: %q", got[:200])
-	}
-}
-
-// ===== encodeForDataURL — replacer correctness =====
-
-// encodeForDataURL percent-encodes the small set of characters that
-// confuse chromedp's data-URL parser, and drops carriage returns.
-func TestEncodeForDataURL(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"percent literal becomes %25", `100%`, `100%25`},
-		{"hash literal becomes %23", `#anchor`, `%23anchor`},
-		{"ampersand literal becomes %26", `a&b`, `a%26b`},
-		{"question mark becomes %3F", `a?b`, `a%3Fb`},
-		{"newline becomes %0A", "a\nb", `a%0Ab`},
-		{"carriage return is stripped", "a\r\nb", `a%0Ab`},
-		{"untouched chars round-trip", `plain text 1 2 3`, `plain text 1 2 3`},
-	}
-	for _, c := range cases {
-		c := c
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			got := encodeForDataURL(c.in)
-			if got != c.want {
-				t.Fatalf("encodeForDataURL(%q) = %q, want %q", c.in, got, c.want)
-			}
-		})
-	}
-}
-
-// ===== isChromeUnavailable — error classification =====
-
-func TestIsChromeUnavailable_NilFalse(t *testing.T) {
-	t.Parallel()
-	if isChromeUnavailable(nil) {
-		t.Fatal("nil error must classify as available")
-	}
-}
-
-func TestIsChromeUnavailable_ExecError(t *testing.T) {
-	t.Parallel()
-	if !isChromeUnavailable(errors.New("exec: \"chrome\": some other context")) {
-		t.Fatal("error containing 'exec:' must classify as unavailable")
-	}
-}
-
-func TestIsChromeUnavailable_FileNotFound(t *testing.T) {
-	t.Parallel()
-	if !isChromeUnavailable(errors.New("executable file not found in $PATH")) {
-		t.Fatal("error containing 'executable file not found' must classify as unavailable")
-	}
-}
-
-func TestIsChromeUnavailable_NoChromeFound(t *testing.T) {
-	t.Parallel()
-	if !isChromeUnavailable(errors.New("no chrome found on PATH")) {
-		t.Fatal("error containing 'no chrome found' must classify as unavailable")
-	}
-}
-
-func TestIsChromeUnavailable_UnrelatedError(t *testing.T) {
-	t.Parallel()
-	if isChromeUnavailable(errors.New("network timeout")) {
-		t.Fatal("unrelated error must classify as available — only browser-missing errors hit the 503 path")
 	}
 }
 

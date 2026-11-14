@@ -65,6 +65,8 @@ const (
 	KindFeatureFlag     Kind = "feature_flag"
 	KindMe              Kind = "me"
 	KindWalkthrough     Kind = "walkthrough"
+	// KindFrameworkScope is framework_scope_workflow_log (issue #1786).
+	KindFrameworkScope Kind = "framework_scope"
 )
 
 // SubjectModule constants (slice 180). The module identifier tagged onto
@@ -93,6 +95,7 @@ var AllKinds = []Kind{
 	KindFeatureFlag,
 	KindMe,
 	KindWalkthrough,
+	KindFrameworkScope,
 }
 
 // IsCanonical reports whether k is one of the nine canonical kinds.
