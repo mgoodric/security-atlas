@@ -3,8 +3,9 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 
+import { ListPagination, paginateRows } from "@/components/list/pagination";
 import {
   Card,
   CardContent,
@@ -13,7 +14,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -23,20 +26,41 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { listAnchors } from "@/lib/api/anchors";
 import { APIError } from "@/lib/api/base";
 import {
   ANCHORS_EXPORT_FORMATS,
   ANCHORS_EXPORT_FORMAT_LABELS,
   buildAnchorsExportURL,
 } from "@/lib/api/anchors-export";
+import { fetchControlsCatalog } from "@/lib/api/controls-list";
+
+import { catalogTruncationNote } from "../../controls/view";
+import {
+  CATALOG_PAGE_SIZE,
+  anchorHasControl,
+  catalogCountLabel,
+  searchAnchors,
+} from "./view";
 
 export default function SCFCatalogPage() {
   const router = useRouter();
+  // Issue #2066 — walk every page of the catalog (the platform's default
+  // page is 100 rows) through the same `/v1/anchors` read /controls uses.
+  // Its rows carry `control_count`, which drives the "Has control" marker.
   const { data, isLoading, error } = useQuery({
-    queryKey: ["anchors"],
-    queryFn: () => listAnchorsFromCookieSession(),
+    queryKey: ["anchors", "catalog"],
+    queryFn: () => fetchControlsCatalog(),
   });
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const matches = useMemo(
+    () => searchAnchors(data?.anchors ?? [], query),
+    [data, query],
+  );
+  const rows = paginateRows(matches, page, CATALOG_PAGE_SIZE);
+  const truncation = data
+    ? catalogTruncationNote(data.anchors.length, data.total)
+    : "";
 
   useEffect(() => {
     if (error instanceof APIError && error.status === 401) {
@@ -87,11 +111,26 @@ export default function SCFCatalogPage() {
       {data ? (
         <Card>
           <CardHeader>
-            <CardTitle>{data.length} anchors</CardTitle>
+            <CardTitle data-testid="catalog-scf-count">
+              {catalogCountLabel(data.anchors.length, data.total)}
+            </CardTitle>
             <CardDescription>
-              A starter subset of the Secure Controls Framework. The full SCF
-              catalog loads when you run the catalog import.
+              Search by SCF code, title or family. &ldquo;Has control&rdquo;
+              marks anchors that at least one of your controls uses.
+              {truncation ? ` ${truncation}.` : null}
             </CardDescription>
+            <Input
+              type="search"
+              aria-label="Search SCF anchors"
+              placeholder="Search by code, title or family"
+              value={query}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(1);
+              }}
+              className="mt-2 max-w-sm"
+              data-testid="catalog-scf-search"
+            />
           </CardHeader>
           <CardContent>
             <Table>
@@ -103,8 +142,23 @@ export default function SCFCatalogPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {data.map((anchor) => (
-                  <TableRow key={anchor.id} className="cursor-pointer">
+                {rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={3}
+                      className="text-sm text-muted-foreground"
+                      data-testid="catalog-scf-empty"
+                    >
+                      No anchors match &ldquo;{query}&rdquo;.
+                    </TableCell>
+                  </TableRow>
+                ) : null}
+                {rows.map((anchor) => (
+                  <TableRow
+                    key={anchor.id}
+                    className="cursor-pointer"
+                    data-testid="catalog-scf-row"
+                  >
                     <TableCell className="font-mono text-xs">
                       <Link href={`/catalog/scf/${anchor.id}`}>
                         {anchor.scf_id}
@@ -112,18 +166,35 @@ export default function SCFCatalogPage() {
                     </TableCell>
                     <TableCell>{anchor.family}</TableCell>
                     <TableCell>
-                      <Link
-                        href={`/catalog/scf/${anchor.id}`}
-                        className="text-sm font-medium hover:underline"
-                      >
-                        {anchor.name}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        <Link
+                          href={`/catalog/scf/${anchor.id}`}
+                          className="text-sm font-medium hover:underline"
+                        >
+                          {anchor.name}
+                        </Link>
+                        {anchorHasControl(anchor) ? (
+                          <Badge
+                            variant="pass"
+                            data-testid="catalog-scf-has-control"
+                          >
+                            Has control
+                          </Badge>
+                        ) : null}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
           </CardContent>
+          <ListPagination
+            currentPage={page}
+            pageSize={CATALOG_PAGE_SIZE}
+            totalCount={matches.length}
+            onPageChange={setPage}
+            testIdPrefix="catalog-scf-pagination"
+          />
         </Card>
       ) : null}
     </div>
@@ -138,18 +209,4 @@ function AnchorSkeletons() {
       ))}
     </div>
   );
-}
-
-// listAnchorsFromCookieSession hits a same-origin Next.js route handler
-// (/api/anchors) that proxies the bearer cookie into the upstream API.
-// Going through a route handler keeps the bearer httpOnly on the client.
-async function listAnchorsFromCookieSession() {
-  const res = await fetch("/api/anchors");
-  if (!res.ok) {
-    throw new APIError(res.status, `${res.status} ${res.statusText}`);
-  }
-  const body = (await res.json()) as {
-    anchors: Awaited<ReturnType<typeof listAnchors>>;
-  };
-  return body.anchors;
 }
