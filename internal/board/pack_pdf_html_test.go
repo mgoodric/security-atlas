@@ -21,8 +21,8 @@
 // Branches deliberately left to integration:
 //   - RenderPackPDF — requires chromedp + a real Chrome binary; integration
 //     test asserts the leading `%PDF-` magic header.
-//   - encodeForDataURL — already covered transitively by the slice-031
-//     brief render path.
+//   - the chromedp render itself — pdfrender.PrintHTML, shared with the
+//     brief and covered in internal/pdfrender (#1847).
 //
 // Slice 279 — coverage lift target. Pre-lift merged %: 23.7. The pure HTML
 // builder is the largest unit-testable surface in the package; closing

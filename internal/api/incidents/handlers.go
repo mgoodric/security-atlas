@@ -196,6 +196,14 @@ func (h *Handler) writeErr(w http.ResponseWriter, r *http.Request, op string, er
 		// #1830: the postmortem evidence goes through ingest, which
 		// refuses an observed_at outside the skew window.
 		httpresp.WriteError(w, http.StatusBadRequest, "observed_at outside permitted skew window")
+	case errors.Is(err, ingest.ErrValidation), errors.Is(err, ingest.ErrMissingField):
+		httpresp.WriteError(w, http.StatusBadRequest, "postmortem evidence failed validation")
+	case errors.Is(err, ingest.ErrScopeViolation):
+		httpresp.WriteError(w, http.StatusBadRequest, "postmortem evidence outside the incident register's evidence scope")
+	case errors.Is(err, ingest.ErrIdempotencyMismatch):
+		// The postmortem evidence for this incident already exists with
+		// different content.
+		httpresp.WriteError(w, http.StatusConflict, "postmortem evidence already recorded with different content")
 	case errors.Is(err, ingest.ErrUnavailable):
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "evidence ingest unavailable")
 	default:

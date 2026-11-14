@@ -12,9 +12,11 @@ list:
 # Build all components (Go + frontend)
 build: build-go build-frontend
 
-# Build Go binaries (atlas, atlas-cli, atlas-oscal)
+# Build Go binaries (atlas, atlas-cli, atlas-oscal). CGO_ENABLED=0 matches the
+# release and image builds (.goreleaser.yaml, deploy/docker): nothing we ship
+# needs C, and it keeps a broken system C toolchain from blocking the build.
 build-go:
-    go build ./...
+    CGO_ENABLED=0 go build ./...
 
 # Build frontend workspaces (web, sdk/typescript)
 build-frontend:
@@ -305,15 +307,15 @@ import-soc2 path:
 
 # Build all connector binaries
 connector-build:
-    go build -o ./bin/aws-connector ./connectors/aws/cmd/aws-connector
+    CGO_ENABLED=0 go build -o ./bin/aws-connector ./connectors/aws/cmd/aws-connector
 
 # Build the Slack connector binary (slice 443).
 connector-build-slack:
-    go build -o ./bin/slack-connector ./connectors/slack/cmd/slack-connector
+    CGO_ENABLED=0 go build -o ./bin/slack-connector ./connectors/slack/cmd/slack-connector
 
 # Build the GCP connector binary (slice 442).
 connector-build-gcp:
-    go build -o ./bin/gcp-connector ./connectors/gcp/cmd/gcp-connector
+    CGO_ENABLED=0 go build -o ./bin/gcp-connector ./connectors/gcp/cmd/gcp-connector
 
 # Trigger a connector run. Args: <vendor> <kind>. Required env vars:
 #   SECURITY_ATLAS_ENDPOINT  platform gRPC endpoint
@@ -395,7 +397,7 @@ install-script-test:
 # Print the version embedded in a locally-built atlas-cli binary.
 # Useful for verifying ldflags wiring before cutting a tag.
 print-version version:
-    go build -ldflags "-X main.version={{version}}" -o /tmp/security-atlas-cli ./cmd/atlas-cli
+    CGO_ENABLED=0 go build -ldflags "-X main.version={{version}}" -o /tmp/security-atlas-cli ./cmd/atlas-cli
     /tmp/security-atlas-cli --version
     /tmp/security-atlas-cli version
     rm /tmp/security-atlas-cli

@@ -21,13 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"os"
 	"strings"
-
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/chromedp/remote"
 
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
@@ -44,8 +38,8 @@ const PDFTimeout = pdfrender.DefaultRenderTimeout
 // ErrChromeUnavailable is returned when chromedp could not launch a browser.
 // The HTTP handler maps this to 503 so operators can run the platform
 // without Chrome (PDF endpoint disabled) until they install it — the brief
-// + Markdown still work. Mirrors internal/policy/pdf.ErrChromeUnavailable.
-var ErrChromeUnavailable = errors.New("board/pdf: chrome browser unavailable")
+// + Markdown still work. It is the shared pdfrender sentinel.
+var ErrChromeUnavailable = pdfrender.ErrChromeUnavailable
 
 // RenderPDF returns a PDF byte stream for the frozen brief. The returned
 // bytes begin with the literal `%PDF-` magic header.
@@ -62,65 +56,12 @@ func RenderPDF(ctx context.Context, sb StoredBrief) ([]byte, error) {
 	}
 	htmlDoc := buildBriefHTML(sb)
 	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
-		return renderBriefBytes(ctx, htmlDoc)
-	})
-}
-
-// renderBriefBytes performs the actual chromedp render under the deadline the
-// limiter has already applied to ctx.
-func renderBriefBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
-	// Browser allocation mirrors internal/policy/pdf: connect to a remote
-	// CDP endpoint when CHROME_DEBUG_URL is set (CI / dev machines without a
-	// local Chrome), otherwise launch a local Chrome with --no-sandbox. We
-	// never load untrusted URLs — only the inline data: URL we construct.
-	var browserCtx context.Context
-	var cancelAlloc context.CancelFunc
-	var cancelBrowser context.CancelFunc
-	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	} else {
-		opts := append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoSandbox,
-			chromedp.DisableGPU,
-			chromedp.Headless,
-			chromedp.Flag("hide-scrollbars", true),
-		)
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	}
-	defer cancelBrowser()
-	defer cancelAlloc()
-
-	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
-	var buf []byte
-	err := chromedp.Do(browserCtx,
-		chromedp.Navigate(dataURL),
-		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
-			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
-				PrintBackground: new(true),
-				MarginTop:       new(0.4),
-				MarginBottom:    new(0.4),
-				MarginLeft:      new(0.4),
-				MarginRight:     new(0.4),
-			})
-			buf = res.Data
-			return err
-		}),
-	)
-	if err != nil {
-		if isChromeUnavailable(err) {
-			return nil, fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
+		buf, err := pdfrender.PrintHTML(ctx, htmlDoc)
+		if err != nil {
+			return nil, fmt.Errorf("board/pdf: %w", err)
 		}
-		return nil, fmt.Errorf("board/pdf: chromedp run: %w", err)
-	}
-	if len(buf) < 5 || string(buf[:5]) != "%PDF-" {
-		return nil, fmt.Errorf("board/pdf: invalid PDF output (len=%d)", len(buf))
-	}
-	return buf, nil
+		return buf, nil
+	})
 }
 
 // buildBriefHTML renders the frozen brief as a minimal, print-friendly HTML
@@ -198,31 +139,4 @@ th { background: #f5f5f5; font-weight: 600; }
 
 	w.WriteString(`</body></html>`)
 	return w.String()
-}
-
-// encodeForDataURL percent-encodes the small set of characters that would
-// confuse chromedp's data-URL parser. Mirrors internal/policy/pdf.
-func encodeForDataURL(s string) string {
-	r := strings.NewReplacer(
-		"%", "%25",
-		"#", "%23",
-		"&", "%26",
-		"?", "%3F",
-		"\n", "%0A",
-		"\r", "",
-	)
-	return r.Replace(s)
-}
-
-// isChromeUnavailable heuristically classifies a chromedp error as
-// "browser executable missing" so the handler can 503 rather than 500.
-// Mirrors internal/policy/pdf.
-func isChromeUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "exec:") ||
-		strings.Contains(msg, "executable file not found") ||
-		strings.Contains(msg, "no chrome found")
 }
