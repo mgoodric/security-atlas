@@ -139,5 +139,31 @@ test.describe("local email/password sign-in after first install", () => {
     expect(cookies.some((c) => c.name === ATLAS_JWT_COOKIE && c.value)).toBe(
       true,
     );
+
+    // #2055: the session is a person, not a credential. The JWT Subject is
+    // "user:<uuid>"; /v1/me used to parse it raw, fail, and serve the
+    // "API key" credential profile ("AK" in the header, the credential
+    // banners in Settings, notifications switched off).
+    await expect(page.getByTestId("user-avatar-initials")).toHaveText("LL");
+    await expect(page.getByTestId("user-avatar-name")).toHaveText(
+      "Local Login E2E",
+    );
+
+    await page.goto("/settings");
+    const profile = page.getByTestId("settings-section-profile");
+    await expect(profile).toContainText(email);
+    await expect(
+      page.getByTestId("settings-profile-credential-banner"),
+    ).toHaveCount(0);
+
+    await expect(
+      page.getByTestId("settings-section-notifications"),
+    ).toBeVisible();
+    await expect(
+      page.getByTestId("settings-notif-credential-banner"),
+    ).toHaveCount(0);
+    await expect(
+      page.getByTestId("settings-notif-policy_ack_due-email"),
+    ).toBeEnabled();
   });
 });
