@@ -118,6 +118,7 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	var releaseDate string
 	var titlesPath string
 	var allowCodeTitles bool
+	var scfRelease string
 	cmd := &cobra.Command{
 		Use:     "import-crosswalk <path>",
 		Aliases: []string{"import-soc2"},
@@ -146,9 +147,17 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 					ReleaseDate:      releaseDate,
 					TitlesPath:       titlesPath,
 					AllowCodeTitles:  allowCodeTitles,
+					SCFRelease:       scfRelease,
 				})
 			} else {
 				cw, err = soc2import.Load(path)
+				switch {
+				case err != nil, scfRelease == "":
+				case cw.SCFRelease == "":
+					cw.SCFRelease = scfRelease
+				case cw.SCFRelease != scfRelease:
+					err = fmt.Errorf("crosswalk: --scf-release %q contradicts the file's scf_release %q", scfRelease, cw.SCFRelease)
+				}
 			}
 			if err != nil {
 				return err
@@ -168,6 +177,12 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			}
 			fmt.Printf("framework=%s:%s framework_version_id=%s new_version=%v\n",
 				report.FrameworkSlug, report.FrameworkVersion, report.FrameworkVersionID, report.IsNewVersion)
+			if report.SCFRelease != "" {
+				fmt.Printf("scf_release=%s\n", report.SCFRelease)
+			}
+			for _, w := range report.Warnings {
+				fmt.Printf("warning: %s\n", w)
+			}
 			fmt.Printf("requirements created=%d updated=%d unchanged=%d differed=%d\n",
 				report.RequirementsCreated, report.RequirementsUpdated, report.RequirementsUnchanged, len(report.RequirementsDiffered))
 			if n := soc2import.CodeOnlyTitleCount(cw); n > 0 {
@@ -235,6 +250,7 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	cmd.Flags().StringVar(&releaseDate, "release-date", "", "framework release date override (YYYY-MM-DD) for SCF workbook imports")
 	cmd.Flags().StringVar(&titlesPath, "titles", "", "crosswalk-format YAML whose requirement titles and bodies override the bundled crosswalk's for SCF workbook imports (its mappings are ignored)")
 	cmd.Flags().BoolVar(&allowCodeTitles, "allow-code-titles", false, "let SCF workbook requirements that no title source covers import titled with their code")
+	cmd.Flags().StringVar(&scfRelease, "scf-release", "", "SCF release the crosswalk's SCF codes belong to; the only way to declare it for an OLIR STRM workbook, which names none (a wide workbook takes it from its \"SCF <release>\" sheet, a YAML file from scf_release)")
 	return cmd
 }
 

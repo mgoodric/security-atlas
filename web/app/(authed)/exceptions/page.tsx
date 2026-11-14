@@ -46,6 +46,7 @@ import {
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
+import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import {
@@ -258,14 +259,20 @@ function ExceptionsPageInner() {
       id: "status",
       header: "Status",
       cell: (row) => (
-        <span
-          className={
-            "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
-            statusPillClass(row.status)
-          }
-          data-testid="exceptions-row-status"
-        >
-          {row.status}
+        <span className="inline-flex items-center gap-1.5">
+          <span
+            className={
+              "inline-flex items-center rounded-md px-1.5 py-0.5 text-[11px] font-medium " +
+              statusPillClass(row.status)
+            }
+            data-testid="exceptions-row-status"
+          >
+            {row.status}
+          </span>
+          <SelfApprovedBadge
+            selfApproved={row.self_approved}
+            testId="exceptions-row-self-approved"
+          />
         </span>
       ),
     },

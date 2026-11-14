@@ -67,8 +67,10 @@ type Querier interface {
 	// The DB CHECK is the authoritative backstop. updated_at is refreshed.
 	ApproveChecklistSection(ctx context.Context, arg ApproveChecklistSectionParams) (ChecklistSection, error)
 	// AC-3 transition: requested -> approved. The application MUST verify the
-	// caller has IsApprover before invoking this query AND that approved_by
-	// differs from requested_by (segregation of duties). The WHERE
+	// caller has IsApprover before invoking this query AND apply the approval
+	// rule (internal/approval, #2101): approved_by differs from requested_by
+	// unless the organisation allows self-approval, in which case self_approved
+	// is true and exceptions_sod admits the same person. The WHERE
 	// status='requested' clause guards against double-approval / out-of-order
 	// transitions; zero rows returned indicates either a missing row or a wrong
 	// prior state -- the application probes after to disambiguate.
@@ -79,7 +81,8 @@ type Querier interface {
 	// Optional approval-evidence file URL + hash are passed by the handler.
 	ApproveFrameworkScope(ctx context.Context, arg ApproveFrameworkScopeParams) (FrameworkScope, error)
 	// Transition: under_review -> approved. Requires IsApprover at handler
-	// (AC-4). The DB only guards the prior-state.
+	// (AC-4). The DB only guards the prior-state. self_approved is set by the
+	// store after the approval rule allowed a self-approval (#2101).
 	ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (Policy, error)
 	// Slice 441 — one-click human approval of an AI-suggested draft (AC-6/AC-7).
 	// Sets human_approved=TRUE and records the human_approver; optionally accepts
@@ -1056,6 +1059,10 @@ type Querier interface {
 	GetSlackOptIn(ctx context.Context, arg GetSlackOptInParams) (bool, error)
 	// Single-claim lookup by dedup key — used by tests + idempotency assertions.
 	GetStalenessRollupClaim(ctx context.Context, arg GetStalenessRollupClaimParams) (StalenessRollupLog, error)
+	// #2101: the caller-tenant's Allow self-approval setting. RLS scopes the row
+	// to the current tenant. Returns ErrNoRows when no tenants row exists
+	// (bare-UUID tenant); approval.AllowSelf maps that to the default, off.
+	GetTenantAllowSelfApproval(ctx context.Context, id pgtype.UUID) (bool, error)
 	// Slice 608: read the caller-tenant's control-bundle upload gate policy.
 	// RLS scopes the row to the current tenant; the WHERE clause exists only so
 	// the query returns at most one row. Returns ErrNoRows when no tenants row
@@ -1320,7 +1327,8 @@ type Querier interface {
 	// Append one vendor-attributed CLAIM (an implemented-requirement) mapped (or
 	// flagged NULL for mapping) to an SCF anchor. is_vendor_claim defaults TRUE
 	// and claim_status defaults 'asserted' (the table defaults) — the import never
-	// writes anything else (P0-512-1).
+	// writes anything else (P0-512-1). scf_release is the SCF release the code
+	// was bound in (#1771); NULL with an unmapped claim.
 	InsertImportedComponentClaim(ctx context.Context, arg InsertImportedComponentClaimParams) (ImportedComponentClaim, error)
 	// Append one append-only disposition-audit row recording the
 	// from_status -> to_status transition, the actor, and an optional note.
@@ -3097,6 +3105,7 @@ type Querier interface {
 	// SCF anchor only, invariant #7) — it is NOT a claim -> claim mapping and does
 	// NOT touch control_evaluations or the evidence ledger (the claim stays a
 	// claim; mapping only sets the crosswalk — invariant #2 / P0-512-1).
+	// scf_release records the SCF release the code was validated in (#1771).
 	// is_vendor_claim + claim_status are NOT touched. RLS rides the slice-512
 	// tenant_update policy.
 	MapImportedComponentClaimScfAnchor(ctx context.Context, arg MapImportedComponentClaimScfAnchorParams) (ImportedComponentClaim, error)
@@ -3370,6 +3379,9 @@ type Querier interface {
 	StartBackupRun(ctx context.Context, arg StartBackupRunParams) (BackupRun, error)
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already
 	// under-review row by accident (would still be valid but masks bugs).
+	// #2101: records the submitter as a person, so approval can compare. Also
+	// re-submits a review row whose submitter is unrecorded (NULL) or a session
+	// id ('jwt:<token id>'), which approval refuses because it names no person.
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
 	// Transition: draft -> under_review. Operator action; no role gate.
 	// Also re-submits an under_review policy whose submitter was recorded
@@ -3507,6 +3519,10 @@ type Querier interface {
 	// Update an existing anchor in place. Touches updated_at; the caller
 	// decides whether to call this based on a content-equality check.
 	UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error)
+	// #2101: turn the caller-tenant's Allow self-approval on or off. RLS gates
+	// this to the caller's own row; the handler gates it to admins and writes
+	// the me_audit_log row in the same transaction.
+	UpdateTenantAllowSelfApproval(ctx context.Context, arg UpdateTenantAllowSelfApprovalParams) (UpdateTenantAllowSelfApprovalRow, error)
 	// Slice 608: set the caller-tenant's control-bundle upload gate policy.
 	// RLS gates this to the caller's own row. The CHECK constraint
 	// `tenants_bundle_gate_mode_chk` rejects an out-of-enum value at the DB

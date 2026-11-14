@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -230,6 +231,12 @@ func (s *Store) MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID
 			}
 			return qerr
 		}
+		// The code was just validated in the current release, so that is
+		// the release the claim now names it in (#1771).
+		rel, qerr := scfrelease.Lookup(ctx, q, "")
+		if qerr != nil {
+			return qerr
+		}
 
 		current, qerr := q.GetImportedComponentClaimByID(ctx, dbx.GetImportedComponentClaimByIDParams{
 			TenantID: pgUUID(tenantID),
@@ -247,6 +254,7 @@ func (s *Store) MapScfAnchor(ctx context.Context, claimID uuid.UUID, scfAnchorID
 			TenantID:    pgUUID(tenantID),
 			ID:          pgUUID(claimID),
 			ScfAnchorID: &anchorCopy,
+			ScfRelease:  &rel.Version,
 		})
 		if qerr != nil {
 			return qerr

@@ -54,6 +54,11 @@ export type Exception = {
   requested_at: string;
   approved_by?: string;
   approved_at?: string;
+  /**
+   * #2101 — true when the requester approved the exception under the
+   * organisation's Allow self-approval setting.
+   */
+  self_approved?: boolean;
   denied_by?: string;
   denied_at?: string;
   activated_by?: string;

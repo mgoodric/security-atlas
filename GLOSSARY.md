@@ -123,9 +123,15 @@ No other transitions. `denied` and `expired` are terminal.
 
 **`compensating_controls`** is a `TEXT[]` — free-form descriptions of what's being done instead. NOT an FK to `controls` (because compensating mitigations are often informal: "weekly manual review by SRE on-call until IAM federation lands"). A future slice can add `compensating_control_ids UUID[]` if a structured link becomes useful.
 
-**Segregation of duties** — `approved_by` MUST differ from `requested_by`. The same credential cannot both file and approve an exception.
+**Segregation of duties** — `approved_by` MUST differ from `requested_by`, compared by person, unless the organisation allows [self-approval](#self-approval-2101). See ADR 0024.
 
 **Calendar surface** — `GET /v1/exceptions/expiring?within=30d` powers the "Upcoming items" dashboard panel (canvas §6.3, dashboard mockup).
+
+## Self-approval (#2101)
+
+An approval made by the person who requested it: the submitter of a policy or framework scope, or the requester of an exception. Refused by default. Approvals require a second person, and only a person (never an API key, OAuth client or bootstrap credential) approves.
+
+An organisation may turn on **Allow self-approval** (`tenants.allow_self_approval`; admin-only; every change written to the audit log). While it is on, the requester may approve their own record, and the record is flagged `self_approved` and shown as **Self-approved** in the UI, the exports and the audit log. The setting relaxes only "same person": a machine credential still never approves. One rule decides every approval (`internal/approval`); see [ADR 0024](docs/adr/0024-approvals-require-a-second-person.md).
 
 ## Decision Log (slice 055)
 

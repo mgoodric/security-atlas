@@ -162,8 +162,37 @@ For an SCF OLIR STRM workbook, no framework column is needed:
 atlas-cli catalog import-crosswalk ./scf-olir-strm-nist-800-53-r5-1-1.xlsx \
   --framework-slug nist-800-53 \
   --framework-name "NIST SP 800-53 R5.1.1" \
-  --framework-issuer NIST
+  --framework-issuer NIST \
+  --scf-release 2026.2
 ```
+
+## SCF release
+
+The SCF reuses control codes between releases, sometimes for a different
+control. Each crosswalk therefore names the SCF release its `scf_anchor` codes
+belong to, and the importer binds every code within that release only (#1771):
+
+| Source                 | Where the release comes from                                         |
+| ---------------------- | -------------------------------------------------------------------- |
+| YAML crosswalk         | the top-level `scf_release` key (`--scf-release` fills it if absent) |
+| Full SCF workbook      | the `SCF <release>` sheet name: `SCF 2026.3` declares `2026.3`       |
+| SCF OLIR STRM workbook | `--scf-release`, because the OLIR shape has no `SCF <release>` sheet |
+
+Load the release first with `atlas-cli catalog import-scf`. A declared release
+(`scf_release` or `--scf-release`) that is not loaded fails the import
+(`unknown SCF release`), and so does a code the release does not have
+(`SCF code not in release`). Either way nothing is written. A `--scf-release`
+that contradicts the file is refused.
+
+A release read only from a workbook's sheet name is looser for now. When that
+release is loaded, codes bind in it. When it is not, the import binds in the
+current SCF release as it did before and prints a warning naming the sheet's
+release. Pass `--scf-release <release>` to make an unloaded sheet release an
+error instead.
+
+A crosswalk that declares no release still binds in the current SCF release and
+prints a deprecation warning. The declaration becomes required in a later
+release.
 
 All XLSX imports land at `source_attribution=community_draft`. The database
 trust tier for new edges remains the catalog default draft tier; promotion to
