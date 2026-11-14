@@ -2,13 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc1_2_board_oversight
 title: "Board reviews security program at least annually"
 description: |
-  The board of directors (or equivalent governing body) demonstrates
-  independence from management and exercises oversight of the security
-  program (TSC CC1.2, COSO Principle 2). The control owner uploads the
-  signed board minutes — or an excerpt thereof — showing the security
-  program was on the agenda and was discussed substantively at least once
-  per fiscal year. For early-stage companies without a formal board,
-  uploads of founder + investor security reviews are an acceptable
+  A governing body that sits apart from day-to-day management reviews the
+  security program (TSC CC1.2, COSO Principle 2). The control owner
+  uploads the signed board minutes — or an excerpt thereof — showing the
+  security program was on the agenda and was discussed substantively at
+  least once per fiscal year. For early-stage companies without a formal
+  board, uploads of founder + investor security reviews are an acceptable
   substitute.
 
 scf_anchor_id: GOV-01

@@ -338,22 +338,44 @@ func (s *Store) UserCanAuthenticate(tenantID, userID, keyID string) (bool, error
 	defer cancel()
 	q := dbx.New(s.authPool)
 	if keyID != "" {
-		kid, kerr := keyIDToPg(keyID)
-		if kerr != nil {
-			return false, nil
-		}
-		row, kerr := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tid, ID: kid})
-		if kerr != nil {
-			if errors.Is(kerr, pgx.ErrNoRows) {
-				return false, nil
-			}
-			return false, fmt.Errorf("apikeystore: key status: %w", kerr)
-		}
-		if row.RevokedAt.Valid {
-			return false, nil
+		ok, kerr := keyLive(ctx, q, tid, keyID)
+		if kerr != nil || !ok {
+			return false, kerr
 		}
 	}
 	return userCanAuthenticate(ctx, q, tid, uid)
+}
+
+// KeyCanAuthenticate implements credstore.UserGate for a persisted key with
+// no user (#1964): admin-minted and push keys. The key's api_keys row must
+// exist and not be revoked. Like UserCanAuthenticate it reads the row on
+// every authentication, uncached, so a revocation committed on any replica
+// is refused here from the next request.
+func (s *Store) KeyCanAuthenticate(tenantID, keyID string) (bool, error) {
+	tid, err := uuidToPg(tenantID)
+	if err != nil {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), userGateTimeout)
+	defer cancel()
+	return keyLive(ctx, dbx.New(s.authPool), tid, keyID)
+}
+
+// keyLive reports whether the api_keys row named by keyID exists in
+// tenantID and is not revoked. A malformed id or a missing row refuses.
+func keyLive(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, keyID string) (bool, error) {
+	kid, err := keyIDToPg(keyID)
+	if err != nil {
+		return false, nil
+	}
+	row, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tenantID, ID: kid})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("apikeystore: key status: %w", err)
+	}
+	return !row.RevokedAt.Valid, nil
 }
 
 // userCanAuthenticate reports whether the users row (tenantID, userID)

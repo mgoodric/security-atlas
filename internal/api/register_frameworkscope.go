@@ -29,6 +29,11 @@ func (s *Server) registerFrameworkScope(root *chi.Mux) {
 	)
 	root.Post("/v1/framework-scopes", fwH.Create)
 	root.Get("/v1/framework-scopes", fwH.List)
+	// Issue #1787: Statement of Applicability decisions on a revision. The
+	// literal /applicability segment resolves before /{id}.
+	root.Get("/v1/framework-scopes/applicability", fwH.ApplicabilityAsOf)
+	root.Get("/v1/framework-scopes/{id}/applicability", fwH.ListApplicability)
+	root.Put("/v1/framework-scopes/{id}/applicability/{requirement_id}", fwH.SetApplicability)
 	// Sub-resource transitions are PATCH, distinct from the generic PATCH
 	// on /v1/framework-scopes/{id} (which edits predicate). chi resolves
 	// the literal-segment routes first within the same method.

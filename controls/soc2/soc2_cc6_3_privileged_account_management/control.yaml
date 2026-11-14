@@ -2,13 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc6_3_privileged_account_management
 title: "Privileged credentials vaulted with break-glass workflow"
 description: |
-  Privileged accounts are a tested subset of CC6.3 (authorize, modify,
-  remove access). The query reads the 1Password org-policy snapshot and
+  Privileged accounts are a tested subset of CC6.3 (granting, changing and
+  revoking access). The query reads the 1Password org-policy snapshot and
   asserts that the vault containing privileged credentials (root keys,
-  shared admin passwords, break-glass accounts) has: a documented list
-  of vault members, sharing-disabled-by-default, and an audit-event
-  stream enabled. Personal-vault sharing of company secrets is
-  disallowed.
+  shared admin passwords, break-glass accounts) has: a documented list of
+  vault members, sharing-disabled-by-default, and an audit-event stream
+  enabled. Personal-vault sharing of company secrets is disallowed.
 
 scf_anchor_id: IAC-21
 control_family: IAC

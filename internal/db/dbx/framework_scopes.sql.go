@@ -240,6 +240,66 @@ func (q *Queries) GetActivatedFrameworkScope(ctx context.Context, arg GetActivat
 	return i, err
 }
 
+const getFrameworkRequirementInVersion = `-- name: GetFrameworkRequirementInVersion :one
+
+SELECT id, code, title
+FROM framework_requirements
+WHERE id = $1 AND framework_version_id = $2
+`
+
+type GetFrameworkRequirementInVersionParams struct {
+	ID                 pgtype.UUID `json:"id"`
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+}
+
+type GetFrameworkRequirementInVersionRow struct {
+	ID    pgtype.UUID `json:"id"`
+	Code  string      `json:"code"`
+	Title string      `json:"title"`
+}
+
+// ===== framework_scope_applicability (issue #1787) =====
+//
+// Statement of Applicability decisions on a framework-scope revision. The
+// guard + reset triggers on the table enforce the workflow; these queries
+// only read and upsert.
+func (q *Queries) GetFrameworkRequirementInVersion(ctx context.Context, arg GetFrameworkRequirementInVersionParams) (GetFrameworkRequirementInVersionRow, error) {
+	row := q.db.QueryRow(ctx, getFrameworkRequirementInVersion, arg.ID, arg.FrameworkVersionID)
+	var i GetFrameworkRequirementInVersionRow
+	err := row.Scan(&i.ID, &i.Code, &i.Title)
+	return i, err
+}
+
+const getFrameworkScopeApplicability = `-- name: GetFrameworkScopeApplicability :one
+SELECT id, tenant_id, framework_scope_id, framework_requirement_id, decision, justification, implementation_ref, updated_by, updated_at, created_at
+FROM framework_scope_applicability
+WHERE tenant_id = $1 AND framework_scope_id = $2 AND framework_requirement_id = $3
+`
+
+type GetFrameworkScopeApplicabilityParams struct {
+	TenantID               pgtype.UUID `json:"tenant_id"`
+	FrameworkScopeID       pgtype.UUID `json:"framework_scope_id"`
+	FrameworkRequirementID pgtype.UUID `json:"framework_requirement_id"`
+}
+
+func (q *Queries) GetFrameworkScopeApplicability(ctx context.Context, arg GetFrameworkScopeApplicabilityParams) (FrameworkScopeApplicability, error) {
+	row := q.db.QueryRow(ctx, getFrameworkScopeApplicability, arg.TenantID, arg.FrameworkScopeID, arg.FrameworkRequirementID)
+	var i FrameworkScopeApplicability
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.FrameworkScopeID,
+		&i.FrameworkRequirementID,
+		&i.Decision,
+		&i.Justification,
+		&i.ImplementationRef,
+		&i.UpdatedBy,
+		&i.UpdatedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getFrameworkScopeAsOf = `-- name: GetFrameworkScopeAsOf :one
 SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
 FROM framework_scopes
@@ -360,6 +420,73 @@ func (q *Queries) InsertFrameworkScopeWorkflowLog(ctx context.Context, arg Inser
 		arg.Actor,
 	)
 	return err
+}
+
+const listFrameworkScopeApplicability = `-- name: ListFrameworkScopeApplicability :many
+SELECT r.id AS requirement_id,
+       r.code,
+       r.title,
+       a.decision,
+       a.justification,
+       a.implementation_ref,
+       a.updated_by,
+       a.updated_at
+FROM framework_requirements r
+LEFT JOIN framework_scope_applicability a
+       ON a.framework_requirement_id = r.id
+      AND a.tenant_id = $1
+      AND a.framework_scope_id = $2
+WHERE r.framework_version_id = $3
+ORDER BY r.code, r.id
+`
+
+type ListFrameworkScopeApplicabilityParams struct {
+	TenantID           pgtype.UUID `json:"tenant_id"`
+	FrameworkScopeID   pgtype.UUID `json:"framework_scope_id"`
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+}
+
+type ListFrameworkScopeApplicabilityRow struct {
+	RequirementID     pgtype.UUID        `json:"requirement_id"`
+	Code              string             `json:"code"`
+	Title             string             `json:"title"`
+	Decision          *string            `json:"decision"`
+	Justification     *string            `json:"justification"`
+	ImplementationRef *string            `json:"implementation_ref"`
+	UpdatedBy         *string            `json:"updated_by"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Every requirement of the framework version, with the revision's decision
+// when one exists. A NULL framework_scope_id (no revision in force) returns
+// every requirement undecided.
+func (q *Queries) ListFrameworkScopeApplicability(ctx context.Context, arg ListFrameworkScopeApplicabilityParams) ([]ListFrameworkScopeApplicabilityRow, error) {
+	rows, err := q.db.Query(ctx, listFrameworkScopeApplicability, arg.TenantID, arg.FrameworkScopeID, arg.FrameworkVersionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFrameworkScopeApplicabilityRow
+	for rows.Next() {
+		var i ListFrameworkScopeApplicabilityRow
+		if err := rows.Scan(
+			&i.RequirementID,
+			&i.Code,
+			&i.Title,
+			&i.Decision,
+			&i.Justification,
+			&i.ImplementationRef,
+			&i.UpdatedBy,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listFrameworkScopeWorkflowLog = `-- name: ListFrameworkScopeWorkflowLog :many
@@ -618,6 +745,58 @@ func (q *Queries) UpdateFrameworkScopePredicate(ctx context.Context, arg UpdateF
 		&i.EffectiveFrom,
 		&i.SupersededBy,
 		&i.SupersededAt,
+	)
+	return i, err
+}
+
+const upsertFrameworkScopeApplicability = `-- name: UpsertFrameworkScopeApplicability :one
+INSERT INTO framework_scope_applicability (
+    tenant_id, framework_scope_id, framework_requirement_id,
+    decision, justification, implementation_ref, updated_by
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (framework_scope_id, framework_requirement_id) DO UPDATE
+SET decision = EXCLUDED.decision,
+    justification = EXCLUDED.justification,
+    implementation_ref = EXCLUDED.implementation_ref,
+    updated_by = EXCLUDED.updated_by,
+    updated_at = now()
+RETURNING id, tenant_id, framework_scope_id, framework_requirement_id, decision, justification, implementation_ref, updated_by, updated_at, created_at
+`
+
+type UpsertFrameworkScopeApplicabilityParams struct {
+	TenantID               pgtype.UUID `json:"tenant_id"`
+	FrameworkScopeID       pgtype.UUID `json:"framework_scope_id"`
+	FrameworkRequirementID pgtype.UUID `json:"framework_requirement_id"`
+	Decision               string      `json:"decision"`
+	Justification          string      `json:"justification"`
+	ImplementationRef      string      `json:"implementation_ref"`
+	UpdatedBy              string      `json:"updated_by"`
+}
+
+func (q *Queries) UpsertFrameworkScopeApplicability(ctx context.Context, arg UpsertFrameworkScopeApplicabilityParams) (FrameworkScopeApplicability, error) {
+	row := q.db.QueryRow(ctx, upsertFrameworkScopeApplicability,
+		arg.TenantID,
+		arg.FrameworkScopeID,
+		arg.FrameworkRequirementID,
+		arg.Decision,
+		arg.Justification,
+		arg.ImplementationRef,
+		arg.UpdatedBy,
+	)
+	var i FrameworkScopeApplicability
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.FrameworkScopeID,
+		&i.FrameworkRequirementID,
+		&i.Decision,
+		&i.Justification,
+		&i.ImplementationRef,
+		&i.UpdatedBy,
+		&i.UpdatedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }

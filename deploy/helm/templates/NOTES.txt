@@ -6,6 +6,11 @@ Components deployed:
   - NATS JetStream (StatefulSet, persistence: {{ .Values.nats.persistence.enabled }})
 {{- if .Values.minio.enabled }}
   - MinIO          (bundled artifact store — dev/solo only)
+{{- if not .Values.artifacts.s3PublicEndpoint }}
+    Artifact download links point at the in-cluster MinIO Service, which
+    browsers cannot reach. Set artifacts.s3PublicEndpoint to the MinIO
+    address users reach.
+{{- end }}
 {{- else }}
   - artifact store: EXTERNAL S3 at {{ .Values.artifacts.s3Endpoint }}
 {{- end }}

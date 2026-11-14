@@ -2,13 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc2_2_internal_communication
 title: "Internal security communications channel maintained and used"
 description: |
-  The entity internally communicates information necessary to support
-  the functioning of internal control (TSC CC2.2). The control owner
-  uploads quarterly evidence that the security team uses a documented
-  internal channel — a #security Slack channel, a periodic all-hands
-  security update, an internal security newsletter — to communicate
-  security expectations, incidents (post-mortem summaries), and policy
-  changes to all personnel.
+  Staff are told what they need to know to operate controls (TSC CC2.2).
+  The control owner uploads quarterly evidence that the security team uses
+  a documented internal channel — a #security Slack channel, a periodic
+  all-hands security update, an internal security newsletter — to
+  communicate security expectations, incidents (post-mortem summaries),
+  and policy changes to all personnel.
 
 scf_anchor_id: GOV-04
 control_family: GOV

@@ -15,6 +15,9 @@ type fakeGate struct {
 	err         error
 	calls       int
 	keyIDs      []string
+	// keyCalls counts KeyCanAuthenticate, the check for persisted keys
+	// with no user; calls counts only UserCanAuthenticate.
+	keyCalls int
 }
 
 func (g *fakeGate) UserCanAuthenticate(_, userID, keyID string) (bool, error) {
@@ -27,6 +30,14 @@ func (g *fakeGate) UserCanAuthenticate(_, userID, keyID string) (bool, error) {
 		return false, nil
 	}
 	return g.allowed[userID], nil
+}
+
+func (g *fakeGate) KeyCanAuthenticate(_, keyID string) (bool, error) {
+	g.keyCalls++
+	if g.err != nil {
+		return false, g.err
+	}
+	return !g.revokedKeys[keyID], nil
 }
 
 const (
@@ -138,8 +149,55 @@ func TestAuthenticate_UserGateSkipsKeylessUsers(t *testing.T) {
 			t.Errorf("%s key: Authenticate = %v; want nil", name, err)
 		}
 	}
-	if gate.calls != 0 {
-		t.Fatalf("gate consulted %d times for key-less credentials; want 0", gate.calls)
+	if gate.calls != 0 || gate.keyCalls != 0 {
+		t.Fatalf("gate consulted %d user / %d key times for memory-only key-less credentials; want 0, 0", gate.calls, gate.keyCalls)
+	}
+}
+
+// #1964: a persisted key with no user (admin-minted, push) is checked
+// against its api_keys row on every authentication, so a revocation
+// committed on another replica refuses it here even though this replica's
+// in-memory record is still active. A gate error fails closed.
+func TestAuthenticate_KeyGateChecksPersistedMachineKeyRevocation(t *testing.T) {
+	s := New(time.Hour)
+	const fixed = "FAKE_TEST_TOKEN_not_a_secret"
+	if _, err := s.IssueFixedAdmin(gateTenant, fixed); err != nil {
+		t.Fatalf("IssueFixedAdmin: %v", err)
+	}
+	if _, err := s.AttachPersistence(newFakePersister()); err != nil {
+		t.Fatalf("AttachPersistence: %v", err)
+	}
+	machine, machineTok, err := s.Issue(gateTenant, "", nil, 0)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	gate := &fakeGate{allowed: map[string]bool{}, revokedKeys: map[string]bool{}}
+	s.SetUserGate(gate)
+
+	if _, err := s.Authenticate(machineTok); err != nil {
+		t.Fatalf("live row: Authenticate = %v; want nil", err)
+	}
+	if gate.keyCalls != 1 || gate.calls != 0 {
+		t.Fatalf("gate consulted %d key / %d user times; want 1, 0", gate.keyCalls, gate.calls)
+	}
+
+	gate.revokedKeys[machine.ID] = true
+	if _, err := s.Authenticate(machineTok); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("revoked row: Authenticate = %v; want ErrUnknownKey", err)
+	}
+
+	// The memory-only bootstrap key has no row and never consults the gate.
+	before := gate.keyCalls
+	if _, err := s.Authenticate(fixed); err != nil {
+		t.Fatalf("bootstrap key: Authenticate = %v; want nil", err)
+	}
+	if gate.keyCalls != before {
+		t.Fatalf("bootstrap key consulted the key gate")
+	}
+
+	gate.err = errors.New("db down")
+	if _, err := s.Authenticate(machineTok); err == nil || errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("gate error: Authenticate = %v; want a non-ErrUnknownKey error", err)
 	}
 }
 
@@ -213,7 +271,10 @@ func TestIssueMinted_RecordsMinterWithoutOwnership(t *testing.T) {
 		t.Fatalf("Authenticate with minter disallowed = %v; want nil", err)
 	}
 	if gate.calls != 0 {
-		t.Fatalf("gate consulted %d times for a machine key; want 0", gate.calls)
+		t.Fatalf("user gate consulted %d times for a machine key; want 0", gate.calls)
+	}
+	if gate.keyCalls != 1 {
+		t.Fatalf("key gate consulted %d times for a persisted machine key; want 1", gate.keyCalls)
 	}
 }
 

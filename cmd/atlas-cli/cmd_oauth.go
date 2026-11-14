@@ -14,7 +14,6 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/auth/oauthclient"
 	"github.com/mgoodric/security-atlas/internal/auth/oauthcode"
-	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // newOAuthCmd wires `atlas-cli oauth ...` — operator-only helpers
@@ -344,16 +343,6 @@ type clientBinder interface {
 	Bind(ctx context.Context, clientID string, tenant uuid.UUID) (*oauthclient.Client, error)
 }
 
-// tenantResolver answers "which tenant is implied?" — in production
-// tenancy.ResolveImplicitTenant over the CLI's pool.
-type tenantResolver func(ctx context.Context) (tenancy.TenantRef, error)
-
-func poolTenantResolver(pool *pgxpool.Pool) tenantResolver {
-	return func(ctx context.Context) (tenancy.TenantRef, error) {
-		return tenancy.ResolveImplicitTenant(ctx, pool)
-	}
-}
-
 func runOAuthBindClient(ctx context.Context, out io.Writer, b clientBinder, resolve tenantResolver, clientID, tenantFlag string) error {
 	if clientID == "" {
 		return errors.New("client_id argument is required")
@@ -380,26 +369,5 @@ func runOAuthBindClient(ctx context.Context, out io.Writer, b clientBinder, reso
 // returns uuid.Nil, and it refuses rather than guesses when several
 // tenants exist (security-atlas#1739).
 func chooseClientTenant(ctx context.Context, tenantFlag string, resolve tenantResolver) (uuid.UUID, error) {
-	if tenantFlag != "" {
-		id, err := uuid.Parse(tenantFlag)
-		if err != nil {
-			return uuid.Nil, fmt.Errorf("--tenant %q is not a UUID: %w", tenantFlag, err)
-		}
-		if id == uuid.Nil {
-			return uuid.Nil, errors.New("--tenant must not be the all-zeros tenant")
-		}
-		return id, nil
-	}
-	ref, err := resolve(ctx)
-	if err != nil {
-		var amb *tenancy.AmbiguousTenantError
-		switch {
-		case errors.As(err, &amb):
-			return uuid.Nil, fmt.Errorf("pass --tenant: %w", err)
-		case errors.Is(err, tenancy.ErrNoTenants):
-			return uuid.Nil, errors.New("no tenant is visible: pass --tenant, or use the BYPASSRLS (atlas_migrate) DATABASE_URL so the only tenant can be found")
-		}
-		return uuid.Nil, fmt.Errorf("resolve tenant: %w", err)
-	}
-	return ref.ID, nil
+	return chooseTenant(ctx, io.Discard, "--tenant", tenantFlag, resolve)
 }

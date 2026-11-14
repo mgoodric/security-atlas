@@ -2,13 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc3_3_fraud_risk
 title: "Fraud risk explicitly considered in annual risk assessment"
 description: |
-  The entity considers the potential for fraud in assessing risks to the
-  achievement of objectives (TSC CC3.3). The control owner attests
-  annually that the risk assessment (per CC3.2) explicitly enumerated
-  fraud scenarios — internal misuse, insider threat, financial-reporting
-  manipulation, account takeover — and that mitigating controls were
-  identified for each. This is a deliberate attestation rather than a
-  document upload because the same risk-assessment PDF satisfies CC3.2.
+  Fraud scenarios are part of the risk assessment (TSC CC3.3). The control
+  owner attests annually that the risk assessment (per CC3.2) explicitly
+  enumerated fraud scenarios — internal misuse, insider threat,
+  financial-reporting manipulation, account takeover — and that mitigating
+  controls were identified for each. This is a deliberate attestation
+  rather than a document upload because the same risk-assessment PDF
+  satisfies CC3.2.
 
 scf_anchor_id: RSK-04
 control_family: RSK
