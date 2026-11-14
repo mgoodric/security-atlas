@@ -40,47 +40,44 @@ If the file is also gone (someone signed in already) but you have no admin sessi
 
 The file was deleted (someone called `/v1/install/mark-first-signin` — typically a successful sign-in) but the session cookie never made it back to the browser. `platform_status.first_signin_at` is set; a re-issued bootstrap token cannot be consumed without explicit intent.
 
-Use the recovery flag on `atlas-cli credentials issue`:
+Use the recovery flag on `atlas-cli credentials issue`, with the bootstrap token as `--token`. An admin API key such as `ATLAS_BOOTSTRAP_TOKEN` resets over gRPC (`--endpoint`), where API keys authenticate. The HTTP API accepts only JWTs, so `--http-endpoint` is used only when `--token` is a super_admin JWT. The atlas gRPC port serves plaintext inside the deployment network, hence `--insecure`.
 
-**Verified on docker-compose:**
+**On docker-compose:**
 
 ```sh
-# From inside the atlas-cli container (sees the same network):
+# From a container on the atlas network:
 atlas-cli credentials issue \
-  --tenant "$ATLAS_BOOTSTRAP_TENANT" \
   --reset-bootstrap --force \
-  --endpoint atlas:50051 \
-  --http-endpoint http://atlas:8080 \
+  --endpoint atlas:50051 --insecure \
   --token "$ATLAS_BOOTSTRAP_TOKEN"
 ```
 
 The `--force` flag is the foot-gun gate: without it the CLI refuses because re-issuing bootstrap after a real user has signed in is rarely the right move. With it, the platform:
 
 1. Clears `platform_status.bootstrap_token_consumed_at` and `first_signin_at`.
-2. Mints a fresh admin bearer for `--tenant`, which must be the tenant of the `--token` credential. Signing in with it gives an admin session.
+2. Mints a fresh admin bearer for the tenant of the `--token` credential. `--tenant`, if you pass it, must be that same tenant. Signing in with the new bearer gives an admin session.
 3. Writes the new token to `${ATLAS_DATA_DIR}/bootstrap-token` (mode 0600).
 4. Revokes any recovery key an earlier reset minted.
 5. Returns the new bearer plaintext, its `credential_id` and its `expires_at` to stdout.
+6. Logs the reset (`reset-bootstrap minted recovery admin credential`) with the new credential id, the caller's credential id and the transport, never the bearer.
 
-`--token` must be a super_admin JWT, or an admin API key on an install with one tenant. `--scope` and `--kinds` are refused with `--reset-bootstrap`.
+`--token` must be an admin API key on an install with one tenant, or a super_admin JWT (with `--http-endpoint http://atlas:8080`) on any install. On an install with more than one tenant an admin API key is refused. `--scope` and `--kinds` are refused with `--reset-bootstrap`.
 
 **The recovery key expires.** It lasts 24h by default. Pass `--ttl` to change that, up to `168h` (7 days). The key cannot be made non-expiring.
 
 **Revoke it after you sign in.** If the first sign-in uses another credential, the platform revokes the recovery key itself. If you sign in with the recovery key, it stays live until it expires, because it is your session. Once you can sign in another way (local password or SSO), revoke it:
 
 ```sh
-atlas-cli credentials revoke --id <credential_id> --endpoint atlas:50051 --token <your admin token>
+atlas-cli credentials revoke --id <credential_id> --endpoint atlas:50051 --insecure --token <your admin token>
 ```
 
-**Verified on Helm:**
+**On Helm:**
 
 ```sh
 kubectl exec -it deploy/atlas -- \
   atlas-cli credentials issue \
-  --tenant "$ATLAS_BOOTSTRAP_TENANT" \
   --reset-bootstrap --force \
-  --endpoint atlas:50051 \
-  --http-endpoint http://atlas:8080 \
+  --endpoint atlas:50051 --insecure \
   --token "$ATLAS_BOOTSTRAP_TOKEN"
 ```
 

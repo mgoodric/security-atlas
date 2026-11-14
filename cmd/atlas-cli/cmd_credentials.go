@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 
@@ -89,11 +91,56 @@ func newCredentialsIssueCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&f.force, "force", false,
 		"with --reset-bootstrap: allow the reset after first sign-in has occurred")
 	cmd.Flags().StringVar(&f.httpEndpoint, "http-endpoint", "",
-		"with --reset-bootstrap: atlas HTTP endpoint (e.g. http://localhost:8080); defaults to deriving from --endpoint")
+		"with --reset-bootstrap and a JWT --token: atlas HTTP endpoint (e.g. http://localhost:8080); defaults to deriving from --endpoint. An API-key --token resets over gRPC at --endpoint")
 	return cmd
 }
 
-// runResetBootstrap implements the slice-073 --reset-bootstrap flow: one
+// jwtPrefix begins every JWS compact serialization (base64url of
+// `{"alg":`). The server's /v1 middleware uses the same shape check.
+const jwtPrefix = "eyJ"
+
+// runResetBootstrap routes --reset-bootstrap by the shape of --token
+// (#2121). /v1 accepts only JWTs, so a super_admin JWT goes over HTTP; an
+// API key, such as ATLAS_BOOTSTRAP_TOKEN, goes over gRPC, where API keys
+// authenticate. Both reach the same reset on the server.
+func runResetBootstrap(tenant string, force bool, httpEndpoint string, ttl time.Duration) error {
+	if strings.HasPrefix(common.token, jwtPrefix) {
+		return runResetBootstrapHTTP(tenant, force, httpEndpoint, ttl)
+	}
+	return runResetBootstrapGRPC(tenant, force, ttl)
+}
+
+// runResetBootstrapGRPC calls AdminCredentialsService.ResetBootstrap with
+// the operator's admin API key. The server admits it only on a
+// single-tenant install.
+func runResetBootstrapGRPC(tenant string, force bool, ttl time.Duration) error {
+	if ttl < 0 || (ttl > 0 && ttl < time.Second) {
+		return fmt.Errorf("--ttl %s: must be at least 1s with --reset-bootstrap", ttl)
+	}
+	req := &adminv1.ResetBootstrapRequest{Force: force, TenantId: tenant}
+	if ttl > 0 {
+		req.Ttl = durationpb.New(ttl)
+	}
+	err := runAdminRPC(func(ctx context.Context, c adminv1.AdminCredentialsServiceClient) (proto.Message, error) {
+		resp, err := c.ResetBootstrap(ctx, req)
+		if status.Code(err) == codes.FailedPrecondition {
+			return nil, fmt.Errorf("reset refused: a real user has already signed in; re-run with --force to override: %w", err)
+		}
+		return resp, err
+	})
+	if err != nil {
+		return err
+	}
+	printResetBootstrapGuidance()
+	return nil
+}
+
+func printResetBootstrapGuidance() {
+	_, _ = fmt.Fprintln(cmdCredentialsStdout(), "reset-bootstrap: platform_status cleared and bootstrap-token file rewritten with a new admin credential")
+	_, _ = fmt.Fprintln(cmdCredentialsStdout(), "reset-bootstrap: the key expires at expires_at; after you sign in another way, revoke it with `atlas-cli credentials revoke --id <credential_id>`")
+}
+
+// runResetBootstrapHTTP implements the slice-073 --reset-bootstrap flow: one
 // POST /v1/admin/install/reset-bootstrap carrying --force and --tenant,
 // authorized by the operator's --token. atlas resets platform_status
 // (refuses without --force when first_signin_at is already set), mints a
@@ -106,7 +153,7 @@ func newCredentialsIssueCmd() *cobra.Command {
 // token gave a non-admin session.
 //
 // ttl is the recovery key's lifetime; 0 leaves the server default (#1892).
-func runResetBootstrap(tenant string, force bool, httpEndpoint string, ttl time.Duration) error {
+func runResetBootstrapHTTP(tenant string, force bool, httpEndpoint string, ttl time.Duration) error {
 	endpoint := httpEndpoint
 	if endpoint == "" {
 		endpoint = deriveHTTPEndpoint(common.endpoint)
@@ -127,8 +174,7 @@ func runResetBootstrap(tenant string, force bool, httpEndpoint string, ttl time.
 		return fmt.Errorf("decode reset-bootstrap response: %w", err)
 	}
 	_, _ = fmt.Fprintln(cmdCredentialsStdout(), out.String())
-	_, _ = fmt.Fprintln(cmdCredentialsStdout(), "reset-bootstrap: platform_status cleared and bootstrap-token file rewritten with a new admin credential")
-	_, _ = fmt.Fprintln(cmdCredentialsStdout(), "reset-bootstrap: the key expires at expires_at; after you sign in another way, revoke it with `atlas-cli credentials revoke --id <credential_id>`")
+	printResetBootstrapGuidance()
 	return nil
 }
 

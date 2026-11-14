@@ -20,12 +20,38 @@ import (
 // Service implements adminv1.AdminCredentialsServiceServer.
 type Service struct {
 	adminv1.UnimplementedAdminCredentialsServiceServer
-	store *credstore.Store
+	store    *credstore.Store
+	resetter BootstrapResetter
+}
+
+// BootstrapResetter performs the first-login recovery reset for the
+// ResetBootstrap RPC (#2121). The api.Server implements it with the same
+// code the HTTP reset-bootstrap endpoint runs; it lives behind an
+// interface because that code needs the platform status and the
+// bootstrap-token path, which this package does not hold.
+type BootstrapResetter interface {
+	ResetBootstrap(ctx context.Context, req *adminv1.ResetBootstrapRequest) (*adminv1.ResetBootstrapResponse, error)
 }
 
 // New constructs the service.
 func New(store *credstore.Store) *Service {
 	return &Service{store: store}
+}
+
+// SetBootstrapResetter wires the ResetBootstrap RPC. Without it the RPC
+// returns Unavailable.
+func (s *Service) SetBootstrapResetter(r BootstrapResetter) {
+	s.resetter = r
+}
+
+// ResetBootstrap re-arms first login for an operator locked out of it
+// (#2121). The resetter authorizes the caller: an admin key on a
+// single-tenant install.
+func (s *Service) ResetBootstrap(ctx context.Context, req *adminv1.ResetBootstrapRequest) (*adminv1.ResetBootstrapResponse, error) {
+	if s.resetter == nil {
+		return nil, status.Error(codes.Unavailable, "bootstrap reset not configured")
+	}
+	return s.resetter.ResetBootstrap(ctx, req)
 }
 
 // Issue creates a new API key and returns the bearer token exactly once.

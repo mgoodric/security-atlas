@@ -10,8 +10,9 @@ import (
 	"testing"
 )
 
-// TestRunResetBootstrap_SendsOperatorTokenAsBearer pins #1851/#1885: the
-// reset POST is authorized by the operator's --token, and the body carries
+// TestRunResetBootstrap_SendsOperatorTokenAsBearer pins #1851/#1885: a JWT
+// --token resets over HTTP (#2121); the reset POST is authorized by the
+// operator's --token, and the body carries
 // --tenant and --force (no caller-minted token). The response's credential
 // is printed.
 func TestRunResetBootstrap_SendsOperatorTokenAsBearer(t *testing.T) {
@@ -26,7 +27,7 @@ func TestRunResetBootstrap_SendsOperatorTokenAsBearer(t *testing.T) {
 	defer srv.Close()
 
 	prevToken := common.token
-	common.token = "operator-token"
+	common.token = "eyJoperator.jwt"
 	defer func() { common.token = prevToken }()
 	var out bytes.Buffer
 	prevStdout := cmdCredentialsStdout
@@ -36,8 +37,8 @@ func TestRunResetBootstrap_SendsOperatorTokenAsBearer(t *testing.T) {
 	if err := runResetBootstrap("t-1", true, srv.URL, 0); err != nil {
 		t.Fatalf("runResetBootstrap: %v", err)
 	}
-	if gotAuth != "Bearer operator-token" {
-		t.Fatalf("Authorization = %q, want %q", gotAuth, "Bearer operator-token")
+	if gotAuth != "Bearer eyJoperator.jwt" {
+		t.Fatalf("Authorization = %q, want %q", gotAuth, "Bearer eyJoperator.jwt")
 	}
 	if gotPath != "/v1/admin/install/reset-bootstrap" {
 		t.Fatalf("path = %q", gotPath)
@@ -59,7 +60,7 @@ func TestRunResetBootstrap_ConflictSuggestsForce(t *testing.T) {
 		w.WriteHeader(http.StatusConflict)
 	}))
 	defer srv.Close()
-	err := runResetBootstrap("t-1", false, srv.URL, 0)
+	err := runResetBootstrapHTTP("t-1", false, srv.URL, 0)
 	if err == nil || !strings.Contains(err.Error(), "--force") {
 		t.Fatalf("err = %v, want the --force hint", err)
 	}

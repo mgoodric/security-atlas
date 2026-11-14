@@ -24,19 +24,19 @@ func TestRunResetBootstrap_SendsTTL(t *testing.T) {
 	cmdCredentialsStdout = func() io.Writer { return io.Discard }
 	defer func() { cmdCredentialsStdout = prevStdout }()
 
-	if err := runResetBootstrap("t-1", true, srv.URL, 48*time.Hour); err != nil {
+	if err := runResetBootstrapHTTP("t-1", true, srv.URL, 48*time.Hour); err != nil {
 		t.Fatalf("runResetBootstrap: %v", err)
 	}
 	if gotBody["ttl_seconds"] != float64(172800) {
 		t.Fatalf("ttl_seconds = %v, want 172800", gotBody["ttl_seconds"])
 	}
-	if err := runResetBootstrap("t-1", true, srv.URL, 0); err != nil {
+	if err := runResetBootstrapHTTP("t-1", true, srv.URL, 0); err != nil {
 		t.Fatalf("runResetBootstrap: %v", err)
 	}
 	if _, ok := gotBody["ttl_seconds"]; ok {
 		t.Fatalf("ttl_seconds sent for --ttl 0: %v", gotBody)
 	}
-	if err := runResetBootstrap("t-1", true, srv.URL, time.Millisecond); err == nil {
+	if err := runResetBootstrapHTTP("t-1", true, srv.URL, time.Millisecond); err == nil {
 		t.Fatalf("sub-second --ttl: want an error")
 	}
 }

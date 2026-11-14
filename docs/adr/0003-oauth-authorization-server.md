@@ -459,6 +459,33 @@ operator gets no chance to rotate the keys first.
 database on every user-owned key authentication, so checking `revoked_at`
 in that read closes the gap without a new channel.
 
+## Amendment (2026-11-14, #2121): the admin-key reset runs over gRPC
+
+The #1851 admin-key fallback on `POST /v1/admin/install/reset-bootstrap` was
+unreachable. Slice 326 made JWTs the only credential `/v1` accepts, so an
+admin API key, `ATLAS_BOOTSTRAP_TOKEN` included, gets 401 before the handler
+runs. The documented recovery command failed for every operator without a
+JWT, which is the operator it exists for.
+
+The fallback now lives on gRPC: `AdminCredentialsService.ResetBootstrap`,
+where API keys authenticate. It runs the same code as the HTTP handler and
+admits only an admin key on an install with exactly one tenant; gRPC has no
+JWTs, so there is no super_admin path there. The HTTP endpoint is unchanged
+and serves super_admin JWTs. `atlas-cli credentials issue --reset-bootstrap`
+picks the transport from the shape of `--token`: a JWT goes to HTTP, anything
+else to gRPC. Each reset is logged with its transport.
+
+Rejected alternatives:
+
+- **Accept the bootstrap token on that one HTTP route.** It reopens a non-JWT
+  credential on `/v1`, which slice 326 closed, and needs a second
+  authentication path ahead of `requireCredential` for one route.
+- **An on-box `DATABASE_URL` reset command.** The credential store is held
+  in the server's memory and rehydrated from `api_keys` only at boot, and
+  the bootstrap-token file lives in the server's data directory. A
+  separate process writing to the database could not mint a key the running
+  server accepts, or write the file, without a restart.
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block
