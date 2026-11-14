@@ -54,10 +54,14 @@ so a refused change leaves no row.
 
 `resolveCategory` now refuses an archived category on risk create (400).
 Existing risks keep it. No risk update path changes category yet (#1809 D5),
-so "moving a risk off an archived category" has nothing to change. Raw-SQL
-writers that send the enum (the MCP applier, aggregation meta-risks) still go
-through the sync trigger and are not checked; the migrate batches of #1745
-move those readers.
+so "moving a risk off an archived category" has nothing to change. The MCP
+`create_risk` applier resolves its category in the apply transaction through
+`risk.ResolveCategoryTx` and writes `category_id` explicitly, so an unknown,
+archived or deleted category is `ErrInvalidInput` (400 on confirm) and
+nothing is written. Review found this path, which D6 would otherwise have
+turned into a 500 for a deleted category. Aggregation meta-risks copy their
+first child's category and still go through the sync trigger; #1745's
+aggregation batch moves them to the organisation default.
 
 ## D6 — the lazy seed no longer restores a deleted category
 
@@ -65,9 +69,10 @@ move those readers.
 every list and risk write, so a deleted seeded category (`financial`) came
 back on the next list. The integration test caught it. The function now
 seeds only a tenant with no categories at all; the down migration restores
-the old body. A writer that later sends a deleted category's enum value gets
-a NOT NULL violation on `category_id`, which is correct (the category is
-gone) if not friendly; the contract step removes the enum path.
+the old body. The API and the MCP applier resolve the category first, so a
+deleted one is a 400 there (D5). A raw SQL write that sends a deleted
+category's enum value gets a NOT NULL violation on `category_id`, which is
+correct (the category is gone); the contract step removes the enum path.
 
 ## D7 — added categories cannot hold risks until the contract step
 

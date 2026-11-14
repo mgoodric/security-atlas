@@ -80,6 +80,27 @@ func (s *Store) ListCategories(ctx context.Context) ([]Category, error) {
 // and returns it with the enum value the risk row still carries. An unknown
 // ref is an UnknownCategoryError naming the tenant's slugs.
 func resolveCategory(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, dbx.RiskCategory, error) {
+	return ResolveCategoryTx(ctx, q, tenantID, ref)
+}
+
+// IsCategoryRefusal reports whether err is a category the caller named but
+// cannot assign to a new risk: unknown, archived, or one that cannot hold
+// risks yet. Callers map it to a client error.
+func IsCategoryRefusal(err error) bool {
+	var (
+		archived *ArchivedCategoryError
+		invalid  *InvalidCategoryError
+	)
+	return IsUnknownCategory(err) || errors.As(err, &archived) || errors.As(err, &invalid)
+}
+
+// ResolveCategoryTx resolves ref (a slug or an id) to one of the tenant's
+// categories inside the caller's tenant-scoped transaction, for writers
+// outside Store such as the MCP create_risk applier (#1810). It returns the
+// category with the enum value the risk row still carries, or an error that
+// IsCategoryRefusal recognises when the category is unknown, archived, or
+// cannot hold risks yet.
+func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, dbx.RiskCategory, error) {
 	if err := q.SeedRiskCategories(ctx, pgUUID(tenantID)); err != nil {
 		return Category{}, "", fmt.Errorf("seed risk categories: %w", err)
 	}
