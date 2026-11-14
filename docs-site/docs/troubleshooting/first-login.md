@@ -55,13 +55,19 @@ Use the recovery flag on `atlas-cli credentials issue`:
     [#2121](https://github.com/mgoodric/security-atlas/issues/2121).
 
     ```sh
-    ATLAS_JWT=$(curl -fsS -X POST http://atlas:8080/auth/local/login \
-      -H 'Content-Type: application/json' \
-      -d '{"email":"admin@example.com","password":"..."}' \
+    printf 'Password: '; read -rs ATLAS_PASSWORD; echo
+    ATLAS_JWT=$(printf '{"email":"%s","password":"%s"}' admin@example.com "$ATLAS_PASSWORD" \
+      | curl -fsS -X POST http://atlas:8080/auth/local/login -H 'Content-Type: application/json' --data-binary @- \
       | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+    unset ATLAS_PASSWORD
+    [ -n "$ATLAS_JWT" ] || echo 'no token: is ATLAS_ISSUER_URL set?'
     ```
 
-    Then pass `--token "$ATLAS_JWT"` in place of
+    The password is read without echo and sent on stdin, so it stays out
+    of the process list and your shell history. A `"` or `\` in the
+    password breaks the JSON body that `printf` builds; the
+    [Getting Started sign-in step](../getting-started.md#3-sign-in-and-get-credentials)
+    uses the same pattern. Then pass `--token "$ATLAS_JWT"` in place of
     `--token "$ATLAS_BOOTSTRAP_TOKEN"` below.
 <!-- prettier-ignore-end -->
 
