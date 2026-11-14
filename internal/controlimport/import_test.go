@@ -244,6 +244,46 @@ func TestParseXLSXRefusesDecompressionBomb(t *testing.T) {
 	}
 }
 
+// TestCheckUnzipSizeDoesNotWrap: a 10 MiB entry followed by one declaring
+// 2^64 - 5 MiB sums to 5 MiB in uint64, under the cap, if the check adds
+// before comparing.
+func TestCheckUnzipSizeDoesNotWrap(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, size := range []uint64{10 << 20, ^uint64(0) - (5 << 20) + 1} {
+		w, err := zw.CreateRaw(&zip.FileHeader{
+			Name: fmt.Sprintf("xl/part-%d.xml", size), Method: zip.Store,
+			UncompressedSize64: size, CompressedSize64: 1,
+		})
+		if err != nil {
+			t.Fatalf("CreateRaw: %v", err)
+		}
+		_, _ = w.Write([]byte("x"))
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := checkUnzipSize(buf.Bytes()); !errors.Is(err, ErrWorkbookTooLarge) {
+		t.Fatalf("wrapping sizes err = %v, want ErrWorkbookTooLarge", err)
+	}
+}
+
+func TestParseXLSXColumnCap(t *testing.T) {
+	far := make([]string, 16384) // a value in column XFD
+	far[0], far[1], far[2], far[16383] = "C-1", "T", "D", "stray"
+	raw := makeControlXLSX(t, [][]string{{"Control ID", "Title", "Description"}, far})
+	if _, err := ParseXLSX(raw); !errors.Is(err, ErrTooManyColumns) {
+		t.Fatalf("far cell err = %v, want ErrTooManyColumns", err)
+	}
+	// A cell at the cap is fine.
+	atCap := make([]string, MaxColumns)
+	atCap[0], atCap[1], atCap[2], atCap[MaxColumns-1] = "C-1", "T", "D", "note"
+	got, err := ParseXLSX(makeControlXLSX(t, [][]string{{"Control ID", "Title", "Description"}, atCap}))
+	if err != nil || len(got.Controls) != 1 {
+		t.Fatalf("at-cap = %+v, %v", got, err)
+	}
+}
+
 func TestParseXLSXRowCapStopsTheRead(t *testing.T) {
 	if _, err := ParseXLSX(rowsXLSX(t, MaxRows)); !errors.Is(err, ErrTooManyRows) {
 		t.Fatalf("header + %d rows err = %v, want ErrTooManyRows", MaxRows, err)

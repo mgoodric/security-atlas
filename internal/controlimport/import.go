@@ -31,6 +31,8 @@ const (
 	// MaxUnzipXMLBytes the part of it excelize holds in memory per sheet.
 	MaxUnzipBytes    = 64 << 20
 	MaxUnzipXMLBytes = 16 << 20
+	// MaxColumns caps the cells kept per row; a control sheet has a handful.
+	MaxColumns = 200
 )
 
 var (
@@ -39,6 +41,7 @@ var (
 	ErrEmptyFile          = errors.New("controlimport: empty control file")
 	ErrNoHeaderRow        = errors.New("controlimport: no recognizable header row")
 	ErrTooManyRows        = errors.New("controlimport: control file exceeds row cap")
+	ErrTooManyColumns     = errors.New("controlimport: control file row exceeds column cap")
 	ErrUnsupportedFormat  = errors.New("controlimport: file must be .csv or .xlsx")
 	ErrInvalidColumnMap   = errors.New("controlimport: invalid column map")
 	ErrMappedColumnAbsent = errors.New("controlimport: column map names a header that is not in the file")
@@ -210,12 +213,14 @@ func checkUnzipSize(raw []byte) error {
 	if err != nil {
 		return fmt.Errorf("controlimport: open xlsx: %w", err)
 	}
+	// Compare before adding: a zip64 entry declaring close to 2^64 bytes
+	// would wrap a plain running sum back under the cap.
 	var total uint64
 	for _, zf := range zr.File {
-		total += zf.UncompressedSize64
-		if total > MaxUnzipBytes {
+		if zf.UncompressedSize64 > MaxUnzipBytes-total {
 			return ErrWorkbookTooLarge
 		}
+		total += zf.UncompressedSize64
 	}
 	return nil
 }
@@ -237,7 +242,17 @@ func readSheetRows(f *excelize.File, sheet string) ([][]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("controlimport: read xlsx row: %w", err)
 		}
-		rows = append(rows, cols)
+		// Columns() pads a row out to its highest cell index, so one cell
+		// at XFD yields 16,384 entries. Keep only up to the last non-blank
+		// cell, copied so the padded array is not retained.
+		n := len(cols)
+		for n > 0 && strings.TrimSpace(cols[n-1]) == "" {
+			n--
+		}
+		if n > MaxColumns {
+			return nil, ErrTooManyColumns
+		}
+		rows = append(rows, append([]string(nil), cols[:n]...))
 	}
 	if err := it.Error(); err != nil {
 		return nil, fmt.Errorf("controlimport: read xlsx rows: %w", err)

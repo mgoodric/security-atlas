@@ -131,6 +131,9 @@ func writeStageError(w http.ResponseWriter, r *http.Request, err error) {
 	case errors.Is(err, controlimport.ErrTooManyRows):
 		httpresp.WriteError(w, http.StatusBadRequest,
 			fmt.Sprintf("control file exceeds the %d-row cap; split it into smaller files", controlimport.MaxRows))
+	case errors.Is(err, controlimport.ErrTooManyColumns):
+		httpresp.WriteError(w, http.StatusBadRequest,
+			fmt.Sprintf("a row has a value past column %d; remove the stray cells or split the sheet", controlimport.MaxColumns))
 	case errors.Is(err, controlimport.ErrFrameworkRequired):
 		httpresp.WriteError(w, http.StatusBadRequest, "framework is required: the slug of the framework the tested-under codes belong to")
 	case errors.Is(err, controlimport.ErrUnknownFramework):

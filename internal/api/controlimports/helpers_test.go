@@ -45,6 +45,7 @@ func TestWriteStageErrorStatuses(t *testing.T) {
 		{controlimport.ErrUploadTooLarge, http.StatusRequestEntityTooLarge, "5 MiB size cap"},
 		{controlimport.ErrWorkbookTooLarge, http.StatusRequestEntityTooLarge, "64 MiB uncompressed cap"},
 		{controlimport.ErrTooManyRows, http.StatusBadRequest, "5000-row cap"},
+		{controlimport.ErrTooManyColumns, http.StatusBadRequest, "past column 200"},
 		{controlimport.ErrFrameworkRequired, http.StatusBadRequest, "framework is required"},
 		{fmt.Errorf("%w: %q", controlimport.ErrUnknownFramework, "iso"), http.StatusBadRequest, `"iso"`},
 		{controlimport.ErrUnsupportedFormat, http.StatusBadRequest, ".csv or .xlsx"},

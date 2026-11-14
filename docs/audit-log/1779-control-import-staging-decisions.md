@@ -135,6 +135,20 @@ misconfigured pair of limits. The declared sizes are binding because
 `archive/zip` fails an entry that inflates past its declared size. The
 questionnaire XLSX parser has the same gap and is tracked separately.
 
+The declared sizes are summed without overflow: each entry is compared
+against the cap's remainder before it is added, because a zip64 entry
+declaring nearly 2^64 bytes would wrap a plain running sum back under the
+cap.
+
+Rows are capped at 200 columns. excelize's `Columns()` pads a row out to its
+highest cell index, so a single cell in column XFD yields 16,384 entries.
+Each row is trimmed to its last non-blank cell and copied, and a row with a
+value past column 200 is refused with 400 (`ErrTooManyColumns`).
+
+These match #1960's questionnaire fix, but the code is not shared:
+`internal/questionnaire`'s `checkDecompressedSize` is unexported and still
+uses the plain running sum.
+
 `detection_tier_actual = manual_review` (PR review) ·
 `detection_tier_target = unit` (a parser test with a compressible workbook).
 
