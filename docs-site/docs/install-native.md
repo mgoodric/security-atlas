@@ -172,8 +172,8 @@ sh deploy/docker/bootstrap/migrate.sh
 This is the script the compose `atlas-migrate` service runs. It re-runs
 `01-roles.sql` as a no-op, records every applied file in a
 `schema_migrations` table, and skips files already recorded, so it is
-safe to run on every upgrade. Prefer it over `just migrate-up`, which
-re-applies every file and is meant for a throwaway dev database.
+safe to run on every upgrade. From a source checkout, `just migrate-up`
+runs this same script.
 
 ## Step 5 — start the server
 
