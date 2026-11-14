@@ -26,7 +26,7 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   - **What retirement keeps:** a retired edge keeps its row and its append-only tier history. The importer adds a `fw_to_scf_edge_tier_transitions` row by the system reviewer, with the note `retired: dropped by crosswalk <source>`.
   - **What drops it:** `effective_fw_to_scf_edges` excludes retired edges, so coverage, traversal, the catalog export and the tier state machine no longer see them.
   - **Re-listing:** a crosswalk that lists the pair again restores the edge, with a `restored` transition row.
-  - **New columns:** migration `20260921000000` adds `fw_to_scf_edges.retired_at` and `fw_to_scf_edges.crosswalk_source`. The source is `yaml:<file>` for a YAML crosswalk, or `scf-workbook:<columns>` / `scf-olir:<sheet>` for a workbook.
+  - **New columns:** migration `20260926000000` adds `fw_to_scf_edges.retired_at` and `fw_to_scf_edges.crosswalk_source`. The source is `yaml:<file>` for a YAML crosswalk, or `scf-workbook:<columns>` / `scf-olir:<sheet>` for a workbook.
   - **Ownership:** an import retires only the edges its own source wrote, so a workbook import and the bundled YAML can share a framework version (the ISO 27001 preset in `docs/operator/scf-crosswalk-import.md`). Edges written before this release have no source: a YAML import treats them as its own, and a workbook import never retires them. An unlisted edge from another source is kept and printed as `edge kept`.
   - **Output:** each retired edge is printed with its source and tier, followed by an `edges retired by source[...]` count. The edges table holds catalog edges only, with no tenant column, so no tenant data is touched.
 
