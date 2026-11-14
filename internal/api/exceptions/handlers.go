@@ -25,6 +25,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -461,13 +462,22 @@ func parseWithin(s string) (time.Duration, error) {
 	if num <= 0 {
 		return 0, errors.New("must be positive")
 	}
+	var unit time.Duration
 	switch suffix {
 	case 'd':
-		return time.Duration(num) * 24 * time.Hour, nil
+		unit = 24 * time.Hour
 	case 'h':
-		return time.Duration(num) * time.Hour, nil
+		unit = time.Hour
 	case 'm':
-		return time.Duration(num) * time.Minute, nil
+		unit = time.Minute
+	default:
+		return 0, errors.New("unknown duration unit")
 	}
-	return 0, errors.New("unknown duration unit")
+	// Refuse a num that would overflow before multiplying: it wraps
+	// time.Duration negative and slips under the caller's
+	// MaxExpiringWindow check (#1914).
+	if int64(num) > math.MaxInt64/int64(unit) {
+		return 0, errors.New("out of range")
+	}
+	return time.Duration(num) * unit, nil
 }

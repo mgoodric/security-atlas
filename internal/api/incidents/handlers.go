@@ -16,6 +16,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/incident"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -191,6 +192,12 @@ func (h *Handler) writeErr(w http.ResponseWriter, r *http.Request, op string, er
 		errors.Is(err, incident.ErrPostmortemRequired),
 		errors.Is(err, incident.ErrIRControlRequired):
 		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, ingest.ErrObservedAtSkew):
+		// #1830: the postmortem evidence goes through ingest, which
+		// refuses an observed_at outside the skew window.
+		httpresp.WriteError(w, http.StatusBadRequest, "observed_at outside permitted skew window")
+	case errors.Is(err, ingest.ErrUnavailable):
+		httpresp.WriteError(w, http.StatusServiceUnavailable, "evidence ingest unavailable")
 	default:
 		if strings.Contains(err.Error(), "target does not exist in tenant") {
 			httpresp.WriteError(w, http.StatusBadRequest, "linked target does not exist in tenant")
