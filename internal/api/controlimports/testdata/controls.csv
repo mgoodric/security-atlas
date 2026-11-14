@@ -5,3 +5,4 @@ ORG-AC-03,,Access is removed within one day of termination.,CC6.2,,HR
 ORG-AC-04,Encryption at rest,Customer data is encrypted at rest.,CC9.9,,Engineering
 ORG-AC-01,MFA for contractors,Contractor accounts require multi-factor authentication.,CC6.1,,IT
 ORG-HR-01,Background checks,New hires pass a background check before their start date.,,manual_attested,HR
+ORG-OP-01,Incident monitoring,Security events are monitored and triaged daily.,CC7.1,,Security

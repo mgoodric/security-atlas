@@ -100,6 +100,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/controls/export", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/export"},
 	{Method: "GET", Path: "/v1/controls/history/export", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/history/export"},
 	{Method: "GET", Path: "/v1/controls/imports/{id}", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/imports/{id} — an import batch with its counts, staged rows and rejected rows (#1779)"},
+	{Method: "GET", Path: "/v1/controls/imports/{id}/rows", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/imports/{id}/rows — staged rows with ranked SCF anchor candidates, filterable by status and no_candidate_reaches (#1780)"},
 	{Method: "GET", Path: "/v1/controls/checklist/{generationID}", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/checklist/{generationID}"},
 	{Method: "GET", Path: "/v1/controls/checklist/{generationID}/export.md", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/checklist/{generationID}/export.md"},
 	{Method: "GET", Path: "/v1/controls/{id}/action-plans", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/action-plans"},

@@ -51,6 +51,7 @@ import (
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
+		"control_import_candidates",
 		"control_import_rejected_rows",
 		"control_import_rows",
 		"control_import_batches",
@@ -76,17 +77,31 @@ func testServer(t *testing.T, app *pgxpool.Pool, tenant string) testEnv {
 	return testEnv{server: ts, bearer: bearer}
 }
 
-// seedCatalog writes a three-anchor SCF-shaped catalog and a framework with
-// three requirements, two of which carry crosswalk edges into the catalog.
-// Both are global catalog rows under per-test slugs so they never collide
-// with the bundled catalogs; cleanup deletes them (cascading to versions,
-// anchors, requirements and edges). Returns the framework slug.
-func seedCatalog(t *testing.T, admin *pgxpool.Pool) string {
+// testCatalog is what seedCatalog wrote: the framework slug, the SCF
+// release the anchors live in, and each fixture anchor's scf_id by key.
+type testCatalog struct {
+	framework  string
+	scfRelease string
+	anchors    map[string]string // key -> scf_id
+}
+
+// seedCatalog writes four fixture anchors into the current global SCF
+// release (creating that release when the database has none) and a
+// framework with three requirements:
+//
+//	CC6.1 -> mfa (0.8)
+//	CC6.2 -> mfa (0.7), review (0.9)
+//	CC7.1 -> nothing
+//
+// The monitoring and screening anchors have no edges; they exist to be
+// found by keyword. Anchor IDs and the framework slug are per test, and
+// cleanup deletes them (cascading to requirements, edges and candidates).
+// The SCF release is shared catalog data and stays.
+func seedCatalog(t *testing.T, admin *pgxpool.Pool) testCatalog {
 	t.Helper()
 	ctx := context.Background()
-	suffix := strings.ReplaceAll(uuid.NewString()[:8], "-", "")
-	scfSlug, fwSlug := "byoc-scf-"+suffix, "byoc-fw-"+suffix
-	scfID, scfVer := uuid.New(), uuid.New()
+	suffix := strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:8], "-", ""))
+	fwSlug := "byoc-fw-" + strings.ToLower(suffix)
 	fwID, fwVer := uuid.New(), uuid.New()
 
 	exec := func(sql string, args ...any) {
@@ -95,31 +110,89 @@ func seedCatalog(t *testing.T, admin *pgxpool.Pool) string {
 			t.Fatalf("seed catalog: %v\nsql: %s", err, sql)
 		}
 	}
+	scfVer, scfRelease := currentSCFRelease(t, admin)
+
+	anchorIDs := map[string]uuid.UUID{}
 	t.Cleanup(func() {
-		_, _ = admin.Exec(context.Background(), `DELETE FROM frameworks WHERE id = ANY($1)`, []uuid.UUID{scfID, fwID})
+		ids := make([]uuid.UUID, 0, len(anchorIDs))
+		for _, id := range anchorIDs {
+			ids = append(ids, id)
+		}
+		_, _ = admin.Exec(context.Background(), `DELETE FROM frameworks WHERE id = $1`, fwID)
+		_, _ = admin.Exec(context.Background(), `DELETE FROM scf_anchors WHERE id = ANY($1)`, ids)
 	})
-	for _, f := range []struct {
-		id, ver    uuid.UUID
-		slug, name string
-	}{{scfID, scfVer, scfSlug, "Test SCF"}, {fwID, fwVer, fwSlug, "Test Framework"}} {
-		exec(`INSERT INTO frameworks (id, tenant_id, name, slug, issuer) VALUES ($1, NULL, $2, $3, 'test')`, f.id, f.name, f.slug)
-		exec(`INSERT INTO framework_versions (id, tenant_id, framework_id, version, status) VALUES ($1, NULL, $2, '2017', 'current')`, f.ver, f.id)
-	}
-	anchors := map[string]uuid.UUID{"IAC-06": uuid.New(), "IAC-15": uuid.New(), "CRY-05": uuid.New()}
-	for scf, id := range anchors {
-		exec(`INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title) VALUES ($1, $2, $3, $4, $5)`,
-			id, scfVer, scf, scf[:3], "Anchor "+scf)
+	exec(`INSERT INTO frameworks (id, tenant_id, name, slug, issuer) VALUES ($1, NULL, 'Test Framework', $2, 'test')`, fwID, fwSlug)
+	exec(`INSERT INTO framework_versions (id, tenant_id, framework_id, version, status) VALUES ($1, NULL, $2, '2017', 'current')`, fwVer, fwID)
+
+	cat := testCatalog{framework: fwSlug, scfRelease: scfRelease, anchors: map[string]string{}}
+	for _, a := range []struct{ key, family, title, desc string }{
+		{"mfa", "IAC", "Multi-factor authentication " + suffix, "Workforce accounts require multi-factor authentication."},
+		{"review", "IAC", "Privileged access review " + suffix, "Privileged access is reviewed periodically."},
+		{"monitoring", "MON", "Security event monitoring " + suffix, "Security events are monitored and triaged."},
+		{"screening", "HRS", "Personnel background screening " + suffix, "Personnel pass a background check before access."},
+	} {
+		id := uuid.New()
+		scfID := "BY" + suffix + "-" + strings.ToUpper(a.key)
+		exec(`INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description) VALUES ($1, $2, $3, $4, $5, $6)`,
+			id, scfVer, scfID, a.family, a.title, a.desc)
+		anchorIDs[a.key] = id
+		cat.anchors[a.key] = scfID
 	}
 	reqs := map[string]uuid.UUID{"CC6.1": uuid.New(), "CC6.2": uuid.New(), "CC7.1": uuid.New()}
 	for code, id := range reqs {
 		exec(`INSERT INTO framework_requirements (id, framework_version_id, code, title) VALUES ($1, $2, $3, $4)`,
 			id, fwVer, code, "Requirement "+code)
 	}
-	for code, scf := range map[string]string{"CC6.1": "IAC-06", "CC6.2": "IAC-15"} {
+	for _, e := range []struct {
+		code, anchor string
+		strength     float64
+	}{{"CC6.1", "mfa", 0.8}, {"CC6.2", "mfa", 0.7}, {"CC6.2", "review", 0.9}} {
 		exec(`INSERT INTO fw_to_scf_edges (id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution)
-		      VALUES ($1, $2, $3, 'intersects_with', 0.8, 'scf_official')`, uuid.New(), reqs[code], anchors[scf])
+		      VALUES ($1, $2, $3, 'intersects_with', $4, 'scf_official')`, uuid.New(), reqs[e.code], anchorIDs[e.anchor], e.strength)
 	}
-	return fwSlug
+	return cat
+}
+
+// currentSCFRelease returns the current global SCF release, creating one
+// when the database has none (the controls list tests' get-or-create).
+func currentSCFRelease(t *testing.T, admin *pgxpool.Pool) (uuid.UUID, string) {
+	t.Helper()
+	ctx := context.Background()
+	var fwID uuid.UUID
+	if err := admin.QueryRow(ctx, `SELECT id FROM frameworks WHERE slug = 'scf' AND tenant_id IS NULL`).Scan(&fwID); err != nil {
+		if _, err := admin.Exec(ctx, `
+			INSERT INTO frameworks (id, tenant_id, slug, name, issuer, description)
+			VALUES ($1, NULL, 'scf', 'Secure Controls Framework', 'SCF Council', '')
+			ON CONFLICT DO NOTHING`, uuid.New()); err != nil {
+			t.Fatalf("insert scf framework: %v", err)
+		}
+		if err := admin.QueryRow(ctx, `SELECT id FROM frameworks WHERE slug = 'scf' AND tenant_id IS NULL`).Scan(&fwID); err != nil {
+			t.Fatalf("read scf framework: %v", err)
+		}
+	}
+	read := func() (uuid.UUID, string, error) {
+		var id uuid.UUID
+		var version string
+		err := admin.QueryRow(ctx, `
+			SELECT id, version FROM framework_versions
+			WHERE framework_id = $1 AND status = 'current'
+			ORDER BY created_at DESC LIMIT 1`, fwID).Scan(&id, &version)
+		return id, version, err
+	}
+	if id, version, err := read(); err == nil {
+		return id, version
+	}
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+		VALUES ($1, NULL, $2, 'test-1.0', 'current')
+		ON CONFLICT DO NOTHING`, uuid.New(), fwID); err != nil {
+		t.Fatalf("insert scf version: %v", err)
+	}
+	id, version, err := read()
+	if err != nil {
+		t.Fatalf("read scf version: %v", err)
+	}
+	return id, version
 }
 
 type upload struct {
@@ -268,6 +341,7 @@ var wantFixtureStaged = []wantStaged{
 	{row: 2, id: "ORG-AC-01", testedUnder: []string{"CC6.1", "CC6.2"}, implType: "automated"},
 	{row: 3, id: "ORG-AC-02", testedUnder: []string{"CC6.2"}, implType: "manual_periodic"},
 	{row: 7, id: "ORG-HR-01", testedUnder: []string{}, implType: "manual_attested"},
+	{row: 8, id: "ORG-OP-01", testedUnder: []string{"CC7.1"}},
 }
 
 var wantFixtureRejected = []controlimport.RejectedRow{
@@ -276,7 +350,7 @@ var wantFixtureRejected = []controlimport.RejectedRow{
 	{RowNumber: 6, ExternalID: "ORG-AC-01", Reason: controlimport.RejectDuplicateID},
 }
 
-const fixtureDataRows = 6
+const fixtureDataRows = 7
 
 func assertFixtureBatch(t *testing.T, b controlimport.Batch, format, framework string) {
 	t.Helper()
@@ -342,7 +416,7 @@ func assertFixtureBatch(t *testing.T, b controlimport.Batch, format, framework s
 func TestUploadStagesAndRejectsRows(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
-	framework := seedCatalog(t, admin)
+	framework := seedCatalog(t, admin).framework
 
 	cases := []struct {
 		name, filename, format string
@@ -382,7 +456,7 @@ func TestUploadStagesAndRejectsRows(t *testing.T) {
 func TestUploadHonoursColumnMap(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
-	framework := seedCatalog(t, admin)
+	framework := seedCatalog(t, admin).framework
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -430,7 +504,7 @@ func TestUploadHonoursColumnMap(t *testing.T) {
 func TestUploadCaps(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
-	framework := seedCatalog(t, admin)
+	framework := seedCatalog(t, admin).framework
 	tenant := freshTenant(t, admin)
 	env := testServer(t, app, tenant)
 
@@ -494,7 +568,7 @@ func TestUploadCaps(t *testing.T) {
 func TestBatchInvisibleToOtherTenant(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
-	framework := seedCatalog(t, admin)
+	framework := seedCatalog(t, admin).framework
 	tenantA := freshTenant(t, admin)
 	tenantB := freshTenant(t, admin)
 	envA := testServer(t, app, tenantA)
@@ -536,8 +610,8 @@ func TestBatchInvisibleToOtherTenant(t *testing.T) {
 	if got := counts(tenantB); got != [3]int{} {
 		t.Errorf("tenant B sees batch/rows/rejected = %v, want none", got)
 	}
-	if got := counts(tenantA); got != [3]int{1, 3, 3} {
-		t.Errorf("tenant A sees batch/rows/rejected = %v, want [1 3 3]", got)
+	if got := counts(tenantA); got != [3]int{1, 4, 3} {
+		t.Errorf("tenant A sees batch/rows/rejected = %v, want [1 4 3]", got)
 	}
 }
 
