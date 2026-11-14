@@ -1150,6 +1150,12 @@ type Querier interface {
 	// precision and truncates sub-us nanos), so the verify walk reconstructs the
 	// exact nanosecond timestamp the hash covered.
 	InsertEvidenceRecord(ctx context.Context, arg InsertEvidenceRecordParams) (EvidenceRecord, error)
+	// ===== framework_scope_workflow_log (issue #1786) =====
+	//
+	// Append-only history of framework_scopes changes. Written by
+	// internal/frameworkscope.Store in the same tx as the change it records.
+	// No UPDATE or DELETE query exists, and atlas_app holds no grant for one.
+	InsertFrameworkScopeWorkflowLog(ctx context.Context, arg InsertFrameworkScopeWorkflowLogParams) error
 	// ===== audit (append-only) =====
 	// One immutable audit row per lifecycle transition or migration decision
 	// (threat-model R / AC-1 / AC-4). Written in the SAME tx as the act.
@@ -2095,6 +2101,7 @@ type Querier interface {
 	// shape includes never-toggled flags too.
 	ListFeatureFlags(ctx context.Context, tenantID pgtype.UUID) ([]FeatureFlag, error)
 	ListFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) ([]FrameworkRequirement, error)
+	ListFrameworkScopeWorkflowLog(ctx context.Context, arg ListFrameworkScopeWorkflowLogParams) ([]FrameworkScopeWorkflowLog, error)
 	// Newest first. Caller filters by framework_version + state in the
 	// application layer because sqlc-static optional WHERE is noisy; the row
 	// count per tenant is bounded by (#frameworks × scope-versions) which stays
@@ -3318,7 +3325,8 @@ type Querier interface {
 	// (app-layer now(), no trigger — matches the repo convention).
 	UpsertTenantLLMRouting(ctx context.Context, arg UpsertTenantLLMRoutingParams) (TenantLlmRouting, error)
 	// Used by the OIDC callback: provision-on-first-sign-in by (idp_issuer, idp_subject).
-	// The composite UNIQUE index on (idp_issuer, idp_subject) WHERE both non-empty
+	// The per-tenant UNIQUE index users_idp_principal_unique on (tenant_id,
+	// idp_issuer, idp_subject) WHERE both non-empty
 	// is the conflict target. On conflict we update display_name + email (the IdP
 	// is canonical) and updated_at.
 	UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserByIdpSubjectParams) (User, error)

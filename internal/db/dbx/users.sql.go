@@ -180,7 +180,7 @@ INSERT INTO users (
 VALUES (
     $1, $2, $3, $4, $5, $6, $7
 )
-ON CONFLICT (idp_issuer, idp_subject)
+ON CONFLICT (tenant_id, idp_issuer, idp_subject)
     WHERE idp_issuer <> '' AND idp_subject <> ''
 DO UPDATE SET
     email = EXCLUDED.email,
@@ -200,7 +200,8 @@ type UpsertUserByIdpSubjectParams struct {
 }
 
 // Used by the OIDC callback: provision-on-first-sign-in by (idp_issuer, idp_subject).
-// The composite UNIQUE index on (idp_issuer, idp_subject) WHERE both non-empty
+// The per-tenant UNIQUE index users_idp_principal_unique on (tenant_id,
+// idp_issuer, idp_subject) WHERE both non-empty
 // is the conflict target. On conflict we update display_name + email (the IdP
 // is canonical) and updated_at.
 func (q *Queries) UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserByIdpSubjectParams) (User, error) {
