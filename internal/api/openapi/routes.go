@@ -252,6 +252,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/admin/framework-versions/{id}/revert", Tag: "admin-framework-versions", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/framework-versions/{id}/revert — reverse a version promotion (slice 484)"},
 	{Method: "POST", Path: "/v1/admin/install/reset-bootstrap", Tag: "admin-install", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/install/reset-bootstrap"},
 	{Method: "POST", Path: "/v1/admin/group-role-mappings", Tag: "admin-group-role-mappings", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/group-role-mappings"},
+	{Method: "POST", Path: "/v1/admin/policies/import", Tag: "admin-policies", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/policies/import — import a policy library with its approval history (#1747)"},
 	{Method: "POST", Path: "/v1/admin/scim-credentials", Tag: "admin-scim-credentials", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/scim-credentials"},
 	{Method: "POST", Path: "/v1/admin/sso/preflight", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/sso/preflight"},
 	{Method: "POST", Path: "/v1/admin/super-admins", Tag: "admin-super-admins", Tier: "adminBearer", Internal: false, Summary: "POST /v1/admin/super-admins"},

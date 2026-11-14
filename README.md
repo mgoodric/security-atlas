@@ -153,7 +153,7 @@ just migrate-up
 just build
 ```
 
-Detailed local dev setup, prerequisites, and the full `just` recipe surface live in [`CONTRIBUTING.md`](./CONTRIBUTING.md). For a production self-host walkthrough (docker-compose, service roles, backups), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md).
+Detailed local dev setup, prerequisites, and the full `just` recipe surface live in [`CONTRIBUTING.md`](./CONTRIBUTING.md). For a production self-host walkthrough (docker-compose, service roles, backups), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md). No container runtime? The [native install](./docs-site/docs/install-native.md) runs on Go, Postgres 16 and Node alone.
 
 ### Your first sign-in (self-host)
 

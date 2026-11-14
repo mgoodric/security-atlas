@@ -23,6 +23,8 @@ func TestSlice138_PoliciesExportHeader_StableOrder(t *testing.T) {
 		"id", "title", "version", "status", "effective_date",
 		"owner", "approver", "acknowledgment_required_role",
 		"next_review_at", "body_md", "created_at", "updated_at",
+		"source_attribution", "imported", "historical_approver_name",
+		"historical_approved_at", "source_url", "imported_by", "imported_at",
 	}
 	got := policiesExportHeader()
 	if len(got) != len(want) {
@@ -42,7 +44,7 @@ func TestSlice138_PoliciesToRowIter(t *testing.T) {
 	row := policyExportRow{
 		ID:                          id,
 		Title:                       "Access Control Policy",
-		Version:                     3,
+		Version:                     "3",
 		Status:                      "approved",
 		EffectiveDate:               "2026-01-01",
 		Owner:                       "ciso@example.com",

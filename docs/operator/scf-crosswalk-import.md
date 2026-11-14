@@ -111,6 +111,46 @@ If the workbook has exactly one framework mapping column, the column is selected
 automatically. Real SCF full workbooks contain many framework columns, so
 `--framework-column` is normally required.
 
+The framework slug, name, issuer and version default to the column's row in the
+`Focal Documents` sheet. `--framework-slug` is required when that metadata is
+missing: the workbook has no `Focal Documents` sheet, the sheet has no
+`SCF Column Header` column, or it has no row for the selected column (the first
+one, when several are combined). Without it the slug would fall back to the
+column header and could duplicate a framework already imported under its FDI
+slug, so the import fails and names the cause.
+
+### Combining columns (ISO 27001)
+
+Some frameworks span more than one workbook column. Repeat
+`--framework-column` to import them as one framework. A column given as
+`HEADER=PREFIX` has `PREFIX` prepended to every requirement code read from it
+(a code that already starts with the prefix is left alone). Framework metadata
+that is not passed explicitly is taken from the first column.
+
+ISO/IEC 27001:2022 is the case this exists for. SCF puts only the
+management-system clauses (4-10) under `ISO 27001 2022`; the Annex A controls
+are mapped under `ISO 27002 2022` as bare `5.1`-`8.34`. Importing either column
+alone gives an ISO 27001 with no Annex A controls or one with no clauses. The
+preset below imports both and writes the Annex A codes as `A.5.1`-`A.8.34`,
+the same codes and slug as the shipped `data/crosswalks/iso27001-2022.yaml`:
+
+```sh
+atlas-cli catalog import-crosswalk ./secure-controls-framework-scf-2026-3.xlsx \
+  --framework-column "ISO 27001 2022" \
+  --framework-column "ISO 27002 2022=A." \
+  --framework-slug iso27001 \
+  --framework-name "ISO/IEC 27001:2022" \
+  --framework-version 2022
+```
+
+**Do not run this preset unchanged on a database that already holds
+`iso27001-2022.yaml`.** It targets the same framework slug and version
+(`iso27001` / `2022`). The workbook carries IDs only, so every requirement it
+writes has `title` set to its code and an empty body, and the import overwrites
+the curated Annex A titles and bodies from the YAML. To compare the two side by
+side, give the workbook import its own version, for example
+`--framework-version 2022-scf-2026.3`.
+
 For an SCF OLIR STRM workbook, no framework column is needed:
 
 ```sh
