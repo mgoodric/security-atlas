@@ -4308,6 +4308,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/policies/{id}/review-date:
+    patch:
+      summary: PATCH /v1/policies/{id}/review-date — change a published policy's next_review_at, audit-logged (#1806)
+      tags: [policies]
+      operationId: patch-v1-policies-id-review-date
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/submit:
     patch:
       summary: PATCH /v1/policies/{id}/submit
