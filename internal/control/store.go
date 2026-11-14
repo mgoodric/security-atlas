@@ -14,6 +14,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/demoprov"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -21,6 +22,20 @@ import (
 // resolve to a row in the scf_anchors catalog. The HTTP layer maps this to
 // 404 (canvas invariant 7 — no anchor, no control).
 var ErrSCFAnchorUnknown = errors.New("control bundle: scf_anchor_id does not resolve to a known SCF anchor")
+
+// ErrSCFReleaseUnknown is returned when the bundle declares an scf_release
+// that is not loaded (#1770). Distinct from ErrSCFCodeNotInRelease so an
+// author can tell a mistyped release from a code the release lacks.
+var ErrSCFReleaseUnknown = scfrelease.ErrUnknownRelease
+
+// ErrSCFCodeNotInRelease is returned when the bundle's declared scf_release
+// is loaded but has no anchor for its scf_anchor_id (#1770).
+var ErrSCFCodeNotInRelease = scfrelease.ErrCodeNotInRelease
+
+// SCFReleaseDeprecationWarning is returned on an upload whose control.yaml
+// has no scf_release (#1770). The bundle binds as before, to the current
+// SCF release; the field becomes required in a later release.
+const SCFReleaseDeprecationWarning = "control.yaml has no scf_release, so scf_anchor_id was bound in the current SCF release; declare scf_release, which will become required"
 
 // ErrControlChangedConcurrently is returned when the active version a
 // description-only upload was about to update in place was superseded by a
@@ -57,6 +72,15 @@ type UploadResult struct {
 	// so the control was left on its legacy anchor (#1971 D3). It earns no
 	// framework credit until it is re-anchored.
 	NeedsReanchoring bool
+	// AnchorID is the SCF anchor the bundle's scf_anchor_id resolved to;
+	// zero for an unanchored (anchor_fit: none) control.
+	AnchorID uuid.UUID
+	// SCFRelease is the SCF release label scf_anchor_id was resolved in
+	// (#1770); empty for an unanchored control.
+	SCFRelease string
+	// Warnings are non-fatal notes for the uploader, such as
+	// SCFReleaseDeprecationWarning.
+	Warnings []string
 }
 
 // rebindOutcome is what rebindAnchor did with an unchanged manifest whose
@@ -76,7 +100,16 @@ const (
 // new row has the same code AND the same title as the old one, i.e. the
 // meaning did not change. Otherwise the control stays where it is and is
 // reported as needing re-anchoring, never silently re-pointed.
-func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior dbx.LockActiveControlByBundleIDRow, anchorID uuid.UUID) (rebindOutcome, error) {
+//
+// anchorID is what bindSCFAnchor resolved the manifest to. A bundle that
+// declares scf_release (#1770) is pinned to that release and is never
+// re-bound: binding it anywhere but its declared release is exactly the
+// silent move #1770 and D3 forbid. An unanchored control (anchor_fit: none)
+// has nothing to re-bind.
+func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior dbx.LockActiveControlByBundleIDRow, anchorID uuid.UUID, pinnedRelease string) (rebindOutcome, error) {
+	if pinnedRelease != "" || anchorID == uuid.Nil {
+		return rebindNone, nil
+	}
 	if !prior.ScfAnchorID.Valid || uuid.UUID(prior.ScfAnchorID.Bytes) == anchorID {
 		return rebindNone, nil
 	}
@@ -152,13 +185,22 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		//    An empty scf_anchor_id passed ValidateStructural only with
 		//    anchor_fit: none (issue #1736): the control stands unanchored
 		//    and anchorID stays uuid.Nil (stored as NULL).
+		//
+		//    #1770: a declared scf_release binds the code within that
+		//    release. Without one the code binds in the current release,
+		//    as before, and the upload carries a deprecation warning.
 		var anchorID uuid.UUID
 		if b.Manifest.SCFAnchorID != "" {
-			var err error
-			anchorID, err = resolveSCFAnchor(ctx, q, b.Manifest.SCFAnchorID)
+			anchor, rel, err := bindSCFAnchor(ctx, q, b.Manifest.SCFRelease, b.Manifest.SCFAnchorID)
 			if err != nil {
 				return err
 			}
+			anchorID = uuid.UUID(anchor.ID.Bytes)
+			result.AnchorID = anchorID
+			result.SCFRelease = rel.Version
+		}
+		if b.Manifest.SCFRelease == "" {
+			result.Warnings = append(result.Warnings, SCFReleaseDeprecationWarning)
 		}
 
 		// 2. Marshal JSONB fields.
@@ -217,7 +259,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		//     v2, v3, ... on every boot — the slice-065 idempotency
 		//     assertion (AC-7) exists precisely to catch that.
 		if !isNew && prior.BundleManifestHash == b.ManifestHashHex {
-			outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID)
+			outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease)
 			if err != nil {
 				return err
 			}
@@ -280,7 +322,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 				if n != 1 {
 					return ErrControlChangedConcurrently
 				}
-				outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID)
+				outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease)
 				if err != nil {
 					return err
 				}
@@ -496,31 +538,36 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 }
 
 // resolveSCFAnchor accepts either a uuid string or an SCF code (e.g.,
-// "IAC-37") and returns the anchor's uuid. Unknown values fail with
-// ErrSCFAnchorUnknown.
+// "IAC-37") resolved in the current SCF release, and returns the anchor's
+// uuid. Unknown values fail with ErrSCFAnchorUnknown.
 func resolveSCFAnchor(ctx context.Context, q *dbx.Queries, ref string) (uuid.UUID, error) {
-	if ref == "" {
-		return uuid.Nil, ErrSCFAnchorUnknown
-	}
-	// First, try as a uuid.
-	if u, err := uuid.Parse(ref); err == nil {
-		row, err := q.GetSCFAnchorByID(ctx, pgUUID(u))
-		if err == nil {
-			return uuid.UUID(row.ID.Bytes), nil
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return uuid.Nil, fmt.Errorf("get scf anchor by id: %w", err)
-		}
-	}
-	// Fall back: SCF code lookup.
-	row, err := q.GetSCFAnchorBySCFID(ctx, ref)
+	row, _, err := bindSCFAnchor(ctx, q, "", ref)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return uuid.Nil, ErrSCFAnchorUnknown
-		}
-		return uuid.Nil, fmt.Errorf("get scf anchor by code: %w", err)
+		return uuid.Nil, err
 	}
 	return uuid.UUID(row.ID.Bytes), nil
+}
+
+// bindSCFAnchor resolves a bundle's scf_anchor_id in its declared
+// scf_release (#1770). With a release named, the two scfrelease errors
+// (ErrSCFReleaseUnknown, ErrSCFCodeNotInRelease) pass through wrapped, so
+// the caller can tell them apart. With none, any miss is
+// ErrSCFAnchorUnknown, the pre-#1770 error.
+func bindSCFAnchor(ctx context.Context, q scfrelease.Querier, release, ref string) (dbx.ScfAnchor, scfrelease.Release, error) {
+	if ref == "" {
+		return dbx.ScfAnchor{}, scfrelease.Release{}, ErrSCFAnchorUnknown
+	}
+	row, rel, err := scfrelease.Resolve(ctx, q, release, ref)
+	switch {
+	case err == nil:
+		return row, rel, nil
+	case release == "" && (errors.Is(err, scfrelease.ErrCodeNotInRelease) || errors.Is(err, scfrelease.ErrNoCurrentRelease)):
+		return dbx.ScfAnchor{}, scfrelease.Release{}, ErrSCFAnchorUnknown
+	case errors.Is(err, scfrelease.ErrUnknownRelease), errors.Is(err, scfrelease.ErrCodeNotInRelease):
+		return dbx.ScfAnchor{}, scfrelease.Release{}, fmt.Errorf("control bundle: %w", err)
+	default:
+		return dbx.ScfAnchor{}, scfrelease.Release{}, err
+	}
 }
 
 // inPlaceManifestKeys are the top-level control.yaml keys an upload may

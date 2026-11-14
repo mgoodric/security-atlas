@@ -11,6 +11,18 @@ import (
 	"github.com/google/uuid"
 )
 
+func TestIsCSF_OnlyNISTCSFSlug(t *testing.T) {
+	t.Parallel()
+	if !IsCSF("nist_csf") {
+		t.Error("IsCSF(nist_csf) = false, want true")
+	}
+	for _, slug := range []string{"", "iso27001", "soc2", "pci_dss", "NIST_CSF", "nist_csf_t515", "nist"} {
+		if IsCSF(slug) {
+			t.Errorf("IsCSF(%q) = true, want false", slug)
+		}
+	}
+}
+
 func TestValidTiers_EnumeratesFour(t *testing.T) {
 	t.Parallel()
 	want := []string{"tier1_partial", "tier2_risk_informed", "tier3_repeatable", "tier4_adaptive"}

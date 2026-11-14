@@ -3224,6 +3224,20 @@ type SuperAdminAuditLog struct {
 	PayloadJson   []byte             `json:"payload_json"`
 }
 
+type TaxonomyAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	SubjectKind   string             `json:"subject_kind"`
+	SubjectID     pgtype.UUID        `json:"subject_id"`
+	SubjectSlug   string             `json:"subject_slug"`
+	Action        string             `json:"action"`
+	Before        []byte             `json:"before"`
+	After         []byte             `json:"after"`
+	Actor         string             `json:"actor"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
 // Slice 144: canonical tenant identity row. Adopted late — through v1, tenant_id was a bare UUID with no parent. The slice-192 `GET /v1/me/tenants` handler reads `name` from here; `PATCH /v1/tenants/{id}` (slice 144) mutates it under per-tenant admin or super_admin authority.
 type Tenant struct {
 	ID pgtype.UUID `json:"id"`
@@ -3237,6 +3251,8 @@ type Tenant struct {
 	BundleGateMode string `json:"bundle_gate_mode"`
 	// #2059: days between a risk's creation and its default review_due_at. Default 365, range 1..3650. Set via PATCH /v1/tenants/{id}; a change affects new risks only.
 	RiskReviewCadenceDays int32 `json:"risk_review_cadence_days"`
+	// #2061: days after a vendor's creation (UTC date) that its first review is due. A never-reviewed vendor is overdue only after that day. Default 30.
+	VendorInitialReviewDays int32 `json:"vendor_initial_review_days"`
 }
 
 // Slice 499 per-tenant cloud-LLM opt-in routing. Absence of a row => local-ollama (the off-by-default posture). provider is a closed enum (no free-text URL). api_key_ciphertext is AES-256-GCM, never plaintext, never returned/logged.

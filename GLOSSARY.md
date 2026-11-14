@@ -40,7 +40,9 @@ Coverage queries hit three routes:
 - `GET /v1/anchors/{id}/requirements` — given an SCF anchor (UUID or scf_id), list satisfied framework requirements (DB-backed replacement of the slice-006 in-memory placeholder).
 - `GET /v1/controls/{id}/coverage` — given a tenant control (UUID), list the framework requirements its anchor satisfies.
 
-All three accept optional `?framework_version=slug:version` to pin historical mappings. `?as-of=<timestamp>` and `?scf_release=<version>` are accepted-and-no-op in v1; slice 012 / future SCF-release-import work will activate them.
+All three accept optional `?framework_version=slug:version` to pin historical mappings. `?as-of=<timestamp>` is accepted-and-no-op in v1; slice 012 will activate it.
+
+`?scf_release=<version>` is live on `GET /v1/anchors/{id}`, `GET /v1/anchors/{id}/requirements` and `GET /v1/requirements/{id}/coverage` (#1770), and the response's `scf_release` names the release used. On the anchor reads an SCF code resolves in that release, or in the current release when the parameter is absent; an unknown release and a code missing from the release are distinct 404s. Requirement coverage pins its anchors to the named release; without the parameter it stays unpinned and echoes `scf_release: null` until the crosswalk re-bind (#1971) lets it default to the current release. Control bundles name their release the same way, with `scf_release` in `control.yaml`; without it, upload binds in the current release and returns a deprecation warning.
 
 **RLS interaction:** the catalog tables (`framework_requirements`, `fw_to_scf_edges`, `scf_anchors`) have no `tenant_id` and no RLS — they're platform-bundled and global. Only `controls` is tenant-scoped. A traversal across tenant boundaries returns the (global) requirement + anchors but an empty controls list — this is the correct shape (canvas §3.5) and is enforced by Postgres RLS, not by app code. The handler MUST NOT add `WHERE tenant_id = ?` to any query (constitutional invariant 6).
 

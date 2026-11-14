@@ -29,6 +29,13 @@ The rule. A control moves to the current release's anchor only when that anchor 
 - **`scfimport.RebindControls`**, run by `atlas-cli catalog import-scf` right after the import, so on every bootstrap. It works across every tenant through the migrate role. It reads `ListControlsOnLegacySCFAnchors`, re-binds the rows that pass (`RebindControlAnchorInPlace`), and prints one `control needs re-anchoring` line per remaining control.
 - **`control.Store.Upload`**, for an unchanged re-uploaded bundle (byte-identical, or in-place metadata only). It moves the control on the same test, and otherwise leaves it in place and reports `NeedsReanchoring`. A re-upload therefore never silently changes what a control means either.
 
+**A bundle pinned to a release is never moved.** A bundle that declares `scf_release` (#1770) is bound in that release on purpose. Both paths skip it:
+
+- **Boot-time re-bind:** `RebindControls` reads the declared release from the stored `bundle_manifest_yaml` (`PinnedRelease`) and reports the control as `Pinned`, neither moved nor flagged.
+- **Upload:** the re-bind consumes what `bindSCFAnchor` resolved and returns early for a declared release.
+
+A pinned legacy bundle is a deliberate choice, so it does not count as needing re-anchoring. The dispatcher asked for this when #2205 merged. `TestRebind_PinnedLegacyBundleIsNeverMoved` covers it and fails when the skip is removed.
+
 The note says where the concept went, most specific source first:
 
 1. `data/scfremap/remaps.json`, a machine-readable copy of the D5 table, embedded in the binary. The `concept` rows (`IAC-15`, `IAC-21`, `IAC-24`) cannot come from #2032's `legacy_scf_id`, which records SCF's official legacy number, so this table is the only source for them. Later family groups append their rows.

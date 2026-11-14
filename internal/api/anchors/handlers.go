@@ -26,6 +26,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/catalog"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -315,19 +316,31 @@ func includesState(r *http.Request) bool {
 }
 
 // getAnchor returns one anchor. `:id` may be a UUID or an scf_id
-// (e.g., "IAC-37"); scf_id resolves against the current SCF version.
+// (e.g., "IAC-37").
+//
+// #1770: `?scf_release=<label>` resolves the scf_id within that SCF
+// release; without it the scf_id resolves in the current release (a UUID
+// resolves in whichever release holds it). The response's `scf_release`
+// names the release the anchor was read from. An unknown release and a
+// code missing from the release are both 404, with messages naming which.
 func (h *Handler) getAnchor(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	anchor, ok, err := h.lookupAnchor(r.Context(), id)
-	if err != nil {
+	row, rel, err := scfrelease.Resolve(r.Context(), h.q, r.URL.Query().Get("scf_release"), id)
+	switch {
+	case errors.Is(err, scfrelease.ErrUnknownRelease), errors.Is(err, scfrelease.ErrCodeNotInRelease):
+		httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		return
+	case errors.Is(err, scfrelease.ErrNoCurrentRelease):
+		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
+		return
+	case err != nil:
 		httperr.WriteInternal(w, r, "lookup anchor", err)
 		return
 	}
-	if !ok {
-		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
-		return
-	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"anchor": anchor})
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"anchor":      anchorWireFromRow(row),
+		"scf_release": rel.Version,
+	})
 }
 
 // listFrameworks returns the framework catalog (global only).
@@ -468,27 +481,6 @@ func (h *Handler) lookupRequirement(ctx context.Context, idOrCode string) (dbx.F
 		return dbx.FrameworkRequirement{}, false, nil
 	}
 	return row, err == nil, err
-}
-
-func (h *Handler) lookupAnchor(ctx context.Context, idOrSCFID string) (anchorWire, bool, error) {
-	if uid, err := uuid.Parse(idOrSCFID); err == nil {
-		row, err := h.q.GetSCFAnchorByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return anchorWire{}, false, nil
-		}
-		if err != nil {
-			return anchorWire{}, false, err
-		}
-		return anchorWireFromRow(row), true, nil
-	}
-	row, err := h.q.GetSCFAnchorBySCFID(ctx, idOrSCFID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return anchorWire{}, false, nil
-	}
-	if err != nil {
-		return anchorWire{}, false, err
-	}
-	return anchorWireFromRow(row), true, nil
 }
 
 func (h *Handler) pagination(r *http.Request) (int32, int32) {

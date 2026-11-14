@@ -7,10 +7,12 @@
       "flipped_out": [],
       "flipped_out_count": 0,
       "since": "2026-05-08",
+      "started_passing": [],
+      "started_passing_count": 0,
       "through": "2026-05-15"
     },
     "populated": {
-      "delta": -1,
+      "delta": 0,
       "flipped_out": [
         {
           "control_id": "33333333-3333-4333-8333-333333333333",
@@ -20,6 +22,12 @@
       ],
       "flipped_out_count": 1,
       "since": "2026-05-08",
+      "started_passing": [
+        {
+          "control_id": "44444444-4444-4444-8444-444444444444"
+        }
+      ],
+      "started_passing_count": 1,
       "through": "2026-05-15"
     }
   }

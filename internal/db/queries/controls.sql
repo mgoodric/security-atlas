@@ -357,6 +357,9 @@ SELECT
     c.tenant_id,
     c.bundle_id,
     c.title               AS control_title,
+    -- The stored control.yaml: a bundle that declares scf_release (#1770)
+    -- is pinned to that release and is never re-bound.
+    c.bundle_manifest_yaml,
     la.id                 AS legacy_anchor_id,
     la.scf_id             AS legacy_scf_id,
     la.title              AS legacy_anchor_title,

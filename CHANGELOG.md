@@ -20,10 +20,11 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   Coverage joins controls to crosswalk edges by anchor row, so after the new release everything has to move to the current rows:
   - **The rule:** a control is moved to the new release's anchor only when that anchor has the same SCF code **and the same title**, so its meaning did not change. It keeps its control id, version, owners and evidence. Nothing is re-pointed silently.
   - **Where it runs:** `atlas-cli catalog import-scf` runs this across every tenant right after the import, so the bootstrap does it on every boot. A bundle re-upload applies the same rule; the upload result reports `AnchorRebound` or `NeedsReanchoring`.
+  - **Pinned bundles are never moved:** a bundle that declares `scf_release` (#1770) is bound in that release on purpose. The SCF import counts it as `pinned` and leaves it where it is, and so does a re-upload.
   - **Controls needing re-anchoring:** every other active control left on a legacy anchor stays where it is and earns no framework credit until someone re-anchors it. That covers a code that is gone (`IAC-21`) and a code whose title changed (`IAC-10`). The SCF import prints a count and one line per control, with a note on where the concept went:
 
     ```text
-    controls rebound=41 needs_reanchoring=2
+    controls rebound=41 needs_reanchoring=2 pinned=0
     control needs re-anchoring tenant=<id> bundle=my-pam-control anchor=IAC-21@test-2026.1: IAC-21 -> IAC-10 in test-2026.3 (concept)
     control needs re-anchoring tenant=<id> bundle=my-mfa-secrets anchor=IAC-10@test-2026.1: IAC-10 -> IAC-14 in test-2026.3 (legacy)
     ```
@@ -42,6 +43,8 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   **One-time retirement of legacy workbook edges:** if, before this release, you imported an SCF workbook into the same slug and version as a bundled YAML crosswalk (for example the ISO 27001 preset into `iso27001` / `2022`), those workbook edges have no recorded source. The next import of that YAML retires the ones it doesn't list. Re-run the same workbook import afterwards; it restores them under their own source, and from then on they are left alone.
 
   **Opt-in crosswalks need a manual re-import.** The bootstrap re-imports only the SOC 2 crosswalk. If you imported any of the opt-in crosswalks (HIPAA, ISO 27001, PCI DSS, NIST CSF), re-run `atlas-cli catalog import-crosswalk data/crosswalks/<file>.yaml` for each one after upgrading. Until you do, that framework's edges stay on the legacy release's anchor rows. The stock controls have moved to the new rows, so that framework shows no coverage from them until you re-import.
+
+- **feat(search): global search covers policies, groups results by type, and lists your own records before the SCF catalog (#2067).** `GET /v1/search` gains a `policies` type (title and body; superseded versions left out; admitted by the same OPA rule as `GET /v1/policies`). Hits now come back grouped in the order controls, risks, policies, evidence, anchors, best match first within a group, and the `limit` is shared across groups so one crowded group cannot push the rest out. A new `groups` array carries each type's full match count. The ⌘K popover shows a count per group and "Show all" for a group the limit cut short. **API change:** clients that relied on a relevance-only merge, or on anchors sorting first, now see group order. Decisions: `docs/audit-log/2067-global-search-groups-decisions.md`.
 
 - **feat(controls): warn when a control's anchor earns no framework credit (#1738).** `POST /v1/controls:upload-bundle` now returns `anchor_warning` when the bundle's `scf_anchor_id` reaches no requirement in an enabled framework (the tenant's activated FrameworkScopes, or every current framework version when none is activated), and suggests the parent anchor when that one is mapped. The SCF maps several precise anchors (NET-26.5, IRO-17, VPM-18, ...) to no SOC 2 requirement, so such a control persisted silently with no SOC 2 credit. The upload still succeeds; `atlas-cli controls upload` repeats the warning on stderr. Decisions: `docs/audit-log/1738-anchor-coverage-warning-decisions.md`.
 

@@ -23,6 +23,21 @@ func legacy(scfID, title, currentTitle string, current bool, successor string) d
 	return r
 }
 
+// A bundle that declares scf_release (#1770) is pinned and never re-bound.
+func TestPinnedRelease(t *testing.T) {
+	t.Parallel()
+	for manifest, want := range map[string]string{
+		"bundle_id: a\nscf_anchor_id: IAC-10\nscf_release: test-2026.1\n": "test-2026.1",
+		"bundle_id: a\nscf_anchor_id: IAC-10\nscf_release: '  x  '\n":     "x",
+		"bundle_id: a\nscf_anchor_id: IAC-10\n":                           "",
+		"not: [valid":                                                     "",
+	} {
+		if got := PinnedRelease(manifest); got != want {
+			t.Errorf("PinnedRelease(%q) = %q; want %q", manifest, got, want)
+		}
+	}
+}
+
 // Matt's #1971 D3 rule: re-bind only when the current release has the same
 // code with the same title.
 func TestRebindable(t *testing.T) {

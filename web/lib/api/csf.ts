@@ -51,6 +51,8 @@ export type CsfGapRow = {
 
 export type CsfGapView = {
   framework_version_id: string;
+  framework_name: string;
+  framework_version: string;
   gap: CsfGapRow[];
   gap_count: number;
   tier_rating?: CsfTierRating | null;

@@ -15,10 +15,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"gopkg.in/yaml.v3"
 
 	"github.com/mgoodric/security-atlas/data/scfremap"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -47,6 +49,22 @@ type RebindReport struct {
 	// NeedsReanchoring controls stay on their legacy anchor: the code is
 	// gone from the current release or now names a different control.
 	NeedsReanchoring []ControlOnLegacyAnchor
+	// Pinned controls declare scf_release (#1770) in their bundle, so they
+	// are bound to that release on purpose and are never moved.
+	Pinned []ControlOnLegacyAnchor
+}
+
+// PinnedRelease returns the scf_release a stored control.yaml declares, or
+// "" when it declares none (#1770). A manifest that does not parse counts
+// as unpinned; the upload path validated it when it was stored.
+func PinnedRelease(manifestYAML string) string {
+	var doc struct {
+		SCFRelease string `yaml:"scf_release"`
+	}
+	if err := yaml.Unmarshal([]byte(manifestYAML), &doc); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(doc.SCFRelease)
 }
 
 // Rebindable reports whether a control on a legacy anchor can move to the
@@ -112,6 +130,12 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 	var report RebindReport
 	for _, r := range rows {
 		row := legacyRow(r)
+		// A bundle pinned to an SCF release (#1770) is bound there on
+		// purpose: moving it would be the silent re-point D3 forbids.
+		if PinnedRelease(r.BundleManifestYaml) != "" {
+			report.Pinned = append(report.Pinned, row)
+			continue
+		}
 		if !Rebindable(r) {
 			if row.Note, err = ReanchorNote(r); err != nil {
 				return RebindReport{}, err
