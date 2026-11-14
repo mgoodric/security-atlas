@@ -47,6 +47,11 @@ export type Policy = {
   submitted_by?: string | null;
   approved_at?: string | null;
   approved_by?: string | null;
+  /**
+   * #2101 — true when the submitter approved the policy under the
+   * organisation's Allow self-approval setting.
+   */
+  self_approved?: boolean;
   published_at?: string | null;
   published_by?: string | null;
   superseded_at?: string | null;
