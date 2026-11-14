@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // BundleSchemaVersion is the only accepted manifest schema version in slice
@@ -59,7 +60,32 @@ type Manifest struct {
 	LinkedPolicyIDs      []string        `yaml:"linked_policy_ids,omitempty" json:"linked_policy_ids,omitempty"`
 	EvidenceQueries      []EvidenceQuery `yaml:"evidence_queries,omitempty"  json:"evidence_queries,omitempty"`
 	ManualEvidenceSchema map[string]any  `yaml:"manual_evidence_schema,omitempty" json:"manual_evidence_schema,omitempty"`
+
+	// ExternalRefs traces this control to identifiers outside the platform:
+	// the organisation's own control number, an auditor's reference, or the
+	// framework requirement it was tested under (#1737).
+	ExternalRefs []ExternalRef `yaml:"external_refs,omitempty" json:"external_refs,omitempty"`
 }
+
+// ExternalRef is one entry in `external_refs[]`.
+//
+// Kind is "reference" (the default when omitted) for a free-form identifier
+// such as an auditor's control number, or "tested_under" for a framework
+// requirement the control was audited against. For tested_under, System is
+// the framework slug (e.g. "soc2") and ID the requirement code (e.g.
+// "CC1.1"); the #1735 "audited under" report reads those pairs.
+type ExternalRef struct {
+	System string `yaml:"system"         json:"system"`
+	Kind   string `yaml:"kind,omitempty" json:"kind,omitempty"`
+	ID     string `yaml:"id"             json:"id"`
+	Note   string `yaml:"note,omitempty" json:"note,omitempty"`
+}
+
+// External reference kinds accepted in `external_refs[].kind`.
+const (
+	ExternalRefKindReference   = "reference"
+	ExternalRefKindTestedUnder = "tested_under"
+)
 
 // EvidenceQuery is one entry in `evidence_queries[]`. Slice 009 stores these
 // verbatim; slice 012 will dispatch on Language to invoke the appropriate
@@ -124,6 +150,16 @@ var allowedQueryLanguages = map[string]struct{}{
 var (
 	bundleIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_.-]{2,63}$`)
 	queryIDPattern  = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,63}$`)
+	// refSystemPattern admits framework slugs ("soc2", "iso27001") and short
+	// organisation labels ("internal", "acme-audit").
+	refSystemPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,63}$`)
+)
+
+// Caps on external_refs. Lengths count characters (runes), not bytes.
+const (
+	maxExternalRefs       = 100
+	maxExternalRefIDLen   = 200
+	maxExternalRefNoteLen = 500
 )
 
 // ValidateStructural runs every check that does not require a database call:
@@ -217,6 +253,46 @@ func (m *Manifest) ValidateStructural() error {
 		}
 	}
 
+	return m.validateExternalRefs()
+}
+
+// validateExternalRefs checks every external_refs entry and normalises an
+// omitted kind to "reference", so the stored JSON is the same whether the
+// author wrote the default or left it out.
+func (m *Manifest) validateExternalRefs() error {
+	if len(m.ExternalRefs) > maxExternalRefs {
+		return fmt.Errorf("control bundle: external_refs has %d entries; at most %d are allowed", len(m.ExternalRefs), maxExternalRefs)
+	}
+	seen := make(map[[3]string]struct{}, len(m.ExternalRefs))
+	for i := range m.ExternalRefs {
+		r := &m.ExternalRefs[i]
+		if r.System == "" {
+			return fmt.Errorf("control bundle: external_refs[%d].system is required", i)
+		}
+		if !refSystemPattern.MatchString(r.System) {
+			return fmt.Errorf("control bundle: external_refs[%d].system %q must match %s", i, r.System, refSystemPattern.String())
+		}
+		if r.Kind == "" {
+			r.Kind = ExternalRefKindReference
+		}
+		if r.Kind != ExternalRefKindReference && r.Kind != ExternalRefKindTestedUnder {
+			return fmt.Errorf("control bundle: external_refs[%d].kind %q is not one of reference|tested_under", i, r.Kind)
+		}
+		if strings.TrimSpace(r.ID) == "" {
+			return fmt.Errorf("control bundle: external_refs[%d].id is required and must be non-empty", i)
+		}
+		if utf8.RuneCountInString(r.ID) > maxExternalRefIDLen {
+			return fmt.Errorf("control bundle: external_refs[%d].id exceeds %d characters", i, maxExternalRefIDLen)
+		}
+		if utf8.RuneCountInString(r.Note) > maxExternalRefNoteLen {
+			return fmt.Errorf("control bundle: external_refs[%d].note exceeds %d characters", i, maxExternalRefNoteLen)
+		}
+		key := [3]string{r.System, r.Kind, r.ID}
+		if _, dup := seen[key]; dup {
+			return fmt.Errorf("control bundle: external_refs[%d] duplicates system %q kind %q id %q", i, r.System, r.Kind, r.ID)
+		}
+		seen[key] = struct{}{}
+	}
 	return nil
 }
 
@@ -281,4 +357,13 @@ func (m *Manifest) ManualEvidenceSchemaJSON() ([]byte, error) {
 		return nil, nil
 	}
 	return json.Marshal(m.ManualEvidenceSchema)
+}
+
+// ExternalRefsJSON returns the refs as a JSON array for the NOT NULL JSONB
+// column. An empty/absent list serialises as "[]".
+func (m *Manifest) ExternalRefsJSON() ([]byte, error) {
+	if len(m.ExternalRefs) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(m.ExternalRefs)
 }

@@ -47,6 +47,16 @@ export type ControlWire = {
   // non-exact fit is not exact. Absent means exact.
   anchor_fit?: "exact" | "partial" | "none";
   anchor_fit_note?: string;
+  // #1737 — control.yaml external_refs[]; omitted when the control has none.
+  external_refs?: ExternalRefWire[];
+};
+
+// externalRefWire mirrors `externalRefWire` in internal/api/ucfcoverage/handlers.go.
+export type ExternalRefWire = {
+  system: string;
+  kind: "reference" | "tested_under";
+  id: string;
+  note?: string;
 };
 
 // anchorWire mirrors `anchorWire` in the same handler (bare anchor form).

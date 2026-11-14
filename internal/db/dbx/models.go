@@ -1944,8 +1944,10 @@ type Control struct {
 	FreshnessClass       *string                   `json:"freshness_class"`
 	BundleUploadedAt     pgtype.Timestamptz        `json:"bundle_uploaded_at"`
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
-	AnchorFit            string                    `json:"anchor_fit"`
-	AnchorFitNote        *string                   `json:"anchor_fit_note"`
+	// control.yaml external_refs[]: [{system, kind, id, note?}], kind in (reference, tested_under). Validated by the bundle parser (#1737).
+	ExternalRefs  []byte  `json:"external_refs"`
+	AnchorFit     string  `json:"anchor_fit"`
+	AnchorFitNote *string `json:"anchor_fit_note"`
 }
 
 type ControlDriftSnapshot struct {

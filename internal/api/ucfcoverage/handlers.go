@@ -299,6 +299,18 @@ type controlWire struct {
 	// (an anchor-side view), so it is omitted.
 	AnchorFit     string `json:"anchor_fit,omitempty"`
 	AnchorFitNote string `json:"anchor_fit_note,omitempty"`
+	// ExternalRefs is the control.yaml external_refs[] list (#1737).
+	// Omitted when the control carries none.
+	ExternalRefs []externalRefWire `json:"external_refs,omitempty"`
+}
+
+// externalRefWire is one controls.external_refs element. Kind is
+// "reference" or "tested_under" (see internal/control.ExternalRef).
+type externalRefWire struct {
+	System string `json:"system"`
+	Kind   string `json:"kind"`
+	ID     string `json:"id"`
+	Note   string `json:"note,omitempty"`
 }
 
 // requirementForAnchorWire is the shape of one row in

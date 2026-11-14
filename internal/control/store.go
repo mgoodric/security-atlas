@@ -110,6 +110,10 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		if err != nil {
 			return err
 		}
+		refsJSON, err := b.Manifest.ExternalRefsJSON()
+		if err != nil {
+			return err
+		}
 
 		// 3. Look up the active predecessor for this bundle_id.
 		var prior dbx.GetActiveControlByBundleIDRow
@@ -300,6 +304,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 			BundleManifestYaml:   string(b.ManifestYAMLRaw),
 			BundleManifestHash:   b.ManifestHashHex,
 			BundleUploadedBy:     uploader,
+			ExternalRefs:         refsJSON,
 		})
 		if err != nil {
 			return fmt.Errorf("insert control version: %w", err)

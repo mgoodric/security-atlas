@@ -119,7 +119,7 @@ SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        evidence_queries, manual_evidence_schema, linked_policy_ids,
        freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
        bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at,
-       anchor_fit, anchor_fit_note
+       external_refs, anchor_fit, anchor_fit_note
 FROM controls
 WHERE tenant_id = $1 AND id = $2
 `
@@ -154,6 +154,7 @@ type GetControlByIDRow struct {
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 	CreatedAt            pgtype.Timestamptz        `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz        `json:"updated_at"`
+	ExternalRefs         []byte                    `json:"external_refs"`
 	AnchorFit            string                    `json:"anchor_fit"`
 	AnchorFitNote        *string                   `json:"anchor_fit_note"`
 }
@@ -186,6 +187,7 @@ func (q *Queries) GetControlByID(ctx context.Context, arg GetControlByIDParams) 
 		&i.BundleUploadedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExternalRefs,
 		&i.AnchorFit,
 		&i.AnchorFitNote,
 	)
@@ -227,16 +229,18 @@ INSERT INTO controls (
     implementation_type, owner_role, lifecycle_state, applicability_expr,
     evidence_queries, manual_evidence_schema, linked_policy_ids,
     freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
-    bundle_uploaded_at, bundle_uploaded_by, anchor_fit, anchor_fit_note
+    bundle_uploaded_at, bundle_uploaded_by, external_refs,
+    anchor_fit, anchor_fit_note
 ) VALUES (
     $1, $2, $3, $4, NULL,
     $5, $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16,
     $17, $18, $19,
-    now(), $20, $21, $22
+    now(), $20, $21,
+    $22, $23
 )
-RETURNING id, tenant_id, scf_id, title, description, control_family, implementation_type, owner_role, lifecycle_state, applicability_expr, version, created_at, updated_at, bundle_id, superseded_by, bundle_manifest_yaml, bundle_manifest_hash, scf_anchor_id, evidence_queries, manual_evidence_schema, linked_policy_ids, freshness_class, bundle_uploaded_at, bundle_uploaded_by, anchor_fit, anchor_fit_note
+RETURNING id, tenant_id, scf_id, title, description, control_family, implementation_type, owner_role, lifecycle_state, applicability_expr, version, created_at, updated_at, bundle_id, superseded_by, bundle_manifest_yaml, bundle_manifest_hash, scf_anchor_id, evidence_queries, manual_evidence_schema, linked_policy_ids, freshness_class, bundle_uploaded_at, bundle_uploaded_by, external_refs, anchor_fit, anchor_fit_note
 `
 
 type InsertControlVersionParams struct {
@@ -260,6 +264,7 @@ type InsertControlVersionParams struct {
 	BundleManifestYaml   string                    `json:"bundle_manifest_yaml"`
 	BundleManifestHash   string                    `json:"bundle_manifest_hash"`
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
+	ExternalRefs         []byte                    `json:"external_refs"`
 	AnchorFit            string                    `json:"anchor_fit"`
 	AnchorFitNote        *string                   `json:"anchor_fit_note"`
 }
@@ -290,6 +295,7 @@ func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVer
 		arg.BundleManifestYaml,
 		arg.BundleManifestHash,
 		arg.BundleUploadedBy,
+		arg.ExternalRefs,
 		arg.AnchorFit,
 		arg.AnchorFitNote,
 	)
@@ -319,6 +325,7 @@ func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVer
 		&i.FreshnessClass,
 		&i.BundleUploadedAt,
 		&i.BundleUploadedBy,
+		&i.ExternalRefs,
 		&i.AnchorFit,
 		&i.AnchorFitNote,
 	)

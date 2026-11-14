@@ -2,6 +2,7 @@ package ucfcoverage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -149,7 +150,11 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		return coverageView{}, false, nil
 	}
 
-	view := coverageView{Control: controlWireFromControlRow(ctrl)}
+	cw, err := controlWireFromControlRow(ctrl)
+	if err != nil {
+		return coverageView{}, false, err
+	}
+	view := coverageView{Control: cw}
 	if !ctrl.ScfAnchorID.Valid {
 		// Control exists but isn't anchored.
 		view.Requirements = []requirementForAnchorWire{}
@@ -293,7 +298,7 @@ func (h *Handler) applyCoverage(ctx context.Context, controlID uuid.UUID, reqs [
 
 // controlWireFromControlRow maps a GetControlByIDRow to the controlWire
 // JSON shape (ControlCoverage's `control` field).
-func controlWireFromControlRow(c dbx.GetControlByIDRow) controlWire {
+func controlWireFromControlRow(c dbx.GetControlByIDRow) (controlWire, error) {
 	w := controlWire{
 		ID:                 uuidStr(c.ID),
 		BundleID:           c.BundleID,
@@ -315,5 +320,10 @@ func controlWireFromControlRow(c dbx.GetControlByIDRow) controlWire {
 	if c.AnchorFitNote != nil {
 		w.AnchorFitNote = *c.AnchorFitNote
 	}
-	return w
+	if len(c.ExternalRefs) > 0 {
+		if err := json.Unmarshal(c.ExternalRefs, &w.ExternalRefs); err != nil {
+			return controlWire{}, fmt.Errorf("decode external_refs: %w", err)
+		}
+	}
+	return w, nil
 }
