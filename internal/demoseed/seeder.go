@@ -671,6 +671,9 @@ func (s *Seeder) tenantWasSeeded(ctx context.Context, tenantID uuid.UUID) (bool,
 			SELECT 1 FROM me_audit_log
 			WHERE tenant_id = $1
 			  AND action IN ('demo_seed_apply', 'demo_seed_teardown')
+			  -- An in-place seed's marks outlive its teardown (M2, #2039) and
+			  -- sit in a real organisation; they never mark a demo tenant.
+			  AND COALESCE(after->>'in_place', '') <> 'true'
 		)
 	`, tenantID).Scan(&has)
 	if err != nil {

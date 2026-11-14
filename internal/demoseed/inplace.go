@@ -11,10 +11,13 @@ package demoseed
 // primary key of every tenant-scoped row before writing, and after writing
 // records each new row in demo_seed_rows. teardownInPlace deletes exactly the
 // recorded rows and keeps the tenant.
+//
+// Audit-log tables are never recorded (Matt's call on #2039, M2): the seed's
+// audit rows stay as a trace, and teardown adds its own demo_seed_teardown
+// row beside them.
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -250,7 +253,8 @@ type tenantTable struct {
 }
 
 // tenantScopedTables lists every table in the current schema with a
-// tenant_id column (partitions excluded; their parent covers them). A row's
+// tenant_id column (partitions excluded; their parent covers them), except
+// audit logs. A row's
 // key is its primary-key columns, or the whole row when there is no primary
 // key. Discovering the tables, rather than listing them, means a writer added
 // to the seed later is recorded without anyone remembering to.
@@ -293,6 +297,9 @@ func tenantScopedTables(ctx context.Context, tx pgx.Tx) ([]tenantTable, error) {
 	}
 	tables := make([]tenantTable, 0, len(found))
 	for _, f := range found {
+		if isTenantAuditTable(f.name) {
+			continue // M2: audit rows are a trace, never demo rows
+		}
 		tables = append(tables, tenantTable{name: f.name, keyExpr: rowKeyExpr(f.pk)})
 	}
 	return tables, nil
@@ -370,10 +377,11 @@ func recordNewRows(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, before, a
 }
 
 // teardownInPlace deletes exactly the rows ApplyInPlace recorded for the
-// tenant, then the records themselves, in one transaction. The tenant row and
-// every row the seed did not add stay. It writes only a
-// super_admin_audit_log row (no tenant_id), so the tenant's rows end up as
-// they were before the seed.
+// tenant, then the records themselves, in one transaction. The tenant row,
+// every row the seed did not add, and the tenant's audit logs stay; outside
+// the audit logs the tenant ends up as it was before the seed. It writes a
+// demo_seed_teardown row, with the actor and per-table counts, to
+// super_admin_audit_log and the tenant's me_audit_log.
 //
 // Tables are tried in teardownTables order, then alphabetically; a delete
 // blocked by a foreign key from a not-yet-deleted demo row is retried on the
@@ -404,6 +412,8 @@ func (s *Seeder) teardownInPlace(ctx context.Context, tenantID uuid.UUID, slug s
 	}
 
 	order := inPlaceTeardownOrder(remaining)
+	removed := map[string]int64{}
+	var removedRows int64
 	for len(remaining) > 0 {
 		progressed := false
 		for _, table := range order {
@@ -411,13 +421,17 @@ func (s *Seeder) teardownInPlace(ctx context.Context, tenantID uuid.UUID, slug s
 			if !ok {
 				continue
 			}
-			blocked, err := deleteRecordedRows(ctx, tx, table, tenantID, keys)
+			n, blocked, err := deleteRecordedRows(ctx, tx, table, tenantID, keys)
 			if err != nil {
 				return err
 			}
 			if !blocked {
 				delete(remaining, table)
 				progressed = true
+				if n > 0 {
+					removed[table] = n
+					removedRows += n
+				}
 			}
 		}
 		if !progressed {
@@ -434,12 +448,16 @@ func (s *Seeder) teardownInPlace(ctx context.Context, tenantID uuid.UUID, slug s
 	if _, err := tx.Exec(ctx, `DELETE FROM demo_seed_rows WHERE tenant_id = $1`, tenantID); err != nil {
 		return fmt.Errorf("demoseed: teardown clear records: %w", err)
 	}
-	payload, err := json.Marshal(map[string]any{"slug": slug, "in_place": true, "demo_seed_v": DemoSeedVersion})
-	if err != nil {
-		return fmt.Errorf("demoseed: marshal audit payload: %w", err)
-	}
-	if err := writeSuperAdminAuditRow(ctx, tx, "demo_seed_teardown",
-		actorUserID, actorTenantID, tenantID, payload,
+	if err := writeAuditLogRow(ctx, tx, "demo_seed_teardown",
+		actorUserID, actorTenantID, tenantID,
+		map[string]any{
+			"slug":         slug,
+			"in_place":     true,
+			"tenant_id":    tenantID.String(),
+			"demo_seed_v":  DemoSeedVersion,
+			"removed_rows": removedRows,
+			"removed":      removed,
+		},
 	); err != nil {
 		return err
 	}
@@ -464,14 +482,15 @@ func inPlaceTeardownOrder(recorded map[string][]string) []string {
 }
 
 // deleteRecordedRows deletes the tenant's rows of table whose key is in
-// keys, inside a savepoint. blocked is true, and nothing is deleted, when a
-// foreign key from another (demo) row still references one of them.
-func deleteRecordedRows(ctx context.Context, tx pgx.Tx, table string, tenantID uuid.UUID, keys []string) (blocked bool, err error) {
+// keys, inside a savepoint, and returns how many it deleted. blocked is true,
+// and nothing is deleted, when a foreign key from another row still
+// references one of them.
+func deleteRecordedRows(ctx context.Context, tx pgx.Tx, table string, tenantID uuid.UUID, keys []string) (deleted int64, blocked bool, err error) {
 	sp, err := tx.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("demoseed: teardown savepoint: %w", err)
+		return 0, false, fmt.Errorf("demoseed: teardown savepoint: %w", err)
 	}
-	_, err = sp.Exec(ctx,
+	tag, err := sp.Exec(ctx,
 		fmt.Sprintf(`DELETE FROM %s t WHERE t.tenant_id::text = $1 AND to_jsonb(t.*) @> ANY($2::text[]::jsonb[])`,
 			pgx.Identifier{table}.Sanitize()),
 		tenantID.String(), keys,
@@ -480,15 +499,15 @@ func deleteRecordedRows(ctx context.Context, tx pgx.Tx, table string, tenantID u
 		_ = sp.Rollback(ctx)
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23503" {
-			return true, nil
+			return 0, true, nil
 		}
 		if pgIsUndefinedTable(err) {
-			return false, nil
+			return 0, false, nil
 		}
-		return false, fmt.Errorf("demoseed: teardown delete %s: %w", table, err)
+		return 0, false, fmt.Errorf("demoseed: teardown delete %s: %w", table, err)
 	}
 	if err := sp.Commit(ctx); err != nil {
-		return false, fmt.Errorf("demoseed: teardown release savepoint: %w", err)
+		return 0, false, fmt.Errorf("demoseed: teardown release savepoint: %w", err)
 	}
-	return false, nil
+	return tag.RowsAffected(), false, nil
 }

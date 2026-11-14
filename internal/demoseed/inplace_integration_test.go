@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -167,6 +168,47 @@ func tenantRows(t *testing.T, tenantID uuid.UUID) map[string][]string {
 	return out
 }
 
+// withoutAuditTables drops the tenant's audit-log tables from a tenantRows
+// snapshot. Matt's M2 call (#2039): the seed's audit rows are a trace and
+// survive teardown, so "exactly the pre-seed rows" excludes them.
+func withoutAuditTables(rows map[string][]string) map[string][]string {
+	out := map[string][]string{}
+	for table, r := range rows {
+		if strings.HasSuffix(table, "_audit_log") || strings.HasSuffix(table, "_audit") {
+			continue
+		}
+		out[table] = r
+	}
+	return out
+}
+
+// seedAuditTrail returns the tenant's me_audit_log actions written by the
+// in-place seed and its teardown, oldest first, with the teardown's
+// removed_rows count.
+func seedAuditTrail(t *testing.T, tenantID uuid.UUID) (actions []string, removedRows int) {
+	t.Helper()
+	rows, err := adminPool.Query(context.Background(), `
+		SELECT action, COALESCE((after->>'removed_rows')::int, 0)
+		FROM me_audit_log
+		WHERE tenant_id = $1 AND action IN ('demo_seed_apply', 'demo_seed_teardown')
+		  AND after->>'in_place' = 'true'
+		ORDER BY occurred_at, action`, tenantID)
+	if err != nil {
+		t.Fatalf("read me_audit_log: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var a string
+		var n int
+		if err := rows.Scan(&a, &n); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		actions = append(actions, a)
+		removedRows += n
+	}
+	return actions, removedRows
+}
+
 func countTenants(t *testing.T) int {
 	t.Helper()
 	var n int
@@ -276,19 +318,29 @@ func TestSeedInPlace_Teardown_LeavesExactlyPreSeedRows(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			ref := freshInstallTenant(t)
 			seeder := soleTenantSeeder(t, ref)
-			before := tenantRows(t, ref.ID)
+			before := withoutAuditTables(tenantRows(t, ref.ID))
 
-			if _, err := seeder.Seed(ctx, demoseed.SeedInput{}); err != nil {
+			res, err := seeder.Seed(ctx, demoseed.SeedInput{})
+			if err != nil {
 				t.Fatalf("Seed: %v", err)
 			}
-			if d := diffRows(before, tenantRows(t, ref.ID)); len(d) == 0 {
+			if d := diffRows(before, withoutAuditTables(tenantRows(t, ref.ID))); len(d) == 0 {
 				t.Fatal("seed changed nothing; the teardown check would prove nothing")
 			}
 			if err := teardown(seeder, ref); err != nil {
 				t.Fatalf("teardown: %v", err)
 			}
-			if d := diffRows(before, tenantRows(t, ref.ID)); len(d) > 0 {
+			// Every demo row outside the audit logs is gone, and nothing else moved.
+			if d := diffRows(before, withoutAuditTables(tenantRows(t, ref.ID))); len(d) > 0 {
 				t.Errorf("after teardown the tenant differs from before the seed in %d rows; first: %s", len(d), d[0])
+			}
+			// M2: the tenant's audit log keeps the apply and records the teardown.
+			actions, removed := seedAuditTrail(t, ref.ID)
+			if !slices.Equal(actions, []string{"demo_seed_apply", "demo_seed_teardown"}) {
+				t.Errorf("me_audit_log seed trail = %v, want [demo_seed_apply demo_seed_teardown]", actions)
+			}
+			if removed != res.RecordedRows {
+				t.Errorf("teardown audit row says %d rows removed, want the %d recorded", removed, res.RecordedRows)
 			}
 			var records int
 			if err := adminPool.QueryRow(ctx,
@@ -388,7 +440,7 @@ func TestSeedInPlace_NoStockScope_AddsAndRemovesIt(t *testing.T) {
 		}
 	}
 	seeder := soleTenantSeeder(t, ref)
-	before := tenantRows(t, ref.ID)
+	before := withoutAuditTables(tenantRows(t, ref.ID))
 	if _, err := seeder.Seed(ctx, demoseed.SeedInput{}); err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
@@ -398,7 +450,7 @@ func TestSeedInPlace_NoStockScope_AddsAndRemovesIt(t *testing.T) {
 	if _, err := seeder.TeardownImplicit(ctx, uuid.Nil, uuid.Nil); err != nil {
 		t.Fatalf("teardown: %v", err)
 	}
-	if d := diffRows(before, tenantRows(t, ref.ID)); len(d) > 0 {
+	if d := diffRows(before, withoutAuditTables(tenantRows(t, ref.ID))); len(d) > 0 {
 		t.Errorf("after teardown %d rows differ; first: %s", len(d), d[0])
 	}
 }
@@ -472,5 +524,28 @@ func TestSeedInPlace_RowCommittedMidSeedBySomeoneElse_IsKept(t *testing.T) {
 		`SELECT EXISTS (SELECT 1 FROM scope_dimensions WHERE id = $1)`, realID,
 	).Scan(&kept); err != nil || !kept {
 		t.Errorf("teardown removed the row committed mid-seed by another session (kept=%v, err=%v)", kept, err)
+	}
+}
+
+// The apply and teardown marks stay in the organisation's audit log (M2), so
+// they must never make it look like a whole demo tenant: a later teardown by
+// slug refuses and the organisation survives.
+func TestSeedInPlace_AfterTeardown_SlugTeardownNeverDropsTheTenant(t *testing.T) {
+	ref := freshInstallTenant(t)
+	ctx := context.Background()
+	seeder := soleTenantSeeder(t, ref)
+	if _, err := seeder.Seed(ctx, demoseed.SeedInput{}); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if _, err := seeder.TeardownImplicit(ctx, uuid.Nil, uuid.Nil); err != nil {
+		t.Fatalf("teardown: %v", err)
+	}
+	err := seeder.Teardown(ctx, ref.Slug, uuid.Nil, uuid.Nil)
+	if err == nil || !strings.Contains(err.Error(), "does not carry the slice-205 forensic mark") {
+		t.Errorf("second teardown by slug err = %v, want a refusal", err)
+	}
+	var exists bool
+	if err := adminPool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM tenants WHERE id = $1)`, ref.ID).Scan(&exists); err != nil || !exists {
+		t.Fatalf("tenant gone after second teardown (exists=%v, err=%v)", exists, err)
 	}
 }

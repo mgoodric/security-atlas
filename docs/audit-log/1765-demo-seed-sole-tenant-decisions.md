@@ -94,14 +94,45 @@ a mark naming another tenant, and a tenant with earlier evidence. The
 in-place mark carries the tenant id because the bootstrap tenant has no slug
 to match on.
 
-## D5 — Teardown never drops a tenant seeded in place
+## D5 — Teardown never drops a tenant seeded in place, and leaves a trace
 
 `Teardown(slug)` and the new `TeardownTenant(id)` check `demo_seed_rows`
 first. A tenant seeded in place also carries the `demo_seed_apply` mark, and
 without this check `demo teardown --tenant-slug=<your org>` would have
-deleted the whole organisation. The in-place teardown writes only a
-`super_admin_audit_log` row (no `tenant_id`), so the tenant's rows end up
-exactly as before the seed (AC-2).
+deleted the whole organisation.
+
+Audit logs keep a trace (Matt's decision M2, below). The seed never records
+rows in the tenant's audit-log tables (`*_audit_log`, `*_audit`,
+`isTenantAuditTable`), so teardown never deletes them. That includes the
+`demo_seed_apply` mark and the ~50 synthetic `me_audit_log` rows; every one
+carries `demo_seed_v`, so the filter in `demo-seed.md` separates them from
+real activity. Teardown adds its own `demo_seed_teardown` row to
+`me_audit_log` and `super_admin_audit_log`, with the actor, the total
+`removed_rows` and per-table `removed` counts. AC-2's "exactly the pre-seed
+rows" therefore holds for every table except the audit logs.
+`TestSeedInPlace_Teardown_LeavesExactlyPreSeedRows` asserts both halves:
+nothing outside the audit logs differs from before the seed, and the tenant's
+`me_audit_log` shows the apply and then the teardown.
+
+Because those marks now outlive teardown in a real organisation,
+`tenantWasSeeded`, the test for "this is a whole demo tenant", ignores marks
+carrying `in_place`. Without that, a second `demo teardown
+--tenant-slug=<your org>` after an in-place teardown would find the mark,
+take the whole-tenant path and delete the organisation.
+`TestSeedInPlace_AfterTeardown_SlugTeardownNeverDropsTheTenant` fails without
+the filter: the tenant is deleted.
+
+## Matt's decisions on the #2039 review (2026-11-14)
+
+- **M1 — hard-delete from append-only ledgers: yes.** Teardown may
+  hard-delete the recorded demo rows from append-only ledgers
+  (`evidence_records` and similar) of a live tenant. Only recorded rows are
+  deleted, and since the B1 fix (D3) a recorded row is provably one the seed
+  transaction wrote.
+- **M2 — keep a trace.** Audit-log rows are never recorded as demo rows, so
+  teardown never deletes them. Teardown writes its own `me_audit_log`
+  `demo_seed_teardown` row with the actor and counts. AC-2 excludes the
+  audit log. Implemented as D5.
 
 ## D6 — Rows added after the seed follow the schema's delete rules
 
@@ -135,7 +166,7 @@ pre-seed rows" is a property of this code.
 `admintenants.DefaultAllowMultiTenant()`. The super-admin HTTP demo button
 (`internal/api/admindemo`) still calls `Apply` directly and creates a `demo`
 tenant as before. That button is the subject of other #1758 work and is out
-of this ticket's CLI scope; it is filed as #2042 rather than changed here.
+of this ticket's CLI scope; it is filed as #2043 rather than changed here.
 
 ## D9 — Tests stand in for "the only tenant" with a resolver override
 

@@ -144,13 +144,15 @@ DATABASE_URL='...' \
 ```
 
 **Seeded in place:** teardown deletes exactly the rows the seed recorded
-(in `demo_seed_rows`) and keeps the tenant, so your organisation is left as
-it was before the seed. Rows you add later that hang off a demo row follow
+(in `demo_seed_rows`) and keeps the tenant, so outside its audit logs your
+organisation is left as it was before the seed. The audit logs keep a trace:
+the seed's own audit rows (all tagged `demo_seed_v`, see the filter below)
+stay, and teardown adds a `demo_seed_teardown` row to `me_audit_log` with who
+ran it and how many rows it removed from each table. Rows you add later that hang off a demo row follow
 the schema's own delete rule: those tied by `ON DELETE CASCADE` (an owner
 assigned to a demo control, say) go with it; those tied by `ON DELETE
 RESTRICT` (an exception filed against a demo control) make teardown refuse
-and name the table, so you can decide. Only a `super_admin_audit_log` row
-records an in-place teardown. Derived evaluation rows the post-seed
+and name the table, so you can decide. Derived evaluation rows the post-seed
 evaluation pass wrote for your stock controls are left in place; the
 evaluator recomputes them on its next run.
 

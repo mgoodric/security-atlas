@@ -99,3 +99,21 @@ func TestImplicitTenant_NoneOrSeveral(t *testing.T) {
 		}
 	}
 }
+
+func TestIsTenantAuditTable(t *testing.T) {
+	t.Parallel()
+	for name, want := range map[string]bool{
+		"me_audit_log":                         true,
+		"evidence_audit_log":                   true,
+		"decisions_audit":                      true,
+		"questionnaire_mapping_proposal_audit": true,
+		"audit_periods":                        false,
+		"audit_notes":                          false,
+		"auditor_assignments":                  false,
+		"controls":                             false,
+	} {
+		if got := isTenantAuditTable(name); got != want {
+			t.Errorf("isTenantAuditTable(%q) = %v, want %v", name, got, want)
+		}
+	}
+}

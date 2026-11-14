@@ -1,5 +1,7 @@
 package demoseed
 
+import "strings"
+
 // Stock bootstrap seed: the organisation data a fresh single-tenant install
 // holds before anyone has used it (#1765). ApplyInPlace accepts a tenant only
 // when every control and policy it holds is stock.
@@ -64,3 +66,10 @@ var stockControlBundleIDs = []string{
 // stockPolicyCreatedBy is the created_by stamp internal/policy/seed writes on
 // the stock policies (`atlas-cli policies seed-stock`).
 const stockPolicyCreatedBy = "system:stock-seed"
+
+// isTenantAuditTable reports whether a tenant-scoped table is an audit log
+// (`*_audit_log`, `*_audit`). Matt's call on #2039 (M2): the in-place seed
+// never records audit-log rows, so teardown leaves them as a trace.
+func isTenantAuditTable(name string) bool {
+	return strings.HasSuffix(name, "_audit_log") || strings.HasSuffix(name, "_audit")
+}
