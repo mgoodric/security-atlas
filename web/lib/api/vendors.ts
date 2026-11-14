@@ -39,6 +39,10 @@ export type Vendor = {
   dpa_signed_at?: string | null;
   review_cadence: VendorReviewCadence;
   last_review_date?: string | null;
+  // Set only while the vendor has never been reviewed: its creation date
+  // (UTC) plus the tenant's initial-review window. Overdue stays false until
+  // that day has passed (#2061).
+  first_review_due?: string | null;
   overdue: boolean;
   owner_user: string;
   linked_sow_uri?: string | null;

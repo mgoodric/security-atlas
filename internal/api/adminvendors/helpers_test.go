@@ -128,6 +128,7 @@ func TestVendorsToRowIter_PopulatedAndNullable(t *testing.T) {
 	sowURI := "s3://bucket/sow.pdf"
 
 	asOf := time.Date(2025, 1, 20, 0, 0, 0, 0, time.UTC) // 5 days after last review → NOT overdue under quarterly cadence
+	firstReviewDue := asOf.AddDate(0, 0, -1)
 
 	vendors := []vendor.Vendor{
 		{
@@ -154,10 +155,12 @@ func TestVendorsToRowIter_PopulatedAndNullable(t *testing.T) {
 			Name:          "Sparse Vendor",
 			Criticality:   vendor.CriticalityMedium,
 			ReviewCadence: vendor.CadenceQuarterly,
-			OwnerUser:     "", // non-email; masked to ""
-			Notes:         "",
-			CreatedAt:     contractStart,
-			UpdatedAt:     contractStart,
+			// Never reviewed, first review due a day before asOf (#2061).
+			FirstReviewDue: &firstReviewDue,
+			OwnerUser:      "", // non-email; masked to ""
+			Notes:          "",
+			CreatedAt:      contractStart,
+			UpdatedAt:      contractStart,
 		},
 	}
 
@@ -208,7 +211,7 @@ func TestVendorsToRowIter_PopulatedAndNullable(t *testing.T) {
 		t.Errorf("row[1][dpa_signed_at] empty: got %q", got[1][7])
 	}
 	if got[1][10] != "true" {
-		// LastReviewDate=nil → IsOverdueAsOf(asOf) is true.
+		// LastReviewDate=nil, FirstReviewDue before asOf → overdue.
 		t.Errorf("row[1][overdue] should be true for no-review vendor: got %q", got[1][10])
 	}
 	if got[1][11] != "" {

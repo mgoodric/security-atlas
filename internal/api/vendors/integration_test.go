@@ -283,8 +283,42 @@ func TestHTTP_ListVendors_OverdueOnly(t *testing.T) {
 	if err := json.Unmarshal(payload, &got); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if len(got.Vendors) != 2 {
-		t.Fatalf("want 2 overdue rows; got %d", len(got.Vendors))
+	// "never" was created today, so its first review is not due until 30
+	// days from now (#2061); only "stale" is overdue as of 2026-05-11.
+	if len(got.Vendors) != 1 || got.Vendors[0]["name"] != "stale" {
+		t.Fatalf("want only stale overdue; got %v", got.Vendors)
+	}
+}
+
+// #2061: a vendor created now carries first_review_due = creation date + 30
+// days and overdue=false on the wire.
+func TestHTTP_NewVendor_FirstReviewDue(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ts, bearer := setupHTTPServer(t, tenant)
+
+	resp, payload := doJSON(t, http.MethodPost, ts.URL+"/v1/vendors",
+		bearer, `{"name":"fresh","criticality":"high","review_cadence":"annual"}`)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d %s", resp.StatusCode, payload)
+	}
+	var body struct {
+		Vendor struct {
+			Overdue        bool      `json:"overdue"`
+			FirstReviewDue string    `json:"first_review_due"`
+			CreatedAt      time.Time `json:"created_at"`
+		} `json:"vendor"`
+	}
+	if err := json.Unmarshal(payload, &body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := body.Vendor
+	if got.Overdue {
+		t.Fatal("a vendor created just now is overdue")
+	}
+	want := got.CreatedAt.UTC().AddDate(0, 0, 30).Format(time.DateOnly)
+	if got.FirstReviewDue != want {
+		t.Fatalf("first_review_due = %q; want %q", got.FirstReviewDue, want)
 	}
 }
 

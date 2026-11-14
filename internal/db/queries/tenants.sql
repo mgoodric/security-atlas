@@ -33,6 +33,15 @@ SELECT bundle_gate_mode
 FROM tenants
 WHERE id = $1;
 
+-- name: GetTenantVendorInitialReviewDays :one
+-- #2061: the caller-tenant's vendor initial-review window in days. RLS scopes
+-- the row to the current tenant. Returns ErrNoRows when no tenants row exists
+-- (bare-UUID tenant); the vendor store maps that to the 30-day default, the
+-- same COALESCE the vendor overdue queries use.
+SELECT vendor_initial_review_days
+FROM tenants
+WHERE id = $1;
+
 -- name: UpdateTenantName :one
 -- Update a tenant's name. RLS gates this to the caller's own row.
 -- Returns the post-update row so the handler can emit the new value

@@ -271,7 +271,9 @@ type Querier interface {
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
-	// AC-3 burndown: returns total + overdue counts per criticality band. Used
+	// AC-3 burndown: returns total + overdue counts per criticality band. The
+	// overdue rule is ListOverdueVendors' (first-review window for a vendor never
+	// reviewed, #2061), so the counts match the overdue list. Used
 	// by the dashboard panel (slice 040) and the quarterly board pack (slice 032).
 	// Returns one row per criticality present in the result set; empty bands are
 	// not included (callers fill in zero where needed).
@@ -1050,6 +1052,11 @@ type Querier interface {
 	// Fetch the current routing config for the tenant. Returns no rows when the
 	// tenant has never opted in (=> the router treats that as local-ollama).
 	GetTenantLLMRouting(ctx context.Context, tenantID pgtype.UUID) (TenantLlmRouting, error)
+	// #2061: the caller-tenant's vendor initial-review window in days. RLS scopes
+	// the row to the current tenant. Returns ErrNoRows when no tenants row exists
+	// (bare-UUID tenant); the vendor store maps that to the 30-day default, the
+	// same COALESCE the vendor overdue queries use.
+	GetTenantVendorInitialReviewDays(ctx context.Context, id pgtype.UUID) (int32, error)
 	// Lookup by case-insensitive email within a tenant. Used by /auth/local/login.
 	GetUserByEmail(ctx context.Context, arg GetUserByEmailParams) (User, error)
 	GetUserByID(ctx context.Context, arg GetUserByIDParams) (User, error)
@@ -2354,12 +2361,14 @@ type Querier interface {
 	ListOverdueDecisions(ctx context.Context, arg ListOverdueDecisionsParams) ([]Decision, error)
 	ListOverdueOffboardingChecklists(ctx context.Context, arg ListOverdueOffboardingChecklistsParams) ([]PersonnelSecurityChecklist, error)
 	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
-	// the cutoff date. NULL last_review_date means "never reviewed" which always
-	// counts as overdue (a vendor with no review on file is by definition past
-	// due). Cadence -> interval mapping happens with a CASE in SQL so the query
-	// plan is stable. Cutoff is passed as DATE so the caller controls "now"
-	// (testability) and timezone semantics (vendor reviews are date-granular,
-	// not timestamp-granular).
+	// the cutoff date. A vendor never reviewed (NULL last_review_date) has its
+	// first review due on the UTC date of created_at plus the tenant's
+	// vendor_initial_review_days (default 30 when the tenant has no row), and is
+	// overdue only after that day (#2061). CountVendorsForBurndown and
+	// vendor.IsOverdueAsOf apply the same rule. Cadence -> interval mapping
+	// happens with a CASE in SQL so the query plan is stable. Cutoff is passed as
+	// DATE so the caller controls "now" (testability) and timezone semantics
+	// (vendor reviews are date-granular, not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
 	// Read the assignment audit ledger for the tenant, newest first. Used by
 	// the integration tests (and a future "who reassigned these?" surface).

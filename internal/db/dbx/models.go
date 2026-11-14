@@ -3223,6 +3223,8 @@ type Tenant struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 	// Slice 608: per-tenant control-bundle upload test-gate policy. strict (default, = slice-574 global behaviour) | advisory (red tests warn, not block) | mandatory_tests (a bundle with no tests/ is rejected). Set via PATCH /v1/tenants/{id}.
 	BundleGateMode string `json:"bundle_gate_mode"`
+	// #2061: days after a vendor's creation (UTC date) that its first review is due. A never-reviewed vendor is overdue only after that day. Default 30.
+	VendorInitialReviewDays int32 `json:"vendor_initial_review_days"`
 }
 
 // Slice 499 per-tenant cloud-LLM opt-in routing. Absence of a row => local-ollama (the off-by-default posture). provider is a closed enum (no free-text URL). api_key_ciphertext is AES-256-GCM, never plaintext, never returned/logged.

@@ -51,7 +51,11 @@ SELECT
     criticality,
     COUNT(*)::bigint AS total_count,
     COUNT(*) FILTER (
-        WHERE last_review_date IS NULL
+        WHERE (last_review_date IS NULL
+               AND (created_at AT TIME ZONE 'UTC')::date + COALESCE(
+                       (SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = $1),
+                       30
+                   ) < $2::date)
            OR last_review_date + (
                   CASE review_cadence
                       WHEN 'monthly'   THEN INTERVAL '1 month'
@@ -59,18 +63,18 @@ SELECT
                       WHEN 'biannual'  THEN INTERVAL '6 months'
                       WHEN 'annual'    THEN INTERVAL '1 year'
                   END
-              ) < $1::date
+              ) < $2::date
     )::bigint AS overdue_count
 FROM vendors
-WHERE tenant_id = $2
+WHERE tenant_id = $1
   AND ($3::vendor_criticality IS NULL
        OR criticality = $3)
 GROUP BY criticality
 `
 
 type CountVendorsForBurndownParams struct {
-	Cutoff      pgtype.Date        `json:"cutoff"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`
+	Cutoff      pgtype.Date        `json:"cutoff"`
 	Criticality *VendorCriticality `json:"criticality"`
 }
 
@@ -80,12 +84,14 @@ type CountVendorsForBurndownRow struct {
 	OverdueCount int64             `json:"overdue_count"`
 }
 
-// AC-3 burndown: returns total + overdue counts per criticality band. Used
+// AC-3 burndown: returns total + overdue counts per criticality band. The
+// overdue rule is ListOverdueVendors' (first-review window for a vendor never
+// reviewed, #2061), so the counts match the overdue list. Used
 // by the dashboard panel (slice 040) and the quarterly board pack (slice 032).
 // Returns one row per criticality present in the result set; empty bands are
 // not included (callers fill in zero where needed).
 func (q *Queries) CountVendorsForBurndown(ctx context.Context, arg CountVendorsForBurndownParams) ([]CountVendorsForBurndownRow, error) {
-	rows, err := q.db.Query(ctx, countVendorsForBurndown, arg.Cutoff, arg.TenantID, arg.Criticality)
+	rows, err := q.db.Query(ctx, countVendorsForBurndown, arg.TenantID, arg.Cutoff, arg.Criticality)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +273,11 @@ WHERE tenant_id = $1
   AND ($2::vendor_criticality IS NULL
        OR criticality = $2)
   AND (
-        last_review_date IS NULL
+        (last_review_date IS NULL
+         AND (created_at AT TIME ZONE 'UTC')::date + COALESCE(
+                 (SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = $1),
+                 30
+             ) < $3::date)
      OR last_review_date + (
             CASE review_cadence
                 WHEN 'monthly'   THEN INTERVAL '1 month'
@@ -277,7 +287,7 @@ WHERE tenant_id = $1
             END
         ) < $3::date
       )
-ORDER BY last_review_date ASC NULLS FIRST, name ASC
+ORDER BY last_review_date ASC NULLS FIRST, created_at ASC, name ASC
 `
 
 type ListOverdueVendorsParams struct {
@@ -287,12 +297,14 @@ type ListOverdueVendorsParams struct {
 }
 
 // AC-4 overdue calc — vendors whose last_review_date + cadence is older than
-// the cutoff date. NULL last_review_date means "never reviewed" which always
-// counts as overdue (a vendor with no review on file is by definition past
-// due). Cadence -> interval mapping happens with a CASE in SQL so the query
-// plan is stable. Cutoff is passed as DATE so the caller controls "now"
-// (testability) and timezone semantics (vendor reviews are date-granular,
-// not timestamp-granular).
+// the cutoff date. A vendor never reviewed (NULL last_review_date) has its
+// first review due on the UTC date of created_at plus the tenant's
+// vendor_initial_review_days (default 30 when the tenant has no row), and is
+// overdue only after that day (#2061). CountVendorsForBurndown and
+// vendor.IsOverdueAsOf apply the same rule. Cadence -> interval mapping
+// happens with a CASE in SQL so the query plan is stable. Cutoff is passed as
+// DATE so the caller controls "now" (testability) and timezone semantics
+// (vendor reviews are date-granular, not timestamp-granular).
 func (q *Queries) ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error) {
 	rows, err := q.db.Query(ctx, listOverdueVendors, arg.TenantID, arg.Criticality, arg.Cutoff)
 	if err != nil {

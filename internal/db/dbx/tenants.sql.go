@@ -78,6 +78,23 @@ func (q *Queries) GetTenantByID(ctx context.Context, id pgtype.UUID) (GetTenantB
 	return i, err
 }
 
+const getTenantVendorInitialReviewDays = `-- name: GetTenantVendorInitialReviewDays :one
+SELECT vendor_initial_review_days
+FROM tenants
+WHERE id = $1
+`
+
+// #2061: the caller-tenant's vendor initial-review window in days. RLS scopes
+// the row to the current tenant. Returns ErrNoRows when no tenants row exists
+// (bare-UUID tenant); the vendor store maps that to the 30-day default, the
+// same COALESCE the vendor overdue queries use.
+func (q *Queries) GetTenantVendorInitialReviewDays(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, getTenantVendorInitialReviewDays, id)
+	var vendor_initial_review_days int32
+	err := row.Scan(&vendor_initial_review_days)
+	return vendor_initial_review_days, err
+}
+
 const updateTenantBundleGateMode = `-- name: UpdateTenantBundleGateMode :one
 UPDATE tenants
 SET bundle_gate_mode = $2

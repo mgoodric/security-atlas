@@ -55,16 +55,20 @@ func NewWithClock(store *vendor.Store, now func() time.Time) *Handler {
 // ----- wire types -----
 
 type vendorWire struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	Domain         *string   `json:"domain,omitempty"`
-	Criticality    string    `json:"criticality"`
-	ContractStart  *string   `json:"contract_start,omitempty"`
-	ContractEnd    *string   `json:"contract_end,omitempty"`
-	DPASigned      bool      `json:"dpa_signed"`
-	DPASignedAt    *string   `json:"dpa_signed_at,omitempty"`
-	ReviewCadence  string    `json:"review_cadence"`
-	LastReviewDate *string   `json:"last_review_date,omitempty"`
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	Domain         *string `json:"domain,omitempty"`
+	Criticality    string  `json:"criticality"`
+	ContractStart  *string `json:"contract_start,omitempty"`
+	ContractEnd    *string `json:"contract_end,omitempty"`
+	DPASigned      bool    `json:"dpa_signed"`
+	DPASignedAt    *string `json:"dpa_signed_at,omitempty"`
+	ReviewCadence  string  `json:"review_cadence"`
+	LastReviewDate *string `json:"last_review_date,omitempty"`
+	// FirstReviewDue is set only while the vendor has never been reviewed:
+	// its creation date (UTC) plus the tenant's initial-review window
+	// (#2061). Overdue is false until that day has passed.
+	FirstReviewDue *string   `json:"first_review_due,omitempty"`
 	Overdue        bool      `json:"overdue"`
 	OwnerUser      string    `json:"owner_user"`
 	LinkedSOWURI   *string   `json:"linked_sow_uri,omitempty"`
@@ -545,6 +549,7 @@ func (h *Handler) toWire(v vendor.Vendor) vendorWire {
 	w.ContractEnd = dateString(v.ContractEnd)
 	w.DPASignedAt = dateString(v.DPASignedAt)
 	w.LastReviewDate = dateString(v.LastReviewDate)
+	w.FirstReviewDue = dateString(v.FirstReviewDue)
 	w.RenewalDate = dateString(v.RenewalDate)
 	if v.ToolCategory != nil {
 		s := string(*v.ToolCategory)

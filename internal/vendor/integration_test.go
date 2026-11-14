@@ -283,8 +283,9 @@ func TestListVendors_FilterByCriticality(t *testing.T) {
 
 // AC-2 + AC-4: List filter for review-overdue. Insert one vendor reviewed
 // recently, one reviewed long ago, and one never reviewed. With cadence=
-// quarterly and cutoff well past the old review, the "long ago" and the
-// "never reviewed" rows must surface as overdue.
+// quarterly and cutoff well past the old review, only the "long ago" row is
+// overdue: the never-reviewed vendor's first review is not due until 30 days
+// after it was created (#2061).
 func TestListVendors_FilterByOverdue(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -321,12 +322,151 @@ func TestListVendors_FilterByOverdue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list overdue: %v", err)
 	}
-	if len(overdue) != 2 {
+	if len(overdue) != 1 || overdue[0].Name != "Stale" {
 		names := make([]string, 0, len(overdue))
 		for _, v := range overdue {
 			names = append(names, v.Name)
 		}
-		t.Fatalf("want 2 overdue rows, got %d: %v", len(overdue), names)
+		t.Fatalf("want only Stale overdue, got %d: %v", len(overdue), names)
+	}
+}
+
+// overdueNames returns the names List reports overdue at cutoff, and checks
+// the burndown at the same cutoff counts the same number (#2061: the
+// burndown follows the list's rule).
+func overdueNames(ctx context.Context, t *testing.T, store *vendor.Store, cutoff time.Time) []string {
+	t.Helper()
+	rows, err := store.List(ctx, vendor.ListFilter{OverdueOnly: true, Cutoff: cutoff})
+	if err != nil {
+		t.Fatalf("list overdue at %s: %v", cutoff.Format(time.DateOnly), err)
+	}
+	bd, err := store.Burndown(ctx, cutoff, nil)
+	if err != nil {
+		t.Fatalf("burndown at %s: %v", cutoff.Format(time.DateOnly), err)
+	}
+	if bd.Total.Overdue != int64(len(rows)) {
+		t.Fatalf("at %s burndown overdue = %d, list overdue = %d",
+			cutoff.Format(time.DateOnly), bd.Total.Overdue, len(rows))
+	}
+	names := make([]string, 0, len(rows))
+	for _, v := range rows {
+		names = append(names, v.Name)
+	}
+	return names
+}
+
+// #2061: a vendor created now is "first review due" 30 days after its
+// creation date (UTC), not overdue. Past that day it is overdue, in the
+// list, the Go flag and the burndown alike. Once reviewed, the cadence
+// applies and the first-review date is gone.
+func TestNeverReviewedVendor_FirstReviewDue(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	store := vendor.NewStore(app)
+	ctx := tenantCtx(t, tenant)
+
+	in := vendor.CreateVendorInput{
+		Name:          "Brand New",
+		Criticality:   vendor.CriticalityHigh,
+		ReviewCadence: vendor.CadenceMonthly,
+	}
+	v, err := store.Create(ctx, in)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if v.FirstReviewDue == nil {
+		t.Fatal("FirstReviewDue is nil for a never-reviewed vendor")
+	}
+	wantDue := vendor.FirstReviewDueDate(v.CreatedAt, vendor.DefaultInitialReviewDays)
+	if !v.FirstReviewDue.Equal(wantDue) {
+		t.Fatalf("FirstReviewDue = %s; want %s (created + 30 days)",
+			v.FirstReviewDue.Format(time.DateOnly), wantDue.Format(time.DateOnly))
+	}
+
+	now := time.Now().UTC()
+	if v.IsOverdueAsOf(now) {
+		t.Fatal("a vendor created just now is overdue")
+	}
+	if got := overdueNames(ctx, t, store, now); len(got) != 0 {
+		t.Fatalf("overdue right after creation: %v", got)
+	}
+	dueDay := *v.FirstReviewDue
+	if got := overdueNames(ctx, t, store, dueDay); len(got) != 0 {
+		t.Fatalf("overdue on the first-review due day: %v", got)
+	}
+	if v.IsOverdueAsOf(dueDay.Add(23 * time.Hour)) {
+		t.Fatal("Go flag overdue during the first-review due day")
+	}
+
+	dayAfter := dueDay.AddDate(0, 0, 1)
+	if got := overdueNames(ctx, t, store, dayAfter); len(got) != 1 || got[0] != "Brand New" {
+		t.Fatalf("overdue the day after the first-review due day = %v; want [Brand New]", got)
+	}
+	if !v.IsOverdueAsOf(dayAfter) {
+		t.Fatal("Go flag not overdue the day after the first-review due day")
+	}
+
+	// A review lands: the monthly cadence applies from the review date.
+	reviewed := dueDay.AddDate(0, 0, 5)
+	in.LastReviewDate = &reviewed
+	v, err = store.Update(ctx, v.ID, in)
+	if err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if v.FirstReviewDue != nil {
+		t.Fatalf("FirstReviewDue = %v after a review; want nil", v.FirstReviewDue)
+	}
+	withinCadence := reviewed.AddDate(0, 0, 20)
+	if got := overdueNames(ctx, t, store, withinCadence); len(got) != 0 {
+		t.Fatalf("overdue within the monthly cadence: %v", got)
+	}
+	if v.IsOverdueAsOf(withinCadence) {
+		t.Fatal("Go flag overdue within the monthly cadence")
+	}
+	pastCadence := reviewed.AddDate(0, 2, 0)
+	if got := overdueNames(ctx, t, store, pastCadence); len(got) != 1 {
+		t.Fatalf("overdue past the monthly cadence = %v; want [Brand New]", got)
+	}
+	if !v.IsOverdueAsOf(pastCadence) {
+		t.Fatal("Go flag not overdue past the monthly cadence")
+	}
+}
+
+// #2061: the initial-review window is the tenant's setting, read from
+// tenants.vendor_initial_review_days, in Go and in SQL.
+func TestNeverReviewedVendor_TenantWindow(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO tenants (id, name, vendor_initial_review_days) VALUES ($1, $2, 7)`,
+		tenant, "vendor-2061-"+tenant[:8]); err != nil {
+		t.Fatalf("seed tenant row: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1`, tenant)
+	})
+	store := vendor.NewStore(app)
+	ctx := tenantCtx(t, tenant)
+
+	v, err := store.Create(ctx, vendor.CreateVendorInput{
+		Name:          "Short Window",
+		Criticality:   vendor.CriticalityLow,
+		ReviewCadence: vendor.CadenceAnnual,
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	wantDue := vendor.FirstReviewDueDate(v.CreatedAt, 7)
+	if v.FirstReviewDue == nil || !v.FirstReviewDue.Equal(wantDue) {
+		t.Fatalf("FirstReviewDue = %v; want %s (created + 7 days)", v.FirstReviewDue, wantDue.Format(time.DateOnly))
+	}
+	if got := overdueNames(ctx, t, store, wantDue); len(got) != 0 {
+		t.Fatalf("overdue on the due day: %v", got)
+	}
+	if got := overdueNames(ctx, t, store, wantDue.AddDate(0, 0, 1)); len(got) != 1 {
+		t.Fatalf("overdue the day after = %v; want [Short Window]", got)
 	}
 }
 
