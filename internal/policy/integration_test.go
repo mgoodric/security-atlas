@@ -161,7 +161,7 @@ func TestStateMachine_Transitions(t *testing.T) {
 	if submitted.Status != policy.StateUnderReview {
 		t.Fatalf("expected under_review, got %q", submitted.Status)
 	}
-	approved, err := store.Approve(ctx, created.ID, "key_approver")
+	approved, err := store.Approve(ctx, created.ID, approverPerson)
 	if err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestPublish_FirstVersion(t *testing.T) {
 	if _, err := store.SubmitForReview(ctx, created.ID, "key_author"); err != nil {
 		t.Fatalf("SubmitForReview: %v", err)
 	}
-	if _, err := store.Approve(ctx, created.ID, "key_approver"); err != nil {
+	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	now := time.Now().UTC().Truncate(24 * time.Hour)
@@ -221,7 +221,7 @@ func TestPublish_OrphanRejected(t *testing.T) {
 	if _, err := store.SubmitForReview(ctx, created.ID, "key_author"); err != nil {
 		t.Fatalf("SubmitForReview: %v", err)
 	}
-	if _, err := store.Approve(ctx, created.ID, "key_approver"); err != nil {
+	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	now := time.Now().UTC().Truncate(24 * time.Hour)
@@ -247,7 +247,7 @@ func TestApprove_RejectsFromDraft(t *testing.T) {
 
 	created, _ := store.Create(ctx, validCreate([]uuid.UUID{ctrl}, "key_author"))
 	// Skip SubmitForReview; attempt to approve directly from draft.
-	_, err := store.Approve(ctx, created.ID, "key_approver")
+	_, err := store.Approve(ctx, created.ID, approverPerson)
 	if !errors.Is(err, policy.ErrWrongState) {
 		t.Fatalf("expected ErrWrongState, got %v", err)
 	}
@@ -255,7 +255,40 @@ func TestApprove_RejectsFromDraft(t *testing.T) {
 
 // ---- #1807: segregation of duties on approval ----
 
+// approverPerson is a user who submitted nothing in these tests: the
+// second person every approval needs.
+var approverPerson = policy.Approver{UserID: "6f1c2a7e-0000-4000-8000-00000000a001", CredentialID: "key_approver"}
+
 func TestApprove_RefusesSubmitter(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctrl := seedControl(t, admin, tenant)
+	store := policy.NewStore(app)
+	ctx := ctxFor(t, tenant)
+
+	submitter := "6f1c2a7e-0000-4000-8000-00000000a002"
+	created, _ := store.Create(ctx, validCreate([]uuid.UUID{ctrl}, "key_author"))
+	if _, err := store.SubmitForReview(ctx, created.ID, submitter); err != nil {
+		t.Fatalf("SubmitForReview: %v", err)
+	}
+	_, err := store.Approve(ctx, created.ID, policy.Approver{UserID: submitter, CredentialID: "key_submitters"})
+	if !errors.Is(err, policy.ErrSelfApproval) {
+		t.Fatalf("submitter approving own policy: expected ErrSelfApproval, got %v", err)
+	}
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != policy.StateUnderReview {
+		t.Fatalf("refused approval must leave the policy under_review, got %q", got.Status)
+	}
+	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
+		t.Fatalf("a second person approving: %v", err)
+	}
+}
+
+func TestApprove_RefusesCredentialWithNoUser(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
@@ -267,19 +300,46 @@ func TestApprove_RefusesSubmitter(t *testing.T) {
 	if _, err := store.SubmitForReview(ctx, created.ID, "key_author"); err != nil {
 		t.Fatalf("SubmitForReview: %v", err)
 	}
-	_, err := store.Approve(ctx, created.ID, "key_author")
-	if !errors.Is(err, policy.ErrSelfApproval) {
-		t.Fatalf("submitter approving own policy: expected ErrSelfApproval, got %v", err)
+	_, err := store.Approve(ctx, created.ID, policy.Approver{CredentialID: "key_machine"})
+	if !errors.Is(err, policy.ErrApproverNotPerson) {
+		t.Fatalf("unbound key approving: expected ErrApproverNotPerson, got %v", err)
 	}
-	got, err := store.Get(ctx, created.ID)
+}
+
+// A policy submitted before #1807 recorded its submitter as a session id
+// ("jwt:<token id>"). Approval refuses it; re-submitting records the person,
+// after which a second person can approve.
+func TestApprove_LegacySessionSubmitter(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctrl := seedControl(t, admin, tenant)
+	store := policy.NewStore(app)
+	ctx := ctxFor(t, tenant)
+
+	created, _ := store.Create(ctx, validCreate([]uuid.UUID{ctrl}, "key_author"))
+	if _, err := store.SubmitForReview(ctx, created.ID, "jwt:pre-1807-token"); err != nil {
+		t.Fatalf("SubmitForReview: %v", err)
+	}
+	_, err := store.Approve(ctx, created.ID, approverPerson)
+	if !errors.Is(err, policy.ErrSubmitterUnknown) {
+		t.Fatalf("approving a session-submitted policy: expected ErrSubmitterUnknown, got %v", err)
+	}
+	submitter := "6f1c2a7e-0000-4000-8000-00000000a003"
+	resubmitted, err := store.SubmitForReview(ctx, created.ID, submitter)
 	if err != nil {
-		t.Fatalf("Get: %v", err)
+		t.Fatalf("re-submit: %v", err)
 	}
-	if got.Status != policy.StateUnderReview {
-		t.Fatalf("refused approval must leave the policy under_review, got %q", got.Status)
+	if resubmitted.SubmittedBy == nil || *resubmitted.SubmittedBy != submitter {
+		t.Fatalf("re-submit recorded submitter %v, want %q", resubmitted.SubmittedBy, submitter)
 	}
-	if _, err := store.Approve(ctx, created.ID, "key_approver"); err != nil {
-		t.Fatalf("a second person approving: %v", err)
+	// Re-submitting an under_review policy whose submitter is a person is
+	// still a wrong-state transition.
+	if _, err := store.SubmitForReview(ctx, created.ID, submitter); !errors.Is(err, policy.ErrWrongState) {
+		t.Fatalf("second re-submit: expected ErrWrongState, got %v", err)
+	}
+	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
+		t.Fatalf("a second person approving after re-submit: %v", err)
 	}
 }
 

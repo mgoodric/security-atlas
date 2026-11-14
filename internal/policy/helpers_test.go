@@ -532,21 +532,31 @@ func TestImportReport_Failed(t *testing.T) {
 	}
 }
 
-// TestCheckApprover covers #1807: the submitter never approves their own
-// policy. A row with no recorded submitter (pre-dates the column) has no
-// one to collide with.
+// TestCheckApprover covers #1807: only a person approves, never the one who
+// submitted. A row with no recorded submitter (pre-dates the column) has
+// no one to collide with; a row submitted under a session id has no person
+// to compare and is refused until re-submitted.
 func TestCheckApprover(t *testing.T) {
 	t.Parallel()
 	submitter := "user-1"
+	keySubmitter := "key_abc"
+	sessionSubmitter := "jwt:token-1"
+	empty := ""
+	person := func(u string) Approver { return Approver{UserID: u, CredentialID: "key_other"} }
 	cases := []struct {
 		name        string
 		submittedBy *string
-		approver    string
+		approver    Approver
 		want        error
 	}{
-		{"submitter approves own policy", &submitter, "user-1", ErrSelfApproval},
-		{"second person approves", &submitter, "user-2", nil},
-		{"no recorded submitter", nil, "user-1", nil},
+		{"submitter approves own policy", &submitter, person("user-1"), ErrSelfApproval},
+		{"second person approves", &submitter, person("user-2"), nil},
+		{"no recorded submitter", nil, person("user-1"), nil},
+		{"empty recorded submitter", &empty, person("user-1"), nil},
+		{"no user behind the credential", &submitter, Approver{CredentialID: "key_machine"}, ErrApproverNotPerson},
+		{"no user, no submitter", nil, Approver{CredentialID: "key_machine"}, ErrApproverNotPerson},
+		{"submitted under a session id", &sessionSubmitter, person("user-2"), ErrSubmitterUnknown},
+		{"pre-1807 key submitter approves with that key", &keySubmitter, Approver{UserID: "user-1", CredentialID: "key_abc"}, ErrSelfApproval},
 	}
 	for _, tc := range cases {
 		tc := tc

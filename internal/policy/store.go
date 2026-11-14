@@ -37,6 +37,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,6 +86,14 @@ var (
 	// submitted the policy for review (#1807, segregation of duties).
 	// HTTP 403.
 	ErrSelfApproval = errors.New("policy: the submitter cannot approve their own policy; a second approver must approve it")
+	// ErrApproverNotPerson is returned when the approving credential
+	// belongs to no user: an unbound API key, an OAuth client or the
+	// bootstrap admin. Only people approve policies (#1807). HTTP 403.
+	ErrApproverNotPerson = errors.New("policy: only a person can approve a policy; approve with your own login or a key bound to your user, not an unbound API key, OAuth client or bootstrap credential")
+	// ErrSubmitterUnknown is returned when the policy was submitted
+	// before #1807 under a session id rather than a person, so no
+	// approver can be shown to differ from the submitter. HTTP 409.
+	ErrSubmitterUnknown = errors.New("policy: this policy was submitted before submitters were recorded by person, so a second approver cannot be verified; it must be re-submitted before it can be approved")
 	// ErrOrphanPublish is returned when publish is attempted on a policy
 	// with empty linked_control_ids (AC-7 + anti-criterion P0).
 	ErrOrphanPublish = errors.New("policy: cannot publish orphan policy (no linked controls)")
@@ -320,7 +329,9 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Policy, error) {
 }
 
 // SubmitForReview transitions draft -> under_review. Operator action; no
-// role gate.
+// role gate. It also re-submits an under_review policy whose submitter
+// was recorded before #1807 as a session id, so that approval, which
+// refuses such a row (ErrSubmitterUnknown), has a person to compare.
 func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string) (Policy, error) {
 	if actor == "" {
 		return Policy{}, ErrCreatedByRequired
@@ -338,11 +349,20 @@ func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string)
 	})
 }
 
+// Approver names who is approving a policy (#1807). UserID is the person:
+// the users(id) uuid behind the credential, empty when the credential
+// belongs to no user. CredentialID is the credential itself, compared
+// against submitters recorded by credential id before #1807.
+type Approver struct {
+	UserID       string
+	CredentialID string
+}
+
 // Approve transitions under_review -> approved. Handler validates
-// IsApprover before calling; the store refuses an approver who submitted
-// the policy (#1807), in the same transaction as the approval.
-func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver string) (Policy, error) {
-	if approver == "" {
+// IsApprover before calling; the store applies checkApprover (#1807) in
+// the same transaction as the approval.
+func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (Policy, error) {
+	if approver.UserID == "" && approver.CredentialID == "" {
 		return Policy{}, ErrCreatedByRequired
 	}
 	return s.transition(ctx, id, transitionParams{
@@ -367,18 +387,33 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver string) (Pol
 			return q.ApprovePolicy(ctx, dbx.ApprovePolicyParams{
 				TenantID:   pgUUID(tenantID),
 				ID:         pgUUID(id),
-				ApprovedBy: stringPtr(approver),
+				ApprovedBy: stringPtr(approver.UserID),
 			})
 		},
 	})
 }
 
-// checkApprover is the single segregation-of-duties rule for policy
-// approval (#1807): the approver must not be the submitter. It refuses
-// unconditionally for now; the organisation-level self-approval opt-in
-// (#2101) extends this function rather than adding a second check.
-func checkApprover(p dbx.Policy, approver string) error {
-	if p.SubmittedBy != nil && *p.SubmittedBy == approver {
+// legacySessionSubmitterPrefix marks a submitted_by recorded before #1807
+// from a JWT credential id ("jwt:<token id>"). It names a session, not a
+// person, so no approver can be shown to differ from it.
+const legacySessionSubmitterPrefix = "jwt:"
+
+// checkApprover is the single approval rule for policies (#1807). Only a
+// person approves, and never the person who submitted the policy. It
+// refuses unconditionally for now; the organisation-level self-approval
+// opt-in (#2101) extends this function rather than adding a second check.
+func checkApprover(p dbx.Policy, a Approver) error {
+	if a.UserID == "" {
+		return ErrApproverNotPerson
+	}
+	if p.SubmittedBy == nil || *p.SubmittedBy == "" {
+		return nil
+	}
+	submitter := *p.SubmittedBy
+	if strings.HasPrefix(submitter, legacySessionSubmitterPrefix) {
+		return ErrSubmitterUnknown
+	}
+	if submitter == a.UserID || submitter == a.CredentialID {
 		return ErrSelfApproval
 	}
 	return nil

@@ -234,6 +234,8 @@ func TestWriteTransitionErr(t *testing.T) {
 		{policy.ErrNotFound, http.StatusNotFound},
 		{policy.ErrWrongState, http.StatusConflict},
 		{fmt.Errorf("transition: %w", policy.ErrSelfApproval), http.StatusForbidden},
+		{fmt.Errorf("transition: %w", policy.ErrApproverNotPerson), http.StatusForbidden},
+		{fmt.Errorf("transition: %w", policy.ErrSubmitterUnknown), http.StatusConflict},
 		{errors.New("boom"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
@@ -249,16 +251,21 @@ func TestWriteTransitionErr(t *testing.T) {
 	}
 }
 
-// TestActorOf pins #1807's identity rule: two JWT sessions of one user are
-// one actor, so the submitter cannot approve from a second session.
+// TestActorOf pins #1807's identity rule: two JWT sessions of one user, and
+// a key bound to that user, are one actor, so the submitter cannot approve
+// from a second session or through their key.
 func TestActorOf(t *testing.T) {
 	t.Parallel()
-	a := credstore.Credential{ID: "jwt:session-a", UserID: "user-1"}
-	b := credstore.Credential{ID: "jwt:session-b", UserID: "user-1"}
-	if actorOf(a) != actorOf(b) {
-		t.Fatalf("two sessions of one user: actorOf = %q and %q, want equal", actorOf(a), actorOf(b))
+	user := uuid.NewString()
+	a := credstore.Credential{ID: "jwt:session-a", UserID: "user:" + user}
+	b := credstore.Credential{ID: "jwt:session-b", UserID: "user:" + user}
+	key := credstore.Credential{ID: "key_bound", UserID: user}
+	for _, c := range []credstore.Credential{a, b, key} {
+		if got := actorOf(c); got != user {
+			t.Fatalf("actorOf(%s) = %q, want the bare user id %q", c.ID, got, user)
+		}
 	}
-	if got := actorOf(credstore.Credential{ID: "key-1"}); got != "key-1" {
+	if got := actorOf(credstore.Credential{ID: "key_1", UserID: "key_1"}); got != "key_1" {
 		t.Fatalf("credential with no user: actorOf = %q, want the credential id", got)
 	}
 }

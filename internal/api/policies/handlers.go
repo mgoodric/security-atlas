@@ -561,7 +561,13 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	approved, err := h.store.Approve(ctx, id, actorOf(cred))
+	// Only a person approves (#1807): Approver.UserID is empty for an
+	// unbound key, an OAuth client or the bootstrap admin, and the store
+	// refuses it.
+	approved, err := h.store.Approve(ctx, id, policy.Approver{
+		UserID:       credstore.MinterUserID(cred),
+		CredentialID: cred.ID,
+	})
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -791,13 +797,15 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 	}
 }
 
-// actorOf names the person behind a credential: the user when there is one,
-// else the credential id. A JWT credential's id is per token ("jwt:"+jti),
-// so comparing ids would let one person submit in one session and approve
-// in another (#1807).
+// actorOf names the person behind a credential: the bare users(id) uuid,
+// whether the caller is a JWT ("user:<uuid>") or a key bound to the user
+// ("<uuid>"), else the credential id. A JWT credential's id is per token
+// ("jwt:"+jti), and the two UserID shapes differ, so comparing either raw
+// would let one person submit through one and approve through another
+// (#1807).
 func actorOf(cred credstore.Credential) string {
-	if cred.UserID != "" {
-		return cred.UserID
+	if u := credstore.MinterUserID(cred); u != "" {
+		return u
 	}
 	return cred.ID
 }
@@ -806,8 +814,11 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 	switch {
 	case errors.Is(err, policy.ErrNotFound):
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
-	case errors.Is(err, policy.ErrSelfApproval):
+	case errors.Is(err, policy.ErrSelfApproval),
+		errors.Is(err, policy.ErrApproverNotPerson):
 		httpresp.WriteError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, policy.ErrSubmitterUnknown):
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, policy.ErrWrongState):
 		httpresp.WriteError(w, http.StatusConflict, "policy not in expected state for this transition")
 	default:
