@@ -28,7 +28,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -181,7 +180,7 @@ func (s *Server) handleResetBootstrap(w http.ResponseWriter, r *http.Request) {
 
 	// Minted after the status reset, so a refused reset (409) leaves no
 	// live admin credential behind.
-	issued, bearer, err := s.credStore.IssueRecoveryAdmin(cred.TenantID, ttl, minterUserID(cred))
+	issued, bearer, err := s.credStore.IssueRecoveryAdmin(cred.TenantID, ttl, credstore.MinterUserID(cred))
 	if err != nil {
 		s.installLogger().Warn("reset-bootstrap credential issue failed",
 			slog.String("error", err.Error()))
@@ -252,19 +251,6 @@ func callerSubject(ctx context.Context, cred credstore.Credential) string {
 		return claims.Subject
 	}
 	return cred.UserID
-}
-
-// minterUserID returns the users(id) uuid behind the caller, for
-// api_keys.minted_by (attribution only, never the new key's identity), or
-// "" when the caller is not a user. A JWT carries "user:<uuid>"; a key
-// issued by a user carries the bare uuid; a bootstrap or machine
-// credential carries neither and records no minter.
-func minterUserID(cred credstore.Credential) string {
-	id := strings.TrimPrefix(cred.UserID, "user:")
-	if _, err := uuid.Parse(id); err != nil {
-		return ""
-	}
-	return id
 }
 
 // authorizeResetBootstrap admits a caller whose verified JWT carries
