@@ -83,7 +83,7 @@ security-atlas is the right fit when you want to **own your data and your contro
 
 Built first for the **solo security leader at a 50–150-person company** who runs the entire program alone — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — and whose own customers scrutinize how they handle security. The goal is concrete: run your next SOC 2 audit out of security-atlas and build your next board pack from it, without reaching for a spreadsheet to fill a gap. It scales up from there to a small security team.
 
-security-atlas is **self-hosted by one organisation**: a fresh install has one tenant, and nobody signs in with or types a tenant ID. Running several organisations from one install (consultancies, MSPs, or groups running several entities) is an advanced **multi-tenant** mode that an operator opts into deliberately ([ADR 0023](./docs/adr/0023-single-tenant-experience-by-default.md)).
+security-atlas is **self-hosted by one organisation**: a fresh install holds one tenant, your organisation. Running several organisations from one install (consultancies, MSPs, or groups running several entities) is an advanced **multi-tenant** mode that an operator opts into deliberately ([ADR 0023](./docs/adr/0023-single-tenant-experience-by-default.md)).
 
 ## Project status
 
