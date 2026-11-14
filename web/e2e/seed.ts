@@ -106,7 +106,11 @@ export type FixtureName =
   // #1794 — synthetic ISO/IEC 27001 version + crosswalk + three
   // evaluated controls for the SoA tab (framework-scope-soa.spec.ts).
   // Deletes the version's scope revisions so each run starts clean.
-  | "framework-scope-soa";
+  | "framework-scope-soa"
+  // #1795 — synthetic framework version with four requirements for the
+  // review-screen applicability diff (framework-scope-diff.spec.ts).
+  // Deletes the version's scope revisions so each run starts clean.
+  | "framework-scope-diff";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

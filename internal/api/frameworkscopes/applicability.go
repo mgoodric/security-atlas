@@ -174,6 +174,84 @@ func (h *Handler) ListApplicability(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, applicabilityBody(out.Filter(filter), out.Scope.FrameworkVersionID))
 }
 
+type decisionSideWire struct {
+	Decision          string `json:"decision"`
+	Justification     string `json:"justification"`
+	ImplementationRef string `json:"implementation_ref"`
+}
+
+type decisionChangeWire struct {
+	RequirementID string            `json:"requirement_id"`
+	Code          string            `json:"code"`
+	Title         string            `json:"title"`
+	Change        string            `json:"change"`
+	Before        *decisionSideWire `json:"before"`
+	After         *decisionSideWire `json:"after"`
+}
+
+func toSideWire(d *frameworkscope.Decision) *decisionSideWire {
+	if d == nil {
+		return nil
+	}
+	return &decisionSideWire{Decision: d.Decision, Justification: d.Justification, ImplementationRef: d.ImplementationRef}
+}
+
+// DiffApplicability — GET /v1/framework-scopes/{id}/applicability/diff
+// (#1795). Lists the decisions that changed against the activated revision
+// of the same framework version (added, removed, decision_changed,
+// justification_changed) with both predicates, so the approver of a
+// revision in review reads the changes rather than the whole list.
+// baseline is null when no other revision is activated; every decision is
+// then `added`. A read: any tenant credential may call it, approvers
+// included.
+func (h *Handler) DiffApplicability(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, ok := parseID(w, r)
+	if !ok {
+		return
+	}
+	d, err := h.store.DiffAgainstActivated(ctx, id)
+	if err != nil {
+		if errors.Is(err, frameworkscope.ErrNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "diff applicability", err)
+		return
+	}
+	changes := make([]decisionChangeWire, len(d.Changes))
+	for i, c := range d.Changes {
+		changes[i] = decisionChangeWire{
+			RequirementID: c.RequirementID.String(),
+			Code:          c.Code,
+			Title:         c.Title,
+			Change:        c.Kind,
+			Before:        toSideWire(c.Before),
+			After:         toSideWire(c.After),
+		}
+	}
+	var baseline any
+	var basePredicate json.RawMessage
+	if d.Baseline != nil {
+		baseline = toWire(*d.Baseline)
+		basePredicate = json.RawMessage(d.Baseline.Predicate)
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
+		"framework_scope": toWire(d.Scope),
+		"baseline":        baseline,
+		"predicate": map[string]any{
+			"changed": d.PredicateChanged,
+			"before":  basePredicate,
+			"after":   json.RawMessage(d.Scope.Predicate),
+		},
+		"changes": changes,
+	})
+}
+
 // ApplicabilityAsOf — GET /v1/framework-scopes/applicability?framework_version=…&as_of=….
 // Returns the decisions of the revision active at as_of; framework_scope is
 // null (and every requirement undecided) when none was. The decisions are
