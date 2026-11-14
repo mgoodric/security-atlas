@@ -7,13 +7,13 @@ INSERT INTO risks (
     id, tenant_id, title, description, category, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     review_due_at, accepted_until, accepter, instrument_reference,
-    acceptance_status, level, org_unit_id
+    acceptance_status, level, org_unit_id, category_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
-    $15, $16, $17
+    $15, $16, $17, $18
 )
 RETURNING *;
 

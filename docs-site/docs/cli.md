@@ -211,9 +211,17 @@ nothing else, enables it. Teardown is destructive; see
 [Configuration reference](configuration.md).
 
 ```sh
-security-atlas-cli demo seed --tenant-slug demo-acme --scale 1.0
+security-atlas-cli demo seed                 # your organisation, single-tenant install
+security-atlas-cli demo teardown             # removes exactly what that seed added
+security-atlas-cli demo seed --tenant-slug demo-acme --scale 1.0   # separate tenant
 security-atlas-cli demo teardown --tenant-slug demo-acme
 ```
+
+Without `--tenant-slug`, `seed` loads into the install's only tenant, and only
+while it holds nothing beyond the stock bootstrap seed; otherwise it refuses.
+With `--tenant-slug` it creates a separate demo tenant, which needs
+`ATLAS_ALLOW_MULTI_TENANT=true` when a tenant already exists. See
+`docs/getting-started/demo-seed.md`.
 
 `--scale` accepts 0.1 to 5.0. Both read the BYPASSRLS DSN from
 `--database-url` / `DATABASE_URL`; `seed` also uses `--app-database-url` /

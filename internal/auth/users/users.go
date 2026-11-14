@@ -510,6 +510,12 @@ func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (Bootst
 		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap resolve tenant: %w", err)
 	}
 
+	// 1b. The tenant's seven seeded risk categories (#1809). Idempotent,
+	//     so an existing tenant that already has them is unchanged.
+	if _, err := tx.Exec(ctx, `SELECT seed_risk_categories($1)`, tenantID); err != nil {
+		return BootstrapResult{}, false, fmt.Errorf("users: bootstrap seed risk categories: %w", err)
+	}
+
 	// 2. users row keyed on (tenant_id, idp_issuer, idp_subject).
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO users (id, tenant_id, email, display_name, status, idp_issuer, idp_subject)
