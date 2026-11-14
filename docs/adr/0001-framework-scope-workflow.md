@@ -47,6 +47,8 @@ Three secondary realities shape the workflow:
 | `activated`  | `activate` from `approved`                                     | superseded by a new `activated` row (this row → `superseded`)            |
 | `superseded` | superseded by another row's activation                         | terminal                                                                 |
 
+**Activated and superseded rows are immutable (amended 2026-11-14, #1965).** Their predicate cannot be edited: `PATCH /v1/framework-scopes/{id}` returns 409, checked in the store and by the `framework_scopes_predicate_frozen` BEFORE UPDATE trigger (migration `20261103000000`). Their applicability decisions were already frozen the same way (#1787, `framework_scope_applicability_frozen`). The only change an activated row accepts is the transition to `superseded`. To change the scope, create a new revision from the row: `POST /v1/framework-scopes` with `from_scope_id` makes a `draft` on the same framework version, takes the source's name and predicate unless the request gives new ones, and copies every applicability decision (each logged as `applicability.carry_over` naming the source revision). The draft then goes through `submit → approve → activate`, and its activation supersedes the source. This keeps `as_of` reads honest: the row active at a point in time holds exactly the predicate and decisions that were in force then. Ratified by Matt as D3 on #1943.
+
 **Approval evidence shape:**
 
 - **Primary (always recorded):** in-app attestation. When an approver clicks `Approve`, the system records `approver_user_id`, `approved_at`, and `predicate_hash_at_approval` (sha256 of the canonicalized predicate JSON at the moment of approval). This is the load-bearing audit trail.
@@ -68,7 +70,7 @@ Three secondary realities shape the workflow:
 
 **Re-approval rule (strict — applies to all frameworks in v1):**
 
-Any change to the `predicate` field bounces the row back to `draft`, clearing `approver_user_id`, `approved_at`, `predicate_hash_at_approval`, and any uploaded evidence file. Concretely: a database trigger on `BEFORE UPDATE` compares `OLD.predicate_hash` to `NEW.predicate_hash`; if they differ AND `OLD.state IN ('review', 'approved')`, the trigger forces `NEW.state = 'draft'` and clears the approval columns. The UI surfaces this as a banner: `"approval invalidated — predicate changed, resubmit for review"`.
+Any change to the `predicate` field of a `review` or `approved` row bounces the row back to `draft`, clearing `approver_user_id`, `approved_at`, `predicate_hash_at_approval`, and any uploaded evidence file. Concretely: a database trigger on `BEFORE UPDATE` compares `OLD.predicate_hash` to `NEW.predicate_hash`; if they differ AND `OLD.state IN ('review', 'approved')`, the trigger forces `NEW.state = 'draft'` and clears the approval columns. The UI surfaces this as a banner: `"approval invalidated — predicate changed, resubmit for review"`.
 
 This is the **strictest of the three options considered** (the others being `narrowing-only re-approves` and `never auto-invalidate`). The decision rationale:
 

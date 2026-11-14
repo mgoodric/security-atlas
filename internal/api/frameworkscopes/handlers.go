@@ -1,10 +1,10 @@
 // Package frameworkscopes serves the slice-018 HTTP API for the
 // FrameworkScope predicate + four-state workflow. Routes:
 //
-//	POST   /v1/framework-scopes                        — create a draft scope
+//	POST   /v1/framework-scopes                        — create a draft scope, or a new revision of one (from_scope_id)
 //	GET    /v1/framework-scopes                        — list (filter by framework_version, state, as_of)
 //	GET    /v1/framework-scopes/{id}                   — get one
-//	PATCH  /v1/framework-scopes/{id}                   — edit predicate (triggers re-approval if review/approved)
+//	PATCH  /v1/framework-scopes/{id}                   — edit predicate (triggers re-approval if review/approved; 409 if activated/superseded)
 //	PATCH  /v1/framework-scopes/{id}/submit            — draft → review
 //	PATCH  /v1/framework-scopes/{id}/approve           — review → approved (approver-role gate)
 //	PATCH  /v1/framework-scopes/{id}/activate          — approved → activated
@@ -57,6 +57,10 @@ type createReq struct {
 	FrameworkVersionID string          `json:"framework_version_id"`
 	Name               string          `json:"name"`
 	Predicate          json.RawMessage `json:"predicate"`
+	// FromScopeID makes the new draft a revision of that scope (#1965):
+	// framework_version_id, name and predicate default to the source's,
+	// and its decisions are copied.
+	FromScopeID string `json:"from_scope_id"`
 }
 
 type approveReq struct {
@@ -135,24 +139,43 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
-	if strings.TrimSpace(req.Name) == "" {
+	var fromID uuid.UUID
+	if req.FromScopeID != "" {
+		id, perr := uuid.Parse(req.FromScopeID)
+		if perr != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "from_scope_id must be a UUID")
+			return
+		}
+		fromID = id
+	}
+	if fromID == uuid.Nil && strings.TrimSpace(req.Name) == "" {
 		httpresp.WriteError(w, http.StatusBadRequest, "name is required")
 		return
 	}
-	fvID, err := uuid.Parse(req.FrameworkVersionID)
-	if err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
-		return
+	var fvID uuid.UUID
+	if fromID == uuid.Nil || req.FrameworkVersionID != "" {
+		id, perr := uuid.Parse(req.FrameworkVersionID)
+		if perr != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "framework_version_id must be a UUID")
+			return
+		}
+		fvID = id
 	}
 	out, err := h.store.Create(ctx, frameworkscope.CreateRequest{
 		FrameworkVersionID: fvID,
-		Name:               req.Name,
+		Name:               strings.TrimSpace(req.Name),
 		Predicate:          []byte(req.Predicate),
 		Actor:              actorOf(r),
+		FromScopeID:        fromID,
 	})
 	if err != nil {
-		if errors.Is(err, frameworkscope.ErrPredicateMalformed) {
+		if errors.Is(err, frameworkscope.ErrPredicateMalformed) ||
+			errors.Is(err, frameworkscope.ErrRevisionVersionMismatch) {
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, frameworkscope.ErrNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "from_scope_id: framework_scope not found")
 			return
 		}
 		httperr.WriteInternal(w, r, "create framework_scope", err)
@@ -163,7 +186,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 
 // Patch — AC-9. PATCH /v1/framework-scopes/{id}. Body may include predicate.
 // When the row was in `review` or `approved`, the DB trigger bounces it back
-// to `draft`; we surface this as `approval_invalidated: true`.
+// to `draft`; we surface this as `approval_invalidated: true`. An activated
+// or superseded row is immutable (#1965): 409, create a new revision.
 func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
@@ -191,6 +215,10 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		}
 		if errors.Is(err, frameworkscope.ErrPredicateMalformed) {
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if errors.Is(err, frameworkscope.ErrPredicateFrozen) {
+			httpresp.WriteError(w, http.StatusConflict, err.Error()+" (POST /v1/framework-scopes with from_scope_id)")
 			return
 		}
 		httperr.WriteInternal(w, r, "patch framework_scope", err)

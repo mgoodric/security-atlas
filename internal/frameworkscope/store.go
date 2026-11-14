@@ -30,7 +30,19 @@ var (
 	// partial unique index (another row is already activated for the
 	// same (tenant, framework_version)). HTTP 409.
 	ErrAnotherActivated = errors.New("frameworkscope: another scope is already activated for this framework version")
+	// ErrPredicateFrozen is returned when the predicate of an activated or
+	// superseded revision is edited. Create a new revision from it instead
+	// (CreateRequest.FromScopeID). HTTP 409.
+	ErrPredicateFrozen = errors.New("frameworkscope: the predicate of an activated or superseded scope is frozen; create a new revision from it")
+	// ErrRevisionVersionMismatch is returned when a new revision names a
+	// framework version other than its source revision's. HTTP 400.
+	ErrRevisionVersionMismatch = errors.New("frameworkscope: a new revision must be on its source revision's framework version")
 )
+
+// constraintPredicateFrozen is the constraint name the
+// framework_scopes_predicate_frozen trigger raises for a predicate edit on
+// an activated or superseded revision.
+const constraintPredicateFrozen = "framework_scopes_predicate_frozen"
 
 // State constants mirror the CHECK enum on framework_scopes.state.
 const (
@@ -88,20 +100,54 @@ type CreateRequest struct {
 	Predicate          []byte // raw JSON from the caller
 	// Actor is the calling credential id, recorded on the workflow log.
 	Actor string
+	// FromScopeID, when set, makes the new draft a revision of that scope
+	// (#1965): activated and superseded revisions are immutable, so this is
+	// how their predicate or decisions change. The new draft is on the
+	// source's framework version (FrameworkVersionID may be zero; a
+	// different one is ErrRevisionVersionMismatch), takes the source's name
+	// and predicate when Name or Predicate is empty, and copies every
+	// decision recorded on the source. Each copied decision is logged as
+	// applicability.carry_over naming the source revision.
+	FromScopeID uuid.UUID
 }
 
 // Create inserts a new framework_scope row in `draft` state. AC-5.
 func (s *Store) Create(ctx context.Context, req CreateRequest) (FrameworkScope, error) {
-	canon, hash, err := Canonicalize(req.Predicate)
-	if err != nil {
-		return FrameworkScope{}, err
-	}
-	if err := Validate(canon); err != nil {
-		return FrameworkScope{}, err
-	}
-
 	var out FrameworkScope
-	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var source *dbx.FrameworkScope
+		if req.FromScopeID != uuid.Nil {
+			src, gerr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       pgUUID(req.FromScopeID),
+			})
+			if gerr != nil {
+				if errors.Is(gerr, pgx.ErrNoRows) {
+					return ErrNotFound
+				}
+				return fmt.Errorf("get source framework_scope: %w", gerr)
+			}
+			srcVersion := uuid.UUID(src.FrameworkVersionID.Bytes)
+			if req.FrameworkVersionID != uuid.Nil && req.FrameworkVersionID != srcVersion {
+				return ErrRevisionVersionMismatch
+			}
+			req.FrameworkVersionID = srcVersion
+			if req.Name == "" {
+				req.Name = src.Name
+			}
+			if len(req.Predicate) == 0 {
+				req.Predicate = src.Predicate
+			}
+			source = &src
+		}
+
+		canon, hash, err := Canonicalize(req.Predicate)
+		if err != nil {
+			return err
+		}
+		if err := Validate(canon); err != nil {
+			return err
+		}
 		row, err := q.CreateFrameworkScope(ctx, dbx.CreateFrameworkScopeParams{
 			ID:                 pgUUID(uuid.New()),
 			TenantID:           pgUUID(tenantID),
@@ -116,10 +162,47 @@ func (s *Store) Create(ctx context.Context, req CreateRequest) (FrameworkScope, 
 		if err := logChange(ctx, q, ActionCreate, req.Actor, nil, row); err != nil {
 			return err
 		}
+		if source != nil {
+			if row, err = copyDecisions(ctx, q, tenantID, *source, row, req.Actor); err != nil {
+				return err
+			}
+		}
 		out = rowToScope(row)
 		return nil
 	})
 	return out, err
+}
+
+// copyDecisions copies every decision recorded on source into the new draft
+// revision target, and returns target as it stands after the writes.
+func copyDecisions(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, source, target dbx.FrameworkScope, actor string) (dbx.FrameworkScope, error) {
+	src := rowToScope(source)
+	app, err := listApplicability(ctx, q, tenantID, src.FrameworkVersionID, &src)
+	if err != nil {
+		return target, err
+	}
+	var items []DecisionInput
+	for _, r := range app.Requirements {
+		if r.Decision == nil {
+			continue
+		}
+		items = append(items, DecisionInput{
+			RequirementID:     r.RequirementID,
+			Decision:          r.Decision.Decision,
+			Justification:     r.Decision.Justification,
+			ImplementationRef: r.Decision.ImplementationRef,
+			carriedFrom: &carrySource{
+				FrameworkVersionID:     src.FrameworkVersionID,
+				FrameworkScopeID:       src.ID,
+				FrameworkRequirementID: r.RequirementID,
+			},
+		})
+	}
+	if len(items) == 0 {
+		return target, nil
+	}
+	_, last, err := writeDecisions(ctx, q, tenantID, target, items, actor)
+	return last, err
 }
 
 // UpdatePredicate edits the predicate. The DB-level BEFORE UPDATE trigger
@@ -146,6 +229,9 @@ func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []b
 			}
 			return fmt.Errorf("get framework_scope: %w", gerr)
 		}
+		if before.State == StateActivated || before.State == StateSuperseded {
+			return ErrPredicateFrozen
+		}
 		row, uerr := q.UpdateFrameworkScopePredicate(ctx, dbx.UpdateFrameworkScopePredicateParams{
 			TenantID:      pgUUID(tenantID),
 			ID:            pgUUID(id),
@@ -153,6 +239,12 @@ func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []b
 			PredicateHash: hash,
 		})
 		if uerr != nil {
+			// The trigger re-checks the state on the locked row, so an
+			// activation that committed after the read above lands here.
+			var pgErr *pgconn.PgError
+			if errors.As(uerr, &pgErr) && pgErr.ConstraintName == constraintPredicateFrozen {
+				return ErrPredicateFrozen
+			}
 			return fmt.Errorf("update predicate: %w", uerr)
 		}
 		if lerr := logChange(ctx, q, ActionPredicateUpdate, actor, &before, row); lerr != nil {

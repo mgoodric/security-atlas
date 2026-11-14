@@ -76,6 +76,24 @@ async function patchPredicate(id: string, predicate: unknown) {
   };
 }
 
+// #1965: an activated or superseded revision is immutable. A change starts
+// as a new draft revision copied from it (predicate and decisions).
+async function createRevision(fromID: string) {
+  const res = await fetch(`/api/framework-scopes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from_scope_id: fromID }),
+  });
+  if (!res.ok) {
+    throw new APIError(res.status, `${res.status} ${res.statusText}`);
+  }
+  return (await res.json()) as { framework_scope: FrameworkScope };
+}
+
+function isFrozen(state: FrameworkScopeState): boolean {
+  return state === "activated" || state === "superseded";
+}
+
 async function transition(
   id: string,
   t: "submit" | "approve" | "activate",
@@ -148,6 +166,20 @@ export default function FrameworkScopesPage() {
       }
       reset();
     },
+    onError: (e: unknown) => {
+      if (e instanceof APIError && e.status === 409) {
+        setBanner(
+          "This scope is frozen. Create a new revision to change its predicate.",
+        );
+      }
+    },
+  });
+  const revisionMut = useMutation({
+    mutationFn: (fromID: string) => createRevision(fromID),
+    onSuccess: () => {
+      setBanner(null);
+      reset();
+    },
   });
 
   return (
@@ -160,7 +192,8 @@ export default function FrameworkScopesPage() {
           One scope predicate per framework, versioned. Approval is the
           auditor&apos;s sign-off; activation is when it takes effect. Editing
           the predicate on a row in review or approved bounces it back to draft
-          — the auditor sees every change.
+          — the auditor sees every change. Activated and superseded rows are
+          frozen; change one by creating a new revision from it.
         </p>
       </div>
 
@@ -232,6 +265,7 @@ export default function FrameworkScopesPage() {
               onPatchPredicate={(id, predicate) =>
                 patchMut.mutate({ id, predicate })
               }
+              onNewRevision={(id) => revisionMut.mutate(id)}
             />
           </CardContent>
         </Card>
@@ -252,12 +286,14 @@ function ScopeTable({
   onApprove,
   onActivate,
   onPatchPredicate,
+  onNewRevision,
 }: {
   scopes: FrameworkScope[];
   onSubmit: (id: string) => void;
   onApprove: (id: string) => void;
   onActivate: (id: string, effectiveFrom: string) => void;
   onPatchPredicate: (id: string, predicate: unknown) => void;
+  onNewRevision: (id: string) => void;
 }) {
   if (scopes.length === 0) {
     return (
@@ -293,10 +329,19 @@ function ScopeTable({
               <StateBadge state={s.state} />
             </TableCell>
             <TableCell>
-              <PredicateEditor
-                initial={s.predicate}
-                onSave={(predicate) => onPatchPredicate(s.id, predicate)}
-              />
+              {isFrozen(s.state) ? (
+                <pre
+                  className="max-h-32 overflow-auto rounded border bg-muted p-2 font-mono text-xs"
+                  data-testid="framework-scope-predicate-frozen"
+                >
+                  {JSON.stringify(s.predicate, null, 2)}
+                </pre>
+              ) : (
+                <PredicateEditor
+                  initial={s.predicate}
+                  onSave={(predicate) => onPatchPredicate(s.id, predicate)}
+                />
+              )}
             </TableCell>
             <TableCell className="text-xs">
               {s.effective_from ?? (
@@ -309,6 +354,7 @@ function ScopeTable({
                 onSubmit={() => onSubmit(s.id)}
                 onApprove={() => onApprove(s.id)}
                 onActivate={(ef) => onActivate(s.id, ef)}
+                onNewRevision={() => onNewRevision(s.id)}
               />
             </TableCell>
           </TableRow>
@@ -378,11 +424,13 @@ function ScopeActions({
   onSubmit,
   onApprove,
   onActivate,
+  onNewRevision,
 }: {
   scope: FrameworkScope;
   onSubmit: () => void;
   onApprove: () => void;
   onActivate: (effectiveFrom: string) => void;
+  onNewRevision: () => void;
 }) {
   const [activateOpen, setActivateOpen] = useState(false);
   const [effectiveFrom, setEffectiveFrom] = useState(() =>
@@ -434,10 +482,20 @@ function ScopeActions({
           </Button>
         </div>
       )}
-      {(scope.state === "activated" || scope.state === "superseded") && (
-        <span className="text-xs text-muted-foreground">
-          {scope.state === "activated" ? "Current scope" : "Superseded"}
-        </span>
+      {isFrozen(scope.state) && (
+        <>
+          <span className="text-xs text-muted-foreground">
+            {scope.state === "activated" ? "Current scope" : "Superseded"}
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={onNewRevision}
+            data-testid="framework-scope-new-revision"
+          >
+            New revision
+          </Button>
+        </>
       )}
     </div>
   );
