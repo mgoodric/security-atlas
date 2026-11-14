@@ -62,6 +62,8 @@ widen. There is no "return everything" option — a request over 500 is rejected
 | `update_control_state`  | A control-state override (recorded as evidence)              |
 | `push_evidence`         | A new evidence record                                        |
 | `update_risk_treatment` | A change to a risk's treatment and owner                     |
+| `link_child_risks`      | Attaching existing risks under an existing parent risk       |
+| `unlink_child_risk`     | Detaching a child risk from its parent                       |
 | `confirm_write`         | **Approver-only** — approves a pending proposal, applying it |
 
 ## The write-approval flow

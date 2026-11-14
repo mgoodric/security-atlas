@@ -418,6 +418,55 @@
       }
     },
     {
+      "name": "link_child_risks",
+      "description": "Propose attaching existing risks as children of an existing parent risk, so they roll up to it. The parent's own score and treatment are not changed. Proposal sits at state='ai_proposed' until an approver confirms.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "child_risk_ids": {
+            "description": "UUIDs of existing risks to attach. Each must sit at a lower level than the parent (team \u003c org \u003c company), be scored on the 5x5 grid, and not be the parent or one of its ancestors. A child already attached is left as it is.",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          },
+          "parent_risk_id": {
+            "description": "UUID of the existing parent risk.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parent_risk_id",
+          "child_risk_ids"
+        ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "unlink_child_risk",
+      "description": "Propose detaching a child risk from its parent risk. Neither risk is deleted. Proposal sits at state='ai_proposed' until an approver confirms.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "child_risk_id": {
+            "description": "UUID of the child risk to detach. It must be linked to the parent.",
+            "type": "string"
+          },
+          "parent_risk_id": {
+            "description": "UUID of the parent risk.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "parent_risk_id",
+          "child_risk_id"
+        ],
+        "type": "object"
+      }
+    },
+    {
       "name": "confirm_write",
       "description": "Confirm an ai_proposed write proposal. Requires the caller's credential to hold the approver role; the platform runs the canonical Applier inside the same transaction as the state flip. Idempotent: a second call on an applied proposal returns a 409 conflict.",
       "inputSchema": {

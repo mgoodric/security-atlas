@@ -519,6 +519,9 @@ type Querier interface {
 	// independent of parent).
 	DeleteOrgUnit(ctx context.Context, arg DeleteOrgUnitParams) error
 	DeleteRisk(ctx context.Context, arg DeleteRiskParams) error
+	// Detach one child from one parent, reporting how many rows went, so the
+	// caller can tell a removed link from one that never existed (#1748).
+	DeleteRiskAggregationLink(ctx context.Context, arg DeleteRiskAggregationLinkParams) (int64, error)
 	// Delete one of the caller's own views. The user_id predicate means a
 	// caller can never delete another user's view even within the same tenant.
 	// RETURNING lets the handler 404 when the id was not the caller's.
@@ -2451,11 +2454,17 @@ type Querier interface {
 	ListRequirementsForAnchorCurrentVersions(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorCurrentVersionsRow, error)
 	// All child risks rolled up under this parent.
 	ListRiskAggregationChildren(ctx context.Context, arg ListRiskAggregationChildrenParams) ([]ListRiskAggregationChildrenRow, error)
+	// Every parent link in the tenant, for the risk register export's
+	// parent_risk_ids column (#1748): one query, folded per child in Go.
+	ListRiskAggregationLinksForTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListRiskAggregationLinksForTenantRow, error)
 	// All parent risks this child rolls up to. Children can roll up to multiple
 	// parents (e.g., an ownership-themed risk feeds both an org-level ownership
 	// meta-risk and a team-level meta-risk).
 	ListRiskAggregationParents(ctx context.Context, arg ListRiskAggregationParentsParams) ([]ListRiskAggregationParentsRow, error)
 	ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error)
+	// The children of a parent risk with the fields the hierarchy views show
+	// (#1748). rule_id NULL means the link was made by hand.
+	ListRiskChildLinks(ctx context.Context, arg ListRiskChildLinksParams) ([]ListRiskChildLinksRow, error)
 	// Slice 020: returns each control link for a risk WITH the per-link
 	// effectiveness weighting columns (migration `_029`). The residual derivation
 	// reads design_score + the three weights here; operational_score and
@@ -2469,6 +2478,8 @@ type Querier interface {
 	// evidence-ingest residual subscriber uses this to find which risks must be
 	// recomputed when a control's state changes.
 	ListRiskIDsLinkedToControl(ctx context.Context, arg ListRiskIDsLinkedToControlParams) ([]pgtype.UUID, error)
+	// The parents a risk rolls up to, same shape as ListRiskChildLinks (#1748).
+	ListRiskParentLinks(ctx context.Context, arg ListRiskParentLinksParams) ([]ListRiskParentLinksRow, error)
 	// Enumerate all risks for the tenant, newest first. Filters are applied
 	// in the application layer because sqlc's static typing makes optional
 	// WHERE clauses noisy; the row count is bounded by tenant-size anyway.
@@ -2907,6 +2918,14 @@ type Querier interface {
 	// not conflict with the FOR KEY SHARE an aggregation evaluation takes when
 	// it links this risk as a child, so an evaluation is never blocked by it.
 	LockRiskByID(ctx context.Context, arg LockRiskByIDParams) (Risk, error)
+	// #1748: serialize every write that can add a hierarchy link in one tenant
+	// (POST /v1/risks/{id}/children, the link_child_risks MCP applier, and the
+	// aggregation engine), so two concurrent links cannot each pass the cycle
+	// check on a snapshot that lacks the other. Transaction-scoped and
+	// re-entrant within a session. Callers take it before any meta-risk key
+	// lock (LockAggregationKey) so the two locks are always acquired in the
+	// same order.
+	LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error
@@ -3037,6 +3056,11 @@ type Querier interface {
 	// Keys with no owner (issued_by IS NULL: the env bootstrap key, recovery
 	// keys, admin-issued push keys) never match. Returns the revoked ids.
 	RevokeUserAPIKeys(ctx context.Context, arg RevokeUserAPIKeysParams) ([]pgtype.UUID, error)
+	// Reports whether target_risk_id is from_risk_id or one of its descendants
+	// (children, grandchildren, ...). Linking parent P -> child C would close a
+	// cycle exactly when C reaches P (#1748). UNION, not UNION ALL, so the walk
+	// terminates even over a graph that already holds a cycle.
+	RiskAggregationReaches(ctx context.Context, arg RiskAggregationReachesParams) (bool, error)
 	// Slice 067: risk-hierarchy backend read endpoints. Two read-only
 	// aggregation queries that fill the placeholders slice 056 (hierarchical
 	// risk dashboard) shipped binding empty-state affordances for. No

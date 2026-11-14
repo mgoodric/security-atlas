@@ -8,8 +8,8 @@ import "testing"
 
 // TestAllowedTools_Exhaustive guards against silent drift between the
 // AllowedTools map and the DB CHECK constraint. The list MUST match
-// migrations/sql/20260520030000_mcp_write_proposals.sql's
-// `mcp_wp_tool_name_check` enum verbatim.
+// `mcp_wp_tool_name_check` enum verbatim, as last widened by
+// migrations/sql/20260911000000_mcp_risk_link_tools.sql.
 func TestAllowedTools_Exhaustive(t *testing.T) {
 	t.Parallel()
 	want := map[string]bool{
@@ -17,6 +17,8 @@ func TestAllowedTools_Exhaustive(t *testing.T) {
 		"update_control_state":  true,
 		"push_evidence":         true,
 		"update_risk_treatment": true,
+		"link_child_risks":      true,
+		"unlink_child_risk":     true,
 	}
 	if len(AllowedTools) != len(want) {
 		t.Fatalf("AllowedTools size %d != %d", len(AllowedTools), len(want))

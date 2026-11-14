@@ -21,6 +21,7 @@ func TestRisksToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 	now := time.Now().UTC()
 	id := uuid.New()
 	ou := uuid.New()
+	parentA, parentB := uuid.New(), uuid.New()
 	review := now.Add(7 * 24 * time.Hour)
 	acceptedUntil := now.Add(30 * 24 * time.Hour)
 
@@ -43,6 +44,7 @@ func TestRisksToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		Severity:       12,
 		CreatedAt:      now,
 		UpdatedAt:      now,
+		ParentIDs:      []uuid.UUID{parentA, parentB},
 	}
 
 	iter := risksToRowIter([]riskRow{row})
@@ -69,6 +71,7 @@ func TestRisksToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		"severity":             "12",
 		"org_unit_id":          ou.String(),
 		"themes":               "data-protection,access",
+		"parent_risk_ids":      parentA.String() + ";" + parentB.String(),
 	}
 	for col, want := range checks {
 		idx := -1
@@ -165,5 +168,24 @@ func TestRiskExportFilenamePrefix(t *testing.T) {
 	// asserts the prefix shape of the constant.
 	if !strings.HasPrefix(riskExportEntity, "risk-register") {
 		t.Errorf("riskExportEntity = %q; want prefix risk-register", riskExportEntity)
+	}
+}
+
+// A risk with no parents renders an empty parent_risk_ids cell (#1748),
+// and the column is appended after acceptance_status so the existing
+// column positions hold.
+func TestRisksToRowIter_NoParentsRendersBlank(t *testing.T) {
+	header := riskExportHeader()
+	if got := header[len(header)-1]; got != "parent_risk_ids" {
+		t.Fatalf("last column = %q; want parent_risk_ids", got)
+	}
+	if got := header[len(header)-2]; got != "acceptance_status" {
+		t.Fatalf("second-to-last column = %q; want acceptance_status", got)
+	}
+	for cells := range risksToRowIter([]riskRow{{ID: uuid.New()}}) {
+		if got := cells[len(header)-1]; got != "" {
+			t.Errorf("parent_risk_ids for a risk with no parents = %q; want empty string", got)
+		}
+		break
 	}
 }

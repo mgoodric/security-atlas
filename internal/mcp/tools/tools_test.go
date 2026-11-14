@@ -342,15 +342,15 @@ func TestAll_WiresReadTools(t *testing.T) {
 	}
 }
 
-// TestAllWithWrites_WiresAllTools — the full surface is 16 tools
-// (11 reads + 5 writes). Order is fixed by mcp.CanonicalToolOrder.
+// TestAllWithWrites_WiresAllTools — the full surface is 18 tools
+// (11 reads + 7 writes). Order is fixed by mcp.CanonicalToolOrder.
 func TestAllWithWrites_WiresAllTools(t *testing.T) {
 	t.Parallel()
 
 	client, _ := mcp.NewClient("http://localhost:8080", "test-bearer", "v0.0.0-test")
 	all := tools.AllWithWrites(client)
-	if len(all) != 16 {
-		t.Fatalf("AllWithWrites() = %d tools, want 16 (11 reads + 5 writes)", len(all))
+	if len(all) != 18 {
+		t.Fatalf("AllWithWrites() = %d tools, want 18 (11 reads + 7 writes)", len(all))
 	}
 	for i, want := range mcp.CanonicalToolOrder {
 		if got := all[i].Definition().Name; got != want {

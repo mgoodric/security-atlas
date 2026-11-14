@@ -145,6 +145,10 @@ type riskWire struct {
 	Level    string   `json:"level"`
 	Themes   []string `json:"themes"`
 	Severity int      `json:"severity"`
+	// RollUp is the severity computed from the risk's children (#1748),
+	// beside its own assessed Severity. Set on GET /v1/risks/{id} for a
+	// risk with at least one scored child; omitted otherwise.
+	RollUp *rollUpWire `json:"rollup,omitempty"`
 }
 
 // CreateRisk handles POST /v1/risks (AC-1..AC-5).
@@ -359,7 +363,22 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "get risk", err)
 		return
 	}
-	body := map[string]any{"risk": riskWireFrom(rk)}
+	wire := riskWireFrom(rk)
+	_, rollUp, err := h.store.ListChildren(ctx, id)
+	if err != nil {
+		if errors.Is(err, risk.ErrNotFound) {
+			// Deleted between the two reads.
+			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
+			return
+		}
+		httperr.WriteInternal(w, r, "risk roll-up", err)
+		return
+	}
+	if rollUp != nil {
+		ru := rollUpWireFrom(*rollUp)
+		wire.RollUp = &ru
+	}
+	body := map[string]any{"risk": wire}
 	// Slice 020 (AC-2): when the residual deriver is wired, return the
 	// live-derived residual + the per-linked-control effectiveness breakdown.
 	// Derive is the pure read path — recompute=false, so a GET never triggers
@@ -603,24 +622,7 @@ func riskWireFrom(r risk.Risk) riskWire {
 // posture as the residual-magnitude sort (slice 066): a malformed score
 // ranks as the least severe rather than erroring the response.
 func severityOf(inherentScore []byte) int {
-	if len(inherentScore) == 0 {
-		return 0
-	}
-	var score struct {
-		Likelihood *float64 `json:"likelihood"`
-		Impact     *float64 `json:"impact"`
-		Severity   *float64 `json:"severity"`
-	}
-	if err := json.Unmarshal(inherentScore, &score); err != nil {
-		return 0
-	}
-	if score.Severity != nil {
-		return int(*score.Severity)
-	}
-	if score.Likelihood != nil && score.Impact != nil {
-		return int(*score.Likelihood) * int(*score.Impact)
-	}
-	return 0
+	return risk.AssessedSeverity(inherentScore)
 }
 
 func jsonRaw(b []byte) json.RawMessage {

@@ -4965,11 +4965,95 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/children:
+    get:
+      summary: GET /v1/risks/{id}/children — child risks plus the computed roll-up severity
+      tags: [risks]
+      operationId: get-v1-risks-id-children
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/risks/{id}/children — attach existing risks as children; body {child_risk_ids}
+      tags: [risks]
+      operationId: post-v1-risks-id-children
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/children/{child_id}:
+    delete:
+      summary: DELETE /v1/risks/{id}/children/{child_id} — detach a child risk from its parent
+      tags: [risks]
+      operationId: delete-v1-risks-id-children-child_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: child_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/controls:
     post:
       summary: POST /v1/risks/{id}/controls
       tags: [risks]
       operationId: post-v1-risks-id-controls
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/{id}/parents:
+    get:
+      summary: GET /v1/risks/{id}/parents — the parent risks this risk rolls up to
+      tags: [risks]
+      operationId: get-v1-risks-id-parents
       security:
         - bearer: []
       parameters:
