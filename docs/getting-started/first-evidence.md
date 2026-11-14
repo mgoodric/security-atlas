@@ -130,13 +130,13 @@ host that can reach the atlas API:
 go build -o /tmp/atlas-cli ./cmd/atlas-cli
 
 # Issue a credential for your organisation (the tenant of --token).
+# --endpoint is the gRPC port (host:port, no scheme), not the HTTP API
+# on :8080; --insecure because the local stack serves gRPC without TLS
+# on loopback.
 /tmp/atlas-cli credentials issue \
   --endpoint localhost:50051 --insecure \
   --token "$ATLAS_BOOTSTRAP_TOKEN"
 ```
-
-`--endpoint` is the gRPC address, not the HTTP URL. `--insecure` is for a
-loopback endpoint without TLS.
 
 The command prints a new bearer token once — copy it.
 

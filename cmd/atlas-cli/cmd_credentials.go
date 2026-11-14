@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -282,9 +284,18 @@ func splitKinds(s string) []string {
 	return out
 }
 
+// parseDuration reads --ttl: a Go duration (24h, 90m) or a whole number
+// of days (30d), which time.ParseDuration does not accept (#2100).
 func parseDuration(s string) (time.Duration, error) {
 	if s == "" || s == "0" {
 		return 0, nil
+	}
+	if days, ok := strings.CutSuffix(s, "d"); ok {
+		n, err := strconv.ParseInt(days, 10, 64)
+		if err != nil || n < 0 || n > math.MaxInt64/int64(24*time.Hour) {
+			return 0, fmt.Errorf("--ttl %q: days must be a whole number, e.g. 30d", s)
+		}
+		return time.Duration(n) * 24 * time.Hour, nil
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil {

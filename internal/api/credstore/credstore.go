@@ -86,6 +86,10 @@ type Credential struct {
 	// UserID is. Nothing authorizes on it. Set on recovery keys (#1892);
 	// a Rotate successor inherits it.
 	MintedBy string
+	// RetiresAt is api_keys.retires_at: non-zero on a rotated-out
+	// predecessor, which stops authenticating after it. Set by the
+	// DB-backed list (#1953); the in-memory maps track retirement apart.
+	RetiresAt time.Time
 	// System marks an in-process platform credential, not an API key:
 	// the identity a domain writer ingests its evidence under
 	// (ingest.SystemCredential). Never persisted and never authenticated;

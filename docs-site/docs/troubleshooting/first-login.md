@@ -50,8 +50,19 @@ Use the recovery flag on `atlas-cli credentials issue`:
     keys both get `401 authorization must be Bearer <token>`. A super-admin
     JWT works: on a single-tenant install, sign in with the default user's
     email and password through `POST /auth/local/login` and pass the
-    `token` it returns as `--token`. Tracked in
+    `token` it returns as `--token`. The response carries `token` only when
+    `ATLAS_ISSUER_URL` is set on the `atlas` service. Tracked in
     [#2121](https://github.com/mgoodric/security-atlas/issues/2121).
+
+    ```sh
+    ATLAS_JWT=$(curl -fsS -X POST http://atlas:8080/auth/local/login \
+      -H 'Content-Type: application/json' \
+      -d '{"email":"admin@example.com","password":"..."}' \
+      | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')
+    ```
+
+    Then pass `--token "$ATLAS_JWT"` in place of
+    `--token "$ATLAS_BOOTSTRAP_TOKEN"` below.
 <!-- prettier-ignore-end -->
 
 **On docker-compose** (affected by the known issue above):

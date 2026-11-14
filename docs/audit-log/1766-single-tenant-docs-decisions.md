@@ -24,9 +24,9 @@ Running each changed example against a single-tenant install found two
 faults that had nothing to do with tenants. Both are fixed in place:
 
 - `credentials issue --ttl 30d`: Go durations have no `d` unit, so the
-  command exits 1. The example now uses `--ttl 720h`, and the page says the
-  value is a Go duration. The flag's own help text still says `30d`; that
-  is a CLI fix and is left for its own ticket.
+  command exits 1. The example now uses `--ttl 720h`. #2122 later taught
+  `--ttl` to accept whole days, and the merge kept its wording for the
+  flag, so both forms now work.
 - `docs/getting-started/first-evidence.md` passed the HTTP URL
   (`http://localhost:8080`) as the gRPC `--endpoint`, which fails with
   `too many colons in address`. It now passes `localhost:50051 --insecure`.
