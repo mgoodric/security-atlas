@@ -87,6 +87,7 @@ GET /v1/controls/checklist/{generationID}/export.md
 GET /v1/controls/drift
 GET /v1/controls/export
 GET /v1/controls/history/export
+GET /v1/controls/imports/settings
 GET /v1/controls/imports/{id}
 GET /v1/controls/imports/{id}/rows
 POST /v1/controls/imports
@@ -340,6 +341,7 @@ PUT /scim/v2/Groups/{id}
 PUT /scim/v2/Users/{id}
 PUT /v1/admin/llm-routing
 PUT /v1/board-packs/{id}/sections/{key}
+PUT /v1/controls/imports/settings
 PUT /v1/csf/profiles/{kind}
 PUT /v1/csf/profiles/{kind}/selections
 PUT /v1/csf/tier
