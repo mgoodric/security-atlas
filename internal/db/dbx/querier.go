@@ -1109,6 +1109,11 @@ type Querier interface {
 	// absence of any INSERT into evidence_records — the engine has no
 	// evidence-write surface (constitutional invariant #2).
 	InsertControlEvaluation(ctx context.Context, arg InsertControlEvaluationParams) (ControlEvaluation, error)
+	// Issue #1908: record the manifest an in-place description update is about
+	// to overwrite. Copies the active row's current values in the same
+	// transaction, just before UpdateControlDescriptionInPlace, so the prose
+	// history is append-only in control_manifest_revisions.
+	InsertControlManifestRevision(ctx context.Context, arg InsertControlManifestRevisionParams) (int64, error)
 	// Insert a new control row (initial upload or supersession). Caller is
 	// responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
 	InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error)
@@ -3152,6 +3157,11 @@ type Querier interface {
 	// zero rows here and returns pgx.ErrNoRows, which the handler maps to 409.
 	// `updated_at` is bumped to now() so the row reflects the last edit.
 	UpdateBoardPackContent(ctx context.Context, arg UpdateBoardPackContentParams) (BoardPack, error)
+	// Issue #1908: a re-upload whose manifest differs from the active row's
+	// only in `description` updates that row in place instead of versioning,
+	// so every control-keyed row (owners, evidence, exceptions, links) stays
+	// attached. The hash moves with the YAML so a repeat upload is a no-op.
+	UpdateControlDescriptionInPlace(ctx context.Context, arg UpdateControlDescriptionInPlaceParams) (int64, error)
 	UpdateDecision(ctx context.Context, arg UpdateDecisionParams) (Decision, error)
 	// Patch the predicate. The BEFORE UPDATE trigger
 	// (framework_scopes_bounce_on_predicate_change_trg) ensures that if this row

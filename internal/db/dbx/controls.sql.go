@@ -183,6 +183,34 @@ func (q *Queries) GetControlByID(ctx context.Context, arg GetControlByIDParams) 
 	return i, err
 }
 
+const insertControlManifestRevision = `-- name: InsertControlManifestRevision :execrows
+INSERT INTO control_manifest_revisions (
+    tenant_id, control_id, bundle_manifest_yaml, bundle_manifest_hash,
+    bundle_uploaded_by, bundle_uploaded_at
+)
+SELECT c.tenant_id, c.id, c.bundle_manifest_yaml, c.bundle_manifest_hash,
+       c.bundle_uploaded_by, c.bundle_uploaded_at
+FROM controls c
+WHERE c.tenant_id = $1 AND c.id = $2 AND c.superseded_by IS NULL
+`
+
+type InsertControlManifestRevisionParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ControlID pgtype.UUID `json:"control_id"`
+}
+
+// Issue #1908: record the manifest an in-place description update is about
+// to overwrite. Copies the active row's current values in the same
+// transaction, just before UpdateControlDescriptionInPlace, so the prose
+// history is append-only in control_manifest_revisions.
+func (q *Queries) InsertControlManifestRevision(ctx context.Context, arg InsertControlManifestRevisionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertControlManifestRevision, arg.TenantID, arg.ControlID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const insertControlVersion = `-- name: InsertControlVersion :one
 INSERT INTO controls (
     id, tenant_id, bundle_id, version, superseded_by,
@@ -1024,4 +1052,43 @@ type MarkControlSupersededParams struct {
 func (q *Queries) MarkControlSuperseded(ctx context.Context, arg MarkControlSupersededParams) error {
 	_, err := q.db.Exec(ctx, markControlSuperseded, arg.TenantID, arg.ID, arg.SupersededBy)
 	return err
+}
+
+const updateControlDescriptionInPlace = `-- name: UpdateControlDescriptionInPlace :execrows
+UPDATE controls
+SET description = $3,
+    bundle_manifest_yaml = $4,
+    bundle_manifest_hash = $5,
+    bundle_uploaded_at = now(),
+    bundle_uploaded_by = $6,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL
+`
+
+type UpdateControlDescriptionInPlaceParams struct {
+	TenantID           pgtype.UUID `json:"tenant_id"`
+	ID                 pgtype.UUID `json:"id"`
+	Description        string      `json:"description"`
+	BundleManifestYaml string      `json:"bundle_manifest_yaml"`
+	BundleManifestHash string      `json:"bundle_manifest_hash"`
+	BundleUploadedBy   *string     `json:"bundle_uploaded_by"`
+}
+
+// Issue #1908: a re-upload whose manifest differs from the active row's
+// only in `description` updates that row in place instead of versioning,
+// so every control-keyed row (owners, evidence, exceptions, links) stays
+// attached. The hash moves with the YAML so a repeat upload is a no-op.
+func (q *Queries) UpdateControlDescriptionInPlace(ctx context.Context, arg UpdateControlDescriptionInPlaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateControlDescriptionInPlace,
+		arg.TenantID,
+		arg.ID,
+		arg.Description,
+		arg.BundleManifestYaml,
+		arg.BundleManifestHash,
+		arg.BundleUploadedBy,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }

@@ -1975,6 +1975,17 @@ type ControlEvaluation struct {
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 }
 
+type ControlManifestRevision struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	ControlID          pgtype.UUID        `json:"control_id"`
+	BundleManifestYaml string             `json:"bundle_manifest_yaml"`
+	BundleManifestHash string             `json:"bundle_manifest_hash"`
+	BundleUploadedBy   *string            `json:"bundle_uploaded_by"`
+	BundleUploadedAt   pgtype.Timestamptz `json:"bundle_uploaded_at"`
+	ReplacedAt         pgtype.Timestamptz `json:"replaced_at"`
+}
+
 type ControlOwnerAssignment struct {
 	TenantID    pgtype.UUID        `json:"tenant_id"`
 	ControlID   pgtype.UUID        `json:"control_id"`

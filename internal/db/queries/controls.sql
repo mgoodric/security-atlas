@@ -274,6 +274,34 @@ UPDATE controls
 SET superseded_by = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 
+-- name: InsertControlManifestRevision :execrows
+-- Issue #1908: record the manifest an in-place description update is about
+-- to overwrite. Copies the active row's current values in the same
+-- transaction, just before UpdateControlDescriptionInPlace, so the prose
+-- history is append-only in control_manifest_revisions.
+INSERT INTO control_manifest_revisions (
+    tenant_id, control_id, bundle_manifest_yaml, bundle_manifest_hash,
+    bundle_uploaded_by, bundle_uploaded_at
+)
+SELECT c.tenant_id, c.id, c.bundle_manifest_yaml, c.bundle_manifest_hash,
+       c.bundle_uploaded_by, c.bundle_uploaded_at
+FROM controls c
+WHERE c.tenant_id = @tenant_id AND c.id = @control_id AND c.superseded_by IS NULL;
+
+-- name: UpdateControlDescriptionInPlace :execrows
+-- Issue #1908: a re-upload whose manifest differs from the active row's
+-- only in `description` updates that row in place instead of versioning,
+-- so every control-keyed row (owners, evidence, exceptions, links) stays
+-- attached. The hash moves with the YAML so a repeat upload is a no-op.
+UPDATE controls
+SET description = $3,
+    bundle_manifest_yaml = $4,
+    bundle_manifest_hash = $5,
+    bundle_uploaded_at = now(),
+    bundle_uploaded_by = $6,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
+
 -- NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
 -- from internal/db/queries/scf_anchors.sql (slice 006). The bundle parser
 -- in internal/control/parser.go calls them through the same dbx.Queries

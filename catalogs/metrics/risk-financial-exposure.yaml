@@ -1,7 +1,8 @@
 # Board metric: Open risk financial exposure
 #
-# Sum of Annualized Loss Expectancy (ALE) for risks where treatment !=
-# accept. Canvas §7.5 calls out dollar-banded ALE as the board-trusted
+# Sum of Annualized Loss Expectancy (ALE) for risks not under an approved
+# acceptance (treatment <> 'accept' OR acceptance_status IS DISTINCT FROM
+# 'approved'; #1746). A proposed acceptance still counts as open. Canvas §7.5 calls out dollar-banded ALE as the board-trusted
 # format. Reads slice 019's risk register.
 
 metrics:
@@ -11,7 +12,8 @@ metrics:
     name: Open risk financial exposure
     description: |
       Sum of ALE (Annualized Loss Expectancy) for risks where
-      treatment != 'accept'. The board-pack dollar figure for "what is
+      treatment <> 'accept' OR acceptance_status IS DISTINCT FROM
+      'approved', so a proposed acceptance still counts. The board-pack dollar figure for "what is
       our open risk worth?".
     unit: dollars_ale
     cadence: weekly
