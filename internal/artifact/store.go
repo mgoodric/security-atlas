@@ -153,6 +153,11 @@ func (s *Store) Put(ctx context.Context, in PutInput) (Artifact, error) {
 			Body:          body,
 			ContentType:   aws.String(in.ContentType),
 			ContentLength: aws.Int64(int64(len(in.Body))),
+			// The content type is uploader-supplied. Serving an
+			// uploaded text/html or image/svg+xml inline would be
+			// stored XSS on the object-store origin, so every object
+			// downloads as an attachment (security-atlas#1928).
+			ContentDisposition: aws.String(DownloadContentDisposition),
 		})
 		if putErr != nil {
 			return fmt.Errorf("artifact: s3 put: %w", putErr)
@@ -337,6 +342,10 @@ func pgUUID(u uuid.UUID) pgtype.UUID {
 
 // ----- Presigner adapter for the real AWS SDK -----
 
+// DownloadContentDisposition is stamped on every stored object and every
+// presigned download, so a browser never renders an artifact inline.
+const DownloadContentDisposition = "attachment"
+
 // S3Presigner adapts *s3.PresignClient to the Presigner interface.
 type S3Presigner struct {
 	Bucket string
@@ -348,6 +357,9 @@ func (p *S3Presigner) PresignGetObject(ctx context.Context, key string, ttl time
 	req, err := p.Client.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(p.Bucket),
 		Key:    aws.String(key),
+		// Signed into the URL, so it also covers objects written before
+		// Put set ContentDisposition, and the holder cannot strip it.
+		ResponseContentDisposition: aws.String(DownloadContentDisposition),
 	}, s3.WithPresignExpires(ttl))
 	if err != nil {
 		return "", err

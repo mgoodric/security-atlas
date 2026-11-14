@@ -286,6 +286,10 @@ func TestStore_Presign_TTLBound(t *testing.T) {
 	if string(got) != string(body) {
 		t.Fatalf("presign download body mismatch: got %d bytes, status %d", len(got), resp.StatusCode)
 	}
+	// security-atlas#1928: never served inline (stored-XSS guard).
+	if cd := resp.Header.Get("Content-Disposition"); cd != artifact.DownloadContentDisposition {
+		t.Fatalf("Content-Disposition = %q, want %q", cd, artifact.DownloadContentDisposition)
+	}
 }
 
 // ISC-22 + ISC-23 + ISC-A3 — every upload + every presign records an

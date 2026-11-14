@@ -451,6 +451,11 @@ services:
       # Slice 036: artifact store wiring.
       ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-atlas-artifacts}
       ARTIFACTS_S3_ENDPOINT: http://minio:9000
+      # security-atlas#1928: the endpoint baked into presigned download
+      # URLs. http://minio:9000 only resolves inside the compose network, so
+      # browsers need the host-published MinIO address here (e.g.
+      # http://<host>:9000). Empty falls back to ARTIFACTS_S3_ENDPOINT.
+      ARTIFACTS_S3_PUBLIC_ENDPOINT: ${ARTIFACTS_S3_PUBLIC_ENDPOINT:-}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
       AWS_REGION: ${AWS_REGION:-us-east-1}
