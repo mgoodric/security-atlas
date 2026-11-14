@@ -1,11 +1,8 @@
 package change
 
 import (
-	"bytes"
 	"context"
-	"crypto/sha256"
 	"encoding/csv"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,8 +15,11 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -82,11 +82,29 @@ type Rollup struct {
 	VerifiedLast30Days int64
 }
 
+// EvidenceSchemaVersion is the schema version of the change evidence
+// kinds; EvidenceCredentialID is the system credential the store ingests
+// them under.
+const (
+	EvidenceSchemaVersion = "1.0.0"
+	EvidenceCredentialID  = "system:change-register"
+)
+
 type Store struct {
-	pool *pgxpool.Pool
+	pool   *pgxpool.Pool
+	ingest *ingest.Service
 }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// WithIngest returns a copy of s that writes approval and verification
+// evidence through svc. A store without one fails Approve and Verify with
+// ingest.ErrUnavailable rather than writing the ledger directly (#1830).
+func (s *Store) WithIngest(svc *ingest.Service) *Store {
+	out := *s
+	out.ingest = ingest.ForDomainWriter(svc)
+	return &out
+}
 
 type CreateInput struct {
 	Title              string
@@ -361,7 +379,7 @@ func (s *Store) transition(ctx context.Context, id, actor uuid.UUID, now time.Ti
 		now = time.Now().UTC()
 	}
 	var out Change
-	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := s.withTx(ctx, func(ctx context.Context, tx pgx.Tx, q *dbx.Queries, tenantID uuid.UUID) error {
 		if err := ensureUser(ctx, q, tenantID, actor); err != nil {
 			return err
 		}
@@ -402,7 +420,7 @@ func (s *Store) transition(ctx context.Context, id, actor uuid.UUID, now time.Ti
 		}
 		if action == ActionApproved || action == ActionVerified {
 			for _, c := range controls {
-				if err := insertEvidence(ctx, q, tenantID, out, uuid.UUID(c.ControlID.Bytes), action, now.UTC()); err != nil {
+				if err := s.insertEvidence(ctx, tx, tenantID, out, uuid.UUID(c.ControlID.Bytes), action, now.UTC()); err != nil {
 					return err
 				}
 			}
@@ -431,12 +449,17 @@ func linkControl(ctx context.Context, q *dbx.Queries, tenantID, changeID, contro
 	return writeAudit(ctx, q, tenantID, changeID, actor, ActionControlLinked, nil, detail)
 }
 
-func insertEvidence(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ch Change, controlID uuid.UUID, action string, observed time.Time) error {
+// insertEvidence writes the CC8 change evidence through
+// ingest.Service.ProcessInTx in the transition's transaction, so the
+// record gets the observed_at skew check, schema validation, kind scope
+// and an evidence_audit_log row, and commits only with the transition
+// (#1830).
+func (s *Store) insertEvidence(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, ch Change, controlID uuid.UUID, action string, observed time.Time) error {
 	kind := EvidenceKindApproval
 	if action == ActionVerified {
 		kind = EvidenceKindVerification
 	}
-	payload, _ := json.Marshal(map[string]any{
+	payload, err := ingest.PayloadStruct(map[string]any{
 		"change_id":      ch.ID.String(),
 		"title":          ch.Title,
 		"status":         ch.Status,
@@ -446,45 +469,39 @@ func insertEvidence(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ch 
 		"rollback_notes": ch.RollbackNotes,
 		"action":         action,
 	})
-	provenance, _ := json.Marshal(map[string]any{"system": "security-atlas", "source": "change_register", "change_id": ch.ID.String()})
-	sourceAttribution, _ := json.Marshal(map[string]any{"type": "change_register", "change_id": ch.ID.String(), "source_url": ch.SourceURL})
-	sum := sha256.Sum256(bytes.Join([][]byte{[]byte(kind), []byte(ch.ID.String()), []byte(controlID.String()), []byte(action), payload}, []byte{0}))
-	idem := "change:" + ch.ID.String() + ":" + controlID.String() + ":" + action
-	nanos := observed.UnixNano()
-	_, err := q.InsertEvidenceRecord(ctx, dbx.InsertEvidenceRecordParams{
-		ID:                pgUUID(uuid.New()),
-		TenantID:          pgUUID(tenantID),
-		ControlID:         pgUUID(controlID),
-		ControlRef:        controlID.String(),
-		ScopeID:           pgtype.UUID{},
-		ObservedAt:        pgTS(observed),
-		Provenance:        provenance,
-		Result:            dbx.EvidenceResultPass,
-		Payload:           payload,
-		PayloadUri:        nil,
-		Hash:              hex.EncodeToString(sum[:]),
-		FreshnessClass:    dbx.EvidenceFreshnessClassMonthly,
-		ValidUntil:        pgtype.Timestamptz{},
-		IdempotencyKey:    &idem,
-		EvidenceKind:      &kind,
-		SchemaVersion:     strPtr("1.0.0"),
-		CredentialID:      strPtr("system:change-register"),
-		IngestionPath:     "manual_upload",
-		SourceAttribution: sourceAttribution,
-		ScopeCanonical:    []byte(`[]`),
-		ObservedAtNanos:   &nanos,
-	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgErrUniqueViolation {
-			return nil
-		}
-		return fmt.Errorf("insert change evidence: %w", err)
+		return err
+	}
+	rec := &evidencev1.EvidenceRecord{
+		IdempotencyKey: "change:" + ch.ID.String() + ":" + controlID.String() + ":" + action,
+		EvidenceKind:   kind,
+		SchemaVersion:  EvidenceSchemaVersion,
+		ControlId:      controlID.String(),
+		Scope:          []*evidencev1.ScopeDimension{{Key: "change_id", Values: []string{ch.ID.String()}}},
+		ObservedAt:     timestamppb.New(observed),
+		Result:         evidencev1.Result_RESULT_PASS,
+		Payload:        payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "system",
+			ActorId:   EvidenceCredentialID,
+		},
+	}
+	cred := ingest.SystemCredential(EvidenceCredentialID, tenantID.String(), EvidenceKindApproval, EvidenceKindVerification)
+	if _, _, err := s.ingest.ProcessInTx(ctx, tx, rec, cred, ingest.LedgerOptions{}); err != nil {
+		return fmt.Errorf("ingest change evidence: %w", err)
 	}
 	return nil
 }
 
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries, uuid.UUID) error) error {
+	return s.withTx(ctx, func(ctx context.Context, _ pgx.Tx, q *dbx.Queries, tenantID uuid.UUID) error {
+		return fn(ctx, q, tenantID)
+	})
+}
+
+// withTx is inTx with the transaction exposed, for writes that hand it to
+// ingest.Service.ProcessInTx.
+func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx, *dbx.Queries, uuid.UUID) error) error {
 	tenantStr, err := tenancy.TenantFromContext(ctx)
 	if err != nil {
 		return err
@@ -501,8 +518,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
 		return err
 	}
-	q := dbx.New(tx)
-	if err := fn(ctx, q, tenantID); err != nil {
+	if err := fn(ctx, tx, dbx.New(tx), tenantID); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -682,13 +698,6 @@ func uuidString(u *uuid.UUID) string {
 		return ""
 	}
 	return u.String()
-}
-
-func strPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
 }
 
 func nilIfEmpty(s string) *string {
