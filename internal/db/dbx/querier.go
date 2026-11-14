@@ -2146,6 +2146,13 @@ type Querier interface {
 	// that view, so they count as a path here with no change to this query.
 	// "Latest evaluation" is per control across scope cells, as in
 	// FrameworkPosture.
+	//
+	// "Active control" here is lifecycle_state = 'active' AND superseded_by IS
+	// NULL, deliberately stricter than FrameworkPosture (dashboard.sql), which
+	// counts any non-superseded control: posture measures coverage by any
+	// defined control, a contradiction claims a working control sits behind an
+	// exclusion (#1789 D3). Do not align either one to the other. See GLOSSARY
+	// "Active control".
 	ListFrameworkScopeContradictions(ctx context.Context, arg ListFrameworkScopeContradictionsParams) ([]pgtype.UUID, error)
 	ListFrameworkScopeWorkflowLog(ctx context.Context, arg ListFrameworkScopeWorkflowLogParams) ([]FrameworkScopeWorkflowLog, error)
 	// Newest first. Caller filters by framework_version + state in the

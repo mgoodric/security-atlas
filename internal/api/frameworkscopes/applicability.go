@@ -12,7 +12,9 @@ package frameworkscopes
 // excluded requirement with a passing active control behind it carries
 // `contradiction: true` (#1789). Both GETs filter with
 // ?decision=applicable|excluded|undecided and ?contradiction=true|false;
-// counts always describe the whole revision.
+// counts always describe the whole revision. Contradictions are computed
+// against current control evaluations on both GETs, including as_of
+// (`contradictions_evaluated_against: "current"`).
 // Writes use the same gate as the predicate PATCH: the rego bundle admits
 // writes on `framework-scopes` from grc_engineer and admin only. An edit on a
 // revision in review or approved sends it back to draft
@@ -22,7 +24,6 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -80,8 +81,12 @@ func parseFilter(w http.ResponseWriter, r *http.Request) (frameworkscope.Applica
 		return f, false
 	}
 	if raw := strings.TrimSpace(q.Get("contradiction")); raw != "" {
-		v, err := strconv.ParseBool(raw)
-		if err != nil {
+		var v bool
+		switch raw {
+		case "true":
+			v = true
+		case "false":
+		default:
 			httpresp.WriteError(w, http.StatusBadRequest, "contradiction must be true or false")
 			return f, false
 		}
@@ -129,6 +134,9 @@ func applicabilityBody(a frameworkscope.Applicability, frameworkVersionID uuid.U
 		"framework_version_id": frameworkVersionID.String(),
 		"framework_scope":      scopeW,
 		"requirements":         reqs,
+		// The flag is always computed against current control evaluations,
+		// even when the decisions are those in force at as_of (#1789 D6).
+		"contradictions_evaluated_against": "current",
 		"counts": countsWire{
 			Total:          a.Counts.Total,
 			Applicable:     a.Counts.Applicable,
@@ -168,7 +176,10 @@ func (h *Handler) ListApplicability(w http.ResponseWriter, r *http.Request) {
 
 // ApplicabilityAsOf — GET /v1/framework-scopes/applicability?framework_version=…&as_of=….
 // Returns the decisions of the revision active at as_of; framework_scope is
-// null (and every requirement undecided) when none was.
+// null (and every requirement undecided) when none was. The decisions are
+// point-in-time, but `contradiction` is not: it is computed against current
+// control evaluations ("would this exclusion be contradicted now"), and the
+// body says so with `contradictions_evaluated_against: "current"` (#1789 D6).
 func (h *Handler) ApplicabilityAsOf(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {

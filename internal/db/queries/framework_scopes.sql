@@ -241,6 +241,13 @@ WHERE fsa.tenant_id = @tenant_id
 -- that view, so they count as a path here with no change to this query.
 -- "Latest evaluation" is per control across scope cells, as in
 -- FrameworkPosture.
+--
+-- "Active control" here is lifecycle_state = 'active' AND superseded_by IS
+-- NULL, deliberately stricter than FrameworkPosture (dashboard.sql), which
+-- counts any non-superseded control: posture measures coverage by any
+-- defined control, a contradiction claims a working control sits behind an
+-- exclusion (#1789 D3). Do not align either one to the other. See GLOSSARY
+-- "Active control".
 SELECT DISTINCT fsa.framework_requirement_id
 FROM framework_scope_applicability fsa
 JOIN effective_fw_to_scf_edges e
