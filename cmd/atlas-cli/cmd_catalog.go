@@ -85,7 +85,7 @@ func newCatalogImportSCFCmd() *cobra.Command {
 // the crosswalk tier workflow.
 func newCatalogImportCrosswalkCmd() *cobra.Command {
 	var dsn string
-	var frameworkColumn string
+	var frameworkColumns []string
 	var frameworkSlug string
 	var frameworkName string
 	var frameworkIssuer string
@@ -111,7 +111,7 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			var err error
 			if strings.EqualFold(filepath.Ext(path), ".xlsx") {
 				cw, err = soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{
-					FrameworkColumn:  frameworkColumn,
+					FrameworkColumns: frameworkColumns,
 					FrameworkSlug:    frameworkSlug,
 					FrameworkName:    frameworkName,
 					FrameworkIssuer:  frameworkIssuer,
@@ -167,8 +167,8 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL)")
-	cmd.Flags().StringVar(&frameworkColumn, "framework-column", "", "SCF workbook column header to import (required when an .xlsx has multiple framework columns)")
-	cmd.Flags().StringVar(&frameworkSlug, "framework-slug", "", "framework slug override for SCF workbook imports")
+	cmd.Flags().StringArrayVar(&frameworkColumns, "framework-column", nil, "SCF workbook column header to import, as HEADER or HEADER=PREFIX to prefix its requirement codes; repeat to combine columns into one framework (required when an .xlsx has multiple framework columns)")
+	cmd.Flags().StringVar(&frameworkSlug, "framework-slug", "", "framework slug override for SCF workbook imports (required when the first framework column has no Focal Documents metadata)")
 	cmd.Flags().StringVar(&frameworkName, "framework-name", "", "framework name override for SCF workbook imports")
 	cmd.Flags().StringVar(&frameworkIssuer, "framework-issuer", "", "framework issuer override for SCF workbook imports")
 	cmd.Flags().StringVar(&frameworkVersion, "framework-version", "", "framework version override for SCF workbook imports")

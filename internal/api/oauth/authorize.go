@@ -89,6 +89,7 @@ type AuthorizeEndpoint struct {
 	now           func() time.Time
 	randRead      func([]byte) (int, error)
 	loginRedirect func(returnTo string, tenantID uuid.UUID) string
+	implicit      func(ctx context.Context) (uuid.UUID, error)
 }
 
 // AuthorizeEndpointConfig is the constructor parameter bag.
@@ -107,6 +108,11 @@ type AuthorizeEndpointConfig struct {
 	// the user lacks an active session. Default points at
 	// `/auth/oidc/login?tenant_id=<id>` with an opaque return-to param.
 	LoginRedirect func(returnTo string, tenantID uuid.UUID) string
+	// ImplicitTenant, when set, answers which tenant a request without
+	// tenant_id means: the sole tenant on a single-tenant install
+	// (#1761). It returns an error when no tenant is implied. Nil keeps
+	// tenant_id required.
+	ImplicitTenant func(ctx context.Context) (uuid.UUID, error)
 }
 
 // NewAuthorizeEndpoint constructs an AuthorizeEndpoint.
@@ -155,6 +161,7 @@ func NewAuthorizeEndpoint(cfg AuthorizeEndpointConfig) *AuthorizeEndpoint {
 		now:           now,
 		randRead:      randRead,
 		loginRedirect: loginRedirect,
+		implicit:      cfg.ImplicitTenant,
 	}
 }
 
@@ -223,16 +230,28 @@ func (a *AuthorizeEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tenantIDStr := q.Get("tenant_id")
+	var tenantID uuid.UUID
 	if tenantIDStr == "" {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request",
-			"tenant_id is required")
-		return
-	}
-	tenantID, err := uuid.Parse(tenantIDStr)
-	if err != nil {
-		writeOAuthError(w, http.StatusBadRequest, "invalid_request",
-			"tenant_id is not a valid UUID")
-		return
+		// #1761: on a single-tenant install the sole tenant is implied.
+		// The error names no tenant: the caller is unauthenticated.
+		if a.implicit != nil {
+			if id, err := a.implicit(r.Context()); err == nil {
+				tenantID = id
+			}
+		}
+		if tenantID == uuid.Nil {
+			writeOAuthError(w, http.StatusBadRequest, "invalid_request",
+				"tenant_id is required")
+			return
+		}
+	} else {
+		var err error
+		tenantID, err = uuid.Parse(tenantIDStr)
+		if err != nil {
+			writeOAuthError(w, http.StatusBadRequest, "invalid_request",
+				"tenant_id is not a valid UUID")
+			return
+		}
 	}
 
 	// AC-17: validate client_id against oauth_clients. We use the

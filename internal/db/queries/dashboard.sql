@@ -72,7 +72,7 @@ req_anchor AS (
         vr.requirement_id,
         e.scf_anchor_id
     FROM version_reqs vr
-    JOIN fw_to_scf_edges e
+    JOIN effective_fw_to_scf_edges e
       ON e.framework_requirement_id = vr.requirement_id
      AND e.relationship_type <> 'no_relationship'
      AND e.mapping_tier <> 'rejected'

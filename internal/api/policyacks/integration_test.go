@@ -554,17 +554,13 @@ func TestPendingForUser_SupersededVersion_AC4(t *testing.T) {
 func (s *setupResult) forkAndPublishV2(t *testing.T, v1ID, newVersion string) string {
 	t.Helper()
 	// Test-only direct-DB shortcut: bypass slice 022's publish handler.
-	// Rationale: slice 022's subsequent-publish path (store.go line 354+)
-	// has a known architectural drift — it INSERTs a new row with
-	// predecessor_id = v1ID, but if the staging row also has
-	// predecessor_id = v1ID, the policies_predecessor_unique_when_set
-	// partial UNIQUE blocks the second insert. Fixing that handler is
-	// outside slice 023's scope. For slice 023's purposes we only need
-	// the schema state: v1 status = 'superseded', a new published v2
-	// row with predecessor_id = v1ID. The admin DB access produces
-	// that state directly. Slice 022's publish-handler drift is tracked
-	// as a follow-up (admincreds-like P0 — slice 022 publishing a
-	// version chain past v2 will hit the UNIQUE).
+	// Slice 023 only needs the schema state: v1 status = 'superseded', a
+	// new published v2 row with predecessor_id = v1ID. The admin DB
+	// access produces that state directly. (The store's
+	// subsequent-publish path used to hit the
+	// policies_predecessor_unique_when_set UNIQUE; #1747 fixed it to
+	// publish the successor draft in place. The shortcut stays because
+	// it keeps this test independent of the workflow.)
 	v2ID := uuid.New().String()
 	_, err := s.admin.Exec(context.Background(), `
 		WITH supersede AS (

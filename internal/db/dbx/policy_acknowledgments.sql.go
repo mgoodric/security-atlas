@@ -118,7 +118,7 @@ func (q *Queries) GetAcknowledgmentByToken(ctx context.Context, arg GetAcknowled
 }
 
 const getPolicyForAcknowledge = `-- name: GetPolicyForAcknowledge :one
-SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at
+SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at
 FROM policies
 WHERE tenant_id = $1 AND id = $2
 `
@@ -159,6 +159,11 @@ func (q *Queries) GetPolicyForAcknowledge(ctx context.Context, arg GetPolicyForA
 		&i.PublishedBy,
 		&i.SupersededAt,
 		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
 	)
 	return i, err
 }

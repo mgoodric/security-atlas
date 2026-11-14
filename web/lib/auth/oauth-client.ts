@@ -87,9 +87,10 @@ export interface InitLoginFlowParams {
   clientId: string;
   // The redirect URI registered via `atlas-cli oauth add-redirect-uri`.
   redirectUri: string;
-  // The tenant the user is signing in for. v1 single-tenant; slice
-  // 192 multi-tenant work will derive this dynamically.
-  tenantId: string;
+  // The tenant the user is signing in for. Omit it on a single-tenant
+  // install: /oauth/authorize then resolves the sole tenant (#1761). A
+  // multi-tenant install requires it.
+  tenantId?: string;
   // The URL to return the user to after successful sign-in. Stored
   // in sessionStorage; the callback route reads it on completion.
   returnTo?: string;
@@ -124,7 +125,9 @@ export async function initLoginFlow(
   url.searchParams.set("state", state);
   url.searchParams.set("code_challenge", challenge);
   url.searchParams.set("code_challenge_method", "S256");
-  url.searchParams.set("tenant_id", params.tenantId);
+  if (params.tenantId) {
+    url.searchParams.set("tenant_id", params.tenantId);
+  }
 
   window.location.assign(url.toString());
 }

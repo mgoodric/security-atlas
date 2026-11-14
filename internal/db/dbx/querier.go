@@ -398,8 +398,9 @@ type Querier interface {
 	// as the prior-state guard; zero affected rows means the transition was
 	// attempted from the wrong state (the application probes after to
 	// disambiguate ErrNotFound vs ErrWrongState, matching slice 021's pattern).
-	// Publish is a two-step operation (supersede prior + insert new); the
-	// application wraps both queries in a single tx so the chain is atomic.
+	// Publishing a later version is a two-step operation (supersede prior +
+	// publish the successor row in place); the application wraps both queries
+	// in a single tx so the chain is atomic.
 	CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Policy, error)
 	// Slice 026 — sample-pull primitives.
 	//
@@ -1043,6 +1044,12 @@ type Querier interface {
 	// read jsonb-number values directly as int4 without an explicit cast.
 	HeatmapBuckets(ctx context.Context, tenantID pgtype.UUID) ([]HeatmapBucketsRow, error)
 	ImplementChange(ctx context.Context, arg ImplementChangeParams) (Change, error)
+	// #1747 — insert an imported policy directly as 'published', carrying its
+	// historical lifecycle. The in-tool submit/approve/publish transitions do
+	// not apply; the handler gates the import on an admin credential instead.
+	// approved_by stays NULL: the historical approver is a free-text name in
+	// historical_approver_name, not a credential.
+	ImportPublishedPolicy(ctx context.Context, arg ImportPublishedPolicyParams) (Policy, error)
 	// Persist a new API key. token_hash is HMAC-SHA256(plaintext, BEARER_HASH_KEY)
 	// per ADR 0002 — computed by the application layer before this call. last4 is
 	// the last four characters of the plaintext bearer (safe to surface).
@@ -1290,12 +1297,8 @@ type Querier interface {
 	// double-clicks within the same UTC day; the handler treats the
 	// 23505 violation as "deduplicated, return original".
 	InsertPolicyAcknowledgment(ctx context.Context, arg InsertPolicyAcknowledgmentParams) (PolicyAcknowledgment, error)
-	// Part 2 of the two-step Publish for SECOND-and-later versions: clones
-	// the approved row's content into a NEW row with status='published',
-	// predecessor_id pointing at the just-superseded prior. Called inside
-	// the same tx as SupersedePolicyAtPublish so the version chain stays
-	// atomic. The caller supplies the new row's id and version string.
-	InsertPublishedPolicy(ctx context.Context, arg InsertPublishedPolicyParams) (Policy, error)
+	// #1747 — append one row to the policy audit log.
+	InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAuditLogParams) (PolicyAuditLog, error)
 	// Slice 155: questionnaire tracer-bullet queries.
 	//
 	// CRUD against the four new tables (questionnaires, questionnaire_questions,
@@ -2366,6 +2369,8 @@ type Querier interface {
 	// bigint value. See
 	// `docs/audit-log/159-sqlc-toolchain-ci-drift-fix-decisions.md`.
 	ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesWithAckRateParams) ([]ListPoliciesWithAckRateRow, error)
+	// #1747 — the audit trail for one policy, oldest first.
+	ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLogParams) ([]PolicyAuditLog, error)
 	// The policy ids linked to one control via slice-022's
 	// policies.linked_control_ids UUID[] array (same predicate as slice-064's
 	// ListPoliciesLinkedToControl). Lets the generator offer a linked-policy id as
@@ -2952,9 +2957,14 @@ type Querier interface {
 	ParentChainIDs(ctx context.Context, arg ParentChainIDsParams) ([]pgtype.UUID, error)
 	// SCIM Patch of a core attribute (display_name). Roles are out of scope.
 	PatchSCIMUserDisplayName(ctx context.Context, arg PatchSCIMUserDisplayNameParams) (User, error)
-	// One-shot publish of an approved row that has NO predecessor (the very
-	// first version). Sets status -> published, populates effective_date,
-	// published_at, published_by. Predecessor_id stays NULL.
+	// #1747 — duplicate check for import: a policy with this title and version
+	// already exists in the tenant (in any state).
+	PolicyTitleVersionExists(ctx context.Context, arg PolicyTitleVersionExistsParams) (bool, error)
+	// Publishes an approved row in place. Sets status -> published, populates
+	// effective_date, published_at, published_by. predecessor_id is never
+	// changed: a first version keeps NULL, and a later version (a draft
+	// created with predecessor_id set) keeps the link to the row that Part 1
+	// just superseded (#1747).
 	PublishApprovedPolicy(ctx context.Context, arg PublishApprovedPolicyParams) (Policy, error)
 	// Flip a DRAFT pack to PUBLISHED, stamping the publish metadata. The
 	// `status = 'draft'` predicate makes this idempotent-safe: a second publish
@@ -3120,8 +3130,9 @@ type Querier interface {
 	// anti-criterion); only its status + superseded_by + updated_at change.
 	SupersedeDecision(ctx context.Context, arg SupersedeDecisionParams) (Decision, error)
 	// Part 1 of the two-step Publish: marks the prior 'published' row as
-	// 'superseded'. Used inside the same transaction as InsertPublishedPolicy
-	// so the chain transition is atomic. Returns the updated prior row so the
+	// 'superseded'. Used inside the same transaction as PublishApprovedPolicy
+	// (which publishes the successor row in place) so the chain transition is
+	// atomic. Returns the updated prior row so the
 	// handler can audit who superseded it. Only matches when the row is
 	// currently 'published' (defense-in-depth -- a chain can't supersede a
 	// draft).

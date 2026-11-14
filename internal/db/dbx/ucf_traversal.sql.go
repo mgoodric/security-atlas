@@ -61,7 +61,7 @@ SELECT
     a.family,
     a.title            AS anchor_title,
     a.description      AS anchor_description
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
@@ -152,7 +152,7 @@ SELECT
     a.family,
     a.title            AS anchor_title,
     a.description      AS anchor_description
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
@@ -315,7 +315,7 @@ SELECT
     fv.status          AS framework_version_status,
     f.slug             AS framework_slug,
     f.name             AS framework_name
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
@@ -401,7 +401,7 @@ SELECT
     fv.status          AS framework_version_status,
     f.slug             AS framework_slug,
     f.name             AS framework_name
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
@@ -491,7 +491,7 @@ SELECT
     fv.status          AS framework_version_status,
     f.slug             AS framework_slug,
     f.name             AS framework_name
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id

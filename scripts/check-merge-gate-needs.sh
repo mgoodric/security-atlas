@@ -17,10 +17,13 @@
 # (the job is gone, gains an `if:`, or is in `needs:` after all), so the
 # list cannot rot into a blanket waiver.
 #
-# The parser reads the workflow's own layout: jobs at two spaces under
-# `jobs:`, job keys at four, merge-gate's `needs:` as a block list of
-# `      - <job>` lines. A layout it cannot read (no jobs, no merge-gate, an
-# empty needs list) exits 2 rather than passing.
+# The workflow is parsed as YAML (`yaml.safe_load`), not by indentation, so
+# a job key with a trailing comment or quotes reads like any other (#1950).
+# A job-level `if:` of exactly `always()` or `!cancelled()` (bare or inside
+# `${{ }}`) still runs on every PR, so it counts as unconditional; anything
+# else, `always() && <filter>` included, is conditional. A workflow it
+# cannot read (invalid YAML, no jobs, no merge-gate, an empty needs) exits
+# 2 rather than passing.
 #
 # Exit codes:
 #   0 — every unconditional job is in merge-gate's needs or allowlisted
@@ -31,6 +34,11 @@
 #   bash scripts/check-merge-gate-needs.sh
 #   CI_WORKFLOW=/path/to/ci.yml bash scripts/check-merge-gate-needs.sh
 #
+# Needs a python3 that can import PyYAML; ubuntu-latest's system python3
+# can. Elsewhere, point MERGE_GATE_PYTHON at one that can, e.g.
+#   uv venv "$TMPDIR/mgn" && uv pip install -p "$TMPDIR/mgn" pyyaml
+#   MERGE_GATE_PYTHON="$TMPDIR/mgn/bin/python" bash scripts/check-merge-gate-needs.sh
+#
 # Self-test:
 #   bash scripts/check-merge-gate-needs_test.sh
 
@@ -38,6 +46,7 @@ set -euo pipefail
 
 WORKFLOW="${CI_WORKFLOW:-.github/workflows/ci.yml}"
 GATE="merge-gate"
+PYTHON="${MERGE_GATE_PYTHON:-python3}"
 
 # "<job> <reason>", one per line. Empty today: every unconditional job in
 # ci.yml is a check whose red result should block the merge. Add an entry
@@ -51,47 +60,70 @@ if [[ ! -f "$WORKFLOW" || ! -r "$WORKFLOW" ]]; then
   exit 2
 fi
 
+# "job <name> <conditional|unconditional>" per job, then "need <name>" per
+# entry in merge-gate's needs. On anything unreadable it prints a message
+# and exits non-zero, which this script turns into exit 2.
+parse_workflow() {
+  "$PYTHON" - "$@" <<'PY'
+import re
+import sys
+
+try:
+    import yaml
+except ImportError:
+    sys.exit("check-merge-gate-needs: PyYAML is not importable; set MERGE_GATE_PYTHON")
+
+path, gate = sys.argv[1], sys.argv[2]
+try:
+    with open(path) as f:
+        doc = yaml.safe_load(f)
+except yaml.YAMLError as e:
+    sys.exit(f"check-merge-gate-needs: {path} is not valid YAML: {e}")
+
+jobs = doc.get("jobs") if isinstance(doc, dict) else None
+if not isinstance(jobs, dict) or not jobs:
+    sys.exit(f"check-merge-gate-needs: no jobs found under 'jobs:' in {path}")
+if not isinstance(jobs.get(gate), dict):
+    sys.exit(f"check-merge-gate-needs: no '{gate}' job in {path}")
+
+ALWAYS = {"always()", "!cancelled()"}
+
+
+def unconditional(job):
+    if "if" not in job:
+        return True
+    cond = job["if"]
+    if cond is True:
+        return True
+    if not isinstance(cond, str):
+        return False
+    cond = cond.strip()
+    m = re.fullmatch(r"\$\{\{(.*)\}\}", cond, re.S)
+    if m:
+        cond = m.group(1)
+    return re.sub(r"\s+", "", cond) in ALWAYS
+
+
+for name, job in jobs.items():
+    if not isinstance(job, dict):
+        sys.exit(f"check-merge-gate-needs: job '{name}' is not a mapping in {path}")
+    print("job", name, "unconditional" if unconditional(job) else "conditional")
+
+needs = jobs[gate].get("needs")
+if isinstance(needs, str):
+    needs = [needs]
+if not isinstance(needs, list) or not needs:
+    sys.exit(f"check-merge-gate-needs: '{gate}' has no 'needs:' in {path}")
+for n in needs:
+    print("need", n)
+PY
+}
+parsed="$(parse_workflow "$WORKFLOW" "$GATE")" || exit 2
+
 # One line per job: "<job> <conditional|unconditional>".
-jobs="$(
-  awk '
-    /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
-    in_jobs && /^[^[:space:]#]/ { in_jobs = 0 }
-    !in_jobs { next }
-    /^  [A-Za-z0-9_-]+:[[:space:]]*$/ {
-      if (job != "") print job, (cond ? "conditional" : "unconditional")
-      job = $1; sub(/:$/, "", job); cond = 0; next
-    }
-    /^    if:/ { cond = 1 }
-    END { if (job != "") print job, (cond ? "conditional" : "unconditional") }
-  ' "$WORKFLOW"
-)"
-
+jobs="$(printf '%s\n' "$parsed" | awk '$1 == "job" { print $2, $3 }')"
 # merge-gate's needs, one job per line.
-needs="$(
-  awk -v gate="$GATE" '
-    /^jobs:[[:space:]]*$/ { in_jobs = 1; next }
-    in_jobs && /^[^[:space:]#]/ { in_jobs = 0 }
-    !in_jobs { next }
-    /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { in_gate = ($1 == gate ":"); in_needs = 0; next }
-    !in_gate { next }
-    /^    needs:[[:space:]]*$/ { in_needs = 1; next }
-    in_needs && /^    [A-Za-z]/ { in_needs = 0 }
-    in_needs && /^      - / { j = $2; print j }
-  ' "$WORKFLOW"
-)"
-
-if [[ -z "$jobs" ]]; then
-  echo "check-merge-gate-needs: no jobs found under 'jobs:' in $WORKFLOW" >&2
-  exit 2
-fi
-if ! printf '%s\n' "$jobs" | awk '{ print $1 }' | grep -qxF "$GATE"; then
-  echo "check-merge-gate-needs: no '$GATE' job in $WORKFLOW" >&2
-  exit 2
-fi
-if [[ -z "$needs" ]]; then
-  echo "check-merge-gate-needs: '$GATE' has no block-list 'needs:' in $WORKFLOW" >&2
-  exit 2
-fi
+needs="$(printf '%s\n' "$parsed" | awk '$1 == "need" { print $2 }')"
 
 allowlisted() { printf '%s\n' "$ALLOWLIST" | awk 'NF { print $1 }' | grep -qxF "$1"; }
 in_needs() { printf '%s\n' "$needs" | grep -qxF "$1"; }
