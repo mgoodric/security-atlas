@@ -112,6 +112,20 @@ function mockTenants(page: import("@playwright/test").Page) {
 }
 
 test.describe("admin users management page", () => {
+  // #1764: these cases exercise the multi-tenant chrome (tenant column,
+  // tenant field, self-assign), which appears only with two or more
+  // tenants. Pin the tenant count so the shared DB's count is irrelevant;
+  // the single-tenant variant lives in tenant-chrome.spec.ts.
+  test.beforeEach(async ({ authedPage }) => {
+    await authedPage.route("**/api/me/tenancy", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ tenant_count: 2, multi_tenant: true }),
+      }),
+    );
+  });
+
   test("super_admin: lists cross-tenant users + supports assign", async ({
     authedPage,
   }) => {

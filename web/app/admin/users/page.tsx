@@ -83,6 +83,7 @@ import {
   tenantOptions,
   tenantFieldMode,
 } from "@/lib/admin/assign-options";
+import { showTenantChrome, useTenancy } from "@/lib/tenancy";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -134,6 +135,10 @@ export default function UsersPage() {
 
   const crossTenant = data?.cross_tenant ?? false;
   const items = data?.items ?? [];
+  // #1764: with one tenant on the install, tenant chrome is hidden — no
+  // Tenant column, no super-admin banner or self-assign, and the assign
+  // dialog has no tenant field (the user lands in the sole tenant).
+  const singleTenant = !showTenantChrome(useTenancy());
 
   // AC-2 / AC-4: the cross-tenant tenant list is super_admin-only. Gate the
   // fetch on `crossTenant` so a tenant-admin's browser never receives the
@@ -165,7 +170,13 @@ export default function UsersPage() {
   const tenantMode = tenantFieldMode({
     crossTenant,
     sessionTenantId: me?.tenant_id,
+    singleTenant,
+    tenantIds: tenantOpts.map((o) => o.value),
   });
+  // The tenant the assignment posts: the sole tenant when there is one,
+  // otherwise the dialog's (chosen or pinned) field.
+  const assignTenant =
+    tenantMode.kind === "sole" ? tenantMode.tenantId : assignTenantID.trim();
 
   // resolveRevokeTenant picks the row's tenant_id (cross-tenant shape) or
   // falls back to the session tenant (within-tenant shape).
@@ -257,8 +268,8 @@ export default function UsersPage() {
     if (tenantMode.kind === "unresolved") {
       return "your session tenant is still resolving — reload and retry";
     }
-    if (assignTenantID.trim() === "") return "select a tenant";
-    if (!UUID_PATTERN.test(assignTenantID.trim())) {
+    if (assignTenant === "") return "select a tenant";
+    if (!UUID_PATTERN.test(assignTenant)) {
       return "tenant_id must be a UUID";
     }
     if (assignRoles.length === 0) return "select at least one role";
@@ -286,11 +297,11 @@ export default function UsersPage() {
         </div>
         <div className="flex shrink-0 gap-2">
           <Button data-testid="open-assign-user" onClick={() => openAssign({})}>
-            Assign user to tenant
+            {singleTenant ? "Add user" : "Assign user to tenant"}
           </Button>
           {/* AC-4 / P0-479-2: self-assign is a cross-tenant action — only a
               super_admin (cross-tenant response shape) sees it. */}
-          {crossTenant ? (
+          {crossTenant && !singleTenant ? (
             <Button
               variant="secondary"
               data-testid="open-self-assign"
@@ -302,28 +313,30 @@ export default function UsersPage() {
         </div>
       </div>
 
-      <Alert>
-        <AlertTitle>
-          {crossTenant
-            ? "Cross-tenant view (super admin)"
-            : "Tenant-scoped view"}
-        </AlertTitle>
-        <AlertDescription>
-          {crossTenant ? (
-            <>
-              You are a super admin: this list spans every tenant, and you can
-              assign any identity (including yourself) to any tenant. The server
-              is the authority — actions you are not permitted to take are
-              rejected with a clear error.
-            </>
-          ) : (
-            <>
-              This list is scoped to your tenant. Assignment is limited to your
-              own tenant. Cross-tenant management requires super admin.
-            </>
-          )}
-        </AlertDescription>
-      </Alert>
+      {singleTenant ? null : (
+        <Alert data-testid="users-tenancy-banner">
+          <AlertTitle>
+            {crossTenant
+              ? "Cross-tenant view (super admin)"
+              : "Tenant-scoped view"}
+          </AlertTitle>
+          <AlertDescription>
+            {crossTenant ? (
+              <>
+                You are a super admin: this list spans every tenant, and you can
+                assign any identity (including yourself) to any tenant. The
+                server is the authority — actions you are not permitted to take
+                are rejected with a clear error.
+              </>
+            ) : (
+              <>
+                This list is scoped to your tenant. Assignment is limited to
+                your own tenant. Cross-tenant management requires super admin.
+              </>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Card>
         <CardHeader>
@@ -357,7 +370,9 @@ export default function UsersPage() {
               <TableHeader>
                 <TableRow>
                   <TableHead>User</TableHead>
-                  {crossTenant ? <TableHead>Tenant</TableHead> : null}
+                  {crossTenant && !singleTenant ? (
+                    <TableHead>Tenant</TableHead>
+                  ) : null}
                   <TableHead>Status</TableHead>
                   <TableHead>Roles</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
@@ -378,7 +393,7 @@ export default function UsersPage() {
                         {u.id}
                       </div>
                     </TableCell>
-                    {crossTenant ? (
+                    {crossTenant && !singleTenant ? (
                       <TableCell>
                         <code className="font-mono text-xs">{u.tenant_id}</code>
                       </TableCell>
@@ -494,12 +509,18 @@ export default function UsersPage() {
           <DialogContent data-testid="assign-user-dialog">
             <DialogHeader>
               <DialogTitle>
-                {selfAssign ? "Add me to a tenant" : "Assign user to tenant"}
+                {selfAssign
+                  ? "Add me to a tenant"
+                  : singleTenant
+                    ? "Add user"
+                    : "Assign user to tenant"}
               </DialogTitle>
               <DialogDescription>
                 {selfAssign
                   ? "Grant your own identity a membership + role(s) in a tenant. A re-login is required afterward before the tenant appears in your switcher."
-                  : "Grant a user a membership + role(s) in a tenant. The server enforces authority — cross-tenant assignment requires super admin."}
+                  : singleTenant
+                    ? "Give a user role(s) in your organisation."
+                    : "Grant a user a membership + role(s) in a tenant. The server enforces authority — cross-tenant assignment requires super admin."}
               </DialogDescription>
             </DialogHeader>
             <form
@@ -513,7 +534,7 @@ export default function UsersPage() {
                 }
                 setAssignError(null);
                 assignMutation.mutate({
-                  tenant_id: assignTenantID.trim(),
+                  tenant_id: assignTenant,
                   roles: assignRoles,
                   user_id: selfAssign ? undefined : assignUserID.trim(),
                   self_assign: selfAssign,
@@ -554,57 +575,61 @@ export default function UsersPage() {
                   cross-tenant dropdown; a tenant-admin's tenant is PINNED to
                   their session tenant (read-only, NOT a chooser — P0-527-1 /
                   P0-479-2). */}
-              <div className="space-y-1">
-                <label
-                  htmlFor="assign-tenant-id"
-                  className="text-xs font-medium text-muted-foreground"
-                >
-                  Tenant
-                </label>
-                {tenantMode.kind === "chooser" ? (
-                  <Select
-                    id="assign-tenant-id"
-                    data-testid="assign-tenant-select"
-                    value={assignTenantID}
-                    onChange={(e) => setAssignTenantID(e.target.value)}
-                    aria-describedby={assignErrorId}
+              {/* #1764: one tenant on the install — no tenant field; the
+                  user lands in the sole tenant. */}
+              {tenantMode.kind === "sole" ? null : (
+                <div className="space-y-1">
+                  <label
+                    htmlFor="assign-tenant-id"
+                    className="text-xs font-medium text-muted-foreground"
                   >
-                    <option value="" disabled>
-                      Select a tenant…
-                    </option>
-                    {tenantOpts.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
+                    Tenant
+                  </label>
+                  {tenantMode.kind === "chooser" ? (
+                    <Select
+                      id="assign-tenant-id"
+                      data-testid="assign-tenant-select"
+                      value={assignTenantID}
+                      onChange={(e) => setAssignTenantID(e.target.value)}
+                      aria-describedby={assignErrorId}
+                    >
+                      <option value="" disabled>
+                        Select a tenant…
                       </option>
-                    ))}
-                  </Select>
-                ) : tenantMode.kind === "pinned" ? (
-                  <Input
-                    id="assign-tenant-id"
-                    data-testid="assign-tenant-pinned"
-                    value={tenantMode.tenantId}
-                    readOnly
-                    aria-readonly="true"
-                    spellCheck={false}
-                    className="font-mono text-xs text-muted-foreground"
-                  />
-                ) : (
-                  <Input
-                    id="assign-tenant-id"
-                    data-testid="assign-tenant-unresolved"
-                    value=""
-                    readOnly
-                    aria-readonly="true"
-                    placeholder="resolving your session tenant…"
-                  />
-                )}
-                {tenantMode.kind === "pinned" ? (
-                  <p className="text-[11px] text-muted-foreground">
-                    Pinned to your tenant. Cross-tenant assignment requires
-                    super admin.
-                  </p>
-                ) : null}
-              </div>
+                      {tenantOpts.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </Select>
+                  ) : tenantMode.kind === "pinned" ? (
+                    <Input
+                      id="assign-tenant-id"
+                      data-testid="assign-tenant-pinned"
+                      value={tenantMode.tenantId}
+                      readOnly
+                      aria-readonly="true"
+                      spellCheck={false}
+                      className="font-mono text-xs text-muted-foreground"
+                    />
+                  ) : (
+                    <Input
+                      id="assign-tenant-id"
+                      data-testid="assign-tenant-unresolved"
+                      value=""
+                      readOnly
+                      aria-readonly="true"
+                      placeholder="resolving your session tenant…"
+                    />
+                  )}
+                  {tenantMode.kind === "pinned" ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Pinned to your tenant. Cross-tenant assignment requires
+                      super admin.
+                    </p>
+                  ) : null}
+                </div>
+              )}
               <fieldset className="space-y-2" aria-describedby={assignErrorId}>
                 <legend className="text-xs font-medium text-muted-foreground">
                   Roles (select one or more)
@@ -760,7 +785,7 @@ export default function UsersPage() {
                 <div className="font-mono text-xs text-muted-foreground">
                   {revokeTarget.id}
                 </div>
-                {revokeTarget.tenant_id ? (
+                {revokeTarget.tenant_id && !singleTenant ? (
                   <div>
                     <span className="font-medium">Tenant:</span>{" "}
                     <code className="font-mono text-xs">
