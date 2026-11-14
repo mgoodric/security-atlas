@@ -91,7 +91,10 @@ docker compose -f deploy/docker/docker-compose.yml logs --no-log-prefix atlas-bo
 
 Open <http://localhost:3000> and sign in with `ATLAS_DEFAULT_USER_EMAIL`
 and `ATLAS_DEFAULT_USER_PASSWORD` from your `.env`. If the first sign-in
-fails, see [First-time login](troubleshooting/first-login.md).
+fails, see [First-time login](troubleshooting/first-login.md). Its
+`credentials issue --reset-bootstrap` recovery currently answers 401
+([#2121](https://github.com/mgoodric/security-atlas/issues/2121)); the
+page's other recovery steps still apply.
 
 Three kinds of credential reach the platform, and each later step needs
 a particular one:
@@ -105,18 +108,28 @@ a particular one:
 The REST API rejects API keys, and the gRPC push endpoint accepts only
 API keys. [OAuth grants](oauth-grants.md) covers the OAuth flows.
 
-To get a user token in a shell, sign in from a script. Put your
-credentials in the environment first:
+To get a user token in a shell, sign in from a script. The password is
+read at a prompt, so it stays out of your shell history and out of every
+command's arguments:
 
 ```sh
 export ATLAS=http://localhost:8080
 export ATLAS_EMAIL=<ATLAS_DEFAULT_USER_EMAIL>
-export ATLAS_PASSWORD=<ATLAS_DEFAULT_USER_PASSWORD>
+printf 'Password: '; read -rs ATLAS_PASSWORD; echo; export ATLAS_PASSWORD
 
-TOKEN=$(jq -n --arg e "$ATLAS_EMAIL" --arg p "$ATLAS_PASSWORD" '{email: $e, password: $p}' \
+TOKEN=$(jq -n '{email: env.ATLAS_EMAIL, password: env.ATLAS_PASSWORD}' \
   | curl -fsS -X POST "$ATLAS/auth/local/login" -H 'Content-Type: application/json' -d @- \
   | jq -r .token)
+unset ATLAS_PASSWORD
 ```
+
+`$TOKEN` is your own admin session, for this interactive first run only.
+Keep it in this shell: never write it to a file, a CI secret or a cron
+job. Automation gets its own credential, an OAuth client or a scoped API
+key. The commands below pass it as `-H "Authorization: Bearer $TOKEN"`
+or `--token "$TOKEN"`, which puts it in the process's arguments, where
+other users of the same host can read it with `ps`; run them on a host
+only you use.
 
 The token lasts one hour; run the same command again when a call starts
 answering 401. `tenant_id` may be left out of the login body while the
@@ -322,13 +335,23 @@ is planned as tenant overlay edges
 Evidence lands in an append-only ledger. A first record is one manual
 attestation, pushed with an API key:
 [Push a first manual attestation](first-manual-attestation.md) walks
-through issuing the key with the bootstrap token (`ATLAS_BOOTSTRAP_TOKEN`
-in your `.env`), the payload, and the common rejections. In short:
+through issuing the key, the payload, and the common rejections.
+
+Issuing the key takes an admin bearer, which on a new install is the
+bootstrap token: `ATLAS_BOOTSTRAP_TOKEN` in your `.env`, or on a native
+install the `bootstrap credential issued` line in the server log. Paste
+it at the prompt; the CLI reads it from `SECURITY_ATLAS_TOKEN`, so it
+never appears in the command's arguments. In short:
 
 ```sh
 export SECURITY_ATLAS_ENDPOINT=localhost:50051
-export SECURITY_ATLAS_TOKEN=$(atlas-cli credentials issue --insecure \
-  --token "<ATLAS_BOOTSTRAP_TOKEN>" --kinds manual.attestation.v1 --ttl 720h | jq -r .bearerToken)
+printf 'Bootstrap token: '; read -rs BOOTSTRAP_TOKEN; echo
+
+KEY_JSON=$(SECURITY_ATLAS_TOKEN="$BOOTSTRAP_TOKEN" atlas-cli credentials issue --insecure \
+  --kinds manual.attestation.v1 --ttl 24h)
+KEY_ID=$(jq -r .handle.id <<<"$KEY_JSON")
+export SECURITY_ATLAS_TOKEN=$(jq -r .bearerToken <<<"$KEY_JSON")
+unset KEY_JSON
 
 cat > attestation.json <<'EOF'
 {
@@ -348,10 +371,20 @@ atlas-cli evidence push --insecure \
 # { "recordId": "…", "hash": "…", "ingestedAt": "…", "credentialId": "key_…" }
 ```
 
-`--control` must be the control's UUID. A bundle ID is accepted but the
-record is not linked to the control
-([#2100](https://github.com/mgoodric/security-atlas/issues/2100)).
-`--ttl` takes hours: `720h`, not `30d`.
+`--control` takes the control's UUID or its bundle ID
+(`acme_mfa_all_staff`); either links the record to the control.
+
+The key exists for this first push. Keep it in this shell, never in a
+shell rc file, and revoke it once the push has landed:
+
+```sh
+SECURITY_ATLAS_TOKEN="$BOOTSTRAP_TOKEN" atlas-cli credentials revoke --insecure --id "$KEY_ID"
+# revoked key_…
+unset BOOTSTRAP_TOKEN SECURITY_ATLAS_TOKEN
+```
+
+A key that pushes on a schedule belongs in your secret manager, issued
+for that job alone.
 
 Two more sources of evidence:
 
@@ -485,8 +518,11 @@ curl -fsS -H "Authorization: Bearer $TOKEN" "$ATLAS/v1/audit-periods" | jq -c '.
   quarterly pack from the same data.
 - **Assistant access.** [MCP server](mcp.md) lets Claude Desktop or
   Claude Code query and update your program.
-- **Single sign-on.** [Connect an external IdP](oidc-setup.md) replaces
-  local sign-in.
+- **Single sign-on.** [Connect an external IdP](oidc-setup.md) is meant
+  to replace local sign-in. Today the IdP set on the admin SSO page does
+  not reach production sign-in
+  ([#2034](https://github.com/mgoodric/security-atlas/issues/2034)), so
+  keep local sign-in until that lands.
 - **A populated demo.** To see every page with data before your own is
   in, [load the demo dataset](https://github.com/mgoodric/security-atlas/blob/main/docs/getting-started/demo-seed.md)
   into a separate install.
