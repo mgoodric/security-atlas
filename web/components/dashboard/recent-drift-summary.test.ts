@@ -48,11 +48,17 @@ describe("summarizeDrift", () => {
     });
   });
 
+  test("zero gains is unsigned", () => {
+    expect(summarizeDrift(report([], ["d"])).label).toBe(
+      "0 started passing · 1 stopped passing",
+    );
+  });
+
   test("an upstream without started_passing counts zero gains", () => {
     const old = report([], ["d"]) as Partial<DriftReport>;
     delete old.started_passing;
     expect(summarizeDrift(old as DriftReport).label).toBe(
-      "+0 started passing · 1 stopped passing",
+      "0 started passing · 1 stopped passing",
     );
   });
 });

@@ -6,12 +6,16 @@
 // (slice 016 drift read model). #2063: the headline is gains and losses
 // counted from the two lists below it ("+3 started passing · 1 stopped
 // passing"), each count linking to its list. The bare net delta is gone:
-// beside a loss list it read as a contradiction. Fully bound — no gap.
+// beside a loss list it read as a contradiction. A zero count has no list
+// to link to, so it renders as plain text. Fully bound — no gap.
 
 import Link from "next/link";
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
-import { summarizeDrift } from "@/components/dashboard/recent-drift-summary";
+import {
+  gainsCount,
+  summarizeDrift,
+} from "@/components/dashboard/recent-drift-summary";
 import type { DriftReport } from "@/lib/api/dashboard";
 
 export function RecentDriftPanel({
@@ -35,13 +39,17 @@ export function RecentDriftPanel({
             className="font-mono text-xs text-muted-foreground"
             data-testid="drift-summary"
           >
-            <a href="#recent-drift-gains" className="hover:underline">
-              +{summary.gains} started passing
-            </a>
+            <CountLink
+              href="#recent-drift-gains"
+              text={`${gainsCount(summary.gains)} started passing`}
+              linked={summary.gains > 0}
+            />
             {" · "}
-            <a href="#recent-drift-losses" className="hover:underline">
-              {summary.losses} stopped passing
-            </a>
+            <CountLink
+              href="#recent-drift-losses"
+              text={`${summary.losses} stopped passing`}
+              linked={summary.losses > 0}
+            />
           </span>
         ) : null
       }
@@ -118,5 +126,22 @@ export function RecentDriftPanel({
         </>
       )}
     </PanelCard>
+  );
+}
+
+function CountLink({
+  href,
+  text,
+  linked,
+}: {
+  href: string;
+  text: string;
+  linked: boolean;
+}) {
+  if (!linked) return <span>{text}</span>;
+  return (
+    <a href={href} className="hover:underline">
+      {text}
+    </a>
   );
 }

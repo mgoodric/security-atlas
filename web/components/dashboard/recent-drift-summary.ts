@@ -22,6 +22,11 @@ export function summarizeDrift(report: DriftReport): DriftSummary {
   return {
     gains,
     losses,
-    label: `+${gains} started passing · ${losses} stopped passing`,
+    label: `${gainsCount(gains)} started passing · ${losses} stopped passing`,
   };
+}
+
+// A gain count is signed only when there is a gain: "+3", but "0".
+export function gainsCount(gains: number): string {
+  return gains > 0 ? `+${gains}` : "0";
 }
