@@ -183,4 +183,17 @@ describe("initLoginFlow + completeLoginFlow sessionStorage discipline", () => {
       "00000000-0000-0000-0000-000000000002",
     );
   });
+
+  it("initLoginFlow omits tenant_id when no tenant is given (#1761)", async () => {
+    const { initLoginFlow } = await import("./oauth-client");
+    await initLoginFlow({
+      issuer: "https://atlas.example.test",
+      clientId: "client-789",
+      redirectUri: "https://atlas.example.test/oauth/callback",
+    });
+    expect(assignSpy).toHaveBeenCalledOnce();
+    const url = new URL(assignSpy.mock.calls[0][0] as string);
+    expect(url.pathname).toBe("/oauth/authorize");
+    expect(url.searchParams.has("tenant_id")).toBe(false);
+  });
 });

@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -210,8 +211,14 @@ type Store struct {
 // even if its in-memory record outlived the revocation. Credentials with no
 // user (UserID is their own "key_..." id: the env bootstrap key, recovery
 // keys, admin-issued push keys) skip it.
+//
+// keyID is the credential's id when the store holds an api_keys row for it,
+// and empty for a memory-only credential. With a keyID the gate also refuses
+// a key whose row is revoked (#1947): RevokeUserInMemory reaches only the
+// replica that ran the deactivation, so on every other replica the durable
+// revoked_at is what keeps the key dead once the user is re-activated.
 type UserGate interface {
-	UserCanAuthenticate(tenantID, userID string) (bool, error)
+	UserCanAuthenticate(tenantID, userID, keyID string) (bool, error)
 }
 
 // SetUserGate wires the user-status check. Nil disables it.
@@ -330,6 +337,26 @@ func (s *Store) Issue(tenantID, scope string, kinds []string, ttl time.Duration)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.issueLocked(tenantID, scope, kinds, ttl, "", false, false, nil)
+}
+
+// IssueMinted is Issue with the minting admin recorded in MintedBy, the
+// gRPC AdminCredentialsService.Issue path (#1947). mintedBy is a users(id)
+// uuid or empty, and is attribution only: the key stays a machine key whose
+// UserID is its own id, so it never acts as the minter and keeps working
+// after the minter is disabled. Operators revoke such keys deliberately.
+func (s *Store) IssueMinted(tenantID, scope string, kinds []string, ttl time.Duration, mintedBy string) (Credential, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cred, token, r, err := s.buildLocked(tenantID, scope, kinds, ttl, "", false, false, nil)
+	if err != nil {
+		return Credential{}, "", err
+	}
+	cred.MintedBy = mintedBy
+	r.cred = cred
+	if err := s.commitLocked(cred, r); err != nil {
+		return Credential{}, "", err
+	}
+	return cred, token, nil
 }
 
 // IssueAdmin mints an admin-flagged credential for tenantID. Admin
@@ -593,12 +620,16 @@ func (s *Store) RebindUserIDForTests(token, userID string) error {
 // the lock so a slow DB never stalls other lookups. A deactivated owner
 // refuses with ErrUnknownKey; a gate error fails closed.
 func (s *Store) Authenticate(token string) (Credential, error) {
-	cred, gate, err := s.authenticateLocked(token)
+	cred, gate, persisted, err := s.authenticateLocked(token)
 	if err != nil {
 		return Credential{}, err
 	}
 	if gate != nil && OwnedByUser(cred) {
-		ok, gerr := gate.UserCanAuthenticate(cred.TenantID, cred.UserID)
+		keyID := ""
+		if persisted {
+			keyID = cred.ID
+		}
+		ok, gerr := gate.UserCanAuthenticate(cred.TenantID, cred.UserID, keyID)
 		if gerr != nil {
 			return Credential{}, fmt.Errorf("credstore: user gate: %w", gerr)
 		}
@@ -609,21 +640,37 @@ func (s *Store) Authenticate(token string) (Credential, error) {
 	return cred, nil
 }
 
-func (s *Store) authenticateLocked(token string) (Credential, UserGate, error) {
+func (s *Store) authenticateLocked(token string) (Credential, UserGate, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.lookupTokenLocked(token)
 	if !ok || r.state == stateRevoked {
-		return Credential{}, nil, ErrUnknownKey
+		return Credential{}, nil, false, ErrUnknownKey
 	}
 	if !r.retiresAt.IsZero() && time.Now().UTC().After(r.retiresAt) {
-		return Credential{}, nil, ErrUnknownKey
+		return Credential{}, nil, false, ErrUnknownKey
 	}
 	if r.cred.expired(time.Now().UTC()) {
-		return Credential{}, nil, ErrUnknownKey
+		return Credential{}, nil, false, ErrUnknownKey
 	}
 	r.cred.LastUsedAt = time.Now().UTC()
-	return r.cred, s.gate, nil
+	return r.cred, s.gate, r.persisted, nil
+}
+
+// MinterUserID returns the users(id) uuid behind the caller c, for
+// api_keys.minted_by (attribution only, never the new key's identity), or
+// "" when the caller is not a user. A JWT carries "user:<uuid>"; a key
+// issued by a user carries the bare uuid; a bootstrap or machine
+// credential carries neither and records no minter.
+func MinterUserID(c Credential) string {
+	id := strings.TrimPrefix(c.UserID, "user:")
+	if id == c.ID {
+		return ""
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return ""
+	}
+	return id
 }
 
 // OwnedByUser reports whether c belongs to a user: its UserID is a users(id)

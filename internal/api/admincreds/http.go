@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
@@ -98,14 +99,20 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 	}
 	// requireAdmin returning true guarantees the credential is in context.
 	cred, _ := authctx.CredentialFromContext(r.Context())
-	issued, plain, err := h.store.Issue(r.Context(), cred.TenantID, apikeystore.IssueInput{
+	in := apikeystore.IssueInput{
 		ScopePredicate: req.ScopePredicate,
 		AllowedKinds:   req.AllowedKinds,
 		TTL:            time.Duration(req.TTLSeconds) * time.Second,
 		IsAdmin:        req.IsAdmin,
 		IsApprover:     req.IsApprover,
 		OwnerRoles:     req.OwnerRoles,
-	})
+	}
+	// The minting admin is attribution only (#1947): the key is a machine
+	// key, not the admin's, and keeps working after the admin is disabled.
+	if m, merr := uuid.Parse(credstore.MinterUserID(cred)); merr == nil {
+		in.MintedBy = &m
+	}
+	issued, plain, err := h.store.Issue(r.Context(), cred.TenantID, in)
 	if err != nil {
 		httperr.WriteInternal(w, r, "issue failed", err)
 		return
