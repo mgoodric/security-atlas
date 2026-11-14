@@ -14,3 +14,4 @@ export {
 } from "./oauth.js";
 
 export type { OAuthClientOptions } from "./oauth.js";
+// #2099 throwaway demo: unclassified code path
