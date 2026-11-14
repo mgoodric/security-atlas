@@ -12,7 +12,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
+	"google.golang.org/protobuf/encoding/protojson"
 
+	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
 	"github.com/mgoodric/security-atlas/internal/api"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -207,8 +209,12 @@ func TestCredentialsCommands_NoTenant_DefaultToCredentialTenant(t *testing.T) {
 		cmd.SetArgs(nil)
 		return cmd.Execute()
 	})
-	if !strings.Contains(issued, `"tenantId": "`+soloTenant.ID.String()+`"`) {
-		t.Fatalf("issue output = %s, want a key in tenant %s", issued, soloTenant.ID)
+	var issueResp adminv1.IssueResponse
+	if err := protojson.Unmarshal([]byte(issued), &issueResp); err != nil {
+		t.Fatalf("parse issue output %s: %v", issued, err)
+	}
+	if got := issueResp.GetHandle().GetTenantId(); got != soloTenant.ID.String() {
+		t.Fatalf("issued key tenant = %s, want %s", got, soloTenant.ID)
 	}
 
 	listed := captureStdout(t, func() error {
@@ -216,8 +222,17 @@ func TestCredentialsCommands_NoTenant_DefaultToCredentialTenant(t *testing.T) {
 		cmd.SetArgs(nil)
 		return cmd.Execute()
 	})
-	if got := strings.Count(listed, `"tenantId": "`+soloTenant.ID.String()+`"`); got != 2 {
-		t.Fatalf("list output = %s, want the 2 keys of tenant %s (bootstrap + issued)", listed, soloTenant.ID)
+	var listResp adminv1.ListResponse
+	if err := protojson.Unmarshal([]byte(listed), &listResp); err != nil {
+		t.Fatalf("parse list output %s: %v", listed, err)
+	}
+	if n := len(listResp.GetHandles()); n != 2 {
+		t.Fatalf("listed %d keys, want the 2 of tenant %s (bootstrap + issued)", n, soloTenant.ID)
+	}
+	for _, h := range listResp.GetHandles() {
+		if h.GetTenantId() != soloTenant.ID.String() {
+			t.Errorf("listed key %s in tenant %s, want %s", h.GetId(), h.GetTenantId(), soloTenant.ID)
+		}
 	}
 }
 

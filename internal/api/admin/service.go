@@ -36,11 +36,18 @@ func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv
 	if err != nil {
 		return nil, err
 	}
+	// A nil ttl is 0, "no expiry". A negative one is refused, matching the
+	// HTTP path's ttl_seconds >= 0 (#1906). AsDuration saturates rather
+	// than wrapping, so no upper bound is needed here (#1914 D3).
+	ttl := req.GetTtl().AsDuration()
+	if ttl < 0 {
+		return nil, status.Error(codes.InvalidArgument, "ttl must not be negative")
+	}
 	var minter string
 	if caller, ok := authctx.CredentialFromContext(ctx); ok {
 		minter = credstore.MinterUserID(caller)
 	}
-	cred, bearer, err := s.store.IssueMinted(tenant, req.GetScopePredicate(), req.GetKinds(), req.GetTtl().AsDuration(), minter)
+	cred, bearer, err := s.store.IssueMinted(tenant, req.GetScopePredicate(), req.GetKinds(), ttl, minter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue: %v", err)
 	}
