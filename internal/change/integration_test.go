@@ -12,8 +12,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/change"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 )
 
 var cleanupTables = []string{
@@ -24,6 +26,44 @@ var cleanupTables = []string{
 	"evidence_records",
 	"controls",
 	"users",
+}
+
+// newStore builds the production wiring: a change store writing evidence
+// through an ingest.Service over the app role, validated by the DB-backed
+// schema registry seeded with the bundled platform schemas.
+func newStore(t *testing.T, admin, app *pgxpool.Pool) *change.Store {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	reg := schemaregistry.NewService(admin)
+	if _, _, err := reg.ImportPlatformSchemas(ctx, schemaregistry.PlatformSchemasFS()); err != nil {
+		t.Fatalf("ImportPlatformSchemas: %v", err)
+	}
+	return change.NewStore(app).WithIngest(ingest.New(app, reg))
+}
+
+// auditDecisions returns the evidence_audit_log decisions recorded for an
+// idempotency key, oldest first.
+func auditDecisions(t *testing.T, admin *pgxpool.Pool, tenant, idemKey string) []string {
+	t.Helper()
+	rows, err := admin.Query(context.Background(), `
+		SELECT decision FROM evidence_audit_log
+		WHERE tenant_id = $1 AND idempotency_key = $2
+		ORDER BY received_at
+	`, tenant, idemKey)
+	if err != nil {
+		t.Fatalf("query evidence_audit_log: %v", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			t.Fatalf("scan audit row: %v", err)
+		}
+		out = append(out, d)
+	}
+	return out
 }
 
 func seedTenant(t *testing.T, admin *pgxpool.Pool) string {
@@ -77,7 +117,7 @@ func TestCreateApproveImplementVerify_EmitsCC8Evidence(t *testing.T) {
 	tenant := seedTenant(t, admin)
 	actor := seedUser(t, admin, tenant)
 	controlID := seedControl(t, admin, tenant)
-	store := change.NewStore(app)
+	store := newStore(t, admin, app)
 	ctx := ctxFor(t, tenant)
 
 	ch, err := store.Create(ctx, validCreate(actor, controlID))
@@ -140,7 +180,7 @@ func TestImportJira_MapsTicketToProposedChange(t *testing.T) {
 	tenant := seedTenant(t, admin)
 	actor := seedUser(t, admin, tenant)
 	controlID := seedControl(t, admin, tenant)
-	store := change.NewStore(app)
+	store := newStore(t, admin, app)
 
 	changes, err := store.ImportJira(ctxFor(t, tenant), actor, []change.JiraTicket{{
 		TicketKey: "CHG-42",
@@ -166,7 +206,7 @@ func TestImportCSV_CreatesManualFallbackRecords(t *testing.T) {
 	tenant := seedTenant(t, admin)
 	actor := seedUser(t, admin, tenant)
 	controlID := seedControl(t, admin, tenant)
-	store := change.NewStore(app)
+	store := newStore(t, admin, app)
 
 	body := "title,description,control_id,source_ref,risk_notes,rollback_notes\n" +
 		"Patch SSO routing,Change from CSV," + controlID.String() + ",CSV-1,Low risk,Revert routing\n"
@@ -186,7 +226,7 @@ func TestRLS_CrossTenantChangeIsolation(t *testing.T) {
 	tenantB := seedTenant(t, admin)
 	actorA := seedUser(t, admin, tenantA)
 	controlA := seedControl(t, admin, tenantA)
-	store := change.NewStore(app)
+	store := newStore(t, admin, app)
 
 	ch, err := store.Create(ctxFor(t, tenantA), validCreate(actorA, controlA))
 	if err != nil {
@@ -201,5 +241,82 @@ func TestRLS_CrossTenantChangeIsolation(t *testing.T) {
 	}
 	if len(rows) != 0 {
 		t.Fatalf("tenant B saw %d tenant A changes", len(rows))
+	}
+}
+
+// #1830: change evidence goes through ingest.Service.ProcessInTx, so a
+// backdated approval is refused with ErrObservedAtSkew, the transition
+// rolls back, and the refusal leaves an evidence_audit_log row.
+func TestApprove_BackdatedEvidenceRefusedAndAudited(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := seedTenant(t, admin)
+	actor := seedUser(t, admin, tenant)
+	controlID := seedControl(t, admin, tenant)
+	store := newStore(t, admin, app)
+	ctx := ctxFor(t, tenant)
+
+	ch, err := store.Create(ctx, validCreate(actor, controlID))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	backdated := time.Now().Add(-ingest.MaxObservedAtSkew - time.Hour)
+	if _, err := store.Approve(ctx, ch.ID, actor, backdated); !errors.Is(err, ingest.ErrObservedAtSkew) {
+		t.Fatalf("backdated Approve: got %v, want ErrObservedAtSkew", err)
+	}
+	got, err := store.Get(ctx, ch.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != change.StatusProposed {
+		t.Fatalf("status after refused approval = %q, want proposed (transition rolled back)", got.Status)
+	}
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+		t.Fatalf("count evidence: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("evidence rows after refusal = %d, want 0", n)
+	}
+	idem := "change:" + ch.ID.String() + ":" + controlID.String() + ":" + change.ActionApproved
+	if d := auditDecisions(t, admin, tenant, idem); len(d) != 1 || d[0] != "rejected_observed_at_skew" {
+		t.Fatalf("audit decisions = %v, want [rejected_observed_at_skew]", d)
+	}
+
+	// The same approval at the current time is accepted and audited in
+	// the transition's transaction.
+	if _, err := store.Approve(ctx, ch.ID, actor, time.Now()); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+	if d := auditDecisions(t, admin, tenant, idem); len(d) != 2 || d[1] != "accepted" {
+		t.Fatalf("audit decisions = %v, want [rejected_observed_at_skew accepted]", d)
+	}
+}
+
+// #1830: a store built without an ingest service fails closed instead of
+// writing the ledger some other way.
+func TestApprove_WithoutIngestFailsClosed(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := seedTenant(t, admin)
+	actor := seedUser(t, admin, tenant)
+	controlID := seedControl(t, admin, tenant)
+	store := change.NewStore(app)
+	ctx := ctxFor(t, tenant)
+
+	ch, err := store.Create(ctx, validCreate(actor, controlID))
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if _, err := store.Approve(ctx, ch.ID, actor, time.Now()); !errors.Is(err, ingest.ErrUnavailable) {
+		t.Fatalf("Approve without ingest: got %v, want ErrUnavailable", err)
+	}
+	got, err := store.Get(ctx, ch.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != change.StatusProposed {
+		t.Fatalf("status = %q, want proposed", got.Status)
 	}
 }

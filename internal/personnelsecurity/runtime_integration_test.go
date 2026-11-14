@@ -122,7 +122,7 @@ func TestWorkerEventThroughIngestionPathCreatesChecklistOnce(t *testing.T) {
 		conn.Close()
 	})
 
-	store := personnelsecurity.NewStore(app)
+	store := newStore(t, migrate, app, time.Now().UTC())
 	sub := personnelsecurity.NewWorkerEventSubscriber(conn.Stream(), conn.Cfg().Subject, store, testLogger(t))
 	subCtx, subCancel := context.WithCancel(context.Background())
 	t.Cleanup(subCancel)
@@ -234,7 +234,7 @@ func TestOverdueSweepNotifiesOnceAndIsolatesTenants(t *testing.T) {
 	userB := seedActiveUser(t, migrate, tenantB)
 
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	store := personnelsecurity.NewStore(app).WithClock(func() time.Time { return now })
+	store := newStore(t, migrate, app, now)
 
 	w := worker.Worker{
 		SourceHRIS: worker.HRISBambooHR,
