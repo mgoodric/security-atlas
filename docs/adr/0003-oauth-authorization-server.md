@@ -330,6 +330,19 @@ revoked), and nothing recorded who minted it.
   The response says which happened (`revoked_credential_ids`,
   `recovery_key_kept`). The documented step is to sign in another way and
   revoke it: `atlas-cli credentials revoke --id <credential_id>`.
+  `mark-first-signin` requires an admin credential (#1906), so a
+  low-privilege key cannot call it first and revoke the recovery key out
+  from under the operator. The recovery key is itself an admin key.
+- **Rotation keeps the bound and the marker.** `Rotate` gives a recovery
+  key's successor the same TTL, counted from the successor's own issue
+  time, so it gets a fresh window. The successor keeps the
+  `bootstrap-recovery` marker, so the next reset or first sign-in still
+  revokes it.
+- **Revocation is install-wide.** Both revocations above match every live
+  recovery key on the install, across tenants, not only the caller's
+  tenant. The reset clears install-wide markers and rewrites the
+  install's one bootstrap-token file, so its recovery keys are an
+  install-wide set.
 - **Traceable.** The mint is logged at Info with `credential_id`,
   `tenant_id`, `expires_at`, the caller's credential id and subject, and the
   ids it revoked. The bearer is never logged, in whole or in part. A caller
@@ -396,7 +409,47 @@ again on those replicas until restart.
   checking the owner's status. Reprovisioning the user therefore cannot
   bring a revoked key back on any replica. The cost is one primary-key read
   per authentication of a user-owned key. Machine keys skip the gate as
-  before.
+  before. (#1964 closes that gap for machine keys; see the next
+  amendment.)
+
+## Amendment (2026-11-13, #1964): revocation holds on every replica for every persisted key
+
+The #1947 amendment left machine keys out of the per-request gate. A
+machine key (admin-minted, which can carry `is_admin`, or a push key) is
+rehydrated from `api_keys` into every replica's credstore at boot. Revoking
+it updated `api_keys` and the memory of the replica that ran the revoke,
+and every other replica kept authenticating it until it restarted. Under
+the #1947 decision that operators revoke these keys deliberately,
+deliberate revocation is the only control, so it has to hold everywhere.
+
+**Decision.**
+
+- **Every persisted key reads its own `api_keys` row on each
+  authentication.** The credstore gate now covers a key with no user when
+  the store holds a row for it. The key is refused when `revoked_at` is set
+  or the row is missing, and a lookup error fails closed. User-owned keys
+  keep the #1947 check.
+- **Staleness bound: none beyond the next request.** The read is uncached,
+  so once the revoke commits, the next authentication of that key on any
+  replica is refused. The cost is one primary-key read per authentication
+  of a persisted machine key, the same read user-owned keys already pay.
+- **Memory-only keys are unchanged.** The env bootstrap key and other
+  `IssueFixedAdmin` credentials have no row and are never gated. They are
+  re-minted from the environment each boot, so an operator removes one by
+  changing the environment and restarting every replica.
+
+**Operator guidance.** `atlas-cli credentials revoke --id <credential_id>`
+or `POST /v1/admin/credentials/{id}/revoke` on any one replica stops the
+key on all replicas from the next request. No restart is needed.
+
+**Rejected: a short TTL cache in front of the read.** It would trade a
+seconds-long window in which a revoked admin key still works for one
+indexed read per request. The user-owned path already pays that read
+uncached, and nothing measured shows it matters.
+
+**Rejected: a revocation generation or LISTEN/NOTIFY.** Either adds a
+channel whose failure mode is a key that stays live with no error.
+Reading the row needs no new infrastructure and fails closed.
 
 **Rejected: revoke minted keys when the minter is disabled.** The model is
 simpler, but it turns staff offboarding into an ingestion outage, and the

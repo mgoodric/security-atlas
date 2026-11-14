@@ -82,7 +82,8 @@ type PutInput struct {
 	// UploadedBy is the credential id of the actor.
 	UploadedBy string
 	// Body is the raw blob bytes. The Store writes them to S3 then
-	// inserts the metadata row.
+	// inserts the metadata row. Put only; PutReader takes the body as
+	// a reader and requires this to be nil.
 	Body []byte
 }
 

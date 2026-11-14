@@ -2,14 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc6_5_asset_disposal
 title: "Decommissioned media and devices are securely wiped"
 description: |
-  The entity discontinues logical and physical protections over
-  physical assets only after the ability to read or recover data has
-  been diminished (TSC CC6.5). The owner uploads quarterly evidence of
-  device disposal — laptops returned by terminated employees and wiped,
-  storage media physically destroyed, EBS volumes deleted — including
-  serial numbers, dates, and disposal method. For cloud-native orgs the
-  bulk of this evidence is the storage-deletion log from the cloud
-  provider.
+  Devices and media are wiped or destroyed before they leave the
+  organisation's protection (TSC CC6.5). The owner uploads quarterly
+  evidence of device disposal — laptops returned by terminated employees
+  and wiped, storage media physically destroyed, EBS volumes deleted —
+  including serial numbers, dates, and disposal method. For cloud-native
+  orgs the bulk of this evidence is the storage-deletion log from the
+  cloud provider.
 
 scf_anchor_id: AST-09
 control_family: AST

@@ -19,6 +19,16 @@ data:
   # --- artifact store (slice 036) ---
   ARTIFACTS_BUCKET: {{ .Values.artifacts.bucket | quote }}
   ARTIFACTS_S3_ENDPOINT: {{ include "security-atlas.s3Endpoint" . | quote }}
+  {{- with .Values.artifacts.s3PublicEndpoint }}
+  ARTIFACTS_S3_PUBLIC_ENDPOINT: {{ . | quote }}
+  {{- end }}
+  {{- $pathStyle := toString .Values.artifacts.forcePathStyle }}
+  {{- if ne $pathStyle "" }}
+  {{- if not (has $pathStyle (list "true" "false")) }}
+  {{- fail (printf "artifacts.forcePathStyle must be true, false or empty, got %q" $pathStyle) }}
+  {{- end }}
+  ARTIFACTS_S3_FORCE_PATH_STYLE: {{ $pathStyle | quote }}
+  {{- end }}
   AWS_REGION: {{ .Values.artifacts.region | quote }}
   # --- bootstrap / first-boot seed (consumed by the migration Job) ---
   ATLAS_BOOTSTRAP_TENANT: {{ .Values.bootstrap.tenantId | quote }}

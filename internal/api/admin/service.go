@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/google/uuid"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -31,14 +32,22 @@ func New(store *credstore.Store) *Service {
 // A user caller is recorded as the key's minter, for attribution only
 // (#1947): the key outlives that user's access.
 func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv1.IssueResponse, error) {
-	if req.GetTenantId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "tenant_id is required")
+	tenant, err := requestTenant(ctx, req.GetTenantId())
+	if err != nil {
+		return nil, err
+	}
+	// A nil ttl is 0, "no expiry". A negative one is refused, matching the
+	// HTTP path's ttl_seconds >= 0 (#1906). AsDuration saturates rather
+	// than wrapping, so no upper bound is needed here (#1914 D3).
+	ttl := req.GetTtl().AsDuration()
+	if ttl < 0 {
+		return nil, status.Error(codes.InvalidArgument, "ttl must not be negative")
 	}
 	var minter string
 	if caller, ok := authctx.CredentialFromContext(ctx); ok {
 		minter = credstore.MinterUserID(caller)
 	}
-	cred, bearer, err := s.store.IssueMinted(req.GetTenantId(), req.GetScopePredicate(), req.GetKinds(), req.GetTtl().AsDuration(), minter)
+	cred, bearer, err := s.store.IssueMinted(tenant, req.GetScopePredicate(), req.GetKinds(), ttl, minter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue: %v", err)
 	}
@@ -82,16 +91,33 @@ func (s *Service) Revoke(_ context.Context, req *adminv1.RevokeRequest) (*adminv
 }
 
 // List enumerates active credentials for a tenant. No tokens returned.
-func (s *Service) List(_ context.Context, req *adminv1.ListRequest) (*adminv1.ListResponse, error) {
-	if req.GetTenantId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "tenant_id is required")
+func (s *Service) List(ctx context.Context, req *adminv1.ListRequest) (*adminv1.ListResponse, error) {
+	tenant, err := requestTenant(ctx, req.GetTenantId())
+	if err != nil {
+		return nil, err
 	}
-	creds := s.store.List(req.GetTenantId())
+	creds := s.store.List(tenant)
 	handles := make([]*adminv1.ApiKeyHandle, 0, len(creds))
 	for _, c := range creds {
 		handles = append(handles, handleFromCred(c))
 	}
 	return &adminv1.ListResponse{Handles: handles}, nil
+}
+
+// requestTenant is the tenant an Issue or List acts in: tenant_id when the
+// request names one, otherwise the caller's own credential tenant, so a CLI
+// on a single-tenant install need not name it (#1762). A caller with no
+// tenant (the all-zeros id a super_admin JWT carries outside any tenant)
+// must name one.
+func requestTenant(ctx context.Context, requested string) (string, error) {
+	if requested != "" {
+		return requested, nil
+	}
+	if caller, ok := authctx.CredentialFromContext(ctx); ok &&
+		caller.TenantID != "" && caller.TenantID != uuid.Nil.String() {
+		return caller.TenantID, nil
+	}
+	return "", status.Error(codes.InvalidArgument, "tenant_id is required")
 }
 
 func handleFromCred(c credstore.Credential) *adminv1.ApiKeyHandle {

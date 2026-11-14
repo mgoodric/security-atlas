@@ -70,19 +70,21 @@ For anything beyond a throwaway cluster, use a pre-created Secret — see
 Every key is documented inline in [`values.yaml`](./values.yaml). The
 high-traffic ones:
 
-| Key                                                  | Default                                                     | Purpose                                                              |
-| ---------------------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------------------------- |
-| `image.registry` / `image.repository` / `image.tag`  | `ghcr.io` / `mgoodric/security-atlas` / `""` (= appVersion) | First-party image coordinates.                                       |
-| `atlas.replicaCount` / `web.replicaCount`            | `1` / `1`                                                   | Stateless-tier scale-out.                                            |
-| `postgres.host` / `.port` / `.database` / `.sslmode` | `postgres` / `5432` / `security_atlas` / `disable`          | External Postgres connection. Use `sslmode: require`+ in production. |
-| `postgres.appUser` / `.migrateUser`                  | `atlas_app` / `atlas_migrate`                               | The two roles (slice 065 role model).                                |
-| `minio.enabled`                                      | `true`                                                      | Bundle MinIO (dev) or use external S3 (production → `false`).        |
-| `artifacts.s3Endpoint`                               | `""`                                                        | **Required** when `minio.enabled: false`.                            |
-| `oidc.issuer` / `.clientId` / `.redirectUrl`         | `""`                                                        | OIDC relying-party config. Empty issuer = local-user mode.           |
-| `secrets.existingSecret`                             | `""`                                                        | Name of a pre-created Secret. Set this for production.               |
-| `secrets.*` (inline)                                 | `changeme`                                                  | Placeholder credentials — used only when `existingSecret` is unset.  |
-| `ingress.enabled`                                    | `false`                                                     | Render an Ingress.                                                   |
-| `ingress.certManager.enabled`                        | `false`                                                     | Add the cert-manager cluster-issuer annotation + TLS block.          |
+| Key                                                  | Default                                                     | Purpose                                                                                    |
+| ---------------------------------------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `image.registry` / `image.repository` / `image.tag`  | `ghcr.io` / `mgoodric/security-atlas` / `""` (= appVersion) | First-party image coordinates.                                                             |
+| `atlas.replicaCount` / `web.replicaCount`            | `1` / `1`                                                   | Stateless-tier scale-out.                                                                  |
+| `postgres.host` / `.port` / `.database` / `.sslmode` | `postgres` / `5432` / `security_atlas` / `disable`          | External Postgres connection. Use `sslmode: require`+ in production.                       |
+| `postgres.appUser` / `.migrateUser`                  | `atlas_app` / `atlas_migrate`                               | The two roles (slice 065 role model).                                                      |
+| `minio.enabled`                                      | `true`                                                      | Bundle MinIO (dev) or use external S3 (production → `false`).                              |
+| `artifacts.s3Endpoint`                               | `""`                                                        | **Required** when `minio.enabled: false`.                                                  |
+| `artifacts.s3PublicEndpoint`                         | `""`                                                        | Browser-reachable endpoint for download links. Set with bundled MinIO.                     |
+| `artifacts.forcePathStyle`                           | `""`                                                        | `true` / `false` / empty (= path-style, as an endpoint is always set). `false` for AWS S3. |
+| `oidc.issuer` / `.clientId` / `.redirectUrl`         | `""`                                                        | OIDC relying-party config. Empty issuer = local-user mode.                                 |
+| `secrets.existingSecret`                             | `""`                                                        | Name of a pre-created Secret. Set this for production.                                     |
+| `secrets.*` (inline)                                 | `changeme`                                                  | Placeholder credentials — used only when `existingSecret` is unset.                        |
+| `ingress.enabled`                                    | `false`                                                     | Render an Ingress.                                                                         |
+| `ingress.certManager.enabled`                        | `false`                                                     | Add the cert-manager cluster-issuer annotation + TLS block.                                |
 
 ## Secrets
 

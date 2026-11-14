@@ -10,7 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"testing"
+
+	"github.com/xuri/excelize/v2"
 )
 
 // zipBomb rebuilds a valid workbook with one extra part of padBytes
@@ -104,8 +107,79 @@ func TestParseExcel_RowCap(t *testing.T) {
 	}
 }
 
-func TestCheckDecompressedSize_NonZipFallsThrough(t *testing.T) {
-	if err := checkDecompressedSize([]byte("not a zip")); err != nil {
-		t.Fatalf("non-zip input should defer to excelize, got %v", err)
+// Issue 1969: a zip64 entry declaring close to 2^64 used to wrap the
+// running sum back under the cap, leaving excelize's backstop to refuse
+// it as a 400 open error instead of the 413 this sentinel maps to.
+func TestParseExcel_Zip64WrapRejected(t *testing.T) {
+	_, err := ParseExcel(withZip64Entry(t, minimalWorkbook(t)))
+	if !errors.Is(err, ErrDecompressedTooLarge) {
+		t.Fatalf("expected ErrDecompressedTooLarge, got %v", err)
+	}
+}
+
+// withZip64Entry appends a stored entry whose declared size, added to the
+// workbook's parts, sums to exactly 2^64 (wrapping a uint64 to zero).
+func withZip64Entry(t *testing.T, workbook []byte) []byte {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(workbook), int64(len(workbook)))
+	if err != nil {
+		t.Fatalf("read workbook zip: %v", err)
+	}
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	var total uint64
+	for _, zf := range zr.File {
+		if err := zw.Copy(zf); err != nil {
+			t.Fatalf("copy %s: %v", zf.Name, err)
+		}
+		total += zf.UncompressedSize64
+	}
+	if _, err := zw.CreateRaw(&zip.FileHeader{
+		Name:               "xl/media/wrap.bin",
+		Method:             zip.Store,
+		UncompressedSize64: math.MaxUint64 - total + 1,
+	}); err != nil {
+		t.Fatalf("create wrap entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestParseExcel_ColumnCap(t *testing.T) {
+	build := func(width int) []byte {
+		header := make([]string, width)
+		header[0], header[1] = "Question ID", "Question"
+		for i := 2; i < width; i++ {
+			header[i] = fmt.Sprintf("extra %d", i)
+		}
+		return makeXLSX(t, [][]string{header, {"IAM-02", "Do you require MFA?"}})
+	}
+	if _, err := ParseExcel(build(MaxColumns)); err != nil {
+		t.Fatalf("at cap: %v", err)
+	}
+	if _, err := ParseExcel(build(MaxColumns + 1)); !errors.Is(err, ErrTooManyColumns) {
+		t.Fatalf("past cap: expected ErrTooManyColumns, got %v", err)
+	}
+}
+
+// One real cell at XFD (column 16,384) pads its row to 16,384 strings.
+func TestParseExcel_FarColumnCellRejected(t *testing.T) {
+	f := excelize.NewFile()
+	defer func() { _ = f.Close() }()
+	sheet := f.GetSheetName(0)
+	cells := map[string]string{"A1": "Question ID", "B1": "Question", "A2": "IAM-02", "B2": "text", "XFD2": "x"}
+	for cell, v := range cells {
+		if err := f.SetCellStr(sheet, cell, v); err != nil {
+			t.Fatalf("set %s: %v", cell, err)
+		}
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write xlsx: %v", err)
+	}
+	if _, err := ParseExcel(buf.Bytes()); !errors.Is(err, ErrTooManyColumns) {
+		t.Fatalf("expected ErrTooManyColumns, got %v", err)
 	}
 }
