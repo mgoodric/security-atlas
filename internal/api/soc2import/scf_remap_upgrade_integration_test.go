@@ -118,6 +118,16 @@ func TestSCFRemapUpgrade_PrunesEdgesLeftOnOldAnchors(t *testing.T) {
 	if _, err := soc2import.Import(ctx, pool, oldCW); err != nil {
 		t.Fatalf("pre-#1971 HIPAA Import: %v", err)
 	}
+	// A pre-#1971 install has no crosswalk_source on its edges.
+	if _, err := pool.Exec(ctx, `
+		UPDATE fw_to_scf_edges SET crosswalk_source = NULL
+		WHERE framework_requirement_id IN (
+			SELECT fr.id FROM framework_requirements fr
+			JOIN framework_versions fv ON fv.id = fr.framework_version_id
+			JOIN frameworks f ON f.id = fv.framework_id
+			WHERE f.slug = 'hipaa_security_rule' AND f.tenant_id IS NULL)`); err != nil {
+		t.Fatalf("clear crosswalk_source: %v", err)
+	}
 	if got := hipaaAnchors(t, pool, passwordManagement); !slices.Equal(got, []string{"IAC-10"}) {
 		t.Fatalf("pre-#1971 Password Management anchors = %v; want [IAC-10] (the old Authenticator Management row)", got)
 	}
@@ -137,8 +147,8 @@ func TestSCFRemapUpgrade_PrunesEdgesLeftOnOldAnchors(t *testing.T) {
 		t.Fatal("upgrade import pruned no edges; the edges left on the old anchors survived")
 	}
 	for _, p := range report.EdgesPruned {
-		if p.Attribution != "community_draft" {
-			t.Errorf("pruned %s->%s with attribution %s; only the crosswalk's own community_draft edges may go", p.RequirementCode, p.SCFAnchor, p.Attribution)
+		if p.Attribution != "community_draft" || p.Source != soc2import.LegacySource {
+			t.Errorf("pruned %s->%s (attribution %s, source %s); only the legacy community_draft edges may go", p.RequirementCode, p.SCFAnchor, p.Attribution, p.Source)
 		}
 	}
 
@@ -243,4 +253,137 @@ func readProvenanceEdgeTo(t *testing.T, pool *pgxpool.Pool, scfID string) string
 		t.Fatalf("read P-1->%s: %v", scfID, err)
 	}
 	return attr
+}
+
+// A YAML crosswalk and a workbook import can write into the same framework
+// version, both as community_draft (docs/operator/scf-crosswalk-import.md,
+// "Combining columns"). Each re-import prunes only the edges its own source
+// wrote (fw_to_scf_edges.crosswalk_source, #1971).
+const coexistSlug = "coexist-1971"
+
+func coexistCrosswalk(source string, mappings ...[2]string) *soc2import.Crosswalk {
+	cw := &soc2import.Crosswalk{
+		SchemaVersion:     "1",
+		FrameworkSlug:     coexistSlug,
+		FrameworkName:     "Crosswalk source coexistence fixture",
+		FrameworkIssuer:   "security-atlas tests",
+		FrameworkVersion:  "1.0",
+		SourceAttribution: "community_draft",
+		Source:            source,
+		Requirements: []soc2import.Requirement{
+			{Code: "R-1", Title: "First", Body: "Fixture requirement."},
+			{Code: "R-2", Title: "Second", Body: "Fixture requirement."},
+		},
+	}
+	for _, m := range mappings {
+		cw.Mappings = append(cw.Mappings, soc2import.Mapping{
+			RequirementCode:  m[0],
+			SCFAnchor:        m[1],
+			RelationshipType: "intersects_with",
+			Strength:         0.7,
+			Rationale:        source + " " + m[0] + "->" + m[1],
+		})
+	}
+	return cw
+}
+
+// coexistEdges returns "code->scf_id@source" for every edge of the fixture.
+func coexistEdges(t *testing.T, pool *pgxpool.Pool) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), `
+		SELECT fr.code || '->' || a.scf_id || '@' || coalesce(e.crosswalk_source, '')
+		FROM fw_to_scf_edges e
+		JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+		JOIN framework_versions fv ON fv.id = fr.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		JOIN scf_anchors a ON a.id = e.scf_anchor_id
+		WHERE f.slug = $1 AND f.tenant_id IS NULL
+		ORDER BY 1`, coexistSlug)
+	if err != nil {
+		t.Fatalf("query fixture edges: %v", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var s string
+		if err := rows.Scan(&s); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		out = append(out, s)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	return out
+}
+
+func TestImport_YAMLAndWorkbookPruneOnlyTheirOwnEdges(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	ctx := context.Background()
+	resetFrameworkCatalog(t, pool, coexistSlug)
+	t.Cleanup(func() { resetFrameworkCatalog(t, pool, coexistSlug) })
+	ensureSCFLoaded(t, pool)
+
+	const yamlSrc, wbSrc = "yaml:coexist.yaml", "scf-workbook:Example 2022"
+	importCW := func(cw *soc2import.Crosswalk) soc2import.Report {
+		t.Helper()
+		r, err := soc2import.Import(ctx, pool, cw)
+		if err != nil {
+			t.Fatalf("Import %s: %v", cw.Source, err)
+		}
+		return r
+	}
+	importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-01"}, [2]string{"R-2", "IAC-01"}))
+	importCW(coexistCrosswalk(wbSrc, [2]string{"R-1", "IAC-37"}, [2]string{"R-2", "IAC-04"}))
+	want := []string{
+		"R-1->GOV-01@" + yamlSrc, "R-1->IAC-37@" + wbSrc,
+		"R-2->IAC-01@" + yamlSrc, "R-2->IAC-04@" + wbSrc,
+	}
+	if got := coexistEdges(t, pool); !slices.Equal(got, want) {
+		t.Fatalf("after both imports edges = %v; want %v", got, want)
+	}
+
+	// A YAML re-import that moves R-2 to IAC-14 prunes its own old edge and
+	// leaves the workbook's edges untouched.
+	r := importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-01"}, [2]string{"R-2", "IAC-14"}))
+	if len(r.EdgesPruned) != 1 || r.EdgesPruned[0].SCFAnchor != "IAC-01" || r.EdgesPruned[0].Source != yamlSrc {
+		t.Fatalf("YAML re-import pruned %+v; want only its own R-2->IAC-01", r.EdgesPruned)
+	}
+	if len(r.EdgesUnlisted) != 2 {
+		t.Fatalf("YAML re-import reported %d unlisted edges; want the workbook's 2", len(r.EdgesUnlisted))
+	}
+	want = []string{
+		"R-1->GOV-01@" + yamlSrc, "R-1->IAC-37@" + wbSrc,
+		"R-2->IAC-04@" + wbSrc, "R-2->IAC-14@" + yamlSrc,
+	}
+	if got := coexistEdges(t, pool); !slices.Equal(got, want) {
+		t.Fatalf("after YAML re-import edges = %v; want %v", got, want)
+	}
+
+	// A workbook re-import that drops R-2 prunes its own edge and leaves the
+	// YAML's edges untouched.
+	r = importCW(coexistCrosswalk(wbSrc, [2]string{"R-1", "IAC-37"}))
+	if len(r.EdgesPruned) != 1 || r.EdgesPruned[0].SCFAnchor != "IAC-04" || r.EdgesPruned[0].Source != wbSrc {
+		t.Fatalf("workbook re-import pruned %+v; want only its own R-2->IAC-04", r.EdgesPruned)
+	}
+	want = []string{"R-1->GOV-01@" + yamlSrc, "R-1->IAC-37@" + wbSrc, "R-2->IAC-14@" + yamlSrc}
+	if got := coexistEdges(t, pool); !slices.Equal(got, want) {
+		t.Fatalf("after workbook re-import edges = %v; want %v", got, want)
+	}
+
+	// A workbook import never prunes an edge with no recorded source: those
+	// predate #1971 and belong to the YAML crosswalk.
+	if _, err := pool.Exec(ctx, `
+		UPDATE fw_to_scf_edges SET crosswalk_source = NULL
+		WHERE crosswalk_source = $1`, yamlSrc); err != nil {
+		t.Fatalf("clear YAML sources: %v", err)
+	}
+	r = importCW(coexistCrosswalk(wbSrc, [2]string{"R-1", "IAC-37"}))
+	if len(r.EdgesPruned) != 0 {
+		t.Fatalf("workbook import pruned legacy edges %+v", r.EdgesPruned)
+	}
+	r = importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-01"}))
+	if len(r.EdgesPruned) != 1 || r.EdgesPruned[0].SCFAnchor != "IAC-14" || r.EdgesPruned[0].Source != soc2import.LegacySource {
+		t.Fatalf("YAML import pruned %+v; want the legacy R-2->IAC-14", r.EdgesPruned)
+	}
 }

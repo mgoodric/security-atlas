@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -56,12 +57,12 @@ type Report struct {
 	EdgesTierReseeded []ReseededEdge
 
 	// EdgesPruned lists the catalog edges this import deleted because the
-	// crosswalk no longer lists them (#1971). Only edges whose provenance the
-	// crosswalk writes are pruned; see staleEdges.
+	// crosswalk no longer lists them (#1971). Only edges this crosswalk's
+	// source wrote are pruned; see staleEdges.
 	EdgesPruned []PrunedEdge
 
 	// EdgesUnlisted lists edges the crosswalk does not list but did not
-	// prune, because another source wrote them (a different
+	// prune, because another source wrote them (another crosswalk_source or
 	// source_attribution). They are reported so an operator can see them.
 	EdgesUnlisted []PrunedEdge
 
@@ -97,13 +98,20 @@ type ReseededEdge struct {
 	NewTier         string
 }
 
-// PrunedEdge names one catalog edge the crosswalk no longer lists.
+// PrunedEdge names one catalog edge the crosswalk does not list. Source is
+// the edge's recorded crosswalk_source, or LegacySource when it has none.
 type PrunedEdge struct {
 	RequirementCode string
 	SCFAnchor       string
 	Attribution     string
 	Tier            string
+	Source          string
 }
+
+// LegacySource is how a report names an edge with no recorded
+// crosswalk_source: one written before #1971 added the column, or by a seed
+// that does not set it.
+const LegacySource = "(none)"
 
 // edgeKey identifies a mapping the way the edges table does: one edge per
 // (requirement, anchor) pair.
@@ -112,22 +120,34 @@ type edgeKey struct {
 	scfAnchor       string
 }
 
+// ownsEdge reports whether an import from source may prune an edge recorded
+// under edgeSource. Each source owns the edges it wrote. An edge with no
+// recorded source predates #1971, when the YAML crosswalks were the only
+// importer, so a YAML import (or an in-memory crosswalk with no Source)
+// owns it too; a workbook import never prunes one.
+func ownsEdge(source string, edgeSource *string) bool {
+	if edgeSource == nil {
+		return source == "" || strings.HasPrefix(source, yamlSourcePrefix)
+	}
+	return *edgeSource == source
+}
+
 // staleEdges splits the stored edges of one framework version that the
 // crosswalk does not list into the ones to delete and the ones to leave.
 //
 // A crosswalk is the source of truth for the edges it writes, so an edge it
 // stopped listing is deleted: after an SCF remap moves a mapping to a new
 // anchor, the edge left on the old anchor would otherwise keep counting as
-// coverage (#1971). The importer only owns the provenance it writes, though.
-// An edge with a source_attribution the crosswalk never uses came from
-// another source (an scf_official workbook, a demo seed) and is left in
-// place and reported.
-func staleEdges(stored []dbx.ListFwToScfEdgesForVersionForUpdateRow, listed map[edgeKey]bool, owned map[dbx.CrosswalkSourceAttribution]bool) (prune []dbx.ListFwToScfEdgesForVersionForUpdateRow, keep []dbx.ListFwToScfEdgesForVersionForUpdateRow) {
+// coverage (#1971). An import only prunes what it owns, though: an edge
+// another source wrote (see ownsEdge), or one with a source_attribution the
+// crosswalk never uses, is left in place and reported. fw_to_scf_edges holds
+// catalog (platform) edges only; it has no tenant rows to touch.
+func staleEdges(stored []dbx.ListFwToScfEdgesForVersionForUpdateRow, listed map[edgeKey]bool, source string, owned map[dbx.CrosswalkSourceAttribution]bool) (prune []dbx.ListFwToScfEdgesForVersionForUpdateRow, keep []dbx.ListFwToScfEdgesForVersionForUpdateRow) {
 	for _, e := range stored {
 		if listed[edgeKey{e.RequirementCode, e.ScfID}] {
 			continue
 		}
-		if owned[e.SourceAttribution] {
+		if ownsEdge(source, e.CrosswalkSource) && owned[e.SourceAttribution] {
 			prune = append(prune, e)
 		} else {
 			keep = append(keep, e)
@@ -137,12 +157,36 @@ func staleEdges(stored []dbx.ListFwToScfEdgesForVersionForUpdateRow, listed map[
 }
 
 func prunedEdge(e dbx.ListFwToScfEdgesForVersionForUpdateRow) PrunedEdge {
+	source := LegacySource
+	if e.CrosswalkSource != nil {
+		source = *e.CrosswalkSource
+	}
 	return PrunedEdge{
 		RequirementCode: e.RequirementCode,
 		SCFAnchor:       e.ScfID,
 		Attribution:     string(e.SourceAttribution),
 		Tier:            string(e.MappingTier),
+		Source:          source,
 	}
+}
+
+// PrunedBySource counts the pruned edges by their recorded source, for the
+// import summary.
+func (r Report) PrunedBySource() map[string]int {
+	out := map[string]int{}
+	for _, p := range r.EdgesPruned {
+		out[p.Source]++
+	}
+	return out
+}
+
+// sourceParam is the crosswalk_source an import stamps on the edges it
+// writes; NULL for a crosswalk with no Source.
+func sourceParam(source string) *string {
+	if source == "" {
+		return nil
+	}
+	return &source
 }
 
 // SystemReviewerID is the reviewer_id on a tier-transition audit row written
@@ -406,6 +450,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				Strength:          m.Strength,
 				SourceAttribution: srcAttr,
 				Rationale:         m.Rationale,
+				CrosswalkSource:   sourceParam(cw.Source),
 			}); err != nil {
 				return Report{}, fmt.Errorf("crosswalk: update edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 			}
@@ -448,6 +493,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				Strength:               m.Strength,
 				SourceAttribution:      srcAttr,
 				Rationale:              m.Rationale,
+				CrosswalkSource:        sourceParam(cw.Source),
 			}); err != nil {
 				return Report{}, fmt.Errorf("crosswalk: insert edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
 			}
@@ -480,7 +526,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	if err != nil {
 		return Report{}, fmt.Errorf("crosswalk: list edges for prune: %w", err)
 	}
-	prune, keep := staleEdges(stored, listed, owned)
+	prune, keep := staleEdges(stored, listed, cw.Source, owned)
 	for _, e := range prune {
 		if err := q.DeleteFwToScfEdge(ctx, e.ID); err != nil {
 			return Report{}, fmt.Errorf("crosswalk: prune edge %s->%s: %w", e.RequirementCode, e.ScfID, err)

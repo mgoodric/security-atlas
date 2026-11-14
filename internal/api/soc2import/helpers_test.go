@@ -347,7 +347,8 @@ func TestStaleEdges(t *testing.T) {
 	listed := map[edgeKey]bool{{"R-1", "IAC-14"}: true}
 	owned := map[dbx.CrosswalkSourceAttribution]bool{community: true}
 
-	prune, keep := staleEdges(stored, listed, owned)
+	// No recorded source (pre-#1971 rows): a YAML import owns them.
+	prune, keep := staleEdges(stored, listed, "yaml:x.yaml", owned)
 
 	var got []string
 	for _, e := range prune {
@@ -359,14 +360,66 @@ func TestStaleEdges(t *testing.T) {
 	if len(keep) != 1 || keep[0].ScfID != "IAC-37" {
 		t.Fatalf("keep = %+v; want only the scf_official R-2->IAC-37 edge", keep)
 	}
-	if p := prunedEdge(prune[0]); p.Attribution != "community_draft" || p.Tier != "draft" || p.SCFAnchor != "IAC-10" {
+	if p := prunedEdge(prune[0]); p.Attribution != "community_draft" || p.Tier != "draft" || p.SCFAnchor != "IAC-10" || p.Source != LegacySource {
 		t.Fatalf("prunedEdge = %+v", p)
+	}
+}
+
+// Each source prunes only the edges it wrote; a workbook import never
+// prunes a pre-#1971 edge with no recorded source (#1971).
+func TestStaleEdges_ScopedToSource(t *testing.T) {
+	t.Parallel()
+	src := func(s string) *string { return &s }
+	community := dbx.CrosswalkSourceAttributionCommunityDraft
+	stored := []dbx.ListFwToScfEdgesForVersionForUpdateRow{
+		{RequirementCode: "R-1", ScfID: "A-1", SourceAttribution: community, CrosswalkSource: src("yaml:x.yaml")},
+		{RequirementCode: "R-2", ScfID: "A-2", SourceAttribution: community, CrosswalkSource: src("scf-workbook:ISO 27001 2022")},
+		{RequirementCode: "R-3", ScfID: "A-3", SourceAttribution: community},
+	}
+	owned := map[dbx.CrosswalkSourceAttribution]bool{community: true}
+	cases := []struct {
+		source string
+		want   string
+	}{
+		{"yaml:x.yaml", "R-1,R-3"},
+		{"yaml:other.yaml", "R-3"},
+		{"scf-workbook:ISO 27001 2022", "R-2"},
+		{"scf-workbook:ISO 27002 2022=A.", ""},
+		{"", "R-3"},
+	}
+	for _, c := range cases {
+		prune, keep := staleEdges(stored, map[edgeKey]bool{}, c.source, owned)
+		var got []string
+		for _, e := range prune {
+			got = append(got, e.RequirementCode)
+		}
+		if strings.Join(got, ",") != c.want {
+			t.Errorf("source %q pruned %v; want %q", c.source, got, c.want)
+		}
+		if len(prune)+len(keep) != len(stored) {
+			t.Errorf("source %q: prune+keep = %d; want %d", c.source, len(prune)+len(keep), len(stored))
+		}
+	}
+}
+
+func TestPrunedBySourceAndSourceParam(t *testing.T) {
+	t.Parallel()
+	r := Report{EdgesPruned: []PrunedEdge{{Source: "yaml:a"}, {Source: "yaml:a"}, {Source: LegacySource}}}
+	got := r.PrunedBySource()
+	if got["yaml:a"] != 2 || got[LegacySource] != 1 || len(got) != 2 {
+		t.Fatalf("PrunedBySource = %v", got)
+	}
+	if sourceParam("") != nil {
+		t.Fatal("an empty source must be stored as NULL")
+	}
+	if p := sourceParam("yaml:a"); p == nil || *p != "yaml:a" {
+		t.Fatalf("sourceParam(yaml:a) = %v", p)
 	}
 }
 
 func TestStaleEdges_NothingStored(t *testing.T) {
 	t.Parallel()
-	prune, keep := staleEdges(nil, map[edgeKey]bool{}, map[dbx.CrosswalkSourceAttribution]bool{})
+	prune, keep := staleEdges(nil, map[edgeKey]bool{}, "", map[dbx.CrosswalkSourceAttribution]bool{})
 	if len(prune) != 0 || len(keep) != 0 {
 		t.Fatalf("empty input gave prune=%v keep=%v", prune, keep)
 	}

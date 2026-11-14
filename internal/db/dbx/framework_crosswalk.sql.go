@@ -156,7 +156,7 @@ func (q *Queries) GetFrameworkRequirementByVersionAndCode(ctx context.Context, a
 }
 
 const getFwToScfEdge = `-- name: GetFwToScfEdge :one
-SELECT id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier FROM fw_to_scf_edges
+SELECT id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier, crosswalk_source FROM fw_to_scf_edges
 WHERE framework_requirement_id = $1 AND scf_anchor_id = $2
 `
 
@@ -182,12 +182,13 @@ func (q *Queries) GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MappingTier,
+		&i.CrosswalkSource,
 	)
 	return i, err
 }
 
 const getFwToScfEdgeForUpdate = `-- name: GetFwToScfEdgeForUpdate :one
-SELECT id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier FROM fw_to_scf_edges
+SELECT id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier, crosswalk_source FROM fw_to_scf_edges
 WHERE framework_requirement_id = $1 AND scf_anchor_id = $2
 FOR UPDATE
 `
@@ -217,6 +218,7 @@ func (q *Queries) GetFwToScfEdgeForUpdate(ctx context.Context, arg GetFwToScfEdg
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MappingTier,
+		&i.CrosswalkSource,
 	)
 	return i, err
 }
@@ -271,10 +273,11 @@ func (q *Queries) GetFwToScfEdgeTierForUpdate(ctx context.Context, id pgtype.UUI
 const insertFwToScfEdge = `-- name: InsertFwToScfEdge :one
 INSERT INTO fw_to_scf_edges (
     id, framework_requirement_id, scf_anchor_id,
-    relationship_type, strength, source_attribution, rationale
+    relationship_type, strength, source_attribution, rationale,
+    crosswalk_source
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier, crosswalk_source
 `
 
 type InsertFwToScfEdgeParams struct {
@@ -285,6 +288,7 @@ type InsertFwToScfEdgeParams struct {
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
 	Rationale              string                     `json:"rationale"`
+	CrosswalkSource        *string                    `json:"crosswalk_source"`
 }
 
 func (q *Queries) InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgeParams) (FwToScfEdge, error) {
@@ -296,6 +300,7 @@ func (q *Queries) InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgePa
 		arg.Strength,
 		arg.SourceAttribution,
 		arg.Rationale,
+		arg.CrosswalkSource,
 	)
 	var i FwToScfEdge
 	err := row.Scan(
@@ -309,6 +314,7 @@ func (q *Queries) InsertFwToScfEdge(ctx context.Context, arg InsertFwToScfEdgePa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MappingTier,
+		&i.CrosswalkSource,
 	)
 	return i, err
 }
@@ -499,7 +505,8 @@ SELECT
     fr.code AS requirement_code,
     a.scf_id,
     e.source_attribution,
-    e.mapping_tier
+    e.mapping_tier,
+    e.crosswalk_source
 FROM fw_to_scf_edges e
 JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
@@ -514,6 +521,7 @@ type ListFwToScfEdgesForVersionForUpdateRow struct {
 	ScfID             string                     `json:"scf_id"`
 	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier       CrosswalkMappingTier       `json:"mapping_tier"`
+	CrosswalkSource   *string                    `json:"crosswalk_source"`
 }
 
 // Every catalog edge under one framework_version, row-locked, with the
@@ -537,6 +545,7 @@ func (q *Queries) ListFwToScfEdgesForVersionForUpdate(ctx context.Context, frame
 			&i.ScfID,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.CrosswalkSource,
 		); err != nil {
 			return nil, err
 		}
@@ -593,9 +602,10 @@ SET relationship_type    = $2,
     strength             = $3,
     source_attribution   = $4,
     rationale            = $5,
+    crosswalk_source     = $6,
     updated_at           = now()
 WHERE id = $1
-RETURNING id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier
+RETURNING id, framework_requirement_id, scf_anchor_id, relationship_type, strength, source_attribution, rationale, created_at, updated_at, mapping_tier, crosswalk_source
 `
 
 type UpdateFwToScfEdgeParams struct {
@@ -604,6 +614,7 @@ type UpdateFwToScfEdgeParams struct {
 	Strength          float64                    `json:"strength"`
 	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
 	Rationale         string                     `json:"rationale"`
+	CrosswalkSource   *string                    `json:"crosswalk_source"`
 }
 
 // Update an existing edge in place. Importer decides whether to call this
@@ -615,6 +626,7 @@ func (q *Queries) UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgePa
 		arg.Strength,
 		arg.SourceAttribution,
 		arg.Rationale,
+		arg.CrosswalkSource,
 	)
 	var i FwToScfEdge
 	err := row.Scan(
@@ -628,6 +640,7 @@ func (q *Queries) UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgePa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.MappingTier,
+		&i.CrosswalkSource,
 	)
 	return i, err
 }

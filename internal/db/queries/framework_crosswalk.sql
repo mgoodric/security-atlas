@@ -76,9 +76,10 @@ FOR UPDATE;
 -- name: InsertFwToScfEdge :one
 INSERT INTO fw_to_scf_edges (
     id, framework_requirement_id, scf_anchor_id,
-    relationship_type, strength, source_attribution, rationale
+    relationship_type, strength, source_attribution, rationale,
+    crosswalk_source
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.narg(crosswalk_source))
 RETURNING *;
 
 -- name: UpdateFwToScfEdge :one
@@ -89,6 +90,7 @@ SET relationship_type    = $2,
     strength             = $3,
     source_attribution   = $4,
     rationale            = $5,
+    crosswalk_source     = sqlc.narg(crosswalk_source),
     updated_at           = now()
 WHERE id = $1
 RETURNING *;
@@ -105,7 +107,8 @@ SELECT
     fr.code AS requirement_code,
     a.scf_id,
     e.source_attribution,
-    e.mapping_tier
+    e.mapping_tier,
+    e.crosswalk_source
 FROM fw_to_scf_edges e
 JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
 JOIN scf_anchors a ON a.id = e.scf_anchor_id

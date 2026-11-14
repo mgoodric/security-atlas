@@ -171,12 +171,21 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d pruned=%d\n",
 				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped), len(report.EdgesPruned))
 			for _, pr := range report.EdgesPruned {
-				fmt.Printf("edge pruned %s->%s: no longer in the crosswalk (source_attribution=%s mapping_tier=%s)\n",
-					pr.RequirementCode, pr.SCFAnchor, pr.Attribution, pr.Tier)
+				fmt.Printf("edge pruned %s->%s: no longer in the crosswalk (source=%s source_attribution=%s mapping_tier=%s)\n",
+					pr.RequirementCode, pr.SCFAnchor, pr.Source, pr.Attribution, pr.Tier)
+			}
+			pruned := report.PrunedBySource()
+			sources := make([]string, 0, len(pruned))
+			for s := range pruned {
+				sources = append(sources, s)
+			}
+			sort.Strings(sources)
+			for _, s := range sources {
+				fmt.Printf("edges pruned by source[%s]=%d\n", s, pruned[s])
 			}
 			for _, un := range report.EdgesUnlisted {
-				fmt.Printf("edge kept %s->%s: not in the crosswalk, but source_attribution=%s is another source's\n",
-					un.RequirementCode, un.SCFAnchor, un.Attribution)
+				fmt.Printf("edge kept %s->%s: not in the crosswalk, but written by another source (source=%s source_attribution=%s)\n",
+					un.RequirementCode, un.SCFAnchor, un.Source, un.Attribution)
 			}
 			for _, sk := range report.EdgesSkipped {
 				fmt.Printf("edge skipped %s->%s: existing source_attribution=%s outranks incoming %s\n",
