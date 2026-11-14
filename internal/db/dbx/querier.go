@@ -829,6 +829,10 @@ type Querier interface {
 	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
 	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
 	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
+	// The actor of a revision's most recent approval, for the SoA export
+	// (#1791). approver_user_id holds it only when the credential id is a UUID;
+	// the workflow log always does.
+	GetFrameworkScopeLatestApprover(ctx context.Context, arg GetFrameworkScopeLatestApproverParams) (string, error)
 	// slice 484: framework-versioning capability — the lifecycle + migration-suggest
 	// review queue + audit queries (ADR 0019). All targets are CATALOG tables (no
 	// tenant RLS); the trust gate is admin-role authz + the append-only audit.
@@ -843,6 +847,9 @@ type Querier interface {
 	// handlers to translate the URL param into a stable id for the pinned
 	// traversal. NULL tenant_id constraint scopes to the global catalog.
 	GetFrameworkVersionBySlugAndVersion(ctx context.Context, arg GetFrameworkVersionBySlugAndVersionParams) (FrameworkVersion, error)
+	// The framework name, slug and version string that title an SoA export
+	// (#1791). Global catalog rows and the caller tenant's own rows are visible.
+	GetFrameworkVersionLabel(ctx context.Context, arg GetFrameworkVersionLabelParams) (GetFrameworkVersionLabelRow, error)
 	// Row-lock one queue entry inside the approve/reject tx. Returns ErrNoRows for
 	// an unknown id.
 	GetFrameworkVersionMigrationForUpdate(ctx context.Context, id pgtype.UUID) (FrameworkVersionMigration, error)
@@ -2187,6 +2194,11 @@ type Querier interface {
 	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
 	// Audit history for one framework (newest first). Admin-scoped.
 	ListFrameworkVersionAudit(ctx context.Context, frameworkID pgtype.UUID) ([]FrameworkVersionAudit, error)
+	// The tenant controls behind each requirement of a framework version, for
+	// the SoA export's linked-controls column (#1791). The crosswalk and the
+	// "active control" rule are the ones ListFrameworkScopeContradictions uses,
+	// so an exported contradiction always lists the control behind it.
+	ListFrameworkVersionLinkedControls(ctx context.Context, arg ListFrameworkVersionLinkedControlsParams) ([]ListFrameworkVersionLinkedControlsRow, error)
 	// The review queue for one version pair, oldest first. Admin-scoped read.
 	ListFrameworkVersionMigrations(ctx context.Context, arg ListFrameworkVersionMigrationsParams) ([]FrameworkVersionMigration, error)
 	// ===== migration-suggest review queue =====

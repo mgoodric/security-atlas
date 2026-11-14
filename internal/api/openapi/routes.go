@@ -139,6 +139,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/features/enabled", Tag: "feature-flags", Tier: "bearer", Internal: false, Summary: "GET /v1/features/enabled — non-admin enabled-modules read (slice 660 gating flags)"},
 	{Method: "GET", Path: "/v1/framework-scopes", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes"},
 	{Method: "GET", Path: "/v1/framework-scopes/applicability", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/applicability — applicability decisions in force at as_of"},
+	{Method: "GET", Path: "/v1/framework-scopes/applicability/export", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/applicability/export — export the Statement of Applicability as CSV or xlsx"},
 	{Method: "GET", Path: "/v1/framework-scopes/{id}", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}"},
 	{Method: "GET", Path: "/v1/framework-scopes/{id}/applicability", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}/applicability — list a revision's applicability decisions"},
 	{Method: "GET", Path: "/v1/frameworks", Tag: "frameworks", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks"},
