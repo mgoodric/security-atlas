@@ -2,13 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc6_6_boundary_protection
 title: "Production endpoints have host-firewall enabled"
 description: |
-  The entity implements logical access security measures to protect
-  against threats from sources outside its system boundaries (TSC CC6.6).
-  Network boundary protection covers many controls; the
-  auditor-most-tested manifestation at endpoint level is: every
+  Systems are shielded from threats that originate outside the system
+  boundary (TSC CC6.6). Network boundary protection covers many controls;
+  the auditor-most-tested manifestation at endpoint level is: every
   production-developer endpoint has a host firewall enabled (pf on macOS,
-  ufw on Linux, Windows Defender Firewall on Windows). The osquery
-  query reads the firewall-state table and asserts coverage.
+  ufw on Linux, Windows Defender Firewall on Windows). The osquery query
+  reads the firewall-state table and asserts coverage.
 
 scf_anchor_id: NET-04
 control_family: NET
