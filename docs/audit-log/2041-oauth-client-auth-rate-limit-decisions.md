@@ -59,6 +59,26 @@ user's logout burst throttle others behind the same proxy.
 so clients see one throttling shape across the AS. RFC 7009 and RFC 7662
 responses are unchanged for requests within the limit.
 
+## D7 — Bound the limiter's memory, not just its rate (review of #2221)
+
+The limiter's keys are caller-chosen, so the rate limit alone would trade
+the CPU DoS for a memory one: megabyte `client_id`s, or rotated IPs, grow
+the bucket maps without bound. Three bounds, all also applied to
+`/oauth/token`:
+
+- A presented `client_id` over `MaxClientIDBytes` (256; issued ids are
+  36-byte UUIDs) is refused 401 `invalid_client` before any bucket is
+  stored.
+- `tokenBucketLimiter` prunes buckets that have refilled to full once the
+  map reaches 4096 entries, then at twice the surviving count, the same
+  scheme as the login throttle's `maybePrune`. A full bucket holds nothing
+  a fresh one would not, so pruning never loosens the limit.
+- The form body on the three endpoints is capped at 64 KiB
+  (`MaxFormBytes`); net/http's default for urlencoded bodies is 10 MB.
+
+A set-but-invalid rate env value now logs a Warn instead of falling back
+silently.
+
 ## Not done here
 
 `oauthclient.Store.Verify` returns early for an unknown or disabled
@@ -66,4 +86,4 @@ responses are unchanged for requests within the limit.
 differs between known and unknown ids on all three endpoints. The limiter
 caps how fast that can be probed but does not remove it. Equalising it
 belongs in `internal/auth/oauthclient` (the users store already does this
-with `timingDummyHash`) and is a separate ticket.
+with `timingDummyHash`) and is filed as #2241.

@@ -31,6 +31,17 @@ const (
 	// It sits above the per-client limit so one host serving a couple of
 	// clients is not throttled before either client is.
 	DefaultClientAuthIPRatePerMin = 2 * DefaultClientAuthRatePerMin
+
+	// MaxClientIDBytes bounds a presented client_id. oauthclient issues
+	// UUIDs (36 bytes); anything past this is refused with 401
+	// invalid_client before it becomes a limiter key, so an attacker
+	// cannot fill the per-client map with megabyte keys.
+	MaxClientIDBytes = 256
+
+	// MaxFormBytes caps the form body on /oauth/token, /oauth/revoke and
+	// /oauth/introspect. The largest legitimate field is a JWT of a few
+	// KB; net/http's own default cap is 10 MB.
+	MaxFormBytes = 64 << 10
 )
 
 // clientAuthLimiter pairs a per-client_id and a per-IP token bucket.
@@ -64,14 +75,20 @@ func newClientAuthLimiter(clientRate, ipRate int, clientIP func(*http.Request) s
 }
 
 // allow reports whether a client-authenticated request may proceed to
-// the secret verify. When it may not, it has already written the 429
-// with Retry-After and the caller must return. Requests presenting no
+// the secret verify. When it may not, it has already written the
+// response (401 for an over-long client_id, else 429 with
+// Retry-After) and the caller must return. Requests presenting no
 // client_id (the self-revocation bearer path) never reach argon2 and
 // are not counted.
 func (l *clientAuthLimiter) allow(w http.ResponseWriter, r *http.Request) bool {
 	clientID := presentedClientID(r)
 	if clientID == "" {
 		return true
+	}
+	if len(clientID) > MaxClientIDBytes {
+		writeOAuthError(w, http.StatusUnauthorized, "invalid_client",
+			"client authentication failed")
+		return false
 	}
 	if !l.perIP.Allow(l.clientIP(r)) {
 		writeRateLimited(w, l.perIP.WindowSeconds())

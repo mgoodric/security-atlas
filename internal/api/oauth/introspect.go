@@ -123,6 +123,7 @@ func (e *IntrospectionEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request
 			"Content-Type must be application/x-www-form-urlencoded")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxFormBytes)
 	if err := r.ParseForm(); err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "malformed form body")
 		return

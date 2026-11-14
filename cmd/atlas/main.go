@@ -480,8 +480,8 @@ func main() {
 			// unauthenticated, so each throttles per client_id and per
 			// caller IP (resolved through TRUSTED_PROXY_CIDRS) first.
 			revokedStore := revocation.New(pool)
-			clientAuthRate := positiveIntEnv("ATLAS_OAUTH_CLIENT_AUTH_RATE_PER_MIN", oauthapi.DefaultClientAuthRatePerMin)
-			clientAuthIPRate := positiveIntEnv("ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN", oauthapi.DefaultClientAuthIPRatePerMin)
+			clientAuthRate := positiveIntEnv(logger, "ATLAS_OAUTH_CLIENT_AUTH_RATE_PER_MIN", oauthapi.DefaultClientAuthRatePerMin)
+			clientAuthIPRate := positiveIntEnv(logger, "ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN", oauthapi.DefaultClientAuthIPRatePerMin)
 			revokeEP := oauthapi.NewRevocationEndpoint(signer, revokedStore, clients, oauthapi.RevocationEndpointConfig{
 				Issuer:              issuer,
 				ClientRatePerMinute: clientAuthRate,
@@ -1490,11 +1490,18 @@ func envOr(key, fallback string) string {
 }
 
 // positiveIntEnv reads a positive integer from key, falling back when
-// it is unset, malformed or not positive.
-func positiveIntEnv(key string, fallback int) int {
-	if v, err := strconv.Atoi(os.Getenv(key)); err == nil && v > 0 {
+// it is unset, malformed or not positive. A set-but-unusable value is
+// logged so the operator learns their setting was ignored.
+func positiveIntEnv(logger *slog.Logger, key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	if v, err := strconv.Atoi(raw); err == nil && v > 0 {
 		return v
 	}
+	logger.Warn("atlas: ignoring invalid env value; using default",
+		"key", key, "value", raw, "default", fallback)
 	return fallback
 }
 

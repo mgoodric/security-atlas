@@ -13,11 +13,13 @@ package oauth_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/auth/keystore/fsstore"
@@ -56,6 +58,9 @@ func newLimitUnitServer(t *testing.T, c limitCfg) *httptest.Server {
 		ClientRatePerMinute: c.clientRate,
 		IPRatePerMinute:     c.ipRate,
 		ClientIP:            c.clientIP,
+	}))
+	h.AttachTokenEndpoint(oauth.NewTokenEndpoint(signer, nil, oauth.TokenEndpointConfig{
+		Issuer: testIssuer, RatePerMinute: c.clientRate, Now: pinnedNow,
 	}))
 	srv := httptest.NewServer(routerFor(h))
 	t.Cleanup(srv.Close)
@@ -184,5 +189,125 @@ func TestClientAuthLimit_NoClientIDNotCounted(t *testing.T) {
 		if resp := postLimited(t, srv.URL, oauth.PathRevoke, url.Values{"token": {"t"}}, [2]string{}); resp.StatusCode != http.StatusUnauthorized {
 			t.Fatalf("request %d: status = %d, want 401", i, resp.StatusCode)
 		}
+	}
+}
+
+// TestClientAuthLimit_OversizedClientIDRejectedUnstored: a client_id
+// past MaxClientIDBytes is refused 401 invalid_client before any
+// bucket is created, so megabyte keys cannot pile up in the limiter.
+func TestClientAuthLimit_OversizedClientIDRejectedUnstored(t *testing.T) {
+	t.Parallel()
+	ks, err := fsstore.Open(t.TempDir())
+	if err != nil {
+		t.Fatalf("fsstore.Open: %v", err)
+	}
+	ep := oauth.NewIntrospectionEndpoint(tokensign.New(ks), revocation.New(nil), oauthclient.New(nil),
+		oauth.IntrospectionEndpointConfig{Issuer: testIssuer, Now: pinnedNow})
+	h := oauth.New(ks, oauth.Config{Issuer: testIssuer})
+	h.AttachIntrospectionEndpoint(ep)
+	srv := httptest.NewServer(routerFor(h))
+	t.Cleanup(srv.Close)
+
+	long := strings.Repeat("a", oauth.MaxClientIDBytes+1)
+	for _, basic := range [][2]string{{}, {long, "s"}} {
+		form := url.Values{"token": {"t"}}
+		if basic[0] == "" {
+			form.Set("client_id", long)
+		}
+		resp := postLimited(t, srv.URL, oauth.PathIntrospect, form, basic)
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("status = %d, want 401", resp.StatusCode)
+		}
+		var body map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		if body["error"] != "invalid_client" {
+			t.Fatalf("error = %q, want invalid_client", body["error"])
+		}
+	}
+	if c, ip := oauth.ExportIntrospectLimiterLens(ep); c != 0 || ip != 0 {
+		t.Fatalf("buckets stored: per-client=%d per-IP=%d, want 0 and 0", c, ip)
+	}
+
+	// An id at the cap is still an ordinary (counted) request.
+	atCap := url.Values{"token": {"t"}, "client_id": {long[:oauth.MaxClientIDBytes]}}
+	if resp := postLimited(t, srv.URL, oauth.PathIntrospect, atCap, [2]string{}); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("at-cap status = %d, want 401", resp.StatusCode)
+	}
+	if c, _ := oauth.ExportIntrospectLimiterLens(ep); c != 1 {
+		t.Fatalf("per-client buckets = %d, want 1", c)
+	}
+}
+
+// TestClientAuthLimit_OversizedFormBodyRejected: a body past
+// MaxFormBytes is refused 400 before parsing completes.
+func TestClientAuthLimit_OversizedFormBodyRejected(t *testing.T) {
+	t.Parallel()
+	srv := newLimitUnitServer(t, limitCfg{})
+	form := url.Values{"token": {strings.Repeat("x", oauth.MaxFormBytes)}, "client_id": {"c"}}
+	for _, path := range []string{oauth.PathIntrospect, oauth.PathRevoke, oauth.PathToken} {
+		resp := postLimited(t, srv.URL, path, form, [2]string{})
+		var body map[string]string
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		if resp.StatusCode != http.StatusBadRequest || body["error_description"] != "malformed form body" {
+			t.Fatalf("%s: status = %d body = %v, want 400 malformed form body", path, resp.StatusCode, body)
+		}
+	}
+}
+
+// TestTokenBucketLimiter_PrunesRefilledBuckets: once the map reaches
+// the prune floor, buckets that have refilled to full are dropped on
+// the next new key; buckets still draining survive.
+func TestTokenBucketLimiter_PrunesRefilledBuckets(t *testing.T) {
+	t.Parallel()
+	now := pinnedNow()
+	lim := oauth.ExportNewTokenBucketLimiter(60, func() time.Time { return now })
+	for i := 0; i < oauth.ExportTokenBucketPruneFloor; i++ {
+		oauth.ExportLimiterAllow(lim, fmt.Sprintf("k%d", i))
+	}
+	// Still draining: nothing is dropped.
+	oauth.ExportLimiterAllow(lim, "live")
+	if got := oauth.ExportLimiterLen(lim); got != oauth.ExportTokenBucketPruneFloor+1 {
+		t.Fatalf("len before refill = %d, want %d", got, oauth.ExportTokenBucketPruneFloor+1)
+	}
+	// After a full refill window the first floor+1 buckets are full
+	// again. Keys added from here on are draining, so when the next
+	// sweep fires (at twice the surviving count) only they remain.
+	now = now.Add(61 * time.Second)
+	added := 0
+	for prev := oauth.ExportLimiterLen(lim); ; added++ {
+		oauth.ExportLimiterAllow(lim, fmt.Sprintf("n%d", added))
+		got := oauth.ExportLimiterLen(lim)
+		if got < prev {
+			added++
+			if got != added {
+				t.Fatalf("len after prune = %d, want %d (only post-refill keys)", got, added)
+			}
+			return
+		}
+		if added > 4*oauth.ExportTokenBucketPruneFloor {
+			t.Fatalf("no prune after %d new keys", added)
+		}
+		prev = got
+	}
+}
+
+// TestTokenEndpoint_OversizedClientIDRejected: /oauth/token refuses an
+// over-long client_id with 401 invalid_client before the limiter.
+func TestTokenEndpoint_OversizedClientIDRejected(t *testing.T) {
+	t.Parallel()
+	srv := newLimitUnitServer(t, limitCfg{})
+	form := url.Values{
+		"grant_type":    {"client_credentials"},
+		"client_id":     {strings.Repeat("a", oauth.MaxClientIDBytes+1)},
+		"client_secret": {"s"},
+	}
+	resp := postLimited(t, srv.URL, oauth.PathToken, form, [2]string{})
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+	var body map[string]string
+	_ = json.NewDecoder(resp.Body).Decode(&body)
+	if body["error"] != "invalid_client" {
+		t.Fatalf("error = %q, want invalid_client", body["error"])
 	}
 }
