@@ -256,6 +256,36 @@ func TestDeactivation_RevokedKeyStaysDeadOnOtherReplicaAfterReprovision(t *testi
 	f.requireStatus(t, http.StatusOK, f.keylessToken)
 }
 
+// #1964: a machine key (no user, rehydrated into every replica's memory at
+// boot) revoked on replica A is refused on replica B from the next request,
+// although B's in-memory record of it was never revoked.
+func TestDeactivation_RevokedMachineKeyRefusedOnOtherReplica(t *testing.T) {
+	f := newDeactivationFixture(t)
+	hasher, err := bearer.NewHasher([]byte("test-bearer-hash-key-at-least-32-bytes-long!!"))
+	if err != nil {
+		t.Fatalf("hasher: %v", err)
+	}
+	replicaA := credstore.New(0)
+	if _, err := replicaA.AttachPersistence(apikeystore.NewPersister(f.app, f.admin, hasher)); err != nil {
+		t.Fatalf("replica A attach persistence: %v", err)
+	}
+	machine, err := replicaA.Authenticate(f.keylessToken)
+	if err != nil {
+		t.Fatalf("replica A authenticate machine key: %v", err)
+	}
+	if credstore.OwnedByUser(machine) {
+		t.Fatalf("precondition: key %s is user-owned; want a machine key", machine.ID)
+	}
+	if err := replicaA.Revoke(machine.ID); err != nil {
+		t.Fatalf("replica A revoke: %v", err)
+	}
+
+	// f.auth is replica B: f.creds rehydrated the key at boot and nothing
+	// on B revoked it.
+	f.requireStatus(t, http.StatusUnauthorized, f.keylessToken)
+	f.requireStatus(t, http.StatusOK, f.memToken, f.dbToken)
+}
+
 // #1947: a key an admin mints through POST /v1/admin/credentials or gRPC
 // AdminCredentialsService.Issue is a machine key. The admin is recorded in
 // api_keys.minted_by for attribution only, and disabling that admin leaves
