@@ -132,7 +132,7 @@ SELECT
     p.approved_at, p.approved_by, p.published_at, p.published_by,
     p.superseded_at, p.next_review_at,
     p.historical_approver_name, p.historical_approved_at, p.source_url,
-    p.imported_by, p.imported_at,
+    p.imported_by, p.imported_at, p.self_approved,
     ac.ack_denominator,
     ac.ack_numerator
 FROM policies p
@@ -180,11 +180,13 @@ RETURNING *;
 
 -- name: ApprovePolicy :one
 -- Transition: under_review -> approved. Requires IsApprover at handler
--- (AC-4). The DB only guards the prior-state.
+-- (AC-4). The DB only guards the prior-state. self_approved is set by the
+-- store after the approval rule allowed a self-approval (#2101).
 UPDATE policies
 SET status = 'approved',
     approved_at = now(),
     approved_by = $3,
+    self_approved = sqlc.arg('self_approved'),
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
