@@ -25,11 +25,17 @@ package demoseed
 //     every user demo_only, no OAuth client bound to it, and no row in a
 //     table outside teardownTables.
 //
-// The checks and the delete run in one SERIALIZABLE transaction, so data
-// written between the check and the delete cannot be swept up: a concurrent
-// write to any table the checks read makes one side fail with a
-// serialization error rather than commit. (The tenants row lock alone would
-// cover only writers to tables with an FK to tenants.)
+// The checks and the delete run in one SERIALIZABLE transaction. The app
+// writes at READ COMMITTED, so what that buys is snapshot isolation, not
+// full serializability against those writers:
+//
+//   - the delete removes only rows visible in the snapshot the checks read,
+//     so a row committed after the checks is never deleted;
+//   - a concurrent update or delete of a row the teardown deletes makes it
+//     fail with 40001 (serialization_failure), and nothing is deleted;
+//   - a row inserted concurrently into a table with an FK to tenants blocks
+//     on the FOR UPDATE lock on the tenants row; one inserted into a table
+//     with no FK to tenants is left behind as an orphan, not deleted.
 
 import (
 	"context"
@@ -40,6 +46,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // ErrLegacyTeardownRefused wraps every refusal of TeardownLegacyButtonTenant,
@@ -91,15 +98,30 @@ func (s *Seeder) TeardownLegacyButtonTenant(ctx context.Context, slug, superAdmi
 		map[string]any{"legacy_button_tenant": true},
 	)
 	if err != nil {
-		return res, err
+		return res, concurrentWriteErr(err)
 	}
 	if dryRun {
 		return res, nil // the deferred Rollback undoes the delete
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return res, fmt.Errorf("demoseed: legacy teardown commit: %w", err)
+		return res, concurrentWriteErr(fmt.Errorf("demoseed: legacy teardown commit: %w", err))
 	}
 	return res, nil
+}
+
+// ErrConcurrentWrite reports that a write by another transaction conflicted
+// with the legacy teardown (SQLSTATE 40001). The transaction rolled back, so
+// nothing was deleted, and a rerun re-checks against the new state.
+var ErrConcurrentWrite = errors.New("demoseed: concurrent write detected; nothing was deleted; rerun")
+
+// concurrentWriteErr maps a serialization failure to ErrConcurrentWrite and
+// returns any other error unchanged.
+func concurrentWriteErr(err error) error {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "40001" {
+		return fmt.Errorf("%w (%v)", ErrConcurrentWrite, err)
+	}
+	return err
 }
 
 // resolveSuperAdmin returns the user id and tenant of the one active user

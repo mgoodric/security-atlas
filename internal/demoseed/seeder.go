@@ -572,10 +572,12 @@ func deleteDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug s
 		}
 		tag, err := tx.Exec(ctx, stmt, tenantID)
 		if err != nil {
-			// Ignore unknown-table errors — older / missing tables
-			// won't have any rows for this tenant anyway; the
-			// teardown is meant to be best-effort. Fail loudly on
-			// other errors.
+			// An undefined-table error is skipped here, but it is not
+			// best-effort: Postgres has already aborted tx, so the next
+			// statement fails with 25P02 (in_failed_sql_transaction) and
+			// the whole teardown rolls back. That fails safe (nothing is
+			// deleted); a table removed from the schema must come out of
+			// teardownTables for teardown to work again.
 			if pgIsUndefinedTable(err) {
 				continue
 			}
@@ -736,9 +738,9 @@ func (s *Seeder) tenantIsPopulated(ctx context.Context, tenantID uuid.UUID) (boo
 }
 
 // pgIsUndefinedTable returns true when err is a Postgres SQLSTATE
-// 42P01 (undefined_table). Used by Teardown so a future schema delta
-// that removes a table the seeder used to write into doesn't break
-// teardown of older demo data.
+// 42P01 (undefined_table). deleteDemoTenant skips such a table, but the
+// error has already aborted its transaction, so the teardown still fails
+// (25P02) and rolls back: safe, not best-effort (#2153).
 func pgIsUndefinedTable(err error) bool {
 	if err == nil {
 		return false

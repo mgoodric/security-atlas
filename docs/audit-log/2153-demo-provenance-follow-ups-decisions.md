@@ -78,11 +78,21 @@ with every safety check left to the reader, so the CLI path was chosen:
   - Rows a visitor added while signed in as a demo user count as demo. No
     real account exists in the tenant to have written anything else.
 - **One SERIALIZABLE transaction.** The checks and the delete share one
-  transaction at `SERIALIZABLE`. The tenant row's `FOR UPDATE` lock alone
-  would block only writers to tables with an FK to `tenants`; under
-  `SERIALIZABLE`, a concurrent write to anything the checks read makes one
-  side fail with a serialization error instead of committing, so nothing
-  written between check and delete is swept up. A failure is safe: rerun.
+  transaction at `SERIALIZABLE`. The app writes at `READ COMMITTED`, so
+  the guarantee is snapshot isolation, not serializability against those
+  writers:
+  - the delete removes only rows visible to the checks' snapshot, so a row
+    committed after the checks is never deleted;
+  - a concurrent update or delete of a row the teardown deletes fails it
+    with 40001. The command reports "concurrent write detected; nothing was
+    deleted; rerun" (`ErrConcurrentWrite`);
+  - a concurrent insert into a table with an FK to `tenants` blocks on the
+    tenant row's `FOR UPDATE` lock. One into a table with no FK to
+    `tenants` is left behind as an orphan, not deleted.
+- **Undefined tables fail safe.** `deleteDemoTenant` skips a 42P01, but
+  Postgres has already aborted the transaction, so the next statement fails
+  with 25P02 and nothing is deleted. The old comment called this
+  "best-effort"; it is not, and the comment now says so.
 - **`--dry-run`.** Runs every check and the delete, prints the rows each
   DELETE removed per table (FK cascades are not counted), and rolls back.
   The teardown audit rows roll back with it.
