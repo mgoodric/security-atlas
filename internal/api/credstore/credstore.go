@@ -723,9 +723,9 @@ func MinterUserID(c Credential) string {
 //     ("bootstrap-admin") and a machine token ("oauth_client:<id>") are not
 //     users and never resolve, even when the remainder happens to parse.
 //
-// Authorization inputs never carry this value: resolveRoles and
-// authz.BuildInput keep the raw cred.UserID. The prefix rule itself lives in
-// identity.UserID, shared with the auditor attrs resolver.
+// authz.BuildInput keeps the raw cred.UserID. /v1/me's resolveRoles keys
+// user_roles by this value for a user caller (#2216). The prefix rule itself
+// lives in identity.UserID, shared with the auditor attrs resolver.
 func CallerUserID(c Credential) (uuid.UUID, bool) {
 	if c.UserID == "" || c.UserID == c.ID {
 		return uuid.Nil, false

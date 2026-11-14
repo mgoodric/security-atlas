@@ -329,3 +329,29 @@ func TestMapsEqual(t *testing.T) {
 		})
 	}
 }
+
+// #2216: user_roles stores the bare uuid, so a "user:"-prefixed JWT subject
+// must be stripped before the lookup; non-user principals keep their raw id.
+func TestRolesKey(t *testing.T) {
+	t.Parallel()
+	u := uuid.New()
+	cases := []struct {
+		name string
+		cred credstore.Credential
+		want string
+	}{
+		{"jwt user subject is stripped", credstore.Credential{ID: "jwt", UserID: "user:" + u.String()}, u.String()},
+		{"key bound to a user keeps the bare uuid", credstore.Credential{ID: "key_abc", UserID: u.String()}, u.String()},
+		{"unbound key keeps its own id", credstore.Credential{ID: "key_abc", UserID: "key_abc"}, "key_abc"},
+		{"bootstrap admin is unchanged", credstore.Credential{ID: "b", UserID: "bootstrap-admin"}, "bootstrap-admin"},
+		{"machine token is unchanged", credstore.Credential{ID: "m", UserID: "oauth_client:c1"}, "oauth_client:c1"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := rolesKey(tc.cred); got != tc.want {
+				t.Fatalf("rolesKey(%+v) = %q, want %q", tc.cred, got, tc.want)
+			}
+		})
+	}
+}

@@ -138,3 +138,49 @@ func TestGetMe_APIKeyKeepsCredentialProfile(t *testing.T) {
 		})
 	}
 }
+
+// #2216: /v1/me roles under the "user:<uuid>" subject. user_roles stores the
+// bare uuid, so the unstripped subject matched no rows and every password or
+// OIDC sign-in reported "roles": []. Both sign-ins mint the same subject
+// shape; the OIDC case is a users row carrying an idp_subject.
+func TestGetMe_UserPrefixedSubjectReturnsRoles(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	ctx := context.Background()
+	cases := []struct {
+		name, email, idpSubject, role string
+	}{
+		{"password sign-in", "pw@example.com", "", "admin"},
+		{"oidc sign-in", "oidc@example.com", "oidc|abc123", "grc_engineer"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tenantID, userID := seedTenantAndUser(t, admin, tc.email, tc.name)
+			if tc.idpSubject != "" {
+				if _, err := admin.Exec(ctx, `UPDATE users SET idp_subject = $1 WHERE id = $2`, tc.idpSubject, userID); err != nil {
+					t.Fatalf("set idp_subject: %v", err)
+				}
+			}
+			if _, err := admin.Exec(ctx,
+				`INSERT INTO user_roles (tenant_id, user_id, role, granted_by) VALUES ($1, $2, $3, 'test')`,
+				tenantID, userID, tc.role); err != nil {
+				t.Fatalf("seed user_roles: %v", err)
+			}
+			t.Cleanup(func() {
+				if _, err := admin.Exec(ctx, `DELETE FROM user_roles WHERE tenant_id = $1`, tenantID); err != nil {
+					t.Logf("cleanup user_roles: %v", err)
+				}
+			})
+			env := testServerForLocalLogin(t, app, tenantID, userID)
+
+			resp, body := do(t, env, http.MethodGet, "/v1/me", nil)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("GET /v1/me: status %d, want 200; body=%v", resp.StatusCode, body)
+			}
+			roles, _ := body["roles"].([]any)
+			if len(roles) != 1 || roles[0] != tc.role {
+				t.Fatalf("roles = %v; want [%s]", body["roles"], tc.role)
+			}
+		})
+	}
+}
