@@ -33,7 +33,7 @@ commands need the `atlas_migrate` role; the read/verify paths use `atlas_app`.
 | `evidence verify`                        | Walk the ledger and re-check each record's stored hash           |
 | `credentials issue`                      | Issue an API key (bearer returned once)                          |
 | `credentials rotate` / `revoke` / `list` | API-key lifecycle                                                |
-| `catalog import-scf <path>`              | Import the SCF JSON catalog into Postgres                        |
+| `catalog import-scf <path>`              | Import the SCF catalog (JSON or SCF `.xlsx`) into Postgres       |
 | `catalog import-crosswalk <path>`        | Import a framework→SCF crosswalk YAML (alias: `import-soc2`)     |
 | `controls validate <path>`               | Validate a control bundle locally (no network call)              |
 | `controls test <bundle-dir>`             | Run a bundle's test cases against fixture evidence               |
@@ -115,6 +115,23 @@ security-atlas-cli catalog import-crosswalk data/crosswalks/soc2-tsc-2017.yaml
 ```
 
 `just import-scf <path>` and `just import-soc2 <path>` wrap these.
+
+`import-scf` also reads SCF's published Excel workbook directly, with no
+conversion step. Download it from the
+[SCF website](https://securecontrolsframework.com/) or the
+[SCF GitHub repository](https://github.com/securecontrolsframework/securecontrolsframework),
+which carries files such as `secure-controls-framework-scf-2026-3.xlsx`:
+
+```sh
+security-atlas-cli catalog import-scf ./secure-controls-framework-scf-2026-3.xlsx
+```
+
+It reads the `SCF <release>` sheet (`SCF #`, `SCF Control`, and the
+`Secure Controls Framework (SCF) Control Description` column), the same sheet
+`import-crosswalk` reads from that workbook. The release version comes from the
+sheet name (`2026.3`); `--release-version` overrides it. The workbook carries
+no release date; pass `--release-date YYYY-MM-DD` to record one. Family is the `SCF #`
+prefix (`IAC` for `IAC-06`), as in the JSON catalog.
 
 To import a full OSCAL catalog (NIST 800-53 and friends), use the separate
 `atlas-oscal import-catalog` binary — see

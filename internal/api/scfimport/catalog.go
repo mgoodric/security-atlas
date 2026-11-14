@@ -1,6 +1,6 @@
-// Package scfimport ingests the Secure Controls Framework JSON catalog
-// into Postgres. The catalog JSON shape is documented in the Catalog type
-// below — operators convert SCF's Excel/JSON release into this shape.
+// Package scfimport ingests the Secure Controls Framework catalog into
+// Postgres. It reads either the JSON shape documented in the Catalog type
+// below (Load) or SCF's published Excel workbook directly (LoadWorkbook).
 //
 // The importer is idempotent: re-running with the same release_version
 // upserts in place (no duplicates); a new release_version creates a new
