@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/fetch"
+	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
 	"github.com/chromedp/chromedp"
 	"github.com/chromedp/chromedp/remote"
@@ -41,6 +43,11 @@ func allocatorOptions() []chromedp.ExecAllocatorOption {
 		chromedp.Flag("no-pings", true),
 		// Replaces the default's value, so it repeats chromedp's two entries.
 		chromedp.Flag("disable-features", "Translate,BlinkGenPropertyTrees,OptimizationHints,MediaRouter"),
+		// #1941: no hostname resolves, so a request that slips past the
+		// Fetch block in PrintHTML still cannot reach a named host. It does
+		// not apply to a remote CHROME_DEBUG_URL browser, whose flags we do
+		// not set; there the Fetch block is the only guard.
+		chromedp.Flag("host-resolver-rules", "MAP * ~NOTFOUND"),
 	)
 }
 
@@ -54,23 +61,43 @@ func allocatorOptions() []chromedp.ExecAllocatorOption {
 //  2. Otherwise: launch a local Chrome with allocatorOptions.
 //
 // Only the inline data: URL built here is ever loaded, never an untrusted
-// URL. PrintHTML does not take a render slot; callers that serve requests
-// wrap it in Default().Do so the shared concurrency cap and deadline apply.
+// URL. Every other request the document makes (img, link, script, iframe,
+// CSS url()) is failed through Fetch interception before it leaves the
+// browser, on both paths, so a builder that misses an escape cannot turn the
+// renderer into an SSRF client (#1941). PrintHTML does not take a render
+// slot; callers that serve requests wrap it in Default().Do so the shared
+// concurrency cap and deadline apply.
 func PrintHTML(ctx context.Context, htmlDoc string) ([]byte, error) {
+	return printHTML(ctx, htmlDoc, allocatorOptions())
+}
+
+// printHTML is PrintHTML with the local allocator options as a parameter, so
+// the network-block test can switch off Chrome's own loopback protection.
+func printHTML(ctx context.Context, htmlDoc string, opts []chromedp.ExecAllocatorOption) ([]byte, error) {
 	var allocCtx context.Context
 	var cancelAlloc context.CancelFunc
 	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
 		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
 	} else {
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, allocatorOptions()...)
+		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
 	}
 	defer cancelAlloc()
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
 	defer cancelBrowser()
 
+	if err := blockNonDataRequests(browserCtx); err != nil {
+		return nil, renderError(err)
+	}
+
 	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
 	var buf []byte
 	err := chromedp.Do(browserCtx,
+		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+			_, err := cdp.Call(ctx, t, fetch.Enable, fetch.EnableParams{
+				Patterns: []*fetch.RequestPattern{{URLPattern: "*"}},
+			})
+			return err
+		}),
 		chromedp.Navigate(dataURL),
 		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
 			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
@@ -85,15 +112,47 @@ func PrintHTML(ctx context.Context, htmlDoc string) ([]byte, error) {
 		}),
 	)
 	if err != nil {
-		if isChromeUnavailable(err) {
-			return nil, fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
-		}
-		return nil, fmt.Errorf("pdfrender: chromedp run: %w", err)
+		return nil, renderError(err)
 	}
 	if len(buf) < 5 || string(buf[:5]) != "%PDF-" {
 		return nil, fmt.Errorf("pdfrender: invalid PDF output (len=%d, prefix=%q)", len(buf), safePrefix(buf))
 	}
 	return buf, nil
+}
+
+// blockNonDataRequests answers every request Fetch pauses in the tab of
+// browserCtx: a data: URL continues, anything else fails as BlockedByClient.
+// The listener must not run commands itself (chromedp.Listen), so each answer
+// goes out from its own goroutine. Fetch.enable is sent by the caller, before
+// navigation.
+func blockNonDataRequests(browserCtx context.Context) error {
+	return chromedp.Listen(browserCtx, func(ev any) {
+		paused, ok := ev.(*fetch.EventRequestPaused)
+		if !ok {
+			return
+		}
+		go func() {
+			// Listen has set up the tab, so the Target is in place.
+			target := chromedp.FromContext(browserCtx).Target
+			if paused.Request != nil && strings.HasPrefix(paused.Request.URL, "data:") {
+				_, _ = cdp.Call(browserCtx, target, fetch.ContinueRequest, fetch.ContinueRequestParams{RequestID: paused.RequestID})
+				return
+			}
+			_, _ = cdp.Call(browserCtx, target, fetch.FailRequest, fetch.FailRequestParams{
+				RequestID:   paused.RequestID,
+				ErrorReason: network.ErrorReasonBlockedByClient,
+			})
+		}()
+	})
+}
+
+// renderError wraps a chromedp error, mapping a missing browser to
+// ErrChromeUnavailable so handlers 503.
+func renderError(err error) error {
+	if isChromeUnavailable(err) {
+		return fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
+	}
+	return fmt.Errorf("pdfrender: chromedp run: %w", err)
 }
 
 // encodeForDataURL percent-encodes the small set of characters that would
