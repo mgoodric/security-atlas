@@ -797,6 +797,58 @@ func TestExistingMultiTenant_ServesWithoutOptIn(t *testing.T) {
 	}
 }
 
+// #2015: without the opt-in, the tenant count runs inside the create
+// transaction, behind one install-wide advisory lock. While another
+// transaction holds that lock, a create waits; once it is released, the
+// create counts the tenants then present and is refused.
+func TestCreate_GateSerialisedByInstallLock(t *testing.T) {
+	t.Setenv(admintenants.AllowMultiTenantEnvVar, "")
+	resetSuperAdminAuditLog(t)
+	sessionTenantID := seedTenant(t, "Issue 2015 lock session")
+	actorID := uuid.New()
+	seedActorUser(t, sessionTenantID, actorID, "test-2015@example.invalid", "Lock Creator")
+	seedSuperAdmin(t, actorID)
+	cleanupCreatedTenants(t, actorID)
+
+	ctx := context.Background()
+	holder, err := adminPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin holder tx: %v", err)
+	}
+	t.Cleanup(func() { _ = holder.Rollback(ctx) })
+	if _, err := holder.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, int64(0x201520152015)); err != nil {
+		t.Fatalf("hold install lock: %v", err)
+	}
+
+	h := newGatedRouter(t, sessionTenantID, actorID, true)
+	done := make(chan int, 1)
+	go func() {
+		res, _ := doRequest(t, h, http.MethodPost, "/v1/admin/tenants", map[string]any{
+			"name": "Issue 2015 Second", "slug": "test-2015-second",
+		})
+		done <- res.StatusCode
+	}()
+
+	select {
+	case code := <-done:
+		t.Fatalf("create returned %d while the install lock was held; the gate must wait for it", code)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatalf("release install lock: %v", err)
+	}
+	select {
+	case code := <-done:
+		if code != http.StatusForbidden {
+			t.Fatalf("create after the lock released: expected 403, got %d", code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("create still blocked 10s after the install lock was released")
+	}
+	assertNoTenantWithSlug(t, "test-2015-second")
+}
+
 func assertNoTenantWithSlug(t *testing.T, slug string) {
 	t.Helper()
 	var n int
