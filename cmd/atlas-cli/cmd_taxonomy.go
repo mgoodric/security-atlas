@@ -4,6 +4,9 @@ package main
 // categories through the HTTP API (/v1/risks/categories). Every subcommand
 // takes --endpoint (the platform HTTP base URL) and --token like the
 // `controls import` commands. A category is named by its slug or its id.
+//
+// #1811: `atlas-cli taxonomy themes` does the same for the organisation's
+// risk themes (/v1/themes, cmd_taxonomy_themes.go).
 
 import (
 	"bytes"
@@ -27,7 +30,7 @@ func newTaxonomyCmd() *cobra.Command {
 		Use:   "taxonomy",
 		Short: "manage the organisation's risk taxonomy",
 	}
-	cmd.AddCommand(newTaxonomyCategoriesCmd())
+	cmd.AddCommand(newTaxonomyCategoriesCmd(), newTaxonomyThemesCmd())
 	return cmd
 }
 

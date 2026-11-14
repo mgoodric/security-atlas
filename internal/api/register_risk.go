@@ -110,6 +110,10 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// Slice 053: theme catalog + per-risk theme tagging.
 	themesH := themesapi.New(risksStore)
 	root.Get("/v1/themes", themesH.ListVisible)
+	// #1811: organisation theme management (admin / grc_engineer).
+	root.Post("/v1/themes", risksH.CreateTheme)
+	root.Patch("/v1/themes/{ref}", risksH.RenameTheme)
+	root.Delete("/v1/themes/{ref}", risksH.DeleteTheme)
 	root.Post("/v1/risks/{id}/themes", themesH.AssignThemes)
 	root.Delete("/v1/risks/{id}/themes/{theme}", themesH.RemoveTheme)
 	// Slice 054: declarative aggregation rules engine. Routes appended per
