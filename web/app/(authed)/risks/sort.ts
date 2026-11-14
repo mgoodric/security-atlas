@@ -20,7 +20,7 @@
 
 import type { Risk } from "@/lib/api/risks";
 
-import { residualState } from "./filters";
+import { fairScore, residualSeverity } from "./filters";
 
 /** The three columns an operator triages on. */
 export type SortKey = "residual" | "severity" | "review_due";
@@ -83,14 +83,14 @@ export function nextSortState(current: SortState, clicked: SortKey): SortState {
 }
 
 /**
- * Residual magnitude on the 0..1 scale, or `null` for a row whose
- * residual is not yet evaluated (slice 680 "pending"). Mirrors
- * `formatResidualScore`'s math but returns a number for comparison.
+ * Residual magnitude (1..25 for a 5x5 residual, dollars for a FAIR one),
+ * or `null` for a row whose residual is not yet evaluated (slice 680
+ * "pending"). Reads every shape `residualSeverity` reads (#2058).
  */
 function residualMagnitude(score: unknown): number | null {
-  if (residualState(score) !== "scored") return null;
-  const s = score as { likelihood: number; impact: number };
-  return (s.likelihood * s.impact) / 25;
+  const fair = fairScore(score);
+  if (fair != null) return fair.annualized_loss_exposure;
+  return residualSeverity(score);
 }
 
 /**

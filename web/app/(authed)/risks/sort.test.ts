@@ -201,6 +201,19 @@ describe("sortRisks — residual", () => {
     const out = sortRisks(rows, { key: "residual", dir: "asc" });
     expect(out.map((r) => r.id)).toEqual(["lo", "hi", "pending"]);
   });
+
+  it("ranks a deriver-written {score} residual alongside {likelihood, impact} (#2058)", () => {
+    const rows = [
+      mkRisk({ id: "pair", residual_score: residual(3, 3) }), // 9
+      mkRisk({
+        id: "derived",
+        residual_score: { score: 12, inherent_score: 20 },
+      }),
+      mkRisk({ id: "pending", residual_score: {} }),
+    ];
+    const out = sortRisks(rows, { key: "residual", dir: "desc" });
+    expect(out.map((r) => r.id)).toEqual(["derived", "pair", "pending"]);
+  });
 });
 
 describe("sortRisks — review_due", () => {
