@@ -1136,10 +1136,10 @@ type Querier interface {
 	// absence of any INSERT into evidence_records — the engine has no
 	// evidence-write surface (constitutional invariant #2).
 	InsertControlEvaluation(ctx context.Context, arg InsertControlEvaluationParams) (ControlEvaluation, error)
-	// Issue #1908: record the manifest an in-place description update is about
+	// Issue #1908: record the manifest an in-place metadata update is about
 	// to overwrite. Copies the active row's current values in the same
-	// transaction, just before UpdateControlDescriptionInPlace, so the prose
-	// history is append-only in control_manifest_revisions.
+	// transaction, just before UpdateControlMetadataInPlace, so the prose
+	// and external-refs history is append-only in control_manifest_revisions.
 	InsertControlManifestRevision(ctx context.Context, arg InsertControlManifestRevisionParams) (int64, error)
 	// Insert a new control row (initial upload or supersession). Caller is
 	// responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
@@ -2903,6 +2903,13 @@ type Querier interface {
 	// ListSlackOptInUsers. enabled = false / no-row excluded (default
 	// opted-OUT). Returns only the (tenant, user) keys — no PII.
 	ListWebhookOptInUsers(ctx context.Context) ([]ListWebhookOptInUsersRow, error)
+	// Issue #1958: GetActiveControlByBundleID plus a row lock, for the upload
+	// path. Two concurrent uploads of one bundle serialise on the active row,
+	// so the second decides no-op / in-place / supersede against what the
+	// first committed. Without it, two in-place uploads could both copy the
+	// same manifest into control_manifest_revisions and the first one's text
+	// would be overwritten without a trace.
+	LockActiveControlByBundleID(ctx context.Context, arg LockActiveControlByBundleIDParams) (LockActiveControlByBundleIDRow, error)
 	// #1861: serialize every evaluation of one rule's meta-risk key inside the
 	// caller's transaction. The engine's de-dup is a read (GetRuleMetaRiskByKey)
 	// then an insert (CreateAggregateRisk); without this lock two concurrent
@@ -3205,11 +3212,12 @@ type Querier interface {
 	// zero rows here and returns pgx.ErrNoRows, which the handler maps to 409.
 	// `updated_at` is bumped to now() so the row reflects the last edit.
 	UpdateBoardPackContent(ctx context.Context, arg UpdateBoardPackContentParams) (BoardPack, error)
-	// Issue #1908: a re-upload whose manifest differs from the active row's
-	// only in `description` updates that row in place instead of versioning,
-	// so every control-keyed row (owners, evidence, exceptions, links) stays
-	// attached. The hash moves with the YAML so a repeat upload is a no-op.
-	UpdateControlDescriptionInPlace(ctx context.Context, arg UpdateControlDescriptionInPlaceParams) (int64, error)
+	// Issues #1908, #1958: a re-upload whose manifest differs from the active
+	// row's only in `description` and/or `external_refs` updates that row in
+	// place instead of versioning, so every control-keyed row (owners,
+	// evidence, exceptions, links) stays attached. The hash moves with the
+	// YAML so a repeat upload is a no-op.
+	UpdateControlMetadataInPlace(ctx context.Context, arg UpdateControlMetadataInPlaceParams) (int64, error)
 	UpdateDecision(ctx context.Context, arg UpdateDecisionParams) (Decision, error)
 	// Patch the predicate. The BEFORE UPDATE trigger
 	// (framework_scopes_bounce_on_predicate_change_trg) ensures that if this row
