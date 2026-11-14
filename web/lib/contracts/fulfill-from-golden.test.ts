@@ -51,7 +51,6 @@ const ALL_ENDPOINTS: GoldenEndpoint[] = [
   "demo-status",
   "framework-posture",
   "activity",
-  "upcoming",
   "freshness",
   "drift",
 ];

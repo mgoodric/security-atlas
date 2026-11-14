@@ -101,11 +101,22 @@ func TestNormalizeTypeFilter_DedupesAndOrdersStably(t *testing.T) {
 }
 
 // TestNormalizeTypeFilter_RejectsUnknownType asserts the AC-1 closed
-// vocabulary — unknown types get a 400-shaped error. `risk` is not a
-// calendar event source.
+// vocabulary — unknown types get a 400-shaped error.
 func TestNormalizeTypeFilter_RejectsUnknownType(t *testing.T) {
-	if _, err := normalizeTypeFilter("audit,risk"); err == nil {
-		t.Error("expected err for unknown type 'risk', got nil")
+	if _, err := normalizeTypeFilter("audit,bogus"); err == nil {
+		t.Error("expected err for unknown type 'bogus', got nil")
+	}
+}
+
+// TestNormalizeTypeFilter_AcceptsRiskAndActionPlan is the #2130 guard:
+// risk reviews and action-plan due dates are calendar event types.
+func TestNormalizeTypeFilter_AcceptsRiskAndActionPlan(t *testing.T) {
+	got, err := normalizeTypeFilter("risk,action_plan")
+	if err != nil {
+		t.Fatalf("risk and action_plan should be valid event types: %v", err)
+	}
+	if want := "risk,action_plan"; got != want {
+		t.Errorf("normalized=%q want=%q", got, want)
 	}
 }
 

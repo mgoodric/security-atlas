@@ -16,6 +16,15 @@
 --      the append-only control_evaluations ledger.
 --   6. personnel_security_checklists — open offboarding due dates, so overdue
 --      leaver access-removal tasks surface on the compliance calendar.
+--   7. risks                   — review_due_at is the next risk review (#2130)
+--   8. action_plans            — due_date of an open plan (#2130)
+--   9. policy_acknowledgments  — the latest ack per (policy version, user)
+--      + 365 days, when the annual re-acknowledgement lapses (#2130; it
+--      moved here from the retired dashboard upcoming rollup)
+--
+-- Past-due items: every branch filters on its own date against [from, to),
+-- so a window that starts in the past returns the items that fell due in
+-- it. The dashboard's "Coming up" asks for today + 14 days.
 --
 -- All event sources are tenant-scoped; RLS fires on each underlying SELECT, and the
 -- explicit tenant_id predicates are the primary guarantee.
@@ -25,8 +34,11 @@
 -- timestamptz bounds.
 --
 -- Type filter (`type_filter`) is a CSV string. Empty string ('') means
--- "all five sources." A non-empty filter narrows to the subset by checking
--- membership on the per-branch literal type discriminator.
+-- "every source." A non-empty filter narrows to the subset by exact
+-- membership of the per-branch literal type in the CSV (#2130: it was a
+-- substring match, which `policy_ack` would have tripped for `policy`).
+-- The handler also narrows it by the caller's OPA access (risk,
+-- action_plan) before it reaches this query.
 --
 -- Cadence math for the controls branch:
 --   - The control's freshness_class is mapped to a max-acceptable-age
@@ -78,7 +90,7 @@ FROM (
     WHERE ap.tenant_id = $1
       AND ap.period_end::timestamptz >= sqlc.arg(from_ts)::timestamptz
       AND ap.period_end::timestamptz <  sqlc.arg(to_ts)::timestamptz
-      AND (sqlc.arg(type_filter)::text = '' OR position('audit' IN sqlc.arg(type_filter)::text) > 0)
+      AND (sqlc.arg(type_filter)::text = '' OR 'audit' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
 
     UNION ALL
 
@@ -123,7 +135,7 @@ FROM (
       AND e.expires_at IS NOT NULL
       AND e.expires_at::timestamptz >= sqlc.arg(from_ts)::timestamptz
       AND e.expires_at::timestamptz <  sqlc.arg(to_ts)::timestamptz
-      AND (sqlc.arg(type_filter)::text = '' OR position('exception' IN sqlc.arg(type_filter)::text) > 0)
+      AND (sqlc.arg(type_filter)::text = '' OR 'exception' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
 
     UNION ALL
 
@@ -159,7 +171,7 @@ FROM (
       AND p.next_review_at IS NOT NULL
       AND p.next_review_at::timestamptz >= sqlc.arg(from_ts)::timestamptz
       AND p.next_review_at::timestamptz <  sqlc.arg(to_ts)::timestamptz
-      AND (sqlc.arg(type_filter)::text = '' OR position('policy' IN sqlc.arg(type_filter)::text) > 0)
+      AND (sqlc.arg(type_filter)::text = '' OR 'policy' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
 
     UNION ALL
 
@@ -202,7 +214,7 @@ FROM (
             WHEN 'biannual'  THEN INTERVAL '6 months'
             WHEN 'annual'    THEN INTERVAL '12 months'
            END)::timestamptz <  sqlc.arg(to_ts)::timestamptz
-      AND (sqlc.arg(type_filter)::text = '' OR position('vendor' IN sqlc.arg(type_filter)::text) > 0)
+      AND (sqlc.arg(type_filter)::text = '' OR 'vendor' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
 
     UNION ALL
 
@@ -226,7 +238,7 @@ FROM (
       AND v.commercial_status <> 'churned'
       AND v.renewal_date::timestamptz >= sqlc.arg(from_ts)::timestamptz
       AND v.renewal_date::timestamptz <  sqlc.arg(to_ts)::timestamptz
-      AND (sqlc.arg(type_filter)::text = '' OR position('vendor' IN sqlc.arg(type_filter)::text) > 0)
+      AND (sqlc.arg(type_filter)::text = '' OR 'vendor' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
 
     UNION ALL
 
@@ -326,7 +338,95 @@ FROM (
                     END
             END
           ) <  sqlc.arg(to_ts)::timestamptz
-      AND (sqlc.arg(type_filter)::text = '' OR position('control' IN sqlc.arg(type_filter)::text) > 0)
+      AND (sqlc.arg(type_filter)::text = '' OR 'control' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
+
+    UNION ALL
+
+    -- risk reviews (#2130): every risk with a review_due_at, roll-ups
+    -- included. A roll-up's review date is its own (#2059 sets one on every
+    -- risk), and each risk is one row here, so a child listed under a
+    -- roll-up is not listed twice. status is '' in SQL: the store fills it
+    -- with duedate.Status (overdue after the UTC due day, due-soon within
+    -- 14 days), the one rule the policy list shares.
+    SELECT
+        r.id::text                                                    AS event_id,
+        'risk'::text                                                  AS event_type,
+        ('Risk review: ' || r.title)::text                            AS title,
+        r.review_due_at                                               AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        r.id::text                                                    AS related_entity_id,
+        'risk'::text                                                  AS related_entity_kind,
+        r.treatment::text                                             AS summary,
+        ''::text                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM risks r
+    WHERE r.tenant_id = $1
+      AND r.review_due_at IS NOT NULL
+      AND r.review_due_at >= sqlc.arg(from_ts)::timestamptz
+      AND r.review_due_at <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR 'risk' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
+
+    UNION ALL
+
+    -- action-plan due dates (#2130): open plans (not completed, verified or
+    -- tombstoned) with a due_date. due_date is a DATE, placed at 00:00 UTC
+    -- so the event's day does not move with the session time zone. status
+    -- is filled by the store, as for risk reviews.
+    SELECT
+        ap.id::text                                                   AS event_id,
+        'action_plan'::text                                           AS event_type,
+        ('Action plan due: ' || ap.title)::text                       AS title,
+        (ap.due_date::timestamp AT TIME ZONE 'UTC')                   AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        ap.id::text                                                   AS related_entity_id,
+        'action_plan'::text                                           AS related_entity_kind,
+        ap.status                                                     AS summary,
+        ''::text                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM action_plans ap
+    WHERE ap.tenant_id = $1
+      AND ap.tombstoned_at IS NULL
+      AND ap.status NOT IN ('completed', 'verified')
+      AND ap.due_date IS NOT NULL
+      AND (ap.due_date::timestamp AT TIME ZONE 'UTC') >= sqlc.arg(from_ts)::timestamptz
+      AND (ap.due_date::timestamp AT TIME ZONE 'UTC') <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR 'action_plan' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
+
+    UNION ALL
+
+    -- policy acknowledgement expiries (#2130): the freshest ack per
+    -- (policy_version, user) plus 365 days, when that attestation lapses.
+    -- The query is the retired dashboard rollup's policy_ack branch; the
+    -- title now names the policy (LEFT JOIN, tenant-scoped composite key)
+    -- instead of printing its version UUID, and summary names only the
+    -- policy: who acknowledged is not shown to calendar readers or ICS
+    -- subscribers (the rollup never exposed it). status is filled by the store
+    -- with duedate.Status, as for risk reviews.
+    SELECT
+        latest_ack.id::text                                           AS event_id,
+        'policy_ack'::text                                            AS event_type,
+        ('Policy acknowledgement due: ' ||
+            COALESCE(p.title, latest_ack.policy_version_id::text))::text AS title,
+        (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        latest_ack.id::text                                           AS related_entity_id,
+        'policy_acknowledgment'::text                                 AS related_entity_kind,
+        COALESCE(p.title, '')::text                                   AS summary,
+        ''::text                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM (
+        SELECT DISTINCT ON (pa.policy_version_id, pa.user_id)
+            pa.id, pa.tenant_id, pa.policy_version_id, pa.user_id, pa.acknowledged_at
+        FROM policy_acknowledgments pa
+        WHERE pa.tenant_id = $1
+        ORDER BY pa.policy_version_id, pa.user_id, pa.acknowledged_at DESC
+    ) latest_ack
+    LEFT JOIN policies p
+      ON p.tenant_id = latest_ack.tenant_id
+     AND p.id = latest_ack.policy_version_id
+    WHERE (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz >= sqlc.arg(from_ts)::timestamptz
+      AND (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz <  sqlc.arg(to_ts)::timestamptz
+      AND (sqlc.arg(type_filter)::text = '' OR 'policy_ack' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
 
     UNION ALL
 
@@ -352,7 +452,7 @@ FROM (
       AND psc.status = 'open'
       AND psc.due_at >= sqlc.arg(from_ts)::timestamptz
       AND psc.due_at <  sqlc.arg(to_ts)::timestamptz
-      AND (sqlc.arg(type_filter)::text = '' OR position('offboarding' IN sqlc.arg(type_filter)::text) > 0)
+      AND (sqlc.arg(type_filter)::text = '' OR 'offboarding' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
 ) calendar_events
 ORDER BY starts_at ASC, event_id ASC
 LIMIT sqlc.arg(row_limit)::int;

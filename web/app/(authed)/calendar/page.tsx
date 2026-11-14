@@ -25,9 +25,9 @@
 // Anti-criteria honored (P0):
 // - P0-A6: NO calendar-library dependency (FullCalendar etc.). Both
 //   views are hand-rolled with Tailwind. See decision D6.
-// - P0-A1: a closed event-type set (audit/exception/policy/vendor/control).
-//   Slice 675 added `vendor` to align the agenda with the dashboard
-//   "Upcoming" widget; the set is still closed (no free-form types).
+// - P0-A1: a closed event-type set (audit/exception/policy/vendor/control/
+//   risk/action_plan/policy_ack). Slice 675 added `vendor`; #2130 added
+//   `risk`, `action_plan` and `policy_ack`. The set is still closed (no free-form types).
 // - P0-A5: per-event links fall back to placeholders for pages that
 //   have not shipped yet.
 
@@ -54,6 +54,9 @@ const ALL_TYPES = [
   "policy",
   "vendor",
   "control",
+  "risk",
+  "action_plan",
+  "policy_ack",
 ] as const;
 type AllowedType = (typeof ALL_TYPES)[number];
 
@@ -157,7 +160,7 @@ function CalendarPageInner() {
   return (
     <PageShell
       title="Compliance calendar"
-      subtitle="Upcoming audits, exception expirations, policy reviews, vendor reviews, and periodic control reviews — one place for the whole team."
+      subtitle="Upcoming audits, exception expirations, policy reviews, vendor reviews, periodic control reviews, risk reviews and action-plan due dates — one place for the whole team."
       actions={
         <div className="flex flex-col items-end gap-2">
           <div className="flex gap-2">

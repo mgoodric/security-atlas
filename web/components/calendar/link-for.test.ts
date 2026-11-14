@@ -50,6 +50,25 @@ describe("linkFor", () => {
     expect(result).toEqual({ kind: "link", href: "/vendors/vnd-7" });
   });
 
+  it("risk review event returns a link to the risk detail route (#2130)", () => {
+    const result = linkFor(
+      makeEvent({ type: "risk", related_entity_id: "rsk-3" }),
+    );
+    expect(result).toEqual({ kind: "link", href: "/risks/rsk-3" });
+  });
+
+  it("policy-ack event returns the policy static result (#2130)", () => {
+    const result = linkFor(makeEvent({ type: "policy_ack" }));
+    expect(result.kind).toBe("static");
+  });
+
+  it("action-plan event returns a link to the plan detail route (#2130)", () => {
+    const result = linkFor(
+      makeEvent({ type: "action_plan", related_entity_id: "ap-5" }),
+    );
+    expect(result).toEqual({ kind: "link", href: "/action-plans/ap-5" });
+  });
+
   it("exception event returns a static (no-link) result with an explanatory reason", () => {
     const result = linkFor(makeEvent({ type: "exception" }));
     expect(result.kind).toBe("static");
