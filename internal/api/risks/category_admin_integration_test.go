@@ -177,6 +177,15 @@ func TestCategoryAdmin_AddThenRenameKeepsSlug(t *testing.T) {
 		t.Fatalf("created = %v", created)
 	}
 
+	// Until #1745's contract step a new category cannot hold risks: a 400,
+	// not a 500.
+	if status, body := taxCall(t, env, http.MethodPost, "/v1/risks", env.admin, map[string]any{
+		"title": "in a new category", "category": "cloud-security",
+		"inherent_score": map[string]int{"likelihood": 2, "impact": 2},
+	}); status != http.StatusBadRequest {
+		t.Fatalf("risk in new category: status %d (%v), want 400", status, body)
+	}
+
 	// A duplicate slug is a conflict.
 	if status, body := taxCall(t, env, http.MethodPost, "/v1/risks/categories", env.admin,
 		map[string]any{"slug": "cloud-security", "name": "Other"}); status != http.StatusConflict {

@@ -227,7 +227,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 			errors.Is(err, risk.ErrInherentScoreInvalid),
 			risk.IsPlacementValidation(err),
 			risk.IsUnknownCategory(err),
-			errors.As(err, new(*risk.ArchivedCategoryError)):
+			errors.As(err, new(*risk.ArchivedCategoryError)),
+			errors.As(err, new(*risk.InvalidCategoryError)):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "create risk", err)

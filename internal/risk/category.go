@@ -100,10 +100,11 @@ func resolveCategory(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, re
 	}
 	enum := dbx.RiskCategory(row.Slug)
 	if !slices.Contains(dbx.AllRiskCategoryValues(), enum) {
-		// Only the seeded slugs exist until the management API lands with
-		// the contract step, so this is unreachable today; refuse rather
-		// than write an enum value the column cannot hold.
-		return Category{}, "", fmt.Errorf("risk: category %q has no legacy enum value", row.Slug)
+		// A category added through the management API (#1810) has no enum
+		// value until #1745's contract step drops the enum column; refuse
+		// rather than write a value the column cannot hold.
+		return Category{}, "", &InvalidCategoryError{Reason: fmt.Sprintf(
+			"category %q cannot hold risks until the risk_category enum is retired (#1745)", row.Slug)}
 	}
 	return categoryFromRow(row), enum, nil
 }
