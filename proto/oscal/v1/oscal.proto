@@ -202,6 +202,26 @@ message SspInput {
   // statements. SEPARATE from control_implementations by design (slice 619):
   // a vendor claim never contributes to platform control-satisfaction.
   repeated VendorAttestedImplementation vendor_attested_implementations = 9;
+  // Framework requirements excluded in the framework-scope revision active
+  // at the period's frozen_at (#1792, Statement of Applicability). Rendered
+  // as `not-applicable` implemented-requirements with the justification as
+  // remarks. SEPARATE from control_implementations: an exclusion is a scope
+  // decision, not a control implementation.
+  repeated ExcludedRequirement excluded_requirements = 10;
+}
+
+// ExcludedRequirement is one framework requirement the operator excluded in
+// an approved, activated framework-scope revision (#1792).
+message ExcludedRequirement {
+  // Framework namespace: framework slug and version, e.g. "iso27001-2022".
+  string framework = 1;
+  // The requirement's code within the framework, e.g. "A.8.25".
+  string requirement_code = 2;
+  string requirement_title = 3;
+  // The human-authored exclusion justification (never AI-generated).
+  string justification = 4;
+  // The framework-scope revision that recorded the exclusion.
+  string framework_scope_id = 5;
 }
 
 message SerializeSSPRequest {

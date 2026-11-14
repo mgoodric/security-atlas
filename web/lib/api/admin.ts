@@ -33,6 +33,10 @@ export type AdminCredential = {
   is_approver: boolean;
   owner_roles: string[];
   rotated_from?: string | null;
+  // IssuedAt + TTL; absent for a key that never expires.
+  expires_at?: string | null;
+  // The admin who minted the key, for attribution only (#1947).
+  minted_by?: string | null;
 };
 
 export type AdminCredentialListResponse = { items: AdminCredential[] };
@@ -62,10 +66,14 @@ export type AdminCredentialRotateResponse = {
   predecessor_expires_at: string;
 };
 
+// listAdminCredentials lists the tenant's keys. With mintedBy (#1953) the
+// upstream narrows to the live keys that user minted.
 export async function listAdminCredentials(
   bearer: string,
+  mintedBy?: string,
 ): Promise<AdminCredential[]> {
-  const res = await apiFetch(`/v1/admin/credentials`, bearer);
+  const qs = mintedBy ? `?minted_by=${encodeURIComponent(mintedBy)}` : "";
+  const res = await apiFetch(`/v1/admin/credentials${qs}`, bearer);
   const body = (await res.json()) as AdminCredentialListResponse;
   return body.items;
 }

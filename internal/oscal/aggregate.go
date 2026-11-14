@@ -52,6 +52,11 @@ type aggregate struct {
 	// and nothing here writes control_evaluations (the read is pure SELECT over
 	// imported_component_claims).
 	acceptedVendorClaims []dbx.ListAcceptedVendorClaimsForExportRow
+	// excludedRequirements are the requirements of the period's framework
+	// version excluded in the framework-scope revision in force at frozen_at
+	// (#1792). Rendered in the SSP as not-applicable entries; they are scope
+	// decisions and never contribute to control-satisfaction.
+	excludedRequirements []dbx.ListExcludedRequirementsAsOfForExportRow
 	// sampledEvidence maps population_id -> the DRAWN sample evidence ids,
 	// in shuffle order (slice 494, AC-1/AC-2). Read from the persisted
 	// sample_evidence rows, which were materialized at draw-time over the
@@ -181,6 +186,20 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 		return nil, fmt.Errorf("oscal: list accepted vendor claims: %w", err)
 	}
 	agg.acceptedVendorClaims = acceptedClaims
+
+	// 4c. Requirements excluded in the framework-scope revision in force at
+	//     the freeze (#1792). Bounded by frozen_at, so an exclusion recorded
+	//     on a later revision does not reach this period's SSP (invariant
+	//     #10). Same tx + tenant RLS context as every other read.
+	excluded, err := q.ListExcludedRequirementsAsOfForExport(ctx, dbx.ListExcludedRequirementsAsOfForExportParams{
+		TenantID:           pgUUID(tenantID),
+		FrameworkVersionID: period.FrameworkVersionID,
+		FrozenAt:           period.FrozenAt,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("oscal: list excluded requirements: %w", err)
+	}
+	agg.excludedRequirements = excluded
 
 	// 5. Sample populations attached to this period (AP).
 	populations, err := q.ListPopulationsForPeriod(ctx, dbx.ListPopulationsForPeriodParams{
@@ -379,7 +398,27 @@ func (a *aggregate) sspInput() *oscalv1.SspInput {
 		// claim never contributes to platform control-satisfaction (the hard
 		// boundary). The list is empty when no claim has been accepted.
 		VendorAttestedImplementations: a.vendorAttestedImplementations(),
+		// Requirements excluded at the freeze (#1792), carried apart from
+		// ControlImplementations: an exclusion is a scope decision.
+		ExcludedRequirements: a.excludedRequirementsProto(),
 	}
+}
+
+// excludedRequirementsProto converts the requirements excluded at the freeze
+// into proto messages for the SSP (#1792). The framework namespace is the
+// framework slug and version, e.g. "iso27001-2022".
+func (a *aggregate) excludedRequirementsProto() []*oscalv1.ExcludedRequirement {
+	out := make([]*oscalv1.ExcludedRequirement, 0, len(a.excludedRequirements))
+	for _, r := range a.excludedRequirements {
+		out = append(out, &oscalv1.ExcludedRequirement{
+			Framework:        r.FrameworkSlug + "-" + r.FrameworkVersion,
+			RequirementCode:  r.RequirementCode,
+			RequirementTitle: r.RequirementTitle,
+			Justification:    r.Justification,
+			FrameworkScopeId: uuid.UUID(r.FrameworkScopeID.Bytes).String(),
+		})
+	}
+	return out
 }
 
 // vendorAttestedImplementations converts the operator-accepted vendor claims

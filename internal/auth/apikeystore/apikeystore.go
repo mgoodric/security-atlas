@@ -502,6 +502,9 @@ func credentialFromRow(row dbx.ApiKey) credstore.Credential {
 			c.MintedBy = u.String()
 		}
 	}
+	if row.RetiresAt.Valid {
+		c.RetiresAt = row.RetiresAt.Time
+	}
 	if row.RotatedFrom.Valid {
 		ruu, _ := uuidFromPg(row.RotatedFrom)
 		c.RotatedFrom = "key_" + ruu.String()
