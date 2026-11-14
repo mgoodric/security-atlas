@@ -2122,6 +2122,19 @@ type DecisionsAudit struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type EffectiveFwToScfEdge struct {
+	ID                     pgtype.UUID                `json:"id"`
+	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`
+	ScfAnchorID            pgtype.UUID                `json:"scf_anchor_id"`
+	RelationshipType       StrmRelationshipType       `json:"relationship_type"`
+	Strength               float64                    `json:"strength"`
+	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
+	Rationale              string                     `json:"rationale"`
+	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
+	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+}
+
 type EmailChannelOptin struct {
 	TenantID  pgtype.UUID        `json:"tenant_id"`
 	UserID    pgtype.UUID        `json:"user_id"`

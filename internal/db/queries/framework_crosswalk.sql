@@ -109,7 +109,7 @@ SELECT
     a.scf_id,
     a.family,
     a.title AS anchor_title
-FROM fw_to_scf_edges e
+FROM effective_fw_to_scf_edges e
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
 ORDER BY e.strength DESC, a.scf_id;
