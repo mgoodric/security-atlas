@@ -69,6 +69,9 @@ const (
 	KindFrameworkScope Kind = "framework_scope"
 	// KindTaxonomy is taxonomy_audit_log (#1810): risk-category changes.
 	KindTaxonomy Kind = "taxonomy"
+	// KindMappingOverlay is fw_to_scf_overlay_edge_audit_log (#1797):
+	// overlay edge create and retire.
+	KindMappingOverlay Kind = "mapping_overlay"
 	// KindControlImport is control_import_audit_log (#1782): control
 	// import approvals, rejections and duplicates.
 	KindControlImport Kind = "control_import"
@@ -102,6 +105,7 @@ var AllKinds = []Kind{
 	KindWalkthrough,
 	KindFrameworkScope,
 	KindTaxonomy,
+	KindMappingOverlay,
 	KindControlImport,
 }
 

@@ -475,7 +475,8 @@ func applyInputs(sec *Section, in *SectionInputs) {
 		d.SpendUSD = *in.SpendUSD
 	}
 	if in.BaselineCoveragePct != nil {
-		d.BaselineCoveragePct = *in.BaselineCoveragePct
+		d.BaselineCoveragePct = float64(*in.BaselineCoveragePct)
+		d.NoBaseline = false
 	}
 	sec.Data = d
 }
@@ -485,17 +486,28 @@ func applyInputs(sec *Section, in *SectionInputs) {
 //
 //   - coverage_trend.coverage_delta = coverage_pct - baseline_coverage_pct
 //   - investment.coverage_delta mirrors coverage_trend's delta
-//   - investment.cost_per_coverage_point = spend / max(delta, 1)
+//   - investment.cost_per_coverage_point = spend / max(delta, 1), or n/a
+//     (0, no_baseline) when there is no baseline or no scoped framework
 func recomputeDerived(sections map[string]Section) {
 	trend, hasTrend := sections[SectionCoverageTrend]
 	inv, hasInv := sections[SectionInvestment]
 	if !hasTrend || !hasInv {
 		return
 	}
-	delta := trend.Data.CoveragePct - trend.Data.BaselineCoveragePct
+	delta := 0.0
+	if !trend.Data.NoBaseline {
+		delta = round2(trend.Data.CoveragePct - trend.Data.BaselineCoveragePct)
+	}
 	trend.Data.CoverageDelta = delta
 	inv.Data.CoverageDelta = delta
-	inv.Data.CostPerCoveragePoint = costPerCoveragePoint(inv.Data.SpendUSD, delta)
+	inv.Data.ScopedFrameworkCount = trend.Data.ScopedFrameworkCount
+	// No baseline, or nothing scoped to measure coverage against: the cost
+	// per coverage point is n/a, not spend divided by a made-up delta.
+	inv.Data.NoBaseline = trend.Data.NoBaseline || trend.Data.NoScopedFrameworks()
+	inv.Data.CostPerCoveragePoint = 0
+	if !inv.Data.NoBaseline {
+		inv.Data.CostPerCoveragePoint = costPerCoveragePoint(inv.Data.SpendUSD, delta)
+	}
 	sections[SectionCoverageTrend] = trend
 	sections[SectionInvestment] = inv
 }

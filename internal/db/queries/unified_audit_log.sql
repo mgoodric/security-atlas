@@ -261,7 +261,24 @@ WITH unified AS (
 
     UNION ALL
 
-    -- 12. control_import_audit_log (#1782): import approvals, rejections
+    -- 12. fw_to_scf_overlay_edge_audit_log (#1797)
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'mapping_overlay'::text AS kind,
+        'overlay_edge'::text AS target_type,
+        overlay_edge_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ov) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'overlay_edge_id' - 'subject_module')::jsonb AS payload_json
+    FROM fw_to_scf_overlay_edge_audit_log ov
+
+    UNION ALL
+
+    -- 13. control_import_audit_log (#1782): import approvals, rejections
     -- and duplicates, one per staged row decided.
     SELECT
         occurred_at,
