@@ -12,7 +12,8 @@
 // trusts web. App Router code never sees the socket, so the header has to
 // be fixed here, at the http.Server, before any handler runs.
 //
-// For every "request" and "upgrade" event this builds the chain a
+// For every request-carrying server event ("request", "upgrade",
+// "connect", "checkContinue", "checkExpectation") this builds the chain a
 // standards-following proxy would ("<inbound X-Forwarded-For hops>,
 // <socket peer>"), walks it right-to-left against WEB_TRUSTED_PROXY_CIDRS
 // the way atlas's internal/api/auth/clientip.go does, and REPLACES
@@ -128,12 +129,22 @@ function vetForwardedFor(req, trusted) {
   }
 }
 
+// Every http.Server event whose first argument is an IncomingMessage.
+// "upgrade" matters today (Next proxies WebSocket upgrades to the
+// rewrites with the request's headers); the rest are vetted too, so the
+// protection does not depend on which listeners Next registers.
+const REQUEST_EVENTS = new Set([
+  "request",
+  "upgrade",
+  "connect",
+  "checkContinue",
+  "checkExpectation",
+]);
+
 function wrapEmit(proto, trusted) {
   const emit = proto.emit;
   proto.emit = function (event, req, ...rest) {
-    // "upgrade" too: Next proxies WebSocket upgrades to the rewrites
-    // with the request's headers.
-    if ((event === "request" || event === "upgrade") && req && req.headers) {
+    if (REQUEST_EVENTS.has(event) && req && req.headers) {
       vetForwardedFor(req, trusted);
     }
     return emit.call(this, event, req, ...rest);

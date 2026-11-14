@@ -6,6 +6,7 @@
 // the /v1 rewrite, a WebSocket upgrade and the login action) is
 // web/scripts/check-forwarded-for.mjs, run in CI's prod-build job.
 
+import http from "node:http";
 import { createRequire } from "node:module";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -30,8 +31,9 @@ type PeerChain = {
   ): void;
 };
 
-// Loading the preload installs its http.Server hook in this worker, which
-// is harmless here: no test in this file starts a server.
+// Loading the preload installs its http.Server hook in this worker. No
+// test here listens on a socket; the "server hook" block drives the
+// wrapped emit directly.
 const pc = createRequire(import.meta.url)("../peer-chain.cjs") as PeerChain;
 
 const trusted = (cidrs: string) => pc.parseTrustedProxies(cidrs);
@@ -110,6 +112,31 @@ describe("peer-chain.cjs vetForwardedFor", () => {
       "198.51.100.1",
     );
     expect(vetted(["198.51.100.66"], "192.0.2.7", "")).toBe("192.0.2.7");
+  });
+});
+
+describe("peer-chain.cjs server hook", () => {
+  // The preload wrapped http.Server.prototype.emit when it loaded above,
+  // with WEB_TRUSTED_PROXY_CIDRS unset in this worker. Emitting by hand
+  // checks every request-carrying event without a socket.
+  it.each([
+    "request",
+    "upgrade",
+    "connect",
+    "checkContinue",
+    "checkExpectation",
+  ])("vets X-Forwarded-For on %s", (event) => {
+    const server = new http.Server();
+    let seen: string | string[] | undefined = "not called";
+    server.on(event, (req: http.IncomingMessage) => {
+      seen = req.headers["x-forwarded-for"];
+    });
+    const req = {
+      headers: { "x-forwarded-for": "198.51.100.66" },
+      socket: { remoteAddress: "192.0.2.9" },
+    };
+    server.emit(event, req, {}, Buffer.alloc(0));
+    expect(seen).toBe("192.0.2.9");
   });
 });
 
