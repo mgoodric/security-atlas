@@ -48,6 +48,10 @@ CLI input:
 - `internal/api/oauth/device_code_grant.go` converts a constant.
 - `internal/api/evidence/http.go` converts a float computed from the rate
   limiter's own state.
+- `internal/api/install_reset.go` (`handleResetBootstrap`, `ttl_seconds`)
+  is request input, but #1893 already range-checks it to `[1, 604800]`
+  before the conversion, which is the shape this ticket applies elsewhere.
 - The CLI `--ttl` flag goes through `time.ParseDuration`, which refuses
   overflow, and the admin gRPC `Issue` RPC uses `durationpb.AsDuration`,
-  which saturates instead of wrapping.
+  which saturates instead of wrapping. It did accept a negative TTL;
+  #1906 refuses that with `InvalidArgument`.

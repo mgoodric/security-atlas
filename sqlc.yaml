@@ -96,6 +96,7 @@ sql:
       - "migrations/sql/20260816000000_risk_audit_log.sql"
       - "migrations/sql/20260819000000_policy_import.sql"
       - "migrations/sql/20260820000000_control_manifest_revisions.sql"
+      - "migrations/sql/20260821000000_effective_fw_to_scf_edges.sql"
       - "migrations/sql/20260903000000_policy_review_dates.sql"
     queries: "internal/db/queries"
     gen:
