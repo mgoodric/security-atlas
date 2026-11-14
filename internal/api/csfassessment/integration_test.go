@@ -101,22 +101,30 @@ func do(t *testing.T, env testEnv, method, path, body string) (*http.Response, m
 // tenant_id NULL).
 func seedCSFVersion(t *testing.T, admin *pgxpool.Pool) (fvID uuid.UUID, reqIDs []uuid.UUID) {
 	t.Helper()
+	// The CSF routes accept only a version of the nist_csf framework (#2065).
+	// frameworks' UNIQUE (tenant_id, slug) treats NULL tenants as distinct,
+	// so this global fixture sits beside the bundled nist_csf catalog row; it
+	// is told apart by its id and removed on cleanup.
+	return seedFrameworkVersion(t, admin, "nist_csf", "NIST CSF (slice-515 test)", "2.0")
+}
+
+// seedFrameworkVersion inserts a global framework + framework_version + two
+// requirement rows and returns the version id + requirement ids.
+func seedFrameworkVersion(t *testing.T, admin *pgxpool.Pool, slug, name, version string) (fvID uuid.UUID, reqIDs []uuid.UUID) {
+	t.Helper()
 	ctx := context.Background()
 	fwID := uuid.New()
 	fvID = uuid.New()
-	// A unique slug per test run avoids collisions with the bundled nist_csf
-	// catalog and with parallel tests.
-	slug := "nist_csf_t515_" + uuid.NewString()[:8]
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO frameworks (id, tenant_id, slug, name, issuer)
-		VALUES ($1, NULL, $2, 'NIST CSF 2.0 (slice-515 test)', 'NIST')
-	`, fwID, slug); err != nil {
+		VALUES ($1, NULL, $2, $3, 'test')
+	`, fwID, slug, name); err != nil {
 		t.Fatalf("seed framework: %v", err)
 	}
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
-		VALUES ($1, NULL, $2, '2.0', 'current')
-	`, fvID, fwID); err != nil {
+		VALUES ($1, NULL, $2, $3, 'current')
+	`, fvID, fwID, version); err != nil {
 		t.Fatalf("seed framework_version: %v", err)
 	}
 	for _, code := range []string{"GV.OC-01", "PR.AA-01"} {
@@ -441,5 +449,76 @@ func TestRLS_DenyOnMissingContext(t *testing.T) {
 	}
 	if n != 0 {
 		t.Fatalf("RLS leaked %d rows with no tenant context set; want 0 (deny-on-missing-context)", n)
+	}
+}
+
+// ===== #2065: only NIST CSF framework versions are assessable =====
+
+// TestFrameworkVersion_NonCSFRefused asserts every CSF route refuses an ISO
+// 27001 framework_version with a 400, on reads and writes alike, and writes
+// nothing for it; a CSF version is accepted and the gap view carries its
+// real framework name and version for the page title.
+func TestFrameworkVersion_NonCSFRefused(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	isoID, isoReqs := seedFrameworkVersion(t, admin, "iso27001", "ISO/IEC 27001 (#2065 test)", "2022")
+	csfID, _ := seedCSFVersion(t, admin)
+	tenant := freshTenant(t, admin)
+	env := engineerServer(t, app, tenant)
+	iso := "?framework_version=" + isoID.String()
+
+	cases := []struct{ method, path, body string }{
+		{http.MethodGet, "/v1/csf/tier" + iso, ""},
+		{http.MethodPut, "/v1/csf/tier" + iso, `{"tier":"tier2_risk_informed"}`},
+		{http.MethodGet, "/v1/csf/profiles/current" + iso, ""},
+		{http.MethodPut, "/v1/csf/profiles/current" + iso, ""},
+		{http.MethodPut, "/v1/csf/profiles/target/selections" + iso,
+			`{"requirement_id":"` + isoReqs[0].String() + `","target_outcome":"fully"}`},
+		{http.MethodDelete, "/v1/csf/profiles/target/selections/" + isoReqs[0].String() + iso, ""},
+		{http.MethodGet, "/v1/csf/gap" + iso, ""},
+	}
+	for _, c := range cases {
+		resp, body := do(t, env, c.method, c.path, c.body)
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("%s %s status = %d, want 400", c.method, c.path, resp.StatusCode)
+			continue
+		}
+		if msg, _ := body["error"].(string); !strings.Contains(msg, "not a NIST CSF version") {
+			t.Errorf("%s %s error = %q, want it to say the version is not NIST CSF", c.method, c.path, msg)
+		}
+	}
+
+	var n int
+	if err := admin.QueryRow(context.Background(), `
+		SELECT (SELECT count(*) FROM csf_tier_ratings WHERE framework_version_id = $1)
+		     + (SELECT count(*) FROM csf_profiles WHERE framework_version_id = $1)
+	`, isoID).Scan(&n); err != nil {
+		t.Fatalf("count iso assessment rows: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("%d CSF assessment rows written against an ISO version; want 0", n)
+	}
+
+	resp, body := do(t, env, http.MethodGet, "/v1/csf/gap?framework_version="+csfID.String(), "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CSF gap status = %d, want 200", resp.StatusCode)
+	}
+	if body["framework_name"] != "NIST CSF (slice-515 test)" || body["framework_version"] != "2.0" {
+		t.Fatalf("gap label = %v %v, want the seeded CSF name and version 2.0",
+			body["framework_name"], body["framework_version"])
+	}
+}
+
+// TestFrameworkVersion_UnknownNotFound asserts a framework_version id that
+// does not exist is a 404, not an empty assessment.
+func TestFrameworkVersion_UnknownNotFound(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := engineerServer(t, app, tenant)
+
+	resp, _ := do(t, env, http.MethodGet, "/v1/csf/gap?framework_version="+uuid.NewString(), "")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("unknown version status = %d, want 404", resp.StatusCode)
 	}
 }
