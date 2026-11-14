@@ -107,6 +107,7 @@ sql:
       - "migrations/sql/20260911000000_mcp_risk_link_tools.sql"
       - "migrations/sql/20260920000000_oidc_identity_link_audit.sql"
       - "migrations/sql/20260921000000_policy_draft_discard.sql"
+      - "migrations/sql/20260924000000_demo_seed_rows.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -190,6 +190,63 @@ def test_serialize_ssp_excludes_rejected_and_needs_info_claims():
     assert not any(any(p["name"] == "vendor-attested" for p in ir.get("props", [])) for ir in impls)
 
 
+def test_serialize_ssp_marks_demo_seed_controls():
+    # #2043: a control the in-place demo seed added carries a demo-seed prop;
+    # a real control carries none.
+    inp = _ssp_input()
+    inp.control_implementations.append(
+        oscal_pb2.ControlImplementation(
+            control_id="ctrl-demo",
+            title="Demo control",
+            statement="Demo statement.",
+            evaluation_result="pass",
+            demo=True,
+        )
+    )
+    data = serialize_ssp(inp)
+    impls = json.loads(data)["system-security-plan"]["control-implementation"][
+        "implemented-requirements"
+    ]
+
+    def demo_props(ir):
+        return [p for p in ir.get("props", []) if p["name"] == "demo-seed"]
+
+    marked = [ir["control-id"] for ir in impls if demo_props(ir)]
+    assert marked == ["ctrl-demo"], marked
+    assert len(impls) == 2
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
+def test_serialize_assessment_marks_demo_seed_sampled_evidence():
+    # #2043: only the sampled records the in-place demo seed added carry a
+    # demo-seed prop, keyed to their sample ordinal.
+    inp = oscal_pb2.AssessmentInput(
+        metadata=_metadata(),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        audit_period_id="period-1",
+        audit_period_name="SOC 2 2026 Q2",
+        populations=[
+            oscal_pb2.SamplePopulation(
+                population_id="pop-1",
+                control_id="ctrl-1",
+                population_size=40,
+                sampled_evidence_ids=["ev-1", "ev-2", "ev-3"],
+                demo_evidence_ids=["ev-2"],
+                frozen_at="2026-05-01T00:00:00+00:00",
+            )
+        ],
+    )
+    _, ar_json = serialize_assessment(inp)
+    result = json.loads(ar_json)["assessment-results"]["results"][0]
+    demo = {
+        p["name"]: p["value"] for p in result.get("props", []) if p["name"].endswith("-demo-seed")
+    }
+    assert demo == {"population-pop-1-sampled-1-demo-seed": "true"}
+    valid, errors = round_trip_validate("assessment-results", ar_json)
+    assert valid, errors
+
+
 def test_serialize_assessment_emits_valid_ap_and_ar():
     inp = oscal_pb2.AssessmentInput(
         metadata=_metadata(),

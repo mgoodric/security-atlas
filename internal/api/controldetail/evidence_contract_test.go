@@ -43,6 +43,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -61,6 +62,11 @@ type stubEvidenceReader struct {
 	rows     []dbx.ListEvidenceForControlPagedRow
 	listRows []dbx.ListEvidencePagedRow
 	total    int64
+	demo     demoprov.Set
+}
+
+func (s stubEvidenceReader) DemoEvidence(_ context.Context, _ []uuid.UUID) (demoprov.Set, error) {
+	return s.demo, nil
 }
 
 func (s stubEvidenceReader) EvidenceForControl(_ context.Context, _ uuid.UUID, _ evidencePage) ([]dbx.ListEvidenceForControlPagedRow, error) {

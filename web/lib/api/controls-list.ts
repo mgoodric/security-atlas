@@ -221,6 +221,9 @@ export type ControlWithState = TenantControl & {
   // because hand-rolled fixtures predate it; the platform always sends it.
   anchor_fit?: "exact" | "partial" | "none";
   anchor_fit_note?: string | null;
+  // #2043 — true when the in-place demo seed added this control. The
+  // platform omits it for real controls.
+  demo?: boolean;
 };
 
 export type ControlsWithStateResponse = {

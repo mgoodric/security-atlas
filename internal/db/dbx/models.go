@@ -2126,6 +2126,14 @@ type DecisionsAudit struct {
 	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type DemoSeedRow struct {
+	ID        int64              `json:"id"`
+	TenantID  pgtype.UUID        `json:"tenant_id"`
+	TableName string             `json:"table_name"`
+	RowKey    []byte             `json:"row_key"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type EffectiveFwToScfEdge struct {
 	ID                     pgtype.UUID                `json:"id"`
 	FrameworkRequirementID pgtype.UUID                `json:"framework_requirement_id"`

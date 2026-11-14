@@ -262,6 +262,9 @@ def serialize_ssp(pb_input) -> bytes:
             props.append(_prop("scf-id", ci.scf_id))
         if ci.evaluated_at:
             props.append(_prop("evaluated-at", ci.evaluated_at))
+        if ci.demo:
+            # #2043: the in-place demo seed added this control; never real.
+            props.append(_prop("demo-seed", "true"))
         for pid in ci.linked_policy_ids:
             props.append(_prop("linked-policy-id", pid))
         # OSCAL control-id and statement-id are NCName-style tokens: they
@@ -544,8 +547,14 @@ def _population_props(populations):
         # Slice 494 (AC-1): the DRAWN sample evidence ids, one prop per id in
         # shuffle order. The ordinal-suffixed name preserves the deterministic
         # auditor's-sample order (AC-9) so an importer can re-key the draw.
+        demo_ids = set(pop.demo_evidence_ids)
         for ordinal, ev_id in enumerate(pop.sampled_evidence_ids):
             props.append(_prop(f"population-{pop.population_id}-sampled-{ordinal}", ev_id))
+            # #2043: the in-place demo seed added this record; never real.
+            if ev_id in demo_ids:
+                props.append(
+                    _prop(f"population-{pop.population_id}-sampled-{ordinal}-demo-seed", "true")
+                )
     return props or None
 
 
