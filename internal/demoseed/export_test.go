@@ -10,6 +10,13 @@ func (s *Seeder) WithBeforeRecordHook(fn func(ctx context.Context)) *Seeder {
 	return s
 }
 
+// WithSCFRelease overrides the SCF release the posture spine adopts anchors
+// from, so a test can name a fixture release.
+func (s *Seeder) WithSCFRelease(label string) *Seeder {
+	s.scfRelease = label
+	return s
+}
+
 // IsTenantAuditTable exposes isTenantAuditTable to the integration tests,
 // so "exactly the pre-seed rows" excludes the same tables the seed does.
 var IsTenantAuditTable = isTenantAuditTable

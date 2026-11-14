@@ -19,13 +19,18 @@
 //     f. Default source-attribution fallback (frontmatter without
 //     source_attribution → community_draft).
 //
-//   - SQLAnchorResolver.Resolve(ctx, scfCodes): the controls/scf_id
-//     lookup. Branches exercised:
+//   - SQLAnchorResolver.Resolve(ctx, release, scfCodes): the
+//     code -> anchor-in-release -> bound control lookup. Branches exercised:
 //     a. Empty input → empty output, no DB call (fast path).
 //     b. All-missing input → every code returned as missing.
 //     c. Mixed input → resolved + missing split correctly, stable
 //     order matches the input.
 //     d. Duplicate-input handling (same code twice in input).
+//
+//   - #1772: with the two #1770 fixture releases loaded (B current), a
+//     policy binds in the release it declares; an undeclared one binds in
+//     the current release with a warning; an unloaded declared release
+//     links nothing and says so.
 //
 // These tests run only with `-tags=integration`. The slice 297 PR
 // enrolls ./internal/policy/... in the CI integration job's package
@@ -34,6 +39,7 @@ package seed_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"testing/fstest"
 
@@ -42,6 +48,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/policy/seed"
+	"github.com/mgoodric/security-atlas/internal/scfrelease/scfreleasetest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -49,7 +56,7 @@ import (
 
 // freshTenant CARVE-OUT (742 drain batch 15): kept inline for TWO reasons
 // dbtest.SeedTenant cannot express — (1) it returns uuid.UUID (callers pass
-// the typed id to seed.Seed / seedControlWithSCFID), not the string SeedTenant
+// the typed id to seed.Seed / seedControlOnAnchor), not the string SeedTenant
 // yields; (2) the first cleanup statement is column-scoped
 // (`predecessor_id IS NOT NULL`) to drop self-FK successors first. Only its
 // pool is re-routed to the slice-435 dbtest harness by the callers
@@ -73,31 +80,42 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) uuid.UUID {
 	return tenant
 }
 
-// seedControlWithSCFID creates a control row with a specific scf_id so
-// SQLAnchorResolver can find it. Uses the admin pool (BYPASSRLS) so
-// the seed runs out-of-band of any tenant context.
-func seedControlWithSCFID(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID, scfID string) uuid.UUID {
+// seedControlOnAnchor creates a control bound, as a bundle upload binds
+// it, to the anchor with this code in the named SCF release. Uses the
+// admin pool (BYPASSRLS) so the seed runs out-of-band of any tenant
+// context.
+func seedControlOnAnchor(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID, release, code string) uuid.UUID {
 	t.Helper()
 	ctrlID := uuid.New()
-	bundleID := "legacy_" + ctrlID.String()
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, bundle_id)
-		VALUES ($1, $2, $3, 'Test control', 'IAC', 'automated', $4)
-	`, ctrlID, tenant, scfID, bundleID); err != nil {
-		t.Fatalf("seed control %q: %v", scfID, err)
+	tag, err := admin.Exec(context.Background(), `
+		INSERT INTO controls (id, tenant_id, scf_id, scf_anchor_id, title, control_family, implementation_type, bundle_id)
+		SELECT $1, $2, a.scf_id, a.id, 'Test control', 'IAC', 'automated', $5
+		FROM scf_anchors a
+		JOIN framework_versions fv ON fv.id = a.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.version = $3 AND a.scf_id = $4
+	`, ctrlID, tenant, release, code, "legacy_"+ctrlID.String())
+	if err != nil || tag.RowsAffected() != 1 {
+		t.Fatalf("seed control on %s %s: %v (rows %d)", release, code, err, tag.RowsAffected())
 	}
 	return ctrlID
 }
 
 // validStockPolicies returns 5 minimal-valid policies for Seed calls.
 // Each policy carries the same 3 linked SCF codes so the resolver
-// branch is exercised consistently.
+// branch is exercised consistently. They declare no scf_release.
 func validStockPolicies(t *testing.T, codes []string) []seed.StockPolicy {
+	t.Helper()
+	return validStockPoliciesIn(t, "", codes)
+}
+
+// validStockPoliciesIn is validStockPolicies declaring scf_release.
+func validStockPoliciesIn(t *testing.T, release string, codes []string) []seed.StockPolicy {
 	t.Helper()
 	fsys := fstest.MapFS{}
 	for _, name := range []string{"a", "b", "c", "d", "e"} {
 		fsys["stock/"+name+".md"] = &fstest.MapFile{
-			Data: []byte(stockPolicyMD(name, codes)),
+			Data: []byte(stockPolicyMD(name, release, codes)),
 		}
 	}
 	policies, err := seed.LoadFromFS(fsys, "stock")
@@ -107,8 +125,12 @@ func validStockPolicies(t *testing.T, codes []string) []seed.StockPolicy {
 	return policies
 }
 
-func stockPolicyMD(title string, codes []string) string {
-	body := "---\ntitle: " + title + "\nversion: 1.0.0\nowner_role: tenant_admin\napprover_role: security_lead\nlinked_control_ids:\n"
+func stockPolicyMD(title, release string, codes []string) string {
+	body := "---\ntitle: " + title + "\nversion: 1.0.0\nowner_role: tenant_admin\napprover_role: security_lead\n"
+	if release != "" {
+		body += "scf_release: " + release + "\n"
+	}
+	body += "linked_control_ids:\n"
 	for _, c := range codes {
 		body += "  - " + c + "\n"
 	}
@@ -246,19 +268,23 @@ func TestSeed_InvalidTenantID(t *testing.T) {
 func TestSeed_SQLResolver_ResolvedLinksMaterialize(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
+	scfreleasetest.LoadAB(t, admin)
 	tenant := freshTenant(t, admin)
 
-	// Seed three controls with known scf_ids.
-	ctrlGOV01 := seedControlWithSCFID(t, admin, tenant, "GOV-01")
-	ctrlGOV04 := seedControlWithSCFID(t, admin, tenant, "GOV-04")
-	ctrlRSK01 := seedControlWithSCFID(t, admin, tenant, "RSK-01")
+	// Three controls bound to anchors of the release the policies declare.
+	ctrlGOV01 := seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseA, "GOV-01")
+	ctrlGOV04 := seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseA, "IAC-06")
+	ctrlRSK01 := seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseA, "CRY-03")
 
-	policies := validStockPolicies(t, []string{"GOV-01", "GOV-04", "RSK-01"})
+	policies := validStockPoliciesIn(t, scfreleasetest.ReleaseA, []string{"GOV-01", "IAC-06", "CRY-03"})
 
 	resolver := seed.NewSQLAnchorResolver(admin)
 	report, err := seed.Seed(context.Background(), app, tenant, policies, resolver)
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
+	}
+	if len(report.SCFReleaseWarnings) != 0 {
+		t.Fatalf("declared, loaded release: want no release warnings, got %v", report.SCFReleaseWarnings)
 	}
 	if len(report.Loaded) != seed.StockPolicyCount {
 		t.Fatalf("expected %d loaded, got %d", seed.StockPolicyCount, len(report.Loaded))
@@ -371,7 +397,7 @@ Body.
 // non-nil pool would mask the bug.
 func TestSQLResolver_EmptyInput_NoDBCall(t *testing.T) {
 	r := seed.NewSQLAnchorResolver(nil)
-	resolved, missing, err := r.Resolve(context.Background(), nil)
+	resolved, missing, err := r.Resolve(context.Background(), "", nil)
 	if err != nil {
 		t.Fatalf("Resolve(nil): %v", err)
 	}
@@ -382,7 +408,7 @@ func TestSQLResolver_EmptyInput_NoDBCall(t *testing.T) {
 		t.Fatalf("expected 0 missing, got %d", len(missing))
 	}
 	// Also exercise the explicit-empty-slice variant.
-	resolved, missing, err = r.Resolve(context.Background(), []string{})
+	resolved, missing, err = r.Resolve(context.Background(), "", []string{})
 	if err != nil {
 		t.Fatalf("Resolve([]): %v", err)
 	}
@@ -391,15 +417,16 @@ func TestSQLResolver_EmptyInput_NoDBCall(t *testing.T) {
 	}
 }
 
-// TestSQLResolver_AllMissing exercises the path where no scf_ids are
-// found in the controls table — every code returned as missing.
+// TestSQLResolver_AllMissing exercises the path where no code is in the
+// release — every code returned as missing.
 func TestSQLResolver_AllMissing(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
+	scfreleasetest.LoadAB(t, admin)
 	_ = freshTenant(t, admin) // ensures we have a cleanup hook even though no rows exist
 
 	r := seed.NewSQLAnchorResolver(admin)
 	codes := []string{"DOES-NOT-EXIST-1", "DOES-NOT-EXIST-2"}
-	resolved, missing, err := r.Resolve(context.Background(), codes)
+	resolved, missing, err := r.Resolve(context.Background(), scfreleasetest.ReleaseA, codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -418,17 +445,19 @@ func TestSQLResolver_AllMissing(t *testing.T) {
 }
 
 // TestSQLResolver_MixedHitAndMiss exercises the split branch: some
-// codes resolve to control UUIDs, others return as missing.
+// codes resolve to control UUIDs, others return as missing. GOV-01 is in
+// the release with no control bound; MIX-MISSING-B is not in the release.
 func TestSQLResolver_MixedHitAndMiss(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
+	scfreleasetest.LoadAB(t, admin)
 	tenant := freshTenant(t, admin)
 
-	ctrlA := seedControlWithSCFID(t, admin, tenant, "MIX-A")
-	ctrlC := seedControlWithSCFID(t, admin, tenant, "MIX-C")
+	ctrlA := seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseA, "IAC-06")
+	ctrlC := seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseA, "CRY-03")
 
 	r := seed.NewSQLAnchorResolver(admin)
-	codes := []string{"MIX-A", "MIX-MISSING-B", "MIX-C", "MIX-MISSING-D"}
-	resolved, missing, err := r.Resolve(context.Background(), codes)
+	codes := []string{"IAC-06", "MIX-MISSING-B", "CRY-03", "GOV-01"}
+	resolved, missing, err := r.Resolve(context.Background(), scfreleasetest.ReleaseA, codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -446,7 +475,7 @@ func TestSQLResolver_MixedHitAndMiss(t *testing.T) {
 		t.Errorf("resolved[1]: want %s, got %s", ctrlC, resolved[1])
 	}
 	// Missing order tracks input order.
-	if missing[0] != "MIX-MISSING-B" || missing[1] != "MIX-MISSING-D" {
+	if missing[0] != "MIX-MISSING-B" || missing[1] != "GOV-01" {
 		t.Errorf("missing order: got %v", missing)
 	}
 }
@@ -457,12 +486,13 @@ func TestSQLResolver_MixedHitAndMiss(t *testing.T) {
 // stays consistent.
 func TestSQLResolver_DuplicateInputCode(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
+	scfreleasetest.LoadAB(t, admin)
 	tenant := freshTenant(t, admin)
-	ctrlA := seedControlWithSCFID(t, admin, tenant, "DUP-A")
+	ctrlA := seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseA, "IAC-06")
 
 	r := seed.NewSQLAnchorResolver(admin)
-	codes := []string{"DUP-A", "DUP-A", "DUP-MISS", "DUP-MISS"}
-	resolved, missing, err := r.Resolve(context.Background(), codes)
+	codes := []string{"IAC-06", "IAC-06", "DUP-MISS", "DUP-MISS"}
+	resolved, missing, err := r.Resolve(context.Background(), scfreleasetest.ReleaseA, codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
@@ -476,5 +506,89 @@ func TestSQLResolver_DuplicateInputCode(t *testing.T) {
 		if r != ctrlA {
 			t.Errorf("expected ctrlA=%s in every resolved slot, got %s", ctrlA, r)
 		}
+	}
+}
+
+// ---- #1772: the release the seed data declares ----
+
+// linkedOf returns the linked_control_ids of the tenant's policy titled
+// title.
+func linkedOf(t *testing.T, admin *pgxpool.Pool, tenant uuid.UUID, title string) []uuid.UUID {
+	t.Helper()
+	var linked []uuid.UUID
+	if err := admin.QueryRow(context.Background(),
+		`SELECT linked_control_ids FROM policies WHERE tenant_id = $1 AND title = $2`,
+		tenant, title).Scan(&linked); err != nil {
+		t.Fatalf("scan linked_control_ids of %s: %v", title, err)
+	}
+	return linked
+}
+
+// With releases A and B loaded and B current, both carry IAC-06 as
+// different anchors, each with its own control. A policy binds to the
+// control of the release it declares: not to B because B is current, and
+// not to A because A was loaded first.
+func TestSeed_BindsInTheDeclaredRelease(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	scfreleasetest.LoadAB(t, admin)
+
+	for _, tc := range []struct {
+		name, release string
+		wantB         bool
+		wantWarnings  int
+	}{
+		{"declares A", scfreleasetest.ReleaseA, false, 0},
+		{"declares B", scfreleasetest.ReleaseB, true, 0},
+		{"declares none: current (B), warned", "", true, seed.StockPolicyCount},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tenant := freshTenant(t, admin)
+			ctrlA := seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseA, "IAC-06")
+			ctrlB := seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseB, "IAC-06")
+			want := ctrlA
+			if tc.wantB {
+				want = ctrlB
+			}
+
+			report, err := seed.Seed(context.Background(), app, tenant,
+				validStockPoliciesIn(t, tc.release, []string{"IAC-06"}), seed.NewSQLAnchorResolver(admin))
+			if err != nil {
+				t.Fatalf("Seed: %v", err)
+			}
+			if len(report.SCFReleaseWarnings) != tc.wantWarnings {
+				t.Errorf("release warnings = %v; want %d", report.SCFReleaseWarnings, tc.wantWarnings)
+			}
+			linked := linkedOf(t, admin, tenant, "a")
+			if len(linked) != 1 || linked[0] != want {
+				t.Fatalf("linked_control_ids = %v; want [%s] (A's control %s, B's %s)", linked, want, ctrlA, ctrlB)
+			}
+		})
+	}
+}
+
+// A declared release that is not loaded links nothing and says so; it
+// never falls back to the current release.
+func TestSeed_UnloadedDeclaredReleaseLinksNothing(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	scfreleasetest.LoadAB(t, admin)
+	tenant := freshTenant(t, admin)
+	_ = seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseB, "IAC-06")
+
+	report, err := seed.Seed(context.Background(), app, tenant,
+		validStockPoliciesIn(t, "test-1772-not-loaded", []string{"IAC-06"}), seed.NewSQLAnchorResolver(admin))
+	if err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if len(report.SCFReleaseWarnings) != seed.StockPolicyCount ||
+		!strings.Contains(report.SCFReleaseWarnings[0], "test-1772-not-loaded") {
+		t.Errorf("release warnings = %v; want one per policy naming the release", report.SCFReleaseWarnings)
+	}
+	if len(report.MissingAnchors) != seed.StockPolicyCount || len(report.OrphanWarnings) != seed.StockPolicyCount {
+		t.Errorf("want every link missing: missing %v orphans %v", report.MissingAnchors, report.OrphanWarnings)
+	}
+	if linked := linkedOf(t, admin, tenant, "a"); len(linked) != 0 {
+		t.Fatalf("linked_control_ids = %v; want none", linked)
 	}
 }
