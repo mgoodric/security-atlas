@@ -15,10 +15,12 @@
 // the mitigation holds by construction rather than by a caller remembering it.
 //
 // Detection is also strictly advisory (decisions log D5). Nothing here demotes
-// a mapping, rejects one, or transitions a tier. A tier change stays a human
-// act through slice 483's admin endpoint, which is what keeps the
-// constitutional "no auto-approve its own mappings" boundary intact from both
-// directions.
+// a mapping, rejects one, or transitions a tier. Tier changes happen in two
+// places only: a human act through slice 483's admin endpoint, and the
+// crosswalk importer re-seeding an edge's tier when its content changes
+// (#1849; ADR 0018 amendment). Neither reads a Conflict, so a detected
+// contradiction never moves a tier, which keeps the constitutional "no
+// auto-approve its own mappings" boundary intact from both directions.
 //
 // # Relationship to slice 483
 //
