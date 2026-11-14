@@ -2,6 +2,7 @@ package soc2import_test
 
 import (
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -90,6 +91,124 @@ func TestLoadSCFWorkbook_PublishedSheetOrderPicksControlSheet(t *testing.T) {
 	}
 	if cw.FrameworkSlug != "general-example-standard-2026" || cw.FrameworkIssuer != "Example Issuer" {
 		t.Fatalf("focal-document metadata not read from \"Focal Documents (FD)\": %+v", cw)
+	}
+}
+
+// The control sheet is found by the version regex, else by the fallback: the
+// first "SCF ..." sheet whose header row carries an "SCF #" column.
+func TestLoadSCFWorkbook_ControlSheetSelection(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		sheets    []string
+		wantSheet string
+	}{
+		{"version sheet", []string{"SCF Domains & Principles", "SCF 2026.3"}, "SCF 2026.3"},
+		{"patch version sheet", []string{"SCF Domains & Principles", "SCF 2026.3.1"}, "SCF 2026.3.1"},
+		{"fallback to SCF # header", []string{"SCF Domains & Principles", "SCF Controls"}, "SCF Controls"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := excelize.NewFile()
+			mustSetSheetName(t, f, "Sheet1", "Focal Documents")
+			mustSetRows(t, f, "Focal Documents", [][]interface{}{
+				{"SCF Column Header", "Focal Document Identifier (FDI)", "Source"},
+				{"Example\nStandard", "general-example-standard", "Example Issuer"},
+			})
+			for _, name := range tc.sheets {
+				if _, err := f.NewSheet(name); err != nil {
+					t.Fatalf("NewSheet %q: %v", name, err)
+				}
+			}
+			mustSetRows(t, f, "SCF Domains & Principles", [][]interface{}{
+				{"#", "SCF Domain", "SCF Identifier"},
+				{"1", "Governance", "GOV"},
+			})
+			mustSetRows(t, f, tc.wantSheet, [][]interface{}{
+				{"SCF #", "Example\nStandard"},
+				{"GOV-01", "EX-1"},
+			})
+			path := filepath.Join(t.TempDir(), "select.xlsx")
+			if err := f.SaveAs(path); err != nil {
+				t.Fatalf("SaveAs: %v", err)
+			}
+			cw, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{FrameworkVersion: "1"})
+			if err != nil {
+				t.Fatalf("LoadSCFWorkbook: %v", err)
+			}
+			if !strings.Contains(cw.Mappings[0].Rationale, strconv.Quote(tc.wantSheet)) {
+				t.Fatalf("rationale should cite sheet %q; got %q", tc.wantSheet, cw.Mappings[0].Rationale)
+			}
+		})
+	}
+}
+
+// Without focal-document metadata the slug would fall back to the column
+// header and could duplicate a framework, so the import fails unless the
+// operator passes a slug.
+func TestLoadSCFWorkbook_MissingFocalMetadataRequiresSlug(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name      string
+		focal     [][]interface{}
+		wantCause string
+		autoCause string
+	}{
+		{"no focal documents sheet", nil, `no "Focal Documents" sheet`, `no "Focal Documents" sheet`},
+		{"no SCF Column Header", [][]interface{}{
+			{"Focal Document Identifier (FDI)", "Source"},
+			{"general-example-standard", "Example Issuer"},
+		}, `missing "SCF Column Header"`, `missing "SCF Column Header"`},
+		{"column not listed", [][]interface{}{
+			{"SCF Column Header", "Focal Document Identifier (FDI)"},
+			{"Other\nStandard", "general-other-standard"},
+		}, `no row for column "Example Standard"`, `no column header matches`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			f := excelize.NewFile()
+			mustSetSheetName(t, f, "Sheet1", "SCF 2026.3")
+			mustSetRows(t, f, "SCF 2026.3", [][]interface{}{
+				{"SCF #", "Example\nStandard"},
+				{"GOV-01", "EX-1"},
+			})
+			if tc.focal != nil {
+				if _, err := f.NewSheet("Focal Documents"); err != nil {
+					t.Fatalf("NewSheet: %v", err)
+				}
+				mustSetRows(t, f, "Focal Documents", tc.focal)
+			}
+			path := filepath.Join(t.TempDir(), "no-focal.xlsx")
+			if err := f.SaveAs(path); err != nil {
+				t.Fatalf("SaveAs: %v", err)
+			}
+
+			_, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{FrameworkColumn: "Example Standard"})
+			if err == nil {
+				t.Fatal("expected an error without --framework-slug")
+			}
+			if !strings.Contains(err.Error(), tc.wantCause) || !strings.Contains(err.Error(), "--framework-slug") {
+				t.Fatalf("error should name %q and --framework-slug; got %v", tc.wantCause, err)
+			}
+
+			cw, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{
+				FrameworkColumn: "Example Standard",
+				FrameworkSlug:   "example-standard",
+			})
+			if err != nil {
+				t.Fatalf("LoadSCFWorkbook with slug: %v", err)
+			}
+			if cw.FrameworkSlug != "example-standard" {
+				t.Fatalf("framework_slug = %q", cw.FrameworkSlug)
+			}
+
+			_, err = soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{})
+			if err == nil || !strings.Contains(err.Error(), "no framework mapping columns found") || !strings.Contains(err.Error(), tc.autoCause) {
+				t.Fatalf("auto-select error should name the cause; got %v", err)
+			}
+		})
 	}
 }
 
@@ -203,6 +322,12 @@ func writePublishedLayoutSCFWorkbook(t *testing.T) string {
 		}
 	}
 	mustSetRows(t, f, "Change Overview", [][]interface{}{{"Change", "SCF #"}, {"Added", "GOV-01"}})
+	// STRM Errata sorts ahead of the control sheet and carries all four OLIR
+	// STRM headers; it must never be imported as the crosswalk.
+	mustSetRows(t, f, "STRM Errata", [][]interface{}{
+		{"Focal Document Element", "Relationship", "Reference Document Element", "Strength of Relationship"},
+		{"ERR-1", "Equal To", "GOV-99", "10"},
+	})
 	mustSetRows(t, f, "SCF Domains & Principles", [][]interface{}{
 		{"#", "SCF Domain", "SCF Identifier", "Cybersecurity & Data Privacy by Design (C|P) Principles"},
 		{"1", "Governance", "GOV", "principle"},
