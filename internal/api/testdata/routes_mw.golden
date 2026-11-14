@@ -87,6 +87,7 @@ GET /v1/controls/checklist/{generationID}/export.md 8
 GET /v1/controls/drift 8
 GET /v1/controls/export 8
 GET /v1/controls/history/export 8
+GET /v1/controls/imports/settings 8
 GET /v1/controls/imports/{id} 8
 GET /v1/controls/imports/{id}/rows 8
 POST /v1/controls/imports 8
@@ -126,6 +127,7 @@ GET /v1/framework-scopes/applicability 8
 GET /v1/framework-scopes/applicability/export 8
 GET /v1/framework-scopes/{id} 8
 GET /v1/framework-scopes/{id}/applicability 8
+GET /v1/framework-scopes/{id}/applicability/diff 8
 GET /v1/frameworks 8
 GET /v1/frameworks/posture 8
 GET /v1/frameworks/scf/versions 8
@@ -185,6 +187,9 @@ GET /v1/scopes/cells 8
 GET /v1/scopes/dimensions 8
 GET /v1/search 8
 GET /v1/themes 8
+DELETE /v1/themes/{ref} 8
+PATCH /v1/themes/{ref} 8
+POST /v1/themes 8
 GET /v1/upcoming 8
 GET /v1/vendors 8
 GET /v1/vendors/burndown 8
@@ -340,6 +345,7 @@ PUT /scim/v2/Groups/{id} 9
 PUT /scim/v2/Users/{id} 9
 PUT /v1/admin/llm-routing 8
 PUT /v1/board-packs/{id}/sections/{key} 9
+PUT /v1/controls/imports/settings 8
 PUT /v1/csf/profiles/{kind} 8
 PUT /v1/csf/profiles/{kind}/selections 8
 PUT /v1/csf/tier 8
