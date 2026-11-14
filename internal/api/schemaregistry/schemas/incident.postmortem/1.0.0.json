@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.security-atlas.io/incident.postmortem/1.0.0.json",
+  "x-evidence-kind": "incident.postmortem.v1",
+  "x-semver": "1.0.0",
+  "x-owner": "platform",
+  "x-default-scf-anchors": ["IRO-09"],
+  "title": "Incident postmortem",
+  "description": "Evidence that an incident in the incident register was closed with a postmortem, one record per linked IR control. Written by the incident register through ingest at close (#1830). IRO-09 Incident Reporting is the closest anchor present in the bundled SCF catalog fixture, as for pagerduty.postmortem_summary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "incident_id",
+    "title",
+    "severity",
+    "postmortem_summary",
+    "closed_by"
+  ],
+  "properties": {
+    "incident_id": { "type": "string", "format": "uuid" },
+    "title": { "type": "string", "minLength": 1 },
+    "severity": { "type": "string", "enum": ["p0", "p1", "p2", "p3"] },
+    "operator_severity": { "type": "string" },
+    "affected_systems": { "type": "array" },
+    "postmortem_summary": { "type": "string", "minLength": 1 },
+    "closed_by": { "type": "string", "minLength": 1 }
+  }
+}

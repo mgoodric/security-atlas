@@ -105,6 +105,9 @@ func DefaultSeed() []KindVersion {
 		// #1751: the MCP update_control_state override evidence, now routed
 		// through ingest.Service.Process instead of a raw ledger INSERT.
 		{Kind: "manual.control_state_override.v1", Version: "1.0.0"},
+		// #1830: incident-register postmortem evidence, written through
+		// ingest.Service.ProcessInTx at incident close.
+		{Kind: "incident.postmortem.v1", Version: "1.0.0"},
 		// Slice 486: Azure connector (Entra ID + Storage).
 		{Kind: "azure.entra_role_assignment.v1", Version: "1.0.0"},
 		{Kind: "azure.storage_account_config.v1", Version: "1.0.0"},
