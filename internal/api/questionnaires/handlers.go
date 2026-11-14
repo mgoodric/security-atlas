@@ -209,7 +209,8 @@ func (h *Handler) ImportExcel(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, err.Error())
 		case errors.Is(err, questionnaire.ErrEmptyWorkbook),
 			errors.Is(err, questionnaire.ErrNoHeaderRow),
-			errors.Is(err, questionnaire.ErrTooManyRows):
+			errors.Is(err, questionnaire.ErrTooManyRows),
+			errors.Is(err, questionnaire.ErrTooManyColumns):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
