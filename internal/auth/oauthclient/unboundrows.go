@@ -281,6 +281,12 @@ func checkLedgersUnchanged(ctx context.Context, tx pgx.Tx, before map[string]int
 	if err != nil {
 		return err
 	}
+	return compareLedgerTotals(before, after)
+}
+
+// compareLedgerTotals fails when any table in before has a different row
+// count in after.
+func compareLedgerTotals(before, after map[string]int64) error {
 	for table, n := range before {
 		if after[table] != n {
 			return fmt.Errorf("oauthclient: purge changed ledger table %s (%d rows across all tenants, now %d)",

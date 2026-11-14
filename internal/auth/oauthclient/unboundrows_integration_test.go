@@ -425,6 +425,25 @@ func TestPurgeUnboundRows_KeepsLedgerRowsAndTheirParents(t *testing.T) {
 	}
 }
 
+// TestUnboundRows_FailOnAbortedTransaction checks every entry point returns
+// a wrapped error, and no result, when the transaction cannot run queries.
+func TestUnboundRows_FailOnAbortedTransaction(t *testing.T) {
+	tx := beginRolledBack(t)
+	ctx := context.Background()
+	if _, err := tx.Exec(ctx, "SELECT 1/0"); err == nil {
+		t.Fatal("SELECT 1/0 succeeded; the transaction must be aborted for this test")
+	}
+	if got, err := oauthclient.LedgerTables(ctx, tx); err == nil || !strings.HasPrefix(err.Error(), "oauthclient: ") {
+		t.Errorf("LedgerTables = %v, %v; want a wrapped error", got, err)
+	}
+	if got, err := oauthclient.ListUnboundRows(ctx, tx); err == nil || !strings.HasPrefix(err.Error(), "oauthclient: ") {
+		t.Errorf("ListUnboundRows = %v, %v; want a wrapped error", got, err)
+	}
+	if res, err := oauthclient.PurgeUnboundRows(ctx, tx, 0, "tester"); err == nil || res.AuditID != uuid.Nil {
+		t.Errorf("PurgeUnboundRows = %+v, %v; want an error and no purge record", res, err)
+	}
+}
+
 // TestUnboundRows_MissingAppRoleKeepsAllWithItsOwnReason renames atlas_app
 // inside the rolled-back transaction. Without the role no table can be
 // classified, so every table is kept, under a reason that says so rather
