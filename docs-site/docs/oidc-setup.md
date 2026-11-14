@@ -128,6 +128,37 @@ your IdP authenticates is admitted.
     comma-separated list; the API takes a JSON array of strings.
 <!-- prettier-ignore-end -->
 
+### Linking users that SCIM provisioned
+
+If you also provision users through SCIM, a user's first OIDC sign-in
+**links** to the user SCIM created, matched by email (case-insensitive),
+instead of creating a second account. From then on that IdP identity signs in
+as that user, and each link is written to the audit log.
+
+A link is made only when all of these hold:
+
+- the SCIM user has not signed in through an IdP before;
+- the account has no local password and no super-admin grant (local accounts
+  are never claimed through an IdP; see
+  [Local mode stays available](#local-mode-stays-available));
+- the IdP vouches for the email (below).
+
+By default the IdP must send `email_verified: true` in the ID token. Some IdPs
+never send that claim. For those, turn on **Link SCIM users when the IdP does
+not report email_verified** in the admin form (API field
+`trust_unverified_email_for_link`, default `false`). With it on, a missing
+claim links too; an IdP that says `email_verified: false` is still refused. A
+sign-in that is refused gets the same "invalid credentials" response as any
+failed sign-in.
+
+<!-- prettier-ignore-start -->
+!!! warning "One IdP per tenant when you use SCIM"
+
+    SCIM credentials are not tied to a particular IdP, so any OIDC IdP
+    configured for the tenant can claim a SCIM user by email on that user's
+    first sign-in. Configure a single OIDC IdP for a tenant that uses SCIM.
+<!-- prettier-ignore-end -->
+
 ## Step 1 — preflight the issuer
 
 Before saving, validate that the issuer is reachable and serves a discovery
@@ -204,6 +235,11 @@ Per-IdP specifics follow.
     - **Client secret:** create one under **Certificates & secrets → Client
       secrets**; copy the secret **value** (not the secret ID) immediately,
       as it is shown only once.
+    - **SCIM users:** Entra ID does not send `email_verified` in its ID
+      tokens, so if Entra also provisions your users through SCIM, turn on
+      **Link SCIM users when the IdP does not report email_verified** (see
+      [Linking users that SCIM provisioned](#linking-users-that-scim-provisioned)).
+      Without it, those users' first sign-in is refused.
 
 === "Keycloak"
 
@@ -223,7 +259,8 @@ Per-IdP specifics follow.
 Enter the five values through the `/admin/sso` form (or `PATCH
 /v1/admin/sso`) and save. On the first save the client secret is required;
 on later saves you may leave the secret field blank to keep the stored
-secret unchanged.
+secret unchanged. `trust_unverified_email_for_link` is optional; a save that
+omits it sets it back to `false`.
 
 A `PATCH /v1/admin/sso` body looks like this (all values are placeholders —
 substitute your own):
@@ -234,7 +271,8 @@ substitute your own):
   "client_id": "atlas-client-id-placeholder",
   "client_secret": "REPLACE-WITH-YOUR-IDP-CLIENT-SECRET",
   "redirect_url": "https://atlas.example.com/auth/oidc/callback",
-  "allowed_email_domains": ["example.com"]
+  "allowed_email_domains": ["example.com"],
+  "trust_unverified_email_for_link": false
 }
 ```
 
@@ -262,7 +300,9 @@ Connecting an IdP is **additive**. The local default user created at first
 boot (the `ATLAS_DEFAULT_USER_EMAIL` / `ATLAS_DEFAULT_USER_PASSWORD` account
 from the [install guide](install.md)) continues to work after you configure
 OIDC. Configuring an IdP does not disable local sign-in unless you choose to
-remove the local account yourself.
+remove the local account yourself. An IdP sign-in never takes over an account
+that has a local password or a super-admin grant, even when the email matches;
+that sign-in is refused.
 
 ## Out of scope (future work)
 

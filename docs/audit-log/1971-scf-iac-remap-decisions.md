@@ -42,7 +42,7 @@ After the upsert pass, in the same transaction, `importIntoTx` reads every live 
 
 ## D5 — Migration numbering
 
-The dispatcher named `20260914000000`, but main had gained `20260916000000_scf_anchor_immutability.sql` by the time this merged it. The worker brief requires a migration strictly above main's highest, so it is `20260917000000`. It is additive: two nullable columns, plus the view redefined with the same column list. The down migration restores the view's earlier shape first, because the view references `retired_at`, and then drops both columns.
+The dispatcher named `20260914000000`, but by the time this branch merged main, main had gained `20260916000000_scf_anchor_immutability.sql` and then `20260920000000_oidc_identity_link_audit.sql`. The worker brief requires a migration strictly above main's highest, so it is `20260921000000`. It is additive: two nullable columns, plus the view redefined with the same column list. The down migration restores the view's earlier shape first, because the view references `retired_at`, and then drops both columns.
 
 ## D6 — `IAC-10` changing meaning is documented, not migrated
 

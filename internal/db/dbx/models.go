@@ -2686,16 +2686,17 @@ type Notification struct {
 }
 
 type OidcIdpConfig struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	Name                string             `json:"name"`
-	IssuerUrl           string             `json:"issuer_url"`
-	ClientID            string             `json:"client_id"`
-	ClientSecretEnc     []byte             `json:"client_secret_enc"`
-	RedirectUrl         string             `json:"redirect_url"`
-	AllowedEmailDomains []string           `json:"allowed_email_domains"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Name                        string             `json:"name"`
+	IssuerUrl                   string             `json:"issuer_url"`
+	ClientID                    string             `json:"client_id"`
+	ClientSecretEnc             []byte             `json:"client_secret_enc"`
+	RedirectUrl                 string             `json:"redirect_url"`
+	AllowedEmailDomains         []string           `json:"allowed_email_domains"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+	TrustUnverifiedEmailForLink bool               `json:"trust_unverified_email_for_link"`
 }
 
 type OidcIdpGroupMapping struct {
@@ -3175,6 +3176,26 @@ type StalenessRollupLog struct {
 	DedupKey        string             `json:"dedup_key"`
 	NotificationID  pgtype.UUID        `json:"notification_id"`
 	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+}
+
+// Slice 198: platform-global super_admin identity rows. NOT tenant-scoped (no RLS). The DBUserResolver (slice 192) consults this table when populating the `atlas:super_admin` JWT claim. Write surface: exactly one — the bootstrap branch in users.Store.BootstrapFirstInstallOrUpsert (slice 198), which writes via the BYPASSRLS atlas_migrate pool during first install.
+type SuperAdmin struct {
+	UserID    pgtype.UUID        `json:"user_id"`
+	GrantedAt pgtype.Timestamptz `json:"granted_at"`
+	// Slice 198: provenance of the grant. v2 admits only 'bootstrap_first_install'. Future slices extending the source of grants (e.g., maintainer-CLI 'cli_grant') extend the CHECK constraint in their own migration.
+	GrantedVia string `json:"granted_via"`
+}
+
+// Slice 142: append-only forensic record of super_admin grant + demote events. Platform-global (no tenant_id, no RLS) because super_admin itself is platform-global. The grant + demote handlers dual-write a tenant-scoped me_audit_log row anchored to the actor's session tenant so the unified slice-124 aggregator surfaces the event to that tenant's admins/auditors without breaching RLS.
+type SuperAdminAuditLog struct {
+	AuditID      pgtype.UUID `json:"audit_id"`
+	Action       string      `json:"action"`
+	TargetUserID pgtype.UUID `json:"target_user_id"`
+	ActorUserID  pgtype.UUID `json:"actor_user_id"`
+	// Slice 142: the actor's session tenant at grant/demote time. Captured as data, not FK — the audit row survives tenant deletion.
+	ActorTenantID pgtype.UUID        `json:"actor_tenant_id"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	PayloadJson   []byte             `json:"payload_json"`
 }
 
 // Slice 144: canonical tenant identity row. Adopted late — through v1, tenant_id was a bare UUID with no parent. The slice-192 `GET /v1/me/tenants` handler reads `name` from here; `PATCH /v1/tenants/{id}` (slice 144) mutates it under per-tenant admin or super_admin authority.

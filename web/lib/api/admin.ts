@@ -574,6 +574,9 @@ export type AdminSSOConfig = {
   client_id: string;
   redirect_url: string;
   allowed_email_domains: string[];
+  // #1944 D3: let a sign-in whose ID token omits email_verified link to a
+  // SCIM-provisioned user by email. Off (strict) by default.
+  trust_unverified_email_for_link: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -584,6 +587,7 @@ export type AdminSSOPatchRequest = {
   client_secret?: string;
   redirect_url: string;
   allowed_email_domains: string[];
+  trust_unverified_email_for_link?: boolean;
 };
 
 // getAdminSSO returns the tenant's primary IdP config, or null if none

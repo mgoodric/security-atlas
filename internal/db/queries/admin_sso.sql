@@ -23,6 +23,7 @@ SELECT id,
        client_id,
        redirect_url,
        allowed_email_domains,
+       trust_unverified_email_for_link,
        created_at,
        updated_at
 FROM oidc_idp_configs
@@ -37,11 +38,13 @@ WHERE tenant_id = $1 AND name = $2;
 INSERT INTO oidc_idp_configs (
     id, tenant_id, name, issuer_url, client_id,
     client_secret_enc, redirect_url, allowed_email_domains,
+    trust_unverified_email_for_link,
     created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
+    $9,
     now(), now()
 )
 ON CONFLICT (tenant_id, name) DO UPDATE
@@ -55,6 +58,8 @@ SET issuer_url            = EXCLUDED.issuer_url,
     END,
     redirect_url          = EXCLUDED.redirect_url,
     allowed_email_domains = EXCLUDED.allowed_email_domains,
+    -- #1944 D3: per-IdP opt-out for linking on an absent email_verified.
+    trust_unverified_email_for_link = EXCLUDED.trust_unverified_email_for_link,
     updated_at            = now()
 RETURNING id,
           tenant_id,
@@ -63,5 +68,6 @@ RETURNING id,
           client_id,
           redirect_url,
           allowed_email_domains,
+          trust_unverified_email_for_link,
           created_at,
           updated_at;

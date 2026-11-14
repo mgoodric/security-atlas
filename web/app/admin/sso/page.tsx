@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { AdminSSOConfig } from "@/lib/api/admin";
 
@@ -54,6 +55,7 @@ type FormState = {
   client_secret: string;
   redirect_url: string;
   allowed_email_domains: string;
+  trust_unverified_email_for_link: boolean;
 };
 
 const EMPTY_FORM: FormState = {
@@ -62,6 +64,7 @@ const EMPTY_FORM: FormState = {
   client_secret: "",
   redirect_url: "",
   allowed_email_domains: "",
+  trust_unverified_email_for_link: false,
 };
 
 function configToForm(c: AdminSSOConfig | null): FormState {
@@ -72,6 +75,7 @@ function configToForm(c: AdminSSOConfig | null): FormState {
     client_secret: "", // never re-populated from server
     redirect_url: c.redirect_url ?? "",
     allowed_email_domains: (c.allowed_email_domains ?? []).join(", "),
+    trust_unverified_email_for_link: c.trust_unverified_email_for_link ?? false,
   };
 }
 
@@ -127,6 +131,7 @@ export default function SSOConfigPage() {
         client_id: body.client_id,
         redirect_url: body.redirect_url,
         allowed_email_domains: allowed,
+        trust_unverified_email_for_link: body.trust_unverified_email_for_link,
       };
       if (body.client_secret) {
         payload.client_secret = body.client_secret;
@@ -349,6 +354,39 @@ export default function SSOConfigPage() {
                   disabled={isLoading || mutation.isPending}
                 />
               </Field>
+              <div className="space-y-1.5 sm:col-span-2">
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="sso-trust-unverified-email"
+                    data-testid="sso-trust-unverified-email"
+                    checked={form.trust_unverified_email_for_link}
+                    onCheckedChange={(checked) =>
+                      setForm({
+                        ...form,
+                        trust_unverified_email_for_link: checked === true,
+                      })
+                    }
+                    disabled={isLoading || mutation.isPending}
+                    aria-describedby="sso-trust-unverified-email-help"
+                  />
+                  <label
+                    htmlFor="sso-trust-unverified-email"
+                    className="text-sm font-medium"
+                  >
+                    Link SCIM users when the IdP does not report email_verified
+                  </label>
+                </div>
+                <p
+                  id="sso-trust-unverified-email-help"
+                  className="text-xs text-muted-foreground"
+                >
+                  A first sign-in claims a SCIM-provisioned user by email only
+                  when the IdP marks the email verified. Turn this on for IdPs
+                  that never send <code>email_verified</code>, such as Microsoft
+                  Entra ID. An IdP that reports the email unverified is still
+                  refused.
+                </p>
+              </div>
             </div>
 
             {submitState === "success" ? (
