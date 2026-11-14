@@ -30,8 +30,8 @@
 //     (the training connector is v2; the vuln-scanner connector is not
 //     built). The generator seeds it empty with a templated placeholder
 //     narrative — it does NOT fabricate coverage (CLAUDE.md anti-pattern).
-//   - investment is OPERATOR-ENTERED ($ spend) plus a computed coverage
-//     delta against an operator `baseline_coverage_pct` (decision D5).
+//   - investment is OPERATOR-ENTERED ($ spend) plus the coverage_trend
+//     section's coverage delta (decision D5).
 //   - asks is OPERATOR-AUTHORED freeform text — no AI generation (AC-4).
 package board
 
@@ -188,18 +188,31 @@ func (s Section) EffectiveText() string {
 // A single struct (rather than a per-section union) keeps the JSONB shape
 // flat and the Go deserialization a single Unmarshal.
 type SectionData struct {
-	// posture: one row per registered framework (reuses the slice-031
-	// FrameworkPosture shape — program-wide posture listed per framework).
-	Frameworks []FrameworkPosture `json:"frameworks,omitempty"`
+	// posture: one row per framework version, read from the dashboard's
+	// per-framework posture query (#2056, pack_posture.go).
+	Frameworks []PackFrameworkPosture `json:"frameworks,omitempty"`
 
 	// top_risks: the top risks aging (reuses the slice-031 RiskAging shape).
 	TopRisks []RiskAging `json:"top_risks,omitempty"`
 
-	// coverage_trend: the program coverage percentage at quarter end plus
-	// the operator baseline it is compared against (decision D5).
-	CoveragePct         int `json:"coverage_pct,omitempty"`
-	BaselineCoveragePct int `json:"baseline_coverage_pct,omitempty"`
-	CoverageDelta       int `json:"coverage_delta,omitempty"`
+	// coverage_trend: the mean coverage of the scoped frameworks at quarter
+	// end, against the mean of their coverage at the start of the 90-day
+	// posture trend (#2056). The operator may overwrite the baseline
+	// (decision D5); the delta is recomputed on every edit.
+	CoveragePct         float64 `json:"coverage_pct,omitempty"`
+	BaselineCoveragePct float64 `json:"baseline_coverage_pct,omitempty"`
+	CoverageDelta       float64 `json:"coverage_delta,omitempty"`
+	// ScopedFrameworkCount is nil on packs stored before #2056, which never
+	// recorded it: their figures render as stored, not as "no framework
+	// scoped". Read it through ScopeCountUnknown / NoScopedFrameworks /
+	// ScopedFrameworks.
+	ScopedFrameworkCount *int `json:"scoped_framework_count,omitempty"`
+	// NoBaseline (coverage_trend, mirrored on investment): there is no
+	// baseline to compare against — a scoped framework has less than 90 days
+	// of evaluation history, or no framework is scoped — so the delta and
+	// the cost per coverage point are not reported. An operator-entered
+	// baseline clears it on coverage_trend.
+	NoBaseline bool `json:"no_baseline,omitempty"`
 
 	// open_findings: failing control evaluations as of period_end
 	// (decision D4 — a failing evaluation IS a finding for v1).
@@ -284,4 +297,22 @@ func allSectionsApproved(p Pack) (string, bool) {
 		}
 	}
 	return "", true
+}
+
+// ScopeCountUnknown reports a pack stored before #2056, which never recorded
+// how many frameworks were scoped.
+func (d SectionData) ScopeCountUnknown() bool { return d.ScopedFrameworkCount == nil }
+
+// NoScopedFrameworks reports a recorded count of zero scoped frameworks. A
+// legacy pack (count unknown) is not "no scoped framework".
+func (d SectionData) NoScopedFrameworks() bool {
+	return d.ScopedFrameworkCount != nil && *d.ScopedFrameworkCount == 0
+}
+
+// ScopedFrameworks is the recorded count, 0 when unknown.
+func (d SectionData) ScopedFrameworks() int {
+	if d.ScopedFrameworkCount == nil {
+		return 0
+	}
+	return *d.ScopedFrameworkCount
 }
