@@ -4397,7 +4397,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/approve:
     patch:
-      summary: PATCH /v1/policies/{id}/approve
+      summary: PATCH /v1/policies/{id}/approve — approve a policy under review; only a person may approve (an unbound API key, OAuth client or bootstrap credential gets 403, even with the approver role), never its submitter (403); a policy submitted under a pre-#1807 session id must be re-submitted first (409)
       tags: [policies]
       operationId: patch-v1-policies-id-approve
       security:
@@ -4477,7 +4477,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/submit:
     patch:
-      summary: PATCH /v1/policies/{id}/submit
+      summary: PATCH /v1/policies/{id}/submit — submit a draft for review; also re-submits a policy under review whose submitter was recorded as a pre-#1807 session id
       tags: [policies]
       operationId: patch-v1-policies-id-submit
       security:

@@ -535,7 +535,9 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	updated, err := h.store.SubmitForReview(ctx, id, cred.ID)
+	// The submitter is recorded as the person, not the credential, so the
+	// approval check (#1807) sees the same person across sessions and keys.
+	updated, err := h.store.SubmitForReview(ctx, id, actorOf(cred))
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -559,7 +561,13 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	approved, err := h.store.Approve(ctx, id, cred.ID)
+	// Only a person approves (#1807): Approver.UserID is empty for an
+	// unbound key, an OAuth client or the bootstrap admin, and the store
+	// refuses it.
+	approved, err := h.store.Approve(ctx, id, policy.Approver{
+		UserID:       credstore.MinterUserID(cred),
+		CredentialID: cred.ID,
+	})
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -670,13 +678,7 @@ func (h *Handler) SetReviewDate(w http.ResponseWriter, r *http.Request) {
 		}
 		next = &t
 	}
-	// The actor is the user behind the credential when there is one, else
-	// the credential id: the rule the import and export audits use.
-	actor := cred.UserID
-	if actor == "" {
-		actor = cred.ID
-	}
-	updated, err := h.store.SetNextReviewAt(ctx, id, next, actor)
+	updated, err := h.store.SetNextReviewAt(ctx, id, next, actorOf(cred))
 	if err != nil {
 		switch {
 		case errors.Is(err, policy.ErrNotFound):
@@ -709,13 +711,7 @@ func (h *Handler) DiscardDraft(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	// The actor is the user behind the credential when there is one, else
-	// the credential id: the rule the review-date audit uses.
-	actor := cred.UserID
-	if actor == "" {
-		actor = cred.ID
-	}
-	if _, err := h.store.DiscardDraft(ctx, id, actor); err != nil {
+	if _, err := h.store.DiscardDraft(ctx, id, actorOf(cred)); err != nil {
 		switch {
 		case errors.Is(err, policy.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
@@ -801,10 +797,28 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 	}
 }
 
+// actorOf names the person behind a credential: the bare users(id) uuid,
+// whether the caller is a JWT ("user:<uuid>") or a key bound to the user
+// ("<uuid>"), else the credential id. A JWT credential's id is per token
+// ("jwt:"+jti), and the two UserID shapes differ, so comparing either raw
+// would let one person submit through one and approve through another
+// (#1807).
+func actorOf(cred credstore.Credential) string {
+	if u := credstore.MinterUserID(cred); u != "" {
+		return u
+	}
+	return cred.ID
+}
+
 func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, policy.ErrNotFound):
 		httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+	case errors.Is(err, policy.ErrSelfApproval),
+		errors.Is(err, policy.ErrApproverNotPerson):
+		httpresp.WriteError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, policy.ErrSubmitterUnknown):
+		httpresp.WriteError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, policy.ErrWrongState):
 		httpresp.WriteError(w, http.StatusConflict, "policy not in expected state for this transition")
 	default:
