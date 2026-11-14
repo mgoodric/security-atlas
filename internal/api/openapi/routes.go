@@ -40,6 +40,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "DELETE", Path: "/v1/risks/{id}/children/{child_id}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "DELETE /v1/risks/{id}/children/{child_id} — detach a child risk from its parent"},
 	{Method: "DELETE", Path: "/v1/risks/{id}/themes/{theme}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "DELETE /v1/risks/{id}/themes/{theme}"},
 	{Method: "DELETE", Path: "/v1/saved-views/{id}", Tag: "saved-views", Tier: "bearer", Internal: false, Summary: "DELETE /v1/saved-views/{id}"},
+	{Method: "DELETE", Path: "/v1/themes/{ref}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "DELETE /v1/themes/{ref} — delete an unused organisation theme (409 with risk and rule counts while in use; built-ins refused); ref is name or id"},
 	{Method: "DELETE", Path: "/v1/vendors/{id}", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "DELETE /v1/vendors/{id}"},
 	{Method: "GET", Path: "/.well-known/jwks.json", Tag: "oauth", Tier: "none", Internal: false, Summary: "GET /.well-known/jwks.json — JWKS publication (RFC 7517)"},
 	{Method: "GET", Path: "/.well-known/openid-configuration", Tag: "oauth", Tier: "none", Internal: false, Summary: "GET /.well-known/openid-configuration — OIDC discovery (RFC 8414 + OIDC Discovery 1.0)"},
@@ -239,6 +240,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "PATCH", Path: "/v1/policies/{id}/submit", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/submit — submit a draft for review; also re-submits a policy under review whose submitter was recorded as a pre-#1807 session id"},
 	{Method: "PATCH", Path: "/v1/questionnaires/{id}/answers/{qid}", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "PATCH /v1/questionnaires/{id}/answers/{qid}"},
 	{Method: "PATCH", Path: "/v1/tenants/{id}", Tag: "tenants", Tier: "bearer", Internal: false, Summary: "PATCH /v1/tenants/{id} — rename a tenant and/or set its control-bundle gate policy (per-tenant admin or super_admin)"},
+	{Method: "PATCH", Path: "/v1/themes/{ref}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "PATCH /v1/themes/{ref} — rename an organisation theme; body {name?, description?}; rewrites every risk and aggregation rule that used the old name"},
 	{Method: "PATCH", Path: "/v1/vendors/{id}", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "PATCH /v1/vendors/{id}"},
 	{Method: "POST", Path: "/auth/local/login", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/local/login — local sign-in; JSON body {tenant_id, email, password}. tenant_id may be omitted when the install has exactly one tenant; otherwise 400 tenant_id is required"},
 	{Method: "POST", Path: "/auth/logout", Tag: "auth", Tier: "none", Internal: false, Summary: "POST /auth/logout"},
@@ -350,6 +352,7 @@ var RouteSpecs = []RouteSpec{
 	// when the env var is set at boot time; absent in production builds. Marked
 	// Internal:true so it does NOT appear in the public Redoc surface.
 	{Method: "POST", Path: "/v1/test/issue-jwt", Tag: "system", Tier: "none", Internal: true, Summary: "Mint a test JWT (env-gated by ATLAS_TEST_MODE; absent in production)"},
+	{Method: "POST", Path: "/v1/themes", Tag: "risks", Tier: "bearer", Internal: false, Summary: "POST /v1/themes — add an organisation theme; body {name, description?}; names are unique across built-ins and the organisation"},
 	{Method: "POST", Path: "/v1/vendors", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "POST /v1/vendors"},
 	{Method: "POST", Path: "/v1/vendors/{id}/reviews", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "POST /v1/vendors/{id}/reviews"},
 	{Method: "POST", Path: "/v1/walkthroughs", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "POST /v1/walkthroughs"},
