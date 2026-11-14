@@ -3459,6 +3459,11 @@ type Querier interface {
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
 	UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error)
+	// #1812: move a risk onto another of the tenant's categories. Dual-writes
+	// the reference and the matching risk_category enum value until #1745's
+	// contract step drops the enum. The caller holds the row via LockRiskByID
+	// and has resolved the category as assignable.
+	UpdateRiskCategory(ctx context.Context, arg UpdateRiskCategoryParams) (Risk, error)
 	// Rename: name and description only. The slug is immutable (trigger).
 	UpdateRiskCategoryText(ctx context.Context, arg UpdateRiskCategoryTextParams) (OrgRiskCategory, error)
 	// #1749: move a risk between hierarchy levels and org units. The caller

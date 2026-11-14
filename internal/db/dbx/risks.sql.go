@@ -926,6 +926,60 @@ func (q *Queries) UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, e
 	return i, err
 }
 
+const updateRiskCategory = `-- name: UpdateRiskCategory :one
+UPDATE risks
+SET category_id = $1,
+    category = $2,
+    updated_at = now()
+WHERE tenant_id = $3 AND id = $4
+RETURNING id, tenant_id, title, description, category, methodology, inherent_score, treatment, treatment_owner, residual_score, review_due_at, created_at, updated_at, accepted_until, accepter, instrument_reference, level, org_unit_id, themes, acceptance_status, category_id
+`
+
+type UpdateRiskCategoryParams struct {
+	CategoryID pgtype.UUID  `json:"category_id"`
+	Category   RiskCategory `json:"category"`
+	TenantID   pgtype.UUID  `json:"tenant_id"`
+	ID         pgtype.UUID  `json:"id"`
+}
+
+// #1812: move a risk onto another of the tenant's categories. Dual-writes
+// the reference and the matching risk_category enum value until #1745's
+// contract step drops the enum. The caller holds the row via LockRiskByID
+// and has resolved the category as assignable.
+func (q *Queries) UpdateRiskCategory(ctx context.Context, arg UpdateRiskCategoryParams) (Risk, error) {
+	row := q.db.QueryRow(ctx, updateRiskCategory,
+		arg.CategoryID,
+		arg.Category,
+		arg.TenantID,
+		arg.ID,
+	)
+	var i Risk
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Description,
+		&i.Category,
+		&i.Methodology,
+		&i.InherentScore,
+		&i.Treatment,
+		&i.TreatmentOwner,
+		&i.ResidualScore,
+		&i.ReviewDueAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AcceptedUntil,
+		&i.Accepter,
+		&i.InstrumentReference,
+		&i.Level,
+		&i.OrgUnitID,
+		&i.Themes,
+		&i.AcceptanceStatus,
+		&i.CategoryID,
+	)
+	return i, err
+}
+
 const updateRiskPlacement = `-- name: UpdateRiskPlacement :one
 UPDATE risks
 SET level = $3,
