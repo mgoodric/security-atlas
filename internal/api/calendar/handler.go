@@ -53,11 +53,10 @@ const (
 	truncateThreshold = 500
 
 	// validEventTypes is the AC-1 closed set. Filters outside this set
-	// are rejected with 400. Slice 675 added `vendor` so the calendar
-	// agenda sources the same event types as the dashboard "Upcoming"
-	// widget (audit-period boundaries, vendor reviews, policy reviews,
-	// exceptions) plus the calendar-only periodic control reviews.
-	validEventTypes = "audit,exception,policy,vendor,control"
+	// are rejected with 400. Slice 675 added `vendor`; #2130 added
+	// `risk` (risk reviews) and `action_plan` (action-plan due dates),
+	// making the calendar the one list of what is due.
+	validEventTypes = "audit,exception,policy,vendor,control,risk,action_plan"
 
 	// calendarScopeKind is the api_keys AllowedKinds entry used to
 	// scope a credential to "may only fetch the ICS feed." See decision
@@ -398,11 +397,13 @@ func normalizeTypeFilter(raw string) (string, error) {
 	}
 	parts := strings.Split(raw, ",")
 	allowed := map[string]struct{}{
-		"audit":     {},
-		"exception": {},
-		"policy":    {},
-		"vendor":    {},
-		"control":   {},
+		"audit":       {},
+		"exception":   {},
+		"policy":      {},
+		"vendor":      {},
+		"control":     {},
+		"risk":        {},
+		"action_plan": {},
 	}
 	kept := make([]string, 0, len(parts))
 	seen := map[string]struct{}{}

@@ -46,7 +46,7 @@ import {
   fetchDashboardFrameworkPosture,
   fetchDashboardFreshness,
   fetchDashboardRisks,
-  fetchDashboardUpcoming,
+  fetchDashboardComingUp,
 } from "@/lib/api/dashboard";
 
 export default function DashboardPage() {
@@ -64,9 +64,10 @@ export default function DashboardPage() {
     queryKey: ["dashboard", "risks"],
     queryFn: fetchDashboardRisks,
   });
+  // #2130: "Coming up" reads the compliance calendar for the next 14 days.
   const upcomingQ = useQuery({
-    queryKey: ["dashboard", "upcoming"],
-    queryFn: fetchDashboardUpcoming,
+    queryKey: ["dashboard", "coming-up"],
+    queryFn: fetchDashboardComingUp,
   });
   const postureQ = useQuery({
     queryKey: ["dashboard", "framework-posture"],

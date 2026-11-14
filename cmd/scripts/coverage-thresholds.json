@@ -270,6 +270,7 @@
     "internal/demoprov": 95,
     "internal/demoseed": 81,
     "internal/drift": 86,
+    "internal/duedate": 98,
     "internal/eval": 77,
     "internal/eval/regocache": 80,
     "internal/evidence/redact": 77,

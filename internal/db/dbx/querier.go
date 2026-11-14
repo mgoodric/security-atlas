@@ -608,11 +608,12 @@ type Querier interface {
 	FinishBackupRunSucceeded(ctx context.Context, arg FinishBackupRunSucceededParams) (BackupRun, error)
 	// Slice 066 — dashboard backend read endpoints.
 	//
-	// Three pure SELECT families that surface existing data behind the
+	// Pure SELECT families that surface existing data behind the
 	// dashboard-grained read paths slice 040's program dashboard view shipped
 	// binding placeholders for. This slice adds NO migration and NO write
-	// surface — it reads framework_versions + the UCF graph, the slice-062
-	// admin_audit_log_v view, and four upcoming-item source tables.
+	// surface — it reads framework_versions + the UCF graph and the slice-062
+	// admin_audit_log_v view. (The upcoming rollup it once also served was
+	// retired by #2130; the compliance calendar is the one list of what is due.)
 	//
 	// All tenant-scoped reads run inside the request's app.current_tenant GUC
 	// (set by the slice-033 tenancy middleware); RLS is the defense-in-depth
@@ -621,7 +622,7 @@ type Querier interface {
 	// frameworks, framework_requirements, fw_to_scf_edges, scf_anchors) carry
 	// no tenant_id and no RLS — they are global, platform-bundled.
 	//
-	// Cursor pagination over the activity feed and the upcoming rollup is
+	// Cursor pagination over the activity feed is
 	// keyset, not OFFSET: a (timestamp, id) keyset is stable under concurrent
 	// appends. The keyset predicate is decomposed (ts < cursor_ts OR (ts =
 	// cursor_ts AND id < cursor_id)) rather than a ROW(...) tuple comparison —
@@ -1832,6 +1833,12 @@ type Querier interface {
 	//      the append-only control_evaluations ledger.
 	//   6. personnel_security_checklists — open offboarding due dates, so overdue
 	//      leaver access-removal tasks surface on the compliance calendar.
+	//   7. risks                   — review_due_at is the next risk review (#2130)
+	//   8. action_plans            — due_date of an open plan (#2130)
+	//
+	// Past-due items: every branch filters on its own date against [from, to),
+	// so a window that starts in the past returns the items that fell due in
+	// it. The dashboard's "Coming up" asks for today + 14 days.
 	//
 	// All event sources are tenant-scoped; RLS fires on each underlying SELECT, and the
 	// explicit tenant_id predicates are the primary guarantee.
@@ -2933,46 +2940,6 @@ type Querier interface {
 	// (the wire shape tolerates null — bootstrap-key + credential-only callers
 	// have no users row).
 	ListUnifiedAuditLog(ctx context.Context, arg ListUnifiedAuditLogParams) ([]ListUnifiedAuditLogRow, error)
-	// AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
-	// sources — expiring exceptions (021), policy-ack expirations (023), vendor
-	// reviews and contract renewals (024/OE-623), audit-period milestones (028) — projected to the AC-4 row
-	// shape {due_date, category, title, resource_type, resource_id}. NOT four
-	// round-trips (anti-criterion P0: no N+1).
-	//
-	// SHARED UPCOMING-EVENT VOCABULARY (slice 675, ADR-0015): this query and
-	// the compliance calendar's `ListCalendarEvents`
-	// (internal/db/queries/calendar.sql) both answer "what's coming up?" and
-	// MUST source the same entity types. The vendor branch below is mirrored
-	// by the calendar's vendor branch (same last_review_date + cadence math).
-	// If you add or remove an event source here, make the matching change in
-	// calendar.sql (or note why the two intentionally differ) so the dashboard
-	// and the calendar cannot silently drift again.
-	//
-	// due_date semantics per source:
-	//   exception        — expires_at (the waiver lapses)
-	//   policy_ack       — latest ack's acknowledged_at + 365d (the annual
-	//                      re-ack falls due); only the freshest ack per
-	//                      (policy_version, user) is considered
-	//   vendor_review    — last_review_date + the cadence interval (next review
-	//                      falls due)
-	//   vendor_renewal   — renewal_date (contract renewal falls due)
-	//   audit_period     — period_end (the audit period closes)
-	//
-	// All four are tenant-scoped; RLS fires on each underlying SELECT and the
-	// explicit tenant_id predicates are the primary guarantee.
-	//
-	// Keyset paginated date-sorted ascending over (due_date, resource_id). The
-	// decomposed keyset predicate + the optional category filter are pushed
-	// INTO each UNION branch: sqlc v1.31's analyzer cannot resolve column names
-	// in an outer WHERE over a UNION-ALL CTE whose columns are all expressions
-	// (it has no base-column lineage to bind to). Pushing the predicates into
-	// each branch lets sqlc analyze each against real tables. The named args
-	// (cursor_date, cursor_id, category_filter, row_limit) are deduplicated by
-	// sqlc — each appears once in the generated Params struct. This is still
-	// ONE statement / ONE UNION ALL — no N+1 (anti-criterion P0). A sentinel
-	// cursor (cursor_date = '-infinity', cursor_id = '') selects the first
-	// page; the empty category filter ('' = all) narrows to one source.
-	ListUpcomingItems(ctx context.Context, arg ListUpcomingItemsParams) ([]ListUpcomingItemsRow, error)
 	// Slice 108 — /v1/me/* preferences + audit-log queries.
 	//
 	// Queries land in their own file (not appended to users.sql or sessions.sql) so the

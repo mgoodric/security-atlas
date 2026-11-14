@@ -1,10 +1,11 @@
-// Package dashboard serves the slice-066 dashboard backend read endpoints —
-// three of the four read paths the slice-040 program dashboard view binds
-// its placeholders to:
+// Package dashboard serves the slice-066 dashboard backend read endpoints
+// the slice-040 program dashboard view binds its panels to:
 //
 //	GET /v1/frameworks/posture   AC-1: per-framework-version posture
 //	GET /v1/activity             AC-2: evidence-ingest activity feed
-//	GET /v1/upcoming             AC-4: unified upcoming-items rollup
+//
+// (AC-4's upcoming rollup was retired by #2130; the dashboard's
+// "Coming up" reads the compliance calendar, GET /v1/calendar.)
 //
 // (The fourth, AC-3's `sort=residual,age` on GET /v1/risks, extends the
 // existing internal/api/risks + internal/risk packages additively — it is
@@ -112,25 +113,6 @@ func (s *Store) ActivityFeed(ctx context.Context, cursor keyset, pageRows int32)
 	return rows, err
 }
 
-// UpcomingItems reads one page of the unified upcoming-items rollup,
-// date-sorted ascending, bounded by the keyset cursor and the optional
-// category filter (” = all). It returns up to limit rows.
-func (s *Store) UpcomingItems(ctx context.Context, categoryFilter string, cursor keyset, pageRows int32) ([]dbx.ListUpcomingItemsRow, error) {
-	var rows []dbx.ListUpcomingItemsRow
-	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		var qerr error
-		rows, qerr = q.ListUpcomingItems(ctx, dbx.ListUpcomingItemsParams{
-			TenantID:       pgUUID(tenantID),
-			CategoryFilter: categoryFilter,
-			CursorDate:     pgTimestamptz(cursor.ts),
-			CursorID:       cursor.id,
-			RowLimit:       pageRows + 1, // +1 probe row to detect a next page
-		})
-		return qerr
-	})
-	return rows, err
-}
-
 // ActivityFeedFirstPage is the cross-package convenience wrapper for
 // the dashboard's activity feed's first page. Slice 269 (dashboard
 // export) is the first caller — the export composes the same view
@@ -144,17 +126,4 @@ func (s *Store) UpcomingItems(ctx context.Context, categoryFilter string, cursor
 // `limit` is the page size (the caller's responsibility to bound).
 func (s *Store) ActivityFeedFirstPage(ctx context.Context, limit int32) ([]dbx.ListEvidenceActivityRow, error) {
 	return s.ActivityFeed(ctx, firstPageActivity(), limit)
-}
-
-// UpcomingItemsFirstPage is the cross-package convenience wrapper for
-// the upcoming rollup's first page. Same rationale as
-// [Store.ActivityFeedFirstPage] — slice 269's dashboard export
-// composes the same view the user sees in the live dashboard.
-//
-// `categoryFilter` defaults to "" (all categories) for the dashboard-
-// export call site; the wrapper still surfaces the filter argument
-// so a future caller (e.g., a category-narrowed export) can
-// specialise the call without a second wrapper.
-func (s *Store) UpcomingItemsFirstPage(ctx context.Context, categoryFilter string, limit int32) ([]dbx.ListUpcomingItemsRow, error) {
-	return s.UpcomingItems(ctx, categoryFilter, firstPageUpcoming(), limit)
 }

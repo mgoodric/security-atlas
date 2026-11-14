@@ -293,6 +293,58 @@ FROM (
 
     UNION ALL
 
+    -- risk reviews (#2130): every risk with a review_due_at, roll-ups
+    -- included. A roll-up's review date is its own (#2059 sets one on every
+    -- risk), and each risk is one row here, so a child listed under a
+    -- roll-up is not listed twice. status is '' in SQL: the store fills it
+    -- with duedate.Status (overdue after the UTC due day, due-soon within
+    -- 14 days), the one rule the policy list shares.
+    SELECT
+        r.id::text                                                    AS event_id,
+        'risk'::text                                                  AS event_type,
+        ('Risk review: ' || r.title)::text                            AS title,
+        r.review_due_at                                               AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        r.id::text                                                    AS related_entity_id,
+        'risk'::text                                                  AS related_entity_kind,
+        r.treatment::text                                             AS summary,
+        ''::text                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM risks r
+    WHERE r.tenant_id = $1
+      AND r.review_due_at IS NOT NULL
+      AND r.review_due_at >= $2::timestamptz
+      AND r.review_due_at <  $3::timestamptz
+      AND ($4::text = '' OR position('risk' IN $4::text) > 0)
+
+    UNION ALL
+
+    -- action-plan due dates (#2130): open plans (not completed, verified or
+    -- tombstoned) with a due_date. due_date is a DATE, placed at 00:00 UTC
+    -- so the event's day does not move with the session time zone. status
+    -- is filled by the store, as for risk reviews.
+    SELECT
+        ap.id::text                                                   AS event_id,
+        'action_plan'::text                                           AS event_type,
+        ('Action plan due: ' || ap.title)::text                       AS title,
+        (ap.due_date::timestamp AT TIME ZONE 'UTC')                   AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        ap.id::text                                                   AS related_entity_id,
+        'action_plan'::text                                           AS related_entity_kind,
+        ap.status                                                     AS summary,
+        ''::text                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM action_plans ap
+    WHERE ap.tenant_id = $1
+      AND ap.tombstoned_at IS NULL
+      AND ap.status NOT IN ('completed', 'verified')
+      AND ap.due_date IS NOT NULL
+      AND (ap.due_date::timestamp AT TIME ZONE 'UTC') >= $2::timestamptz
+      AND (ap.due_date::timestamp AT TIME ZONE 'UTC') <  $3::timestamptz
+      AND ($4::text = '' OR position('action_plan' IN $4::text) > 0)
+
+    UNION ALL
+
     SELECT
         psc.id::text                                                  AS event_id,
         'offboarding'::text                                           AS event_type,
@@ -361,6 +413,12 @@ type ListCalendarEventsRow struct {
 //     the append-only control_evaluations ledger.
 //  6. personnel_security_checklists — open offboarding due dates, so overdue
 //     leaver access-removal tasks surface on the compliance calendar.
+//  7. risks                   — review_due_at is the next risk review (#2130)
+//  8. action_plans            — due_date of an open plan (#2130)
+//
+// Past-due items: every branch filters on its own date against [from, to),
+// so a window that starts in the past returns the items that fell due in
+// it. The dashboard's "Coming up" asks for today + 14 days.
 //
 // All event sources are tenant-scoped; RLS fires on each underlying SELECT, and the
 // explicit tenant_id predicates are the primary guarantee.

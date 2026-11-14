@@ -205,7 +205,6 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/scopes/dimensions", Tag: "scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/scopes/dimensions"},
 	{Method: "GET", Path: "/v1/search", Tag: "search", Tier: "bearer", Internal: false, Summary: "GET /v1/search — unified lexical search across controls, risks, policies, evidence, and SCF anchors"},
 	{Method: "GET", Path: "/v1/themes", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/themes"},
-	{Method: "GET", Path: "/v1/upcoming", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/upcoming"},
 	{Method: "GET", Path: "/v1/vendors", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors"},
 	{Method: "GET", Path: "/v1/vendors/burndown", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors/burndown"},
 	{Method: "GET", Path: "/v1/vendors/spend", Tag: "vendors", Tier: "bearer", Internal: false, Summary: "GET /v1/vendors/spend"},

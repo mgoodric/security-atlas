@@ -10,16 +10,18 @@ import { apiFetch, bffControlFetch } from "./_shared";
 // vendors + controls (with cadence math). Plus a per-user ICS URL token
 // mint. See docs/audit-log/094-compliance-calendar-decisions.md.
 //
-// Slice 675 added `vendor` so the agenda sources the same event types as
-// the dashboard "Upcoming" widget (the calendar was previously missing
-// vendor reviews entirely).
+// Slice 675 added `vendor`; #2130 added `risk` (risk reviews) and
+// `action_plan` (action-plan due dates), making the calendar the one list
+// of what is due. The dashboard's "Coming up" panel reads it.
 
 export type CalendarEventType =
   | "audit"
   | "exception"
   | "policy"
   | "vendor"
-  | "control";
+  | "control"
+  | "risk"
+  | "action_plan";
 
 export type CalendarEvent = {
   id: string;
