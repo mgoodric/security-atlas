@@ -94,6 +94,8 @@ func TestParse_Failures(t *testing.T) {
 		{"relative url", replace("https://wiki.example.com/isp", "/wiki/isp"), "source_url"},
 		{"empty body", "---\ntitle: T\nversion: 1\napproved_by_name: A\napproved_at: 2024-01-02\neffective_date: 2024-01-03\n---\n", "policy text"},
 		{"bad yaml", "---\ntitle: [unclosed\n---\nbody\n", "front matter:"},
+		{"long title", replace("title: Information Security Policy", "title: "+strings.Repeat("t", 501)), "title is longer than 500"},
+		{"long approver", replace("approved_by_name: Jane Doe", "approved_by_name: "+strings.Repeat("a", 501)), "approved_by_name is longer than 500"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,6 +108,14 @@ func TestParse_Failures(t *testing.T) {
 				t.Errorf("error = %q, want it to contain %q", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestParse_LongFileName(t *testing.T) {
+	t.Parallel()
+	_, err := Parse(strings.Repeat("f", 501)+".md", []byte(validFile))
+	if err == nil || !strings.Contains(err.Error(), "file name is longer than 500") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

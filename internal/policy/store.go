@@ -98,8 +98,10 @@ var (
 	// predecessor that is not the published chain tip. HTTP 409.
 	ErrPredecessorNotPublished = errors.New("policy: predecessor must be a published policy")
 	// ErrPredecessorTaken is returned when the predecessor already has a
-	// successor (version chains are linear). HTTP 409.
-	ErrPredecessorTaken = errors.New("policy: predecessor already has a successor version")
+	// successor (version chains are linear). HTTP 409. There is no API to
+	// discard a draft, so the message points the caller at the existing
+	// successor rather than a discard step.
+	ErrPredecessorTaken = errors.New("policy: predecessor already has a successor version; continue that version (submit, approve, publish) instead of creating another, since drafts cannot be discarded through the API")
 	// ErrInvalidSourceAttribution is returned when Create is given a
 	// source_attribution outside the accepted set, or 'imported' (which
 	// only Import sets). HTTP 400.

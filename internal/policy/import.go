@@ -30,6 +30,11 @@ const (
 // auditActionImported is the policy_audit_log action for an import.
 const auditActionImported = "imported"
 
+// MaxImportFieldLen caps the free-text import fields: title, historical
+// approver name and source file name. The migration enforces the same
+// cap on historical_approver_name and policy_audit_log.source_file.
+const MaxImportFieldLen = 500
+
 // ImportInput is one parsed policy file. internal/policy/importfile builds
 // it from Markdown with YAML front matter.
 type ImportInput struct {
@@ -260,6 +265,12 @@ func validateImport(in ImportInput) error {
 		return errors.New("policy: historical approval date is required")
 	case in.EffectiveDate.IsZero():
 		return errors.New("policy: effective date is required")
+	case len(in.Title) > MaxImportFieldLen:
+		return fmt.Errorf("policy: title is longer than %d characters", MaxImportFieldLen)
+	case len(in.HistoricalApproverName) > MaxImportFieldLen:
+		return fmt.Errorf("policy: historical approver name is longer than %d characters", MaxImportFieldLen)
+	case len(in.SourceFile) > MaxImportFieldLen:
+		return fmt.Errorf("policy: file name is longer than %d characters", MaxImportFieldLen)
 	}
 	return nil
 }

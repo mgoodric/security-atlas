@@ -6,6 +6,7 @@ DROP TABLE IF EXISTS policy_audit_log;
 
 DROP INDEX IF EXISTS idx_policies_tenant_title_version;
 
+ALTER TABLE policies DROP CONSTRAINT IF EXISTS policies_historical_approver_name_len;
 ALTER TABLE policies DROP CONSTRAINT IF EXISTS policies_source_url_len;
 ALTER TABLE policies DROP CONSTRAINT IF EXISTS policies_imported_fields_chk;
 ALTER TABLE policies DROP CONSTRAINT IF EXISTS policies_source_attribution_chk;

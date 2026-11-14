@@ -99,6 +99,15 @@ func Parse(name string, content []byte) (policy.ImportInput, error) {
 			return policy.ImportInput{}, fmt.Errorf("missing required front matter %q", req.key)
 		}
 	}
+	for _, f := range []struct{ key, val string }{
+		{"title", in.Title},
+		{"approved_by_name", in.HistoricalApproverName},
+		{"file name", name},
+	} {
+		if len(f.val) > policy.MaxImportFieldLen {
+			return policy.ImportInput{}, fmt.Errorf("%s is longer than %d characters", f.key, policy.MaxImportFieldLen)
+		}
+	}
 	if in.BodyMd == "" {
 		return policy.ImportInput{}, errors.New("policy text (the Markdown after the front matter) is empty")
 	}

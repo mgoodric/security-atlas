@@ -129,6 +129,24 @@ list now shows it as "No linked controls" next to an "Imported" marker. The
 flag is not limited to imports: an orphan draft is the same gap, and drafts
 still cannot be published without controls.
 
+### D13 — free-text import fields are capped at 500 characters. **Confidence: HIGH.**
+
+From review. The title, historical approver name and source file name are
+capped at 500 in the parser and the store (`policy.MaxImportFieldLen`). The
+migration adds the same cap as CHECKs on `policies.historical_approver_name`
+and on `policy_audit_log.source_file` and `historical_approver_name`. The
+title CHECK is not added to `policies` itself, so existing rows with long
+titles cannot fail the migration.
+
+### D14 — a next-version draft cannot be discarded; the 409 says so. **Confidence: MEDIUM.**
+
+From review. A draft created with `predecessor_id` holds the single successor
+slot. The API has no delete or discard route for a policy, so an abandoned
+draft blocks another one. The 409 message (`ErrPredecessorTaken`) tells the
+caller to continue the existing successor through submit, approve and publish,
+and that drafts cannot be discarded through the API. Adding a discard route is
+a separate change.
+
 ## Out of scope (per the ticket)
 
 Editing `next_review_at` and overdue views (#1806), segregation of duties

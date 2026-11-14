@@ -52,7 +52,9 @@ ALTER TABLE policies
             )
         ),
     ADD CONSTRAINT policies_source_url_len
-        CHECK (source_url IS NULL OR length(source_url) <= 2000);
+        CHECK (source_url IS NULL OR length(source_url) <= 2000),
+    ADD CONSTRAINT policies_historical_approver_name_len
+        CHECK (historical_approver_name IS NULL OR length(historical_approver_name) <= 500);
 
 -- Duplicate detection on import looks up (tenant, title, version).
 CREATE INDEX idx_policies_tenant_title_version
@@ -64,8 +66,8 @@ CREATE TABLE policy_audit_log (
     policy_id                UUID NOT NULL,
     action                   TEXT NOT NULL CHECK (action IN ('imported')),
     actor                    TEXT NOT NULL CHECK (length(actor) > 0),
-    source_file              TEXT NOT NULL DEFAULT '',
-    historical_approver_name TEXT NULL,
+    source_file              TEXT NOT NULL DEFAULT '' CHECK (length(source_file) <= 500),
+    historical_approver_name TEXT NULL CHECK (historical_approver_name IS NULL OR length(historical_approver_name) <= 500),
     historical_approved_at   DATE NULL,
     source_url               TEXT NULL,
     subject_module           TEXT NOT NULL DEFAULT 'core',
