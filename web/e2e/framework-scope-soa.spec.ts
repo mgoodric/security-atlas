@@ -17,12 +17,12 @@
 //      moves from 37.5% to 2/4 = 50.0% (SOA-01, 06, 07, 08 excluded), and
 //      the tab turns read-only.
 //
-// #2101: the e2e user submits and approves, so the spec turns on the
-// tenant's Allow self-approval for its run (and off in afterAll); the
-// approved scope carries the "Self-approved" marker.
+// #2101: the e2e user submits and approves, which the fixture allows by
+// turning on the demo tenant's Allow self-approval; the approved scope
+// carries the "Self-approved" marker.
 
 import { expect, test } from "./fixtures";
-import { DEMO_TENANT_ID, seedFromFixture } from "./seed";
+import { seedFromFixture } from "./seed";
 
 const FV = "e2e17940-0000-0000-0000-0000000f0003";
 const SOA_01 = "e2e17940-0000-0000-0000-00000000b001";
@@ -52,9 +52,6 @@ test.describe.configure({ mode: "serial" });
 test.describe("framework scope · Statement of Applicability tab (#1794)", () => {
   test.beforeAll(async () => {
     seedFromFixture("framework-scope-soa");
-    await atlas(`/v1/tenants/${DEMO_TENANT_ID}`, "PATCH", {
-      allow_self_approval: true,
-    });
     const { framework_scope } = (await atlas("/v1/framework-scopes", "POST", {
       framework_version_id: FV,
       name: "ISMS scope (e2e)",
@@ -69,12 +66,6 @@ test.describe("framework scope · Statement of Applicability tab (#1794)", () =>
         implementation_ref: "",
       },
     );
-  });
-
-  test.afterAll(async () => {
-    await atlas(`/v1/tenants/${DEMO_TENANT_ID}`, "PATCH", {
-      allow_self_approval: false,
-    });
   });
 
   test("bulk-excludes three requirements with a justification and the counts update", async ({

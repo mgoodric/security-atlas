@@ -54,4 +54,4 @@ The policy and exception exports gain a `self_approved` column. Policy appends i
 
 ## D8 — The framework-scope e2e
 
-`framework-scope-soa.spec.ts` submits and approves as the one e2e user. The spec now turns Allow self-approval on for the demo tenant in `beforeAll` and off in `afterAll`. Its fixture inserts the demo tenant's `tenants` row, as `controls-top-bar.sql` does, so the PATCH has a row to update. The spec also asserts the Self-approved marker.
+`framework-scope-soa.spec.ts` and `framework-scope-diff.spec.ts` each submit and approve as the one e2e user. Their fixtures upsert the demo tenant's `tenants` row, as `controls-top-bar.sql` does, with Allow self-approval on, and leave it on. A per-spec toggle (on in `beforeAll`, off in `afterAll`) was rejected. The two specs run in parallel workers, so one spec's `afterAll` could turn the setting off while the other was approving. `framework-scope-soa.spec.ts` also asserts the Self-approved marker.

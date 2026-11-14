@@ -33,9 +33,10 @@
 -- version's tile on the dashboard framework-posture panel.
 --
 -- #2101: the e2e user both submits and approves the scope, which needs the
--- organisation's Allow self-approval setting. The spec turns it on through
--- PATCH /v1/tenants/{id} and off again afterwards; that needs the demo
--- tenant's `tenants` row, inserted here as controls-top-bar.sql does.
+-- organisation's Allow self-approval setting. It is turned on for the demo
+-- tenant here, and left on: framework-scope-diff.sql does the same, and the
+-- two specs run in parallel, so neither may turn it off under the other.
+-- The tenants row is inserted as controls-top-bar.sql does.
 
 \set ON_ERROR_STOP on
 
@@ -43,9 +44,9 @@ BEGIN;
 
 SET LOCAL app.current_tenant = '00000000-0000-0000-0000-00000000d3a0';
 
-INSERT INTO tenants (id, name, is_bootstrap_tenant)
-VALUES ('00000000-0000-0000-0000-00000000d3a0', 'Demo Tenant', FALSE)
-ON CONFLICT (id) DO NOTHING;
+INSERT INTO tenants (id, name, is_bootstrap_tenant, allow_self_approval)
+VALUES ('00000000-0000-0000-0000-00000000d3a0', 'Demo Tenant', FALSE, TRUE)
+ON CONFLICT (id) DO UPDATE SET allow_self_approval = TRUE;
 
 INSERT INTO frameworks (id, tenant_id, slug, name, issuer, description)
 VALUES (
