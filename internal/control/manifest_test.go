@@ -149,3 +149,74 @@ func TestEvidenceQueriesJSON_EmptyIsArray(t *testing.T) {
 		t.Fatalf("expected empty array; got %s", string(b))
 	}
 }
+
+// Issue #1736 — anchor_fit rules.
+func TestValidateStructural_AnchorFit(t *testing.T) {
+	t.Parallel()
+	base := func() Manifest {
+		return Manifest{
+			BundleSchemaVersion: "1",
+			BundleID:            "soc2_cc1_2_board_independence",
+			Title:               "Audit committee independence",
+			SCFAnchorID:         "GOV-09",
+			ImplementationType:  "manual_attested",
+		}
+	}
+	note := "No SCF control covers audit committee independence; GOV-09 is the nearest catch-all."
+
+	cases := []struct {
+		name    string
+		mutate  func(*Manifest)
+		wantErr string // empty = valid
+	}{
+		{"omitted defaults to exact", func(*Manifest) {}, ""},
+		{"exact without note", func(m *Manifest) { m.AnchorFit = "exact" }, ""},
+		{"partial with note", func(m *Manifest) { m.AnchorFit = "partial"; m.AnchorFitNote = note }, ""},
+		{"none with note and anchor", func(m *Manifest) { m.AnchorFit = "none"; m.AnchorFitNote = note }, ""},
+		{"none with note, no anchor", func(m *Manifest) {
+			m.AnchorFit = "none"
+			m.AnchorFitNote = note
+			m.SCFAnchorID = ""
+		}, ""},
+		{"none without note", func(m *Manifest) { m.AnchorFit = "none" }, "anchor_fit_note is required"},
+		{"partial with blank note", func(m *Manifest) { m.AnchorFit = "partial"; m.AnchorFitNote = "   " }, "anchor_fit_note is required"},
+		{"unknown value", func(m *Manifest) { m.AnchorFit = "approximate"; m.AnchorFitNote = note }, `anchor_fit "approximate" is not one of exact|partial|none`},
+		{"partial, no anchor", func(m *Manifest) {
+			m.AnchorFit = "partial"
+			m.AnchorFitNote = note
+			m.SCFAnchorID = ""
+		}, "scf_anchor_id is required"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := base()
+			tc.mutate(&m)
+			err := m.ValidateStructural()
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("expected ok, got %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v; want it to contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestAnchorFitDefaults(t *testing.T) {
+	t.Parallel()
+	var m Manifest
+	if got := m.AnchorFitOrDefault(); got != AnchorFitExact {
+		t.Fatalf("AnchorFitOrDefault() = %q; want %q", got, AnchorFitExact)
+	}
+	if got := m.AnchorFitNotePtr(); got != nil {
+		t.Fatalf("AnchorFitNotePtr() = %q; want nil", *got)
+	}
+	m.AnchorFitNote = "  partial cover  "
+	if got := m.AnchorFitNotePtr(); got == nil || *got != "partial cover" {
+		t.Fatalf("AnchorFitNotePtr() = %v; want trimmed note", got)
+	}
+}

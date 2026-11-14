@@ -3129,6 +3129,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/applicability/export:
+    get:
+      summary: GET /v1/framework-scopes/applicability/export — export the Statement of Applicability as CSV or xlsx
+      tags: [framework-scopes]
+      operationId: get-v1-framework-scopes-applicability-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}:
     get:
       summary: GET /v1/framework-scopes/{id}
@@ -4283,6 +4297,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
   /v1/policies/{id}:
+    delete:
+      summary: DELETE /v1/policies/{id} — discard a draft policy, audit-logged (#1987)
+      tags: [policies]
+      operationId: delete-v1-policies-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
     get:
       summary: GET /v1/policies/{id}
       tags: [policies]

@@ -139,6 +139,7 @@ func TestSlice174_AnchorsExportEdgesHeader_StableOrder(t *testing.T) {
 		"strength",
 		"source_attribution",
 		"rationale",
+		"mapping_tier",
 	}
 	got := anchorsExportEdgesHeader()
 	if len(got) != len(want) {
@@ -452,6 +453,74 @@ func TestSlice174_WriteAnchorsXLSX_TwoSheetsCarryHeaders(t *testing.T) {
 	if !strings.Contains(wb, `name="Anchors"`) || !strings.Contains(wb, `name="Edges"`) {
 		t.Errorf("workbook.xml does not declare two sheets named Anchors + Edges: %s", wb)
 	}
+}
+
+// TestIssue1826_RejectedEdgeMarkedInEveryFormat — a reviewer-rejected
+// edge stays in the export (no tier filter) and carries
+// mapping_tier = rejected in the JSON, CSV and XLSX projections.
+func TestIssue1826_RejectedEdgeMarkedInEveryFormat(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
+	a1 := uuid.New()
+	anchors := []anchorExportRow{
+		{ID: a1, SCFID: "IAC-37", Family: "iam", Title: "MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf"},
+	}
+	edgeList := []edgeExportRow{
+		{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-37", FrameworkSlug: "soc2", FrameworkRequirementCode: "CC6.6", RelationshipType: "equal", Strength: 1.0, SourceAttribution: "community_draft", MappingTier: "rejected"},
+		{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-37", FrameworkSlug: "soc2", FrameworkRequirementCode: "CC6.7", RelationshipType: "no_relationship", Strength: 0, SourceAttribution: "scf_official", MappingTier: "verified"},
+	}
+	edges := map[uuid.UUID][]edgeExportRow{a1: edgeList}
+
+	var jsonBuf bytes.Buffer
+	if err := writeAnchorsJSON(&jsonBuf, anchors, edges); err != nil {
+		t.Fatalf("writeAnchorsJSON: %v", err)
+	}
+	var parsed []nestedAnchorWire
+	if err := json.Unmarshal(jsonBuf.Bytes(), &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	sats := parsed[0].FrameworkSatisfactions
+	if len(sats) != 2 {
+		t.Fatalf("satisfaction count = %d; want 2 (export must not filter by tier)", len(sats))
+	}
+	if sats[0].MappingTier != "rejected" || sats[1].MappingTier != "verified" {
+		t.Errorf("json mapping_tier = %q,%q; want rejected,verified", sats[0].MappingTier, sats[1].MappingTier)
+	}
+
+	var csvBuf bytes.Buffer
+	if err := writeAnchorsCSV(&csvBuf, anchors, edges); err != nil {
+		t.Fatalf("writeAnchorsCSV: %v", err)
+	}
+	if !strings.Contains(csvBuf.String(), `""mapping_tier"":""rejected""`) {
+		t.Errorf("csv satisfactions cell missing rejected tier: %s", csvBuf.String())
+	}
+
+	var xlsxBuf bytes.Buffer
+	if err := writeAnchorsXLSX(&xlsxBuf, anchors, edgeList); err != nil {
+		t.Fatalf("writeAnchorsXLSX: %v", err)
+	}
+	zr, err := zip.NewReader(bytes.NewReader(xlsxBuf.Bytes()), int64(xlsxBuf.Len()))
+	if err != nil {
+		t.Fatalf("zip.NewReader: %v", err)
+	}
+	for _, f := range zr.File {
+		if f.Name != "xl/worksheets/sheet2.xml" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open sheet2: %v", err)
+		}
+		b, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			t.Fatalf("read sheet2: %v", err)
+		}
+		if !strings.Contains(string(b), "mapping_tier") || !strings.Contains(string(b), "rejected") {
+			t.Errorf("sheet2.xml missing mapping_tier header or rejected value: %s", b)
+		}
+		return
+	}
+	t.Fatal("sheet2.xml not found")
 }
 
 // TestSlice174_NewExportHandler_StoresPool exercises the constructor

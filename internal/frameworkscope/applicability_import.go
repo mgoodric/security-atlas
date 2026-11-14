@@ -33,7 +33,7 @@ var ErrImportEmpty = errors.New("frameworkscope: CSV has no data rows")
 // Rejection reasons for an import row.
 const (
 	ReasonUnknownCode           = "unknown requirement code"
-	ReasonDuplicateCode         = "requirement code appears more than once"
+	ReasonConflictingDuplicate  = "requirement code appears more than once with different values"
 	ReasonInvalidDecision       = "decision must be `applicable` or `excluded`"
 	ReasonJustificationRequired = "a justification is required to exclude a requirement"
 	ReasonMalformedRow          = "row could not be read"
@@ -152,8 +152,22 @@ func ParseDecisionCSV(r io.Reader) ([]ImportRow, []ImportRejection, error) {
 }
 
 // checkImportRows splits rows into decisions to apply and rejections, given
-// the revision's requirement codes. Codes match exactly after trimming.
+// the revision's requirement codes. Codes match exactly after trimming. A
+// code repeated with identical decision, justification and implementation
+// reference is applied once; a code repeated with any difference is
+// ambiguous, and every row for it is rejected.
 func checkImportRows(rows []ImportRow, codes map[string]uuid.UUID) ([]DecisionInput, []ImportRejection) {
+	type values struct{ decision, justification, implementationRef string }
+	first := map[string]values{}
+	conflicting := map[string]bool{}
+	for _, r := range rows {
+		v := values{r.Decision, r.Justification, r.ImplementationRef}
+		if prev, ok := first[r.RequirementCode]; !ok {
+			first[r.RequirementCode] = v
+		} else if prev != v {
+			conflicting[r.RequirementCode] = true
+		}
+	}
 	var apply []DecisionInput
 	var rejected []ImportRejection
 	seen := map[string]bool{}
@@ -166,9 +180,11 @@ func checkImportRows(rows []ImportRow, codes map[string]uuid.UUID) ([]DecisionIn
 		case !ok:
 			reject(ReasonUnknownCode)
 			continue
-		case seen[r.RequirementCode]:
-			reject(ReasonDuplicateCode)
+		case conflicting[r.RequirementCode]:
+			reject(ReasonConflictingDuplicate)
 			continue
+		case seen[r.RequirementCode]:
+			continue // an identical repeat of a row already handled
 		}
 		seen[r.RequirementCode] = true
 		switch err := ValidateDecision(r.Decision, r.Justification); {

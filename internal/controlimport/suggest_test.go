@@ -25,20 +25,20 @@ func TestBuildCandidatesRanksCrosswalkByCriteriaReachedThenStrength(t *testing.T
 	t.Parallel()
 	row := BatchControl{ID: "row-1", TestedUnder: []Requirement{req61, req62}}
 	edges := []CrosswalkEdge{
-		{RequirementID: "r-62", AnchorID: "a-strong", SCFID: "IAC-15", Strength: 0.9},
-		{RequirementID: "r-61", AnchorID: "a-both", SCFID: "IAC-06", Strength: 0.7},
-		{RequirementID: "r-62", AnchorID: "a-both", SCFID: "IAC-06", Strength: 0.6},
+		{RequirementID: "r-62", AnchorID: "a-strong", SCFID: "IAC-12", Strength: 0.9},
+		{RequirementID: "r-61", AnchorID: "a-both", SCFID: "IAC-37", Strength: 0.7},
+		{RequirementID: "r-62", AnchorID: "a-both", SCFID: "IAC-37", Strength: 0.6},
 		{RequirementID: "r-61", AnchorID: "a-weak", SCFID: "IAC-01", Strength: 0.3},
 		{RequirementID: "r-other", AnchorID: "a-unrelated", SCFID: "END-01", Strength: 1},
 	}
 	keyword := []AnchorCandidate{
-		{AnchorID: "a-both", SCFID: "IAC-06"},
+		{AnchorID: "a-both", SCFID: "IAC-37"},
 		{AnchorID: "k-1", SCFID: "MON-01"},
 		{AnchorID: "k-2", SCFID: "MON-02"},
 	}
 	got := buildCandidates(row, edges, keyword, 4)
 
-	if s := sources(got.Candidates); s != "IAC-06/crosswalk IAC-15/crosswalk IAC-01/crosswalk MON-01/keyword" {
+	if s := sources(got.Candidates); s != "IAC-37/crosswalk IAC-12/crosswalk IAC-01/crosswalk MON-01/keyword" {
 		t.Fatalf("candidates = %s", s)
 	}
 	top := got.Candidates[0]
@@ -71,7 +71,7 @@ func TestBuildCandidatesKeywordOnlyWithoutTestedUnder(t *testing.T) {
 func TestBuildCandidatesFlagsUnreachedCriteria(t *testing.T) {
 	t.Parallel()
 	row := BatchControl{ID: "row-1", TestedUnder: []Requirement{req71}}
-	got := buildCandidates(row, []CrosswalkEdge{{RequirementID: "r-61", AnchorID: "a", SCFID: "IAC-06"}},
+	got := buildCandidates(row, []CrosswalkEdge{{RequirementID: "r-61", AnchorID: "a", SCFID: "IAC-37"}},
 		[]AnchorCandidate{{AnchorID: "k-1", SCFID: "MON-01"}}, 8)
 	if !got.NoCandidateReaches {
 		t.Error("row whose criteria nothing reaches is not flagged")
@@ -84,7 +84,7 @@ func TestBuildCandidatesFlagsUnreachedCriteria(t *testing.T) {
 func suggestStore() *fakeBatchStore {
 	store := newFakeBatchStore()
 	store.release = &SCFRelease{VersionID: "scf-v", Version: "2026.3"}
-	store.edges = []CrosswalkEdge{{RequirementID: "r-61", AnchorID: "a-1", SCFID: "IAC-06", Strength: 0.8}}
+	store.edges = []CrosswalkEdge{{RequirementID: "r-61", AnchorID: "a-1", SCFID: "IAC-37", Strength: 0.8}}
 	store.keyword = []AnchorCandidate{{AnchorID: "k-1", SCFID: "IAC-01", Title: "Identity and access management", Description: "users"}}
 	return store
 }
@@ -103,7 +103,7 @@ func TestStageComputesCandidatesWithoutLLM(t *testing.T) {
 	if b.SuggestionsStatus != SuggestionsReady || b.SCFRelease == nil || b.SCFRelease.Version != "2026.3" {
 		t.Fatalf("batch suggestions = %q release %+v", b.SuggestionsStatus, b.SCFRelease)
 	}
-	if s := sources(b.Staged[0].Candidates); s != "IAC-06/crosswalk IAC-01/keyword" {
+	if s := sources(b.Staged[0].Candidates); s != "IAC-37/crosswalk IAC-01/keyword" {
 		t.Errorf("row 1 candidates = %s", s)
 	}
 	if s := sources(b.Staged[1].Candidates); s != "IAC-01/keyword" {

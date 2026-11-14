@@ -281,7 +281,7 @@ func TestUpload_StoresExternalRefs(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-06", "IAC")
+	_, code := seedSCFAnchor(t, admin, "IAC-37", "IAC")
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
 	ctx, err := tenancy.WithTenant(context.Background(), tenant)

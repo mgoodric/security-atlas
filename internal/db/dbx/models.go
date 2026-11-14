@@ -1945,7 +1945,9 @@ type Control struct {
 	BundleUploadedAt     pgtype.Timestamptz        `json:"bundle_uploaded_at"`
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 	// control.yaml external_refs[]: [{system, kind, id, note?}], kind in (reference, tested_under). Validated by the bundle parser (#1737).
-	ExternalRefs []byte `json:"external_refs"`
+	ExternalRefs  []byte  `json:"external_refs"`
+	AnchorFit     string  `json:"anchor_fit"`
+	AnchorFitNote *string `json:"anchor_fit_note"`
 }
 
 type ControlDriftSnapshot struct {
@@ -2822,6 +2824,8 @@ type PolicyAuditLog struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	PreviousNextReviewAt   pgtype.Timestamptz `json:"previous_next_review_at"`
 	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
+	PolicyTitle            *string            `json:"policy_title"`
+	PolicyVersion          *string            `json:"policy_version"`
 }
 
 type Population struct {

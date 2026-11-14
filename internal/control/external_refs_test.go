@@ -91,7 +91,7 @@ func TestValidateStructural_RejectsBadExternalRefs(t *testing.T) {
 				BundleSchemaVersion: "1",
 				BundleID:            "refs_control",
 				Title:               "Refs",
-				SCFAnchorID:         "IAC-06",
+				SCFAnchorID:         "IAC-37",
 				ImplementationType:  "automated",
 				ExternalRefs:        tc.refs,
 			}
@@ -111,7 +111,7 @@ func refsManifest(refs []ExternalRef) Manifest {
 		BundleSchemaVersion: "1",
 		BundleID:            "refs_control",
 		Title:               "Refs",
-		SCFAnchorID:         "IAC-06",
+		SCFAnchorID:         "IAC-37",
 		ImplementationType:  "automated",
 		ExternalRefs:        refs,
 	}
@@ -158,7 +158,7 @@ func TestValidateStructural_SameIDDifferentKindAllowed(t *testing.T) {
 		BundleSchemaVersion: "1",
 		BundleID:            "refs_control",
 		Title:               "Refs",
-		SCFAnchorID:         "IAC-06",
+		SCFAnchorID:         "IAC-37",
 		ImplementationType:  "automated",
 		ExternalRefs: []ExternalRef{
 			{System: "soc2", ID: "CC1.1"},

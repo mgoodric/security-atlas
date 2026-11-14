@@ -9,9 +9,9 @@ import (
 
 func TestAnchorContentEqual_SubtopicsCompareByValue(t *testing.T) {
 	t.Parallel()
-	ctl := Control{SCFID: "IAC-06", Family: "IAC", Title: "MFA", Subtopics: []Subtopic{{ID: "a", Text: "b"}}}
+	ctl := Control{SCFID: "IAC-37", Family: "IAC", Title: "MFA", Subtopics: []Subtopic{{ID: "a", Text: "b"}}}
 	// Postgres re-serializes JSONB with spaces and its own key order.
-	row := dbx.ScfAnchor{ScfID: "IAC-06", Family: "IAC", Title: "MFA", Subtopics: []byte(`[{"id": "a", "text": "b"}]`)}
+	row := dbx.ScfAnchor{ScfID: "IAC-37", Family: "IAC", Title: "MFA", Subtopics: []byte(`[{"id": "a", "text": "b"}]`)}
 	if !anchorContentEqual(row, ctl) {
 		t.Fatal("JSONB-formatted subtopics should equal the same subtopics")
 	}

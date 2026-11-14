@@ -171,7 +171,8 @@ type Querier interface {
 	CountActionPlanControls(ctx context.Context, arg CountActionPlanControlsParams) (int64, error)
 	CountActionPlanRisks(ctx context.Context, arg CountActionPlanRisksParams) (int64, error)
 	// Issue #1741 — total for the paged ListActiveControlsWithState read.
-	CountActiveControls(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// The optional anchor_fit filter matches the list's (issue #1736).
+	CountActiveControls(ctx context.Context, arg CountActiveControlsParams) (int64, error)
 	// Count of all checklist sections visible to the caller's tenant. Used by the
 	// cross-tenant isolation integration test to prove tenant B sees zero of
 	// tenant A's rows (AC-8).
@@ -503,6 +504,12 @@ type Querier interface {
 	// Returns the deleted row so the caller can audit what was cleared.
 	DeleteCsfProfileSelection(ctx context.Context, arg DeleteCsfProfileSelectionParams) (CsfProfileSelection, error)
 	DeleteDecision(ctx context.Context, arg DeleteDecisionParams) error
+	// #1987 — discard a draft. Only a row still in 'draft' matches, so a policy
+	// that has been submitted, approved, published or superseded is never
+	// deleted here. Deleting a next-version draft frees its predecessor's
+	// successor slot (policies_predecessor_unique_when_set). The caller writes
+	// the policy_audit_log row in the same transaction.
+	DeleteDraftPolicy(ctx context.Context, arg DeleteDraftPolicyParams) (Policy, error)
 	// Used by tests + cleanup paths. Production deployments will rarely delete
 	// a scope (supersession is the lifecycle exit); the row is preserved as
 	// audit trail.
@@ -828,6 +835,10 @@ type Querier interface {
 	// ORDER BY effective_from DESC LIMIT 1 picks the most-recent applicable row.
 	GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkScopeAsOfParams) (FrameworkScope, error)
 	GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkScopeByIDParams) (FrameworkScope, error)
+	// The actor of a revision's most recent approval, for the SoA export
+	// (#1791). approver_user_id holds it only when the credential id is a UUID;
+	// the workflow log always does.
+	GetFrameworkScopeLatestApprover(ctx context.Context, arg GetFrameworkScopeLatestApproverParams) (string, error)
 	// slice 484: framework-versioning capability — the lifecycle + migration-suggest
 	// review queue + audit queries (ADR 0019). All targets are CATALOG tables (no
 	// tenant RLS); the trust gate is admin-role authz + the append-only audit.
@@ -842,6 +853,9 @@ type Querier interface {
 	// handlers to translate the URL param into a stable id for the pinned
 	// traversal. NULL tenant_id constraint scopes to the global catalog.
 	GetFrameworkVersionBySlugAndVersion(ctx context.Context, arg GetFrameworkVersionBySlugAndVersionParams) (FrameworkVersion, error)
+	// The framework name, slug and version string that title an SoA export
+	// (#1791). Global catalog rows and the caller tenant's own rows are visible.
+	GetFrameworkVersionLabel(ctx context.Context, arg GetFrameworkVersionLabelParams) (GetFrameworkVersionLabelRow, error)
 	// Row-lock one queue entry inside the approve/reject tx. Returns ErrNoRows for
 	// an unknown id.
 	GetFrameworkVersionMigrationForUpdate(ctx context.Context, id pgtype.UUID) (FrameworkVersionMigration, error)
@@ -1149,6 +1163,8 @@ type Querier interface {
 	InsertControlManifestRevision(ctx context.Context, arg InsertControlManifestRevisionParams) (int64, error)
 	// Insert a new control row (initial upload or supersession). Caller is
 	// responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
+	// anchor_fit / anchor_fit_note are issue #1736; the caller passes the
+	// manifest's value with 'exact' filled in for an omitted one.
 	InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error)
 	// ===== csf_assessment_audit =====
 	InsertCsfAssessmentAudit(ctx context.Context, arg InsertCsfAssessmentAuditParams) (CsfAssessmentAudit, error)
@@ -1657,6 +1673,11 @@ type Querier interface {
 	// map to that requirement" as a recorded fact, not a silent
 	// omission. The slice 008 traversal views filter no_relationship
 	// out for coverage UI; the export does NOT.
+	//
+	// Issue #1826: mapping_tier is projected so a reviewer-rejected edge
+	// appears in the export marked `rejected` rather than looking like a
+	// live mapping. Rejected edges are NOT filtered out — the export is
+	// the full catalog record, tier included.
 	//
 	// Sorted by anchor_scf_id then framework_slug + framework_version
 	// + requirement_code so the rows group by anchor (matches the
@@ -2182,6 +2203,11 @@ type Querier interface {
 	ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg ListFrameworkScopesByFrameworkVersionParams) ([]FrameworkScope, error)
 	// Audit history for one framework (newest first). Admin-scoped.
 	ListFrameworkVersionAudit(ctx context.Context, frameworkID pgtype.UUID) ([]FrameworkVersionAudit, error)
+	// The tenant controls behind each requirement of a framework version, for
+	// the SoA export's linked-controls column (#1791). The crosswalk and the
+	// "active control" rule are the ones ListFrameworkScopeContradictions uses,
+	// so an exported contradiction always lists the control behind it.
+	ListFrameworkVersionLinkedControls(ctx context.Context, arg ListFrameworkVersionLinkedControlsParams) ([]ListFrameworkVersionLinkedControlsRow, error)
 	// The review queue for one version pair, oldest first. Admin-scoped read.
 	ListFrameworkVersionMigrations(ctx context.Context, arg ListFrameworkVersionMigrationsParams) ([]FrameworkVersionMigration, error)
 	// ===== migration-suggest review queue =====

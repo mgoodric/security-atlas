@@ -29,6 +29,12 @@ export type ControlFilters = {
    * client never receives `applicability_expr` (P0-224-2).
    */
   scope: string;
+  /**
+   * Issue #1736 — how well a control's SCF anchor fits it: `exact`,
+   * `partial` or `none`. Only "My controls" rows carry a fit, so a
+   * catalog anchor never matches a non-ALL value.
+   */
+  anchor_fit: string;
 };
 
 export const DEFAULT_FILTERS: ControlFilters = {
@@ -37,6 +43,7 @@ export const DEFAULT_FILTERS: ControlFilters = {
   result: ALL,
   freshness: ALL,
   scope: ALL,
+  anchor_fit: ALL,
 };
 
 /**
@@ -48,7 +55,8 @@ export function isDefault(filters: ControlFilters): boolean {
     filters.family === ALL &&
     filters.result === ALL &&
     filters.freshness === ALL &&
-    filters.scope === ALL
+    filters.scope === ALL &&
+    filters.anchor_fit === ALL
   );
 }
 
@@ -80,6 +88,9 @@ export function applyFilters(
       if (!row.state || row.state.freshness_status !== filters.freshness) {
         return false;
       }
+    }
+    if (filters.anchor_fit !== ALL && row.anchorFit !== filters.anchor_fit) {
+      return false;
     }
     // framework filter is a no-op for v1 — the anchorWire doesn't carry
     // the per-anchor framework set; spillover 104 brings it. The pill
@@ -162,7 +173,44 @@ export type AnchorRow = {
   anchor: Anchor;
   state: AnchorRowState | null;
   frameworks: string[];
+  /**
+   * Issue #1736 — the control's anchor fit and its note. Set on "My
+   * controls" rows; absent on catalog anchor rows, which have no control.
+   */
+  anchorFit?: AnchorFit;
+  anchorFitNote?: string | null;
 };
+
+export type AnchorFit = "exact" | "partial" | "none";
+
+export const ANCHOR_FIT_OPTIONS: { value: string; label: string }[] = [
+  { value: ALL, label: "All fits" },
+  { value: "exact", label: "Exact" },
+  { value: "partial", label: "Partial" },
+  { value: "none", label: "No SCF fit" },
+];
+
+/**
+ * Issue #1736 — the marker a controls-list row carries for a non-exact
+ * anchor fit, or null for an exact fit (and for catalog rows). The
+ * marker's tooltip is the fit note.
+ */
+export function anchorFitMarker(
+  row: Pick<AnchorRow, "anchorFit" | "anchorFitNote">,
+): { label: string; title: string } | null {
+  if (row.anchorFit !== "partial" && row.anchorFit !== "none") return null;
+  return {
+    label: row.anchorFit === "partial" ? "Partial fit" : "No SCF fit",
+    title: row.anchorFitNote ?? "",
+  };
+}
+
+/** Display label for a fit value; absent or unknown reads as exact. */
+export function anchorFitLabel(fit: string | undefined): string {
+  if (fit === "partial") return "Partial";
+  if (fit === "none") return "No SCF fit";
+  return "Exact";
+}
 
 export type AnchorRowState = {
   result: string;
