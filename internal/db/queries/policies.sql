@@ -267,12 +267,14 @@ SELECT EXISTS (
 INSERT INTO policy_audit_log (
     tenant_id, policy_id, action, actor, source_file,
     historical_approver_name, historical_approved_at, source_url,
-    previous_next_review_at, new_next_review_at
+    previous_next_review_at, new_next_review_at,
+    policy_title, policy_version
 )
 VALUES (
     sqlc.arg('tenant_id'), sqlc.arg('policy_id'), sqlc.arg('action'), sqlc.arg('actor'), sqlc.arg('source_file'),
     sqlc.narg('historical_approver_name'), sqlc.narg('historical_approved_at'), sqlc.narg('source_url'),
-    sqlc.narg('previous_next_review_at'), sqlc.narg('new_next_review_at')
+    sqlc.narg('previous_next_review_at'), sqlc.narg('new_next_review_at'),
+    sqlc.narg('policy_title'), sqlc.narg('policy_version')
 )
 RETURNING *;
 
@@ -294,4 +296,16 @@ SET next_review_at = sqlc.narg('next_review_at'),
 WHERE tenant_id = sqlc.arg('tenant_id')
   AND id = sqlc.arg('id')
   AND status = 'published'
+RETURNING *;
+
+-- name: DeleteDraftPolicy :one
+-- #1987 — discard a draft. Only a row still in 'draft' matches, so a policy
+-- that has been submitted, approved, published or superseded is never
+-- deleted here. Deleting a next-version draft frees its predecessor's
+-- successor slot (policies_predecessor_unique_when_set). The caller writes
+-- the policy_audit_log row in the same transaction.
+DELETE FROM policies
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND status = 'draft'
 RETURNING *;

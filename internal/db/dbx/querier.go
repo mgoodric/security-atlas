@@ -504,6 +504,12 @@ type Querier interface {
 	// Returns the deleted row so the caller can audit what was cleared.
 	DeleteCsfProfileSelection(ctx context.Context, arg DeleteCsfProfileSelectionParams) (CsfProfileSelection, error)
 	DeleteDecision(ctx context.Context, arg DeleteDecisionParams) error
+	// #1987 — discard a draft. Only a row still in 'draft' matches, so a policy
+	// that has been submitted, approved, published or superseded is never
+	// deleted here. Deleting a next-version draft frees its predecessor's
+	// successor slot (policies_predecessor_unique_when_set). The caller writes
+	// the policy_audit_log row in the same transaction.
+	DeleteDraftPolicy(ctx context.Context, arg DeleteDraftPolicyParams) (Policy, error)
 	// Used by tests + cleanup paths. Production deployments will rarely delete
 	// a scope (supersession is the lifecycle exit); the row is preserved as
 	// audit trail.
