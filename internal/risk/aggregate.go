@@ -126,6 +126,9 @@ func (s *Store) Aggregate(ctx context.Context, in AggregateInput) (AggregateResu
 			}
 			parent := riskFromRow(existing)
 			parent.LinkedControlIDs = []uuid.UUID{} // parents never link controls in v1
+			if err := withCategoryNames(ctx, q, tenantID, &parent); err != nil {
+				return err
+			}
 			meta := extractAggregationMeta(existing.InherentScore)
 			result = AggregateResult{
 				Parent:           parent,
@@ -247,6 +250,9 @@ func (s *Store) Aggregate(ctx context.Context, in AggregateInput) (AggregateResu
 
 		parent := riskFromRow(row)
 		parent.LinkedControlIDs = []uuid.UUID{}
+		if err := withCategoryNames(ctx, q, tenantID, &parent); err != nil {
+			return err
+		}
 		result = AggregateResult{
 			Parent:           parent,
 			LinkedChildren:   append([]uuid.UUID(nil), dedupedChildren...),
@@ -306,6 +312,9 @@ func (s *Store) LiveAggregation(ctx context.Context, parentID uuid.UUID) (Aggreg
 
 		parentRisk := riskFromRow(parent)
 		parentRisk.LinkedControlIDs = []uuid.UUID{}
+		if err := withCategoryNames(ctx, q, tenantID, &parentRisk); err != nil {
+			return err
+		}
 
 		// When every child has been closed (deleted), AC-8 says the
 		// parent still survives. We return Severity=0, ChildCount=0,

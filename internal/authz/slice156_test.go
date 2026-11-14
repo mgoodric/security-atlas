@@ -7,7 +7,13 @@ package authz_test
 //
 //   GET /v1/frameworks/posture  → resource.type = "frameworks"
 //   GET /v1/activity            → resource.type = "activity"
-//   GET /v1/upcoming            → resource.type = "upcoming"
+//   (the upcoming rollup)       → resource.type = "upcoming"
+//
+// #2130 retired the upcoming rollup: the dashboard's "Coming up" reads the
+// compliance calendar (GET /v1/calendar → resource.type = "calendar",
+// admitted per role by slice 148). The matrix below now pins the
+// calendar admit in upcoming's place, so the panel keeps loading for
+// every signed-in role.
 //
 // (See internal/authz/input.go:resourceFromPath — the second URL segment
 // is the resource type; the third segment is the resource id.)
@@ -27,7 +33,7 @@ package authz_test
 //   - "activity" and "upcoming" are NOT in catalog_resources and are
 //     NOT enumerated in any per-role readable set. Without this slice's
 //     admit, viewer / control_owner / auditor hit /v1/activity or
-//     /v1/upcoming and OPA returns allow=false. The React Query on the
+//     the upcoming rollup and OPA returns allow=false. The React Query on the
 //     dashboard page enters the isError branch and surfaces "Failed to
 //     load."
 //
@@ -129,10 +135,11 @@ func TestSlice156_DashboardReadAdmitMatrix(t *testing.T) {
 			wantAllow:    [6]bool{true, true, true, true, true, false},
 		},
 		{
-			name:         "upcoming",
-			resourceType: "upcoming",
+			// #2130: the dashboard's "Coming up" panel source.
+			name:         "calendar",
+			resourceType: "calendar",
 			resourceID:   "",
-			path:         "/v1/upcoming",
+			path:         "/v1/calendar",
 			wantAllow:    [6]bool{true, true, true, true, true, false},
 		},
 	}
@@ -174,7 +181,7 @@ func TestSlice156_DashboardReadAdmitMatrix(t *testing.T) {
 // likewise read-only over existing tables (constitutional invariant #2
 // — slice 066 P0-A3). No role except admin (whose wildcard intentionally
 // admits) should be admitted on a hypothetical POST /v1/activity or
-// POST /v1/upcoming write.
+// write to the upcoming rollup.
 //
 // The new slice-156 admits live on the per-role *_readable_resources
 // sets — those rules predicate on is_read, so a POST falls through to
@@ -197,7 +204,6 @@ func TestSlice156_DashboardWriteDenied(t *testing.T) {
 		path         string
 	}{
 		{resourceType: "activity", path: "/v1/activity"},
-		{resourceType: "upcoming", path: "/v1/upcoming"},
 	}
 
 	for _, target := range writeTargets {

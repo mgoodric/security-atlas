@@ -29,7 +29,7 @@ import { join } from "node:path";
 
 import type { Route } from "@playwright/test";
 
-// The nine golden-covered endpoints (slices 349/392 + 409). A typed union,
+// The eight golden-covered endpoints (slices 349/392 + 409). A typed union,
 // NOT a free string: a typo cannot fall through to a non-golden path —
 // `tsc` rejects an unknown endpoint, and you cannot ask the helper for a
 // route that has no recorded truth.
@@ -40,7 +40,6 @@ export type GoldenEndpoint =
   | "demo-status"
   | "framework-posture"
   | "activity"
-  | "upcoming"
   | "freshness"
   | "drift";
 
@@ -55,7 +54,6 @@ const GOLDEN_FILE: Record<GoldenEndpoint, string> = {
   "demo-status": "demo-status.golden.json",
   "framework-posture": "framework-posture.golden.json",
   activity: "activity.golden.json",
-  upcoming: "upcoming.golden.json",
   freshness: "freshness.golden.json",
   drift: "drift.golden.json",
 };

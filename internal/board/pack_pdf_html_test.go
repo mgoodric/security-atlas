@@ -117,7 +117,7 @@ func TestBuildPackHTML_PostureSectionRendersFrameworkCards(t *testing.T) {
 	t.Parallel()
 	sp := newDraftPack()
 	posture := sp.Content.Sections[SectionPosture]
-	posture.Data.Frameworks = []FrameworkPosture{
+	posture.Data.Frameworks = []PackFrameworkPosture{
 		{Name: "SOC 2", CoveragePct: 87, TrendArrow: "up", Delta: 3, State: "Improving"},
 		{Name: "ISO 27001", CoveragePct: 72, TrendArrow: "flat", Delta: 0, State: "Stable"},
 	}

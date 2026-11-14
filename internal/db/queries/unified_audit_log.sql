@@ -258,6 +258,23 @@ WITH unified AS (
         (to_jsonb(tx) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'subject_id' - 'subject_kind' - 'subject_module')::jsonb AS payload_json
     FROM taxonomy_audit_log tx
+
+    UNION ALL
+
+    -- 12. fw_to_scf_overlay_edge_audit_log (#1797)
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'mapping_overlay'::text AS kind,
+        'overlay_edge'::text AS target_type,
+        overlay_edge_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ov) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'overlay_edge_id' - 'subject_module')::jsonb AS payload_json
+    FROM fw_to_scf_overlay_edge_audit_log ov
 )
 -- Slice 129 — LEFT JOIN onto users to resolve human-readable actor_name.
 --
