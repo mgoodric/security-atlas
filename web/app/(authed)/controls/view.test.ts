@@ -94,6 +94,21 @@ describe("rowsFromControls", () => {
       last_observed_at: null,
     });
   });
+  test("carries the anchor fit and note; an omitted fit is exact", () => {
+    const [omitted, none] = rowsFromControls([
+      control(),
+      control({
+        anchor_fit: "none",
+        anchor_fit_note: "No SCF control covers recruitment and retention.",
+      }),
+    ]);
+    expect(omitted.anchorFit).toBe("exact");
+    expect(omitted.anchorFitNote).toBeNull();
+    expect(none.anchorFit).toBe("none");
+    expect(none.anchorFitNote).toBe(
+      "No SCF control covers recruitment and retention.",
+    );
+  });
 });
 
 describe("rowsFromAnchors", () => {

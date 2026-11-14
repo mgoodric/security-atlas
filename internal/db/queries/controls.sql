@@ -20,7 +20,7 @@ SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        evidence_queries, manual_evidence_schema, linked_policy_ids,
        freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
        bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at,
-       external_refs
+       external_refs, anchor_fit, anchor_fit_note
 FROM controls
 WHERE tenant_id = $1 AND id = $2;
 
@@ -97,7 +97,7 @@ ORDER BY bundle_id ASC;
 SELECT id, bundle_id, version, scf_id, scf_anchor_id, title,
        control_family, implementation_type, owner_role, lifecycle_state,
        applicability_expr, freshness_class, bundle_manifest_hash,
-       created_at, updated_at
+       created_at, updated_at, anchor_fit, anchor_fit_note
 FROM controls
 WHERE tenant_id = $1 AND superseded_by IS NULL
 ORDER BY bundle_id ASC, version DESC
@@ -251,20 +251,24 @@ LIMIT $2;
 -- name: InsertControlVersion :one
 -- Insert a new control row (initial upload or supersession). Caller is
 -- responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
+-- anchor_fit / anchor_fit_note are issue #1736; the caller passes the
+-- manifest's value with 'exact' filled in for an omitted one.
 INSERT INTO controls (
     id, tenant_id, bundle_id, version, superseded_by,
     scf_id, scf_anchor_id, title, description, control_family,
     implementation_type, owner_role, lifecycle_state, applicability_expr,
     evidence_queries, manual_evidence_schema, linked_policy_ids,
     freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
-    bundle_uploaded_at, bundle_uploaded_by, external_refs
+    bundle_uploaded_at, bundle_uploaded_by, external_refs,
+    anchor_fit, anchor_fit_note
 ) VALUES (
     $1, $2, $3, $4, NULL,
     $5, $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16,
     $17, $18, $19,
-    now(), $20, $21
+    now(), $20, $21,
+    $22, $23
 )
 RETURNING *;
 
@@ -386,7 +390,7 @@ anchor_frameworks AS (
 )
 SELECT
     c.id, c.bundle_id, c.scf_id, c.scf_anchor_id, c.title, c.control_family,
-    c.lifecycle_state,
+    c.lifecycle_state, c.anchor_fit, c.anchor_fit_note,
     wpc.result                        AS state_result,
     wpc.freshness_status              AS state_freshness_status,
     wpc.last_observed_at::timestamptz AS state_last_observed_at,
@@ -396,11 +400,14 @@ FROM controls c
 LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
 LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
 WHERE c.tenant_id = sqlc.arg(tenant_id) AND c.superseded_by IS NULL
+  AND (sqlc.narg('anchor_fit')::text IS NULL OR c.anchor_fit = sqlc.narg('anchor_fit')::text)
 ORDER BY c.scf_id NULLS LAST, c.bundle_id
 LIMIT sqlc.arg(row_limit) OFFSET sqlc.arg(row_offset);
 
 -- name: CountActiveControls :one
 -- Issue #1741 — total for the paged ListActiveControlsWithState read.
+-- The optional anchor_fit filter matches the list's (issue #1736).
 SELECT count(*)::bigint AS total
 FROM controls
-WHERE tenant_id = $1 AND superseded_by IS NULL;
+WHERE tenant_id = sqlc.arg(tenant_id) AND superseded_by IS NULL
+  AND (sqlc.narg('anchor_fit')::text IS NULL OR anchor_fit = sqlc.narg('anchor_fit')::text);

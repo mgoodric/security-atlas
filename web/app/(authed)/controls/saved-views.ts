@@ -45,6 +45,7 @@ export const SAVED_VIEW_FILTER_KEYS: (keyof ControlFilters)[] = [
   "result",
   "freshness",
   "scope",
+  "anchor_fit",
 ];
 
 // Maximum number of saved views per user (v1 cap). A solo operator's

@@ -84,9 +84,17 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		//    human-readable SCF code (e.g. "IAC-06") that resolves via the
 		//    slice-006 importer. Both shapes are common: hand-written
 		//    bundles use the code, machine-generated bundles use the uuid.
-		anchorID, err := resolveSCFAnchor(ctx, q, b.Manifest.SCFAnchorID)
-		if err != nil {
-			return err
+		//
+		//    An empty scf_anchor_id passed ValidateStructural only with
+		//    anchor_fit: none (issue #1736): the control stands unanchored
+		//    and anchorID stays uuid.Nil (stored as NULL).
+		var anchorID uuid.UUID
+		if b.Manifest.SCFAnchorID != "" {
+			var err error
+			anchorID, err = resolveSCFAnchor(ctx, q, b.Manifest.SCFAnchorID)
+			if err != nil {
+				return err
+			}
 		}
 
 		// 2. Marshal JSONB fields.
@@ -207,14 +215,19 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 			nextVersion = prior.Version + 1
 		}
 
+		anchored := anchorID != uuid.Nil
 		scfCode := b.Manifest.SCFAnchorID
-		if anchorRow, lookupErr := lookupAnchorRow(ctx, q, anchorID); lookupErr == nil {
-			scfCode = anchorRow.ScfID
+		if anchored {
+			if anchorRow, lookupErr := lookupAnchorRow(ctx, q, anchorID); lookupErr == nil {
+				scfCode = anchorRow.ScfID
+			}
 		}
 
 		family := b.Manifest.ControlFamily
 		if family == "" {
-			if anchorRow, lookupErr := lookupAnchorRow(ctx, q, anchorID); lookupErr == nil {
+			if !anchored {
+				family = "UNKNOWN"
+			} else if anchorRow, lookupErr := lookupAnchorRow(ctx, q, anchorID); lookupErr == nil {
 				family = anchorRow.Family
 			} else {
 				family = "UNKNOWN"
@@ -262,14 +275,21 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		// 6. Insert the new active row (superseded_by NULL). After step 5
 		//    the predecessor is no longer NULL, so the partial unique index
 		//    has room for exactly this row.
-		scfPtr := &scfCode
+		var scfPtr *string
+		var anchorPG pgtype.UUID // invalid (NULL) for an unanchored control
+		if anchored {
+			scfPtr = &scfCode
+			anchorPG = pgUUID(anchorID)
+		}
 		row, err := q.InsertControlVersion(ctx, dbx.InsertControlVersionParams{
 			ID:                   pgUUID(newID),
 			TenantID:             pgUUID(tenantID),
 			BundleID:             b.Manifest.BundleID,
 			Version:              nextVersion,
 			ScfID:                scfPtr,
-			ScfAnchorID:          pgUUID(anchorID),
+			ScfAnchorID:          anchorPG,
+			AnchorFit:            b.Manifest.AnchorFitOrDefault(),
+			AnchorFitNote:        b.Manifest.AnchorFitNotePtr(),
 			Title:                b.Manifest.Title,
 			Description:          b.Manifest.Description,
 			ControlFamily:        family,
@@ -351,7 +371,14 @@ func (s *Store) List(ctx context.Context) ([]ActiveControl, error) {
 // each with its own worst-state-wins evaluation rollup and its anchor's
 // framework slugs, plus the unpaged total (issue #1741). A valid
 // scopeCell narrows the rollup to that cell; the zero value is no filter.
-func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCell pgtype.UUID) ([]dbx.ListActiveControlsWithStateRow, int64, error) {
+//
+// A non-empty anchorFit narrows both the page and the total to controls
+// with that fit (issue #1736).
+func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCell pgtype.UUID, anchorFit string) ([]dbx.ListActiveControlsWithStateRow, int64, error) {
+	var fit *string
+	if anchorFit != "" {
+		fit = &anchorFit
+	}
 	var (
 		rows  []dbx.ListActiveControlsWithStateRow
 		total int64
@@ -363,11 +390,15 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 			RowLimit:    limit,
 			RowOffset:   offset,
 			ScopeCellID: scopeCell,
+			AnchorFit:   fit,
 		})
 		if err != nil {
 			return fmt.Errorf("list active controls with state: %w", err)
 		}
-		total, err = q.CountActiveControls(ctx, pgUUID(tenantID))
+		total, err = q.CountActiveControls(ctx, dbx.CountActiveControlsParams{
+			TenantID:  pgUUID(tenantID),
+			AnchorFit: fit,
+		})
 		if err != nil {
 			return fmt.Errorf("count active controls: %w", err)
 		}

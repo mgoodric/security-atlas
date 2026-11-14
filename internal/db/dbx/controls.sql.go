@@ -15,11 +15,18 @@ const countActiveControls = `-- name: CountActiveControls :one
 SELECT count(*)::bigint AS total
 FROM controls
 WHERE tenant_id = $1 AND superseded_by IS NULL
+  AND ($2::text IS NULL OR anchor_fit = $2::text)
 `
 
+type CountActiveControlsParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	AnchorFit *string     `json:"anchor_fit"`
+}
+
 // Issue #1741 — total for the paged ListActiveControlsWithState read.
-func (q *Queries) CountActiveControls(ctx context.Context, tenantID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countActiveControls, tenantID)
+// The optional anchor_fit filter matches the list's (issue #1736).
+func (q *Queries) CountActiveControls(ctx context.Context, arg CountActiveControlsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveControls, arg.TenantID, arg.AnchorFit)
 	var total int64
 	err := row.Scan(&total)
 	return total, err
@@ -112,7 +119,7 @@ SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        evidence_queries, manual_evidence_schema, linked_policy_ids,
        freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
        bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at,
-       external_refs
+       external_refs, anchor_fit, anchor_fit_note
 FROM controls
 WHERE tenant_id = $1 AND id = $2
 `
@@ -148,6 +155,8 @@ type GetControlByIDRow struct {
 	CreatedAt            pgtype.Timestamptz        `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz        `json:"updated_at"`
 	ExternalRefs         []byte                    `json:"external_refs"`
+	AnchorFit            string                    `json:"anchor_fit"`
+	AnchorFitNote        *string                   `json:"anchor_fit_note"`
 }
 
 func (q *Queries) GetControlByID(ctx context.Context, arg GetControlByIDParams) (GetControlByIDRow, error) {
@@ -179,6 +188,8 @@ func (q *Queries) GetControlByID(ctx context.Context, arg GetControlByIDParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ExternalRefs,
+		&i.AnchorFit,
+		&i.AnchorFitNote,
 	)
 	return i, err
 }
@@ -218,16 +229,18 @@ INSERT INTO controls (
     implementation_type, owner_role, lifecycle_state, applicability_expr,
     evidence_queries, manual_evidence_schema, linked_policy_ids,
     freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
-    bundle_uploaded_at, bundle_uploaded_by, external_refs
+    bundle_uploaded_at, bundle_uploaded_by, external_refs,
+    anchor_fit, anchor_fit_note
 ) VALUES (
     $1, $2, $3, $4, NULL,
     $5, $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16,
     $17, $18, $19,
-    now(), $20, $21
+    now(), $20, $21,
+    $22, $23
 )
-RETURNING id, tenant_id, scf_id, title, description, control_family, implementation_type, owner_role, lifecycle_state, applicability_expr, version, created_at, updated_at, bundle_id, superseded_by, bundle_manifest_yaml, bundle_manifest_hash, scf_anchor_id, evidence_queries, manual_evidence_schema, linked_policy_ids, freshness_class, bundle_uploaded_at, bundle_uploaded_by, external_refs
+RETURNING id, tenant_id, scf_id, title, description, control_family, implementation_type, owner_role, lifecycle_state, applicability_expr, version, created_at, updated_at, bundle_id, superseded_by, bundle_manifest_yaml, bundle_manifest_hash, scf_anchor_id, evidence_queries, manual_evidence_schema, linked_policy_ids, freshness_class, bundle_uploaded_at, bundle_uploaded_by, external_refs, anchor_fit, anchor_fit_note
 `
 
 type InsertControlVersionParams struct {
@@ -252,10 +265,14 @@ type InsertControlVersionParams struct {
 	BundleManifestHash   string                    `json:"bundle_manifest_hash"`
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 	ExternalRefs         []byte                    `json:"external_refs"`
+	AnchorFit            string                    `json:"anchor_fit"`
+	AnchorFitNote        *string                   `json:"anchor_fit_note"`
 }
 
 // Insert a new control row (initial upload or supersession). Caller is
 // responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
+// anchor_fit / anchor_fit_note are issue #1736; the caller passes the
+// manifest's value with 'exact' filled in for an omitted one.
 func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error) {
 	row := q.db.QueryRow(ctx, insertControlVersion,
 		arg.ID,
@@ -279,6 +296,8 @@ func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVer
 		arg.BundleManifestHash,
 		arg.BundleUploadedBy,
 		arg.ExternalRefs,
+		arg.AnchorFit,
+		arg.AnchorFitNote,
 	)
 	var i Control
 	err := row.Scan(
@@ -307,6 +326,8 @@ func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVer
 		&i.BundleUploadedAt,
 		&i.BundleUploadedBy,
 		&i.ExternalRefs,
+		&i.AnchorFit,
+		&i.AnchorFitNote,
 	)
 	return i, err
 }
@@ -379,7 +400,7 @@ const listActiveControlsForExport = `-- name: ListActiveControlsForExport :many
 SELECT id, bundle_id, version, scf_id, scf_anchor_id, title,
        control_family, implementation_type, owner_role, lifecycle_state,
        applicability_expr, freshness_class, bundle_manifest_hash,
-       created_at, updated_at
+       created_at, updated_at, anchor_fit, anchor_fit_note
 FROM controls
 WHERE tenant_id = $1 AND superseded_by IS NULL
 ORDER BY bundle_id ASC, version DESC
@@ -407,6 +428,8 @@ type ListActiveControlsForExportRow struct {
 	BundleManifestHash string                    `json:"bundle_manifest_hash"`
 	CreatedAt          pgtype.Timestamptz        `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz        `json:"updated_at"`
+	AnchorFit          string                    `json:"anchor_fit"`
+	AnchorFitNote      *string                   `json:"anchor_fit_note"`
 }
 
 // Slice 137 — controls UCF graph data-export projection.
@@ -459,6 +482,8 @@ func (q *Queries) ListActiveControlsForExport(ctx context.Context, arg ListActiv
 			&i.BundleManifestHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AnchorFit,
+			&i.AnchorFitNote,
 		); err != nil {
 			return nil, err
 		}
@@ -741,7 +766,7 @@ worst_per_control AS (
         MAX(le.last_observed_at) AS last_observed_at,
         MAX(le.evaluated_at)     AS evaluated_at
     FROM latest_eval le
-    WHERE ($4::uuid IS NULL OR le.scope_cell_id = $4::uuid)
+    WHERE ($5::uuid IS NULL OR le.scope_cell_id = $5::uuid)
     GROUP BY le.control_id
 ),
 anchor_frameworks AS (
@@ -760,7 +785,7 @@ anchor_frameworks AS (
 )
 SELECT
     c.id, c.bundle_id, c.scf_id, c.scf_anchor_id, c.title, c.control_family,
-    c.lifecycle_state,
+    c.lifecycle_state, c.anchor_fit, c.anchor_fit_note,
     wpc.result                        AS state_result,
     wpc.freshness_status              AS state_freshness_status,
     wpc.last_observed_at::timestamptz AS state_last_observed_at,
@@ -770,12 +795,14 @@ FROM controls c
 LEFT JOIN worst_per_control wpc ON wpc.control_id = c.id
 LEFT JOIN anchor_frameworks af  ON af.anchor_id = c.scf_anchor_id
 WHERE c.tenant_id = $1 AND c.superseded_by IS NULL
+  AND ($2::text IS NULL OR c.anchor_fit = $2::text)
 ORDER BY c.scf_id NULLS LAST, c.bundle_id
-LIMIT $3 OFFSET $2
+LIMIT $4 OFFSET $3
 `
 
 type ListActiveControlsWithStateParams struct {
 	TenantID    pgtype.UUID `json:"tenant_id"`
+	AnchorFit   *string     `json:"anchor_fit"`
 	RowOffset   int32       `json:"row_offset"`
 	RowLimit    int32       `json:"row_limit"`
 	ScopeCellID pgtype.UUID `json:"scope_cell_id"`
@@ -789,6 +816,8 @@ type ListActiveControlsWithStateRow struct {
 	Title                string                `json:"title"`
 	ControlFamily        string                `json:"control_family"`
 	LifecycleState       ControlLifecycleState `json:"lifecycle_state"`
+	AnchorFit            string                `json:"anchor_fit"`
+	AnchorFitNote        *string               `json:"anchor_fit_note"`
 	StateResult          *EvidenceResult       `json:"state_result"`
 	StateFreshnessStatus *string               `json:"state_freshness_status"`
 	StateLastObservedAt  pgtype.Timestamptz    `json:"state_last_observed_at"`
@@ -819,6 +848,7 @@ type ListActiveControlsWithStateRow struct {
 func (q *Queries) ListActiveControlsWithState(ctx context.Context, arg ListActiveControlsWithStateParams) ([]ListActiveControlsWithStateRow, error) {
 	rows, err := q.db.Query(ctx, listActiveControlsWithState,
 		arg.TenantID,
+		arg.AnchorFit,
 		arg.RowOffset,
 		arg.RowLimit,
 		arg.ScopeCellID,
@@ -838,6 +868,8 @@ func (q *Queries) ListActiveControlsWithState(ctx context.Context, arg ListActiv
 			&i.Title,
 			&i.ControlFamily,
 			&i.LifecycleState,
+			&i.AnchorFit,
+			&i.AnchorFitNote,
 			&i.StateResult,
 			&i.StateFreshnessStatus,
 			&i.StateLastObservedAt,
