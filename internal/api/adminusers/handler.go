@@ -76,6 +76,21 @@ const (
 type Handler struct {
 	pool     *pgxpool.Pool
 	authPool *pgxpool.Pool
+	creds    CredentialRevoker
+}
+
+// CredentialRevoker drops a user's API keys from the in-memory credstore.
+// Revoke-membership revokes the keys durably in its transaction and calls
+// this after commit (#1915). *credstore.Store satisfies it.
+type CredentialRevoker interface {
+	RevokeUserInMemory(tenantID, userID string) int
+}
+
+// SetCredentialRevoker wires the after-commit in-memory key revocation.
+// Returns the handler so it composes with New(...).
+func (h *Handler) SetCredentialRevoker(c CredentialRevoker) *Handler {
+	h.creds = c
+	return h
 }
 
 // New constructs a Handler. Backward-compatible with the slice-062 callers;

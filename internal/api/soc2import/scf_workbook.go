@@ -58,10 +58,15 @@ func LoadSCFWorkbook(path string, opts SCFWorkbookOptions) (*Crosswalk, error) {
 	}
 	defer func() { _ = f.Close() }()
 
-	if cw, err := loadOLIRWorkbook(f, path, opts); err == nil {
-		return cw, nil
-	} else if !errors.Is(err, errNotOLIRWorkbook) {
-		return nil, err
+	// The published SCF workbook carries sheets such as "STRM Errata" whose
+	// header row can look like an OLIR sheet. When an "SCF <version>" sheet is
+	// present the workbook is the wide shape, so OLIR detection is skipped.
+	if !hasSCFVersionSheet(f) {
+		if cw, err := loadOLIRWorkbook(f, path, opts); err == nil {
+			return cw, nil
+		} else if !errors.Is(err, errNotOLIRWorkbook) {
+			return nil, err
+		}
 	}
 
 	cw, err := loadWideSCFWorkbook(f, path, opts)
@@ -90,13 +95,22 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 		return nil, fmt.Errorf("crosswalk: sheet %q missing required \"SCF #\" column", sheet)
 	}
 
-	focalDocs := loadFocalDocuments(f)
-	columns, err := selectFrameworkColumns(headers, focalDocs, opts.FrameworkColumns)
+	focalDocs, focalProblem := loadFocalDocuments(f)
+	columns, err := selectFrameworkColumns(headers, focalDocs, focalProblem, opts.FrameworkColumns)
 	if err != nil {
 		return nil, err
 	}
 	frameworkHeader := headers[columns[0].Index]
-	meta := focalDocs[normalizeHeader(frameworkHeader)]
+	meta, haveMeta := focalDocs[normalizeHeader(frameworkHeader)]
+	// Without focal-document metadata the slug would fall back to the column
+	// header, which can duplicate a framework already imported under its FDI
+	// slug. Make the operator name it instead.
+	if !haveMeta && opts.FrameworkSlug == "" {
+		if focalProblem == "" {
+			focalProblem = fmt.Sprintf("the Focal Documents sheet has no row for column %q", normalizeHeader(frameworkHeader))
+		}
+		return nil, fmt.Errorf("crosswalk: %s; pass --framework-slug", focalProblem)
+	}
 
 	reqs := map[string]Requirement{}
 	seenEdges := map[string]struct{}{}
@@ -171,7 +185,16 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 // scfVersionSheetRe matches the control sheet's name in the published SCF
 // workbook ("SCF 2026.3"). Other "SCF ..." sheets, such as "SCF Domains &
 // Principles", sort ahead of it and must not be taken for it.
-var scfVersionSheetRe = regexp.MustCompile(`^SCF \d{4}\.\d+$`)
+var scfVersionSheetRe = regexp.MustCompile(`^SCF \d{4}(\.\d+)+$`)
+
+func hasSCFVersionSheet(f *excelize.File) bool {
+	for _, name := range f.GetSheetList() {
+		if scfVersionSheetRe.MatchString(normalizeHeader(name)) {
+			return true
+		}
+	}
+	return false
+}
 
 // selectWideSCFSheet picks the wide control sheet by name, never by position:
 // the first "SCF <yyyy>.<n>" sheet, else the first "SCF ..." sheet whose header
@@ -291,15 +314,17 @@ func loadOLIRWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*
 	return nil, fmt.Errorf("%w: %s", errNotOLIRWorkbook, path)
 }
 
-func loadFocalDocuments(f *excelize.File) map[string]focalDocument {
+// loadFocalDocuments reads focal-document metadata keyed by normalized SCF
+// column header. When it yields nothing, the second value says why.
+func loadFocalDocuments(f *excelize.File) (map[string]focalDocument, string) {
 	out := map[string]focalDocument{}
 	sheet := focalDocumentsSheet(f)
 	if sheet == "" {
-		return out
+		return out, `workbook has no "Focal Documents" sheet`
 	}
 	rows, err := f.GetRows(sheet)
 	if err != nil || len(rows) < 2 {
-		return out
+		return out, fmt.Sprintf("sheet %q has no data rows", sheet)
 	}
 	headers := rows[0]
 	headerCol := findHeader(headers, "SCF Column Header")
@@ -307,7 +332,7 @@ func loadFocalDocuments(f *excelize.File) map[string]focalDocument {
 	sourceCol := findHeader(headers, "Source")
 	nameCol := findHeader(headers, "Focal Document Name")
 	if headerCol < 0 {
-		return out
+		return out, fmt.Sprintf(`sheet %q missing "SCF Column Header" column`, sheet)
 	}
 	for _, row := range rows[1:] {
 		header := cellAt(row, headerCol)
@@ -321,7 +346,10 @@ func loadFocalDocuments(f *excelize.File) map[string]focalDocument {
 			Name:   cellAt(row, nameCol),
 		}
 	}
-	return out
+	if len(out) == 0 {
+		return out, fmt.Sprintf("sheet %q lists no SCF column headers", sheet)
+	}
+	return out, ""
 }
 
 // workbookColumn is one framework column picked for import, with the prefix
@@ -331,7 +359,7 @@ type workbookColumn struct {
 	Prefix string
 }
 
-func selectFrameworkColumns(headers []string, focalDocs map[string]focalDocument, requested []string) ([]workbookColumn, error) {
+func selectFrameworkColumns(headers []string, focalDocs map[string]focalDocument, focalProblem string, requested []string) ([]workbookColumn, error) {
 	if len(requested) > 0 {
 		out := make([]workbookColumn, 0, len(requested))
 		for _, spec := range requested {
@@ -353,7 +381,10 @@ func selectFrameworkColumns(headers []string, focalDocs map[string]focalDocument
 		return []workbookColumn{{Index: candidates[0]}}, nil
 	}
 	if len(candidates) == 0 {
-		return nil, fmt.Errorf("crosswalk: no framework mapping columns found; pass --framework-column")
+		if focalProblem == "" {
+			focalProblem = `no column header matches a Focal Documents "SCF Column Header"`
+		}
+		return nil, fmt.Errorf("crosswalk: no framework mapping columns found: %s; pass --framework-column and --framework-slug", focalProblem)
 	}
 	return nil, fmt.Errorf("crosswalk: workbook has %d framework columns; pass --framework-column", len(candidates))
 }

@@ -134,6 +134,83 @@ convenience credential for first boot. Once you have signed in and
 issued a real operator API key, **revoke or rotate the bootstrap
 token** — it should not remain a long-lived admin credential.
 
+### Bring your own SCF release
+
+By default the bootstrap seeds two things you may not want in a real
+deployment:
+
+- **`migrations/fixtures/scf-sample.json`** — a small SCF sample, enough
+  for the bundled SOC 2 crosswalk and the stock controls, not the full
+  ~1,400-anchor catalog.
+- **`controls/soc2/`** — the 50 stock SOC 2 control bundles.
+
+Two variables in `deploy/docker/.env` override them. Both are paths
+**inside the bootstrap container**, where your clone is mounted
+read-only at `/repo`, so a file at `<clone>/local/scf.json` is
+`/repo/local/scf.json`.
+
+| Variable       | Default                                     | Set it to                                                                    |
+| -------------- | ------------------------------------------- | ---------------------------------------------------------------------------- |
+| `SCF_CATALOG`  | `/repo/migrations/fixtures/scf-sample.json` | your SCF release, converted to the importer's JSON shape (below)             |
+| `CONTROLS_DIR` | `/repo/controls/soc2`                       | your own control bundles, or an empty or non-existent directory to seed none |
+
+The importer reads JSON, not SCF's Excel workbook. Convert the release
+into this shape (the contract is `internal/api/scfimport/catalog.go`;
+`scf_id`, `family` and `title` are required per control):
+
+```json
+{
+  "schema_version": "1.0",
+  "release_version": "2025.4",
+  "release_date": "2025-12-01",
+  "controls": [
+    {
+      "scf_id": "IAC-06",
+      "family": "IAC",
+      "title": "Multi-Factor Authentication (MFA)",
+      "description": "Mechanisms exist to ..."
+    }
+  ]
+}
+```
+
+Then, **before the first `just self-host-up`**:
+
+```bash
+# 1. Put the converted catalog somewhere in the clone (don't commit it;
+#    check the SCF license terms before redistributing it).
+mkdir -p local && cp ~/Downloads/scf-2025.4.json local/scf.json
+
+# 2. Point the bootstrap at it, and seed no stock controls.
+cat >> deploy/docker/.env <<'EOF'
+SCF_CATALOG=/repo/local/scf.json
+CONTROLS_DIR=/repo/local/no-controls
+EOF
+
+# 3. Bring the stack up as usual, and check the import line in the logs.
+just self-host-up
+docker compose -f deploy/docker/docker-compose.yml logs atlas-bootstrap \
+  | grep -E 'release_version=|uploaded [0-9]+ control bundles'
+#   release_version=2025.4 framework_version_id=... new_version=true
+#   uploaded 0 control bundles
+```
+
+Things to know:
+
+- **The SOC 2 crosswalk is still imported.** Its anchors must exist in
+  your catalog. A full SCF release has them; a trimmed one may not, and
+  the bootstrap then fails at the crosswalk step.
+- **Set these before first boot.** Control upload and SCF import both
+  upsert; neither deletes. Changing `CONTROLS_DIR` after the stock
+  controls are uploaded does not remove them.
+- **A newer release later is a re-run.** Update `SCF_CATALOG` and run
+  `docker compose -f deploy/docker/docker-compose.yml run --rm atlas-bootstrap`.
+  A new `release_version` becomes the current SCF version; the previous
+  one is kept as `legacy` for audit replay.
+- These variables apply to `deploy/docker/docker-compose.yml`. The
+  edge compose file runs a published image with its own copy of the
+  repo and no bind mount, so it does not take them.
+
 ---
 
 ## Quick start — the Watchtower auto-update example (server-only)

@@ -171,7 +171,7 @@ The bootstrap-token file is **deleted atomically on first successful sign-in**. 
 # 1. start the platform locally
 just db-up && just migrate-up
 export DATABASE_URL_APP="postgres://postgres:postgres@localhost:5432/security_atlas?sslmode=disable"
-go build -o ./bin/ ./cmd/atlas ./cmd/atlas-cli
+CGO_ENABLED=0 go build -o ./bin/ ./cmd/atlas ./cmd/atlas-cli
 ./bin/atlas &
 
 # 2. push a hello-world evidence record (the CLI speaks gRPC on :50051)
@@ -195,6 +195,12 @@ curl -fsS http://localhost:8080/v1/evidence \
 `just build-go` runs `go build ./...` as a compile check — it does not write
 binaries. Use the explicit `go build -o ./bin/` above (or `go run ./cmd/atlas-cli`)
 when you want something to execute.
+
+The server, CLI and connectors build with `CGO_ENABLED=0`, the same setting the
+release and container builds use, so no system C toolchain is needed. Keep it set
+if `go build` fails to link (for example `unknown architecture arm64e...` on a
+macOS Command Line Tools / SDK mismatch). `go test -race` (used by
+`just test-integration`) is the one path that still needs cgo.
 
 For a connector-driven walkthrough (AWS S3 encryption posture, GitHub branch-protection, osquery host posture), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md).
 
