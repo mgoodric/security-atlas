@@ -69,13 +69,15 @@ log() { echo "[bootstrap] $*"; }
 # adopter running it by hand on macOS), so it must not assume busybox wget
 # or a compose stack. in_container gates every `docker compose` hint;
 # http_ok uses curl when present (macOS, most Linux) and wget otherwise
-# (the postgres:alpine image ships busybox wget, not curl).
+# (the postgres:alpine image ships busybox wget, not curl). Both carry a
+# request timeout (#1902): curl has none by default and busybox wget waits
+# ~900s, so a server that accepts but never answers would stall the poll.
 in_container() { [ -f /.dockerenv ] || [ -f /run/.containerenv ]; }
 
 if command -v curl >/dev/null 2>&1; then
-    http_ok() { curl -fsS -o /dev/null "$1" 2>/dev/null; }
+    http_ok() { curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "$1" 2>/dev/null; }
 elif command -v wget >/dev/null 2>&1; then
-    http_ok() { wget -q -O /dev/null "$1" 2>/dev/null; }
+    http_ok() { wget -q -T 5 -O /dev/null "$1" 2>/dev/null; }
 else
     log "ERROR: neither curl nor wget is installed; one is needed to poll atlas /health"
     exit 1

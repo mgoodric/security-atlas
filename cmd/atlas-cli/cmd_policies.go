@@ -28,9 +28,10 @@ import (
 func newPolicyCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "policy",
-		Short: "policy library operations (seed-stock, list)",
+		Short: "policy library operations (seed-stock, import)",
 	}
 	cmd.AddCommand(newPolicySeedStockCmd())
+	cmd.AddCommand(newPolicyImportCmd())
 	return cmd
 }
 

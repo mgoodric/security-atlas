@@ -50,6 +50,20 @@ export type Policy = {
   published_at?: string | null;
   published_by?: string | null;
   superseded_at?: string | null;
+  next_review_at?: string | null;
+  /**
+   * #1747 — true when the policy was brought in by the policy library
+   * import with its historical lifecycle. The historical approver is a
+   * free-text name (not a credential); `source_url` is an absolute
+   * http(s) URL validated on import.
+   */
+  imported?: boolean;
+  historical_approver_name?: string | null;
+  /** YYYY-MM-DD */
+  historical_approved_at?: string | null;
+  source_url?: string | null;
+  imported_by?: string | null;
+  imported_at?: string | null;
   created_at: string;
   updated_at: string;
   warnings?: string[];

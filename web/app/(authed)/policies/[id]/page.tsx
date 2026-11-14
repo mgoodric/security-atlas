@@ -52,6 +52,19 @@ function formatDate(iso: string | null | undefined): string {
   return iso.slice(0, 10);
 }
 
+// #1747 — the import validates source_url as an absolute http(s) URL;
+// re-check before rendering it as a link so no other scheme can reach an
+// href.
+function safeHttpUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    return u.protocol === "http:" || u.protocol === "https:" ? u.href : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function PolicyDetailPage({
   params,
 }: {
@@ -113,6 +126,7 @@ export default function PolicyDetailPage({
 
   const { policy, ack_rate } = data;
   const bodyHtml = renderMarkdown(policy.body_md);
+  const sourceHref = safeHttpUrl(policy.source_url);
 
   return (
     <div className="space-y-6" data-testid="policy-detail">
@@ -134,6 +148,11 @@ export default function PolicyDetailPage({
           >
             {policy.version}
           </span>
+          {policy.imported ? (
+            <Badge variant="outline" data-testid="policy-detail-imported">
+              Imported
+            </Badge>
+          ) : null}
         </div>
         <h1
           className="text-2xl font-semibold tracking-tight"
@@ -163,7 +182,61 @@ export default function PolicyDetailPage({
               {formatDate(policy.published_at)}
             </dd>
           </div>
+          {policy.next_review_at ? (
+            <div>
+              <dt className="inline text-muted-foreground">Next review </dt>
+              <dd
+                className="inline font-mono text-foreground"
+                data-testid="policy-detail-next-review"
+              >
+                {formatDate(policy.next_review_at)}
+              </dd>
+            </div>
+          ) : null}
         </dl>
+        {policy.imported ? (
+          // #1747 — the history this policy carried in on import. The
+          // approver is the name recorded before the tool, not a user.
+          <dl
+            className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm"
+            data-testid="policy-detail-import-history"
+          >
+            <div>
+              <dt className="inline text-muted-foreground">Approved by </dt>
+              <dd
+                className="inline text-foreground"
+                data-testid="policy-detail-historical-approver"
+              >
+                {policy.historical_approver_name ?? "—"}
+              </dd>
+            </div>
+            <div>
+              <dt className="inline text-muted-foreground">Approved </dt>
+              <dd
+                className="inline font-mono text-foreground"
+                data-testid="policy-detail-historical-approved-at"
+              >
+                {formatDate(policy.historical_approved_at)}
+              </dd>
+            </div>
+            {sourceHref ? (
+              <div>
+                <dt className="inline text-muted-foreground">Source </dt>
+                <dd className="inline">
+                  <a
+                    href={sourceHref}
+                    className="text-primary hover:underline break-all"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    data-testid="policy-detail-source-link"
+                  >
+                    {sourceHref}
+                  </a>
+                </dd>
+              </div>
+            ) : null}
+          </dl>
+        ) : null}
       </header>
 
       {/* ============ ACK RATE (published only) ============ */}

@@ -15,6 +15,10 @@ container applies migrations, seeds the default tenant + scope cell +
 local user, imports the SCF catalog, and uploads the 50 SOC 2 control
 bundles.
 
+No container runtime on the host? Follow the
+[native install](install-native.md) instead: Go, Postgres 16 and Node,
+no Docker.
+
 ## Prerequisites
 
 | Requirement             | Version                                                  |
