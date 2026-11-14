@@ -777,8 +777,19 @@ func TestHTTP_Applicability_ViewerCannotWrite(t *testing.T) {
 	if code, _, payload := v.set(scopeID, f.Req["R-05"], applicableBody); code != http.StatusForbidden {
 		t.Fatalf("viewer PUT: status %d, want 403; body %s", code, payload)
 	}
+	// The bulk and import routes sit behind the same gate (#1790).
+	bulk := fmt.Sprintf(`{"requirement_ids":[%q],"decision":"applicable"}`, f.Req["R-05"])
+	if resp, payload := doJSON(t, http.MethodPost, ts.URL+"/v1/framework-scopes/"+scopeID+"/applicability/bulk", viewer, bulk); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("viewer bulk: status %d, want 403; body %s", resp.StatusCode, payload)
+	}
+	if code, _, payload := v.importCSV(scopeID, "requirement_code,decision\nR-05,applicable\n"); code != http.StatusForbidden {
+		t.Fatalf("viewer import: status %d, want 403; body %s", code, payload)
+	}
 	if list := eng.mustList(scopeID); list.Counts.Applicable != 1 {
-		t.Fatalf("counts after viewer PUT = %+v", list.Counts)
+		t.Fatalf("counts after viewer writes = %+v", list.Counts)
+	}
+	if got := applicabilityUpdates(t, tenant, scopeID); got != 1 {
+		t.Fatalf("history entries after viewer writes = %d, want 1", got)
 	}
 }
 
