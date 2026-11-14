@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-1770-b",
+  "release_date": "2025-07-01",
+  "controls": [
+    {
+      "scf_id": "IAC-06",
+      "family": "IAC",
+      "title": "Multi-Factor Authentication (MFA)",
+      "description": "Release B: MFA for privileged and remote access.",
+      "legacy_scf_id": "IAC-06"
+    },
+    {
+      "scf_id": "GOV-01",
+      "family": "GOV",
+      "title": "Cybersecurity & Data Privacy Governance Program",
+      "description": "Release B: governance program, renamed.",
+      "legacy_scf_id": "GOV-01"
+    },
+    {
+      "scf_id": "CRY-03",
+      "family": "CRY",
+      "title": "Transmission Confidentiality",
+      "description": "Release B: confidentiality half of the split.",
+      "legacy_scf_id": "CRY-03"
+    },
+    {
+      "scf_id": "CRY-03.1",
+      "family": "CRY",
+      "title": "Transmission Integrity",
+      "description": "Release B: integrity half of the split.",
+      "legacy_scf_id": "CRY-03"
+    },
+    {
+      "scf_id": "AST-04",
+      "family": "AST",
+      "title": "Secure Disposal, Destruction or Re-Use of Equipment",
+      "description": "Release B: AST-04 now names release A's AST-09.",
+      "legacy_scf_id": "AST-09"
+    },
+    {
+      "scf_id": "AST-04.1",
+      "family": "AST",
+      "title": "Network Diagrams & Data Flow Diagrams (DFDs)",
+      "description": "Release B: release A's AST-04 under a new code.",
+      "legacy_scf_id": "AST-04"
+    }
+  ]
+}

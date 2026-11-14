@@ -11,6 +11,9 @@
 //        the page surfaces the action and reads back the 403 on upstream
 //        denial. Slice 035 will gate by reading IsApprover from /me.
 // AC-17: Activate action with effective_from picker (defaults to now()).
+//
+// #1794: a second tab holds the Statement of Applicability
+// (components/framework-scopes/soa-tab.tsx).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -26,6 +29,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { SoATab, useSoATitle } from "@/components/framework-scopes/soa-tab";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -99,6 +103,8 @@ export default function FrameworkScopesPage() {
   });
 
   const [banner, setBanner] = useState<string | null>(null);
+  const [tab, setTab] = useState<"scopes" | "soa">("scopes");
+  const soaTitle = useSoATitle(fv);
 
   const reset = () =>
     qc.invalidateQueries({ queryKey: ["framework-scopes", fv] });
@@ -173,6 +179,37 @@ export default function FrameworkScopesPage() {
       )}
 
       {scopesQ.data && (
+        <div className="flex gap-1 border-b" role="tablist">
+          {(
+            [
+              { key: "scopes", label: "Scopes" },
+              { key: "soa", label: soaTitle },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.key}
+              data-testid={`framework-scope-tab-${t.key}`}
+              onClick={() => setTab(t.key)}
+              className={`-mb-px border-b-2 px-3 py-1.5 text-sm transition-colors ${
+                tab === t.key
+                  ? "border-primary font-medium text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {scopesQ.data && tab === "soa" && (
+        <SoATab frameworkVersionID={fv} scopes={scopesQ.data} />
+      )}
+
+      {scopesQ.data && tab === "scopes" && (
         <Card>
           <CardHeader>
             <CardTitle>All versions</CardTitle>

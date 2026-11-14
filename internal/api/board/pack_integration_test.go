@@ -624,7 +624,8 @@ func TestPackVendorBurndown_PopulatedFromHighCriticalitySurface(t *testing.T) {
 		tenant := freshPackVendorTenant(t, admin)
 		env := testServer(t, app, tenant)
 		// Mix: 2 on-time (recent annual), 2 past-due (reviewed >400 days ago
-		// against annual cadence, OR never reviewed).
+		// against annual cadence, OR never reviewed and created long enough
+		// before period end that its first review was due — #2061).
 		periodEnd := time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC)
 		recent := periodEnd.AddDate(0, 0, -10)
 		ancient := periodEnd.AddDate(-2, 0, 0) // ~730 days ago
@@ -632,6 +633,11 @@ func TestPackVendorBurndown_PopulatedFromHighCriticalitySurface(t *testing.T) {
 		seedHighCritVendor(t, admin, tenant, "Globex", &recent, "annual")
 		seedHighCritVendor(t, admin, tenant, "OldVendor", &ancient, "annual")
 		seedHighCritVendor(t, admin, tenant, "NeverReviewed", nil, "annual")
+		if _, err := admin.Exec(context.Background(),
+			`UPDATE vendors SET created_at = $3 WHERE tenant_id = $1 AND name = $2`,
+			tenant, "NeverReviewed", periodEnd.AddDate(0, -3, 0)); err != nil {
+			t.Fatalf("backdate NeverReviewed: %v", err)
+		}
 
 		packID := generateDraftPack(t, env, "2026-03-31")
 		resp, body := doJSON(t, env, http.MethodGet, "/v1/board-packs/"+packID, nil)
