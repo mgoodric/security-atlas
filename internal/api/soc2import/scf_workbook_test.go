@@ -157,6 +157,7 @@ func TestLoadSCFWorkbook_FrameworkColumnErrors(t *testing.T) {
 	}{
 		{"unknown header", []string{"Nope"}, `framework column "Nope" not found`},
 		{"unknown header with prefix", []string{"Nope=A."}, `framework column "Nope" not found`},
+		{"duplicate column", []string{"Example Standard 2026", "Example Standard 2026"}, "adds no mappings beyond the columns before it"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

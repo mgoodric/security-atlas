@@ -103,7 +103,7 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 	mappings := make([]Mapping, 0)
 	for _, col := range columns {
 		header := headers[col.Index]
-		colMappings := 0
+		colCodes, colMappings := 0, 0
 		for rowIdx, row := range rows[1:] {
 			scfAnchor := cellAt(row, scfCol)
 			if scfAnchor == "" {
@@ -117,6 +117,7 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 				if !strings.HasPrefix(code, col.Prefix) {
 					code = col.Prefix + code
 				}
+				colCodes++
 				reqs[code] = Requirement{Code: code, Title: code}
 				key := code + "\x00" + scfAnchor
 				if _, ok := seenEdges[key]; ok {
@@ -136,8 +137,11 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 				})
 			}
 		}
-		if colMappings == 0 {
+		if colCodes == 0 {
 			return nil, fmt.Errorf("crosswalk: framework column %q in sheet %q has zero mappings", header, sheet)
+		}
+		if colMappings == 0 {
+			return nil, fmt.Errorf("crosswalk: framework column %q in sheet %q adds no mappings beyond the columns before it; drop it or give it a distinct prefix", header, sheet)
 		}
 	}
 

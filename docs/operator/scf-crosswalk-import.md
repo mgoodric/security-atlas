@@ -84,6 +84,14 @@ atlas-cli catalog import-crosswalk ./secure-controls-framework-scf-2026-3.xlsx \
   --framework-version 2022
 ```
 
+**Do not run this preset unchanged on a database that already holds
+`iso27001-2022.yaml`.** It targets the same framework slug and version
+(`iso27001` / `2022`). The workbook carries IDs only, so every requirement it
+writes has `title` set to its code and an empty body, and the import overwrites
+the curated Annex A titles and bodies from the YAML. To compare the two side by
+side, give the workbook import its own version, for example
+`--framework-version 2022-scf-2026.3`.
+
 For an SCF OLIR STRM workbook, no framework column is needed:
 
 ```sh
