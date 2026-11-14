@@ -39,12 +39,9 @@ export function safeRedirectTarget(target: string): string {
   if (target.startsWith("//") || target.startsWith("/\\")) return FALLBACK;
   if (CONTROL_CHARS.test(target)) return FALLBACK;
   if (target === "/") return FALLBACK;
-  let parsed: URL;
-  try {
-    parsed = new URL(target, PARSE_BASE);
-  } catch {
-    return FALLBACK;
-  }
+  // Cannot throw: the base is a valid absolute URL and the target is a
+  // path-absolute reference by the checks above.
+  const parsed = new URL(target, PARSE_BASE);
   if (parsed.origin !== PARSE_BASE) return FALLBACK;
   if (parsed.pathname.startsWith("//")) return FALLBACK;
   return target;
