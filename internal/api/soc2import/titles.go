@@ -5,7 +5,6 @@ import (
 	"io/fs"
 	"os"
 	"path"
-	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -31,11 +30,6 @@ type titlesYAML struct {
 	FrameworkSlug string        `yaml:"framework_slug"`
 	Requirements  []Requirement `yaml:"requirements"`
 }
-
-// pointOfFocusRe matches a SOC 2 point of focus such as "CC1.1-POF3". It
-// takes its parent criterion's title (#1730); rolling it up into the parent
-// is #1731.
-var pointOfFocusRe = regexp.MustCompile(`^(.+)-POF\d+$`)
 
 // CodeOnlyTitlesError lists the requirements a workbook import would title
 // with their own code. Nothing is written when the loader returns it.
@@ -140,12 +134,6 @@ func resolveWorkbookTitles(cw *Crosswalk, opts SCFWorkbookOptions) error {
 			cw.Requirements[i].Title = src.Title
 			cw.Requirements[i].Body = src.Body
 			continue
-		}
-		if m := pointOfFocusRe.FindStringSubmatch(r.Code); m != nil {
-			if parent, ok := lookup(m[1], sources); ok {
-				cw.Requirements[i].Title = parent.Title
-				continue
-			}
 		}
 		codeOnly = append(codeOnly, r.Code)
 	}

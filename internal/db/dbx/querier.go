@@ -3365,6 +3365,8 @@ type Querier interface {
 	// Insert or update a framework_requirements row. Deterministic id derived
 	// from (framework_version_id, code) so re-imports are idempotent without
 	// relying on NULLs-distinct gotchas on the UNIQUE constraint.
+	// points_of_focus (#1731) is the JSON array of SOC 2 points of focus rolled up
+	// onto this criterion; '[]' for a requirement with none.
 	UpsertFrameworkRequirement(ctx context.Context, arg UpsertFrameworkRequirementParams) (FrameworkRequirement, error)
 	UpsertFrameworkScopeApplicability(ctx context.Context, arg UpsertFrameworkScopeApplicabilityParams) (FrameworkScopeApplicability, error)
 	// Insert or update a framework_versions row. Same deterministic-id pattern
