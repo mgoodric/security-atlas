@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
@@ -88,6 +90,18 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 	// plus the additive fields.
 	score, band := h.requirementRollup(ctx, req, anchors, controls)
 
+	// #1788 — a requirement the tenant's activated framework-scope
+	// revision excludes reads as `excluded`, with its justification,
+	// rather than as uncovered. Draft and unapproved revisions don't count.
+	exclusion, err := h.activatedExclusion(ctx, req.ID)
+	if err != nil {
+		httperr.WriteInternal(w, r, "lookup requirement exclusion", err)
+		return
+	}
+	if exclusion != nil {
+		score, band = 0, BandExcluded
+	}
+
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"requirement": requirementWire{
 			ID:    uuidStr(req.ID),
@@ -99,8 +113,45 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 		"controls":          controlWiresFromRows(controls),
 		"coverage_strength": score,
 		"confidence_band":   string(band),
+		"exclusion":         exclusion,
 	})
 
+}
+
+// exclusionWire is the `exclusion` field of the requirement coverage read:
+// the activated scope revision's exclusion of the requirement, or null.
+type exclusionWire struct {
+	FrameworkScopeID  string    `json:"framework_scope_id"`
+	Justification     string    `json:"justification"`
+	ImplementationRef string    `json:"implementation_ref,omitempty"`
+	DecidedAt         time.Time `json:"decided_at"`
+}
+
+// activatedExclusion returns the exclusion the caller tenant's activated
+// framework-scope revision records for the requirement, or nil when the
+// requirement is applicable, undecided, or no revision is activated.
+func (h *Handler) activatedExclusion(ctx context.Context, reqID pgtype.UUID) (*exclusionWire, error) {
+	var out *exclusionWire
+	err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		row, err := q.GetActivatedExclusionForRequirement(ctx, dbx.GetActivatedExclusionForRequirementParams{
+			TenantID:               pgUUIDFromTenantCtx(ctx),
+			FrameworkRequirementID: reqID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		out = &exclusionWire{
+			FrameworkScopeID:  uuidStr(row.FrameworkScopeID),
+			Justification:     row.Justification,
+			ImplementationRef: row.ImplementationRef,
+			DecidedAt:         row.UpdatedAt.Time.UTC(),
+		}
+		return nil
+	})
+	return out, err
 }
 
 // requirementRollup computes the additive coverage_strength + confidence

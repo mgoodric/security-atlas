@@ -53,6 +53,10 @@ func (f CheckerFunc) IsSuperAdmin(ctx context.Context, userID uuid.UUID) (bool, 
 // (idp_issuer, idp_subject), mirroring DBUserResolver.lookupSuperAdmin.
 // Under an RLS-bound pool the identity join sees no rows and only the
 // direct match applies.
+//
+// The non-empty guards on u.idp_* are implied by the join but the planner
+// cannot derive them, and without them it cannot use the partial
+// users_idp_identity_idx (#1870).
 type DBChecker struct {
 	pool *pgxpool.Pool
 }
@@ -75,6 +79,7 @@ const isSuperAdminSQL = `
 		  JOIN super_admins sa ON sa.user_id = u.id
 		 WHERE me.id = $1
 		   AND me.idp_issuer <> '' AND me.idp_subject <> ''
+		   AND u.idp_issuer <> '' AND u.idp_subject <> ''
 		   AND u.status = 'active'
 	)`
 

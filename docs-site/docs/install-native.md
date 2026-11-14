@@ -156,10 +156,11 @@ source /path/to/atlas.env
 mkdir -p "$ATLAS_DATA_DIR" && chmod 700 "$ATLAS_DATA_DIR"
 ```
 
-Leave `ATLAS_APP_PASSWORD` unset: you set the `atlas_app` password in
-Step 1. When it is set, `migrate.sh` re-applies it with
-`ALTER ROLE ... PASSWORD`, which passes the value on `psql`'s command
-line.
+You can leave `ATLAS_APP_PASSWORD` unset, since you set the `atlas_app`
+password in Step 1. When it is set, `migrate.sh` re-applies it with
+`ALTER ROLE ... PASSWORD` on every run. The value goes to `psql` on
+stdin and never appears on its command line, but Postgres writes the
+statement to its server log if `log_statement` is `ddl` or `all`.
 
 ## Step 4 — apply migrations
 

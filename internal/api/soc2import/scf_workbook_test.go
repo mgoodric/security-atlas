@@ -14,7 +14,7 @@ import (
 func TestLoadSCFWorkbook_WideWorkbookMatchesYAMLModelShape(t *testing.T) {
 	t.Parallel()
 	xlsx := writeWideSCFWorkbook(t)
-	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{})
+	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{AllowCodeTitles: true})
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}
@@ -79,6 +79,7 @@ func TestLoadSCFWorkbook_PublishedSheetOrderPicksControlSheet(t *testing.T) {
 	xlsx := writePublishedLayoutSCFWorkbook(t)
 	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{
 		FrameworkColumns: []string{"Example\nStandard\n2026"},
+		AllowCodeTitles:  true,
 	})
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
@@ -124,6 +125,9 @@ func TestLoadSCFWorkbook_CombinesColumnsWithPrefix(t *testing.T) {
 		FrameworkColumns: []string{"ISO 27001 2022", "ISO 27002 2022=A."},
 		FrameworkSlug:    "iso27001",
 		FrameworkVersion: "2022",
+		// The bundled ISO YAML covers Annex A only; clauses 4.4 and 5.1 keep
+		// their codes.
+		AllowCodeTitles: true,
 	})
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
@@ -209,7 +213,7 @@ func TestLoadSCFWorkbook_ControlSheetSelection(t *testing.T) {
 			if err := f.SaveAs(path); err != nil {
 				t.Fatalf("SaveAs: %v", err)
 			}
-			cw, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{FrameworkVersion: "1"})
+			cw, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{FrameworkVersion: "1", AllowCodeTitles: true})
 			if err != nil {
 				t.Fatalf("LoadSCFWorkbook: %v", err)
 			}
@@ -272,6 +276,7 @@ func TestLoadSCFWorkbook_MissingFocalMetadataRequiresSlug(t *testing.T) {
 			cw, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{
 				FrameworkColumns: []string{"Example Standard"},
 				FrameworkSlug:    "example-standard",
+				AllowCodeTitles:  true,
 			})
 			if err != nil {
 				t.Fatalf("LoadSCFWorkbook with slug: %v", err)
@@ -315,6 +320,7 @@ func TestLoadSCFWorkbook_OLIRWorkbookUsesExplicitSTRM(t *testing.T) {
 	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{
 		FrameworkSlug:   "nist-800-53",
 		FrameworkIssuer: "NIST",
+		AllowCodeTitles: true,
 	})
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)

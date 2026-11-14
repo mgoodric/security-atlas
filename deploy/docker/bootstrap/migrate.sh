@@ -149,10 +149,19 @@ fi
 # DDL-role concern and must complete before the backend tries to connect,
 # so it lives here in the migrate step (gated ahead of the backend), not
 # in the seed one-shot. ALTER ROLE ... PASSWORD is idempotent.
+#
+# security-atlas#1989: the password never reaches psql's argv, where any
+# local user could read it from the process list. The SQL goes in on
+# stdin (a quoted heredoc, so the shell expands nothing) and psql reads
+# the value from the environment with \getenv (psql 15+). `-v pw=...`
+# would put it back in argv, so it is not used.
 if [ -n "${ATLAS_APP_PASSWORD:-}" ]; then
     log "setting atlas_app role password..."
-    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-        -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+    export ATLAS_APP_PASSWORD
+    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+\getenv atlas_app_password ATLAS_APP_PASSWORD
+ALTER ROLE atlas_app PASSWORD :'atlas_app_password';
+SQL
 fi
 
 log "migrate complete — schema is current"
