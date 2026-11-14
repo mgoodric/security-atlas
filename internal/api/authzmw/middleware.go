@@ -56,6 +56,21 @@ import (
 // startup and is a no-op for that request -- production callers
 // always wire both.
 func Middleware(engine *authz.Engine, audit *authz.AuditWriter, exempt ...string) func(http.Handler) http.Handler {
+	return MiddlewareWithResourceAttrs(engine, audit, nil, exempt...)
+}
+
+// ResourceAttrsFunc supplies input.resource.attrs for a request before the
+// decision: the ABAC attributes a rule compares against the caller, such as
+// the audit_period_id of an audit-note write (#2193). It returns nil attrs
+// for a request it does not cover, or whose attribute does not validate; the
+// rule then has nothing to match and denies. It may read the body, but must
+// leave r.Body readable from the start for the handler.
+type ResourceAttrsFunc func(r *http.Request) (map[string]any, error)
+
+// MiddlewareWithResourceAttrs is Middleware with a ResourceAttrsFunc whose
+// attributes are set on input.resource.attrs before engine.Decide. A nil
+// attrs func makes it Middleware.
+func MiddlewareWithResourceAttrs(engine *authz.Engine, audit *authz.AuditWriter, attrs ResourceAttrsFunc, exempt ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Exempt prefix check.
@@ -77,6 +92,16 @@ func Middleware(engine *authz.Engine, audit *authz.AuditWriter, exempt ...string
 			// context, the input arrives with empty roles -- default-deny
 			// fires.
 			in := authz.BuildInput(r, nil)
+			if attrs != nil {
+				extra, err := attrs(r)
+				if err != nil {
+					httperr.WriteInternal(w, r, "authz resource attrs", err)
+					return
+				}
+				for k, v := range extra {
+					in.Resource.Attrs[k] = v
+				}
+			}
 
 			decision, err := engine.Decide(r.Context(), in)
 			if err != nil {
