@@ -383,7 +383,7 @@ func TestPackOutputs_MarkdownAndPDF(t *testing.T) {
 	// PDF — exactly 200 (%PDF- magic) or 503 graceful degradation, never a
 	// 500 / hang (slice 475 AC-1). Shared assertion with the brief PDF test.
 	resp, raw = doRaw(t, env, "/v1/board-packs/"+packID+"/pdf")
-	assertPDFOrServiceUnavailable(t, resp, raw)
+	assertRealPDF(t, resp, raw)
 }
 
 // ===== AC-7: a published pack is immutable =====

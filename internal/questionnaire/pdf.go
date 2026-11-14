@@ -17,13 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"os"
 	"strings"
-
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/chromedp/remote"
 
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
@@ -39,8 +33,8 @@ const PDFTimeout = pdfrender.DefaultRenderTimeout
 // in this environment. The HTTP handler maps this to 503 so operators
 // can run the platform without Chrome (PDF export disabled) until they
 // install it — the questionnaire workflow itself still works. Mirrors
-// internal/board/pdf.go.
-var ErrChromeUnavailable = errors.New("questionnaire/pdf: chrome browser unavailable")
+// internal/board/pdf.go: both are the shared pdfrender sentinel.
+var ErrChromeUnavailable = pdfrender.ErrChromeUnavailable
 
 // PDFInput is the structured snapshot the renderer turns into bytes.
 // Callers (the HTTP handler) hydrate this from the DB via the standard
@@ -97,64 +91,12 @@ func RenderPDF(ctx context.Context, in PDFInput) ([]byte, error) {
 	}
 	htmlDoc := buildHTML(in)
 	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
-		return renderQuestionnaireBytes(ctx, htmlDoc)
-	})
-}
-
-// renderQuestionnaireBytes performs the chromedp render under the deadline the
-// limiter has already applied to ctx.
-func renderQuestionnaireBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
-	var browserCtx context.Context
-	var cancelAlloc context.CancelFunc
-	var cancelBrowser context.CancelFunc
-	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	} else {
-		opts := append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoSandbox,
-			chromedp.DisableGPU,
-			chromedp.Headless,
-			chromedp.Flag("hide-scrollbars", true),
-		)
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	}
-	defer cancelBrowser()
-	defer cancelAlloc()
-
-	// data: URL only — we never navigate to an untrusted URL. The HTML
-	// we render is entirely server-side templated against escaped DB
-	// data, so XSS / SSRF risk is bounded by the renderer interface.
-	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
-	var buf []byte
-	err := chromedp.Do(browserCtx,
-		chromedp.Navigate(dataURL),
-		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
-			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
-				PrintBackground: new(true),
-				MarginTop:       new(0.4),
-				MarginBottom:    new(0.4),
-				MarginLeft:      new(0.4),
-				MarginRight:     new(0.4),
-			})
-			buf = res.Data
-			return err
-		}),
-	)
-	if err != nil {
-		if isChromeUnavailable(err) {
-			return nil, fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
+		buf, err := pdfrender.PrintHTML(ctx, htmlDoc)
+		if err != nil {
+			return nil, fmt.Errorf("questionnaire/pdf: %w", err)
 		}
-		return nil, fmt.Errorf("questionnaire/pdf: chromedp run: %w", err)
-	}
-	if len(buf) < 5 || string(buf[:5]) != "%PDF-" {
-		return nil, fmt.Errorf("questionnaire/pdf: invalid PDF output (len=%d)", len(buf))
-	}
-	return buf, nil
+		return buf, nil
+	})
 }
 
 func buildHTML(in PDFInput) string {
@@ -214,28 +156,4 @@ h1 { font-size: 20pt; border-bottom: 2px solid #333; padding-bottom: 8px; margin
 
 	w.WriteString(`</body></html>`)
 	return w.String()
-}
-
-// encodeForDataURL — same minimal set as internal/board/pdf.
-func encodeForDataURL(s string) string {
-	r := strings.NewReplacer(
-		"%", "%25",
-		"#", "%23",
-		"&", "%26",
-		"?", "%3F",
-		"\n", "%0A",
-		"\r", "",
-	)
-	return r.Replace(s)
-}
-
-// isChromeUnavailable — same heuristic as internal/board/pdf.
-func isChromeUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "exec:") ||
-		strings.Contains(msg, "executable file not found") ||
-		strings.Contains(msg, "no chrome found")
 }

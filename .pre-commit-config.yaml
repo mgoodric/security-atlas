@@ -105,6 +105,18 @@ repos:
   # (DENY_DIRS / DENY_FILES). `always_run: false` (default) + no `files:`
   # filter means it only runs against the staged set, which is exactly the
   # surface we guard.
+  # security-atlas#1940: the deploy/docker test scripts run under
+  # `set -o pipefail`, where `cmd | grep -q` races: grep exits on the first
+  # match, the writer takes SIGPIPE, and pipefail fails a passing check.
+  # Capture output to a variable and grep a here-string instead.
+  - repo: local
+    hooks:
+      - id: no-pipe-grep-q-under-pipefail
+        name: no piped quiet grep in deploy/docker scripts (pipefail SIGPIPE)
+        language: pygrep
+        entry: '\|\s*grep\b[^|]*\s-[A-Za-z]*q'
+        files: ^deploy/docker/.*\.sh$
+
   - repo: local
     hooks:
       - id: cache-path-guard
