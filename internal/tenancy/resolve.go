@@ -86,3 +86,36 @@ func pickImplicitTenant(tenants []TenantRef) (TenantRef, error) {
 		return TenantRef{}, &AmbiguousTenantError{Tenants: tenants}
 	}
 }
+
+// TxBeginner is the slice of pgx shared by *pgxpool.Pool, *pgx.Conn and
+// pgx.Tx that opens a (sub)transaction.
+type TxBeginner interface {
+	Begin(ctx context.Context) (pgx.Tx, error)
+}
+
+// ResolveImplicitTenantAnyRole is ResolveImplicitTenant for a caller whose
+// connection role may be RLS-bound, such as a CLI command handed the
+// atlas_app DSN (#1762). In one transaction it reads tenants directly when
+// the session role bypasses RLS (atlas_migrate), and otherwise under
+// SET LOCAL ROLE atlas_service_account, the BYPASSRLS read role atlas_app
+// is granted. Errors are ResolveImplicitTenant's, unwrapped.
+func ResolveImplicitTenantAnyRole(ctx context.Context, db TxBeginner) (TenantRef, error) {
+	var ref TenantRef
+	err := pgx.BeginFunc(ctx, db, func(tx pgx.Tx) error {
+		var bypass bool
+		if err := tx.QueryRow(ctx,
+			`SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+		).Scan(&bypass); err != nil {
+			return fmt.Errorf("tenancy: read session role: %w", err)
+		}
+		if !bypass {
+			if _, err := tx.Exec(ctx, "SET LOCAL ROLE atlas_service_account"); err != nil {
+				return fmt.Errorf("tenancy: set local role atlas_service_account: %w", err)
+			}
+		}
+		var err error
+		ref, err = ResolveImplicitTenant(ctx, tx)
+		return err
+	})
+	return ref, err
+}

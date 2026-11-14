@@ -18,7 +18,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/spf13/cobra"
 
@@ -46,7 +45,8 @@ func newPolicySeedStockCmd() *cobra.Command {
 		Long: `Loads the 5 bundled stock policies (Information Security, Access Control,
 Vendor Management, Incident Response, Change Management) from
 policies/stock/*.md and INSERTs them as 'draft' rows under the supplied
-tenant. Mirrors slice 007's SOC 2 importer pattern.
+tenant (--tenant-id; the install's only tenant when omitted). Mirrors
+slice 007's SOC 2 importer pattern.
 
 Stock policies ship as community_draft attribution. They are intended as
 starting templates -- the tenant admin reviews, edits, submits for
@@ -62,20 +62,9 @@ P0: 5 high-signal policies, not 50 placeholders).`,
 			if dsn == "" {
 				return fmt.Errorf("--dsn or DATABASE_URL is required (use atlas_app role)")
 			}
-			if tenantID == "" {
-				return fmt.Errorf("--tenant-id is required")
-			}
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			tenant, err := uuid.Parse(tenantID)
-			if err != nil {
-				return fmt.Errorf("--tenant-id must be a UUID: %w", err)
-			}
-			policies, err := seed.LoadFromFS(os.DirFS("."), stockDir)
-			if err != nil {
-				return err
-			}
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 			pool, err := pgxpool.New(ctx, dsn)
@@ -83,6 +72,15 @@ P0: 5 high-signal policies, not 50 placeholders).`,
 				return fmt.Errorf("pgxpool: %w", err)
 			}
 			defer pool.Close()
+
+			tenant, err := chooseTenant(ctx, cmd.ErrOrStderr(), "--tenant-id", tenantID, newTenantResolver(pool))
+			if err != nil {
+				return err
+			}
+			policies, err := seed.LoadFromFS(os.DirFS("."), stockDir)
+			if err != nil {
+				return err
+			}
 
 			resolver := seed.NewSQLAnchorResolver(pool)
 			report, err := seed.Seed(ctx, pool, tenant, policies, resolver)
@@ -105,7 +103,7 @@ P0: 5 high-signal policies, not 50 placeholders).`,
 		},
 	}
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL)")
-	cmd.Flags().StringVar(&tenantID, "tenant-id", "", "target tenant UUID")
+	cmd.Flags().StringVar(&tenantID, "tenant-id", "", "target "+tenantFlagHelp)
 	cmd.Flags().StringVar(&stockDir, "stock-dir", "policies/stock", "directory holding the 5 stock policy markdown files")
 	return cmd
 }

@@ -45,9 +45,6 @@ func newCredentialsIssueCmd() *cobra.Command {
 		Use:   "issue",
 		Short: "issue a new API key (bearer returned once)",
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			if f.tenant == "" {
-				return fmt.Errorf("--tenant is required")
-			}
 			return resolveCommon()
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -81,7 +78,7 @@ func newCredentialsIssueCmd() *cobra.Command {
 			return runResetBootstrap(f.tenant, f.force, f.httpEndpoint, ttl)
 		},
 	}
-	cmd.Flags().StringVar(&f.tenant, "tenant", "", "tenant id [required]")
+	cmd.Flags().StringVar(&f.tenant, "tenant", "", credentialTenantFlagHelp)
 	cmd.Flags().StringVar(&f.scope, "scope", "", "scope predicate (JSON string)")
 	cmd.Flags().StringVar(&f.kinds, "kinds", "", "comma-separated evidence_kind identifiers (empty = all)")
 	cmd.Flags().StringVar(&f.ttl, "ttl", "0", "time-to-live (e.g., 24h, 30d; 0 = no expiry). With --reset-bootstrap: 0 = the server default of 24h, at most 168h")
@@ -141,9 +138,10 @@ func postResetBootstrap(ctx context.Context, endpoint, operatorToken, tenant str
 	if ttl < 0 || (ttl > 0 && ttl < time.Second) {
 		return nil, fmt.Errorf("--ttl %s: must be at least 1s with --reset-bootstrap", ttl)
 	}
-	payload := map[string]any{
-		"tenant_id": tenant,
-		"force":     force,
+	payload := map[string]any{"force": force}
+	if tenant != "" {
+		// Omitted, the server mints for the caller's own tenant.
+		payload["tenant_id"] = tenant
 	}
 	if ttl > 0 {
 		payload["ttl_seconds"] = int64(ttl / time.Second)
@@ -243,16 +241,21 @@ func newCredentialsListCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "list",
 		Short:   "list active credentials for a tenant (metadata only)",
-		PreRunE: requireOneFlag(&tenant, "--tenant"),
+		PreRunE: func(*cobra.Command, []string) error { return resolveCommon() },
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAdminRPC(func(ctx context.Context, c adminv1.AdminCredentialsServiceClient) (proto.Message, error) {
 				return c.List(ctx, &adminv1.ListRequest{TenantId: tenant})
 			})
 		},
 	}
-	cmd.Flags().StringVar(&tenant, "tenant", "", "tenant id [required]")
+	cmd.Flags().StringVar(&tenant, "tenant", "", credentialTenantFlagHelp)
 	return cmd
 }
+
+// credentialTenantFlagHelp is the --tenant help on the API-backed
+// credentials commands: the server fills an omitted tenant from the
+// caller's own credential (#1762).
+const credentialTenantFlagHelp = "tenant id; optional on a single-tenant install (default: the tenant of the --token credential)"
 
 // requireOneFlag returns a PreRunE that asserts *val != "" and resolves
 // the shared --endpoint / --token / --insecure flags.
