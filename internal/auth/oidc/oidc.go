@@ -18,6 +18,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -71,6 +72,11 @@ type IdpConfig struct {
 	ClientSecret        string
 	RedirectURL         string
 	AllowedEmailDomains []string
+	// TrustUnverifiedEmailForLink is oidc_idp_configs.trust_unverified_email_for_link
+	// (#1944 D3). When true, a sign-in whose ID token omits email_verified
+	// may link to a SCIM-provisioned user by email; false (the default)
+	// links only on email_verified=true.
+	TrustUnverifiedEmailForLink bool
 }
 
 // IdpResolver is the per-request lookup the Authenticator needs: given a
@@ -206,6 +212,13 @@ type CallbackResult struct {
 	Subject     string
 	Email       string
 	DisplayName string
+	// EmailVerified is the ID token's email_verified claim, nil when the IdP
+	// omits it. It gates linking a sign-in to an existing user by email
+	// (#1944).
+	EmailVerified *bool
+	// TrustUnverifiedEmailForLink is the IdP config's opt-out letting an
+	// absent EmailVerified link (#1944 D3).
+	TrustUnverifiedEmailForLink bool
 	// IDPConfigID is the id of the oidc_idp_configs row this login flowed
 	// through (slice 733). It scopes the slice-509 group-to-role derivation so a
 	// tenant with multiple IdP configs maps each IdP's groups independently
@@ -308,6 +321,7 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 	}
 	var claims struct {
 		Email             string   `json:"email"`
+		EmailVerified     any      `json:"email_verified"`
 		Name              string   `json:"name"`
 		PreferredUsername string   `json:"preferred_username"`
 		Groups            []string `json:"groups"`
@@ -338,14 +352,34 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 		name = claims.Email
 	}
 	return CallbackResult{
-		TenantID:    tenantID,
-		Issuer:      idTok.Issuer,
-		Subject:     idTok.Subject,
-		Email:       claims.Email,
-		DisplayName: name,
-		IDPConfigID: cfg.ID,
-		Groups:      claims.Groups,
+		TenantID:      tenantID,
+		Issuer:        idTok.Issuer,
+		Subject:       idTok.Subject,
+		Email:         claims.Email,
+		DisplayName:   name,
+		EmailVerified: parseEmailVerified(claims.EmailVerified),
+		IDPConfigID:   cfg.ID,
+		Groups:        claims.Groups,
+
+		TrustUnverifiedEmailForLink: cfg.TrustUnverifiedEmailForLink,
 	}, nil
+}
+
+// parseEmailVerified reads the email_verified claim. OIDC Core types it as a
+// boolean, but some IdPs send the string "true"/"false". Absent or any other
+// shape is nil (unknown), so only an explicit false reads as unverified.
+func parseEmailVerified(v any) *bool {
+	switch t := v.(type) {
+	case bool:
+		return &t
+	case string:
+		b, err := strconv.ParseBool(t)
+		if err != nil {
+			return nil
+		}
+		return &b
+	}
+	return nil
 }
 
 // ClearFlowCookies sets MaxAge=-1 on state/verifier/idp/nonce cookies.

@@ -132,6 +132,58 @@ func TestPatchThenGetSSOOmitsClientSecret(t *testing.T) {
 	if len(resp.AllowedEmailDomains) != 1 || resp.AllowedEmailDomains[0] != "example.com" {
 		t.Errorf("allowed_email_domains = %v; want [example.com]", resp.AllowedEmailDomains)
 	}
+	if resp.TrustUnverifiedEmailForLink {
+		t.Errorf("trust_unverified_email_for_link = true on a PATCH that omitted it; want the strict default false")
+	}
+}
+
+// #1944 D3: PATCH sets trust_unverified_email_for_link, GET returns it, and
+// a later PATCH that omits it writes the strict default back.
+func TestPatchTrustUnverifiedEmailForLinkRoundTrips(t *testing.T) {
+	tenant := uuid.New()
+	cleanupSSO(t, tenant)
+	r := newRouter(t, tenant, true, nil)
+
+	patch := func(fields map[string]any) {
+		t.Helper()
+		body := map[string]any{
+			"issuer_url":    "https://login.microsoftonline.example/v2.0",
+			"client_id":     "client-entra",
+			"client_secret": "s",
+			"redirect_url":  "https://atlas.example.com/auth/oidc/callback",
+		}
+		for k, v := range fields {
+			body[k] = v
+		}
+		raw, _ := json.Marshal(body)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/v1/admin/sso", bytes.NewReader(raw)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PATCH status = %d; body = %s", rec.Code, rec.Body.String())
+		}
+	}
+	get := func() bool {
+		t.Helper()
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/admin/sso", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET status = %d; body = %s", rec.Code, rec.Body.String())
+		}
+		var resp adminsso.GetResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp.TrustUnverifiedEmailForLink
+	}
+
+	patch(map[string]any{"trust_unverified_email_for_link": true})
+	if !get() {
+		t.Fatalf("trust_unverified_email_for_link = false after PATCH true")
+	}
+	patch(nil)
+	if get() {
+		t.Errorf("trust_unverified_email_for_link = true after a PATCH that omitted it; want false")
+	}
 }
 
 // AC-1 (2/2): PATCH a second time with empty client_secret leaves the

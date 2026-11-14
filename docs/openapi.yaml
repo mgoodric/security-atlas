@@ -1108,7 +1108,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/admin/sso
+      summary: PATCH /v1/admin/sso — upsert the primary IdP config, incl. trust_unverified_email_for_link (strict default false; #1944)
       tags: [admin-sso]
       operationId: patch-v1-admin-sso
       security:

@@ -58,6 +58,8 @@ sql:
       - "migrations/sql/20260520020000_audit_log_subject_module.sql"
       - "migrations/sql/20260521000000_questionnaire_tracer.sql"
       - "migrations/sql/20260521010000_tenants_rename.sql"
+      - "migrations/sql/20260521020000_super_admins.sql"
+      - "migrations/sql/20260521030000_super_admins_full.sql"
       - "migrations/sql/20260606010000_oscal_imported_catalogs.sql"
       - "migrations/sql/20260608000000_oscal_imported_profiles.sql"
       - "migrations/sql/20260607000000_ai_generations.sql"
@@ -102,6 +104,7 @@ sql:
       - "migrations/sql/20260903000000_policy_review_dates.sql"
       - "migrations/sql/20260906000000_framework_requirement_points_of_focus.sql"
       - "migrations/sql/20260911000000_mcp_risk_link_tools.sql"
+      - "migrations/sql/20260920000000_oidc_identity_link_audit.sql"
     queries: "internal/db/queries"
     gen:
       go:
