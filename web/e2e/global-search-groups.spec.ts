@@ -81,6 +81,12 @@ test.describe("global search groups (#2067)", () => {
 
     const popover = page.getByTestId("global-search-popover");
     await expect(popover).toBeVisible({ timeout: 30_000 });
+    // The popover opens on "Searching…" before the debounced fetch lands,
+    // and evaluateAll below does not auto-wait: gate on the last group
+    // rendering first.
+    await expect(page.getByTestId("global-search-group-anchors")).toBeVisible({
+      timeout: 30_000,
+    });
 
     // Group order: controls, risks, policies, anchors. Evidence has no
     // rows and renders no group.
