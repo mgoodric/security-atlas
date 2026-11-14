@@ -98,7 +98,7 @@ sql:
       - "migrations/sql/20260820000000_control_manifest_revisions.sql"
       - "migrations/sql/20260821000000_effective_fw_to_scf_edges.sql"
       - "migrations/sql/20260822000000_framework_scope_applicability.sql"
-      - "migrations/sql/20260906000000_mcp_risk_link_tools.sql"
+      - "migrations/sql/20260911000000_mcp_risk_link_tools.sql"
     queries: "internal/db/queries"
     gen:
       go:

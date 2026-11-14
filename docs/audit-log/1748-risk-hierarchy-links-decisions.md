@@ -95,7 +95,7 @@ inside the confirm transaction. A refusal maps to the API's status with a code
 (`hierarchy_validation_failed` 400, `hierarchy_cycle` 409, `risk_not_found` /
 `link_not_found` 404), rolls back, and leaves the proposal pending. The
 `mcp_wp_tool_name_check` CHECK gains the two names in
-`20260906000000_mcp_risk_link_tools.sql`. Its down migration re-adds the
+`20260911000000_mcp_risk_link_tools.sql`. Its down migration re-adds the
 narrower CHECK as `NOT VALID`, so a rollback never deletes a filed proposal (the
 AI-assist audit trail).
 
