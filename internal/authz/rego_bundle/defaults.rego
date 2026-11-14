@@ -86,7 +86,8 @@ allow if {
 # Exact paths, not a `/v1/me/` prefix, so an endpoint added under
 # `/v1/me/` stays denied until someone lists it here or in a role file.
 # `/v1/me/audit-period(s)` stay auditor-only (auditor.rego). Writes are
-# not admitted here. Default-deny still applies to a roleless credential.
+# not admitted here (see the #2022 rule below). Default-deny still
+# applies to a roleless credential.
 allow if {
     is_read
     input.resource.type == "me"
@@ -105,4 +106,66 @@ me_self_read_paths := {
     "/v1/me/email-channel",
     "/v1/me/slack-channel",
     "/v1/me/webhook-channel",
+}
+
+# #2022 — the caller's own `/v1/me/*` settings writes.
+#
+# Every signed-in role manages its own account: the profile (display name
+# and time zone), notification preferences, the three channel opt-ins,
+# revoking its own sessions, and marking its own notifications read.
+# Before this, viewer and control_owner could read these settings
+# (#2015) but not change them. Each handler takes the user from the
+# verified credential only, never from the body or the path: a session or
+# notification id is matched against that user's rows, so another user's
+# id is a 404, not a write.
+#
+# Method and path are both pinned. The two id-bearing routes match one
+# non-empty path segment, nothing deeper. Default-deny still applies to a
+# roleless credential.
+allow if {
+    input.action == "write"
+    input.resource.type == "me"
+    me_self_writes[[input.request.method, input.request.path]]
+    count(input.user.roles) > 0
+}
+
+allow if {
+    input.action == "write"
+    input.resource.type == "me"
+    me_self_id_write
+    count(input.user.roles) > 0
+}
+
+me_self_writes := {
+    ["PATCH", "/v1/me"],
+    ["PATCH", "/v1/me/preferences"],
+    ["PUT", "/v1/me/email-channel"],
+    ["PUT", "/v1/me/slack-channel"],
+    ["PUT", "/v1/me/webhook-channel"],
+    ["DELETE", "/v1/me/sessions"],
+}
+
+# DELETE /v1/me/sessions/{id}
+me_self_id_write if {
+    input.request.method == "DELETE"
+    parts := split(input.request.path, "/")
+    count(parts) == 5
+    parts[0] == ""
+    parts[1] == "v1"
+    parts[2] == "me"
+    parts[3] == "sessions"
+    parts[4] != ""
+}
+
+# PATCH /v1/me/notifications/{id}/read
+me_self_id_write if {
+    input.request.method == "PATCH"
+    parts := split(input.request.path, "/")
+    count(parts) == 6
+    parts[0] == ""
+    parts[1] == "v1"
+    parts[2] == "me"
+    parts[3] == "notifications"
+    parts[4] != ""
+    parts[5] == "read"
 }
