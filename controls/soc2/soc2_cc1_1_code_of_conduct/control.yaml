@@ -2,12 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc1_1_code_of_conduct
 title: "Code of conduct attested annually by all personnel"
 description: |
-  The entity demonstrates a commitment to integrity and ethical values
-  (TSC CC1.1, COSO Principle 1). All personnel — employees, contractors,
-  and board members — must acknowledge a written code of conduct covering
-  acceptable use, conflicts of interest, fraud reporting, and confidentiality
-  obligations on hire and annually thereafter. The acknowledgment is
-  captured as a digital attestation that becomes an evidence record.
+  Leadership sets an ethics standard and holds everyone who works here to
+  it (TSC CC1.1, COSO Principle 1). All personnel — employees,
+  contractors, and board members — must acknowledge a written code of
+  conduct covering acceptable use, conflicts of interest, fraud reporting,
+  and confidentiality obligations on hire and annually thereafter. The
+  acknowledgment is captured as a digital attestation that becomes an
+  evidence record.
 
 scf_anchor_id: GOV-01
 control_family: GOV

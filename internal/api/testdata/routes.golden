@@ -118,7 +118,9 @@ GET /v1/incidents
 GET /v1/incidents/{id}
 GET /v1/features/enabled
 GET /v1/framework-scopes
+GET /v1/framework-scopes/applicability
 GET /v1/framework-scopes/{id}
+GET /v1/framework-scopes/{id}/applicability
 GET /v1/frameworks
 GET /v1/frameworks/posture
 GET /v1/frameworks/scf/versions
@@ -321,6 +323,7 @@ PUT /v1/board-packs/{id}/sections/{key}
 PUT /v1/csf/profiles/{kind}
 PUT /v1/csf/profiles/{kind}/selections
 PUT /v1/csf/tier
+PUT /v1/framework-scopes/{id}/applicability/{requirement_id}
 PUT /v1/me/email-channel
 PUT /v1/me/slack-channel
 PUT /v1/me/webhook-channel

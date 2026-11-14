@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/xuri/excelize/v2"
+
+	"github.com/mgoodric/security-atlas/internal/scfworkbook"
 )
 
 const (
@@ -61,7 +63,7 @@ func LoadSCFWorkbook(path string, opts SCFWorkbookOptions) (*Crosswalk, error) {
 	// The published SCF workbook carries sheets such as "STRM Errata" whose
 	// header row can look like an OLIR sheet. When an "SCF <version>" sheet is
 	// present the workbook is the wide shape, so OLIR detection is skipped.
-	if !hasSCFVersionSheet(f) {
+	if !scfworkbook.HasVersionSheet(f) {
 		if cw, err := loadOLIRWorkbook(f, path, opts); err == nil {
 			return cw, nil
 		} else if !errors.Is(err, errNotOLIRWorkbook) {
@@ -77,7 +79,7 @@ func LoadSCFWorkbook(path string, opts SCFWorkbookOptions) (*Crosswalk, error) {
 }
 
 func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*Crosswalk, error) {
-	sheet, err := selectWideSCFSheet(f)
+	sheet, err := scfworkbook.ControlSheet(f)
 	if err != nil {
 		return nil, fmt.Errorf("crosswalk: SCF workbook %s: %w", path, err)
 	}
@@ -180,50 +182,6 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 		return nil, err
 	}
 	return cw, nil
-}
-
-// scfVersionSheetRe matches the control sheet's name in the published SCF
-// workbook ("SCF 2026.3"). Other "SCF ..." sheets, such as "SCF Domains &
-// Principles", sort ahead of it and must not be taken for it.
-var scfVersionSheetRe = regexp.MustCompile(`^SCF \d{4}(\.\d+)+$`)
-
-func hasSCFVersionSheet(f *excelize.File) bool {
-	for _, name := range f.GetSheetList() {
-		if scfVersionSheetRe.MatchString(normalizeHeader(name)) {
-			return true
-		}
-	}
-	return false
-}
-
-// selectWideSCFSheet picks the wide control sheet by name, never by position:
-// the first "SCF <yyyy>.<n>" sheet, else the first "SCF ..." sheet whose header
-// row carries an "SCF #" column.
-func selectWideSCFSheet(f *excelize.File) (string, error) {
-	var fallback []string
-	for _, name := range f.GetSheetList() {
-		norm := normalizeHeader(name)
-		if scfVersionSheetRe.MatchString(norm) {
-			return name, nil
-		}
-		if strings.HasPrefix(norm, "SCF ") {
-			fallback = append(fallback, name)
-		}
-	}
-	for _, name := range fallback {
-		rows, err := f.GetRows(name)
-		if err == nil && len(rows) > 0 && findHeader(rows[0], "SCF #") >= 0 {
-			return name, nil
-		}
-	}
-	if len(fallback) > 0 {
-		quoted := make([]string, len(fallback))
-		for i, name := range fallback {
-			quoted[i] = strconv.Quote(name)
-		}
-		return "", fmt.Errorf("missing an \"SCF <version>\" sheet with an \"SCF #\" column (found %s)", strings.Join(quoted, ", "))
-	}
-	return "", errors.New("missing an \"SCF <version>\" sheet")
 }
 
 // focalDocumentsSheet finds the focal-document metadata sheet, published as
@@ -405,23 +363,12 @@ func resolveFrameworkColumn(headers []string, spec string) (workbookColumn, erro
 	return workbookColumn{}, fmt.Errorf("crosswalk: framework column %q not found", spec)
 }
 
-func findHeader(headers []string, want string) int {
-	nwant := normalizeHeader(want)
-	for i, h := range headers {
-		nh := normalizeHeader(h)
-		if nh == nwant || strings.HasPrefix(nh, nwant+" ") {
-			return i
-		}
-	}
-	return -1
-}
-
-func cellAt(row []string, idx int) string {
-	if idx < 0 || idx >= len(row) {
-		return ""
-	}
-	return strings.TrimSpace(row[idx])
-}
+// The header and cell helpers are shared with the catalog importer.
+var (
+	findHeader      = scfworkbook.FindHeader
+	cellAt          = scfworkbook.CellAt
+	normalizeHeader = scfworkbook.NormalizeHeader
+)
 
 func splitWorkbookCodes(raw string) []string {
 	parts := strings.FieldsFunc(raw, func(r rune) bool {
@@ -475,10 +422,6 @@ func normalizeStrength(raw string) (float64, error) {
 		return 0, fmt.Errorf("strength %q normalizes outside [0.0, 1.0]", raw)
 	}
 	return n, nil
-}
-
-func normalizeHeader(s string) string {
-	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\u00a0", " ")), " ")
 }
 
 func slugFromFocal(doc focalDocument, fallback string) string {

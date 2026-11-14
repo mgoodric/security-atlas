@@ -2,12 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc6_3_periodic_access_review
 title: "Quarterly access review completed for in-scope systems"
 description: |
-  Periodic review and validation of user accounts and access privileges
-  is required to satisfy the "modifies, or removes access" half of TSC
-  CC6.3. The query reads the `access_review.completion` ledger and
-  asserts each in-scope system has a completed review record within
-  the last 90 days (i.e. quarterly cadence). The reviewer and
-  remediation actions are captured in the evidence record.
+  Regular review of accounts and their privileges covers the
+  change-and-revoke side of TSC CC6.3. The query reads the
+  `access_review.completion` ledger and asserts each in-scope system has a
+  completed review record within the last 90 days (i.e. quarterly
+  cadence). The reviewer and remediation actions are captured in the
+  evidence record.
 
 scf_anchor_id: IAC-15
 control_family: IAC

@@ -3095,6 +3095,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/applicability:
+    get:
+      summary: GET /v1/framework-scopes/applicability — applicability decisions in force at as_of
+      tags: [framework-scopes]
+      operationId: get-v1-framework-scopes-applicability
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}:
     get:
       summary: GET /v1/framework-scopes/{id}
@@ -3143,6 +3157,51 @@ paths:
         - bearer: []
       parameters:
         - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/{id}/applicability:
+    get:
+      summary: GET /v1/framework-scopes/{id}/applicability — list a revision's applicability decisions
+      tags: [framework-scopes]
+      operationId: get-v1-framework-scopes-id-applicability
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/{id}/applicability/{requirement_id}:
+    put:
+      summary: PUT /v1/framework-scopes/{id}/applicability/{requirement_id} — set one applicability decision
+      tags: [framework-scopes]
+      operationId: put-v1-framework-scopes-id-applicability-requirement_id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: requirement_id
           in: path
           required: true
           schema:
