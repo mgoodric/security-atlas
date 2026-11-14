@@ -55,6 +55,11 @@ type BatchControl struct {
 	// candidate reaches: it may need a tenant overlay edge or an anchor_fit
 	// note.
 	NoCandidateReaches bool `json:"no_candidate_reaches"`
+	// LLMRerank is off when no LLM was asked, applied when it reordered
+	// and explained the candidates, and unavailable when it was asked and
+	// failed: the candidates are then the deterministic list, without
+	// rationales (#1781).
+	LLMRerank string `json:"llm_rerank"`
 }
 
 // Batch is one upload: its counts, staged rows and rejected rows. Every
@@ -148,6 +153,9 @@ type StageInput struct {
 type Stager struct {
 	store          BatchStore
 	asyncThreshold int
+	// reranker, when set, reranks candidates for organisations whose
+	// cloud-LLM opt-in allows it (#1781).
+	reranker *Reranker
 	// background receives the error of each background suggestion run;
 	// nil discards it after logging. Tests set it to observe completion.
 	background func(batchID string, err error)
@@ -240,11 +248,12 @@ func (s *Stager) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	if err != nil || created.SuggestionsStatus != SuggestionsPending {
 		return created, err
 	}
-	if created.StagedCount > s.asyncThreshold {
-		go s.suggestInBackground(context.WithoutCancel(ctx), created)
+	rerank := s.reranker.allowed(ctx)
+	if created.StagedCount > s.asyncThreshold || rerank && created.StagedCount > rerankAsyncThreshold {
+		go s.suggestInBackground(context.WithoutCancel(ctx), created, rerank)
 		return created, nil
 	}
-	rows, err := s.suggest(ctx, created)
+	rows, err := s.suggest(ctx, created, rerank)
 	if err != nil {
 		// The batch and its rows are committed; only the candidates failed.
 		slog.ErrorContext(ctx, "controlimport: suggest candidates", "batch_id", created.ID, "error", err)
@@ -256,8 +265,8 @@ func (s *Stager) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	return created, nil
 }
 
-func (s *Stager) suggestInBackground(ctx context.Context, b Batch) {
-	_, err := s.suggest(ctx, b)
+func (s *Stager) suggestInBackground(ctx context.Context, b Batch, rerank bool) {
+	_, err := s.suggest(ctx, b, rerank)
 	if err != nil {
 		slog.ErrorContext(ctx, "controlimport: suggest candidates in background", "batch_id", b.ID, "error", err)
 	}
@@ -275,6 +284,7 @@ func applySuggestions(staged []BatchControl, rows []RowSuggestions) {
 		r := byRow[staged[i].ID]
 		staged[i].Candidates = nonNilCandidates(r.Candidates)
 		staged[i].NoCandidateReaches = r.NoCandidateReaches
+		staged[i].LLMRerank = r.LLMRerank
 	}
 }
 
