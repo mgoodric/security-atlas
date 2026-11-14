@@ -19,7 +19,8 @@ SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        owner_role, lifecycle_state, applicability_expr,
        evidence_queries, manual_evidence_schema, linked_policy_ids,
        freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
-       bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at
+       bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at,
+       external_refs
 FROM controls
 WHERE tenant_id = $1 AND id = $2;
 
@@ -256,14 +257,14 @@ INSERT INTO controls (
     implementation_type, owner_role, lifecycle_state, applicability_expr,
     evidence_queries, manual_evidence_schema, linked_policy_ids,
     freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
-    bundle_uploaded_at, bundle_uploaded_by
+    bundle_uploaded_at, bundle_uploaded_by, external_refs
 ) VALUES (
     $1, $2, $3, $4, NULL,
     $5, $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16,
     $17, $18, $19,
-    now(), $20
+    now(), $20, $21
 )
 RETURNING *;
 
