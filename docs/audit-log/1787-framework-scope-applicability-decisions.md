@@ -41,6 +41,14 @@ allows them in place, without a state change. Decisions refuse them, because
 and that is only true if those rows can't change afterwards. To change the
 SoA, draft a new revision and activate it.
 
+Ratified by Matt on 2026-11-13: an activated or superseded revision is
+immutable, for both the predicate and the decisions. Any change makes a new
+revision. This PR covers the decisions side. Freezing the predicate side
+(a PATCH on an activated revision returns 409 and points the caller to
+create a new revision) changes existing API behaviour, so it is a separate
+ticket. Until that lands, the predicate PATCH still edits an activated
+revision in place.
+
 **D4 — No DELETE guard.** No API deletes a decision. DELETE is left
 unguarded so the FK cascades and the operator purge
 (`internal/auth/oauthclient`, which deletes tenant rows table by table) can
