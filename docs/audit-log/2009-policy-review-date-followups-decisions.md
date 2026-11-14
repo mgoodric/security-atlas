@@ -41,8 +41,10 @@ exist, naming the count, and changes nothing. The append-only trigger is
 never disabled. Removing those rows is a deliberate owner act, after they
 are archived.
 
-`20260921000000` down (#1987) has the same delete-under-disabled-trigger
-shape for `draft_discarded` rows. It is outside this ticket and left as is.
+`20260921000000` down (#1987) had the same delete-under-disabled-trigger
+shape for `draft_discarded` rows. It gets the same fix in this PR, at the
+dispatcher's request: it refuses while any `draft_discarded` row exists.
+Run in order, `0921` down now refuses before `0903` down is reached.
 
 ## D3 — Overdue means after the due day, in UTC
 
