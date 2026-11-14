@@ -665,6 +665,17 @@ type Querier interface {
 	// requirement never shows up as a jump. Exclusions on draft, review or
 	// approved revisions have no effect; undecided requirements stay in.
 	//
+	// scope_activated (#2056, #2114): whether the tenant has an ACTIVATED
+	// framework-scope revision for the version. Without one, nothing has been
+	// decided out of scope, so the percentage is over the whole requirement set;
+	// callers show "Scope not set" for that version instead of the number.
+	//
+	// trend_history (#2056): whether any control covering the version has an
+	// evaluation (pass or fail) on or before the cutoff. Without one there is no
+	// 90-day-ago state to compare against, covered_then is empty, and
+	// trend_delta_90d equals coverage_pct; callers show "no baseline yet"
+	// instead of that delta.
+	//
 	// The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
 	// $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
 	FrameworkPosture(ctx context.Context, arg FrameworkPostureParams) ([]FrameworkPostureRow, error)
@@ -3421,6 +3432,11 @@ type Querier interface {
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
 	UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error)
+	// #1812: move a risk onto another of the tenant's categories. Dual-writes
+	// the reference and the matching risk_category enum value until #1745's
+	// contract step drops the enum. The caller holds the row via LockRiskByID
+	// and has resolved the category as assignable.
+	UpdateRiskCategory(ctx context.Context, arg UpdateRiskCategoryParams) (Risk, error)
 	// Rename: name and description only. The slug is immutable (trigger).
 	UpdateRiskCategoryText(ctx context.Context, arg UpdateRiskCategoryTextParams) (OrgRiskCategory, error)
 	// #1749: move a risk between hierarchy levels and org units. The caller

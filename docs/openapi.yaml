@@ -4980,7 +4980,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks:
     get:
-      summary: GET /v1/risks
+      summary: GET /v1/risks — the register; ?category= takes one or more category slugs or ids (repeated or comma-separated, archived included), an unknown one is a 400 naming the valid slugs; each risk carries category (slug), category_id and category_name
       tags: [risks]
       operationId: get-v1-risks
       security:
@@ -5241,7 +5241,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?}
+      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?, category?}; category is a slug or id, refused when unknown or archived
       tags: [risks]
       operationId: patch-v1-risks-id
       security:

@@ -8,13 +8,17 @@ type InvestmentPanelProps = {
   spendUSD: number;
   coverageDelta: number;
   costPerCoveragePoint: number;
+  // No baseline or no scoped framework (#2056 review): delta and cost n/a.
+  notAvailable?: boolean;
 };
 
 export function InvestmentPanel({
   spendUSD,
   coverageDelta,
   costPerCoveragePoint,
+  notAvailable = false,
 }: InvestmentPanelProps) {
+  const delta = Number(coverageDelta.toFixed(1));
   return (
     <div
       className="grid grid-cols-1 gap-5 md:grid-cols-2"
@@ -43,15 +47,18 @@ export function InvestmentPanel({
           className="mb-3 text-2xl font-semibold"
           data-testid="coverage-delta-display"
         >
-          {coverageDelta > 0
-            ? `+${coverageDelta}`
-            : coverageDelta === 0
-              ? "flat"
-              : coverageDelta}
-          {coverageDelta !== 0 ? " pts" : ""}
+          {notAvailable
+            ? "n/a"
+            : delta > 0
+              ? `+${delta}`
+              : delta === 0
+                ? "flat"
+                : delta}
+          {!notAvailable && delta !== 0 ? " pts" : ""}
         </div>
         <p className="text-sm text-muted-foreground">
-          Current coverage minus the operator-entered baseline.
+          Current coverage minus the baseline: coverage at the start of the
+          90-day posture trend, or the operator-entered prior-quarter figure.
         </p>
         <div className="mt-3 border-t border-border pt-3 text-sm">
           <div className="mb-1 text-xs text-muted-foreground">
@@ -61,9 +68,11 @@ export function InvestmentPanel({
             className="text-lg font-semibold text-foreground"
             data-testid="cost-per-coverage-point"
           >
-            {costPerCoveragePoint > 0
-              ? formatUSD(Math.round(costPerCoveragePoint))
-              : "—"}
+            {notAvailable
+              ? "n/a"
+              : costPerCoveragePoint > 0
+                ? formatUSD(Math.round(costPerCoveragePoint))
+                : "—"}
           </div>
         </div>
       </div>

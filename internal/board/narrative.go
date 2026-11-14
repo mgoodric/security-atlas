@@ -40,7 +40,7 @@ _Generated {{ .GeneratedAt }}. Pinned snapshot — posture as of the report date
 ## Program posture
 
 {{ range .Frameworks -}}
-- **{{ .Name }}** — We are in {{ .State }} state for {{ .Name }} ({{ .CoveragePct }}% coverage, {{ arrow .TrendArrow }} {{ signed .Delta }} pts over 30 days). Evidence freshness {{ .FreshnessPct }}%.
+- **{{ .Name }}** — We are in {{ .State }} state for {{ .Name }} ({{ .CoveragePct }}% evidence freshness rate (tenant-wide), {{ arrow .TrendArrow }} {{ signed .Delta }} pts over 30 days). Controls with fresh evidence {{ .FreshnessPct }}% (tenant-wide).
 {{ end }}
 ## Control drift — last {{ .Drift.WindowDays }} days
 
