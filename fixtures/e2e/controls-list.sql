@@ -49,7 +49,7 @@
 -- ==================================================================
 -- The spec clicks `getByTestId("controls-row-select").first()`. `.first()`
 -- is the first row by `ORDER BY a.scf_id`. Real SCF ids are letter-
--- prefixed (`AAA-01`, `CRY-05`, `IAC-06`, …). Our scf_ids begin with a
+-- prefixed (`AAA-01`, `CRY-05`, `IAC-37`, …). Our scf_ids begin with a
 -- DIGIT (`0E2E743-1` …) so they sort lexically BEFORE any real SCF id.
 -- This guarantees `.first()` lands on one of OUR anchors — which is
 -- backed by a `controls` row of the same id — in BOTH the empty-catalog

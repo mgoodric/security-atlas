@@ -44,7 +44,7 @@ func TestListAnchors_HasControlFiltersToTenantControls(t *testing.T) {
 
 	cleanupTenantState(t, admin, tenantA)
 	t.Cleanup(func() { cleanupTenantState(t, admin, tenantA) })
-	anchorUUID := anchorIDBySCFID(t, admin, "IAC-06")
+	anchorUUID := anchorIDBySCFID(t, admin, "IAC-37")
 	ctrlID := seedAnchorState(t, admin, tenantA, anchorUUID, "pass", "fresh", time.Now().Add(-time.Hour))
 
 	resp, body := get(t, ts, "/v1/anchors?include=state&has_control=true", bearer)
@@ -55,15 +55,15 @@ func TestListAnchors_HasControlFiltersToTenantControls(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
 	}
-	if len(got.Anchors) != 1 || got.Anchors[0].SCFID != "IAC-06" {
-		t.Fatalf("has_control=true anchors = %+v; want only IAC-06", got.Anchors)
+	if len(got.Anchors) != 1 || got.Anchors[0].SCFID != "IAC-37" {
+		t.Fatalf("has_control=true anchors = %+v; want only IAC-37", got.Anchors)
 	}
 	a := got.Anchors[0]
 	if a.ControlID == nil || *a.ControlID != ctrlID.String() {
-		t.Fatalf("IAC-06 control_id = %v; want %s", a.ControlID, ctrlID)
+		t.Fatalf("IAC-37 control_id = %v; want %s", a.ControlID, ctrlID)
 	}
 	if a.ControlCount == nil || *a.ControlCount != 1 {
-		t.Fatalf("IAC-06 control_count = %v; want 1", a.ControlCount)
+		t.Fatalf("IAC-37 control_count = %v; want 1", a.ControlCount)
 	}
 	if got.Total != 1 || got.WithControlTotal != 1 {
 		t.Fatalf("total=%d with_control_total=%d; want 1 and 1", got.Total, got.WithControlTotal)
@@ -82,7 +82,7 @@ func TestListAnchors_HasControlFiltersToTenantControls(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 	for _, row := range without.Anchors {
-		if row.SCFID == "IAC-06" || row.ControlID != nil {
+		if row.SCFID == "IAC-37" || row.ControlID != nil {
 			t.Fatalf("has_control=false returned a controlled anchor: %+v", row)
 		}
 	}

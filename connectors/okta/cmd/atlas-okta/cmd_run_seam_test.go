@@ -102,8 +102,8 @@ func okRunFlags() runFlags {
 		environment:      "prod",
 		oktaBaseURL:      "https://example.okta.com",
 		token:            "test-okta-token",
-		mfaPolicyControl: "scf:IAC-06",
-		appAssignControl: "scf:IAC-21",
+		mfaPolicyControl: "scf:IAC-37",
+		appAssignControl: "scf:IAC-10",
 		userLifeControl:  "scf:IAC-22",
 	}
 }

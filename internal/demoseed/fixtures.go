@@ -287,7 +287,7 @@ type questionnaireQuestionFixture struct {
 	Text        string
 	Domain      string
 	AnswerType  string
-	SCFAnchorID *string // free-form scf_id like "IAC-06"; nil = needs mapping
+	SCFAnchorID *string // free-form scf_id like "IAC-37"; nil = needs mapping
 	SortOrder   int
 	// Answer, when non-empty, seeds a questionnaire_answers row so the
 	// question reads as answered (not a blank intake form).
@@ -1061,7 +1061,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "IAM-01", Domain: "Identity & Access Management",
 			Text:        "Do you enforce multi-factor authentication for all administrative access?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("IAC-06"), SortOrder: 1,
+			SCFAnchorID: anchor("IAC-37"), SortOrder: 1,
 			AnswerValue: "Yes",
 			Narrative:   "MFA (WebAuthn + Okta Verify) is enforced for all human access to production via the production MFA policy.",
 			AuthoredBy:  authoredBy,

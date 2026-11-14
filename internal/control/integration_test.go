@@ -110,7 +110,7 @@ func TestUpload_HappyPath_CreatesActiveRow(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-06", "IAC")
+	_, code := seedSCFAnchor(t, admin, "IAC-37", "IAC")
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
 
@@ -150,7 +150,7 @@ func TestUpload_ReuploadSupersedes(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 
-	_, code := seedSCFAnchor(t, admin, "IAC-07", "IAC")
+	_, code := seedSCFAnchor(t, admin, "IAC-04", "IAC")
 	tenant := freshTenant(t, admin)
 	store := control.NewStore(app)
 

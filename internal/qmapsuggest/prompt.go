@@ -9,7 +9,7 @@ const systemPrompt = `You choose ONE Secure Controls Framework anchor for ONE un
 
 Rules you must follow:
 1. Choose ONLY from the candidate SCF anchors below.
-2. Return JSON only, with this exact shape: {"scf_id":"IAC-06","rationale":"one short sentence"}.
+2. Return JSON only, with this exact shape: {"scf_id":"IAC-37","rationale":"one short sentence"}.
 3. Do not invent SCF ids. The scf_id must exactly match a candidate scf_id.
 4. Keep rationale to one sentence and base it only on the question text and candidate excerpts.`
 

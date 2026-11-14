@@ -98,7 +98,7 @@ func TestDoRun_RoundTrip(t *testing.T) {
 	sink := &fakeSDKClient{}
 	wireFakes(t, gcp, sink)
 
-	if err := doRun(context.Background(), runFlags{projectID: "prod-123", iamControlID: "scf:IAC-21", bucketControlID: "scf:CRY-04"}); err != nil {
+	if err := doRun(context.Background(), runFlags{projectID: "prod-123", iamControlID: "scf:IAC-10", bucketControlID: "scf:CRY-04"}); err != nil {
 		t.Fatalf("doRun: %v", err)
 	}
 	if len(sink.pushed) != 3 {

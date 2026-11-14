@@ -38,7 +38,7 @@ function controlsBody() {
         id: CONTROL_ACCESS_ID,
         title: "Logical access controls",
         control_family: "IAC",
-        scf_id: "IAC-06",
+        scf_id: "IAC-37",
         lifecycle_state: "active",
         bundle_id: "soc2-starter",
       },

@@ -247,7 +247,7 @@ func setupHTTP(t *testing.T) setupResult {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
-	seedSCFAnchor(t, admin, "IAC-06", "IAC")
+	seedSCFAnchor(t, admin, "IAC-37", "IAC")
 	tenant := freshTenant(t, admin)
 
 	ingester := ingest.New(app, reg)
@@ -299,7 +299,7 @@ func uploadBundle(t *testing.T, s setupResult, bundleID string) string {
 bundle_id: ` + bundleID + `
 title: "Manual review of access list"
 implementation_type: manual_attested
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 owner_role: ` + ownerRole + `
 freshness_class: quarterly
 manual_evidence_schema:

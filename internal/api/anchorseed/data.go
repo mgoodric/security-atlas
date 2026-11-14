@@ -40,23 +40,23 @@ func defaultRequirements() []Requirement {
 	}
 }
 
-// defaultMappings keys each STRM edge on scf_id (e.g., "IAC-06") so the
+// defaultMappings keys each STRM edge on scf_id (e.g., "IAC-37") so the
 // lookup works against slice 006's DB-backed anchors without renaming.
 func defaultMappings() []Mapping {
 	return []Mapping{
-		{RequirementID: "req_soc2_cc6_1", AnchorSCFID: "IAC-06", STRMType: "intersects", Strength: 0.8},
-		{RequirementID: "req_iso_a5_17", AnchorSCFID: "IAC-06", STRMType: "equal", Strength: 1.0},
-		{RequirementID: "req_nist_pr_aa_03", AnchorSCFID: "IAC-06", STRMType: "equal", Strength: 1.0},
+		{RequirementID: "req_soc2_cc6_1", AnchorSCFID: "IAC-37", STRMType: "intersects", Strength: 0.8},
+		{RequirementID: "req_iso_a5_17", AnchorSCFID: "IAC-37", STRMType: "equal", Strength: 1.0},
+		{RequirementID: "req_nist_pr_aa_03", AnchorSCFID: "IAC-37", STRMType: "equal", Strength: 1.0},
 
 		{RequirementID: "req_soc2_cc6_1", AnchorSCFID: "IAC-01", STRMType: "subset_of", Strength: 0.7},
 		{RequirementID: "req_iso_a5_15", AnchorSCFID: "IAC-01", STRMType: "equal", Strength: 1.0},
 		{RequirementID: "req_nist_pr_aa_01", AnchorSCFID: "IAC-01", STRMType: "equal", Strength: 0.9},
 
-		{RequirementID: "req_soc2_cc6_2", AnchorSCFID: "IAC-07", STRMType: "equal", Strength: 1.0},
-		{RequirementID: "req_soc2_cc6_3", AnchorSCFID: "IAC-07", STRMType: "intersects", Strength: 0.8},
-		{RequirementID: "req_iso_a8_2", AnchorSCFID: "IAC-07", STRMType: "subset_of", Strength: 0.7},
+		{RequirementID: "req_soc2_cc6_2", AnchorSCFID: "IAC-04", STRMType: "equal", Strength: 1.0},
+		{RequirementID: "req_soc2_cc6_3", AnchorSCFID: "IAC-04", STRMType: "intersects", Strength: 0.8},
+		{RequirementID: "req_iso_a8_2", AnchorSCFID: "IAC-04", STRMType: "subset_of", Strength: 0.7},
 
-		{RequirementID: "req_nist_pr_aa_05", AnchorSCFID: "IAC-15", STRMType: "equal", Strength: 1.0},
+		{RequirementID: "req_nist_pr_aa_05", AnchorSCFID: "IAC-12", STRMType: "equal", Strength: 1.0},
 
 		{RequirementID: "req_soc2_cc7_2", AnchorSCFID: "AAA-01", STRMType: "intersects", Strength: 0.9},
 		{RequirementID: "req_soc2_cc7_3", AnchorSCFID: "AAA-01", STRMType: "intersects", Strength: 0.8},

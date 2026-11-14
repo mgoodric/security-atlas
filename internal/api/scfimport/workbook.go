@@ -30,7 +30,7 @@ type WorkbookOptions struct {
 // the same way the crosswalk importer does (scfworkbook.ControlSheet) and
 // takes the release version from that sheet's name unless opts overrides it.
 //
-// Family is the SCF # prefix ("IAC" for IAC-06), matching the JSON catalog
+// Family is the SCF # prefix ("IAC" for IAC-37), matching the JSON catalog
 // and the rows already seeded from it; the "SCF Domain" column is used only
 // when an ID has no prefix.
 func LoadWorkbook(path string, opts WorkbookOptions) (*Catalog, error) {

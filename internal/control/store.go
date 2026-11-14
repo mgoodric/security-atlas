@@ -81,7 +81,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 	var result UploadResult
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		// 1. Resolve scf_anchor_id. Accept either a uuid (FK target) or a
-		//    human-readable SCF code (e.g. "IAC-06") that resolves via the
+		//    human-readable SCF code (e.g. "IAC-37") that resolves via the
 		//    slice-006 importer. Both shapes are common: hand-written
 		//    bundles use the code, machine-generated bundles use the uuid.
 		anchorID, err := resolveSCFAnchor(ctx, q, b.Manifest.SCFAnchorID)
@@ -389,7 +389,7 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 }
 
 // resolveSCFAnchor accepts either a uuid string or an SCF code (e.g.,
-// "IAC-06") and returns the anchor's uuid. Unknown values fail with
+// "IAC-37") and returns the anchor's uuid. Unknown values fail with
 // ErrSCFAnchorUnknown.
 func resolveSCFAnchor(ctx context.Context, q *dbx.Queries, ref string) (uuid.UUID, error) {
 	if ref == "" {

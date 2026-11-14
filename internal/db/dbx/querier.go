@@ -507,6 +507,10 @@ type Querier interface {
 	// a scope (supersession is the lifecycle exit); the row is preserved as
 	// audit trail.
 	DeleteFrameworkScope(ctx context.Context, arg DeleteFrameworkScopeParams) error
+	// Remove one catalog edge the crosswalk no longer lists. Its tier-transition
+	// audit rows go with it (ON DELETE CASCADE); the importer reports every
+	// pruned edge, tier included, so the removal is visible in the import output.
+	DeleteFwToScfEdge(ctx context.Context, id pgtype.UUID) error
 	// Revokes a SPECIFIC group-derived role from the user. The origin='group-derived'
 	// predicate is the safety belt (AC-4): a manual row with the same (tenant, user,
 	// role) is never deleted by this query. Returns the affected-row count.
@@ -951,7 +955,7 @@ type Querier interface {
 	// the oldest one (#1867).
 	GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskByKeyParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
-	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+	// Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 	// framework version.
 	GetSCFAnchorBySCFID(ctx context.Context, scfID string) (ScfAnchor, error)
 	// Existing-row lookup. Returns ErrNoRows when the anchor doesn't exist yet.
@@ -2176,6 +2180,13 @@ type Querier interface {
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
+	// Every catalog edge under one framework_version, row-locked, with the
+	// requirement code and anchor scf_id the importer keys mappings on. The
+	// crosswalk importer reads this after its upsert pass to find edges the
+	// crosswalk no longer lists (#1971): an SCF remap moves a mapping to a new
+	// anchor, and the edge on the old anchor would otherwise keep counting as
+	// coverage.
+	ListFwToScfEdgesForVersionForUpdate(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFwToScfEdgesForVersionForUpdateRow, error)
 	// ===== user_roles origin-aware reconciliation =====
 	// The user's CURRENT group-derived roles (origin='group-derived') in the
 	// tenant. The resolver diffs this against the freshly-resolved target set to

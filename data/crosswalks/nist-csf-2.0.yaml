@@ -694,12 +694,12 @@ mappings:
     strength: 0.9
     rationale: "Managing identities and credentials maps directly to SCF Identification & Authentication Policy (four-framework shared anchor)."
   - requirement_code: "PR.AA-02"
-    scf_anchor: "IAC-07"
+    scf_anchor: "IAC-04"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Identity proofing and binding to credentials is part of SCF User Provisioning & Lifecycle."
+    rationale: "Identity proofing and binding to credentials is part of SCF User Provisioning & De-Provisioning."
   - requirement_code: "PR.AA-03"
-    scf_anchor: "IAC-06"
+    scf_anchor: "IAC-37"
     relationship_type: "intersects_with"
     strength: 0.75
     rationale: "Risk-commensurate authentication strongly overlaps SCF Multi-Factor Authentication."
@@ -709,7 +709,7 @@ mappings:
     strength: 0.65
     rationale: "Protecting/conveying/verifying identity assertions overlaps SCF Identification & Authentication Policy; federation/assertion-protection specificity is a residual gap (LOW)."
   - requirement_code: "PR.AA-05"
-    scf_anchor: "IAC-21"
+    scf_anchor: "IAC-10"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Least-privilege/separation-of-duties enforcement overlaps SCF Privileged Account Management; broader access governance gap (MEDIUM)."

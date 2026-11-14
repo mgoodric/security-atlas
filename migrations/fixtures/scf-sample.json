@@ -12,46 +12,40 @@
       "description": "Mechanisms exist to facilitate the implementation of identification and access management controls."
     },
     {
-      "scf_id": "IAC-06",
+      "scf_id": "IAC-37",
       "family": "IAC",
       "title": "Multi-Factor Authentication (MFA)",
       "description": "Mechanisms exist to require Multi-Factor Authentication for privileged accounts, network access, and remote access."
     },
     {
-      "scf_id": "IAC-07",
+      "scf_id": "IAC-04",
       "family": "IAC",
-      "title": "User Provisioning & Lifecycle",
+      "title": "User Provisioning & De-Provisioning",
       "description": "Mechanisms exist to establish, activate, modify, disable, and remove logical access for users."
     },
     {
-      "scf_id": "IAC-10",
+      "scf_id": "IAC-14",
       "family": "IAC",
       "title": "Authenticator Management",
       "description": "Mechanisms exist to securely manage authenticators, including the creation, distribution, strength, change, and safeguarding of passwords and other authenticators."
     },
     {
-      "scf_id": "IAC-15",
+      "scf_id": "IAC-12",
       "family": "IAC",
-      "title": "Account Review",
+      "title": "Periodic Review of Individual & Service Account Privileges",
       "description": "Mechanisms exist to periodically review and validate user accounts and access privileges."
     },
     {
-      "scf_id": "IAC-21",
+      "scf_id": "IAC-10",
       "family": "IAC",
-      "title": "Privileged Account Management",
+      "title": "Privileged Account Management (PAM)",
       "description": "Mechanisms exist to govern the privileged account lifecycle."
     },
     {
-      "scf_id": "IAC-24",
+      "scf_id": "IAC-11",
       "family": "IAC",
-      "title": "Emergency Access (Break-Glass) Accounts",
+      "title": "Emergency Accounts",
       "description": "Mechanisms exist to establish, govern, and monitor emergency access accounts that allow necessary data and systems to be reached during an emergency, with after-the-fact review of their use."
-    },
-    {
-      "scf_id": "IAC-25",
-      "family": "IAC",
-      "title": "Session Termination",
-      "description": "Mechanisms exist to automatically terminate a user session after a defined period of inactivity or on a defined trigger condition."
     },
 
     {
@@ -122,6 +116,12 @@
       "family": "CFG",
       "title": "Configuration Change Control",
       "description": "Mechanisms exist to authorize, document, and track configuration changes."
+    },
+    {
+      "scf_id": "CFG-04.5",
+      "family": "CFG",
+      "title": "Session Termination",
+      "description": "Mechanisms exist to automatically terminate a user session after a defined period of inactivity or on a defined trigger condition."
     },
 
     {

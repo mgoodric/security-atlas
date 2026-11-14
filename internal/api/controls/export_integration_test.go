@@ -108,7 +108,7 @@ func seedControlForExport(t *testing.T, tenant uuid.UUID, bundleID, title string
 			bundle_uploaded_at, bundle_uploaded_by
 		)
 		VALUES (
-			$1, $2, $3, 1, 'IAC-06', $4,
+			$1, $2, $3, 1, 'IAC-37', $4,
 			$5, 'test control for slice 137 export', 'identity-access-management', 'automated',
 			'platform-eng', 'active', 'BU=eng AND env=prod',
 			'fresh', '', 'sha256:slice137',
@@ -124,7 +124,7 @@ func seedControlForExport(t *testing.T, tenant uuid.UUID, bundleID, title string
 	return controlID, anchorID
 }
 
-// ensureTestSCFAnchor inserts a single test SCF anchor (IAC-06) if
+// ensureTestSCFAnchor inserts a single test SCF anchor (IAC-37) if
 // one doesn't already exist. Returns its uuid. Reused across all
 // slice 137 tests so the FK pressure is minimal.
 //
@@ -144,7 +144,7 @@ func ensureTestSCFAnchor(t *testing.T) uuid.UUID {
 		SELECT a.id FROM scf_anchors a
 		JOIN framework_versions fv ON fv.id = a.framework_version_id
 		JOIN frameworks f ON f.id = fv.framework_id
-		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND a.scf_id = 'IAC-06'
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND a.scf_id = 'IAC-37'
 		LIMIT 1
 	`).Scan(&existing)
 	if err == nil {
@@ -153,16 +153,16 @@ func ensureTestSCFAnchor(t *testing.T) uuid.UUID {
 
 	// Else lean on the package-local seedSCFAnchor helper (already in
 	// attest_integration_test.go) to plant the anchor.
-	_ = seedSCFAnchor(t, admin, "IAC-06", "identity-access-management")
+	_ = seedSCFAnchor(t, admin, "IAC-37", "identity-access-management")
 	// Look it up again.
 	if err := admin.QueryRow(ctx, `
 		SELECT a.id FROM scf_anchors a
 		JOIN framework_versions fv ON fv.id = a.framework_version_id
 		JOIN frameworks f ON f.id = fv.framework_id
-		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND a.scf_id = 'IAC-06'
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND a.scf_id = 'IAC-37'
 		LIMIT 1
 	`).Scan(&existing); err != nil {
-		t.Fatalf("re-lookup IAC-06 anchor: %v", err)
+		t.Fatalf("re-lookup IAC-37 anchor: %v", err)
 	}
 	return existing
 }

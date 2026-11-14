@@ -34,7 +34,7 @@ import { expect, test } from "./fixtures";
 const Q_ID = "00000000-0000-0000-0000-0000000q1q1q";
 const Q_NAME = "Acme Corp Security Diligence";
 const QUESTION_ID = "00000000-0000-0000-0000-0000000Q11Q1";
-const ANCHOR_ID = "IAC-06";
+const ANCHOR_ID = "IAC-37";
 const EVIDENCE_ID = "00000000-0000-0000-0000-0000000ev01";
 
 // Detail payload — slice 155 getResponse shape.

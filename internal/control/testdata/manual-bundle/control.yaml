@@ -1,7 +1,7 @@
 bundle_schema_version: "1"
 bundle_id: annual_access_review_test
 title: "Annual access review completed"
-scf_anchor_id: IAC-15
+scf_anchor_id: IAC-12
 implementation_type: manual_periodic
 freshness_class: annual
 

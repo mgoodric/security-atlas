@@ -45,7 +45,7 @@ When uploaded as a tarball, the archive **MUST**:
 | `bundle_schema_version` | string | Exactly `"1"` in this slice. Future v2 will gate breaking changes.                                                                                        |
 | `bundle_id`             | string | Stable natural key. Re-uploading the same `bundle_id` is a version bump. Format: `^[a-z][a-z0-9_.-]{2,63}$` (lowercase).                                  |
 | `title`                 | string | Human-readable, 1-200 chars.                                                                                                                              |
-| `scf_anchor_id`         | string | SCF code (e.g., `IAC-06`) **or** the UUID of an `scf_anchors` row. Must resolve to a row in `scf_anchors` or the upload is rejected (canvas invariant 7). |
+| `scf_anchor_id`         | string | SCF code (e.g., `IAC-37`) **or** the UUID of an `scf_anchors` row. Must resolve to a row in `scf_anchors` or the upload is rejected (canvas invariant 7). |
 | `implementation_type`   | enum   | `automated` \| `semi_automated` \| `manual_attested` \| `manual_periodic`.                                                                                |
 
 ### 2.2 Optional fields
@@ -129,7 +129,7 @@ A complete `control.yaml` for an MFA control on production AWS:
 bundle_schema_version: "1"
 bundle_id: aws_iam_mfa_prod
 title: "MFA enforced for all human IAM users in production AWS"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 control_family: IAC
 owner_role: security-engineering
@@ -183,7 +183,7 @@ A minimal **manual** control:
 bundle_schema_version: "1"
 bundle_id: annual_access_review
 title: "Annual access review completed for all production systems"
-scf_anchor_id: IAC-15
+scf_anchor_id: IAC-12
 implementation_type: manual_periodic
 freshness_class: annual
 
@@ -296,7 +296,7 @@ cases:
 bundle_schema_version: "1"
 bundle_id: aws_iam_mfa_prod
 title: "MFA on every prod IAM user"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:

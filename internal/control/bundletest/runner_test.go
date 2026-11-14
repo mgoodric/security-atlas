@@ -138,7 +138,7 @@ func TestRun_BrokenQueryReportedAsError(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "control.yaml"), `bundle_schema_version: "1"
 bundle_id: broken_query_test
 title: "Broken Rego query"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:
@@ -192,7 +192,7 @@ func TestRun_SQLWithoutDB_ReportedAsError(t *testing.T) {
 	writeFile(t, filepath.Join(dir, "control.yaml"), `bundle_schema_version: "1"
 bundle_id: sql_needs_db_test
 title: "SQL query without a DB"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:

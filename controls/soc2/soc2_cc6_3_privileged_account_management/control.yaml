@@ -9,7 +9,7 @@ description: |
   vault members, sharing-disabled-by-default, and an audit-event stream
   enabled. Personal-vault sharing of company secrets is disallowed.
 
-scf_anchor_id: IAC-21
+scf_anchor_id: IAC-10
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering

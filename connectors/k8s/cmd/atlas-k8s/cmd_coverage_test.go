@@ -704,7 +704,7 @@ func TestBuildRBACRecord_Shape(t *testing.T) {
 		Rules:      []rbac.Rule{{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}}},
 		ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildRBACRecord(b, "cluster-1", "prod", "scf:IAC-21")
+	rec, err := buildRBACRecord(b, "cluster-1", "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildRBACRecord: %v", err)
 	}
@@ -736,7 +736,7 @@ func TestBuildRBACRecord_OmitsEmptyOptionals(t *testing.T) {
 		BindingName: "b", BindingScope: rbac.ScopeCluster, RoleKind: rbac.RoleKindClusterRole,
 		RoleName: "r", ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildRBACRecord(b, "c", "prod", "scf:IAC-21")
+	rec, _ := buildRBACRecord(b, "c", "prod", "scf:IAC-10")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"namespace", "subjects", "rules"} {
 		if _, ok := pl[k]; ok {

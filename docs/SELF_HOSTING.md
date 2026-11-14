@@ -165,7 +165,7 @@ into this shape (the contract is `internal/api/scfimport/catalog.go`;
   "release_date": "2025-12-01",
   "controls": [
     {
-      "scf_id": "IAC-06",
+      "scf_id": "IAC-37",
       "family": "IAC",
       "title": "Multi-Factor Authentication (MFA)",
       "description": "Mechanisms exist to ..."

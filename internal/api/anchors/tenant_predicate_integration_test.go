@@ -39,7 +39,7 @@ func TestAnchorQueries_TenantPredicateIsolatesWithoutRLS(t *testing.T) {
 	cleanupTenantState(t, admin, tenantB)
 	t.Cleanup(func() { cleanupTenantState(t, admin, tenantA) })
 
-	anchorUUID := anchorIDBySCFID(t, admin, "IAC-06")
+	anchorUUID := anchorIDBySCFID(t, admin, "IAC-37")
 	seedAnchorState(t, admin, tenantA, anchorUUID, "fail", "stale", time.Now().Add(-time.Hour))
 
 	q := dbx.New(admin)

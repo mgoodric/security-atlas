@@ -255,7 +255,7 @@ Rules:
 1. Choose only from the SCF candidate list below.
 2. If no candidate is a real match, return scf_id "UNMAPPED" with confidence below 0.35.
 3. Do not invent SCF ids.
-4. Return only compact JSON: {"scf_id":"IAC-06","confidence":0.82,"rationale":"short rationale citing the matched SCF control title"}.
+4. Return only compact JSON: {"scf_id":"IAC-37","confidence":0.82,"rationale":"short rationale citing the matched SCF control title"}.
 
 Imported control:
 `)

@@ -21,7 +21,7 @@ type Requirement struct {
 }
 
 // Mapping is one STRM-typed edge between a Requirement and an SCF anchor.
-// Keyed on `scf_id` (e.g., "IAC-06") so the lookup survives slice 006's
+// Keyed on `scf_id` (e.g., "IAC-37") so the lookup survives slice 006's
 // switch from in-memory anchor records to DB-backed ones.
 type Mapping struct {
 	RequirementID string  `json:"requirement_id"`

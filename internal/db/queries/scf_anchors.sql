@@ -104,7 +104,7 @@ LIMIT $1 OFFSET $2;
 SELECT * FROM scf_anchors WHERE id = $1;
 
 -- name: GetSCFAnchorBySCFID :one
--- Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+-- Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 -- framework version.
 SELECT a.*
 FROM scf_anchors a

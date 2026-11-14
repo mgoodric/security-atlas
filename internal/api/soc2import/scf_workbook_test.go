@@ -145,6 +145,11 @@ func TestLoadSCFWorkbook_CombinesColumnsWithPrefix(t *testing.T) {
 	if cw.FrameworkSlug != "iso27001" || cw.FrameworkName != "ISO/IEC 27001:2022" || cw.FrameworkVersion != "2022" {
 		t.Fatalf("metadata should come from the first column: %+v", cw)
 	}
+	// #1971: the source names the columns read, so it never matches the
+	// bundled YAML's and the two imports prune only their own edges.
+	if want := "scf-workbook:ISO 27001 2022+ISO 27002 2022=A."; cw.Source != want {
+		t.Fatalf("Source = %q; want %q", cw.Source, want)
+	}
 	for _, m := range cw.Mappings {
 		if strings.HasPrefix(m.RequirementCode, "A.") != strings.Contains(m.Rationale, "27002") {
 			t.Fatalf("rationale should cite the column the code came from: %+v", m)
@@ -330,6 +335,9 @@ func TestLoadSCFWorkbook_OLIRWorkbookUsesExplicitSTRM(t *testing.T) {
 	}
 	if len(cw.Requirements) != 1 || len(cw.Mappings) != 1 {
 		t.Fatalf("got requirements/mappings %d/%d", len(cw.Requirements), len(cw.Mappings))
+	}
+	if !strings.HasPrefix(cw.Source, "scf-olir:") {
+		t.Fatalf("Source = %q; want an scf-olir: source", cw.Source)
 	}
 	got := cw.Mappings[0]
 	if got.RequirementCode != "AC-01" || got.SCFAnchor != "GOV-02" ||

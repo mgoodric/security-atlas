@@ -53,7 +53,7 @@ func setupOAuthTenantHTTP(t *testing.T) oauthTenantSetup {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	reg := bootRegistry(t, admin)
-	seedSCFAnchor(t, admin, "IAC-06", "IAC")
+	seedSCFAnchor(t, admin, "IAC-37", "IAC")
 
 	ks, err := fsstore.Open(t.TempDir())
 	if err != nil {
@@ -138,7 +138,7 @@ func uploadManualBundle(t *testing.T, s oauthTenantSetup, token, bundleID string
 bundle_id: ` + bundleID + `
 title: "Quarterly access review (1739)"
 implementation_type: manual_attested
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 owner_role: ` + ownerRole + `
 freshness_class: quarterly
 manual_evidence_schema:

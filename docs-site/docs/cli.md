@@ -131,7 +131,7 @@ It reads the `SCF <release>` sheet (`SCF #`, `SCF Control`, and the
 `import-crosswalk` reads from that workbook. The release version comes from the
 sheet name (`2026.3`); `--release-version` overrides it. The workbook carries
 no release date; pass `--release-date YYYY-MM-DD` to record one. Family is the `SCF #`
-prefix (`IAC` for `IAC-06`), as in the JSON catalog.
+prefix (`IAC` for `IAC-37`), as in the JSON catalog.
 
 To import a full OSCAL catalog (NIST 800-53 and friends), use the separate
 `atlas-oscal import-catalog` binary — see

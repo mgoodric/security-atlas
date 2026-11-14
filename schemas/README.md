@@ -14,7 +14,7 @@ This directory remains as a discovery breadcrumb. Add new platform schemas by wr
 
 - Filename: `<semver>.json` (e.g., `1.0.0.json`)
 - Required top-level extension keys: `x-evidence-kind`, `x-semver`, `x-owner`
-- Optional: `x-default-scf-anchors` — array of SCF anchor codes (e.g., `["IAC-06"]`)
+- Optional: `x-default-scf-anchors` — array of SCF anchor codes (e.g., `["IAC-37"]`)
 - Schema dialect: JSON Schema draft 2020-12
 
 See `internal/api/schemaregistry/embed.go` for the loader contract and `Plans/EVIDENCE_SDK.md` §4.5 for the design.

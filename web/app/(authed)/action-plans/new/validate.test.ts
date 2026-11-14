@@ -12,7 +12,7 @@ const OWNER = "11111111-1111-1111-1111-111111111111";
 
 function base(): ActionPlanFormValues {
   return {
-    title: "Close the IAC-06 freshness gap",
+    title: "Close the IAC-37 freshness gap",
     description: "",
     triggeringEvent: "",
     ownerId: OWNER,

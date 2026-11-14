@@ -23,7 +23,7 @@ import (
 //
 // Path forms accepted:
 //   - UUID — direct scf_anchors.id lookup
-//   - scf_id (e.g., "IAC-06") — natural key lookup
+//   - scf_id (e.g., "IAC-37") — natural key lookup
 //
 // Query parameters:
 //   - ?framework_version=slug:version — pin the response to one

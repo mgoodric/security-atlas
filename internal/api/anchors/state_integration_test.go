@@ -227,7 +227,7 @@ func TestListAnchors_IncludeStateRollsUpWorstStatePerAnchor_TenantIsolated(t *te
 	ts, srv, bearer := setupHTTPServerWithSrv(t)
 	admin := dbtest.NewMigratePool(t)
 
-	anchorUUID := anchorIDBySCFID(t, admin, "IAC-06")
+	anchorUUID := anchorIDBySCFID(t, admin, "IAC-37")
 
 	// Tenant A: seed two controls under one anchor — one fail (older),
 	// one pass (newer). The slice 104 SQL's worst-state-wins ranking
@@ -254,32 +254,32 @@ func TestListAnchors_IncludeStateRollsUpWorstStatePerAnchor_TenantIsolated(t *te
 	}
 	var hit bool
 	for _, a := range got.Anchors {
-		if a.SCFID != "IAC-06" {
+		if a.SCFID != "IAC-37" {
 			continue
 		}
 		hit = true
 		if a.State == nil {
-			t.Fatalf("IAC-06 state should be populated after seedAnchorState; got nil")
+			t.Fatalf("IAC-37 state should be populated after seedAnchorState; got nil")
 		}
 		st := *a.State
 		// AC-6: worst-state-wins. fail beats pass.
 		if st["result"] != "fail" {
-			t.Errorf("IAC-06 worst result = %v; want fail", st["result"])
+			t.Errorf("IAC-37 worst result = %v; want fail", st["result"])
 		}
 		// stateWire shape — pinned columns must all be present.
 		for _, key := range []string{"result", "freshness_status", "last_observed_at", "evaluated_at"} {
 			if _, ok := st[key]; !ok {
-				t.Errorf("IAC-06 state missing key %q: %+v", key, st)
+				t.Errorf("IAC-37 state missing key %q: %+v", key, st)
 			}
 		}
 	}
 	if !hit {
-		t.Fatalf("IAC-06 not present in response")
+		t.Fatalf("IAC-37 not present in response")
 	}
 
 	// AC-5 — RLS round-trip. Issue a fresh bearer for Tenant B on the
 	// SAME credstore the running server validates against; the response
-	// must NOT contain a populated `state` for IAC-06 since Tenant B
+	// must NOT contain a populated `state` for IAC-37 since Tenant B
 	// has no controls anywhere.
 	tenantB := "22222222-2222-2222-2222-222222222222"
 	t.Cleanup(func() { cleanupTenantState(t, admin, tenantB) })
@@ -298,8 +298,8 @@ func TestListAnchors_IncludeStateRollsUpWorstStatePerAnchor_TenantIsolated(t *te
 		t.Fatalf("unmarshal B: %v\nbody=%s", err, bodyB)
 	}
 	for _, a := range gotB.Anchors {
-		if a.SCFID == "IAC-06" && a.State != nil {
-			t.Fatalf("Tenant B saw Tenant A's state on IAC-06 — RLS bypass! got %+v", *a.State)
+		if a.SCFID == "IAC-37" && a.State != nil {
+			t.Fatalf("Tenant B saw Tenant A's state on IAC-37 — RLS bypass! got %+v", *a.State)
 		}
 	}
 }
@@ -311,7 +311,7 @@ func TestListAnchors_IncludeStateRollsUpWorstStatePerAnchor_TenantIsolated(t *te
 func TestListAnchors_IncludeStateColumnSetMatchesDesignDoc(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
 	admin := dbtest.NewMigratePool(t)
-	anchorUUID := anchorIDBySCFID(t, admin, "IAC-06")
+	anchorUUID := anchorIDBySCFID(t, admin, "IAC-37")
 	t.Cleanup(func() { cleanupTenantState(t, admin, tenantA) })
 	obs := time.Date(2026, 5, 15, 12, 0, 0, 0, time.UTC)
 	seedAnchorState(t, admin, tenantA, anchorUUID, "pass", "fresh", obs)
@@ -327,7 +327,7 @@ func TestListAnchors_IncludeStateColumnSetMatchesDesignDoc(t *testing.T) {
 
 // Slice 226 AC-1 + AC-3 + AC-5 — `?include=state` returns a `frameworks`
 // array on every anchor. The setupHTTPServer harness loads the SCF
-// catalog + the SOC 2 v2017 crosswalk, so the IAC-06 anchor (which the
+// catalog + the SOC 2 v2017 crosswalk, so the IAC-37 anchor (which the
 // crosswalk explicitly maps) MUST carry at least `SOC2`. Anchors with
 // no satisfaction edges yet carry an empty array (NOT nil / NOT a
 // missing key — the wire shape is always `frameworks: string[]`).
@@ -359,34 +359,34 @@ func TestListAnchors_IncludeStateCarriesFrameworksColumn(t *testing.T) {
 
 	// Every anchor must carry the field — wire shape is `string[]`,
 	// never missing / null. This guards the frontend type narrowing.
-	var iac06Frameworks []string
-	var iac06Hit bool
+	var iac37Frameworks []string
+	var iac37Hit bool
 	for _, a := range got.Anchors {
 		if a.Frameworks == nil {
 			t.Errorf("anchor %s missing frameworks field (nil); want at least empty array", a.SCFID)
 		}
-		if a.SCFID == "IAC-06" {
-			iac06Hit = true
-			iac06Frameworks = a.Frameworks
+		if a.SCFID == "IAC-37" {
+			iac37Hit = true
+			iac37Frameworks = a.Frameworks
 		}
 	}
-	if !iac06Hit {
-		t.Fatal("IAC-06 not present in response — fixture drift?")
+	if !iac37Hit {
+		t.Fatal("IAC-37 not present in response — fixture drift?")
 	}
 
-	// IAC-06 (Multi-Factor Authentication) is explicitly mapped to SOC 2
+	// IAC-37 (Multi-Factor Authentication) is explicitly mapped to SOC 2
 	// in the v2017 crosswalk loaded by setupHTTPServer. Display value is
 	// `SOC2` per the framework_codes authority.
 	wantContains := "SOC2"
 	found := false
-	for _, f := range iac06Frameworks {
+	for _, f := range iac37Frameworks {
 		if f == wantContains {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("IAC-06 frameworks = %v; want to contain %q", iac06Frameworks, wantContains)
+		t.Errorf("IAC-37 frameworks = %v; want to contain %q", iac37Frameworks, wantContains)
 	}
 }
 

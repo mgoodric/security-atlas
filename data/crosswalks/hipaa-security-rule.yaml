@@ -364,10 +364,10 @@ mappings:
     strength: 0.8
     rationale: "Workforce Security (appropriate access, prevent unauthorized access) is covered by SCF Human Resources Security."
   - requirement_code: "164.308(a)(3)(ii)(A)"
-    scf_anchor: "IAC-07"
+    scf_anchor: "IAC-04"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Authorization and/or Supervision (authorize and supervise workforce that handles ePHI) overlaps SCF User Provisioning & Lifecycle; the supervision facet is broader than provisioning (MEDIUM)."
+    rationale: "Authorization and/or Supervision (authorize and supervise workforce that handles ePHI) overlaps SCF User Provisioning & De-Provisioning; the supervision facet is broader than provisioning (MEDIUM)."
   - requirement_code: "164.308(a)(3)(ii)(B)"
     scf_anchor: "HRS-01"
     relationship_type: "subset_of"
@@ -379,22 +379,22 @@ mappings:
     strength: 0.85
     rationale: "Termination Procedures map directly to the SCF Personnel Termination Process."
   - requirement_code: "164.308(a)(4)(i)"
-    scf_anchor: "IAC-07"
+    scf_anchor: "IAC-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Information Access Management (authorizing access) is covered by SCF User Provisioning & Lifecycle."
+    rationale: "Information Access Management (authorizing access) is covered by SCF User Provisioning & De-Provisioning."
   - requirement_code: "164.308(a)(4)(ii)(A)"
     scf_anchor: "NET-06"
     relationship_type: "intersects_with"
     strength: 0.65
     rationale: "Slice 567 re-point (was DCH-01 @ 0.55). Isolating Health Care Clearinghouse Functions is structural isolation of the clearinghouse's ePHI from the larger organization — a segmentation control, not a data-classification one. NET-06 Network Segmentation is the closer concept, though the HIPAA obligation is organizational as well as technical, so the fit stays partial. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 2."
   - requirement_code: "164.308(a)(4)(ii)(B)"
-    scf_anchor: "IAC-07"
+    scf_anchor: "IAC-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Access Authorization (granting access to a workstation/transaction/program/process) is covered by SCF User Provisioning & Lifecycle."
+    rationale: "Access Authorization (granting access to a workstation/transaction/program/process) is covered by SCF User Provisioning & De-Provisioning."
   - requirement_code: "164.308(a)(4)(ii)(C)"
-    scf_anchor: "IAC-15"
+    scf_anchor: "IAC-12"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Access Establishment and Modification (establish/review/modify access rights) overlaps SCF Account Review; provisioning facet sits elsewhere (MEDIUM)."
@@ -419,10 +419,10 @@ mappings:
     strength: 0.7
     rationale: "Log-in Monitoring (monitor log-in attempts, report discrepancies) overlaps SCF Anomalous Behavior Detection; broader correlation gap (MEDIUM)."
   - requirement_code: "164.308(a)(5)(ii)(D)"
-    scf_anchor: "IAC-10"
+    scf_anchor: "IAC-14"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Password Management (procedures for creating, changing, and safeguarding passwords) IS authenticator management; IAC-01 is the domain policy head that sits above it. IAC-10 Authenticator Management is the requirement's direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 3."
+    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Password Management (procedures for creating, changing, and safeguarding passwords) IS authenticator management; IAC-01 is the domain policy head that sits above it. IAC-14 Authenticator Management is the requirement's direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 3."
   - requirement_code: "164.308(a)(6)(i)"
     scf_anchor: "IRO-04"
     relationship_type: "subset_of"
@@ -549,20 +549,20 @@ mappings:
     strength: 0.9
     rationale: "Technical Access Control (only authorized persons/programs access ePHI) maps directly to SCF Identification & Authentication Policy (five-framework shared anchor)."
   - requirement_code: "164.312(a)(2)(i)"
-    scf_anchor: "IAC-07"
+    scf_anchor: "IAC-04"
     relationship_type: "intersects_with"
     strength: 0.75
-    rationale: "Unique User Identification strongly overlaps SCF User Provisioning & Lifecycle (unique identity is a provisioning outcome)."
+    rationale: "Unique User Identification strongly overlaps SCF User Provisioning & De-Provisioning (unique identity is a provisioning outcome)."
   - requirement_code: "164.312(a)(2)(ii)"
-    scf_anchor: "IAC-24"
+    scf_anchor: "IAC-11"
     relationship_type: "equal"
     strength: 0.8
-    rationale: "Slice 567 re-point (was IAC-21 @ 0.60). Emergency Access Procedure (procedures for obtaining necessary ePHI during an emergency) IS the break-glass control; privileged-account management was the covering anchor only because no break-glass anchor existed. IAC-24 Emergency Access (Break-Glass) Accounts is the direct equivalent. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 9."
+    rationale: "Slice 567 re-point (was IAC-10 @ 0.60). Emergency Access Procedure (procedures for obtaining necessary ePHI during an emergency) IS the break-glass control; privileged-account management was the covering anchor only because no break-glass anchor existed. IAC-11 Emergency Accounts is the direct equivalent. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 9."
   - requirement_code: "164.312(a)(2)(iii)"
-    scf_anchor: "IAC-25"
+    scf_anchor: "CFG-04.5"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Automatic Logoff (electronic procedures that terminate an electronic session after a predetermined time of inactivity) IS session termination; IAC-01, the domain policy head, badly over-covered it. IAC-25 Session Termination is the direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 10."
+    rationale: "Slice 567 re-point (was IAC-01 @ 0.60). Automatic Logoff (electronic procedures that terminate an electronic session after a predetermined time of inactivity) IS session termination; IAC-01, the domain policy head, badly over-covered it. CFG-04.5 Session Termination is the direct equivalent. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 10."
   - requirement_code: "164.312(a)(2)(iv)"
     scf_anchor: "CRY-04"
     relationship_type: "equal"

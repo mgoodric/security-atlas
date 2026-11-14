@@ -174,7 +174,7 @@ func TestList_PopulatedTenant(t *testing.T) {
 	app := dbtest.NewAppPool(t)
 
 	tenant := dbtest.SeedTenant(t, admin, "controls")
-	anchor := insertAnchor(t, admin, "IAC-06", "Identity & Access Mgmt")
+	anchor := insertAnchor(t, admin, "IAC-37", "Identity & Access Mgmt")
 	want1 := insertControl(t, admin, tenant, anchor, "Access review quarterly", "Identity & Access Mgmt", "ctrl-iac-06")
 	want2 := insertControl(t, admin, tenant, anchor, "MFA enforced", "Identity & Access Mgmt", "ctrl-iac-06-mfa")
 
@@ -217,7 +217,7 @@ func TestList_TenantIsolation(t *testing.T) {
 
 	tenantA := dbtest.SeedTenant(t, admin, "controls")
 	tenantB := dbtest.SeedTenant(t, admin, "controls")
-	anchor := insertAnchor(t, admin, "IAC-06", "Identity & Access Mgmt")
+	anchor := insertAnchor(t, admin, "IAC-37", "Identity & Access Mgmt")
 	tenantAControl := insertControl(t, admin, tenantA, anchor, "Tenant A only", "Identity & Access Mgmt", "ctrl-iac-06-a")
 
 	rr := callList(t, app, tenantB)

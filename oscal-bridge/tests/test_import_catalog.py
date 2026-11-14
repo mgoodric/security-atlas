@@ -41,12 +41,12 @@ def test_import_valid_catalog():
     assert result.oscal_version == "1.1.2"
     assert result.catalog_title == "Minimal Test Catalog"
     ids = {c.control_id for c in result.controls}
-    assert ids == {"ac-1", "ac-2", "IAC-06"}
+    assert ids == {"ac-1", "ac-2", "IAC-37"}
     # Group path provenance is carried.
     assert all(c.group_path == "Access Control" for c in result.controls)
     # Statement prose is flattened, not empty.
     by_id = {c.control_id: c for c in result.controls}
-    assert "multi-factor authentication" in by_id["IAC-06"].statement.lower()
+    assert "multi-factor authentication" in by_id["IAC-37"].statement.lower()
 
 
 def test_import_malformed_catalog_is_rejected():
@@ -116,7 +116,7 @@ def test_import_catalog_rpc_valid(bridge_channel):
     assert resp.valid, list(resp.errors)
     assert resp.oscal_version == "1.1.2"
     assert resp.source_label == "NIST 800-53 test"
-    assert {c.control_id for c in resp.controls} == {"ac-1", "ac-2", "IAC-06"}
+    assert {c.control_id for c in resp.controls} == {"ac-1", "ac-2", "IAC-37"}
 
 
 def test_import_catalog_rpc_malformed(bridge_channel):

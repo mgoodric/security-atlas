@@ -299,7 +299,7 @@ func TestHandleAnchorRefControlFallsBackToNil(t *testing.T) {
 	creator := &fakeCreator{}
 	s := newTestSubscriber(creator)
 	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	msg := buildWorkerMsg(t, terminatedWorker(now, now.Add(-24*time.Hour)), "scf:IAC-07", uuid.NewString())
+	msg := buildWorkerMsg(t, terminatedWorker(now, now.Add(-24*time.Hour)), "scf:IAC-04", uuid.NewString())
 	s.handle(context.Background(), msg)
 	if creator.callCount() != 1 {
 		t.Fatalf("store calls = %d, want 1", creator.callCount())

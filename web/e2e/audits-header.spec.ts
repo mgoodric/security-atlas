@@ -139,7 +139,7 @@ test.describe("topbar header chrome (slice 213)", () => {
             },
             {
               id: "00000000-0000-0000-0000-000000000002",
-              scf_id: "IAC-06",
+              scf_id: "IAC-37",
               title: "MFA",
             },
           ],

@@ -57,7 +57,7 @@ func TestLoadWorkbook_PublishedLayout(t *testing.T) {
 	t.Parallel()
 	sheets, order := publishedLayout(
 		[]interface{}{"Cybersecurity & Data Protection Governance", "Cybersecurity & Data Protection Governance Program", "GOV-01", "Mechanisms exist to facilitate governance.", "Annual"},
-		[]interface{}{"Identification & Authentication", "Multi-Factor Authentication (MFA)", "IAC-06", "Mechanisms exist to require MFA.", "Annual"},
+		[]interface{}{"Identification & Authentication", "Multi-Factor Authentication (MFA)", "IAC-37", "Mechanisms exist to require MFA.", "Annual"},
 		[]interface{}{"", "", "", "", ""},
 	)
 	cat, err := LoadWorkbook(writeWorkbook(t, sheets, order), WorkbookOptions{ReleaseDate: "2026-09-30"})
@@ -69,7 +69,7 @@ func TestLoadWorkbook_PublishedLayout(t *testing.T) {
 	}
 	want := []Control{
 		{SCFID: "GOV-01", Family: "GOV", Title: "Cybersecurity & Data Protection Governance Program", Description: "Mechanisms exist to facilitate governance."},
-		{SCFID: "IAC-06", Family: "IAC", Title: "Multi-Factor Authentication (MFA)", Description: "Mechanisms exist to require MFA."},
+		{SCFID: "IAC-37", Family: "IAC", Title: "Multi-Factor Authentication (MFA)", Description: "Mechanisms exist to require MFA."},
 	}
 	if len(cat.Controls) != len(want) {
 		t.Fatalf("controls = %+v", cat.Controls)

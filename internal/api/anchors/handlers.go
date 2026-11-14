@@ -314,7 +314,7 @@ func includesState(r *http.Request) bool {
 }
 
 // getAnchor returns one anchor. `:id` may be a UUID or an scf_id
-// (e.g., "IAC-06"); scf_id resolves against the current SCF version.
+// (e.g., "IAC-37"); scf_id resolves against the current SCF version.
 func (h *Handler) getAnchor(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	anchor, ok, err := h.lookupAnchor(r.Context(), id)

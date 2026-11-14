@@ -51,7 +51,7 @@ describe("GET /api/anchors/export", () => {
   test("forwards bearer + query string verbatim on happy path", async () => {
     cookieStore.set(ATLAS_JWT_COOKIE, "test-bearer-token");
     const csvBody =
-      "id,scf_id,family,title\n11111111-1111-1111-1111-111111111111,IAC-06,iam,MFA\n";
+      "id,scf_id,family,title\n11111111-1111-1111-1111-111111111111,IAC-37,iam,MFA\n";
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
       new Response(csvBody, {
         status: 200,

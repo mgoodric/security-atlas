@@ -35,7 +35,7 @@ func scopeValue(dims []*evidencev1.ScopeDimension, key string) string {
 
 func TestBuild_Shape(t *testing.T) {
 	t.Parallel()
-	rec, err := Build(sampleConfig(), "scf:IAC-06", "connector:grafana:ssoconfig@dev", "grafana", "prod")
+	rec, err := Build(sampleConfig(), "scf:IAC-37", "connector:grafana:ssoconfig@dev", "grafana", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestBuild_OmitsEmptyProviders(t *testing.T) {
 	t.Parallel()
 	cfg := sampleConfig()
 	cfg.Providers = nil
-	rec, _ := Build(cfg, "scf:IAC-06", "a", "grafana", "prod")
+	rec, _ := Build(cfg, "scf:IAC-37", "a", "grafana", "prod")
 	if _, ok := rec.GetPayload().AsMap()["sso_providers"]; ok {
 		t.Error("empty sso_providers should be omitted")
 	}
@@ -86,7 +86,7 @@ func TestBuild_OmitsEmptyRoleMappings(t *testing.T) {
 	t.Parallel()
 	cfg := sampleConfig()
 	cfg.Providers = []Provider{{Type: "saml", Enabled: true}} // no mappings
-	rec, _ := Build(cfg, "scf:IAC-06", "a", "grafana", "prod")
+	rec, _ := Build(cfg, "scf:IAC-37", "a", "grafana", "prod")
 	providers, _ := rec.GetPayload().AsMap()["sso_providers"].([]any)
 	if len(providers) != 1 {
 		t.Fatalf("providers = %d; want 1", len(providers))
@@ -114,7 +114,7 @@ func TestBuild_PayloadIsConfigOnly(t *testing.T) {
 		"private", "secret", "password", "passwd", "certificate", "cert",
 		"key", "email", "login", "username", "credential", "principal", "bind",
 	}
-	rec, _ := Build(sampleConfig(), "scf:IAC-06", "a", "grafana", "prod")
+	rec, _ := Build(sampleConfig(), "scf:IAC-37", "a", "grafana", "prod")
 	pl := rec.GetPayload().AsMap()
 	for k := range pl {
 		if !allowedTop[k] {

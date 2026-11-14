@@ -81,7 +81,7 @@ func startBridge(t *testing.T) (string, func()) {
 
 // seedCurrentSCFAnchor seeds a minimal 'scf'-slug framework with a CURRENT
 // version carrying one anchor whose scf_id matches a control id in the
-// resolved profile ("IAC-06"). Proves the deterministic requirement -> SCF
+// resolved profile ("IAC-37"). Proves the deterministic requirement -> SCF
 // anchor mapping (slice-511 D3). scf_anchors is global — seeded idempotently.
 func seedCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool, scfID string) {
 	t.Helper()
@@ -128,7 +128,7 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	seedCurrentSCFAnchor(t, admin, "IAC-06")
+	seedCurrentSCFAnchor(t, admin, "IAC-37")
 
 	addr, stop := startBridge(t)
 	defer stop()
@@ -149,13 +149,13 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	// include-controls selected exactly ac-1, ac-2, IAC-06 (NOT ac-3).
+	// include-controls selected exactly ac-1, ac-2, IAC-37 (NOT ac-3).
 	if report.ControlCount != 3 {
-		t.Errorf("ControlCount = %d, want 3 (import selected ac-1, ac-2, IAC-06)", report.ControlCount)
+		t.Errorf("ControlCount = %d, want 3 (import selected ac-1, ac-2, IAC-37)", report.ControlCount)
 	}
-	// IAC-06 deterministically matched the seeded SCF anchor (D3).
+	// IAC-37 deterministically matched the seeded SCF anchor (D3).
 	if report.MappedCount != 1 {
-		t.Errorf("MappedCount = %d, want 1 (IAC-06 -> SCF anchor)", report.MappedCount)
+		t.Errorf("MappedCount = %d, want 1 (IAC-37 -> SCF anchor)", report.MappedCount)
 	}
 	// The entry profile's declared oscal-version, not the resolver's stamp.
 	if report.OSCALVersion != "1.1.2" {
@@ -190,7 +190,7 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 		t.Errorf("source_sha256 = %q (report %q)", sha, report.SourceSha256)
 	}
 
-	// IAC-06 control mapped to the SCF anchor; the other two are NULL.
+	// IAC-37 control mapped to the SCF anchor; the other two are NULL.
 	var mapped, total int
 	if err := admin.QueryRow(ctx,
 		`SELECT count(*) FILTER (WHERE scf_anchor_id IS NOT NULL), count(*)
@@ -204,12 +204,12 @@ func TestImportProfile_ResolvesEndToEnd(t *testing.T) {
 	var anchorID *string
 	if err := admin.QueryRow(ctx,
 		`SELECT scf_anchor_id FROM imported_catalog_controls
-		 WHERE imported_catalog_id = $1 AND source_control_id = 'IAC-06'`,
+		 WHERE imported_catalog_id = $1 AND source_control_id = 'IAC-37'`,
 		report.ProfileID).Scan(&anchorID); err != nil {
-		t.Fatalf("read IAC-06 mapping: %v", err)
+		t.Fatalf("read IAC-37 mapping: %v", err)
 	}
-	if anchorID == nil || *anchorID != "IAC-06" {
-		t.Errorf("IAC-06 scf_anchor_id = %v, want IAC-06 (requirement -> SCF anchor)", anchorID)
+	if anchorID == nil || *anchorID != "IAC-37" {
+		t.Errorf("IAC-37 scf_anchor_id = %v, want IAC-37 (requirement -> SCF anchor)", anchorID)
 	}
 	// ac-3 was NOT selected by the import directive.
 	var ac3Count int
@@ -341,7 +341,7 @@ func TestImportProfile_ChainedResolvesEndToEnd(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	seedCurrentSCFAnchor(t, admin, "IAC-06")
+	seedCurrentSCFAnchor(t, admin, "IAC-37")
 
 	addr, stop := startBridge(t)
 	defer stop()
@@ -364,13 +364,13 @@ func TestImportProfile_ChainedResolvesEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import (chained): %v", err)
 	}
-	// The entry narrowed the intermediate (ac-1, ac-2, ac-3, IAC-06) down to
-	// ac-1, ac-2, IAC-06.
+	// The entry narrowed the intermediate (ac-1, ac-2, ac-3, IAC-37) down to
+	// ac-1, ac-2, IAC-37.
 	if report.ControlCount != 3 {
 		t.Errorf("ControlCount = %d, want 3 (entry narrowed the chain)", report.ControlCount)
 	}
 	if report.MappedCount != 1 {
-		t.Errorf("MappedCount = %d, want 1 (IAC-06 -> SCF anchor)", report.MappedCount)
+		t.Errorf("MappedCount = %d, want 1 (IAC-37 -> SCF anchor)", report.MappedCount)
 	}
 
 	ctx := context.Background()

@@ -11,7 +11,7 @@ func TestValidateStructural_AcceptsMinimal(t *testing.T) {
 		BundleSchemaVersion: "1",
 		BundleID:            "minimal_control",
 		Title:               "Minimal control",
-		SCFAnchorID:         "IAC-06",
+		SCFAnchorID:         "IAC-37",
 		ImplementationType:  "automated",
 	}
 	if err := m.ValidateStructural(); err != nil {
@@ -42,7 +42,7 @@ func TestValidateStructural_RejectsBadImplementationType(t *testing.T) {
 		BundleSchemaVersion: "1",
 		BundleID:            "bad_impl",
 		Title:               "Bad impl",
-		SCFAnchorID:         "IAC-06",
+		SCFAnchorID:         "IAC-37",
 		ImplementationType:  "vibes-based",
 	}
 	err := m.ValidateStructural()
@@ -60,7 +60,7 @@ func TestValidateStructural_RejectsBadBundleSchemaVersion(t *testing.T) {
 		BundleSchemaVersion: "2",
 		BundleID:            "future",
 		Title:               "Future",
-		SCFAnchorID:         "IAC-06",
+		SCFAnchorID:         "IAC-37",
 		ImplementationType:  "automated",
 	}
 	if err := m.ValidateStructural(); err == nil {
@@ -80,7 +80,7 @@ func TestValidateStructural_RejectsBadBundleIDPattern(t *testing.T) {
 			BundleSchemaVersion: "1",
 			BundleID:            bad,
 			Title:               "x",
-			SCFAnchorID:         "IAC-06",
+			SCFAnchorID:         "IAC-37",
 			ImplementationType:  "automated",
 		}
 		if err := m.ValidateStructural(); err == nil {
@@ -95,7 +95,7 @@ func TestValidateStructural_RejectsDuplicateQueryIDs(t *testing.T) {
 		BundleSchemaVersion: "1",
 		BundleID:            "dupe",
 		Title:               "Dupe",
-		SCFAnchorID:         "IAC-06",
+		SCFAnchorID:         "IAC-37",
 		ImplementationType:  "automated",
 		EvidenceQueries: []EvidenceQuery{
 			{ID: "query_one", Language: "rego", Expression: "package x"},
@@ -114,7 +114,7 @@ func TestValidateStructural_RejectsUnknownQueryLanguage(t *testing.T) {
 		BundleSchemaVersion: "1",
 		BundleID:            "lang",
 		Title:               "Lang",
-		SCFAnchorID:         "IAC-06",
+		SCFAnchorID:         "IAC-37",
 		ImplementationType:  "automated",
 		EvidenceQueries: []EvidenceQuery{
 			{ID: "query_one", Language: "english", Expression: "is it good"},

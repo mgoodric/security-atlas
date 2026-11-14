@@ -59,7 +59,7 @@ const CONTROL_TITLE = "AcmeVault secret rotation — production credentials";
 const RISK_TITLE = "AcmeVault credential sprawl";
 // The endpoint synthesizes the evidence label as
 // "<evidence_kind> · <control_ref>" (internal/api/search/search.go).
-const EVIDENCE_TITLE = "acmevault.secret_rotation.v1 · IAC-10";
+const EVIDENCE_TITLE = "acmevault.secret_rotation.v1 · IAC-14";
 
 // The query the operator types. Lower-case on purpose — the match is
 // ILIKE, so this also pins case-insensitivity through the whole path.

@@ -29,7 +29,7 @@ NIST IR 8477 defines five relationship types, each with a strength score 0.0–1
 | `subset_of`       | Source is fully covered by target.                                            | `ISO27001:A.9.4.2 subset_of SCF:IAC-22`              |
 | `superset_of`     | Source covers more than target.                                               | `SCF:IAC-01 superset_of SOC2:CC6.1` (SCF is broader) |
 | `intersects_with` | Partial overlap.                                                              | `PCI:8.3 intersects_with HIPAA:164.312(d)`           |
-| `equal`           | Logically equivalent.                                                         | `NIST_800_53:AC-2 equal SCF:IAC-15`                  |
+| `equal`           | Logically equivalent.                                                         | `NIST_800_53:AC-2 equal SCF:IAC-12`                  |
 | `no_relationship` | Confirmed _no_ overlap. (Yes, this is data; it suppresses false suggestions.) |                                                      |
 
 A **strength** field captures auditor judgment: `(equal, 1.0)` is full confidence; `(intersects_with, 0.4)` flags partial coverage that needs supplemental evidence.

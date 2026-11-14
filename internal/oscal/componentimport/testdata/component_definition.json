@@ -21,11 +21,11 @@
             "implemented-requirements": [
               {
                 "uuid": "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
-                "control-id": "IAC-06",
+                "control-id": "IAC-37",
                 "description": "Acme enforces phishing-resistant MFA on every administrative session.",
                 "statements": [
                   {
-                    "statement-id": "IAC-06_smt",
+                    "statement-id": "IAC-37_smt",
                     "uuid": "11112222-3333-4444-8555-666677778888",
                     "description": "FIDO2/WebAuthn is required for all privileged roles."
                   }

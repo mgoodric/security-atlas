@@ -208,7 +208,7 @@ func (s *WorkerEventSubscriber) handle(ctx context.Context, msg jetstream.Msg) {
 	}
 	// Control resolution (OE-661 decision D2): pass through the control the
 	// connector operator bound the roster to when it is a control UUID;
-	// otherwise (SCF-anchor ref such as "scf:IAC-07", or empty) fall back to
+	// otherwise (SCF-anchor ref such as "scf:IAC-04", or empty) fall back to
 	// a nil control — the checklist's completion evidence then carries
 	// DefaultControlRef, exactly like a manual checklist without a control.
 	controlID, err := uuid.Parse(strings.TrimSpace(rec.ControlId))

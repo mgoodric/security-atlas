@@ -2,7 +2,7 @@ bundle_schema_version: "1"
 bundle_id: jsonpath_encrypted_test
 title: "Every bucket payload reports encrypted=true (JSON-path)"
 description: "A JSON-path evidence query over each record's payload."
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 control_family: IAC
 owner_role: security-engineering
