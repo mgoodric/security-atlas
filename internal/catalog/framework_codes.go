@@ -112,3 +112,4 @@ func defaultDisplayCode(slug string) string {
 	}
 	return string(out)
 }
+// #2099 throwaway demo: Go-only change
