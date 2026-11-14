@@ -102,6 +102,7 @@ sql:
       - "migrations/sql/20260822000000_framework_scope_applicability.sql"
       - "migrations/sql/20260825000000_controls_external_refs.sql"
       - "migrations/sql/20260903000000_policy_review_dates.sql"
+      - "migrations/sql/20260904000000_control_anchor_fit.sql"
       - "migrations/sql/20260906000000_framework_requirement_points_of_focus.sql"
       - "migrations/sql/20260911000000_mcp_risk_link_tools.sql"
       - "migrations/sql/20260920000000_oidc_identity_link_audit.sql"
