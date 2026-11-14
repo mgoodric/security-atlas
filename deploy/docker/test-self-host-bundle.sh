@@ -378,9 +378,12 @@ log "polling evidence_kind_schemas existence (sentinel of forward migrations com
 # before the matching ledger row's INSERT.
 SCHEMA_READY=""
 for i in $(seq 1 120); do
-    if "${COMPOSE[@]}" exec -T postgres psql -U postgres -d security_atlas -t -A \
-        -c "SELECT to_regclass('public.evidence_kind_schemas') IS NOT NULL" 2>/dev/null \
-        | tr -d '[:space:]' | grep -qx 't'; then
+    # security-atlas#1940: capture output before testing it. Under pipefail,
+    # piping into a quiet grep fails when grep exits on its first match and
+    # the writer takes SIGPIPE. Same pattern for every check below.
+    SCHEMA_PROBE="$("${COMPOSE[@]}" exec -T postgres psql -U postgres -d security_atlas -t -A \
+        -c "SELECT to_regclass('public.evidence_kind_schemas') IS NOT NULL" 2>/dev/null || true)"
+    if [ "${SCHEMA_PROBE//[[:space:]]/}" = "t" ]; then
         SCHEMA_READY=1
         break
     fi
@@ -416,14 +419,16 @@ fi
 OPTIN_CMD="docker compose ${OPTIN_ARGS} run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/iso27001-2022.yaml"
 PHASE4_SEEN=""
 for i in $(seq 1 60); do
-    if "${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 | grep -qF "waiting for atlas /health"; then
+    BOOTSTRAP_LOG="$("${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 || true)"
+    if grep -qF -- "waiting for atlas /health" <<<"${BOOTSTRAP_LOG}"; then
         PHASE4_SEEN=1
         break
     fi
     sleep 2
 done
 [ -n "${PHASE4_SEEN}" ] || fail "atlas-bootstrap did not reach phase 4 within ~2 min of stage-1 migrations"
-"${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 | grep -qF -- "${OPTIN_CMD}" \
+BOOTSTRAP_LOG="$("${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1)"
+grep -qF -- "${OPTIN_CMD}" <<<"${BOOTSTRAP_LOG}" \
     || fail "first-boot bootstrap log lacks the opt-in command: ${OPTIN_CMD}"
 log "first boot printed the repo-root opt-in crosswalk commands"
 
@@ -938,7 +943,7 @@ SQL
     set -e
     printf '%s\n' "${MIGRATE2_OUT}"
     [ "${MIGRATE2_RC}" = "0" ] || fail "AC-7: second atlas-migrate run exited ${MIGRATE2_RC}, want 0"
-    printf '%s' "${MIGRATE2_OUT}" | grep -q "schema current" \
+    grep -qF -- "schema current" <<<"${MIGRATE2_OUT}" \
         || fail "AC-7: second migrate run did not log the 'schema current' idempotent no-op line"
     CONTROLS_FINAL="$(db_count 'SELECT count(*) FROM controls')"
     USERS_FINAL="$(db_count 'SELECT count(*) FROM users')"
