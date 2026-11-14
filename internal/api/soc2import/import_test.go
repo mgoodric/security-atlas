@@ -167,7 +167,7 @@ func TestImport_SCFWorkbookCreatesCommunityDraftEdges(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)
 	resetFrameworkCatalog(t, pool, "general-example-standard-2026")
 	ensureSCFLoaded(t, pool)
-	cw, err := soc2import.LoadSCFWorkbook(writeWideSCFWorkbook(t), soc2import.SCFWorkbookOptions{})
+	cw, err := soc2import.LoadSCFWorkbook(writeWideSCFWorkbook(t), soc2import.SCFWorkbookOptions{AllowCodeTitles: true})
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}
