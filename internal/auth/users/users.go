@@ -174,10 +174,30 @@ type UpsertOIDCInput struct {
 	DisplayName string
 	Issuer      string
 	Subject     string
+	// EmailVerified is the ID token's email_verified claim; nil when the IdP
+	// omits it. Only an explicit false blocks the email link (#1944).
+	EmailVerified *bool
+}
+
+// ErrIdentityConflict is returned by UpsertOIDC when the sign-in's email
+// already belongs to a same-tenant user it may not link to: one bound to a
+// different IdP principal, or an unbound one while the IdP says the email is
+// unverified (#1944). The callback refuses the sign-in.
+var ErrIdentityConflict = errors.New("users: email belongs to another identity")
+
+// emailLinkAllowed reports whether an OIDC sign-in may claim an existing row
+// by email. An explicit email_verified=false refuses; an absent claim links,
+// because some IdPs (Entra ID) never send it and the IdP is the tenant's own
+// configured one (decisions: docs/audit-log/1944-oidc-scim-email-link-decisions.md).
+func emailLinkAllowed(verified *bool) bool {
+	return verified == nil || *verified
 }
 
 // UpsertOIDC provisions-or-updates the user keyed on (idp_issuer, idp_subject).
-// Returns the resulting row.
+// On first sign-in it links to a same-tenant row with the same email and an
+// empty idp tuple (a SCIM-provisioned user, #1944) instead of inserting.
+// Returns the resulting row, or ErrIdentityConflict when the email belongs to
+// a row it may not link to.
 func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error) {
 	if in.Issuer == "" || in.Subject == "" {
 		return User{}, fmt.Errorf("users: UpsertOIDC requires non-empty issuer + subject")
@@ -194,6 +214,36 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 
 	id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 	tIDU := pgtype.UUID{Bytes: in.TenantID, Valid: true}
+	if emailLinkAllowed(in.EmailVerified) {
+		linked, err := q.LinkUserIdpByEmail(ctx, dbx.LinkUserIdpByEmailParams{
+			IdpIssuer:   in.Issuer,
+			IdpSubject:  in.Subject,
+			DisplayName: in.DisplayName,
+			TenantID:    tIDU,
+			Email:       in.Email,
+		})
+		switch {
+		case err == nil:
+			if err := tx.Commit(ctx); err != nil {
+				return User{}, err
+			}
+			return userFromRow(linked), nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return User{}, fmt.Errorf("users: link OIDC by email: %w", err)
+		}
+	}
+	taken, err := q.OIDCFirstSignInEmailTaken(ctx, dbx.OIDCFirstSignInEmailTakenParams{
+		TenantID:   tIDU,
+		Email:      in.Email,
+		IdpIssuer:  in.Issuer,
+		IdpSubject: in.Subject,
+	})
+	if err != nil {
+		return User{}, fmt.Errorf("users: check OIDC email: %w", err)
+	}
+	if taken {
+		return User{}, ErrIdentityConflict
+	}
 	row, err := q.UpsertUserByIdpSubject(ctx, dbx.UpsertUserByIdpSubjectParams{
 		ID:          id,
 		TenantID:    tIDU,
@@ -204,6 +254,11 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 		IdpSubject:  in.Subject,
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation &&
+			pgErr.ConstraintName == "users_email_per_tenant_unique" {
+			return User{}, ErrIdentityConflict
+		}
 		return User{}, fmt.Errorf("users: upsert OIDC: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {

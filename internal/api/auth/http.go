@@ -395,12 +395,23 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		ctx = bootCtx
 	} else {
 		usr, err = h.users.UpsertOIDC(ctx, users.UpsertOIDCInput{
-			TenantID:    result.TenantID,
-			Email:       result.Email,
-			DisplayName: result.DisplayName,
-			Issuer:      result.Issuer,
-			Subject:     result.Subject,
+			TenantID:      result.TenantID,
+			Email:         result.Email,
+			DisplayName:   result.DisplayName,
+			Issuer:        result.Issuer,
+			Subject:       result.Subject,
+			EmailVerified: result.EmailVerified,
 		})
+		if errors.Is(err, users.ErrIdentityConflict) {
+			// #1944: the email is held by a user bound to another IdP
+			// principal, or the IdP says it is unverified. Refuse like a
+			// deactivated user; the reason stays in the server log.
+			slog.WarnContext(r.Context(), "oidc sign-in refused: email held by another identity",
+				"idp_issuer", result.Issuer)
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
 		if err != nil {
 			writeAuthError(w, http.StatusInternalServerError, "user upsert: "+err.Error())
 			return

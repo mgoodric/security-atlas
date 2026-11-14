@@ -49,6 +49,8 @@ type fakeIdP struct {
 	signer jose.Signer
 	pub    *rsa.PublicKey
 	nonce  string
+	// emailVerified, when non-nil, is sent as the email_verified claim.
+	emailVerified any
 }
 
 func newFakeIdP(t *testing.T) *fakeIdP {
@@ -86,7 +88,7 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 		}})
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
-		tok, err := jwt.Signed(f.signer).Claims(map[string]any{
+		claims := map[string]any{
 			"iss":   f.srv.URL,
 			"sub":   "oidc-founder",
 			"aud":   fakeClientID,
@@ -95,7 +97,11 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 			"email": "founder@example.com",
 			"name":  "Founder",
 			"nonce": f.nonce,
-		}).Serialize()
+		}
+		if f.emailVerified != nil {
+			claims["email_verified"] = f.emailVerified
+		}
+		tok, err := jwt.Signed(f.signer).Claims(claims).Serialize()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return

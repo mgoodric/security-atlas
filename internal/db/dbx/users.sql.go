@@ -127,6 +127,107 @@ func (q *Queries) GetUserByID(ctx context.Context, arg GetUserByIDParams) (User,
 	return i, err
 }
 
+const linkUserIdpByEmail = `-- name: LinkUserIdpByEmail :one
+UPDATE users
+SET idp_issuer   = $1,
+    idp_subject  = $2,
+    display_name = $3,
+    updated_at   = now()
+WHERE users.tenant_id = $4
+  AND lower(users.email) = lower($5::text)
+  AND users.idp_issuer = ''
+  AND users.idp_subject = ''
+  AND NOT EXISTS (
+      SELECT 1 FROM users u
+      WHERE u.tenant_id = $4
+        AND u.idp_issuer = $1
+        AND u.idp_subject = $2
+  )
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+`
+
+type LinkUserIdpByEmailParams struct {
+	IdpIssuer   string      `json:"idp_issuer"`
+	IdpSubject  string      `json:"idp_subject"`
+	DisplayName string      `json:"display_name"`
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	Email       string      `json:"email"`
+}
+
+// #1944: first OIDC sign-in for a user SCIM (or local mode) already created.
+// Binds the IdP principal to the same-tenant row with the same email
+// (case-insensitive, matching GetSCIMUserByEmail) ONLY while that row's idp
+// tuple is empty, so a row already bound to another principal is never
+// re-linked. The NOT EXISTS keeps a returning user on their own row. Status
+// and active are left untouched: a deprovisioned row stays refused.
+func (q *Queries) LinkUserIdpByEmail(ctx context.Context, arg LinkUserIdpByEmailParams) (User, error) {
+	row := q.db.QueryRow(ctx, linkUserIdpByEmail,
+		arg.IdpIssuer,
+		arg.IdpSubject,
+		arg.DisplayName,
+		arg.TenantID,
+		arg.Email,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Email,
+		&i.DisplayName,
+		&i.Status,
+		&i.IdpIssuer,
+		&i.IdpSubject,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TimeZone,
+		&i.Active,
+		&i.ScimExternalID,
+		&i.ScimManaged,
+	)
+	return i, err
+}
+
+const oIDCFirstSignInEmailTaken = `-- name: OIDCFirstSignInEmailTaken :one
+SELECT (
+    EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.tenant_id = $1
+          AND lower(u.email) = lower($2::text)
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.tenant_id = $1
+          AND u.idp_issuer = $3
+          AND u.idp_subject = $4
+    )
+)::boolean AS taken
+`
+
+type OIDCFirstSignInEmailTakenParams struct {
+	TenantID   pgtype.UUID `json:"tenant_id"`
+	Email      string      `json:"email"`
+	IdpIssuer  string      `json:"idp_issuer"`
+	IdpSubject string      `json:"idp_subject"`
+}
+
+// #1944: true when this IdP principal has no row yet but another same-tenant
+// row holds the email (case-insensitive). UpsertOIDC asks only after
+// LinkUserIdpByEmail declined, so that row is bound to another principal or
+// the link was refused; the sign-in must not mint a second user for the
+// email. users_email_per_tenant_unique is case-sensitive and would miss a
+// case variant. A returning principal is never refused here.
+func (q *Queries) OIDCFirstSignInEmailTaken(ctx context.Context, arg OIDCFirstSignInEmailTakenParams) (bool, error) {
+	row := q.db.QueryRow(ctx, oIDCFirstSignInEmailTaken,
+		arg.TenantID,
+		arg.Email,
+		arg.IdpIssuer,
+		arg.IdpSubject,
+	)
+	var taken bool
+	err := row.Scan(&taken)
+	return taken, err
+}
+
 const updateUserProfile = `-- name: UpdateUserProfile :one
 UPDATE users
 SET display_name = $3,
