@@ -272,7 +272,7 @@ P0 anti-criteria: anonymous ack rejected (slice 034 cred required); stale acks n
 ## Tenancy (ADR 0023)
 
 - **Tenant** — the isolation boundary for all organisation data. Every control, risk, piece of evidence, policy and setting that belongs to an organisation belongs to exactly one tenant, and no tenant can see another's. Shared catalog data (frameworks, SCF anchors, crosswalk mappings) belongs to no tenant. In user-facing copy on a single-tenant install, the tenant is "your organisation".
-- **Single-tenant install** — an install that holds exactly one tenant: the default, and how almost every adopter runs security-atlas. Nobody chooses, enters or sees a tenant; everything happens in the bootstrap tenant.
+- **Single-tenant install** — an install that holds exactly one tenant: the default, and how almost every adopter runs security-atlas. It is meant to be one where nobody chooses, enters or sees a tenant and everything happens in the bootstrap tenant; parts of the CLI and admin UI still ask for a tenant ID until #1758 is complete.
 - **Multi-tenant install** — an install that holds two or more tenants, so users choose which organisation they are working in. An operator opts into it deliberately; once an install is multi-tenant it does not go back.
 - **Bootstrap tenant** — the one tenant created when the install is first set up. On a single-tenant install it is the organisation; on a multi-tenant install it is the first of several.
 

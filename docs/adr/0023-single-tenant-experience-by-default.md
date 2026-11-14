@@ -18,22 +18,25 @@
 
 OQ #13 resolved to build multi-tenant from day one: the solo operator runs a single-tenant deployment of the multi-tenant system, and "the UI MAY hide tenant chrome when `tenant_count == 1`, but the data model and authz never branch on tenant count." The foundation held: every organisation-data table has row-level security, and isolation is checked in CI and by ISA probes.
 
-The second half, hiding the tenant chrome, was never finished. Almost every adopter runs security-atlas for one organisation and still meets tenancy at every edge:
+The second half, hiding the tenant chrome, was never finished. Almost every adopter runs security-atlas for one organisation, and when the spec was written they met tenancy at every edge:
 
-- local and OIDC sign-in need a `tenant_id`, and `/login` loses its email/password form after the first install (#1756, #1727);
-- OAuth client-credentials clients write into the all-zeros tenant, so uploaded controls are invisible (#1739);
+- local sign-in needed a `tenant_id`, and `/login` lost its email/password form after the first install (#1756, #1727);
+- OAuth client-credentials clients wrote into the all-zeros tenant, so uploaded controls were invisible (#1739);
+- OIDC sign-in needs a tenant;
 - six CLI commands ask for a tenant UUID;
 - the admin UI shows Tenants and Super-admins pages and asks for a tenant UUID when assigning users;
 - the first OIDC login and the Docker seed can each create a different "default" tenant.
 
 Separately, some admin endpoints that change global catalog data are gated only by tenant admin (#1757). That is harmless with one tenant and a cross-tenant write with several.
 
+Parts of this have already landed ahead of the ADR: OAuth clients are bound to a tenant and all-zeros writes are refused (#1854); local login defaults `tenant_id` on a single-tenant install (#1907); `/login` keeps email/password sign-in after first install (#1924); and reset-bootstrap and demo seed/teardown are super-admin gated and hardened (#1872, #1886, #1893). This ADR records the decision those changes implement and the rest of #1758 completes.
+
 ## Decision
 
 1. **The single-tenant install is the default experience.** With one tenant, every edge (sign-in, tokens, CLI, UI, demo data, docs) resolves to the **bootstrap tenant** implicitly. Nobody types or sees a tenant ID. User-facing copy calls the tenant "your organisation".
 2. **Tenant count, not a mode flag, drives the experience.** There is no tenancy-mode setting. The UI shows tenant chrome (switcher, Tenants page, Super-admins, tenant pickers) only when two or more tenants exist, and the CLI and sign-in require an explicit tenant only then.
 3. **The data model, row-level security and authorisation never branch on mode or tenant count.** `tenant_id` columns and RLS are unchanged. Database-enforced isolation stays on for a single-tenant install, as defence in depth.
-4. **Multi-tenant is opt-in.** Creating a second tenant requires a super-admin **and** the deployment setting `ATLAS_ALLOW_MULTI_TENANT=true`. Installs that already hold several tenants are unaffected.
+4. **Multi-tenant is opt-in.** Creating a second tenant requires a super-admin **and** the deployment setting `ATLAS_ALLOW_MULTI_TENANT=true` (gate not yet enforced; lands with the #1758 follow-on). Installs that already hold several tenants are unaffected.
 5. **The opt-in is one-way.** There is no path from multi-tenant back to single-tenant; tenants are not merged or collapsed.
 6. **Global catalog writes require super-admin.** Rows with no tenant (crosswalk edge tiers, global framework versions) are not organisation data and are not editable as such, even on a single-tenant install. On a single-tenant install the bootstrap admin holds super-admin, so this does not lock the operator out.
 7. **Writes from a credential carrying no tenant (the all-zeros tenant) are refused.** OAuth clients are bound to a tenant when they are created, defaulting to the bootstrap tenant.
@@ -50,6 +53,6 @@ Separately, some admin endpoints that change global catalog data are gated only 
 ## Consequences
 
 - Single-tenant operators never handle a tenant UUID; the follow-on tickets under #1758 own the sign-in, token, CLI, UI, demo-seed and docs changes.
-- Test fixtures that need a second tenant (RLS integration tests, tenant-switch e2e specs, the ISA tenant-isolation probe) create it with `ATLAS_ALLOW_MULTI_TENANT=true`.
+- Test fixtures that need a second tenant (RLS integration tests, tenant-switch e2e specs, the ISA tenant-isolation probe) create it with `ATLAS_ALLOW_MULTI_TENANT=true` (gate not yet enforced; lands with the #1758 follow-on).
 - Existing multi-tenant installs carry on unchanged, except that unbound OAuth clients there keep read access and have writes refused until bound to a tenant.
 - MCP tenant resolution is unchanged; it already uses the bearer credential's tenant.
