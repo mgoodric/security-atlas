@@ -1312,6 +1312,10 @@ jobs:
           disable-sudo: true
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # #2005: the bootstrap scripts split the atlas_migrate password out
+      # of DATABASE_URL before calling psql; the self-test pins that parse.
+      - name: Run pg-conn self-test
+        run: bash scripts/pg-conn_test.sh
       - name: Run self-host bundle smoke test (${{ matrix.mode }})
         run: deploy/docker/test-self-host-bundle.sh ${{ matrix.mode }}
       - name: Dump compose logs on failure
@@ -3344,8 +3348,12 @@ jobs:
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
       - name: Set role passwords (CI-scoped)
         run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          # The password goes in on stdin and psql reads it with \getenv,
+          # so it stays off psql's argv (same pattern as migrate.sh, #2005).
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          \getenv atlas_app_password ATLAS_APP_PASSWORD
+          ALTER ROLE atlas_app PASSWORD :'atlas_app_password';
+          SQL
           echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
       - name: Apply forward migrations
         run: |
@@ -4109,8 +4117,12 @@ jobs:
         run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
       - name: Set role passwords (CI-scoped)
         run: |
-          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-            -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+          # The password goes in on stdin and psql reads it with \getenv,
+          # so it stays off psql's argv (same pattern as migrate.sh, #2005).
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          \getenv atlas_app_password ATLAS_APP_PASSWORD
+          ALTER ROLE atlas_app PASSWORD :'atlas_app_password';
+          SQL
           echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
       - name: Apply forward migrations
         run: |
