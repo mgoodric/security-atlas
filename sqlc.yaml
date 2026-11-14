@@ -100,6 +100,7 @@ sql:
       - "migrations/sql/20260822000000_framework_scope_applicability.sql"
       - "migrations/sql/20260825000000_controls_external_refs.sql"
       - "migrations/sql/20260903000000_policy_review_dates.sql"
+      - "migrations/sql/20260911000000_mcp_risk_link_tools.sql"
     queries: "internal/db/queries"
     gen:
       go:

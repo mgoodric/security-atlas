@@ -428,7 +428,74 @@ func ApplyUpdateRiskTreatment(ctx context.Context, tx pgx.Tx, p Proposal) (strin
 	return riskID.String(), nil
 }
 
-// RegisterDefaultAppliers wires all four canonical appliers onto the
+// LinkChildRisksInput is the bounded shape the link_child_risks MCP tool
+// ships: an existing parent risk and the existing risks to attach under it.
+type LinkChildRisksInput struct {
+	ParentRiskID string   `json:"parent_risk_id"`
+	ChildRiskIDs []string `json:"child_risk_ids"`
+}
+
+// ApplyLinkChildRisks attaches existing risks as children of an existing
+// risk (#1748). It runs risk.LinkChildrenTx, the validation
+// POST /v1/risks/{id}/children uses (level order, no cycle, same tenant),
+// inside the confirm transaction. It returns the parent's id for
+// applied_subject.
+func ApplyLinkChildRisks(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
+	var in LinkChildRisksInput
+	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
+		return "", fmt.Errorf("apply link_child_risks: parse input: %w", err)
+	}
+	parentID, err := uuid.Parse(in.ParentRiskID)
+	if err != nil {
+		return "", fmt.Errorf("%w: apply link_child_risks: parent_risk_id must be UUID", ErrInvalidInput)
+	}
+	if len(in.ChildRiskIDs) == 0 {
+		return "", fmt.Errorf("%w: apply link_child_risks: child_risk_ids is required", ErrInvalidInput)
+	}
+	childIDs := make([]uuid.UUID, len(in.ChildRiskIDs))
+	for i, s := range in.ChildRiskIDs {
+		id, perr := uuid.Parse(s)
+		if perr != nil {
+			return "", fmt.Errorf("%w: apply link_child_risks: child_risk_ids[%d] must be UUID", ErrInvalidInput, i)
+		}
+		childIDs[i] = id
+	}
+	if _, err := risk.LinkChildrenTx(ctx, dbx.New(tx), p.TenantID, parentID, childIDs); err != nil {
+		return "", fmt.Errorf("apply link_child_risks: %w", err)
+	}
+	return parentID.String(), nil
+}
+
+// UnlinkChildRiskInput is the bounded shape the unlink_child_risk MCP tool
+// ships: one parent and the child to detach from it.
+type UnlinkChildRiskInput struct {
+	ParentRiskID string `json:"parent_risk_id"`
+	ChildRiskID  string `json:"child_risk_id"`
+}
+
+// ApplyUnlinkChildRisk detaches one child from its parent (#1748) through
+// risk.UnlinkChildTx, as DELETE /v1/risks/{id}/children/{child_id} does. It
+// returns the parent's id for applied_subject.
+func ApplyUnlinkChildRisk(ctx context.Context, tx pgx.Tx, p Proposal) (string, error) {
+	var in UnlinkChildRiskInput
+	if err := json.Unmarshal(p.ToolInput, &in); err != nil {
+		return "", fmt.Errorf("apply unlink_child_risk: parse input: %w", err)
+	}
+	parentID, err := uuid.Parse(in.ParentRiskID)
+	if err != nil {
+		return "", fmt.Errorf("%w: apply unlink_child_risk: parent_risk_id must be UUID", ErrInvalidInput)
+	}
+	childID, err := uuid.Parse(in.ChildRiskID)
+	if err != nil {
+		return "", fmt.Errorf("%w: apply unlink_child_risk: child_risk_id must be UUID", ErrInvalidInput)
+	}
+	if err := risk.UnlinkChildTx(ctx, dbx.New(tx), p.TenantID, parentID, childID); err != nil {
+		return "", fmt.Errorf("apply unlink_child_risk: %w", err)
+	}
+	return parentID.String(), nil
+}
+
+// RegisterDefaultAppliers wires all six canonical appliers onto the
 // store. The evidence appliers ingest through ing — push_evidence under
 // ingestion_path=push, update_control_state under manual_upload — and a
 // nil ing makes them fail closed with ErrIngestUnavailable. Callers may
@@ -444,7 +511,9 @@ func RegisterDefaultAppliers(s *Store, ing *ingest.Service) *Store {
 		WithApplier(ToolCreateRisk, ApplyCreateRisk).
 		WithApplier(ToolUpdateControlState, NewUpdateControlStateApplier(manual)).
 		WithApplier(ToolPushEvidence, NewPushEvidenceApplier(push)).
-		WithApplier(ToolUpdateRiskTreatment, ApplyUpdateRiskTreatment)
+		WithApplier(ToolUpdateRiskTreatment, ApplyUpdateRiskTreatment).
+		WithApplier(ToolLinkChildRisks, ApplyLinkChildRisks).
+		WithApplier(ToolUnlinkChildRisk, ApplyUnlinkChildRisk)
 }
 
 // stateToProtoResult validates that a string is one of the four

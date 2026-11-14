@@ -22,7 +22,9 @@ package writeproposals
 //                               non-UUID control_id, invalid result enum
 //   - ApplyUpdateRiskTreatment— invalid JSON, missing risk_id, missing
 //                               treatment, non-UUID risk_id
-//   - RegisterDefaultAppliers — registers all four tool names
+//   - ApplyLinkChildRisks / ApplyUnlinkChildRisk — non-UUID ids, no
+//                               children (#1748)
+//   - RegisterDefaultAppliers — registers all six tool names
 //
 // The shipped tests on the canonical write paths (with a real tx) live in
 // integration_test.go and exercise the happy + DB-error branches.
@@ -30,8 +32,11 @@ package writeproposals
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // ----- ApplyCreateRisk -----
@@ -245,18 +250,60 @@ func TestApplyUpdateRiskTreatment_RejectsNonUUIDRiskID(t *testing.T) {
 
 // ----- RegisterDefaultAppliers -----
 
-func TestRegisterDefaultAppliers_RegistersAllFourTools(t *testing.T) {
+func TestRegisterDefaultAppliers_RegistersAllTools(t *testing.T) {
 	t.Parallel()
 	s := NewStore(nil)
 	RegisterDefaultAppliers(s, nil)
 	for _, want := range []string{
 		ToolCreateRisk, ToolUpdateControlState, ToolPushEvidence, ToolUpdateRiskTreatment,
+		ToolLinkChildRisks, ToolUnlinkChildRisk,
 	} {
 		if _, ok := s.appliers[want]; !ok {
 			t.Errorf("RegisterDefaultAppliers did not wire %q", want)
 		}
 	}
-	if len(s.appliers) != 4 {
-		t.Fatalf("appliers count = %d, want 4", len(s.appliers))
+	if len(s.appliers) != 6 {
+		t.Fatalf("appliers count = %d, want 6", len(s.appliers))
+	}
+}
+
+// ----- link_child_risks / unlink_child_risk input parsing (#1748) -----
+//
+// Input errors are refused before the applier touches the transaction, so
+// a nil tx is safe here; the validation that needs the database is covered
+// by hierarchy_link_integration_test.go.
+
+func TestApplyLinkChildRisks_RejectsBadInput(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"parent not uuid": `{"parent_risk_id":"nope","child_risk_ids":["` + uuid.NewString() + `"]}`,
+		"no children":     `{"parent_risk_id":"` + uuid.NewString() + `","child_risk_ids":[]}`,
+		"child not uuid":  `{"parent_risk_id":"` + uuid.NewString() + `","child_risk_ids":["nope"]}`,
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			p := Proposal{ToolName: ToolLinkChildRisks, ToolInput: json.RawMessage(in)}
+			if _, err := ApplyLinkChildRisks(context.Background(), nil, p); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("err = %v, want ErrInvalidInput", err)
+			}
+		})
+	}
+}
+
+func TestApplyUnlinkChildRisk_RejectsBadInput(t *testing.T) {
+	t.Parallel()
+	cases := map[string]string{
+		"parent not uuid": `{"parent_risk_id":"nope","child_risk_id":"` + uuid.NewString() + `"}`,
+		"child not uuid":  `{"parent_risk_id":"` + uuid.NewString() + `","child_risk_id":"nope"}`,
+	}
+	for name, in := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			p := Proposal{ToolName: ToolUnlinkChildRisk, ToolInput: json.RawMessage(in)}
+			if _, err := ApplyUnlinkChildRisk(context.Background(), nil, p); !errors.Is(err, ErrInvalidInput) {
+				t.Fatalf("err = %v, want ErrInvalidInput", err)
+			}
+		})
 	}
 }
