@@ -114,6 +114,27 @@ func TestHTTP_PredicateFrozen_NewRevisionAndAsOf(t *testing.T) {
 	if bList.Counts.Excluded != 2 || bList.Counts.Applicable != 5 || bList.Counts.Undecided != 1 {
 		t.Fatalf("B decisions not copied from A: counts %+v", bList.Counts)
 	}
+	// Justification and implementation reference are copied with the decision.
+	wantCopied := map[string][2]string{
+		"R-01": {"No in-house software development", ""},
+		"R-02": {"No cardholder data processed", ""},
+		"R-04": {"", "https://wiki.example/isms/A"},
+		"R-08": {"", "https://wiki.example/isms/A"},
+	}
+	for _, r := range bList.Requirements {
+		want, ok := wantCopied[r.Code]
+		if !ok {
+			continue
+		}
+		if r.Justification != want[0] || r.ImplementationRef != want[1] {
+			t.Fatalf("B %s: justification %q implementation_ref %q, want %q %q",
+				r.Code, r.Justification, r.ImplementationRef, want[0], want[1])
+		}
+		delete(wantCopied, r.Code)
+	}
+	if len(wantCopied) != 0 {
+		t.Fatalf("B missing requirements %v", wantCopied)
+	}
 	rows := carryOverRows(t, tenant, bID)
 	if len(rows) != 7 {
 		t.Fatalf("B carry_over log rows = %d, want 7", len(rows))
@@ -171,20 +192,62 @@ func TestHTTP_PredicateFrozen_NewRevisionAndAsOf(t *testing.T) {
 		t.Fatalf("as_of now: id %s predicate %s", id, pred)
 	}
 
-	// The DB trigger freezes the predicate off the API path, for both the
-	// activated and the superseded revision.
+	// The DB trigger freezes the row off the API path, for both the
+	// activated and the superseded revision: the predicate, effective_from,
+	// and the state (so a step back to draft cannot reopen the predicate or
+	// the decisions). Each write runs in its own tx, as one statement, and
+	// the two-step bypass as two statements in one tx.
 	app := dbtest.NewAppPool(t)
 	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	writes := []struct {
+		name  string
+		stmts []string
+	}{
+		{"predicate", []string{`UPDATE framework_scopes SET predicate = '{"op":"false"}'::jsonb, predicate_hash = 'x' WHERE id = $1`}},
+		{"effective_from", []string{`UPDATE framework_scopes SET effective_from = effective_from - interval '1 day' WHERE id = $1`}},
+		{"back to draft", []string{`UPDATE framework_scopes SET state = 'draft' WHERE id = $1`}},
+		{"back to approved", []string{`UPDATE framework_scopes SET state = 'approved' WHERE id = $1`}},
+		{"draft then predicate", []string{
+			`UPDATE framework_scopes SET state = 'draft' WHERE id = $1`,
+			`UPDATE framework_scopes SET predicate = '{"op":"false"}'::jsonb, predicate_hash = 'x' WHERE id = $1`,
+		}},
+		{"draft then decision", []string{
+			`UPDATE framework_scopes SET state = 'draft' WHERE id = $1`,
+			`UPDATE framework_scope_applicability SET decision = 'applicable', justification = '' WHERE framework_scope_id = $1`,
+		}},
+	}
 	for _, id := range []string{a, bID} {
-		err := withAppTenant(ctx, app, func(tx pgx.Tx) error {
-			_, err := tx.Exec(ctx, `UPDATE framework_scopes
-				SET predicate = '{"op":"false"}'::jsonb, predicate_hash = 'x' WHERE id = $1`, id)
-			return err
-		})
-		var pgErr *pgconn.PgError
-		if !errors.As(err, &pgErr) || pgErr.ConstraintName != "framework_scopes_predicate_frozen" {
-			t.Fatalf("DB predicate update on %s: err = %v, want framework_scopes_predicate_frozen", id, err)
+		for _, w := range writes {
+			err := withAppTenant(ctx, app, func(tx pgx.Tx) error {
+				for _, s := range w.stmts {
+					if _, err := tx.Exec(ctx, s, id); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			var pgErr *pgconn.PgError
+			if !errors.As(err, &pgErr) || pgErr.ConstraintName != "framework_scopes_predicate_frozen" {
+				t.Errorf("DB %s on %s: err = %v, want framework_scopes_predicate_frozen", w.name, id, err)
+			}
 		}
+	}
+
+	// superseded_by and superseded_at stay writable on a frozen row: the
+	// supersede path writes them.
+	if err := withAppTenant(ctx, app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `UPDATE framework_scopes SET superseded_by = $2, superseded_at = now() WHERE id = $1`, a, bID)
+		return err
+	}); err != nil {
+		t.Fatalf("superseded_by write on superseded A: %v", err)
+	}
+
+	// Nothing above changed A or B.
+	if got := c.mustList(a); got.FrameworkScope.State != "superseded" || got.Counts.Excluded != 2 {
+		t.Fatalf("A after refused writes: state %s counts %+v", got.FrameworkScope.State, got.Counts)
+	}
+	if got := c.mustList(bID); got.FrameworkScope.State != "activated" || got.Counts.Excluded != 2 {
+		t.Fatalf("B after refused writes: state %s counts %+v", got.FrameworkScope.State, got.Counts)
 	}
 }
 

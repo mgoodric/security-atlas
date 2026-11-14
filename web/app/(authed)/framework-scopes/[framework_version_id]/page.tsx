@@ -180,6 +180,13 @@ export default function FrameworkScopesPage() {
       setBanner(null);
       reset();
     },
+    onError: (e: unknown) => {
+      setBanner(
+        e instanceof APIError && e.status === 403
+          ? "You do not have permission to create a scope revision."
+          : "Could not create a new revision: " + (e as Error).message,
+      );
+    },
   });
 
   return (

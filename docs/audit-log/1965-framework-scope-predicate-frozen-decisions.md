@@ -3,18 +3,37 @@
 **Ticket:** [#1965](https://github.com/mgoodric/security-atlas/issues/1965), follow-up to #1943 (D3 in `1787-framework-scope-applicability-decisions.md`).
 **Rule (Matt, 2026-11-13):** activated and superseded scope revisions are immutable. Any change, to the predicate or to the decisions, makes a new revision.
 
-- detection_tier_actual: none
-- detection_tier_target: none
+- detection_tier_actual: manual_review
+- detection_tier_target: integration
+
+> The first version of the trigger checked only `OLD.state` against the
+> predicate columns. Review on #2227 caught that a write could set
+> `state = 'draft'` on an activated row and then edit the predicate, and the
+> decisions too, because the applicability guard reads the scope's current
+> state. `effective_from` was also writable. The fix (D1) and the
+> integration cases for each bypass landed in the same PR; with the
+> predicate-only trigger those cases fail.
 
 ## Decisions
 
-**D1 — Freeze `predicate` and `predicate_hash` only.** The new
-`framework_scopes_predicate_frozen` BEFORE UPDATE trigger refuses a change to
-either column when `OLD.state` is `activated` or `superseded`. Other columns
-stay writable so the `activated → superseded` transition
-(`SupersedePreviousActivated`: `state`, `superseded_by`, `superseded_at`,
-`updated_at`) still works on the frozen row. `name` is not frozen: no API
-edits it and the ticket names the predicate.
+**D1 — What the trigger freezes.** `framework_scopes_predicate_frozen`
+(BEFORE UPDATE) acts only when `OLD.state` is `activated` or `superseded`,
+and refuses:
+
+- a change to `predicate` or `predicate_hash`;
+- a change to `effective_from`, which decides which revision an `as_of` read
+  picks;
+- any `state` change except `activated → superseded`. A step back to
+  `draft` would otherwise reopen the predicate and, through the
+  applicability guard, the decisions.
+
+`superseded_by`, `superseded_at` and `updated_at` stay writable, because the
+supersede path (`SupersedePreviousActivated`) writes them. `name` is not
+frozen: no API edits it, and it plays no part in `as_of` reads.
+
+**D6 — DELETE is not guarded.** This follows the decision guard (#1787 D4).
+No API deletes a scope, and the FK cascades and the operator purge
+(`internal/auth/oauthclient`) have to keep working.
 
 **D2 — Store check first, trigger as the guarantee.** `UpdatePredicate`
 returns `ErrPredicateFrozen` (409) from the state it reads, mirroring
@@ -33,7 +52,11 @@ activation. With `from_scope_id` the new draft:
 - copies every decision on the source, each through the normal decision write
   path so the guard and history apply.
 
-Any source state is accepted, so a draft can be forked too. A separate
+Any source state is accepted, so a draft can be forked too, and a source
+can be forked more than once: several drafts may stand side by side, as a
+plain POST already allowed. Only one revision per framework version can be
+activated (the partial unique index), and activating one supersedes the
+current one. Any other drafts stay drafts. A separate
 `:revise` route was considered and rejected: it would duplicate create's
 validation and logging for no gain.
 
