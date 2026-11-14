@@ -39,6 +39,8 @@ func (s *Server) registerFrameworkScope(root *chi.Mux) {
 	// Issue #1790: bulk-set and CSV import of decisions.
 	root.Post("/v1/framework-scopes/{id}/applicability/bulk", fwH.BulkSetApplicability)
 	root.Post("/v1/framework-scopes/{id}/applicability/import", fwH.ImportApplicability)
+	// Issue #1793: carry decisions over from the prior framework version.
+	root.Post("/v1/framework-scopes/{id}/applicability:carry-over", fwH.CarryOverApplicability)
 	// Sub-resource transitions are PATCH, distinct from the generic PATCH
 	// on /v1/framework-scopes/{id} (which edits predicate). chi resolves
 	// the literal-segment routes first within the same method.
