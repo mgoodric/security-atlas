@@ -9,6 +9,7 @@
 //	PATCH  /v1/policies/{id}/approve               under_review -> approved (AC-4)
 //	POST   /v1/policies/{id}/publish               approved -> published (AC-1 versioned row + AC-7 orphan block)
 //	PATCH  /v1/policies/{id}/review-date           change a published policy's next_review_at (#1806)
+//	DELETE /v1/policies/{id}                       discard a draft, audit-logged (#1987)
 //	GET    /v1/policies/{id}/pdf                   PDF render via chromedp (AC-5)
 //	POST   /v1/admin/policies/import               import a policy library with its history (#1747, import.go)
 //
@@ -688,6 +689,44 @@ func (h *Handler) SetReviewDate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
+}
+
+// DiscardDraft handles DELETE /v1/policies/{id} (#1987). It deletes a policy
+// only while it is a draft; the store appends a policy_audit_log row naming
+// the caller and the discarded title and version. Discarding a next-version
+// draft frees its predecessor for a new version. The role is the one that
+// edits a draft (create, submit): any credential in the tenant. Published,
+// superseded, approved and under-review policies answer 409 and are never
+// deleted. 204 on success.
+func (h *Handler) DiscardDraft(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	// The actor is the user behind the credential when there is one, else
+	// the credential id: the rule the review-date audit uses.
+	actor := cred.UserID
+	if actor == "" {
+		actor = cred.ID
+	}
+	if _, err := h.store.DiscardDraft(ctx, id, actor); err != nil {
+		switch {
+		case errors.Is(err, policy.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+		case errors.Is(err, policy.ErrWrongState):
+			httpresp.WriteError(w, http.StatusConflict, "only a draft policy can be discarded; submitted, approved, published and superseded policies are kept")
+		default:
+			httperr.WriteInternal(w, r, "discard policy draft", err)
+		}
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // PDF handles GET /v1/policies/{id}/pdf (AC-5). Returns

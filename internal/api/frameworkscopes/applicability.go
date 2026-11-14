@@ -245,19 +245,7 @@ func (h *Handler) SetApplicability(w http.ResponseWriter, r *http.Request) {
 		Actor:             actorOf(r),
 	})
 	if err != nil {
-		switch {
-		case errors.Is(err, frameworkscope.ErrInvalidDecision),
-			errors.Is(err, frameworkscope.ErrJustificationRequired):
-			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, frameworkscope.ErrNotFound):
-			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
-		case errors.Is(err, frameworkscope.ErrRequirementNotFound):
-			httpresp.WriteError(w, http.StatusNotFound, err.Error())
-		case errors.Is(err, frameworkscope.ErrDecisionsFrozen):
-			httpresp.WriteError(w, http.StatusConflict, err.Error())
-		default:
-			httperr.WriteInternal(w, r, "set applicability", err)
-		}
+		writeDecisionError(w, r, "set applicability", err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -18,10 +19,13 @@ import (
 // statement runs inside a transaction carrying app.current_tenant, so RLS
 // binds on the atlas_app role (invariant #6).
 type Store struct {
-	pool *pgxpool.Pool
+	pool    *pgxpool.Pool
+	keyword *qmapsuggest.Store
 }
 
-func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+func NewStore(pool *pgxpool.Pool) *Store {
+	return &Store{pool: pool, keyword: qmapsuggest.NewStore(pool)}
+}
 
 var _ BatchStore = (*Store)(nil)
 
@@ -122,12 +126,15 @@ func (s *Store) CreateBatch(ctx context.Context, b Batch) (Batch, error) {
 			INSERT INTO control_import_batches (
 				tenant_id, framework_slug, framework_version_id, framework_version,
 				source_filename, source_format, uploaded_by, status,
-				total_rows, staged_count, rejected_count, unmapped_columns)
-			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb)
+				total_rows, staged_count, rejected_count, unmapped_columns,
+				scf_framework_version_id, scf_release, suggestions_status)
+			VALUES ($1::uuid, $2, $3::uuid, $4, $5, $6, $7, $8, $9, $10, $11, $12::jsonb,
+				$13::uuid, $14, $15)
 			RETURNING id::text, created_at
 		`, tenantID, b.Framework.Slug, b.Framework.VersionID, b.Framework.Version,
 			b.SourceFilename, b.SourceFormat, b.UploadedBy, b.Status,
 			b.TotalRows, b.StagedCount, b.RejectedCount, string(unmapped),
+			releaseVersionID(b.SCFRelease), releaseVersion(b.SCFRelease), b.SuggestionsStatus,
 		).Scan(&b.ID, &b.CreatedAt); err != nil {
 			return fmt.Errorf("controlimport: insert batch: %w", err)
 		}
@@ -163,6 +170,9 @@ func (s *Store) CreateBatch(ctx context.Context, b Batch) (Batch, error) {
 	if err != nil {
 		return Batch{}, err
 	}
+	for i := range b.Staged {
+		b.Staged[i].Candidates = nonNilCandidates(b.Staged[i].Candidates)
+	}
 	b.Staged = nonNilControls(b.Staged)
 	b.Rejected = nonNilRejected(b.Rejected)
 	b.UnmappedColumns = nonNil(b.UnmappedColumns)
@@ -178,15 +188,18 @@ func (s *Store) GetBatch(ctx context.Context, id string) (Batch, error) {
 	var b Batch
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ string) error {
 		var unmapped []byte
+		var scfVersionID, scfRelease *string
 		err := tx.QueryRow(ctx, `
 			SELECT id::text, framework_slug, framework_version_id::text, framework_version,
 			       source_filename, source_format, uploaded_by, status,
-			       total_rows, staged_count, rejected_count, unmapped_columns, created_at
+			       total_rows, staged_count, rejected_count, unmapped_columns,
+			       scf_framework_version_id::text, scf_release, suggestions_status, created_at
 			FROM control_import_batches
 			WHERE id = $1::uuid
 		`, id).Scan(&b.ID, &b.Framework.Slug, &b.Framework.VersionID, &b.Framework.Version,
 			&b.SourceFilename, &b.SourceFormat, &b.UploadedBy, &b.Status,
-			&b.TotalRows, &b.StagedCount, &b.RejectedCount, &unmapped, &b.CreatedAt)
+			&b.TotalRows, &b.StagedCount, &b.RejectedCount, &unmapped,
+			&scfVersionID, &scfRelease, &b.SuggestionsStatus, &b.CreatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrBatchNotFound
 		}
@@ -196,7 +209,10 @@ func (s *Store) GetBatch(ctx context.Context, id string) (Batch, error) {
 		if err := json.Unmarshal(unmapped, &b.UnmappedColumns); err != nil {
 			return fmt.Errorf("controlimport: decode unmapped columns: %w", err)
 		}
-		if b.Staged, err = readStaged(ctx, tx, id); err != nil {
+		if scfVersionID != nil {
+			b.SCFRelease = &SCFRelease{VersionID: *scfVersionID, Version: deref(scfRelease)}
+		}
+		if b.Staged, err = readStaged(ctx, tx, id, RowFilter{}); err != nil {
 			return err
 		}
 		b.Rejected, err = readRejected(ctx, tx, id)
@@ -211,14 +227,17 @@ func (s *Store) GetBatch(ctx context.Context, id string) (Batch, error) {
 	return b, nil
 }
 
-func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchControl, error) {
+func readStaged(ctx context.Context, tx pgx.Tx, batchID string, f RowFilter) ([]BatchControl, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, row_number, org_control_id, title, description, tested_under,
-		       COALESCE(implementation_type, ''), COALESCE(applicability, ''), status
+		       COALESCE(implementation_type, ''), COALESCE(applicability, ''), status,
+		       no_candidate_reaches
 		FROM control_import_rows
 		WHERE batch_id = $1::uuid
+		  AND ($2::text = '' OR status = $2::text)
+		  AND (NOT $3::boolean OR no_candidate_reaches)
 		ORDER BY row_number
-	`, batchID)
+	`, batchID, f.Status, f.NoCandidateReaches)
 	if err != nil {
 		return nil, fmt.Errorf("controlimport: read staged rows: %w", err)
 	}
@@ -228,7 +247,7 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchControl,
 		var c BatchControl
 		var tested []byte
 		if err := rows.Scan(&c.ID, &c.RowNumber, &c.ExternalID, &c.Title, &c.Description, &tested,
-			&c.ImplementationType, &c.Applicability, &c.Status); err != nil {
+			&c.ImplementationType, &c.Applicability, &c.Status, &c.NoCandidateReaches); err != nil {
 			return nil, fmt.Errorf("controlimport: scan staged row: %w", err)
 		}
 		if err := json.Unmarshal(tested, &c.TestedUnder); err != nil {
@@ -237,7 +256,20 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string) ([]BatchControl,
 		c.TestedUnder = nonNilReqs(c.TestedUnder)
 		out = append(out, c)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	cands, err := readCandidates(ctx, tx, batchID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range out {
+		out[i].Candidates = nonNilCandidates(cands[out[i].ID])
+		for j := range out[i].Candidates {
+			out[i].Candidates[j].TestedCount = len(out[i].TestedUnder)
+		}
+	}
+	return out, nil
 }
 
 func readRejected(ctx context.Context, tx pgx.Tx, batchID string) ([]RejectedRow, error) {

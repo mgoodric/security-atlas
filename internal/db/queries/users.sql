@@ -51,3 +51,61 @@ DO UPDATE SET
     display_name = EXCLUDED.display_name,
     updated_at = now()
 RETURNING *;
+
+-- name: LinkUserIdpByEmail :one
+-- #1944: first OIDC sign-in for a user SCIM already created. Binds the IdP
+-- principal to the same-tenant row with the same email (case-insensitive,
+-- matching GetSCIMUserByEmail) ONLY while that row's idp tuple is empty, so a
+-- row already bound to another principal is never re-linked.
+--
+-- Only scim_managed rows link. A row with a local password or a super_admins
+-- grant never links even when SCIM manages it: an IdP the tenant admin
+-- controls could otherwise assert that email and take the account over
+-- (the #2007 review, B1). Those rows keep the OIDCFirstSignInEmailTaken 401.
+--
+-- The last NOT EXISTS keeps a returning user on their own row. Status and
+-- active are left untouched: a deprovisioned row stays refused.
+UPDATE users
+SET idp_issuer   = sqlc.arg('idp_issuer'),
+    idp_subject  = sqlc.arg('idp_subject'),
+    display_name = sqlc.arg('display_name'),
+    updated_at   = now()
+WHERE users.tenant_id = sqlc.arg('tenant_id')
+  AND lower(users.email) = lower(sqlc.arg('email')::text)
+  AND users.idp_issuer = ''
+  AND users.idp_subject = ''
+  AND users.scim_managed
+  AND NOT EXISTS (
+      SELECT 1 FROM local_credentials lc WHERE lc.user_id = users.id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM super_admins sa WHERE sa.user_id = users.id
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM users u
+      WHERE u.tenant_id = sqlc.arg('tenant_id')
+        AND u.idp_issuer = sqlc.arg('idp_issuer')
+        AND u.idp_subject = sqlc.arg('idp_subject')
+  )
+RETURNING *;
+
+-- name: OIDCFirstSignInEmailTaken :one
+-- #1944: true when this IdP principal has no row yet but another same-tenant
+-- row holds the email (case-insensitive). UpsertOIDC asks only after
+-- LinkUserIdpByEmail declined, so that row is bound to another principal or
+-- the link was refused; the sign-in must not mint a second user for the
+-- email. users_email_per_tenant_unique is case-sensitive and would miss a
+-- case variant. A returning principal is never refused here.
+SELECT (
+    EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.tenant_id = sqlc.arg('tenant_id')
+          AND lower(u.email) = lower(sqlc.arg('email')::text)
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM users u
+        WHERE u.tenant_id = sqlc.arg('tenant_id')
+          AND u.idp_issuer = sqlc.arg('idp_issuer')
+          AND u.idp_subject = sqlc.arg('idp_subject')
+    )
+)::boolean AS taken;

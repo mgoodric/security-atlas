@@ -43,6 +43,10 @@ export type ControlWire = {
   lifecycle_state: string;
   owner_role: string;
   freshness_class?: string;
+  // Issue #1736 — how well the SCF anchor fits the control, and why a
+  // non-exact fit is not exact. Absent means exact.
+  anchor_fit?: "exact" | "partial" | "none";
+  anchor_fit_note?: string;
   // #1737 — control.yaml external_refs[]; omitted when the control has none.
   external_refs?: ExternalRefWire[];
 };

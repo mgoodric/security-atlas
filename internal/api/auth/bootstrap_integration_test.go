@@ -49,6 +49,11 @@ type fakeIdP struct {
 	signer jose.Signer
 	pub    *rsa.PublicKey
 	nonce  string
+	// emailVerified, when non-nil, is sent as the email_verified claim.
+	emailVerified any
+	// trustUnverifiedEmail is the IdP config's
+	// trust_unverified_email_for_link as callbackVia hands it to the RP.
+	trustUnverifiedEmail bool
 }
 
 func newFakeIdP(t *testing.T) *fakeIdP {
@@ -86,7 +91,7 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 		}})
 	})
 	mux.HandleFunc("/token", func(w http.ResponseWriter, _ *http.Request) {
-		tok, err := jwt.Signed(f.signer).Claims(map[string]any{
+		claims := map[string]any{
 			"iss":   f.srv.URL,
 			"sub":   "oidc-founder",
 			"aud":   fakeClientID,
@@ -95,7 +100,11 @@ func newFakeIdP(t *testing.T) *fakeIdP {
 			"email": "founder@example.com",
 			"name":  "Founder",
 			"nonce": f.nonce,
-		}).Serialize()
+		}
+		if f.emailVerified != nil {
+			claims["email_verified"] = f.emailVerified
+		}
+		tok, err := jwt.Signed(f.signer).Claims(claims).Serialize()
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -202,6 +211,8 @@ func (h harness) callbackVia(t *testing.T, idp *fakeIdP, urlTenant uuid.UUID) *h
 		ClientID:     fakeClientID,
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
+
+		TrustUnverifiedEmailForLink: idp.trustUnverifiedEmail,
 	}})
 	login, err := authn.BeginLogin(context.Background(), oidc.LoginInput{TenantID: urlTenant, IdpName: "primary"}, false)
 	if err != nil {

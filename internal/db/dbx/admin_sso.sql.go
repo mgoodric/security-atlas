@@ -20,6 +20,7 @@ SELECT id,
        client_id,
        redirect_url,
        allowed_email_domains,
+       trust_unverified_email_for_link,
        created_at,
        updated_at
 FROM oidc_idp_configs
@@ -32,15 +33,16 @@ type GetAdminSSOParams struct {
 }
 
 type GetAdminSSORow struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	Name                string             `json:"name"`
-	IssuerUrl           string             `json:"issuer_url"`
-	ClientID            string             `json:"client_id"`
-	RedirectUrl         string             `json:"redirect_url"`
-	AllowedEmailDomains []string           `json:"allowed_email_domains"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Name                        string             `json:"name"`
+	IssuerUrl                   string             `json:"issuer_url"`
+	ClientID                    string             `json:"client_id"`
+	RedirectUrl                 string             `json:"redirect_url"`
+	AllowedEmailDomains         []string           `json:"allowed_email_domains"`
+	TrustUnverifiedEmailForLink bool               `json:"trust_unverified_email_for_link"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Slice 062 — admin /v1/admin/sso queries.
@@ -70,6 +72,7 @@ func (q *Queries) GetAdminSSO(ctx context.Context, arg GetAdminSSOParams) (GetAd
 		&i.ClientID,
 		&i.RedirectUrl,
 		&i.AllowedEmailDomains,
+		&i.TrustUnverifiedEmailForLink,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -80,11 +83,13 @@ const upsertAdminSSO = `-- name: UpsertAdminSSO :one
 INSERT INTO oidc_idp_configs (
     id, tenant_id, name, issuer_url, client_id,
     client_secret_enc, redirect_url, allowed_email_domains,
+    trust_unverified_email_for_link,
     created_at, updated_at
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
+    $9,
     now(), now()
 )
 ON CONFLICT (tenant_id, name) DO UPDATE
@@ -98,6 +103,8 @@ SET issuer_url            = EXCLUDED.issuer_url,
     END,
     redirect_url          = EXCLUDED.redirect_url,
     allowed_email_domains = EXCLUDED.allowed_email_domains,
+    -- #1944 D3: per-IdP opt-out for linking on an absent email_verified.
+    trust_unverified_email_for_link = EXCLUDED.trust_unverified_email_for_link,
     updated_at            = now()
 RETURNING id,
           tenant_id,
@@ -106,31 +113,34 @@ RETURNING id,
           client_id,
           redirect_url,
           allowed_email_domains,
+          trust_unverified_email_for_link,
           created_at,
           updated_at
 `
 
 type UpsertAdminSSOParams struct {
-	ID                  pgtype.UUID `json:"id"`
-	TenantID            pgtype.UUID `json:"tenant_id"`
-	Name                string      `json:"name"`
-	IssuerUrl           string      `json:"issuer_url"`
-	ClientID            string      `json:"client_id"`
-	ClientSecretEnc     []byte      `json:"client_secret_enc"`
-	RedirectUrl         string      `json:"redirect_url"`
-	AllowedEmailDomains []string    `json:"allowed_email_domains"`
+	ID                          pgtype.UUID `json:"id"`
+	TenantID                    pgtype.UUID `json:"tenant_id"`
+	Name                        string      `json:"name"`
+	IssuerUrl                   string      `json:"issuer_url"`
+	ClientID                    string      `json:"client_id"`
+	ClientSecretEnc             []byte      `json:"client_secret_enc"`
+	RedirectUrl                 string      `json:"redirect_url"`
+	AllowedEmailDomains         []string    `json:"allowed_email_domains"`
+	TrustUnverifiedEmailForLink bool        `json:"trust_unverified_email_for_link"`
 }
 
 type UpsertAdminSSORow struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	Name                string             `json:"name"`
-	IssuerUrl           string             `json:"issuer_url"`
-	ClientID            string             `json:"client_id"`
-	RedirectUrl         string             `json:"redirect_url"`
-	AllowedEmailDomains []string           `json:"allowed_email_domains"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Name                        string             `json:"name"`
+	IssuerUrl                   string             `json:"issuer_url"`
+	ClientID                    string             `json:"client_id"`
+	RedirectUrl                 string             `json:"redirect_url"`
+	AllowedEmailDomains         []string           `json:"allowed_email_domains"`
+	TrustUnverifiedEmailForLink bool               `json:"trust_unverified_email_for_link"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Insert-or-update the tenant's primary IdP config. The application
@@ -148,6 +158,7 @@ func (q *Queries) UpsertAdminSSO(ctx context.Context, arg UpsertAdminSSOParams) 
 		arg.ClientSecretEnc,
 		arg.RedirectUrl,
 		arg.AllowedEmailDomains,
+		arg.TrustUnverifiedEmailForLink,
 	)
 	var i UpsertAdminSSORow
 	err := row.Scan(
@@ -158,6 +169,7 @@ func (q *Queries) UpsertAdminSSO(ctx context.Context, arg UpsertAdminSSOParams) 
 		&i.ClientID,
 		&i.RedirectUrl,
 		&i.AllowedEmailDomains,
+		&i.TrustUnverifiedEmailForLink,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

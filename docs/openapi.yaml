@@ -1108,7 +1108,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/admin/sso
+      summary: PATCH /v1/admin/sso — upsert the primary IdP config, incl. trust_unverified_email_for_link (strict default false; #1944)
       tags: [admin-sso]
       operationId: patch-v1-admin-sso
       security:
@@ -2215,6 +2215,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/imports/{id}/rows:
+    get:
+      summary: GET /v1/controls/imports/{id}/rows — staged rows with ranked SCF anchor candidates, filterable by status and no_candidate_reaches (#1780)
+      tags: [controls]
+      operationId: get-v1-controls-imports-id-rows
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/action-plans:
     get:
       summary: GET /v1/controls/{id}/action-plans
@@ -3109,6 +3129,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/applicability/export:
+    get:
+      summary: GET /v1/framework-scopes/applicability/export — export the Statement of Applicability as CSV or xlsx
+      tags: [framework-scopes]
+      operationId: get-v1-framework-scopes-applicability-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}:
     get:
       summary: GET /v1/framework-scopes/{id}
@@ -3173,6 +3207,46 @@ paths:
       summary: GET /v1/framework-scopes/{id}/applicability — list a revision's applicability decisions
       tags: [framework-scopes]
       operationId: get-v1-framework-scopes-id-applicability
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/{id}/applicability/bulk:
+    post:
+      summary: POST /v1/framework-scopes/{id}/applicability/bulk — set one applicability decision on many requirements
+      tags: [framework-scopes]
+      operationId: post-v1-framework-scopes-id-applicability-bulk
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/{id}/applicability/import:
+    post:
+      summary: POST /v1/framework-scopes/{id}/applicability/import — import applicability decisions from CSV
+      tags: [framework-scopes]
+      operationId: post-v1-framework-scopes-id-applicability-import
       security:
         - bearer: []
       parameters:
@@ -4223,6 +4297,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
   /v1/policies/{id}:
+    delete:
+      summary: DELETE /v1/policies/{id} — discard a draft policy, audit-logged (#1987)
+      tags: [policies]
+      operationId: delete-v1-policies-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
     get:
       summary: GET /v1/policies/{id}
       tags: [policies]

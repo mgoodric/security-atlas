@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -71,7 +72,7 @@ func TestLocalLogin_MultiTenant400NamesNoTenant(t *testing.T) {
 	h := &Handler{implicitTenant: fakeImplicitTenant{err: &tenancy.AmbiguousTenantError{Tenants: []tenancy.TenantRef{
 		{ID: a, Slug: "alpha-org", Name: "Alpha Org"},
 		{ID: b, Slug: "beta-org", Name: "Beta Org"},
-	}}}}
+	}}}, loginThrottle: newLoginThrottle(time.Now)}
 	req := httptest.NewRequest(http.MethodPost, "/auth/local/login",
 		strings.NewReader(`{"email":"a@example.com","password":"x"}`))
 	rec := httptest.NewRecorder()
@@ -93,7 +94,7 @@ func TestLocalLogin_MultiTenant400NamesNoTenant(t *testing.T) {
 
 func TestLocalLogin_ExplicitAllZerosTenantRefused(t *testing.T) {
 	t.Parallel()
-	h := &Handler{implicitTenant: fakeImplicitTenant{id: uuid.New()}}
+	h := &Handler{implicitTenant: fakeImplicitTenant{id: uuid.New()}, loginThrottle: newLoginThrottle(time.Now)}
 	req := httptest.NewRequest(http.MethodPost, "/auth/local/login",
 		strings.NewReader(`{"tenant_id":"00000000-0000-0000-0000-000000000000","email":"a@example.com","password":"x"}`))
 	rec := httptest.NewRecorder()

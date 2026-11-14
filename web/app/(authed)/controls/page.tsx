@@ -90,6 +90,8 @@ import {
 
 import {
   ALL,
+  ANCHOR_FIT_OPTIONS,
+  anchorFitMarker,
   applyFilters,
   clearFilters,
   DEFAULT_FILTERS,
@@ -145,6 +147,9 @@ const FILTER_KEYS: (keyof ControlFilters)[] = [
   // or `ALL`. The BFF / upstream applies the actual intersection
   // (P0-224-2 — applicability_expr never reaches the browser).
   "scope",
+  // Issue #1736 — anchor fit, "My controls" only. Filtered client-side
+  // over the full control set like family / state / freshness.
+  "anchor_fit",
 ];
 
 // Slice 224 — cap the Scope pill at 50 entries per AC-5. Tenants with
@@ -310,7 +315,12 @@ function ControlsPageInner() {
     } else {
       sp.set(key, value);
     }
-    if (key === VIEW_PARAM) sp.delete(HAS_CONTROL_PARAM);
+    // Catalog anchors carry no fit, so the fit filter only applies to
+    // "My controls" and is dropped on a view switch (issue #1736).
+    if (key === VIEW_PARAM) {
+      sp.delete(HAS_CONTROL_PARAM);
+      sp.delete("anchor_fit");
+    }
     sp.delete(PAGE_PARAM);
     router.replace(`/controls?${sp.toString()}`);
   };
@@ -728,6 +738,17 @@ function ControlsPageInner() {
       value: filters.scope,
       options: scopeOptions,
     },
+    // Issue #1736 — how well each control's SCF anchor fits it.
+    ...(view === "mine"
+      ? [
+          {
+            id: "anchor_fit",
+            label: "Anchor fit",
+            value: filters.anchor_fit,
+            options: ANCHOR_FIT_OPTIONS,
+          },
+        ]
+      : []),
   ];
 
   // Slice 666 — header count label. The header is a COUNT of the
@@ -854,14 +875,31 @@ function ControlsPageInner() {
       header: "Name",
       cell: (row) => {
         const href = controlHref(row);
-        return href ? (
-          <Link
-            href={href}
-            className="text-foreground hover:text-primary"
-            onClick={(e) => e.stopPropagation()}
+        // Issue #1736 — a non-exact anchor fit carries a marker; its
+        // tooltip is the fit note.
+        const fit = anchorFitMarker(row);
+        const marker = fit ? (
+          <Badge
+            variant="outline"
+            className="ml-2"
+            title={fit.title}
+            data-testid="controls-row-anchor-fit"
+            data-anchor-fit={row.anchorFit}
           >
-            {row.anchor.name}
-          </Link>
+            {fit.label}
+          </Badge>
+        ) : null;
+        return href ? (
+          <>
+            <Link
+              href={href}
+              className="text-foreground hover:text-primary"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {row.anchor.name}
+            </Link>
+            {marker}
+          </>
         ) : (
           <span className="text-muted-foreground">{row.anchor.name}</span>
         );

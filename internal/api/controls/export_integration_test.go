@@ -300,6 +300,7 @@ func TestSlice137_ControlsExportReturnsCanonicalColumns(t *testing.T) {
 		"applicability_expr",
 		"freshness_class", "bundle_manifest_hash",
 		"created_at", "updated_at",
+		"anchor_fit", "anchor_fit_note",
 	}
 	if len(header) != len(expectedCols) {
 		t.Errorf("header column count = %d; want %d; header=%v", len(header), len(expectedCols), header)
@@ -335,6 +336,11 @@ func TestSlice137_ControlsExportReturnsCanonicalColumns(t *testing.T) {
 			if row[10] != "BU=eng AND env=prod" {
 				t.Errorf("data row applicability_expr = %q; want %q",
 					row[10], "BU=eng AND env=prod")
+			}
+			// anchor_fit @ 15 — a row seeded without one stores the
+			// 'exact' default and an empty note (issue #1736).
+			if len(row) > 16 && (row[15] != "exact" || row[16] != "") {
+				t.Errorf("data row anchor_fit, anchor_fit_note = %q, %q; want \"exact\", \"\"", row[15], row[16])
 			}
 			break
 		}

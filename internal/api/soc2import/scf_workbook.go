@@ -168,6 +168,7 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 		}
 	}
 
+	mappings, rollUp := rollUpPointsOfFocus(reqs, mappings)
 	requirements := make([]Requirement, 0, len(reqs))
 	for _, r := range reqs {
 		requirements = append(requirements, r)
@@ -184,6 +185,8 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 		SourceAttribution: "community_draft",
 		Requirements:      requirements,
 		Mappings:          mappings,
+
+		PointsOfFocusRollUp: rollUp,
 	}
 	if err := resolveWorkbookTitles(cw, opts); err != nil {
 		return nil, err
@@ -256,6 +259,7 @@ func loadOLIRWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*
 			return nil, fmt.Errorf("crosswalk: SCF OLIR sheet %q has zero importable mappings", sheet)
 		}
 
+		mappings, rollUp := rollUpPointsOfFocus(reqs, mappings)
 		requirements := make([]Requirement, 0, len(reqs))
 		for _, r := range reqs {
 			requirements = append(requirements, r)
@@ -273,6 +277,8 @@ func loadOLIRWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*
 			SourceAttribution: "community_draft",
 			Requirements:      requirements,
 			Mappings:          mappings,
+
+			PointsOfFocusRollUp: rollUp,
 		}
 		if err := resolveWorkbookTitles(cw, opts); err != nil {
 			return nil, err

@@ -217,6 +217,10 @@ export type ControlWithState = TenantControl & {
   scf_anchor_id: string | null;
   state: AnchorWithState["state"];
   frameworks: string[];
+  // Issue #1736 — how well the SCF anchor fits the control. Optional
+  // because hand-rolled fixtures predate it; the platform always sends it.
+  anchor_fit?: "exact" | "partial" | "none";
+  anchor_fit_note?: string | null;
 };
 
 export type ControlsWithStateResponse = {
