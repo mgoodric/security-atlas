@@ -26,7 +26,7 @@
 --   #6  Tenant isolation at the database layer: policy_audit_log gets
 --       ENABLE + FORCE ROW LEVEL SECURITY with tenant_read / tenant_write.
 --
--- Reversible via 20260816000000_policy_import.down.sql.
+-- Reversible via 20260819000000_policy_import.down.sql.
 
 ALTER TABLE policies
     ADD COLUMN historical_approver_name TEXT        NULL,
