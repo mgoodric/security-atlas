@@ -313,3 +313,10 @@ WHERE tenant_id = @tenant_id
   AND action = 'approve'
 ORDER BY occurred_at DESC, id DESC
 LIMIT 1;
+
+-- name: ListFrameworkVersionMigrationsInto :many
+-- Every version-migration queue row (ADR 0019) whose target is one framework
+-- version, for the applicability carry-over (#1793). Catalog rows: no tenant.
+SELECT * FROM framework_version_migrations
+WHERE to_version_id = $1
+ORDER BY from_version_id, match_kind, requirement_code;

@@ -95,7 +95,7 @@ func (h *SessionsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	userUUID, err := uuid.Parse(cred.UserID)
+	userUUID, err := callerUserUUID(cred)
 	if err != nil {
 		// No real users row → no sessions surface.
 		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"sessions": []sessionWire{}, "count": 0})
@@ -136,7 +136,7 @@ func (h *SessionsHandler) RevokeSession(w http.ResponseWriter, r *http.Request) 
 		httpresp.WriteError(w, http.StatusBadRequest, "session id required")
 		return
 	}
-	userUUID, err := uuid.Parse(cred.UserID)
+	userUUID, err := callerUserUUID(cred)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusNotFound, "session not found")
 		return
@@ -171,7 +171,7 @@ func (h *SessionsHandler) RevokeOtherSessions(w http.ResponseWriter, r *http.Req
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	userUUID, err := uuid.Parse(cred.UserID)
+	userUUID, err := callerUserUUID(cred)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusNotFound, "no sessions for this credential")
 		return

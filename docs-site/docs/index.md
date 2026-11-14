@@ -87,6 +87,9 @@ The full design lives in [`Plans/ARCHITECTURE_CANVAS.md`](https://github.com/mgo
 
 ## Next steps
 
+- [Getting started →](getting-started.md) — from a fresh clone to a working
+  program: install, catalog, frameworks, controls, evidence, risks and a
+  first audit period
 - [Install →](install.md) — self-host quickstart with `docker compose`
 
 ---
