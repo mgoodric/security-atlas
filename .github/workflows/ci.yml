@@ -1316,6 +1316,14 @@ jobs:
       # of DATABASE_URL before calling psql; the self-test pins that parse.
       - name: Run pg-conn self-test
         run: bash scripts/pg-conn_test.sh
+      # #2033: the scratch-cluster script must refuse a Postgres it did not
+      # start. The runner image ships PostgreSQL server binaries off PATH;
+      # the test skips (exit 0) if none are found. One matrix leg is enough.
+      - name: Run scratch-pg self-test
+        if: matrix.mode == 'bundled'
+        run: |
+          pgbin="$(find /usr/lib/postgresql -mindepth 2 -maxdepth 2 -name bin -type d 2>/dev/null | sort -V | tail -1)"
+          PATH="${pgbin:+$pgbin:}$PATH" bash scripts/scratch-pg_test.sh
       - name: Run self-host bundle smoke test (${{ matrix.mode }})
         run: deploy/docker/test-self-host-bundle.sh ${{ matrix.mode }}
       - name: Dump compose logs on failure

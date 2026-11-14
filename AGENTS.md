@@ -95,6 +95,16 @@ NATS + MinIO — sharded across runner legs per `scripts/integration-shards.txt`
 integration is necessary, not sufficient; the CI check `Go · integration
 (Postgres RLS)` is the gate.
 
+**Concurrent sessions: use `just scratch-pg-up`, not a hand-rolled cluster.**
+`just db-up` binds the fixed port 5432, so two worktrees cannot both use it.
+`scripts/scratch-pg.sh` (`just scratch-pg-up` / `scratch-pg-down`) gives each
+worktree its own cluster on a free port, migrates it, and prints the two URLs
+(`eval "$(scripts/scratch-pg.sh env)"`). It fails closed: a failed `initdb` or
+`pg_ctl start` exits before any SQL, and every destructive statement first
+checks the server's `data_directory` is its own. Ad-hoc scripts on a fixed
+port dropped another job's database twice (security-atlas#2033). Never drop or
+create on a cluster you did not start.
+
 ---
 
 ## Read the canvas (reading order)
