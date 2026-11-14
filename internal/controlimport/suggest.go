@@ -90,6 +90,8 @@ type RowSuggestions struct {
 	// LLMRerank is the row's rerank state: RerankOff, RerankApplied or
 	// RerankUnavailable.
 	LLMRerank string
+	// LLMProvider is the provider that served an applied rerank.
+	LLMProvider string
 }
 
 // buildCandidates ranks one row's candidates: crosswalk anchors first, by
@@ -180,15 +182,16 @@ func buildCandidates(row BatchControl, edges []CrosswalkEdge, keyword []AnchorCa
 
 // suggest computes and stores every staged row's candidates, drawn from the
 // batch's SCF release, then marks the batch's suggestions ready (or failed).
-// With rerank set, the LLM reorders and explains each row's candidates; its
-// failure leaves the deterministic candidates as computed.
+// With a positive rerankBudget, the LLM reorders and explains each row's
+// candidates within that wall-clock budget; its failure leaves the
+// deterministic candidates as computed. Zero means no rerank.
 //
 // Every error path marks the batch failed (best effort), so a run that ends
 // never leaves it pending. A run that never ends (the process stops) is the
 // sweeper's to fail. Failed is final: a run whose batch the sweeper failed,
 // before the run started or before it saved, is dropped with
 // ErrSuggestionsNoLongerPending and writes nothing.
-func (s *Stager) suggest(ctx context.Context, b Batch, rerank bool) ([]RowSuggestions, error) {
+func (s *Stager) suggest(ctx context.Context, b Batch, rerankBudget time.Duration) ([]RowSuggestions, error) {
 	select {
 	case s.runs <- struct{}{}:
 	case <-ctx.Done():
@@ -209,8 +212,8 @@ func (s *Stager) suggest(ctx context.Context, b Batch, rerank bool) ([]RowSugges
 	if err != nil {
 		return nil, s.markFailed(ctx, b.ID, err)
 	}
-	if rerank {
-		s.reranker.rerankAll(ctx, b.Staged, out)
+	if rerankBudget > 0 {
+		s.reranker.rerankAll(ctx, b.Staged, out, rerankBudget)
 	}
 	if err := s.store.SaveSuggestions(ctx, b.ID, out, SuggestionsReady); err != nil {
 		if errors.Is(err, ErrSuggestionsNoLongerPending) {

@@ -31,6 +31,23 @@
 //     Middleware on every allow OR deny.
 package authz
 
+import "github.com/mgoodric/security-atlas/internal/api/credstore"
+
+// IsTenantAdmin reports whether cred administers its tenant: a platform
+// admin credential, or one holding the admin role in the tenant. Tenant
+// configuration endpoints (LLM routing, control import settings) gate on it.
+func IsTenantAdmin(cred credstore.Credential) bool {
+	if cred.IsAdmin {
+		return true
+	}
+	for _, role := range cred.OwnerRoles {
+		if role == string(RoleAdmin) {
+			return true
+		}
+	}
+	return false
+}
+
 // Role is the canonical role enum from canvas §9.5. The CHECK
 // constraint on user_roles.role mirrors this set; updates to one MUST
 // update the other and add a .rego file under policies/authz/.

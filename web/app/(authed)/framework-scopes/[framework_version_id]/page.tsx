@@ -14,6 +14,8 @@
 //
 // #1794: a second tab holds the Statement of Applicability
 // (components/framework-scopes/soa-tab.tsx).
+// #1795: each revision in review shows what it changes against the
+// activated revision (components/framework-scopes/review-diff.tsx).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
@@ -30,6 +32,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ReviewDiff } from "@/components/framework-scopes/review-diff";
 import { SoATab, useSoATitle } from "@/components/framework-scopes/soa-tab";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -232,6 +235,12 @@ export default function FrameworkScopesPage() {
           </CardContent>
         </Card>
       )}
+
+      {scopesQ.data &&
+        tab === "scopes" &&
+        scopesQ.data
+          .filter((s) => s.state === "review")
+          .map((s) => <ReviewDiff key={s.id} scope={s} />)}
     </PageShell>
   );
 }

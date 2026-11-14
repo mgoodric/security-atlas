@@ -73,9 +73,12 @@ USER node
 COPY --from=builder --chown=node:node /app/web/.next/standalone ./
 COPY --from=builder --chown=node:node /app/web/.next/static ./web/.next/static
 COPY --from=builder --chown=node:node /app/web/public ./web/public
+# #2040: preload that records each request's real TCP peer so the login
+# BFF can forward the browser's IP (see the file header).
+COPY --from=builder --chown=node:node /app/web/peer-chain.cjs ./web/peer-chain.cjs
 
 EXPOSE 3000
 
 # In a monorepo workspace the standalone tracer roots the output at the
 # repo layout, so the server entrypoint lands at web/server.js.
-CMD ["node", "web/server.js"]
+CMD ["node", "--require", "./web/peer-chain.cjs", "web/server.js"]
