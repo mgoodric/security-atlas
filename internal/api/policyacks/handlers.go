@@ -135,7 +135,7 @@ func (h *Handler) MyAcknowledgments(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "authentication required")
 		return
 	}
-	if !isUUIDUser(cred.UserID) {
+	if _, isUser := credstore.CallerUserID(cred); !isUser {
 		httpresp.WriteJSON(w, http.StatusOK, pendingResponse{
 			Pending:       []pendingItem{},
 			Count:         0,
@@ -363,22 +363,15 @@ func (h *Handler) tenantCredContext(r *http.Request) (context.Context, credstore
 	return r.Context(), cred, true
 }
 
-// isUUIDUser reports whether the credential's UserID is a parseable
-// UUID. Slice 150 — a non-UUID UserID is the platform's marker for a
-// service-account / bootstrap credential; the user-pending-acks read
-// path returns an empty envelope rather than 500-ing the dashboard
-// panel. See MyAcknowledgments for the contract.
-func isUUIDUser(id string) bool {
-	if id == "" {
-		return false
-	}
-	_, err := uuid.Parse(id)
-	return err == nil
-}
-
+// ackCallerFromCred hands the ack store the users(id) behind c, or "" when c
+// is not a user (the store then answers ErrAckMissingUser) (#2183).
 func ackCallerFromCred(c credstore.Credential) policy.AckCaller {
+	userID := ""
+	if u, ok := credstore.CallerUserID(c); ok {
+		userID = u.String()
+	}
 	return policy.AckCaller{
-		UserID:     c.UserID,
+		UserID:     userID,
 		OwnerRoles: append([]string(nil), c.OwnerRoles...),
 		IsAdmin:    c.IsAdmin,
 	}

@@ -170,7 +170,6 @@ catalogs:
 ```sh
 atlas-oscal import-catalog ./nist-800-53-rev5.oscal.json \
   --dsn "$DATABASE_URL_APP" \
-  --tenant-id <tenant uuid> \
   --source-label "NIST SP 800-53 rev5" \
   --imported-by "you@example.com"
 ```

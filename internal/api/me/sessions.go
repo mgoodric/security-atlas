@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
@@ -95,8 +96,8 @@ func (h *SessionsHandler) ListSessions(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	userUUID, err := callerUserUUID(cred)
-	if err != nil {
+	userUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		// No real users row → no sessions surface.
 		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"sessions": []sessionWire{}, "count": 0})
 		return
@@ -136,8 +137,8 @@ func (h *SessionsHandler) RevokeSession(w http.ResponseWriter, r *http.Request) 
 		httpresp.WriteError(w, http.StatusBadRequest, "session id required")
 		return
 	}
-	userUUID, err := callerUserUUID(cred)
-	if err != nil {
+	userUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		httpresp.WriteError(w, http.StatusNotFound, "session not found")
 		return
 	}
@@ -171,8 +172,8 @@ func (h *SessionsHandler) RevokeOtherSessions(w http.ResponseWriter, r *http.Req
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	userUUID, err := callerUserUUID(cred)
-	if err != nil {
+	userUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		httpresp.WriteError(w, http.StatusNotFound, "no sessions for this credential")
 		return
 	}

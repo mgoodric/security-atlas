@@ -13,6 +13,7 @@ DELETE /v1/me/sessions 8
 DELETE /v1/me/sessions/{id} 8
 DELETE /v1/org_units/{id} 8
 DELETE /v1/policies/{id} 8
+DELETE /v1/risks/categories/{ref} 8
 DELETE /v1/risks/{id} 8
 DELETE /v1/risks/{id}/children/{child_id} 8
 DELETE /v1/risks/{id}/themes/{theme} 8
@@ -220,6 +221,7 @@ PATCH /v1/policies/{id}/approve 8
 PATCH /v1/policies/{id}/review-date 8
 PATCH /v1/policies/{id}/submit 8
 PATCH /v1/questionnaires/{id}/answers/{qid} 8
+PATCH /v1/risks/categories/{ref} 8
 PATCH /v1/risks/{id} 8
 PATCH /v1/tenants/{id} 8
 PATCH /v1/vendors/{id} 8
@@ -317,6 +319,10 @@ POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve 8
 POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject 8
 POST /v1/risks 8
 POST /v1/risks/aggregate 8
+POST /v1/risks/categories 8
+POST /v1/risks/categories/{ref}/archive 8
+POST /v1/risks/categories/{ref}/set-default 8
+POST /v1/risks/categories/{ref}/unarchive 8
 POST /v1/risks/{id}/children 8
 POST /v1/risks/{id}/controls 8
 POST /v1/risks/{id}/themes 8

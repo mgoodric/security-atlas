@@ -75,6 +75,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
@@ -767,8 +769,8 @@ func actorFromContext(ctx context.Context) uuid.UUID {
 			return u
 		}
 	}
-	if cred, ok := credentialFromContext(ctx); ok {
-		if u, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID)); err == nil {
+	if cred, ok := authctx.CredentialFromContext(ctx); ok {
+		if u, ok := credstore.CallerUserID(cred); ok {
 			return u
 		}
 	}

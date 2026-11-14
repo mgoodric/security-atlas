@@ -59,7 +59,6 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
-	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -388,16 +387,16 @@ func (h *OwnerAssignHandler) inTenantTx(ctx context.Context, fn func(context.Con
 // identity resolves the tenant + actor user UUIDs from the credential. The
 // actor id is the verified credential's user (NOT the request body) — a
 // caller cannot forge who performed the assignment (threat-model R). The
-// credential's UserID carries the auth-substrate "user:" prefix, stripped
-// via jwtmw.SubjectUserID before parse (the adminusers / export precedent).
+// actor resolves through credstore.CallerUserID, which strips the "user:"
+// JWT prefix and refuses machine and unbound-key credentials (#2183).
 func (h *OwnerAssignHandler) identity(w http.ResponseWriter, cred credstore.Credential) (uuid.UUID, uuid.UUID, bool) {
 	tenantUUID, err := uuid.Parse(cred.TenantID)
 	if err != nil {
 		writeAssignError(w, http.StatusInternalServerError, "tenant context: invalid tenant id")
 		return uuid.Nil, uuid.Nil, false
 	}
-	actorUUID, err := uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
-	if err != nil {
+	actorUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		// A machine/api-key credential has no users.id-shaped UserID;
 		// owner-assignment is a human action (the actor is recorded for
 		// repudiation), so reject rather than tag uuid.Nil.
