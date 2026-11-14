@@ -42,11 +42,26 @@ bump"). The byte-identical no-op (slice 068) was the first exception; this is
 the second. `docs/spec/control-bundle.md` "Versioning + supersession" now
 states both.
 
-**Trade-off.** The prior description text and manifest bytes are overwritten,
-not kept as a version. Auditors lose byte-exact reproducibility of the old
-prose, which the spec promised for every version. We accept that because the
-prose does not affect evaluation, applicability, scope or framework mapping,
-and keeping it as a version currently costs every linked record.
+**Prose history: `control_manifest_revisions` (Matt's call on the PR).**
+The first draft of this change simply overwrote the prior description and
+manifest bytes, so auditors would lose byte-exact reproducibility of the old
+prose. Matt chose in-place plus a revision log instead. Just before the
+UPDATE, in the same transaction, `InsertControlManifestRevision` copies the
+active row's `bundle_manifest_yaml`, `bundle_manifest_hash`,
+`bundle_uploaded_by` and `bundle_uploaded_at` into `control_manifest_revisions`
+with a `replaced_at` timestamp (migration `20260820000000`). The table is
+append-only: RLS enabled and forced, SELECT and INSERT policies only, and
+`atlas_app` holds SELECT and INSERT only. A control's prose history is
+therefore its `controls` versions plus its revision rows. A superseding
+upload writes no revision row, because the prior version survives as its own
+`controls` row. A byte-identical repeat writes none either.
+
+**Concurrency.** The revision insert and the UPDATE both target the active row
+(`superseded_by IS NULL`). If a concurrent upload superseded it between the
+lookup and the write, either statement touches zero rows. `Upload` then
+returns `ErrControlChangedConcurrently`, which rolls back the transaction, and
+the HTTP layer maps it to `409`, so the caller can retry against the new
+active version.
 
 **Rejected: copy-forward (option B in the #1901 review).** Keep versioning on
 every change, and copy or re-point every control-keyed row to the new id in
@@ -55,16 +70,17 @@ dozen-plus tables listed above, and every new control-keyed table must
 remember to join that list. A missed table fails silently in exactly the way
 this issue describes. Evidence also lives in an append-only ledger
 (constitutional invariant 2), so it could only be re-pointed by a read-time
-lineage join, not moved. Option B remains open if a prose history turns out to
-be required. It would supersede this decision rather than extend it.
+lineage join, not moved. The revision log gives the prose history that option
+B would have kept, without re-pointing anything.
 
 ## D2 — The upload response does not change shape
 
 An in-place update returns `200` with the existing `control_id` and
 `version`, `is_new_bundle=false` and no `superseded_id`, which is the same
 shape as the byte-identical no-op. `UploadResult.UpdatedInPlace` tells the
-two apart for in-process callers. The HTTP body has no new field, so the
-OpenAPI document does not change.
+two apart for in-process callers. The HTTP body has no new field. The one
+new status, `409` on the concurrency race above, falls under the endpoint's
+`default` response, so the OpenAPI document does not change.
 
 ## D3 — Evidence pushed to a superseded control id: out of scope, follow-up
 

@@ -273,6 +273,20 @@ UPDATE controls
 SET superseded_by = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 
+-- name: InsertControlManifestRevision :execrows
+-- Issue #1908: record the manifest an in-place description update is about
+-- to overwrite. Copies the active row's current values in the same
+-- transaction, just before UpdateControlDescriptionInPlace, so the prose
+-- history is append-only in control_manifest_revisions.
+INSERT INTO control_manifest_revisions (
+    tenant_id, control_id, bundle_manifest_yaml, bundle_manifest_hash,
+    bundle_uploaded_by, bundle_uploaded_at
+)
+SELECT c.tenant_id, c.id, c.bundle_manifest_yaml, c.bundle_manifest_hash,
+       c.bundle_uploaded_by, c.bundle_uploaded_at
+FROM controls c
+WHERE c.tenant_id = @tenant_id AND c.id = @control_id AND c.superseded_by IS NULL;
+
 -- name: UpdateControlDescriptionInPlace :execrows
 -- Issue #1908: a re-upload whose manifest differs from the active row's
 -- only in `description` updates that row in place instead of versioning,

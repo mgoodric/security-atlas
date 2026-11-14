@@ -21,6 +21,12 @@ import (
 // 404 (canvas invariant 7 — no anchor, no control).
 var ErrSCFAnchorUnknown = errors.New("control bundle: scf_anchor_id does not resolve to a known SCF anchor")
 
+// ErrControlChangedConcurrently is returned when the active version a
+// description-only upload was about to update in place was superseded by a
+// concurrent upload in the meantime. The HTTP layer maps this to 409; the
+// caller can retry against the new active version.
+var ErrControlChangedConcurrently = errors.New("control bundle: the active version changed during upload; retry")
+
 // UploadResult is the persistence-side outcome of a bundle upload.
 type UploadResult struct {
 	ControlID uuid.UUID
@@ -156,7 +162,19 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 				return cmpErr
 			}
 			if same {
-				n, err := q.UpdateControlDescriptionInPlace(ctx, dbx.UpdateControlDescriptionInPlaceParams{
+				// Keep the manifest being overwritten: the prose history
+				// lives append-only in control_manifest_revisions.
+				n, err := q.InsertControlManifestRevision(ctx, dbx.InsertControlManifestRevisionParams{
+					TenantID:  pgUUID(tenantID),
+					ControlID: prior.ID,
+				})
+				if err != nil {
+					return fmt.Errorf("record control manifest revision: %w", err)
+				}
+				if n != 1 {
+					return ErrControlChangedConcurrently
+				}
+				n, err = q.UpdateControlDescriptionInPlace(ctx, dbx.UpdateControlDescriptionInPlaceParams{
 					TenantID:           pgUUID(tenantID),
 					ID:                 prior.ID,
 					Description:        b.Manifest.Description,
@@ -168,7 +186,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 					return fmt.Errorf("update control description in place: %w", err)
 				}
 				if n != 1 {
-					return fmt.Errorf("update control description in place: %d rows updated, want 1", n)
+					return ErrControlChangedConcurrently
 				}
 				result.ControlID = uuid.UUID(prior.ID.Bytes)
 				result.BundleID = b.Manifest.BundleID

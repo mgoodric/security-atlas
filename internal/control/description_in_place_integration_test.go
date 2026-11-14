@@ -102,7 +102,7 @@ func TestUpload_DescriptionOnlyChangeUpdatesInPlace(t *testing.T) {
 
 	_, code := seedSCFAnchor(t, admin, "IAC-1908", "IAC")
 	tenant := dbtest.SeedTenant(t, admin,
-		"risk_control_links", "risks", "exceptions",
+		"control_manifest_revisions", "risk_control_links", "risks", "exceptions",
 		"control_owner_assignments", "evidence_records", "controls",
 	)
 	store := control.NewStore(app)
@@ -163,6 +163,28 @@ func TestUpload_DescriptionOnlyChangeUpdatesInPlace(t *testing.T) {
 		t.Fatalf("links after description-only upload: got %v, want %v", got, want)
 	}
 
+	// The overwritten manifest is kept as one revision row.
+	var revYAML, revHash, revBy string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT bundle_manifest_yaml, bundle_manifest_hash, bundle_uploaded_by
+		FROM control_manifest_revisions WHERE tenant_id = $1 AND control_id = $2
+	`, tenant, res1.ControlID).Scan(&revYAML, &revHash, &revBy); err != nil {
+		t.Fatalf("read revision row: %v", err)
+	}
+	if revYAML != string(b1.ManifestYAMLRaw) || revHash != b1.ManifestHashHex || revBy != "key_admin" {
+		t.Fatalf("revision row should hold the v1 manifest; got hash %s by %q, want %s", revHash, revBy, b1.ManifestHashHex)
+	}
+	countRevisions := func() int {
+		t.Helper()
+		var n int
+		if err := admin.QueryRow(context.Background(), `
+			SELECT count(*) FROM control_manifest_revisions WHERE tenant_id = $1 AND control_id = $2
+		`, tenant, res1.ControlID).Scan(&n); err != nil {
+			t.Fatalf("count revisions: %v", err)
+		}
+		return n
+	}
+
 	// The same bytes again are a no-op, because the hash moved with the YAML.
 	b2again, _ := control.FinalizeBundleForHTTP(manifestWith("in_place", code, "Access review", "Access is reviewed every quarter by the owner."))
 	res3, err := store.Upload(ctx, b2again, "key_admin")
@@ -171,6 +193,9 @@ func TestUpload_DescriptionOnlyChangeUpdatesInPlace(t *testing.T) {
 	}
 	if res3.UpdatedInPlace || res3.ControlID != res1.ControlID || res3.Version != 1 {
 		t.Fatalf("repeat upload should be a no-op; got %+v", res3)
+	}
+	if n := countRevisions(); n != 1 {
+		t.Fatalf("repeat upload added a revision row: %d rows, want 1", n)
 	}
 
 	// A title change is not prose-only: it supersedes, as before.
@@ -181,5 +206,8 @@ func TestUpload_DescriptionOnlyChangeUpdatesInPlace(t *testing.T) {
 	}
 	if res4.UpdatedInPlace || res4.Version != 2 || res4.SupersededID != res1.ControlID || res4.ControlID == res1.ControlID {
 		t.Fatalf("title change should supersede; got %+v", res4)
+	}
+	if n := countRevisions(); n != 1 {
+		t.Fatalf("a superseding upload wrote a revision row: %d rows, want 1", n)
 	}
 }
