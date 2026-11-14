@@ -305,6 +305,135 @@ test.describe("admin users management page", () => {
     await expect(authedPage.getByTestId("revoke-confirm-dialog")).toBeHidden();
   });
 
+  // #1953: the revoke dialog lists the user's still-live minted keys. It
+  // never revokes them on its own: a key goes only on a confirmed click.
+  test("revoke dialog lists the user's live minted keys and never auto-revokes", async ({
+    authedPage,
+  }) => {
+    const KEY_1 = "key_cccccccc-1111-4111-8111-111111111111";
+    const KEY_2 = "key_dddddddd-2222-4222-8222-222222222222";
+    await mockMe(authedPage, TENANT_A);
+    await authedPage.route("**/api/admin/users", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [SUPER_ROW_1, SUPER_ROW_2],
+          cross_tenant: true,
+        }),
+      });
+    });
+    const listed: string[] = [];
+    let live = [
+      {
+        id: KEY_1,
+        tenant_id: TENANT_A,
+        scope_predicate: "",
+        allowed_kinds: [],
+        last4: "aaaa",
+        issued_at: "2026-11-01T00:00:00Z",
+        last_used_at: "2026-11-13T10:00:00Z",
+        expires_at: "2027-11-01T00:00:00Z",
+        is_admin: false,
+        is_approver: false,
+        owner_roles: [],
+        minted_by: USER_1,
+      },
+      {
+        id: KEY_2,
+        tenant_id: TENANT_A,
+        scope_predicate: "env == 'prod'",
+        allowed_kinds: ["aws.iam.user"],
+        last4: "bbbb",
+        issued_at: "2026-11-02T00:00:00Z",
+        is_admin: false,
+        is_approver: false,
+        owner_roles: [],
+        minted_by: USER_1,
+      },
+    ];
+    await authedPage.route("**/api/admin/credentials?*", async (route) => {
+      listed.push(
+        new URL(route.request().url()).searchParams.get("minted_by") ?? "",
+      );
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: live }),
+      });
+    });
+    const revoked: string[] = [];
+    await authedPage.route(
+      "**/api/admin/credentials/*/revoke",
+      async (route) => {
+        const id = decodeURIComponent(
+          route.request().url().split("/").at(-2) ?? "",
+        );
+        revoked.push(id);
+        live = live.filter((k) => k.id !== id);
+        await route.fulfill({ status: 204, body: "" });
+      },
+    );
+
+    await authedPage.goto("/admin/users");
+    await authedPage.getByTestId(`revoke-user-${USER_1}`).click();
+    const warning = authedPage.getByTestId("minted-keys-warning");
+    await expect(warning).toBeVisible();
+    await expect(warning).toContainText(
+      "2 API keys this user minted stay live",
+    );
+    await expect(authedPage.getByTestId(`minted-key-${KEY_2}`)).toContainText(
+      "env == 'prod'",
+    );
+    expect(listed).toContain(USER_1);
+
+    // A per-key revoke needs its own confirmation.
+    await authedPage.getByTestId(`minted-key-revoke-${KEY_1}`).click();
+    expect(revoked).toEqual([]);
+    await authedPage.getByTestId(`minted-key-revoke-confirm-${KEY_1}`).click();
+    await expect(authedPage.getByTestId(`minted-key-${KEY_1}`)).toBeHidden();
+    expect(revoked).toEqual([KEY_1]);
+
+    // "Revoke all" asks first.
+    await authedPage.getByTestId("minted-keys-revoke-all").click();
+    expect(revoked).toEqual([KEY_1]);
+    await authedPage.getByTestId("minted-keys-revoke-all-confirm").click();
+    await expect(authedPage.getByTestId("minted-keys-none")).toBeVisible();
+    expect(revoked).toEqual([KEY_1, KEY_2]);
+  });
+
+  test("revoke dialog: a user in another tenant gets a pointer, not a list", async ({
+    authedPage,
+  }) => {
+    await mockMe(authedPage, TENANT_A);
+    await authedPage.route("**/api/admin/users", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          items: [SUPER_ROW_1, SUPER_ROW_2],
+          cross_tenant: true,
+        }),
+      });
+    });
+    let credCalls = 0;
+    await authedPage.route("**/api/admin/credentials**", async (route) => {
+      credCalls++;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [] }),
+      });
+    });
+
+    await authedPage.goto("/admin/users");
+    await authedPage.getByTestId(`revoke-user-${USER_2}`).click();
+    await expect(
+      authedPage.getByTestId("minted-keys-other-tenant"),
+    ).toContainText(TENANT_B);
+    expect(credCalls).toBe(0);
+  });
+
   test("authz-honest: tenant-admin sees no cross-tenant controls", async ({
     authedPage,
   }) => {

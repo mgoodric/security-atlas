@@ -106,6 +106,11 @@ type Querier interface {
 	// attachment; if the period is still open, frozen_at remains NULL and the
 	// slice-026 query path keeps the population live until the period freezes.
 	AttachPopulationToPeriod(ctx context.Context, arg AttachPopulationToPeriodParams) error
+	// #1769: fill legacy_scf_id on an anchor imported without one. Only a
+	// NULL is filled, so a stored value is never rewritten; the importer
+	// refuses a re-import whose legacy_scf_id differs from a stored one.
+	// legacy_scf_id is outside trg_scf_anchor_immutability's guarded columns.
+	BackfillSCFAnchorLegacySCFID(ctx context.Context, arg BackfillSCFAnchorLegacySCFIDParams) (int64, error)
 	// Slice 751 — the DETERMINISTIC exception-status aggregate the board brief
 	// freezes into `content.exceptions` and the AI-drafted exception-status
 	// narrative section grounds every numeric claim on.
@@ -2131,6 +2136,16 @@ type Querier interface {
 	// evaluation engine (slice 020/012) intersects scope_cell_predicate with
 	// the cell under evaluation.
 	ListExceptionsByControl(ctx context.Context, arg ListExceptionsByControlParams) ([]Exception, error)
+	// ===== #1792: excluded requirements -> SSP not-applicable entries =====
+	// The requirements excluded in the framework-scope revision that was in
+	// force for a framework version at the audit period's frozen_at. The
+	// revision is chosen exactly as GetFrameworkScopeAsOf chooses it (the
+	// revision active at that time); decisions on an activated or superseded
+	// revision are frozen, so its rows are exactly what applied at the freeze.
+	// A requirement excluded only after the freeze lives on a later revision
+	// and is not returned. RLS scopes every table to the caller tenant; the
+	// leading tenant predicates are defense-in-depth.
+	ListExcludedRequirementsAsOfForExport(ctx context.Context, arg ListExcludedRequirementsAsOfForExportParams) ([]ListExcludedRequirementsAsOfForExportRow, error)
 	// AC-6 calendar surface. Returns active exceptions whose expires_at is
 	// within the supplied window. Window upper bound is computed in Go from
 	// the request param to keep the SQL static.
@@ -3262,6 +3277,12 @@ type Querier interface {
 	// handler can audit who superseded it. Only matches when the row is
 	// currently 'published' (defense-in-depth -- a chain can't supersede a
 	// draft).
+	//
+	// next_review_at is left as it was (#2009): the successor carries its own
+	// review date, and the superseded row keeps the date it was due so an
+	// auditor can still see it and compare it with the successor's
+	// published_at. Only a 'published' row has a review due, so the calendar
+	// and the list's review_status ignore it.
 	SupersedePolicyAtPublish(ctx context.Context, arg SupersedePolicyAtPublishParams) (Policy, error)
 	// AC-8: in the same transaction as ActivateFrameworkScope, transition the
 	// previously-activated row (if any) to `superseded`, point its

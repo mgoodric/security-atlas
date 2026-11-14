@@ -7,6 +7,7 @@ import type { AnchorWithState } from "@/lib/api/anchors";
 import type { ControlWithState } from "@/lib/api/controls-list";
 
 import {
+  catalogTruncationNote,
   controlHref,
   controlsViewSummary,
   parseControlsView,
@@ -141,5 +142,17 @@ describe("controlsViewSummary", () => {
       }),
     ).toBe("37 of 1,451 SCF anchors have a control in this tenant");
     expect(controlsViewSummary("catalog", {})).toBe("");
+  });
+});
+
+describe("catalogTruncationNote (issue 1895)", () => {
+  test("states the loaded count when the walk stopped short", () => {
+    expect(catalogTruncationNote(10_000, 12_000)).toBe(
+      "Showing 10,000 of 12,000 SCF anchors; the rest were not loaded",
+    );
+  });
+  test("is empty when every anchor loaded or no total arrived", () => {
+    expect(catalogTruncationNote(1451, 1451)).toBe("");
+    expect(catalogTruncationNote(1451)).toBe("");
   });
 });
