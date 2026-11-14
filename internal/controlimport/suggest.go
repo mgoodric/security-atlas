@@ -2,6 +2,7 @@ package controlimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -184,7 +185,9 @@ func buildCandidates(row BatchControl, edges []CrosswalkEdge, keyword []AnchorCa
 //
 // Every error path marks the batch failed (best effort), so a run that ends
 // never leaves it pending. A run that never ends (the process stops) is the
-// sweeper's to fail.
+// sweeper's to fail. Failed is final: a run whose batch the sweeper failed,
+// before the run started or before it saved, is dropped with
+// ErrSuggestionsNoLongerPending and writes nothing.
 func (s *Stager) suggest(ctx context.Context, b Batch, rerank bool) ([]RowSuggestions, error) {
 	select {
 	case s.runs <- struct{}{}:
@@ -192,6 +195,15 @@ func (s *Stager) suggest(ctx context.Context, b Batch, rerank bool) ([]RowSugges
 		return nil, s.markFailed(ctx, b.ID, fmt.Errorf("controlimport: waiting for a suggestion slot: %w", ctx.Err()))
 	}
 	defer func() { <-s.runs }()
+
+	// The wait for a slot can outlast the sweeper's cutoff.
+	cur, err := s.store.GetBatch(ctx, b.ID)
+	if err != nil {
+		return nil, s.markFailed(ctx, b.ID, fmt.Errorf("controlimport: re-read batch: %w", err))
+	}
+	if cur.SuggestionsStatus != SuggestionsPending {
+		return nil, ErrSuggestionsNoLongerPending
+	}
 
 	out, err := s.computeSuggestions(ctx, b)
 	if err != nil {
@@ -201,6 +213,9 @@ func (s *Stager) suggest(ctx context.Context, b Batch, rerank bool) ([]RowSugges
 		s.reranker.rerankAll(ctx, b.Staged, out)
 	}
 	if err := s.store.SaveSuggestions(ctx, b.ID, out, SuggestionsReady); err != nil {
+		if errors.Is(err, ErrSuggestionsNoLongerPending) {
+			return nil, err
+		}
 		return nil, s.markFailed(ctx, b.ID, err)
 	}
 	return out, nil

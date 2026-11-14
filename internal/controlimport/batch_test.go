@@ -52,6 +52,9 @@ func (f *fakeBatchStore) CreateBatch(_ context.Context, b Batch) (Batch, error) 
 		b.Staged[i].ID = fmt.Sprintf("row-%d", b.Staged[i].RowNumber)
 	}
 	f.created = &b
+	f.mu.Lock()
+	f.status = b.SuggestionsStatus
+	f.mu.Unlock()
 	return b, nil
 }
 
@@ -59,7 +62,13 @@ func (f *fakeBatchStore) GetBatch(_ context.Context, id string) (Batch, error) {
 	if f.created == nil || f.created.ID != id {
 		return Batch{}, ErrBatchNotFound
 	}
-	return *f.created, nil
+	b := *f.created
+	f.mu.Lock()
+	if f.status != "" {
+		b.SuggestionsStatus = f.status
+	}
+	f.mu.Unlock()
+	return b, nil
 }
 
 func (f *fakeBatchStore) ResolveSCFRelease(context.Context) (SCFRelease, bool, error) {
@@ -98,6 +107,10 @@ func (f *fakeBatchStore) SaveSuggestions(_ context.Context, _ string, rows []Row
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.saveCalls = append(f.saveCalls, status)
+	// The Postgres store's guard: a ready save lands only on a pending batch.
+	if status == SuggestionsReady && f.status != "" && f.status != SuggestionsPending {
+		return ErrSuggestionsNoLongerPending
+	}
 	if f.saveErr != nil {
 		if err := f.saveErr(status); err != nil {
 			return err

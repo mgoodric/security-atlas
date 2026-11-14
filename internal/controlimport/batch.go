@@ -17,6 +17,10 @@ var (
 	ErrFrameworkRequired = errors.New("controlimport: framework is required")
 	ErrUnknownFramework  = errors.New("controlimport: framework has no current version")
 	ErrBatchNotFound     = errors.New("controlimport: import batch not found")
+	// ErrSuggestionsNoLongerPending is a run whose batch left pending before
+	// the run saved, because the sweeper failed it. Failed is final: the run
+	// is dropped and writes nothing (#2038).
+	ErrSuggestionsNoLongerPending = errors.New("controlimport: batch suggestions are no longer pending")
 )
 
 // BatchStatusStaged is a batch whose rows are staged and awaiting review.
@@ -289,7 +293,10 @@ func (s *Stager) Stage(ctx context.Context, in StageInput) (Batch, error) {
 
 func (s *Stager) suggestInBackground(ctx context.Context, b Batch, rerank bool) {
 	_, err := s.suggest(ctx, b, rerank)
-	if err != nil {
+	switch {
+	case errors.Is(err, ErrSuggestionsNoLongerPending):
+		slog.InfoContext(ctx, "controlimport: background suggestions dropped; batch no longer pending", "batch_id", b.ID)
+	case err != nil:
 		slog.ErrorContext(ctx, "controlimport: suggest candidates in background", "batch_id", b.ID, "error", err)
 	}
 	if s.background != nil {

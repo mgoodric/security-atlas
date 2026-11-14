@@ -238,6 +238,71 @@ func TestFailedReadySaveMarksTheBatchFailed(t *testing.T) {
 	}
 }
 
+// A batch the sweeper failed while its run waited for a slot is dropped:
+// nothing is computed and nothing is saved.
+func TestRunDropsABatchNoLongerPendingOnceItHasASlot(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	s := NewStager(store)
+	b, err := s.Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	store.status = SuggestionsFailed // the sweeper got there first
+	store.saveCalls, store.keywordVersions = nil, nil
+	b.SuggestionsStatus = SuggestionsPending
+	_, err = s.suggest(tenantCtx(t, batchTenant), b, false)
+	if !errors.Is(err, ErrSuggestionsNoLongerPending) {
+		t.Fatalf("suggest err = %v, want ErrSuggestionsNoLongerPending", err)
+	}
+	if len(store.keywordVersions) != 0 || len(store.saveCalls) != 0 || store.status != SuggestionsFailed {
+		t.Errorf("dropped run retrieved %d times, saved %v, status %q; want nothing and failed",
+			len(store.keywordVersions), store.saveCalls, store.status)
+	}
+}
+
+// A run that computed its candidates after the sweeper failed the batch
+// does not overwrite failed, and is not reported as a new failure.
+func TestLateReadySaveLeavesAFailedBatchFailed(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	s := NewStager(store)
+	b, err := s.Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	store.status = SuggestionsPending
+	store.saveCalls = nil
+	// The sweeper fails the batch between the slot re-check and the save.
+	sweepDuringCompute := &sweepingStore{fakeBatchStore: store}
+	s.store = sweepDuringCompute
+	_, err = s.suggest(tenantCtx(t, batchTenant), b, false)
+	if !errors.Is(err, ErrSuggestionsNoLongerPending) {
+		t.Fatalf("suggest err = %v, want ErrSuggestionsNoLongerPending", err)
+	}
+	if got := strings.Join(store.saveCalls, ","); got != SuggestionsReady {
+		t.Errorf("save calls = %q, want one refused ready save and no failed mark", got)
+	}
+	if store.status != SuggestionsFailed {
+		t.Errorf("status = %q, want failed", store.status)
+	}
+}
+
+// sweepingStore fails the batch, as the sweeper would, during the run's
+// crosswalk read.
+type sweepingStore struct{ *fakeBatchStore }
+
+func (s *sweepingStore) CrosswalkAnchors(ctx context.Context, v string, ids []string) ([]CrosswalkEdge, error) {
+	s.mu.Lock()
+	s.status = SuggestionsFailed
+	s.mu.Unlock()
+	return s.fakeBatchStore.CrosswalkAnchors(ctx, v, ids)
+}
+
 func TestSuggestionRunsShareOneConcurrencyCap(t *testing.T) {
 	t.Parallel()
 	store := suggestStore()

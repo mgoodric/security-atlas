@@ -124,6 +124,64 @@ func TestSweeperFailsStalePendingBatchesOnce(t *testing.T) {
 	}
 }
 
+// ----- failed is final: a late run's ready save is refused -----
+
+func TestLateRunCannotOverwriteASweptBatch(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	cat := seedCatalog(t, admin)
+	tenant := freshTenant(t, admin)
+	batchID := uploadFixture(t, testServer(t, app, tenant), cat.framework, "csv")
+	setSuggestions(t, admin, batchID, controlimport.SuggestionsPending, time.Hour)
+
+	candidates := func() string {
+		t.Helper()
+		var s string
+		if err := admin.QueryRow(context.Background(), `
+			SELECT COALESCE(string_agg(row_id::text || ':' || rank || ':' || scf_anchor_id::text, ',' ORDER BY row_id, rank), '')
+			FROM control_import_candidates WHERE batch_id = $1::uuid`, batchID).Scan(&s); err != nil {
+			t.Fatalf("read candidates: %v", err)
+		}
+		return s
+	}
+	before := candidates()
+
+	if _, err := controlimport.NewSweeper(admin, app, nil, 30*time.Minute).SweepOnce(context.Background()); err != nil {
+		t.Fatalf("SweepOnce: %v", err)
+	}
+
+	// The late run: one row, its candidates replaced by a single new one.
+	var rowID, anchorID string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT r.id::text, a.id::text
+		FROM control_import_rows r, scf_anchors a
+		WHERE r.batch_id = $1::uuid
+		  AND NOT EXISTS (SELECT 1 FROM control_import_candidates c WHERE c.row_id = r.id AND c.scf_anchor_id = a.id)
+		LIMIT 1`, batchID).Scan(&rowID, &anchorID); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	tctx, err := tenancy.WithTenant(context.Background(), tenant)
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	late := []controlimport.RowSuggestions{{
+		RowID: rowID,
+		Candidates: []controlimport.Candidate{{
+			Rank: 1, AnchorID: anchorID, SCFID: "LATE", Title: "Late", Source: controlimport.SourceKeyword,
+		}},
+	}}
+	err = controlimport.NewStore(app).SaveSuggestions(tctx, batchID, late, controlimport.SuggestionsReady)
+	if !errors.Is(err, controlimport.ErrSuggestionsNoLongerPending) {
+		t.Fatalf("late ready save err = %v, want ErrSuggestionsNoLongerPending", err)
+	}
+	if got, _ := batchState(t, admin, batchID); got != controlimport.SuggestionsFailed {
+		t.Errorf("suggestions = %q after the late save, want failed", got)
+	}
+	if after := candidates(); after != before {
+		t.Errorf("late save replaced candidates:\nbefore %s\nafter  %s", before, after)
+	}
+}
+
 // ----- keyword retrieval reads the batch's release, not every current one -----
 
 func TestKeywordAnchorsComeFromThePinnedRelease(t *testing.T) {

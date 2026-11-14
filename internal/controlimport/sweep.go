@@ -15,8 +15,8 @@ import (
 // Sweeper defaults (#2038). A suggestion run that outlives StaleAfter is
 // taken to be dead: its process restarted or crashed before it saved. The
 // cutoff is generous because a large batch with LLM rerank can run for
-// minutes, and a run that does finish after its batch was failed still
-// saves its candidates as ready.
+// minutes, and failed is final: a run that finishes after its batch was
+// failed is refused (ErrSuggestionsNoLongerPending) and writes nothing.
 const (
 	DefaultStaleSuggestionsAfter = 30 * time.Minute
 	DefaultSweepInterval         = 10 * time.Minute

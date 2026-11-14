@@ -19,17 +19,32 @@ which today exists only inside the API server. Failing is one idempotent
 `UPDATE`. A batch read as `failed` tells the operator the truth. A batch read
 as `pending` forever does not.
 
-## D2 — The cutoff is generous, and a late run still wins
+**Failed is final (added in review).** A ready save lands only on a batch that
+is still `pending`. `SaveSuggestions` sets the status first, with
+`WHERE id = $1 AND suggestions_status = 'pending'` for a ready save. That also
+locks the batch row, so the sweeper's `SKIP LOCKED` passes over a save in
+progress. If no row changes, the transaction rolls back before any candidate
+is written and the save returns `ErrSuggestionsNoLongerPending`. A run also
+re-reads the batch after it gets a slot and drops itself if the batch is no
+longer pending. `suggest` does not call `markFailed` on that error: the batch
+is already `failed`, and the run is dropped rather than failed a second time.
+
+**Why final.** Without the guard, a run that outlived the cutoff could flip a
+batch from `failed` back to `ready` after the operator had read `failed` and
+re-uploaded. That leaves two batches for one sheet, and a status the
+operator already acted on changes under them.
+
+## D2 — The cutoff is generous
 
 **Decision.** `DefaultStaleSuggestionsAfter = 30m`, swept at start and every
 10 minutes. Age is measured from `created_at`, since a batch is pending from
-the moment it is created. If a slow run finishes after its batch was failed,
-`SaveSuggestions(..., Ready)` still writes, and the batch reads `ready`.
+the moment it is created.
 
-**Why.** A batch of thousands of rows with rerank can take minutes. A
-heartbeat column would let the cutoff be tight, but it adds a write per row
-batch for a failure that only a restart causes. The late-win rule means a
-false positive costs a short window of `failed`, never lost candidates.
+**Why.** A batch of thousands of rows with rerank can take minutes. Since
+failed is final (D1), a false positive discards that run's candidates, so the
+cutoff sits well above the expected run time. A heartbeat column would let it
+be tight, but it adds a write per row batch for a failure that only a restart
+causes.
 
 ## D3 — Two pools, tenant context for the write, SKIP LOCKED for replicas
 
