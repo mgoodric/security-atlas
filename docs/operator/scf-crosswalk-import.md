@@ -73,17 +73,26 @@ What this means in practice:
   `Relationship` and `Strength of Relationship` values replace the
   workbook's defaults for the same (requirement, anchor) pairs, because both
   imports are `community_draft` and a same-source import updates the edge.
-- **"Official" is provenance, not trust.** No XLSX import is written as
-  `scf_official`, including the OLIR STRM workbook: the importer cannot verify
-  that a local file is an unmodified SCF publication. `scf_official` is only
-  set by a YAML crosswalk that declares it, and none of the bundled
-  `data/crosswalks/*.yaml` files does today. Separately from provenance, every
-  imported edge starts at the draft trust tier; promoting it to reviewed or
-  verified is a human step (ADR 0018).
+  Any edge whose content that import changes has its trust tier re-seeded
+  (#1849), so an edge already promoted to reviewed or verified drops back to
+  draft and needs review again. Each one is printed:
+
+  ```text
+  edge tier re-seeded CC6.1->IAC-01: content changed; mapping_tier verified -> draft
+  ```
+
+- **What "official" means.** No XLSX import is written as `scf_official`,
+  including the OLIR STRM workbook: the importer cannot verify that a local
+  file is an unmodified SCF publication. `scf_official` is only set by a YAML
+  crosswalk that declares it, and none of the bundled
+  `data/crosswalks/*.yaml` files does today. Every XLSX import, and every YAML
+  mapping that isn't `scf_official`, starts at the draft trust tier, and
+  promoting it is a human step. A YAML mapping declared `scf_official` is
+  seeded at verified (ADR 0018 §2).
 
 If you need STRM-accurate relationships for audit work, import the OLIR STRM
-workbook for that framework, or review and edit the workbook-derived edges
-before promoting them. Do not read a workbook edge's `intersects_with` /
+workbook for that framework before promoting its edges, or review and edit the
+workbook-derived edges before promoting them. Do not read a workbook edge's `intersects_with` /
 `0.5` as SCF's judgement of that mapping.
 
 ## Import
@@ -128,10 +137,17 @@ already has an `scf_official` edge. Each skip is printed:
 edge skipped CC6.1->IAC-01: existing source_attribution=scf_official outranks incoming community_draft
 ```
 
-A same-source or stronger-source row updates the edge as before, but never its
-trust tier. If a stronger source lands on an edge whose tier is `rejected`, the
-edge stays out of coverage, and the import prints one line per edge so a
-reviewer can act on it:
+A same-source or stronger-source row updates the edge. If that changes the
+edge's content (relationship, strength, attribution or rationale), its trust
+tier is re-seeded to the incoming source's seed tier: verified for
+`scf_official`, draft for everything else. The reviewer's earlier judgement
+applied to content that no longer exists. Each re-seed is printed and recorded
+as a tier transition. An unchanged row leaves the tier alone.
+
+A `rejected` edge is never re-seeded: rejection is a human call and only a
+reviewer reopens it. If a stronger source lands on a `rejected` edge, the edge
+stays out of coverage, and the import prints one line per edge so a reviewer
+can act on it:
 
 ```text
 edge upgraded onto rejected tier CC6.1->IAC-01: source_attribution community_draft -> scf_official; mapping_tier stays rejected
