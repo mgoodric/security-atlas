@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:standalone": "next build && cp -r public .next/standalone/web/public",
+    "build:standalone": "next build && cp -r public .next/standalone/web/public && cp -r .next/static .next/standalone/web/.next/static",
     "start": "NODE_OPTIONS='--require ./peer-chain.cjs' next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
