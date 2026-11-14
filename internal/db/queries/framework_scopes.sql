@@ -241,6 +241,13 @@ WHERE fsa.tenant_id = @tenant_id
 -- that view, so they count as a path here with no change to this query.
 -- "Latest evaluation" is per control across scope cells, as in
 -- FrameworkPosture.
+--
+-- "Active control" here is lifecycle_state = 'active' AND superseded_by IS
+-- NULL, deliberately stricter than FrameworkPosture (dashboard.sql), which
+-- counts any non-superseded control: posture measures coverage by any
+-- defined control, a contradiction claims a working control sits behind an
+-- exclusion (#1789 D3). Do not align either one to the other. See GLOSSARY
+-- "Active control".
 SELECT DISTINCT fsa.framework_requirement_id
 FROM framework_scope_applicability fsa
 JOIN effective_fw_to_scf_edges e
@@ -263,3 +270,46 @@ JOIN LATERAL (
 WHERE fsa.tenant_id = @tenant_id
   AND fsa.framework_scope_id = @framework_scope_id
   AND fsa.decision = 'excluded';
+
+-- name: GetFrameworkVersionLabel :one
+-- The framework name, slug and version string that title an SoA export
+-- (#1791). Global catalog rows and the caller tenant's own rows are visible.
+SELECT f.name AS framework_name,
+       f.slug AS framework_slug,
+       fv.version AS framework_version
+FROM framework_versions fv
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE fv.id = @framework_version_id
+  AND (fv.tenant_id IS NULL OR fv.tenant_id = @tenant_id);
+
+-- name: ListFrameworkVersionLinkedControls :many
+-- The tenant controls behind each requirement of a framework version, for
+-- the SoA export's linked-controls column (#1791). The crosswalk and the
+-- "active control" rule are the ones ListFrameworkScopeContradictions uses,
+-- so an exported contradiction always lists the control behind it.
+SELECT DISTINCT e.framework_requirement_id AS requirement_id,
+       c.bundle_id
+FROM framework_requirements r
+JOIN effective_fw_to_scf_edges e
+  ON e.framework_requirement_id = r.id
+ AND e.relationship_type <> 'no_relationship'
+ AND e.mapping_tier <> 'rejected'
+JOIN controls c
+  ON c.scf_anchor_id = e.scf_anchor_id
+ AND c.tenant_id = @tenant_id
+ AND c.lifecycle_state = 'active'
+ AND c.superseded_by IS NULL
+WHERE r.framework_version_id = @framework_version_id
+ORDER BY e.framework_requirement_id, c.bundle_id;
+
+-- name: GetFrameworkScopeLatestApprover :one
+-- The actor of a revision's most recent approval, for the SoA export
+-- (#1791). approver_user_id holds it only when the credential id is a UUID;
+-- the workflow log always does.
+SELECT actor
+FROM framework_scope_workflow_log
+WHERE tenant_id = @tenant_id
+  AND framework_scope_id = @framework_scope_id
+  AND action = 'approve'
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1;

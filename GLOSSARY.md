@@ -44,6 +44,25 @@ All three accept optional `?framework_version=slug:version` to pin historical ma
 
 **RLS interaction:** the catalog tables (`framework_requirements`, `fw_to_scf_edges`, `scf_anchors`) have no `tenant_id` and no RLS — they're platform-bundled and global. Only `controls` is tenant-scoped. A traversal across tenant boundaries returns the (global) requirement + anchors but an empty controls list — this is the correct shape (canvas §3.5) and is enforced by Postgres RLS, not by app code. The handler MUST NOT add `WHERE tenant_id = ?` to any query (constitutional invariant 6).
 
+## Anchor fit (#1736)
+
+How well a control's SCF anchor covers what the control does. Stored on the control as `controls.anchor_fit`, set from `anchor_fit` in `control.yaml`:
+
+- **`exact`** — the anchor covers the control. The default; a bundle that omits `anchor_fit` is stored as `exact`.
+- **`partial`** — the anchor covers the control's intent only in part.
+- **`none`** — no SCF control fits. The anchor is the nearest catch-all (SOC 2 CC1 audit committee independence on GOV-09, for example), or the control has no anchor at all. This is ADR 0013's honest "unmapped", and the only case where `scf_anchor_id` may be absent.
+
+A non-exact fit requires **`anchor_fit_note`**, which says what the anchor misses. The fit is a label, not a coverage input: framework credit still flows only through the anchor (see Coverage above), so an unanchored `none` control satisfies no framework requirement until tenant overlay edges (#1735) exist. The user-guide handling is in `docs-site/docs/framework-setup.md` ("Controls with no SCF equivalent").
+
+## Active control (two definitions, on purpose)
+
+Two queries count a tenant control as "active", and they differ deliberately (#1789 D3). Neither is a bug to fix to match the other.
+
+- **For coverage** (`FrameworkPosture`, `internal/db/queries/dashboard.sql`) — any control with `superseded_by IS NULL`, whatever its `lifecycle_state`. Posture measures coverage by any defined control.
+- **For SoA contradictions** (`ListFrameworkScopeContradictions`, `internal/db/queries/framework_scopes.sql`) — `lifecycle_state = 'active' AND superseded_by IS NULL`. A contradiction claims a working control sits behind an exclusion, so a draft or retired control does not count.
+
+**Contradictions are evaluated against current evaluations.** On `GET /v1/framework-scopes/applicability?as_of=…` the decisions are those in force at `as_of`, but `contradiction` answers "would this exclusion be contradicted now". Both applicability GETs say so with `contradictions_evaluated_against: "current"` (#1789 D6).
+
 ## Risk treatment (#1746)
 
 How the program has decided to handle a risk. `risks.treatment` is the `risk_treatment` enum, NOT NULL, and every create path (REST, MCP, web form, DB column default, generated aggregate parents) defaults it to `untreated`. No path ever defaults to a real decision.

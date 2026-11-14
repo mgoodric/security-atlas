@@ -107,6 +107,8 @@ func contractControlWire() controlWire {
 		OwnerRole:          "grc_engineer",
 		LifecycleState:     "active",
 		FreshnessClass:     "30d",
+		AnchorFit:          "partial",
+		AnchorFitNote:      "IAC-06 covers the review cadence, not the reviewer's independence.",
 	}
 }
 

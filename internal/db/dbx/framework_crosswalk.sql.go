@@ -35,7 +35,7 @@ func (q *Queries) CountFwToScfEdgesBySourceAttribution(ctx context.Context, sour
 }
 
 const getFrameworkRequirementByCurrentVersion = `-- name: GetFrameworkRequirementByCurrentVersion :one
-SELECT fr.id, fr.framework_version_id, fr.code, fr.title, fr.body, fr.created_at, fr.updated_at
+SELECT fr.id, fr.framework_version_id, fr.code, fr.title, fr.body, fr.created_at, fr.updated_at, fr.points_of_focus
 FROM framework_requirements fr
 JOIN framework_versions fv ON fv.id = fr.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
@@ -60,12 +60,13 @@ func (q *Queries) GetFrameworkRequirementByCurrentVersion(ctx context.Context, a
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }
 
 const getFrameworkRequirementByFrameworkSlugVersionCode = `-- name: GetFrameworkRequirementByFrameworkSlugVersionCode :one
-SELECT fr.id, fr.framework_version_id, fr.code, fr.title, fr.body, fr.created_at, fr.updated_at
+SELECT fr.id, fr.framework_version_id, fr.code, fr.title, fr.body, fr.created_at, fr.updated_at, fr.points_of_focus
 FROM framework_requirements fr
 JOIN framework_versions fv ON fv.id = fr.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
@@ -92,12 +93,13 @@ func (q *Queries) GetFrameworkRequirementByFrameworkSlugVersionCode(ctx context.
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }
 
 const getFrameworkRequirementByID = `-- name: GetFrameworkRequirementByID :one
-SELECT id, framework_version_id, code, title, body, created_at, updated_at FROM framework_requirements WHERE id = $1
+SELECT id, framework_version_id, code, title, body, created_at, updated_at, points_of_focus FROM framework_requirements WHERE id = $1
 `
 
 func (q *Queries) GetFrameworkRequirementByID(ctx context.Context, id pgtype.UUID) (FrameworkRequirement, error) {
@@ -111,12 +113,13 @@ func (q *Queries) GetFrameworkRequirementByID(ctx context.Context, id pgtype.UUI
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }
 
 const getFrameworkRequirementByVersionAndCode = `-- name: GetFrameworkRequirementByVersionAndCode :one
-SELECT id, framework_version_id, code, title, body, created_at, updated_at FROM framework_requirements
+SELECT id, framework_version_id, code, title, body, created_at, updated_at, points_of_focus FROM framework_requirements
 WHERE framework_version_id = $1 AND code = $2
 `
 
@@ -139,6 +142,7 @@ func (q *Queries) GetFrameworkRequirementByVersionAndCode(ctx context.Context, a
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }
@@ -341,7 +345,7 @@ func (q *Queries) InsertFwToScfEdgeTierTransition(ctx context.Context, arg Inser
 }
 
 const listFrameworkRequirementsForVersion = `-- name: ListFrameworkRequirementsForVersion :many
-SELECT id, framework_version_id, code, title, body, created_at, updated_at
+SELECT id, framework_version_id, code, title, body, created_at, updated_at, points_of_focus
 FROM framework_requirements
 WHERE framework_version_id = $1
 ORDER BY code
@@ -364,6 +368,7 @@ func (q *Queries) ListFrameworkRequirementsForVersion(ctx context.Context, frame
 			&i.Body,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PointsOfFocus,
 		); err != nil {
 			return nil, err
 		}
@@ -566,13 +571,14 @@ func (q *Queries) UpdateFwToScfEdge(ctx context.Context, arg UpdateFwToScfEdgePa
 }
 
 const upsertFrameworkRequirement = `-- name: UpsertFrameworkRequirement :one
-INSERT INTO framework_requirements (id, framework_version_id, code, title, body)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO framework_requirements (id, framework_version_id, code, title, body, points_of_focus)
+VALUES ($1, $2, $3, $4, $5, $6)
 ON CONFLICT (id) DO UPDATE
-SET title       = EXCLUDED.title,
-    body        = EXCLUDED.body,
-    updated_at  = now()
-RETURNING id, framework_version_id, code, title, body, created_at, updated_at
+SET title           = EXCLUDED.title,
+    body            = EXCLUDED.body,
+    points_of_focus = EXCLUDED.points_of_focus,
+    updated_at      = now()
+RETURNING id, framework_version_id, code, title, body, created_at, updated_at, points_of_focus
 `
 
 type UpsertFrameworkRequirementParams struct {
@@ -581,11 +587,14 @@ type UpsertFrameworkRequirementParams struct {
 	Code               string      `json:"code"`
 	Title              string      `json:"title"`
 	Body               string      `json:"body"`
+	PointsOfFocus      []byte      `json:"points_of_focus"`
 }
 
 // Insert or update a framework_requirements row. Deterministic id derived
 // from (framework_version_id, code) so re-imports are idempotent without
 // relying on NULLs-distinct gotchas on the UNIQUE constraint.
+// points_of_focus (#1731) is the JSON array of SOC 2 points of focus rolled up
+// onto this criterion; '[]' for a requirement with none.
 func (q *Queries) UpsertFrameworkRequirement(ctx context.Context, arg UpsertFrameworkRequirementParams) (FrameworkRequirement, error) {
 	row := q.db.QueryRow(ctx, upsertFrameworkRequirement,
 		arg.ID,
@@ -593,6 +602,7 @@ func (q *Queries) UpsertFrameworkRequirement(ctx context.Context, arg UpsertFram
 		arg.Code,
 		arg.Title,
 		arg.Body,
+		arg.PointsOfFocus,
 	)
 	var i FrameworkRequirement
 	err := row.Scan(
@@ -603,6 +613,7 @@ func (q *Queries) UpsertFrameworkRequirement(ctx context.Context, arg UpsertFram
 		&i.Body,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PointsOfFocus,
 	)
 	return i, err
 }

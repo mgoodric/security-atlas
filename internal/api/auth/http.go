@@ -76,6 +76,10 @@ type Handler struct {
 	// implicitTenant, when set, supplies the tenant for a local login that
 	// omits tenant_id (#1727). nil keeps tenant_id required.
 	implicitTenant ImplicitTenantResolver
+
+	// loginThrottle rate-limits /auth/local/login per IP and per account
+	// before the argon2id work (#1913).
+	loginThrottle *loginThrottle
 }
 
 // New constructs a Handler. secureCookies=false is for local-dev HTTP
@@ -98,6 +102,7 @@ func New(
 		sessions:      s,
 		secureCookies: secureCookies,
 		localAS:       localAS,
+		loginThrottle: newLoginThrottle(time.Now),
 	}
 }
 
@@ -124,17 +129,14 @@ type ImplicitTenantResolver interface {
 }
 
 // PoolImplicitTenantResolver resolves the implicit tenant with
-// tenancy.ResolveImplicitTenant. Q must be a BYPASSRLS connection: the
-// question is asked before any tenant context exists.
+// tenancy.ResolveImplicitTenantID, the bounded id-only query (#1913). Q must
+// be a BYPASSRLS connection: the question is asked before any tenant
+// context exists.
 type PoolImplicitTenantResolver struct{ Q tenancy.Querier }
 
 // ImplicitTenant implements ImplicitTenantResolver.
 func (p PoolImplicitTenantResolver) ImplicitTenant(ctx context.Context) (uuid.UUID, error) {
-	ref, err := tenancy.ResolveImplicitTenant(ctx, p.Q)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return ref.ID, nil
+	return tenancy.ResolveImplicitTenantID(ctx, p.Q)
 }
 
 // AttachImplicitTenantResolver lets POST /auth/local/login and the
@@ -180,6 +182,11 @@ func loginTenant(ctx context.Context, raw string, resolver ImplicitTenantResolve
 // omitted on a single-tenant install when an ImplicitTenantResolver is
 // attached (#1727).
 func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
+	// #1913: the per-IP bucket runs first, before the body is read.
+	if ok, retry := h.loginThrottle.ip.Allow(clientIP(r)); !ok {
+		writeLoginThrottled(w, retry)
+		return
+	}
 	var req LocalLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "invalid JSON body")
@@ -188,6 +195,12 @@ func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
 	tenantID, status, msg := loginTenant(r.Context(), req.TenantID, h.implicitTenant)
 	if status != 0 {
 		writeAuthError(w, status, msg)
+		return
+	}
+	// The per-account key comes from the request alone, so an unknown
+	// email is throttled the same as a known one (no existence oracle).
+	if ok, retry := h.loginThrottle.account.Allow(loginAccountKey(tenantID, req.Email)); !ok {
+		writeLoginThrottled(w, retry)
 		return
 	}
 	ctx, err := tenancy.WithTenant(r.Context(), tenantID.String())
@@ -395,12 +408,27 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 		ctx = bootCtx
 	} else {
 		usr, err = h.users.UpsertOIDC(ctx, users.UpsertOIDCInput{
-			TenantID:    result.TenantID,
-			Email:       result.Email,
-			DisplayName: result.DisplayName,
-			Issuer:      result.Issuer,
-			Subject:     result.Subject,
+			TenantID:      result.TenantID,
+			Email:         result.Email,
+			DisplayName:   result.DisplayName,
+			Issuer:        result.Issuer,
+			Subject:       result.Subject,
+			EmailVerified: result.EmailVerified,
+			IDPConfigID:   result.IDPConfigID,
+
+			TrustUnverifiedEmail: result.TrustUnverifiedEmailForLink,
 		})
+		if errors.Is(err, users.ErrIdentityConflict) {
+			// #1944: the email is held by a user this sign-in may not link
+			// to (another IdP principal, a local password, a super_admin),
+			// or the IdP says it is unverified. Refuse like a deactivated
+			// user; the reason stays in the server log, without the email.
+			slog.WarnContext(r.Context(), "oidc sign-in refused: email held by another identity",
+				"idp_issuer", result.Issuer, "idp_config_id", result.IDPConfigID)
+			oidc.ClearFlowCookies(w, h.secureCookies)
+			writeAuthError(w, http.StatusUnauthorized, "invalid credentials")
+			return
+		}
 		if err != nil {
 			writeAuthError(w, http.StatusInternalServerError, "user upsert: "+err.Error())
 			return

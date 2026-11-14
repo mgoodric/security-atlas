@@ -131,4 +131,55 @@ describe("tenantFieldMode", () => {
       tenantFieldMode({ crossTenant: false, sessionTenantId: "" }),
     ).toEqual({ kind: "unresolved" });
   });
+
+  // #1764: one tenant on the install → no tenant field; the assignment
+  // lands in the sole tenant.
+  test("single-tenant install → sole tenant, even for a super-admin", () => {
+    expect(
+      tenantFieldMode({
+        crossTenant: true,
+        sessionTenantId: TENANT_A,
+        singleTenant: true,
+      }),
+    ).toEqual({ kind: "sole", tenantId: TENANT_A });
+    expect(
+      tenantFieldMode({
+        crossTenant: false,
+        sessionTenantId: TENANT_A,
+        singleTenant: true,
+      }),
+    ).toEqual({ kind: "sole", tenantId: TENANT_A });
+  });
+
+  test("single-tenant install falls back to the one listed tenant", () => {
+    expect(
+      tenantFieldMode({
+        crossTenant: true,
+        sessionTenantId: undefined,
+        singleTenant: true,
+        tenantIds: [TENANT_B],
+      }),
+    ).toEqual({ kind: "sole", tenantId: TENANT_B });
+  });
+
+  test("single-tenant install with no known tenant → unresolved", () => {
+    expect(
+      tenantFieldMode({
+        crossTenant: true,
+        sessionTenantId: "",
+        singleTenant: true,
+        tenantIds: [],
+      }),
+    ).toEqual({ kind: "unresolved" });
+  });
+
+  test("multi-tenant (singleTenant false) keeps today's modes", () => {
+    expect(
+      tenantFieldMode({
+        crossTenant: true,
+        sessionTenantId: TENANT_A,
+        singleTenant: false,
+      }),
+    ).toEqual({ kind: "chooser" });
+  });
 });

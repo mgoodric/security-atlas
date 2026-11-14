@@ -188,8 +188,12 @@ runs:
       if: inputs.start-services == 'true'
       shell: bash
       run: |
-        psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
-          -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+        # The password goes in on stdin and psql reads it with \getenv,
+        # so it stays off psql's argv (same pattern as migrate.sh, #2005).
+        psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+        \getenv atlas_app_password ATLAS_APP_PASSWORD
+        ALTER ROLE atlas_app PASSWORD :'atlas_app_password';
+        SQL
         echo "DATABASE_URL_APP=postgres://atlas_app:$ATLAS_APP_PASSWORD@localhost:5432/security_atlas?sslmode=disable" >> "$GITHUB_ENV"
 
     - name: Apply forward migrations

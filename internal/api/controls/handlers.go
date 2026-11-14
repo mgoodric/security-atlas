@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -84,6 +85,11 @@ type uploadResp struct {
 	// under the slice-608 advisory gate policy (the upload was NOT blocked, but
 	// the uploader still sees which cases are red). Nil (dropped) otherwise.
 	GateTestReport *bundletest.Report `json:"gate_test_report,omitempty"`
+	// AnchorWarning is set when the bundle's scf_anchor_id reaches no
+	// requirement in an enabled framework, so the control earns no framework
+	// credit (issue #1738). It suggests the parent anchor when that one is
+	// mapped. Non-fatal: the control is persisted either way.
+	AnchorWarning string `json:"anchor_warning,omitempty"`
 }
 
 // gateRejectionResp is the 400 body returned when the slice-574 upload test-
@@ -244,6 +250,13 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		GateWarning:    verdict.warning,
 		GateTestReport: verdict.advisoryReport,
 	}
+	// Issue #1738: warn when the anchor earns no framework credit. The control
+	// is already persisted, so a failed lookup is logged, not returned.
+	anchorWarning, aerr := h.store.AnchorCoverageWarning(ctx, bundle.Manifest.SCFAnchorID)
+	if aerr != nil {
+		slog.WarnContext(ctx, "control bundle anchor coverage check failed", "bundle_id", result.BundleID, "error", aerr)
+	}
+	resp.AnchorWarning = anchorWarning
 	// SupersededID is set only when this upload actually superseded a
 	// predecessor. It is the zero UUID for an initial upload AND for a
 	// byte-identical-content no-op re-upload (nothing changed) — in both

@@ -72,17 +72,100 @@ allow if {
     count(input.user.roles) > 0
 }
 
-# #1763 — the install's tenant count (`GET /v1/me/tenancy`).
+# #1763 / #2015 — the caller's own `/v1/me/*` reads.
 #
-# The web app reads it to decide whether to show tenant chrome (ADR 0023
-# decision 2), so every signed-in role must be able to read it, including
-# viewer and control_owner, which no rule admits to `me` reads otherwise.
-# Pinned to this one path so the other `/v1/me/*` endpoints keep their
-# role rules. The response names no tenant, only a count. Default-deny
-# still applies to a roleless credential.
+# Every signed-in role needs these to render the app shell and its own
+# settings: the profile (`/v1/me`), tenant chrome and the switcher
+# (`tenancy`, `tenants`; ADR 0023 decision 2), preferences, the
+# notification bell, pending policy acknowledgments, the sessions list and
+# the three channel opt-in toggles. viewer and control_owner have no other
+# rule that admits `me` reads. Each handler is scoped to the caller: it
+# reads the verified credential or JWT claims and pins the user to it, so
+# no one reads another user's row. `tenancy` names no tenant, only a count.
+#
+# Exact paths, not a `/v1/me/` prefix, so an endpoint added under
+# `/v1/me/` stays denied until someone lists it here or in a role file.
+# `/v1/me/audit-period(s)` stay auditor-only (auditor.rego). Writes are
+# not admitted here (see the #2022 rule below). Default-deny still
+# applies to a roleless credential.
 allow if {
     is_read
     input.resource.type == "me"
-    input.request.path == "/v1/me/tenancy"
+    me_self_read_paths[input.request.path]
     count(input.user.roles) > 0
+}
+
+me_self_read_paths := {
+    "/v1/me",
+    "/v1/me/tenancy",
+    "/v1/me/tenants",
+    "/v1/me/preferences",
+    "/v1/me/notifications",
+    "/v1/me/acknowledgments",
+    "/v1/me/sessions",
+    "/v1/me/email-channel",
+    "/v1/me/slack-channel",
+    "/v1/me/webhook-channel",
+}
+
+# #2022 — the caller's own `/v1/me/*` settings writes.
+#
+# Every signed-in role manages its own account: the profile (display name
+# and time zone), notification preferences, the three channel opt-ins,
+# revoking its own sessions, and marking its own notifications read.
+# Before this, viewer and control_owner could read these settings
+# (#2015) but not change them. Each handler takes the user from the
+# verified credential only, never from the body or the path: a session or
+# notification id is matched against that user's rows, so another user's
+# id is a 404, not a write.
+#
+# Method and path are both pinned. The two id-bearing routes match one
+# non-empty path segment, nothing deeper. Default-deny still applies to a
+# roleless credential.
+allow if {
+    input.action == "write"
+    input.resource.type == "me"
+    me_self_writes[[input.request.method, input.request.path]]
+    count(input.user.roles) > 0
+}
+
+allow if {
+    input.action == "write"
+    input.resource.type == "me"
+    me_self_id_write
+    count(input.user.roles) > 0
+}
+
+me_self_writes := {
+    ["PATCH", "/v1/me"],
+    ["PATCH", "/v1/me/preferences"],
+    ["PUT", "/v1/me/email-channel"],
+    ["PUT", "/v1/me/slack-channel"],
+    ["PUT", "/v1/me/webhook-channel"],
+    ["DELETE", "/v1/me/sessions"],
+}
+
+# DELETE /v1/me/sessions/{id}
+me_self_id_write if {
+    input.request.method == "DELETE"
+    parts := split(input.request.path, "/")
+    count(parts) == 5
+    parts[0] == ""
+    parts[1] == "v1"
+    parts[2] == "me"
+    parts[3] == "sessions"
+    parts[4] != ""
+}
+
+# PATCH /v1/me/notifications/{id}/read
+me_self_id_write if {
+    input.request.method == "PATCH"
+    parts := split(input.request.path, "/")
+    count(parts) == 6
+    parts[0] == ""
+    parts[1] == "v1"
+    parts[2] == "me"
+    parts[3] == "notifications"
+    parts[4] != ""
+    parts[5] == "read"
 }

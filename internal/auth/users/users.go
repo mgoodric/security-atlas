@@ -15,8 +15,10 @@ package users
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -174,10 +176,61 @@ type UpsertOIDCInput struct {
 	DisplayName string
 	Issuer      string
 	Subject     string
+	// EmailVerified is the ID token's email_verified claim; nil when the IdP
+	// omits it (#1944).
+	EmailVerified *bool
+	// TrustUnverifiedEmail is the IdP config's
+	// trust_unverified_email_for_link: when true, an absent EmailVerified
+	// may still link by email. False, the zero value, is strict (D3).
+	TrustUnverifiedEmail bool
+	// IDPConfigID is the oidc_idp_configs row the sign-in came through, kept
+	// in the link audit row. uuid.Nil when the resolver supplied none.
+	IDPConfigID uuid.UUID
+}
+
+// emailLinkAllowed reports whether a sign-in may claim an existing SCIM row
+// by email (#1944 D3, Matt's decision of 2026-11-13). email_verified=true
+// links and an explicit false never does. An absent claim links only when
+// the IdP config opts in with trust_unverified_email_for_link, which is for
+// IdPs such as Microsoft Entra ID that never send the claim.
+func emailLinkAllowed(verified *bool, trustUnverified bool) bool {
+	if verified != nil {
+		return *verified
+	}
+	return trustUnverified
+}
+
+// ErrIdentityConflict is returned by UpsertOIDC when the sign-in's email
+// already belongs to a same-tenant user it may not link to: one bound to a
+// different IdP principal, one with a local password or a super_admin grant,
+// or an unbound one while the IdP says the email is unverified (#1944). The
+// callback refuses the sign-in.
+var ErrIdentityConflict = errors.New("users: email belongs to another identity")
+
+// oidcLinkAuditAction is the me_audit_log action for an email link
+// (migration 20260920000000).
+const oidcLinkAuditAction = "oidc_identity_link"
+
+// isUniqueViolationOn reports whether err is a unique_violation on one of the
+// named constraints or indexes.
+func isUniqueViolationOn(err error, names ...string) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgUniqueViolation {
+		return false
+	}
+	for _, n := range names {
+		if pgErr.ConstraintName == n {
+			return true
+		}
+	}
+	return false
 }
 
 // UpsertOIDC provisions-or-updates the user keyed on (idp_issuer, idp_subject).
-// Returns the resulting row.
+// On first sign-in it links to a same-tenant SCIM-provisioned row with the
+// same email and an empty idp tuple (#1944) instead of inserting, and audits
+// the link. Returns the resulting row, or ErrIdentityConflict when the email
+// belongs to a row it may not link to.
 func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error) {
 	if in.Issuer == "" || in.Subject == "" {
 		return User{}, fmt.Errorf("users: UpsertOIDC requires non-empty issuer + subject")
@@ -194,6 +247,30 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 
 	id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 	tIDU := pgtype.UUID{Bytes: in.TenantID, Valid: true}
+	if emailLinkAllowed(in.EmailVerified, in.TrustUnverifiedEmail) {
+		linked, err := linkByEmail(ctx, q, in, tIDU)
+		switch {
+		case err == nil:
+			if err := tx.Commit(ctx); err != nil {
+				return User{}, err
+			}
+			return userFromRow(linked), nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return User{}, err
+		}
+	}
+	taken, err := q.OIDCFirstSignInEmailTaken(ctx, dbx.OIDCFirstSignInEmailTakenParams{
+		TenantID:   tIDU,
+		Email:      in.Email,
+		IdpIssuer:  in.Issuer,
+		IdpSubject: in.Subject,
+	})
+	if err != nil {
+		return User{}, fmt.Errorf("users: check OIDC email: %w", err)
+	}
+	if taken {
+		return User{}, ErrIdentityConflict
+	}
 	row, err := q.UpsertUserByIdpSubject(ctx, dbx.UpsertUserByIdpSubjectParams{
 		ID:          id,
 		TenantID:    tIDU,
@@ -204,12 +281,58 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 		IdpSubject:  in.Subject,
 	})
 	if err != nil {
+		if isUniqueViolationOn(err, "users_email_per_tenant_unique") {
+			return User{}, ErrIdentityConflict
+		}
 		return User{}, fmt.Errorf("users: upsert OIDC: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return User{}, err
 	}
 	return userFromRow(row), nil
+}
+
+// linkByEmail binds the principal to the SCIM row and writes the
+// oidc_identity_link audit row in the caller's transaction. pgx.ErrNoRows
+// means no row qualified. A concurrent sign-in that bound the same principal
+// first trips users_idp_principal_unique; that is a refusal, not a 500.
+func linkByEmail(ctx context.Context, q *dbx.Queries, in UpsertOIDCInput, tIDU pgtype.UUID) (dbx.User, error) {
+	linked, err := q.LinkUserIdpByEmail(ctx, dbx.LinkUserIdpByEmailParams{
+		IdpIssuer:   in.Issuer,
+		IdpSubject:  in.Subject,
+		DisplayName: in.DisplayName,
+		TenantID:    tIDU,
+		Email:       in.Email,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbx.User{}, err
+		}
+		if isUniqueViolationOn(err, "users_idp_principal_unique") {
+			return dbx.User{}, ErrIdentityConflict
+		}
+		return dbx.User{}, fmt.Errorf("users: link OIDC by email: %w", err)
+	}
+	// No email in the row: the issuer and IdP config say which IdP now
+	// signs this user in.
+	after := map[string]string{"idp_issuer": in.Issuer, "idp_config_id": ""}
+	if in.IDPConfigID != uuid.Nil {
+		after["idp_config_id"] = in.IDPConfigID.String()
+	}
+	payload, err := json.Marshal(after)
+	if err != nil {
+		return dbx.User{}, fmt.Errorf("users: marshal link audit: %w", err)
+	}
+	if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+		TenantID: tIDU,
+		UserID:   linked.ID,
+		Action:   oidcLinkAuditAction,
+		Before:   []byte("{}"),
+		After:    payload,
+	}); err != nil {
+		return dbx.User{}, fmt.Errorf("users: audit OIDC link: %w", err)
+	}
+	return linked, nil
 }
 
 // ErrBootstrapUnavailable is returned by BootstrapFirstInstallOrUpsert
@@ -451,26 +574,46 @@ func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (Bootst
 // VerifyLocalLogin verifies against it when the user or credential is
 // missing, so an unknown email or tenant costs the same argon2id work as a
 // wrong password and response time is no enumeration oracle (#1727).
+//
+// A failed build is logged and returns "": VerifyLocalLogin then fails
+// every login closed rather than answering a fast 401 (#1913).
 var timingDummyHash = sync.OnceValue(func() string {
-	h, err := password.Hash("atlas-login-timing-equalizer")
+	return buildTimingDummyHash(password.Hash)
+})
+
+func buildTimingDummyHash(hash func(string) (string, error)) string {
+	h, err := hash("atlas-login-timing-equalizer")
 	if err != nil {
+		slog.Error("users: build login timing-equalizer hash; local login fails closed", "err", err)
 		return ""
 	}
 	return h
-})
+}
 
-// burnPasswordVerify spends one password verification and discards the result.
-func burnPasswordVerify(plaintext string) {
-	if h := timingDummyHash(); h != "" {
-		_, _ = password.Verify(plaintext, h)
-	}
+// errTimingEqualizerUnavailable fails a login closed when the dummy hash
+// could not be built: answering 401 without the argon2id work would make
+// response time an account-existence oracle.
+var errTimingEqualizerUnavailable = errors.New("users: login timing equalizer unavailable")
+
+// burnPasswordVerify spends one password verification against dummyHash
+// and discards the result.
+func burnPasswordVerify(plaintext, dummyHash string) {
+	_, _ = password.Verify(plaintext, dummyHash)
 }
 
 // VerifyLocalLogin returns the User on a successful (tenant, email, password)
 // triple. Returns ErrInvalidCredentials when no user exists, the password
 // does not verify, or the user is deactivated. The caller (HTTP login handler)
 // surfaces 401 on this sentinel.
+//
+// Without the timing-equalizer hash every login fails closed with
+// errTimingEqualizerUnavailable, before any lookup, so known and unknown
+// accounts still answer alike (#1913).
 func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email, plaintextPassword string) (User, error) {
+	dummyHash := timingDummyHash()
+	if dummyHash == "" {
+		return User{}, errTimingEqualizerUnavailable
+	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return User{}, err
@@ -485,7 +628,7 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	row, err := q.GetUserByEmail(ctx, dbx.GetUserByEmailParams{TenantID: tIDU, Email: email})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			burnPasswordVerify(plaintextPassword)
+			burnPasswordVerify(plaintextPassword, dummyHash)
 			return User{}, ErrInvalidCredentials
 		}
 		return User{}, err
@@ -493,7 +636,7 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	cred, err := q.GetLocalCredentialByUserID(ctx, dbx.GetLocalCredentialByUserIDParams{TenantID: tIDU, UserID: row.ID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			burnPasswordVerify(plaintextPassword)
+			burnPasswordVerify(plaintextPassword, dummyHash)
 			return User{}, ErrInvalidCredentials
 		}
 		return User{}, err

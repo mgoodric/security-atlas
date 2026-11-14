@@ -64,6 +64,10 @@ type Crosswalk struct {
 	SourceAttribution string        `yaml:"source_attribution"`
 	Requirements      []Requirement `yaml:"requirements"`
 	Mappings          []Mapping     `yaml:"mappings"`
+
+	// PointsOfFocusRollUp reports what the workbook loaders folded into
+	// parent criteria, for the import summary. Never read from YAML.
+	PointsOfFocusRollUp PointsOfFocusRollUp `yaml:"-"`
 }
 
 // Requirement is one framework requirement/clause inside the crosswalk
@@ -73,6 +77,10 @@ type Requirement struct {
 	Code  string `yaml:"code"`  // e.g., "CC6.1" or "A.5.15"
 	Title string `yaml:"title"` // short label
 	Body  string `yaml:"body"`  // requirement/control description (NOT verbatim copyrighted standard text)
+	// PointsOfFocus is SOC 2 point-of-focus metadata on a criterion (#1731).
+	// The workbook loaders fill it by rolling points of focus up; a YAML
+	// crosswalk may list it but need not.
+	PointsOfFocus []PointOfFocus `yaml:"points_of_focus,omitempty"`
 }
 
 // Mapping is one STRM-typed edge from a framework requirement to an SCF

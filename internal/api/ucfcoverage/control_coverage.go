@@ -309,12 +309,16 @@ func controlWireFromControlRow(c dbx.GetControlByIDRow) (controlWire, error) {
 		ImplementationType: string(c.ImplementationType),
 		OwnerRole:          c.OwnerRole,
 		LifecycleState:     string(c.LifecycleState),
+		AnchorFit:          c.AnchorFit,
 	}
 	if c.ScfID != nil {
 		w.SCFID = *c.ScfID
 	}
 	if c.FreshnessClass != nil {
 		w.FreshnessClass = *c.FreshnessClass
+	}
+	if c.AnchorFitNote != nil {
+		w.AnchorFitNote = *c.AnchorFitNote
 	}
 	if len(c.ExternalRefs) > 0 {
 		if err := json.Unmarshal(c.ExternalRefs, &w.ExternalRefs); err != nil {

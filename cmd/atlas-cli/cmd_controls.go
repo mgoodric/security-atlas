@@ -125,11 +125,12 @@ func resolveControlsAuth() error {
 func newControlsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "controls",
-		Short: "control-as-code bundle authoring (validate / upload)",
+		Short: "control-as-code bundle authoring (validate / upload) and control sheet import",
 	}
 	cmd.AddCommand(newControlsValidateCmd())
 	cmd.AddCommand(newControlsUploadCmd())
 	cmd.AddCommand(newControlsTestCmd())
+	cmd.AddCommand(newControlsImportCmd())
 	return cmd
 }
 
@@ -383,6 +384,14 @@ func uploadBundleHTTP(path string) error {
 		fmt.Println(pretty.String())
 	} else {
 		fmt.Println(string(rspBody))
+	}
+	// Issue #1738: surface the no-framework-credit anchor warning on stderr so
+	// it is not lost in the JSON.
+	var warn struct {
+		AnchorWarning string `json:"anchor_warning"`
+	}
+	if json.Unmarshal(rspBody, &warn) == nil && warn.AnchorWarning != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", warn.AnchorWarning)
 	}
 	return nil
 }

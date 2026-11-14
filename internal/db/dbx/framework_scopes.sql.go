@@ -426,6 +426,61 @@ func (q *Queries) GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkSco
 	return i, err
 }
 
+const getFrameworkScopeLatestApprover = `-- name: GetFrameworkScopeLatestApprover :one
+SELECT actor
+FROM framework_scope_workflow_log
+WHERE tenant_id = $1
+  AND framework_scope_id = $2
+  AND action = 'approve'
+ORDER BY occurred_at DESC, id DESC
+LIMIT 1
+`
+
+type GetFrameworkScopeLatestApproverParams struct {
+	TenantID         pgtype.UUID `json:"tenant_id"`
+	FrameworkScopeID pgtype.UUID `json:"framework_scope_id"`
+}
+
+// The actor of a revision's most recent approval, for the SoA export
+// (#1791). approver_user_id holds it only when the credential id is a UUID;
+// the workflow log always does.
+func (q *Queries) GetFrameworkScopeLatestApprover(ctx context.Context, arg GetFrameworkScopeLatestApproverParams) (string, error) {
+	row := q.db.QueryRow(ctx, getFrameworkScopeLatestApprover, arg.TenantID, arg.FrameworkScopeID)
+	var actor string
+	err := row.Scan(&actor)
+	return actor, err
+}
+
+const getFrameworkVersionLabel = `-- name: GetFrameworkVersionLabel :one
+SELECT f.name AS framework_name,
+       f.slug AS framework_slug,
+       fv.version AS framework_version
+FROM framework_versions fv
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE fv.id = $1
+  AND (fv.tenant_id IS NULL OR fv.tenant_id = $2)
+`
+
+type GetFrameworkVersionLabelParams struct {
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+	TenantID           pgtype.UUID `json:"tenant_id"`
+}
+
+type GetFrameworkVersionLabelRow struct {
+	FrameworkName    string `json:"framework_name"`
+	FrameworkSlug    string `json:"framework_slug"`
+	FrameworkVersion string `json:"framework_version"`
+}
+
+// The framework name, slug and version string that title an SoA export
+// (#1791). Global catalog rows and the caller tenant's own rows are visible.
+func (q *Queries) GetFrameworkVersionLabel(ctx context.Context, arg GetFrameworkVersionLabelParams) (GetFrameworkVersionLabelRow, error) {
+	row := q.db.QueryRow(ctx, getFrameworkVersionLabel, arg.FrameworkVersionID, arg.TenantID)
+	var i GetFrameworkVersionLabelRow
+	err := row.Scan(&i.FrameworkName, &i.FrameworkSlug, &i.FrameworkVersion)
+	return i, err
+}
+
 const insertFrameworkScopeWorkflowLog = `-- name: InsertFrameworkScopeWorkflowLog :exec
 
 INSERT INTO framework_scope_workflow_log (
@@ -572,6 +627,13 @@ type ListFrameworkScopeContradictionsParams struct {
 // that view, so they count as a path here with no change to this query.
 // "Latest evaluation" is per control across scope cells, as in
 // FrameworkPosture.
+//
+// "Active control" here is lifecycle_state = 'active' AND superseded_by IS
+// NULL, deliberately stricter than FrameworkPosture (dashboard.sql), which
+// counts any non-superseded control: posture measures coverage by any
+// defined control, a contradiction claims a working control sits behind an
+// exclusion (#1789 D3). Do not align either one to the other. See GLOSSARY
+// "Active control".
 func (q *Queries) ListFrameworkScopeContradictions(ctx context.Context, arg ListFrameworkScopeContradictionsParams) ([]pgtype.UUID, error) {
 	rows, err := q.db.Query(ctx, listFrameworkScopeContradictions, arg.TenantID, arg.FrameworkScopeID)
 	if err != nil {
@@ -724,6 +786,57 @@ func (q *Queries) ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg
 			&i.SupersededBy,
 			&i.SupersededAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFrameworkVersionLinkedControls = `-- name: ListFrameworkVersionLinkedControls :many
+SELECT DISTINCT e.framework_requirement_id AS requirement_id,
+       c.bundle_id
+FROM framework_requirements r
+JOIN effective_fw_to_scf_edges e
+  ON e.framework_requirement_id = r.id
+ AND e.relationship_type <> 'no_relationship'
+ AND e.mapping_tier <> 'rejected'
+JOIN controls c
+  ON c.scf_anchor_id = e.scf_anchor_id
+ AND c.tenant_id = $1
+ AND c.lifecycle_state = 'active'
+ AND c.superseded_by IS NULL
+WHERE r.framework_version_id = $2
+ORDER BY e.framework_requirement_id, c.bundle_id
+`
+
+type ListFrameworkVersionLinkedControlsParams struct {
+	TenantID           pgtype.UUID `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
+}
+
+type ListFrameworkVersionLinkedControlsRow struct {
+	RequirementID pgtype.UUID `json:"requirement_id"`
+	BundleID      string      `json:"bundle_id"`
+}
+
+// The tenant controls behind each requirement of a framework version, for
+// the SoA export's linked-controls column (#1791). The crosswalk and the
+// "active control" rule are the ones ListFrameworkScopeContradictions uses,
+// so an exported contradiction always lists the control behind it.
+func (q *Queries) ListFrameworkVersionLinkedControls(ctx context.Context, arg ListFrameworkVersionLinkedControlsParams) ([]ListFrameworkVersionLinkedControlsRow, error) {
+	rows, err := q.db.Query(ctx, listFrameworkVersionLinkedControls, arg.TenantID, arg.FrameworkVersionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFrameworkVersionLinkedControlsRow
+	for rows.Next() {
+		var i ListFrameworkVersionLinkedControlsRow
+		if err := rows.Scan(&i.RequirementID, &i.BundleID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
