@@ -18,6 +18,7 @@ package board
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"time"
@@ -66,6 +67,10 @@ type PackFrameworkPosture struct {
 	// BaselinePct is the coverage at the start of the 90-day trend:
 	// CoveragePct - Delta.
 	BaselinePct float64 `json:"baseline_pct"`
+	// NoTrendHistory is true when no control covering this version was
+	// evaluated on or before the start of the 90-day window. There is then
+	// no baseline: BaselinePct and Delta are zero and not reported.
+	NoTrendHistory bool `json:"no_trend_history,omitempty"`
 	// TrendArrow is "up" | "down" | "flat", from Delta.
 	TrendArrow string `json:"trend_arrow"`
 	// Delta is the dashboard's trend_delta_90d, in percentage points.
@@ -87,6 +92,7 @@ type frameworkPostureRow struct {
 	FreshnessPct   float64
 	TrendDelta90d  float64
 	ScopeActivated bool
+	TrendHistory   bool
 }
 
 // FrameworkPosture runs the dashboard's per-framework posture query for the
@@ -113,7 +119,11 @@ func (s *PackStore) FrameworkPosture(ctx context.Context, trendCutoff time.Time)
 		out = make([]frameworkPostureRow, 0, len(rows))
 		for _, r := range rows {
 			id := uuid.UUID(r.FrameworkID.Bytes)
-			fw := names[id]
+			fw, ok := names[id]
+			if !ok {
+				slog.WarnContext(ctx, "board pack: posture row's framework is not in the tenant's framework list; the pack names it by id",
+					"framework_id", id.String(), "framework_version", r.FrameworkVersion)
+			}
 			out = append(out, frameworkPostureRow{
 				FrameworkID:    id,
 				VersionID:      uuid.UUID(r.FrameworkVersionID.Bytes),
@@ -124,6 +134,7 @@ func (s *PackStore) FrameworkPosture(ctx context.Context, trendCutoff time.Time)
 				FreshnessPct:   r.FreshnessComposite,
 				TrendDelta90d:  r.TrendDelta90d,
 				ScopeActivated: r.ScopeActivated,
+				TrendHistory:   r.TrendHistory,
 			})
 		}
 		return nil
@@ -158,9 +169,16 @@ func packPostures(rows []frameworkPostureRow) []PackFrameworkPosture {
 		}
 		p.CoveragePct = r.CoveragePct
 		p.FreshnessPct = r.FreshnessPct
-		p.Delta = r.TrendDelta90d
-		p.BaselinePct = round2(r.CoveragePct - r.TrendDelta90d)
-		p.TrendArrow = trendFromPoints(r.TrendDelta90d)
+		if r.TrendHistory {
+			p.Delta = r.TrendDelta90d
+			p.BaselinePct = round2(r.CoveragePct - r.TrendDelta90d)
+			p.TrendArrow = trendFromPoints(r.TrendDelta90d)
+		} else {
+			// No evaluation before the cutoff: the query's delta equals the
+			// coverage, which would read as "up from 0%". Report no baseline.
+			p.NoTrendHistory = true
+			p.TrendArrow = TrendFlat
+		}
 		// Truncation is floor for a non-negative percentage, so 89.99 stays
 		// below the 90-point audit-ready line.
 		p.State = stateFromCoverage(int(r.CoveragePct))
@@ -173,8 +191,13 @@ func packPostures(rows []frameworkPostureRow) []PackFrameworkPosture {
 // coverage_trend section: the unweighted mean of their coverage now and of
 // their coverage at the start of the 90-day trend. Frameworks without an
 // activated scope are left out. Zero scoped frameworks -> all zeros.
-func coverageTrend(postures []PackFrameworkPosture) (coverage, baseline float64, scoped int) {
+//
+// hasBaseline is false when any scoped framework has no evaluation history
+// before the window: a mean over a mix of real and missing baselines would
+// understate the start, so the section reports no baseline at all.
+func coverageTrend(postures []PackFrameworkPosture) (coverage, baseline float64, scoped int, hasBaseline bool) {
 	var sumNow, sumThen float64
+	hasBaseline = true
 	for _, p := range postures {
 		if p.ScopeNotSet {
 			continue
@@ -182,12 +205,22 @@ func coverageTrend(postures []PackFrameworkPosture) (coverage, baseline float64,
 		scoped++
 		sumNow += p.CoveragePct
 		sumThen += p.BaselinePct
+		if p.NoTrendHistory {
+			hasBaseline = false
+		}
 	}
 	if scoped == 0 {
-		return 0, 0, 0
+		return 0, 0, 0, false
 	}
-	return round2(sumNow / float64(scoped)), round2(sumThen / float64(scoped)), scoped
+	if !hasBaseline {
+		return round2(sumNow / float64(scoped)), 0, scoped, false
+	}
+	return round2(sumNow / float64(scoped)), round2(sumThen / float64(scoped)), scoped, true
 }
+
+// noBaselineText is what every renderer shows in place of a baseline the
+// evaluation history cannot support.
+const noBaselineText = "no baseline yet: less than 90 days of evaluation history"
 
 // trendFromPoints maps a signed percentage-point delta to a trend token.
 func trendFromPoints(delta float64) string {

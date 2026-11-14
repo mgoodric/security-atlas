@@ -665,6 +665,12 @@ type Querier interface {
 	// decided out of scope, so the percentage is over the whole requirement set;
 	// callers show "Scope not set" for that version instead of the number.
 	//
+	// trend_history (#2056): whether any control covering the version has an
+	// evaluation (pass or fail) on or before the cutoff. Without one there is no
+	// 90-day-ago state to compare against, covered_then is empty, and
+	// trend_delta_90d equals coverage_pct; callers show "no baseline yet"
+	// instead of that delta.
+	//
 	// The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
 	// $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
 	FrameworkPosture(ctx context.Context, arg FrameworkPostureParams) ([]FrameworkPostureRow, error)

@@ -346,6 +346,7 @@ func newSeededPack(t *testing.T) Pack {
 	trend.Data.CoveragePct = 80
 	trend.Data.BaselineCoveragePct = 0
 	trend.Data.CoverageDelta = 80
+	trend.Data.ScopedFrameworkCount = 1
 	p.Sections[SectionCoverageTrend] = trend
 
 	inv := p.Sections[SectionInvestment]

@@ -12,16 +12,21 @@
 
 import { cn } from "@/lib/utils";
 
+import { NO_BASELINE_TEXT } from "./posture-coverage-caption";
+
 type CoverageTrendProps = {
   baseline: number;
   current: number;
   delta: number;
+  // No baseline to compare against (#2056 review B1): show n/a, not 0%.
+  noBaseline?: boolean;
 };
 
 export function CoverageTrend({
   baseline,
   current,
   delta,
+  noBaseline = false,
 }: CoverageTrendProps) {
   const fmt = (n: number) => Number(n.toFixed(1)).toString();
   const deltaTone =
@@ -42,7 +47,7 @@ export function CoverageTrend({
       <div className="grid grid-cols-3 gap-3 text-sm">
         <CoverageCard
           label="Baseline"
-          value={`${fmt(baseline)}%`}
+          value={noBaseline ? "n/a" : `${fmt(baseline)}%`}
           tone="muted"
         />
         <CoverageCard
@@ -58,8 +63,14 @@ export function CoverageTrend({
             Quarter delta
           </div>
           <div className={cn("font-semibold", deltaTone)}>
-            {delta > 0 ? `+${fmt(delta)}` : delta === 0 ? "flat" : fmt(delta)}
-            {delta !== 0 ? " pts" : ""}
+            {noBaseline
+              ? "n/a"
+              : delta > 0
+                ? `+${fmt(delta)}`
+                : delta === 0
+                  ? "flat"
+                  : fmt(delta)}
+            {!noBaseline && delta !== 0 ? " pts" : ""}
           </div>
         </div>
       </div>
@@ -68,6 +79,7 @@ export function CoverageTrend({
         their coverage at the start of the 90-day posture trend, unless the
         operator entered a prior-quarter figure; delta is current minus
         baseline.
+        {noBaseline ? ` There is ${NO_BASELINE_TEXT}.` : ""}
       </p>
     </div>
   );

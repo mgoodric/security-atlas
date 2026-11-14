@@ -26,6 +26,7 @@ export type BoardPackSectionData = {
     coverage_pct: number;
     freshness_pct: number;
     baseline_pct?: number;
+    no_trend_history?: boolean;
     trend_arrow: string;
     delta: number;
     state: string;
@@ -44,6 +45,7 @@ export type BoardPackSectionData = {
   baseline_coverage_pct?: number;
   coverage_delta?: number;
   scoped_framework_count?: number;
+  no_baseline?: boolean;
   // open_findings
   findings?: {
     evaluation_id: string;

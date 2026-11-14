@@ -63,6 +63,12 @@
 -- decided out of scope, so the percentage is over the whole requirement set;
 -- callers show "Scope not set" for that version instead of the number.
 --
+-- trend_history (#2056): whether any control covering the version has an
+-- evaluation (pass or fail) on or before the cutoff. Without one there is no
+-- 90-day-ago state to compare against, covered_then is empty, and
+-- trend_delta_90d equals coverage_pct; callers show "no baseline yet"
+-- instead of that delta.
+--
 -- The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
 -- $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
 WITH version_reqs AS (
@@ -149,6 +155,13 @@ covered_then AS (
     JOIN control_passed_then cpt ON cpt.control_id = cc.control_id
     WHERE cpt.passed_then
 ),
+history_versions AS (
+    -- Framework versions with at least one covering control evaluated on or
+    -- before the cutoff.
+    SELECT DISTINCT cc.framework_version_id
+    FROM covering_control cc
+    JOIN control_passed_then cpt ON cpt.control_id = cc.control_id
+),
 scoped_versions AS (
     -- Framework versions with an activated scope revision in the tenant.
     SELECT DISTINCT fs.framework_version_id
@@ -194,7 +207,8 @@ SELECT
            - 100.0 * COUNT(DISTINCT ct.requirement_id)
                    / COUNT(DISTINCT vr.requirement_id), 2)
     END::float8 AS trend_delta_90d,
-    BOOL_OR(sv.framework_version_id IS NOT NULL)::bool AS scope_activated
+    BOOL_OR(sv.framework_version_id IS NOT NULL)::bool AS scope_activated,
+    BOOL_OR(hv.framework_version_id IS NOT NULL)::bool AS trend_history
 FROM version_reqs vr
 LEFT JOIN covered_now      cn ON cn.framework_version_id = vr.framework_version_id
                               AND cn.requirement_id      = vr.requirement_id
@@ -202,6 +216,7 @@ LEFT JOIN covered_then     ct ON ct.framework_version_id = vr.framework_version_
                               AND ct.requirement_id      = vr.requirement_id
 LEFT JOIN control_freshness cf ON cf.framework_version_id = vr.framework_version_id
 LEFT JOIN scoped_versions  sv ON sv.framework_version_id = vr.framework_version_id
+LEFT JOIN history_versions hv ON hv.framework_version_id = vr.framework_version_id
 GROUP BY vr.framework_id, vr.framework_version, vr.framework_version_id
 ORDER BY vr.framework_id, vr.framework_version;
 

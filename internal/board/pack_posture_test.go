@@ -15,8 +15,8 @@ func TestPackPostures_EachFrameworkKeepsItsOwnNumbers(t *testing.T) {
 	t.Parallel()
 	soc2, iso := uuid.New(), uuid.New()
 	got := packPostures([]frameworkPostureRow{
-		{FrameworkID: soc2, Slug: "soc2", Name: "SOC 2", Version: "2017", CoveragePct: 41.9, FreshnessPct: 60, TrendDelta90d: 12.5, ScopeActivated: true},
-		{FrameworkID: iso, Slug: "iso27001", Name: "ISO 27001", Version: "2022", CoveragePct: 93.33, FreshnessPct: 80, TrendDelta90d: -2, ScopeActivated: true},
+		{FrameworkID: soc2, Slug: "soc2", Name: "SOC 2", Version: "2017", CoveragePct: 41.9, FreshnessPct: 60, TrendDelta90d: 12.5, ScopeActivated: true, TrendHistory: true},
+		{FrameworkID: iso, Slug: "iso27001", Name: "ISO 27001", Version: "2022", CoveragePct: 93.33, FreshnessPct: 80, TrendDelta90d: -2, ScopeActivated: true, TrendHistory: true},
 	})
 	if len(got) != 2 {
 		t.Fatalf("got %d rows, want 2", len(got))
@@ -69,16 +69,125 @@ func TestPackPostures_NoActivatedScopeIsScopeNotSet(t *testing.T) {
 func TestCoverageTrend_BaselineFromPostureTrend(t *testing.T) {
 	t.Parallel()
 	postures := packPostures([]frameworkPostureRow{
-		{Name: "SOC 2", CoveragePct: 60, TrendDelta90d: 20, ScopeActivated: true},  // baseline 40
-		{Name: "ISO", CoveragePct: 80, TrendDelta90d: -10, ScopeActivated: true},   // baseline 90
-		{Name: "PCI", CoveragePct: 100, TrendDelta90d: 100, ScopeActivated: false}, // left out
+		{Name: "SOC 2", CoveragePct: 60, TrendDelta90d: 20, ScopeActivated: true, TrendHistory: true}, // baseline 40
+		{Name: "ISO", CoveragePct: 80, TrendDelta90d: -10, ScopeActivated: true, TrendHistory: true},  // baseline 90
+		{Name: "PCI", CoveragePct: 100, TrendDelta90d: 100, ScopeActivated: false},                    // left out
 	})
-	cov, base, scoped := coverageTrend(postures)
-	if scoped != 2 || cov != 70 || base != 65 {
-		t.Errorf("coverageTrend = (%v, %v, %d), want (70, 65, 2)", cov, base, scoped)
+	cov, base, scoped, ok := coverageTrend(postures)
+	if scoped != 2 || cov != 70 || base != 65 || !ok {
+		t.Errorf("coverageTrend = (%v, %v, %d, %v), want (70, 65, 2, true)", cov, base, scoped, ok)
 	}
-	if cov, base, scoped := coverageTrend(postures[2:]); cov != 0 || base != 0 || scoped != 0 {
-		t.Errorf("coverageTrend(unscoped only) = (%v, %v, %d), want zeros", cov, base, scoped)
+	if cov, base, scoped, ok := coverageTrend(postures[2:]); cov != 0 || base != 0 || scoped != 0 || ok {
+		t.Errorf("coverageTrend(unscoped only) = (%v, %v, %d, %v), want zeros, no baseline", cov, base, scoped, ok)
+	}
+}
+
+// Review B1: no evaluation on or before the 90-day cutoff. The query's delta
+// then equals the coverage, which would read "up from 0%" — #2056's own
+// symptom. The row reports no baseline and no delta instead.
+func TestPackPostures_NoTrendHistoryHasNoBaseline(t *testing.T) {
+	t.Parallel()
+	got := packPostures([]frameworkPostureRow{
+		{Name: "SOC 2", Version: "2017", CoveragePct: 75, TrendDelta90d: 75, ScopeActivated: true, TrendHistory: false},
+	})[0]
+	if !got.NoTrendHistory || got.BaselinePct != 0 || got.Delta != 0 || got.TrendArrow != TrendFlat {
+		t.Errorf("row = %+v, want no_trend_history with no baseline or delta", got)
+	}
+	if got.CoveragePct != 75 || got.State != "in-progress" {
+		t.Errorf("row = %+v, want its own 75%% coverage and state kept", got)
+	}
+	sec := newSection(SectionPosture, SectionData{Frameworks: []PackFrameworkPosture{got}})
+	text, err := renderSectionNarrative(sec, "2026-09-30")
+	if err != nil {
+		t.Fatalf("renderSectionNarrative: %v", err)
+	}
+	if !strings.Contains(text, "SOC 2 2017 at 75% coverage (in-progress, no baseline yet: less than 90 days of evaluation history)") {
+		t.Errorf("posture narrative = %q", text)
+	}
+	if strings.Contains(text, "from 0%") || strings.Contains(text, "+75") {
+		t.Errorf("posture narrative reports a 0%% baseline: %q", text)
+	}
+	sp := newDraftPack()
+	sp.Content.Sections[SectionPosture] = sec
+	if html := buildPackHTML(sp); !strings.Contains(html, "no baseline yet: less than 90 days of evaluation history · in-progress") {
+		t.Errorf("PDF posture card missing the no-baseline line")
+	}
+}
+
+// One scoped framework without history means the section has no baseline:
+// a mean over real and missing baselines would understate the start.
+func TestCoverageTrend_AnyFrameworkWithoutHistoryMeansNoBaseline(t *testing.T) {
+	t.Parallel()
+	postures := packPostures([]frameworkPostureRow{
+		{Name: "SOC 2", CoveragePct: 60, TrendDelta90d: 20, ScopeActivated: true, TrendHistory: true},
+		{Name: "ISO", CoveragePct: 80, TrendDelta90d: 80, ScopeActivated: true, TrendHistory: false},
+	})
+	cov, base, scoped, ok := coverageTrend(postures)
+	if ok || cov != 70 || base != 0 || scoped != 2 {
+		t.Errorf("coverageTrend = (%v, %v, %d, %v), want (70, 0, 2, false)", cov, base, scoped, ok)
+	}
+}
+
+// No baseline -> no delta on either section, and the investment cost per
+// point is n/a in the narrative and the PDF. An operator-entered baseline
+// restores the delta and the cost.
+func TestRecomputeDerived_NoBaselineMakesCostNA(t *testing.T) {
+	t.Parallel()
+	p := Pack{PeriodEnd: "2026-09-30", Sections: map[string]Section{
+		SectionCoverageTrend: newSection(SectionCoverageTrend, SectionData{CoveragePct: 70, ScopedFrameworkCount: 2, NoBaseline: true}),
+		SectionInvestment:    newSection(SectionInvestment, SectionData{SpendUSD: 30000}),
+	}}
+	recomputeDerived(p.Sections)
+	trend, inv := p.Sections[SectionCoverageTrend].Data, p.Sections[SectionInvestment].Data
+	if trend.CoverageDelta != 0 || inv.CoverageDelta != 0 || inv.CostPerCoveragePoint != 0 || !inv.NoBaseline {
+		t.Fatalf("trend %+v / investment %+v, want no delta and n/a cost", trend, inv)
+	}
+	for key, want := range map[string]string{
+		SectionCoverageTrend: "with no baseline yet: less than 90 days of evaluation history, so no change is reported",
+		SectionInvestment:    "Cost per coverage point: n/a — no baseline yet: less than 90 days of evaluation history.",
+	} {
+		text, err := renderSectionNarrative(p.Sections[key], p.PeriodEnd)
+		if err != nil {
+			t.Fatalf("renderSectionNarrative(%s): %v", key, err)
+		}
+		if !strings.Contains(text, want) {
+			t.Errorf("%s narrative = %q, want it to contain %q", key, text, want)
+		}
+	}
+	html := buildPackHTML(StoredPack{Content: p})
+	for _, want := range []string{
+		"Coverage 70% · baseline n/a (no baseline yet: less than 90 days of evaluation history)",
+		"Spend $30000 · cost per coverage point n/a",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("PDF HTML missing %q", want)
+		}
+	}
+
+	baseline := 50
+	out := applySectionEdit(p, SectionEdit{SectionKey: SectionCoverageTrend, Inputs: &SectionInputs{BaselineCoveragePct: &baseline}})
+	trend, inv = out.Sections[SectionCoverageTrend].Data, out.Sections[SectionInvestment].Data
+	if trend.NoBaseline || trend.CoverageDelta != 20 || inv.NoBaseline || inv.CostPerCoveragePoint != 1500 {
+		t.Errorf("after operator baseline: trend %+v / investment %+v, want delta 20, cost 1500", trend, inv)
+	}
+}
+
+// Review N2: spend with no scoped framework is n/a, not spend / 0 points,
+// even after an operator enters a baseline.
+func TestRecomputeDerived_NoScopedFrameworkMakesCostNA(t *testing.T) {
+	t.Parallel()
+	baseline := 40
+	p := Pack{PeriodEnd: "2026-09-30", Sections: map[string]Section{
+		SectionCoverageTrend: newSection(SectionCoverageTrend, SectionData{NoBaseline: true}),
+		SectionInvestment:    newSection(SectionInvestment, SectionData{SpendUSD: 30000}),
+	}}
+	out := applySectionEdit(p, SectionEdit{SectionKey: SectionCoverageTrend, Inputs: &SectionInputs{BaselineCoveragePct: &baseline}})
+	inv := out.Sections[SectionInvestment]
+	if !inv.Data.NoBaseline || inv.Data.CostPerCoveragePoint != 0 {
+		t.Errorf("investment = %+v, want n/a cost with no scoped framework", inv.Data)
+	}
+	if !strings.Contains(inv.TemplatedText, "Cost per coverage point: n/a — no framework has an activated scope.") {
+		t.Errorf("investment narrative = %q", inv.TemplatedText)
 	}
 }
 
@@ -87,8 +196,8 @@ func TestCoverageTrend_BaselineFromPostureTrend(t *testing.T) {
 func TestRenderSectionNarrative_PerFrameworkPosture(t *testing.T) {
 	t.Parallel()
 	sec := newSection(SectionPosture, SectionData{Frameworks: packPostures([]frameworkPostureRow{
-		{Name: "SOC 2", Version: "2017", CoveragePct: 41.93, TrendDelta90d: 12.5, ScopeActivated: true},
-		{Name: "ISO 27001", Version: "2022", CoveragePct: 49.3, TrendDelta90d: 0, ScopeActivated: true},
+		{Name: "SOC 2", Version: "2017", CoveragePct: 41.93, TrendDelta90d: 12.5, ScopeActivated: true, TrendHistory: true},
+		{Name: "ISO 27001", Version: "2022", CoveragePct: 49.3, TrendDelta90d: 0, ScopeActivated: true, TrendHistory: true},
 		{Name: "PCI DSS", Version: "4.0", ScopeActivated: false},
 	})})
 	text, err := renderSectionNarrative(sec, "2026-09-30")
@@ -136,7 +245,7 @@ func TestBuildPackHTML_ScopeNotSetCard(t *testing.T) {
 	posture := sp.Content.Sections[SectionPosture]
 	posture.Data.Frameworks = packPostures([]frameworkPostureRow{
 		{Name: "PCI DSS", Version: "4.0", ScopeActivated: false},
-		{Name: "SOC 2", Version: "2017", CoveragePct: 41.93, TrendDelta90d: 1, ScopeActivated: true},
+		{Name: "SOC 2", Version: "2017", CoveragePct: 41.93, TrendDelta90d: 1, ScopeActivated: true, TrendHistory: true},
 	})
 	sp.Content.Sections[SectionPosture] = posture
 	got := buildPackHTML(sp)

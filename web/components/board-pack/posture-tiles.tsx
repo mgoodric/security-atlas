@@ -19,7 +19,10 @@ import Link from "next/link";
 
 import { cn } from "@/lib/utils";
 
-import { POSTURE_COVERAGE_CAPTION } from "./posture-coverage-caption";
+import {
+  NO_BASELINE_TEXT,
+  POSTURE_COVERAGE_CAPTION,
+} from "./posture-coverage-caption";
 
 // #2056: one row per framework version, carrying the dashboard's own
 // per-framework posture (GET /v1/frameworks/posture). `delta` is the 90-day
@@ -35,6 +38,7 @@ export type FrameworkPostureRow = {
   coverage_pct: number;
   freshness_pct: number;
   baseline_pct?: number;
+  no_trend_history?: boolean;
   trend_arrow: string;
   delta: number;
   state: string;
@@ -145,12 +149,22 @@ function PostureTile({ fw }: { fw: FrameworkPostureRow }) {
       <div className="mt-1.5 flex items-baseline gap-1.5">
         <span className="text-2xl font-semibold">{pct(fw.coverage_pct)}</span>
         <span className="text-lg font-normal text-muted-foreground">%</span>
-        <span className={cn("text-xs font-medium", deltaTone)}>
-          {fw.trend_arrow}{" "}
-          {fw.delta > 0 ? `+${delta}` : fw.delta === 0 ? "flat" : delta}
-        </span>
+        {fw.no_trend_history ? null : (
+          <span className={cn("text-xs font-medium", deltaTone)}>
+            {fw.trend_arrow}{" "}
+            {fw.delta > 0 ? `+${delta}` : fw.delta === 0 ? "flat" : delta}
+          </span>
+        )}
       </div>
       <div className={cn("mt-1 text-xs", stateTone)}>{fw.state}</div>
+      {fw.no_trend_history ? (
+        <div
+          className="mt-1 text-[11px] text-muted-foreground"
+          data-testid="posture-no-baseline"
+        >
+          {NO_BASELINE_TEXT}
+        </div>
+      ) : null}
       <div className="mt-2 text-[11px] text-muted-foreground">
         evidence freshness {pct(fw.freshness_pct)}%
       </div>

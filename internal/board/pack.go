@@ -203,6 +203,12 @@ type SectionData struct {
 	BaselineCoveragePct  float64 `json:"baseline_coverage_pct,omitempty"`
 	CoverageDelta        float64 `json:"coverage_delta,omitempty"`
 	ScopedFrameworkCount int     `json:"scoped_framework_count,omitempty"`
+	// NoBaseline (coverage_trend, mirrored on investment): there is no
+	// baseline to compare against — a scoped framework has less than 90 days
+	// of evaluation history, or no framework is scoped — so the delta and
+	// the cost per coverage point are not reported. An operator-entered
+	// baseline clears it on coverage_trend.
+	NoBaseline bool `json:"no_baseline,omitempty"`
 
 	// open_findings: failing control evaluations as of period_end
 	// (decision D4 — a failing evaluation IS a finding for v1).

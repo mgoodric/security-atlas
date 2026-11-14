@@ -136,8 +136,7 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 		return Pack{}, err
 	}
 	postures := packPostures(postureRows)
-	coveragePct, baselinePct, scopedCount := coverageTrend(postures)
-	coverageDelta := round2(coveragePct - baselinePct)
+	coveragePct, baselinePct, scopedCount, hasBaseline := coverageTrend(postures)
 
 	// --- risks: top-N aging, ranked by residual severity then age ---
 	riskRows, err := g.store.ListRisksAsOf(ctx, generatedAt)
@@ -188,8 +187,8 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 	pack.Sections[SectionCoverageTrend] = newSection(SectionCoverageTrend, SectionData{
 		CoveragePct:          coveragePct,
 		BaselineCoveragePct:  baselinePct,
-		CoverageDelta:        coverageDelta,
 		ScopedFrameworkCount: scopedCount,
+		NoBaseline:           !hasBaseline,
 	})
 	pack.Sections[SectionOpenFindings] = newSection(SectionOpenFindings, SectionData{
 		Findings:      findings,
@@ -213,15 +212,11 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 	// templated placeholder narrative. The generator does NOT fabricate
 	// operational metrics, vendor numbers, or spend.
 	pack.Sections[SectionOperational] = newSection(SectionOperational, SectionData{})
-	pack.Sections[SectionInvestment] = newSection(SectionInvestment, SectionData{
-		SpendUSD:             0,
-		CostPerCoveragePoint: 0,
-		// CoverageDelta is mirrored here so the investment narrative can
-		// reference it; it is kept in sync with the coverage_trend section
-		// on edit (see PackStore.UpdateSection).
-		CoverageDelta: coverageDelta,
-	})
+	pack.Sections[SectionInvestment] = newSection(SectionInvestment, SectionData{})
 	pack.Sections[SectionAsks] = newSection(SectionAsks, SectionData{})
+	// The coverage delta, its mirror on investment, and the cost per point
+	// are derived the same way here as on every operator edit.
+	recomputeDerived(pack.Sections)
 
 	// Render each section's templated narrative. Pure text/template, NO LLM.
 	for key, sec := range pack.Sections {

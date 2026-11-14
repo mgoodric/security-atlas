@@ -28,12 +28,13 @@ import (
 
 // packSectionFuncs are the per-section template helpers.
 var packSectionFuncs = template.FuncMap{
-	"arrow":  arrowGlyph,
-	"signed": signedInt,
-	"pts":    signedPts,
-	"pct":    formatPct,
-	"band":   severityBandLabel,
-	"add1":   func(i int) int { return i + 1 },
+	"arrow":      arrowGlyph,
+	"signed":     signedInt,
+	"pts":        signedPts,
+	"pct":        formatPct,
+	"band":       severityBandLabel,
+	"noBaseline": func() string { return noBaselineText },
+	"add1":       func(i int) int { return i + 1 },
 	"pluralize": func(n int, singular, plural string) string {
 		if n == 1 {
 			return singular
@@ -82,7 +83,8 @@ var sectionSources = map[string]string{
 		`{{ if .Data.Frameworks }}The program runs against {{ len .Data.Frameworks }} {{ pluralize (len .Data.Frameworks) "framework" "frameworks" }}: ` +
 		`{{ range $i, $f := .Data.Frameworks }}{{ if $i }}; {{ end }}{{ $f.Name }}{{ if $f.Version }} {{ $f.Version }}{{ end }} ` +
 		`{{ if $f.ScopeNotSet }}has no activated framework scope (scope not set), so no coverage is reported` +
-		`{{ else }}at {{ pct $f.CoveragePct }}% coverage ({{ $f.State }}, {{ arrow $f.TrendArrow }} {{ pts $f.Delta }} pts over 90 days, from {{ pct $f.BaselinePct }}%){{ end }}{{ end }}.` +
+		`{{ else }}at {{ pct $f.CoveragePct }}% coverage ({{ $f.State }}, ` +
+		`{{ if $f.NoTrendHistory }}{{ noBaseline }}{{ else }}{{ arrow $f.TrendArrow }} {{ pts $f.Delta }} pts over 90 days, from {{ pct $f.BaselinePct }}%{{ end }}){{ end }}{{ end }}.` +
 		`{{ else }}No frameworks are registered yet — register a framework to populate per-framework posture.{{ end }}`,
 
 	SectionTopRisks: `{{ if .Data.TopRisks }}The {{ len .Data.TopRisks }} highest-severity open {{ pluralize (len .Data.TopRisks) "risk" "risks" }} aging in the register: ` +
@@ -90,9 +92,11 @@ var sectionSources = map[string]string{
 		`{{ else }}No open risks in the register.{{ end }}`,
 
 	SectionCoverageTrend: `{{ if .Data.ScopedFrameworkCount }}Control coverage averages {{ pct .Data.CoveragePct }}% across ` +
-		`the {{ .Data.ScopedFrameworkCount }} {{ pluralize .Data.ScopedFrameworkCount "framework" "frameworks" }} with an activated scope, ` +
-		`against a baseline of {{ pct .Data.BaselineCoveragePct }}% — a {{ pts .Data.CoverageDelta }} point change. ` +
-		`The baseline is the same frameworks' coverage at the start of the 90-day posture trend, unless the operator has set baseline_coverage_pct.` +
+		`the {{ .Data.ScopedFrameworkCount }} {{ pluralize .Data.ScopedFrameworkCount "framework" "frameworks" }} with an activated scope` +
+		`{{ if .Data.NoBaseline }}, with {{ noBaseline }}, so no change is reported. ` +
+		`Set baseline_coverage_pct to compare against a prior-quarter figure.` +
+		`{{ else }}, against a baseline of {{ pct .Data.BaselineCoveragePct }}% — a {{ pts .Data.CoverageDelta }} point change. ` +
+		`The baseline is the same frameworks' coverage at the start of the 90-day posture trend, unless the operator has set baseline_coverage_pct.{{ end }}` +
 		`{{ else }}No framework has an activated scope, so there is no coverage to trend. ` +
 		`Activate a framework scope to populate this section.{{ end }}`,
 
@@ -124,8 +128,10 @@ var sectionSources = map[string]string{
 		`override this narrative with the quarter's numbers before approving the section.`,
 
 	SectionInvestment: `{{ if gt .Data.SpendUSD 0 }}Security spend for the quarter was ${{ .Data.SpendUSD }}. ` +
-		`Against a {{ pts .Data.CoverageDelta }} point coverage change, that is approximately ` +
-		`${{ printf "%.0f" .Data.CostPerCoveragePoint }} per coverage point gained.` +
+		`{{ if .Data.NoBaseline }}Cost per coverage point: n/a — ` +
+		`{{ if .Data.ScopedFrameworkCount }}{{ noBaseline }}{{ else }}no framework has an activated scope{{ end }}.` +
+		`{{ else }}Against a {{ pts .Data.CoverageDelta }} point coverage change, that is approximately ` +
+		`${{ printf "%.0f" .Data.CostPerCoveragePoint }} per coverage point gained.{{ end }}` +
 		`{{ else }}Investment vs coverage is operator-entered — enter the quarter's security spend (spend_usd). ` +
 		`The cost-per-coverage-point is then computed as spend divided by the coverage-trend section's coverage delta. Override this narrative once the figures are in.{{ end }}`,
 

@@ -14,5 +14,11 @@
 // SCF-anchored evidence pass rate") described a formula the platform
 // never computed; keep this caption aligned with the query instead.
 
+// Shown wherever a baseline would need evaluation history from before the
+// 90-day window and there is none (#2056 review B1). Same text as the Go
+// renderers' noBaselineText (internal/board/pack_posture.go).
+export const NO_BASELINE_TEXT =
+  "no baseline yet: less than 90 days of evaluation history";
+
 export const POSTURE_COVERAGE_CAPTION =
   "Coverage definition: the share of each framework's in-scope requirements (those its activated framework scope does not exclude) with at least one control on a mapped SCF anchor. The same figure the dashboard shows; the trend and baseline are over the last 90 days.";

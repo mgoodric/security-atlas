@@ -239,8 +239,8 @@ func TestPackUpdateSection_InvestmentSpendRecomputes(t *testing.T) {
 	// Coverage is the dashboard's per-framework posture (#2056); this tenant
 	// has no activated framework scope, so the generated coverage is 0. Set
 	// the baseline to 40, then enter $30000 spend: delta = 0 - 40 = -40 on
-	// both sections, and the cost-per-point denominator floors at 1, so
-	// cost-per-point = 30000.
+	// both sections. With no scoped framework there is no coverage to buy,
+	// so the cost per coverage point is n/a (absent, no_baseline set).
 	resp, _ := doJSON(t, env, http.MethodPut,
 		"/v1/board-packs/"+packID+"/sections/coverage_trend",
 		map[string]any{"inputs": map[string]any{"baseline_coverage_pct": 40}})
@@ -263,8 +263,11 @@ func TestPackUpdateSection_InvestmentSpendRecomputes(t *testing.T) {
 	if delta, _ := data["coverage_delta"].(float64); delta != -40 {
 		t.Errorf("investment coverage_delta = %v, want -40 (0 - 40)", data["coverage_delta"])
 	}
-	if cpp, _ := data["cost_per_coverage_point"].(float64); cpp != 30000 {
-		t.Errorf("cost_per_coverage_point = %v, want 30000 (denominator floored at 1)", data["cost_per_coverage_point"])
+	if _, ok := data["cost_per_coverage_point"]; ok {
+		t.Errorf("cost_per_coverage_point = %v, want absent (n/a with no scoped framework)", data["cost_per_coverage_point"])
+	}
+	if na, _ := data["no_baseline"].(bool); !na {
+		t.Errorf("investment no_baseline = %v, want true", data["no_baseline"])
 	}
 }
 

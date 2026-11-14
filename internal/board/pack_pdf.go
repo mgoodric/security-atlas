@@ -129,12 +129,15 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 					html.EscapeString(label))
 				continue
 			}
+			trend := arrowGlyph(fp.TrendArrow) + " " + signedPts(fp.Delta) + " pts over 90 days"
+			if fp.NoTrendHistory {
+				trend = noBaselineText
+			}
 			fmt.Fprintf(w,
 				`<div class="card"><div class="label">%s</div><div class="pct">%s%%</div>`+
-					`<div class="muted">%s %s pts over 90 days · %s</div></div>`,
+					`<div class="muted">%s · %s</div></div>`,
 				html.EscapeString(label), formatPct(fp.CoveragePct),
-				html.EscapeString(arrowGlyph(fp.TrendArrow)),
-				html.EscapeString(signedPts(fp.Delta)), html.EscapeString(fp.State))
+				html.EscapeString(trend), html.EscapeString(fp.State))
 		}
 		w.WriteString(`</div>`)
 
@@ -154,9 +157,17 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 		w.WriteString(`</tbody></table>`)
 
 	case SectionCoverageTrend:
-		fmt.Fprintf(w,
-			`<div class="muted">Coverage %s%% · baseline %s%% · delta %s pts</div>`,
-			formatPct(d.CoveragePct), formatPct(d.BaselineCoveragePct), signedPts(d.CoverageDelta))
+		switch {
+		case d.ScopedFrameworkCount == 0:
+			w.WriteString(`<div class="muted">No framework has an activated scope.</div>`)
+		case d.NoBaseline:
+			fmt.Fprintf(w, `<div class="muted">Coverage %s%% · baseline n/a (%s)</div>`,
+				formatPct(d.CoveragePct), html.EscapeString(noBaselineText))
+		default:
+			fmt.Fprintf(w,
+				`<div class="muted">Coverage %s%% · baseline %s%% · delta %s pts</div>`,
+				formatPct(d.CoveragePct), formatPct(d.BaselineCoveragePct), signedPts(d.CoverageDelta))
+		}
 
 	case SectionOpenFindings:
 		if len(d.Findings) == 0 {
@@ -204,6 +215,10 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 		w.WriteString(`</tbody></table>`)
 
 	case SectionInvestment:
+		if d.NoBaseline {
+			fmt.Fprintf(w, `<div class="muted">Spend $%d · cost per coverage point n/a</div>`, d.SpendUSD)
+			return
+		}
 		fmt.Fprintf(w,
 			`<div class="muted">Spend $%d · coverage delta %s pts · ~$%.0f per coverage point</div>`,
 			d.SpendUSD, signedPts(d.CoverageDelta), d.CostPerCoveragePoint)

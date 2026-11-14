@@ -11,7 +11,10 @@
 
 import { describe, expect, test } from "vitest";
 
-import { POSTURE_COVERAGE_CAPTION } from "./posture-coverage-caption";
+import {
+  NO_BASELINE_TEXT,
+  POSTURE_COVERAGE_CAPTION,
+} from "./posture-coverage-caption";
 
 describe("POSTURE_COVERAGE_CAPTION", () => {
   test("states the dashboard's per-framework definition", () => {
@@ -24,5 +27,13 @@ describe("POSTURE_COVERAGE_CAPTION", () => {
     expect(POSTURE_COVERAGE_CAPTION).toMatch(/activated framework scope/);
     expect(POSTURE_COVERAGE_CAPTION).toMatch(/dashboard/);
     expect(POSTURE_COVERAGE_CAPTION).not.toMatch(/pass rate/);
+  });
+});
+
+describe("NO_BASELINE_TEXT", () => {
+  test("matches the Go renderers' wording", () => {
+    expect(NO_BASELINE_TEXT).toBe(
+      "no baseline yet: less than 90 days of evaluation history",
+    );
   });
 });

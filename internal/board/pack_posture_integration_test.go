@@ -11,6 +11,7 @@ package board_test
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,12 +27,15 @@ import (
 // postureFramework describes one seeded framework version: reqs
 // requirements, each on its own SCF anchor; the first coveredNow have a
 // covering control; the first coveredThen of those passed 120 days ago.
+// newHistory seeds only today's evaluations: no control was evaluated
+// before the 90-day cutoff.
 type postureFramework struct {
 	name        string
 	reqs        int
 	coveredNow  int
 	coveredThen int
 	activate    bool
+	newHistory  bool
 }
 
 // seedPostureFramework seeds a global framework with a current version, its
@@ -79,10 +83,14 @@ func seedPostureFramework(t *testing.T, admin *pgxpool.Pool, tenant string, f po
 		if i < f.coveredThen {
 			then = "pass"
 		}
-		for _, ev := range []struct {
+		evals := []struct {
 			result string
 			at     time.Time
-		}{{then, old}, {"pass", time.Now().UTC()}} {
+		}{{then, old}, {"pass", time.Now().UTC()}}
+		if f.newHistory {
+			evals = evals[1:]
+		}
+		for _, ev := range evals {
 			exec("evaluation", `INSERT INTO control_evaluations (
 					id, tenant_id, control_id, eval_run_id, evaluated_at,
 					result, freshness_status, evidence_count_in_window, trigger)
@@ -191,5 +199,45 @@ func TestPackGenerator_PostureIsTheDashboardsPerFramework(t *testing.T) {
 	}
 	if inv := stored.Content.Sections[board.SectionInvestment].Data; inv.CoverageDelta != 35 {
 		t.Errorf("investment coverage delta = %v, want 35 (mirrors coverage_trend)", inv.CoverageDelta)
+	}
+}
+
+// Review B1: a scoped framework whose controls were first evaluated inside
+// the 90-day window has no 90-day-ago state. The dashboard's delta then
+// equals its coverage; the pack must not turn that into "up from 0%".
+func TestPackGenerator_NoEvaluationHistoryHasNoBaseline(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	fw := seedPostureFramework(t, admin, tenant, postureFramework{name: "Framework N (#2056)", reqs: 4, coveredNow: 3, activate: true, newHistory: true})
+
+	now := time.Now().UTC()
+	stored, err := board.NewPackGenerator(board.NewPackStore(app), nil).
+		WithClock(func() time.Time { return now }).
+		Generate(ctx, now.Format("2006-01-02"))
+	if err != nil {
+		t.Fatalf("Generate: %v", err)
+	}
+
+	var p board.PackFrameworkPosture
+	for _, f := range stored.Content.Sections[board.SectionPosture].Data.Frameworks {
+		if f.FrameworkID == fw.String() {
+			p = f
+		}
+	}
+	if p.CoveragePct != 75 || !p.NoTrendHistory || p.BaselinePct != 0 || p.Delta != 0 {
+		t.Errorf("posture = %+v, want 75%% with no_trend_history and no baseline or delta", p)
+	}
+	trend := stored.Content.Sections[board.SectionCoverageTrend]
+	if !trend.Data.NoBaseline || trend.Data.CoverageDelta != 0 || trend.Data.CoveragePct != 75 {
+		t.Errorf("coverage_trend = %+v, want 75%% with no baseline and no delta", trend.Data)
+	}
+	if !strings.Contains(trend.TemplatedText, "no baseline yet: less than 90 days of evaluation history") {
+		t.Errorf("coverage_trend narrative = %q", trend.TemplatedText)
+	}
+	if inv := stored.Content.Sections[board.SectionInvestment].Data; !inv.NoBaseline || inv.CoverageDelta != 0 {
+		t.Errorf("investment = %+v, want n/a cost and no delta", inv)
 	}
 }
