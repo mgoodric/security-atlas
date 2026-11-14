@@ -57,6 +57,10 @@ grc_writable_resources := {
     # task tracking only; no route provisions or deprovisions access
     # (the OE-630 boundary).
     "personnel-security",
+    # #1797: tenant overlay edges (requirement -> SCF anchor) under
+    # /v1/mapping-overlays. Tenant-owned mappings, RLS-scoped; the catalog
+    # edges stay read-only.
+    "mapping-overlays",
 }
 
 grc_actions := {

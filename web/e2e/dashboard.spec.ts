@@ -20,10 +20,10 @@
 //             hierarchy), 115 (admin-bootstrap). Slice 116 promotes the
 //             job to required-checks after all five spec un-skips +
 //             ≥5 clean runs each.
-// Slice 193 — AC-5 ("upcoming panel binds to /v1/upcoming") failed on
+// Slice 193 — AC-5 ("upcoming panel binds to the upcoming rollup") failed on
 //             slice 111's first post-rebase CI run. Diagnosis verdict:
 //             H1 fixture gap — `fixtures/e2e/dashboard.sql` seeded the
-//             exception with `status='approved'`, but `/v1/upcoming`
+//             exception with `status='approved'`, but the upcoming rollup
 //             (`ListUpcomingItems`) filters on `status='active'`. Fix
 //             flipped the status + switched to `ON CONFLICT (id) DO
 //             UPDATE` per slice 168 precedent. See
@@ -34,6 +34,11 @@
 //             un-exercised (filed as follow-on observation; the path
 //             filter should add `fixtures/**` so future
 //             fixture-only PRs trigger the e2e job).
+// #2130     — "Coming up" reads the compliance calendar for the next 14
+//             days; the upcoming rollup it used to read is retired. AC-5
+//             now asserts the panel lists calendar events (an exception
+//             expiring, a risk review and an action plan due) and that
+//             the rows come from the calendar BFF.
 //
 // Run locally:
 //   cd web
@@ -160,32 +165,49 @@ test.describe("dashboard view", () => {
     ).toBeGreaterThan(0);
   });
 
-  test("AC-5: upcoming panel binds to /v1/upcoming unified rollup (slice 157)", async ({
+  test("AC-5: Coming up lists the calendar's next 14 days (#2130)", async ({
     authedPage: page,
   }) => {
-    // Slice 157: the upcoming panel was wired by slice 040 to
-    // `/v1/exceptions/expiring?within=30d` (the only real source on
-    // main at slice-040 time) with a labelled `upcoming-gap` footer
-    // naming the unified-rollup endpoint as a follow-up gap. Slice 066
-    // shipped the unified rollup; slice 157 re-points the panel onto
-    // it (categories: exception / policy_ack / vendor_review /
-    // audit_period).
-    //
-    // P0-148-3: the `upcoming-gap` testid MUST NOT render after slice
-    // 157, and the panel renders the unified rollup row shape with a
-    // category badge per row.
-    const requests: string[] = [];
-    page.on("request", (r) => requests.push(r.url()));
+    // The panel asks the calendar BFF for [today, today + 14d). The
+    // dashboard fixture seeds an exception expiring in 10 days, a risk
+    // review due in 7 and an action plan due in 5, each on the calendar.
+    const calendarRequests: string[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/api/calendar?")) calendarRequests.push(r.url());
+    });
     await page.goto("/dashboard");
-    await expect(page.getByTestId("upcoming-row").first()).toBeVisible();
+    const panel = page.getByTestId("upcoming-panel");
+    await expect(panel).toContainText("Coming up · next 14 days");
+    await expect(panel.getByTestId("upcoming-row").first()).toBeVisible();
+
+    const titles = panel.getByTestId("upcoming-row-title");
     await expect(
-      page.getByTestId("upcoming-row-category").first(),
-    ).toBeVisible();
-    expect(
-      requests.filter((u) => u.includes("/api/dashboard/upcoming")).length,
-    ).toBeGreaterThan(0);
-    // The gap footer is gone (slice 157):
-    await expect(page.getByTestId("upcoming-gap")).toHaveCount(0);
+      titles.filter({
+        hasText: "Risk review: Unencrypted production data at rest",
+      }),
+    ).toHaveCount(1);
+    await expect(
+      titles.filter({
+        hasText: "Action plan due: Enable SSE on staging buckets",
+      }),
+    ).toHaveCount(1);
+    await expect(titles.filter({ hasText: "Exception on" })).toHaveCount(1);
+    await expect(
+      panel
+        .getByTestId("upcoming-row-category")
+        .filter({ hasText: "Risk review" }),
+    ).toHaveCount(1);
+
+    expect(calendarRequests.length).toBeGreaterThan(0);
+    const url = new URL(calendarRequests[0]);
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+    expect(from).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(to).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    const spanDays =
+      (Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) /
+      86_400_000;
+    expect(spanDays).toBe(13); // `to` is inclusive: 14 days in all
   });
 
   test("evidence freshness panel binds to /v1/evidence/freshness", async ({

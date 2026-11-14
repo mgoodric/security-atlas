@@ -13,7 +13,9 @@
 //	                     (aggregated by class — the panel's bucket=class
 //	                     wire shape)
 //	drift              — slice 016 drift.Store.Report (since=7d default)
-//	upcoming           — slice 066 dashboard.Store.UpcomingItems
+//	upcoming           — calendar.Store.ListEvents over the next
+//	                     14 days, the dashboard's "Coming up" window
+//	                     (#2130 retired the upcoming rollup)
 //	activity           — slice 066 dashboard.Store.ActivityFeed
 //
 // Each call delegates to the upstream store, which opens its own
@@ -31,6 +33,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mgoodric/security-atlas/internal/api/calendar"
 	"github.com/mgoodric/security-atlas/internal/api/dashboard"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/drift"
@@ -131,7 +134,11 @@ type DriftRow struct {
 	CurrentResult string `json:"current_result"`
 }
 
-// UpcomingPanelRow mirrors `/v1/upcoming`'s rows.
+// UpcomingPanelRow is one compliance-calendar event in the export's
+// "Coming up" window. The column names predate #2130 (they were
+// the upcoming rollup's); they are kept so existing export consumers keep
+// parsing: due_date is the event's starts_at, category its type,
+// resource_type / resource_id its related entity.
 type UpcomingPanelRow struct {
 	DueDate      string `json:"due_date"`
 	Category     string `json:"category"`
@@ -167,9 +174,14 @@ const defaultDriftWindow = 7 * 24 * time.Hour
 // first page and the export mirrors what an operator sees.
 const defaultActivityPageSize = 50
 
-// defaultUpcomingPageSize matches the default page size for the
-// upcoming rollup. Same "first page only" posture as activity.
-const defaultUpcomingPageSize = 50
+// UpcomingWindow is the dashboard's "Coming up" window (#2130): the
+// calendar from the start of today (UTC) for this long. The web panel
+// asks the calendar for the same 14 days.
+const UpcomingWindow = 14 * 24 * time.Hour
+
+// upcomingRowLimit bounds the export's calendar read. 14 days of
+// events stays well under it at v1 volumes; it guards the pool.
+const upcomingRowLimit = 500
 
 // defaultPostureTrendWindow is the slice 066 dashboard's trend window
 // (90 days; see internal/api/dashboard/handler.go `trendWindow`).
@@ -184,21 +196,24 @@ type LivePanelSource struct {
 	riskStore      *risk.Store
 	freshnessStore *freshness.Store
 	driftStore     *drift.Store
+	calendarStore  *calendar.Store
 }
 
-// NewLivePanelSource constructs a LivePanelSource. All four stores
+// NewLivePanelSource constructs a LivePanelSource. All five stores
 // MUST be non-nil for the production code path.
 func NewLivePanelSource(
 	dashboardStore *dashboard.Store,
 	riskStore *risk.Store,
 	freshnessStore *freshness.Store,
 	driftStore *drift.Store,
+	calendarStore *calendar.Store,
 ) *LivePanelSource {
 	return &LivePanelSource{
 		dashboardStore: dashboardStore,
 		riskStore:      riskStore,
 		freshnessStore: freshnessStore,
 		driftStore:     driftStore,
+		calendarStore:  calendarStore,
 	}
 }
 
@@ -285,20 +300,22 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 		FlippedOut:      flips,
 	}
 
-	// 5. Upcoming — first page only; category filter empty (all
-	//    categories merged).
-	upcomingRows, err := s.dashboardStore.UpcomingItemsFirstPage(ctx, "", int32(defaultUpcomingPageSize))
+	// 5. Upcoming — the calendar's next 14 days, the window the
+	//    dashboard's "Coming up" panel shows (#2130).
+	now := time.Now().UTC()
+	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+	events, err := s.calendarStore.ListEvents(ctx, from, from.Add(UpcomingWindow), now, "", upcomingRowLimit)
 	if err != nil {
 		return out, fmt.Errorf("upcoming panel: %w", err)
 	}
-	out.Panels.Upcoming = make([]UpcomingPanelRow, 0, len(upcomingRows))
-	for _, u := range upcomingRows {
+	out.Panels.Upcoming = make([]UpcomingPanelRow, 0, len(events))
+	for _, e := range events {
 		out.Panels.Upcoming = append(out.Panels.Upcoming, UpcomingPanelRow{
-			DueDate:      tsStringFromPgtype(u.DueDate),
-			Category:     u.Category,
-			Title:        anyToString(u.Title),
-			ResourceType: u.ResourceType,
-			ResourceID:   u.ResourceID,
+			DueDate:      tsStringFromPgtype(e.StartsAt),
+			Category:     e.EventType,
+			Title:        e.Title,
+			ResourceType: e.RelatedEntityKind,
+			ResourceID:   e.RelatedEntityID,
 		})
 	}
 
@@ -395,17 +412,4 @@ func tsStringFromPgtype(t pgtype.Timestamptz) string {
 		return ""
 	}
 	return t.Time.UTC().Format(time.RFC3339Nano)
-}
-
-func anyToString(v any) string {
-	switch s := v.(type) {
-	case string:
-		return s
-	case []byte:
-		return string(s)
-	case nil:
-		return ""
-	default:
-		return fmt.Sprintf("%v", v)
-	}
 }

@@ -115,6 +115,7 @@ func TestAllListEndpoints_EmptyTenant_NeverReturn5xx(t *testing.T) {
 		"/v1/audit-notes",                     // slice 029 audit notes
 		"/v1/audit-periods",                   // slice 028 audit periods
 		"/v1/board-briefs",                    // slice 031 board briefs list
+		"/v1/calendar",                        // #2130 calendar, the one list of what is due
 		"/v1/controls/drift?since=7d",         // slice 016 drift panel
 		"/v1/decisions",                       // slice 091 decisions list
 		"/v1/decisions/overdue",               // slice 091 overdue decisions
@@ -140,7 +141,6 @@ func TestAllListEndpoints_EmptyTenant_NeverReturn5xx(t *testing.T) {
 		"/v1/scopes/cells",                    // slice 017 scope cells
 		"/v1/scopes/dimensions",               // slice 017 scope dimensions
 		"/v1/themes",                          // slice 019 risk themes
-		"/v1/upcoming",                        // slice 066 upcoming rollup
 		"/v1/vendors",                         // slice 024 vendor lite
 		"/v1/vendors/burndown",                // slice 024 vendor burndown
 		"/v1/walkthroughs",                    // slice 027 walkthroughs list
@@ -213,8 +213,8 @@ func looksLikeArrayKey(k string) bool {
 	case "items", "rows", "results", "data", "list",
 		"policies", "controls", "risks", "vendors", "scopes",
 		"frameworks", "anchors", "users", "evidence", "exceptions",
-		"audit_periods", "briefs", "metrics", "buckets", "activity",
-		"upcoming", "walkthroughs", "flipped_out", "nodes":
+		"audit_periods", "briefs", "metrics", "buckets", "activity", "events",
+		"walkthroughs", "flipped_out", "nodes":
 		return true
 	}
 	// Plural-ish: trailing 's' on a noun-looking key. Excludes obvious
