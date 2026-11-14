@@ -10,6 +10,8 @@
 //	PATCH  /v1/framework-scopes/{id}/activate          — approved → activated
 //	GET    /v1/controls/{id}/effective-scope?framework_version=… — intersection compute (AC-11)
 //
+// Applicability (SoA) decision routes live in applicability.go.
+//
 // Auth: the existing httpAuthMiddleware mounts the credential into context;
 // each handler reads the tenant id off the credential and (for approve)
 // checks IsApprover OR IsAdmin.

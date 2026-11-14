@@ -2,14 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc5_1_control_selection
 title: "Control selection aligned with risk register"
 description: |
-  The entity selects and develops control activities that contribute to
-  the mitigation of risks to the achievement of objectives to acceptable
-  levels (TSC CC5.1). The control owner attests annually that every
-  high or critical entry in the risk register has at least one assigned
-  mitigating control in the control catalog, and conversely that the
-  stock SOC 2 control kit has been reviewed for applicability against
-  the org's risk profile (i.e. controls outside applicability have a
-  documented `applicability_expr` excluding them).
+  Controls are chosen to bring identified risks down to an accepted level
+  (TSC CC5.1). The control owner attests annually that every high or
+  critical entry in the risk register has at least one assigned mitigating
+  control in the control catalog, and conversely that the stock SOC 2
+  control kit has been reviewed for applicability against the org's risk
+  profile (i.e. controls outside applicability have a documented
+  `applicability_expr` excluding them).
 
 scf_anchor_id: RSK-01
 control_family: RSK

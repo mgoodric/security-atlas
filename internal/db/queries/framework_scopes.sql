@@ -160,3 +160,54 @@ INSERT INTO framework_scope_workflow_log (
 SELECT * FROM framework_scope_workflow_log
 WHERE tenant_id = $1 AND framework_scope_id = $2
 ORDER BY occurred_at, id;
+
+-- ===== framework_scope_applicability (issue #1787) =====
+--
+-- Statement of Applicability decisions on a framework-scope revision. The
+-- guard + reset triggers on the table enforce the workflow; these queries
+-- only read and upsert.
+
+-- name: GetFrameworkRequirementInVersion :one
+SELECT id, code, title
+FROM framework_requirements
+WHERE id = $1 AND framework_version_id = $2;
+
+-- name: GetFrameworkScopeApplicability :one
+SELECT *
+FROM framework_scope_applicability
+WHERE tenant_id = $1 AND framework_scope_id = $2 AND framework_requirement_id = $3;
+
+-- name: UpsertFrameworkScopeApplicability :one
+INSERT INTO framework_scope_applicability (
+    tenant_id, framework_scope_id, framework_requirement_id,
+    decision, justification, implementation_ref, updated_by
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (framework_scope_id, framework_requirement_id) DO UPDATE
+SET decision = EXCLUDED.decision,
+    justification = EXCLUDED.justification,
+    implementation_ref = EXCLUDED.implementation_ref,
+    updated_by = EXCLUDED.updated_by,
+    updated_at = now()
+RETURNING *;
+
+-- name: ListFrameworkScopeApplicability :many
+-- Every requirement of the framework version, with the revision's decision
+-- when one exists. A NULL framework_scope_id (no revision in force) returns
+-- every requirement undecided.
+SELECT r.id AS requirement_id,
+       r.code,
+       r.title,
+       a.decision,
+       a.justification,
+       a.implementation_ref,
+       a.updated_by,
+       a.updated_at
+FROM framework_requirements r
+LEFT JOIN framework_scope_applicability a
+       ON a.framework_requirement_id = r.id
+      AND a.tenant_id = @tenant_id
+      AND a.framework_scope_id = sqlc.narg(framework_scope_id)
+WHERE r.framework_version_id = @framework_version_id
+ORDER BY r.code, r.id;

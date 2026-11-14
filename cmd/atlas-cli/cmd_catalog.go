@@ -28,9 +28,11 @@ func newCatalogCmd() *cobra.Command {
 
 func newCatalogImportSCFCmd() *cobra.Command {
 	var dsn string
+	var releaseVersion string
+	var releaseDate string
 	cmd := &cobra.Command{
 		Use:   "import-scf <path>",
-		Short: "import the SCF JSON catalog into Postgres",
+		Short: "import the SCF catalog (JSON, or the published SCF .xlsx workbook) into Postgres",
 		Args:  cobra.ExactArgs(1),
 		PreRunE: func(_ *cobra.Command, _ []string) error {
 			if dsn == "" {
@@ -43,7 +45,19 @@ func newCatalogImportSCFCmd() *cobra.Command {
 		},
 		RunE: func(_ *cobra.Command, args []string) error {
 			path := args[0]
-			cat, err := scfimport.Load(path)
+			var cat *scfimport.Catalog
+			var err error
+			if strings.EqualFold(filepath.Ext(path), ".xlsx") {
+				cat, err = scfimport.LoadWorkbook(path, scfimport.WorkbookOptions{
+					ReleaseVersion: releaseVersion,
+					ReleaseDate:    releaseDate,
+				})
+			} else {
+				if releaseVersion != "" || releaseDate != "" {
+					return fmt.Errorf("--release-version and --release-date apply to .xlsx workbooks only; a JSON catalog carries its own")
+				}
+				cat, err = scfimport.Load(path)
+			}
 			if err != nil {
 				return err
 			}
@@ -68,6 +82,8 @@ func newCatalogImportSCFCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL)")
+	cmd.Flags().StringVar(&releaseVersion, "release-version", "", "release version override for .xlsx workbooks (default: from the \"SCF <release>\" sheet name)")
+	cmd.Flags().StringVar(&releaseDate, "release-date", "", "release date (YYYY-MM-DD) for .xlsx workbooks, which do not carry one")
 	return cmd
 }
 

@@ -2,13 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc5_3_policies_procedures
 title: "Core security policies acknowledged in current version"
 description: |
-  The entity deploys control activities through policies that establish
-  what is expected and procedures that put policies into action (TSC
-  CC5.3). Operationally this resolves to: the v1 policy library is
-  current (each policy has been reviewed within its review cadence),
-  and active users have acknowledged the current version. The evidence
-  query reads the `policy.acknowledgment` ledger and asserts the
-  population of acknowledgments matches active users for each policy.
+  Expectations are set in written policy and carried out through
+  documented procedures (TSC CC5.3). Operationally this resolves to: the
+  v1 policy library is current (each policy has been reviewed within its
+  review cadence), and active users have acknowledged the current version.
+  The evidence query reads the `policy.acknowledgment` ledger and asserts
+  the population of acknowledgments matches active users for each policy.
 
 scf_anchor_id: GOV-01
 control_family: GOV

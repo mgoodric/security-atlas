@@ -2,13 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc1_4_competence_training
 title: "All personnel complete annual security awareness training"
 description: |
-  The entity demonstrates a commitment to attract, develop, and retain
-  competent individuals (TSC CC1.4, COSO Principle 4). Operationally for
-  SOC 2 the auditor-tested manifestation is: every employee and
-  contractor completes annual security awareness training within their
-  required cadence (on hire + within 12 months thereafter). The control
-  is automated by inspecting completion tickets — each training assignment
-  is filed as a Jira ticket tagged `security-training`, and the evidence
+  People doing security-relevant work are hired for it, trained in it and
+  kept capable of it (TSC CC1.4, COSO Principle 4). Operationally for SOC
+  2 the auditor-tested manifestation is: every employee and contractor
+  completes annual security awareness training within their required
+  cadence (on hire + within 12 months thereafter). The control is
+  automated by inspecting completion tickets — each training assignment is
+  filed as a Jira ticket tagged `security-training`, and the evidence
   query asserts every active user has an open or closed completion ticket
   within the last 365 days.
 
