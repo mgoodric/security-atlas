@@ -424,3 +424,45 @@ func TestPurgeUnboundRows_KeepsLedgerRowsAndTheirParents(t *testing.T) {
 		t.Errorf("purge result retained = %v, want evidence_records and controls", res.Retained)
 	}
 }
+
+// TestUnboundRows_MissingAppRoleKeepsAllWithItsOwnReason renames atlas_app
+// inside the rolled-back transaction. Without the role no table can be
+// classified, so every table is kept, under a reason that says so rather
+// than calling it a ledger, and a purge confirms zero rows and deletes
+// nothing.
+func TestUnboundRows_MissingAppRoleKeepsAllWithItsOwnReason(t *testing.T) {
+	tx := beginRolledBack(t)
+	ctx := context.Background()
+	seedRisk(t, tx, uuid.Nil)
+	if _, err := tx.Exec(ctx, "ALTER ROLE atlas_app RENAME TO atlas_app_1905"); err != nil {
+		t.Fatalf("rename atlas_app: %v", err)
+	}
+
+	listed, err := oauthclient.ListUnboundRows(ctx, tx)
+	if err != nil {
+		t.Fatalf("ListUnboundRows: %v", err)
+	}
+	if find(listed, "risks").Rows == 0 {
+		t.Fatalf("listing %v is missing the seeded risks row", listed)
+	}
+	for _, c := range listed {
+		if c.Retained != oauthclient.RetainedNoAppRole {
+			t.Errorf("%s retained = %q, want %q", c.Table, c.Retained, oauthclient.RetainedNoAppRole)
+		}
+	}
+	if got := oauthclient.PurgeableRows(listed); got != 0 {
+		t.Fatalf("purgeable total = %d, want 0 with no atlas_app role", got)
+	}
+
+	risksBefore := countTenantRows(t, tx, "risks", uuid.Nil)
+	res, err := oauthclient.PurgeUnboundRows(ctx, tx, 0, "tester")
+	if err != nil {
+		t.Fatalf("PurgeUnboundRows: %v", err)
+	}
+	if len(res.Purged) != 0 || len(res.Retained) != len(listed) {
+		t.Errorf("purge result = %d purged, %d retained; want 0 and %d", len(res.Purged), len(res.Retained), len(listed))
+	}
+	if got := countTenantRows(t, tx, "risks", uuid.Nil); got != risksBefore {
+		t.Errorf("all-zeros risks after purge = %d, want %d (nothing is purged without atlas_app)", got, risksBefore)
+	}
+}
