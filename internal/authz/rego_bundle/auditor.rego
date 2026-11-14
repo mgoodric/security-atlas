@@ -184,7 +184,8 @@ auditor_readable_resources := {
     # these admits to reads. /v1/frameworks/posture admits via
     # defaults.rego.catalog_resources["frameworks"] (slice 035).
     "activity",
-    "upcoming",
+    # (#2130 retired the upcoming rollup and its "upcoming" admit: the
+    # dashboard's Coming up reads "calendar", admitted above.)
     # Slice 269: dashboard snapshot export
     # (`GET /v1/dashboard/export?format=json|csv|xlsx`). The
     # `BuildInput` path-to-resource resolver derives resource.type

@@ -1,17 +1,15 @@
-// pagination.go — opaque keyset-cursor pagination for the two paginated
-// dashboard reads (activity feed, upcoming rollup).
+// pagination.go — opaque keyset-cursor pagination for the paginated
+// dashboard activity feed. (The upcoming rollup it also served was retired
+// by #2130.)
 //
-// Why keyset, not OFFSET: both reads sit over append-only / mutating
-// sources. OFFSET pagination drifts when rows are added between page
+// Why keyset, not OFFSET: the read sits over an append-only source. OFFSET pagination drifts when rows are added between page
 // fetches (page 2 skips or repeats rows). A keyset cursor over
 // (sort_timestamp, id) is stable under concurrent change.
 //
 // The cursor is opaque: a base64url-encoded "RFC3339Nano|id" string. The
 // wire contract does not leak the internal shape, and the handler treats a
 // malformed cursor as a 400. The activity feed sorts newest-first, so an
-// absent cursor selects the first page via a far-FUTURE sentinel timestamp;
-// the upcoming rollup sorts oldest-first, so an absent cursor selects the
-// first page via a far-PAST sentinel timestamp.
+// absent cursor selects the first page via a far-FUTURE sentinel timestamp.
 package dashboard
 
 import (
@@ -35,29 +33,15 @@ var (
 
 // keyset is the decoded cursor: the (timestamp, id) coordinate of the last
 // row on the previous page. The id is a free-form string because the
-// dashboard reads paginate over heterogeneous resource ids (the upcoming
-// rollup mixes exception / policy-ack / vendor / audit-period ids; the
-// activity feed's resource_id is the view's text projection).
+// activity feed's resource_id is the view's text projection.
 type keyset struct {
 	ts time.Time
 	id string
 }
 
-// far-past / far-future sentinel timestamps. The activity feed (newest-
-// first, keyset predicate `ts < cursor`) wants every row strictly before a
-// far-future cursor on the first page. The upcoming rollup (oldest-first,
-// keyset predicate `due_date > cursor`) wants every row strictly after a
-// far-past cursor on the first page.
-//
-// farPast is deliberately NOT the Go zero time. time.Time{} is year-1
-// 00:00:00 and time.Time.IsZero() is true for it — pgTimestamptz maps a
-// zero time to a NULL timestamptz, and `due_date > NULL` is NULL (no rows).
-// One second past the zero instant keeps IsZero() false so the sentinel
-// reaches Postgres as a real, far-past, non-NULL timestamp.
-var (
-	farFuture = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
-	farPast   = time.Date(1, 1, 1, 0, 0, 1, 0, time.UTC)
-)
+// farFuture is the activity feed's first-page sentinel (newest-first,
+// keyset predicate `ts < cursor`): every row sorts strictly before it.
+var farFuture = time.Date(9999, 12, 31, 23, 59, 59, 0, time.UTC)
 
 // firstPageActivity is the sentinel keyset selecting the activity feed's
 // first page: a far-future timestamp + the max id string so every real row
@@ -65,14 +49,6 @@ var (
 // resource_id < cursor_id)`.
 func firstPageActivity() keyset {
 	return keyset{ts: farFuture, id: "\U0010FFFF"}
-}
-
-// firstPageUpcoming is the sentinel keyset selecting the upcoming rollup's
-// first page: a far-past timestamp + the empty id string so every real row
-// sorts strictly after it under `due_date > cursor_date OR (due_date =
-// cursor_date AND resource_id > cursor_id)`.
-func firstPageUpcoming() keyset {
-	return keyset{ts: farPast, id: ""}
 }
 
 // encodeCursor renders a keyset as the opaque base64url wire token. A zero

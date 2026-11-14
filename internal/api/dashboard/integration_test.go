@@ -16,10 +16,10 @@
 //	ISC-18  framework posture aggregates correctly across versions
 //	ISC-19  activity feed paginates newest-first with a stable cursor
 //	ISC-20  risks sort=residual,age orders correctly (in risks_sort_test.go)
-//	ISC-21  upcoming rollup merges all four sources date-sorted
+//	ISC-21  (retired: the upcoming rollup was removed by #2130)
 //	ISC-22  all four endpoints 403 a role without program-read access
 //	ISC-23  all four endpoints are RLS-isolated across tenants
-//	(plus)  input validation: bad cursor / limit / category -> 400
+//	(plus)  input validation: bad cursor / limit -> 400
 
 package dashboard_test
 
@@ -28,7 +28,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -224,7 +223,7 @@ func seedIngestEvent(t *testing.T, admin *pgxpool.Pool, tenant, decision string,
 }
 
 // seedException inserts one exceptions row. status='active' makes it appear
-// in the upcoming rollup; expiresAt is its due_date.
+// in tenant-scoped reads; expiresAt is when it lapses.
 func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, expiresAt time.Time) {
 	t.Helper()
 	if _, err := admin.Exec(context.Background(), `
@@ -239,8 +238,7 @@ func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid
 	}
 }
 
-// seedAuditPeriod inserts one open audit_periods row. periodEnd is its
-// due_date.
+// seedAuditPeriod inserts one open audit_periods row ending at periodEnd.
 func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid.UUID, periodEnd time.Time) {
 	t.Helper()
 	if _, err := admin.Exec(context.Background(), `
@@ -253,69 +251,6 @@ func seedAuditPeriod(t *testing.T, admin *pgxpool.Pool, tenant string, fvID uuid
 	`, uuid.New(), tenant, fvID,
 		periodEnd.Add(-90*24*time.Hour), periodEnd); err != nil {
 		t.Fatalf("seed audit_period: %v", err)
-	}
-}
-
-// seedVendor inserts one vendors row with a last_review_date so it appears
-// in the upcoming rollup (review due = last_review_date + cadence).
-func seedVendor(t *testing.T, admin *pgxpool.Pool, tenant, name string, lastReview time.Time, cadence string) {
-	t.Helper()
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO vendors (
-			id, tenant_id, name, criticality, review_cadence, last_review_date
-		)
-		VALUES ($1, $2, $3, 'medium', $4, $5)
-	`, uuid.New(), tenant, name, cadence, lastReview); err != nil {
-		t.Fatalf("seed vendor: %v", err)
-	}
-}
-
-func seedVendorRenewal(t *testing.T, admin *pgxpool.Pool, tenant, name string, renewalDate time.Time) uuid.UUID {
-	t.Helper()
-	id := uuid.New()
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO vendors (
-			id, tenant_id, name, criticality, review_cadence, renewal_date,
-			annual_cost, currency, tool_category, commercial_status
-		)
-		VALUES ($1, $2, $3, 'medium', 'annual', $4, 25000, 'USD', 'iam', 'active')
-	`, id, tenant, name, renewalDate); err != nil {
-		t.Fatalf("seed vendor renewal: %v", err)
-	}
-	return id
-}
-
-// seedUserAndAck inserts a user + one policy + one policy_acknowledgments
-// row. The ack's due_date in the rollup is acknowledged_at + 365 days.
-func seedUserAndAck(t *testing.T, admin *pgxpool.Pool, tenant string, ackedAt time.Time) {
-	t.Helper()
-	userID := uuid.New()
-	policyID := uuid.New()
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO users (id, tenant_id, email, display_name, status)
-		VALUES ($1, $2, $3, 'Slice 066 Tester', 'active')
-	`, userID, tenant, "slice066-"+uuid.NewString()[:8]+"@test.example"); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO policies (
-			id, tenant_id, title, version, body_md, status,
-			owner_role, approver_role, created_by, effective_date
-		)
-		VALUES ($1, $2, 'Slice 066 Policy', '1.0.0', '# policy', 'published',
-		        'grc_engineer', 'grc_engineer', 'tester', now())
-	`, policyID, tenant); err != nil {
-		t.Fatalf("seed policy: %v", err)
-	}
-	if _, err := admin.Exec(context.Background(), `
-		INSERT INTO policy_acknowledgments (
-			id, tenant_id, policy_id, policy_version_id, user_id,
-			acknowledged_at, ack_token
-		)
-		VALUES ($1, $2, $3, $3, $4, $5, $6)
-	`, uuid.New(), tenant, policyID, userID, ackedAt,
-		"tok-"+uuid.NewString()[:12]); err != nil {
-		t.Fatalf("seed policy_acknowledgment: %v", err)
 	}
 }
 
@@ -383,7 +318,6 @@ func noRoleRouter(t *testing.T, app *pgxpool.Pool, tenant string) http.Handler {
 	r.Use(tenancymw.Middleware)
 	r.Get("/v1/frameworks/posture", h.FrameworkPosture)
 	r.Get("/v1/activity", h.Activity)
-	r.Get("/v1/upcoming", h.Upcoming)
 	return r
 }
 
@@ -606,159 +540,6 @@ func TestActivity_PaginatesNewestFirst(t *testing.T) {
 	}
 }
 
-// ===== ISC-21: upcoming rollup merges all four sources date-sorted =====
-
-func TestUpcoming_MergesAllFourSourcesDateSorted(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
-	app := dbtest.NewAppPool(t)
-	tenant := freshTenant(t, admin)
-	env := testServer(t, app, tenant)
-
-	now := time.Now().UTC()
-	fw, anchors := seedFramework(t, admin, "fwup", "2024", 1)
-	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
-
-	// One item per source, with deliberately interleaved due dates so a
-	// correct merge interleaves the categories:
-	//   exception     due now+10d
-	//   policy_ack    due now+20d  (ack'd 345 days ago -> +365 = now+20d)
-	//   vendor_review due now+30d  (reviewed today, but annual -> next year;
-	//                               use a monthly cadence reviewed ~now-? )
-	//   audit_period  due now+40d
-	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
-	seedUserAndAck(t, admin, tenant, now.Add(-345*24*time.Hour)) // due ~now+20d
-	// monthly cadence, last reviewed ~now-1d -> due ~now+29d (within window)
-	seedVendor(t, admin, tenant, "Vendor M", now.Add(-1*24*time.Hour), "monthly")
-	seedAuditPeriod(t, admin, tenant, fw.frameworkVersionID, now.Add(40*24*time.Hour))
-
-	resp, body := get(t, env, "/v1/upcoming")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET upcoming: status %d, want 200", resp.StatusCode)
-	}
-	rows, _ := body["upcoming"].([]any)
-	if len(rows) != 4 {
-		t.Fatalf("ISC-21: expected 4 merged rows, got %d", len(rows))
-	}
-	// Row shape.
-	first := rows[0].(map[string]any)
-	for _, field := range []string{"due_date", "category", "title", "resource_type", "resource_id"} {
-		if _, ok := first[field]; !ok {
-			t.Fatalf("ISC-21: upcoming row missing field %q", field)
-		}
-	}
-	// All four categories present.
-	seen := map[string]bool{}
-	for _, r := range rows {
-		seen[r.(map[string]any)["category"].(string)] = true
-	}
-	for _, want := range []string{"exception", "policy_ack", "vendor_review", "audit_period"} {
-		if !seen[want] {
-			t.Fatalf("ISC-21: category %q missing from merged rollup", want)
-		}
-	}
-	// Date-sorted ascending.
-	for i := 1; i < len(rows); i++ {
-		prev := rows[i-1].(map[string]any)["due_date"].(string)
-		cur := rows[i].(map[string]any)["due_date"].(string)
-		if prev > cur {
-			t.Fatalf("ISC-21: rollup not date-sorted ascending: %s > %s", prev, cur)
-		}
-	}
-}
-
-// ISC-21 (category filter arm): ?category= narrows to one source.
-
-func TestUpcoming_CategoryFilter(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
-	app := dbtest.NewAppPool(t)
-	tenant := freshTenant(t, admin)
-	env := testServer(t, app, tenant)
-
-	now := time.Now().UTC()
-	fw, anchors := seedFramework(t, admin, "fwcat", "2024", 1)
-	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
-	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
-	seedAuditPeriod(t, admin, tenant, fw.frameworkVersionID, now.Add(40*24*time.Hour))
-
-	resp, body := get(t, env, "/v1/upcoming?category=exception")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET upcoming?category=exception: status %d", resp.StatusCode)
-	}
-	rows, _ := body["upcoming"].([]any)
-	if len(rows) != 1 {
-		t.Fatalf("ISC-21 filter: expected 1 exception row, got %d", len(rows))
-	}
-	if cat := rows[0].(map[string]any)["category"].(string); cat != "exception" {
-		t.Fatalf("ISC-21 filter: category = %q, want exception", cat)
-	}
-}
-
-func TestUpcoming_IncludesVendorRenewal(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
-	app := dbtest.NewAppPool(t)
-	tenant := freshTenant(t, admin)
-	env := testServer(t, app, tenant)
-
-	renewalID := seedVendorRenewal(t, admin, tenant, "Okta", time.Now().UTC().Add(20*24*time.Hour))
-
-	resp, body := get(t, env, "/v1/upcoming?category=vendor_renewal")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET upcoming vendor_renewal: status %d", resp.StatusCode)
-	}
-	rows, _ := body["upcoming"].([]any)
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 vendor renewal row, got %d; body=%v", len(rows), body)
-	}
-	first := rows[0].(map[string]any)
-	if first["category"] != "vendor_renewal" {
-		t.Fatalf("category=%v want vendor_renewal", first["category"])
-	}
-	if first["resource_id"] != renewalID.String() {
-		t.Fatalf("resource_id=%v want %s", first["resource_id"], renewalID)
-	}
-	if !strings.Contains(first["title"].(string), "Okta") {
-		t.Fatalf("title=%v want vendor name", first["title"])
-	}
-}
-
-// TestUpcoming_ExceptionTitleUsesSCFCodeNotUUID is the slice 732 regression
-// guard for the dashboard "Upcoming" panel: the expiring-exception row's
-// title must resolve the control to its SCF code (here via the control's
-// scf_anchor_id -> scf_anchors.scf_id linkage) + the control name, and must
-// NOT contain the raw control UUID. Mirrors the calendar exception-label fix
-// so the two upcoming-event surfaces read identically (slice 675 vocabulary).
-func TestUpcoming_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
-	admin := dbtest.NewMigratePool(t)
-	app := dbtest.NewAppPool(t)
-	tenant := freshTenant(t, admin)
-	env := testServer(t, app, tenant)
-
-	now := time.Now().UTC()
-	_, anchors := seedFramework(t, admin, "fwscf", "2024", 1)
-	ctrl := seedControlOnAnchor(t, admin, tenant, anchors[0])
-	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
-
-	resp, body := get(t, env, "/v1/upcoming?category=exception")
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET upcoming?category=exception: status %d", resp.StatusCode)
-	}
-	rows, _ := body["upcoming"].([]any)
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 exception row, got %d", len(rows))
-	}
-	title := rows[0].(map[string]any)["title"].(string)
-
-	if !strings.HasPrefix(title, "Exception on SCF-") {
-		t.Errorf("exception title = %q; want it to start with the resolved SCF code", title)
-	}
-	if !strings.Contains(title, "slice 066 test control") {
-		t.Errorf("exception title = %q; want it to contain the control name", title)
-	}
-	if strings.Contains(title, ctrl.String()) {
-		t.Errorf("exception title leaked the raw control UUID: %q", title)
-	}
-}
-
 // ===== ISC-22: all four endpoints 403 a role without program-read access =====
 
 func TestAllEndpoints_ForbidNonProgramReadRole(t *testing.T) {
@@ -770,7 +551,6 @@ func TestAllEndpoints_ForbidNonProgramReadRole(t *testing.T) {
 	paths := []string{
 		"/v1/frameworks/posture",
 		"/v1/activity",
-		"/v1/upcoming",
 	}
 	for _, p := range paths {
 		rec := httptest.NewRecorder()
@@ -805,14 +585,10 @@ func TestAllEndpoints_RLSIsolatedAcrossTenants(t *testing.T) {
 	// nothing).
 	envB := testServer(t, app, tenantB)
 
-	// Activity + upcoming are wholly tenant-scoped: tenant B sees zero rows.
+	// Activity is wholly tenant-scoped: tenant B sees zero rows.
 	_, actBody := get(t, envB, "/v1/activity")
 	if rows, _ := actBody["activity"].([]any); len(rows) != 0 {
 		t.Fatalf("ISC-23: /v1/activity leaked %d cross-tenant rows", len(rows))
-	}
-	_, upBody := get(t, envB, "/v1/upcoming")
-	if rows, _ := upBody["upcoming"].([]any); len(rows) != 0 {
-		t.Fatalf("ISC-23: /v1/upcoming leaked %d cross-tenant rows", len(rows))
 	}
 	// Framework posture: the framework + requirements are global catalog
 	// (visible to any tenant), but the COVERAGE must be tenant B's — which
@@ -848,9 +624,6 @@ func TestDashboard_RejectsBadInput(t *testing.T) {
 		{"/v1/activity?limit=999", http.StatusBadRequest},
 		{"/v1/activity?limit=abc", http.StatusBadRequest},
 		{"/v1/activity?cursor=@@@", http.StatusBadRequest},
-		{"/v1/upcoming?limit=0", http.StatusBadRequest},
-		{"/v1/upcoming?cursor=not-base64-!!", http.StatusBadRequest},
-		{"/v1/upcoming?category=bogus", http.StatusBadRequest},
 	}
 	for _, c := range cases {
 		resp, _ := get(t, env, c.path)

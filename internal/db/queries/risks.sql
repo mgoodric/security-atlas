@@ -236,6 +236,18 @@ SET level = $3,
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;
 
+-- name: UpdateRiskCategory :one
+-- #1812: move a risk onto another of the tenant's categories. Dual-writes
+-- the reference and the matching risk_category enum value until #1745's
+-- contract step drops the enum. The caller holds the row via LockRiskByID
+-- and has resolved the category as assignable.
+UPDATE risks
+SET category_id = sqlc.arg(category_id),
+    category = sqlc.arg(category),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id)
+RETURNING *;
+
 -- name: InsertRiskAuditLog :exec
 -- #1749: one append-only row per placement change, in the write's tx.
 INSERT INTO risk_audit_log (
