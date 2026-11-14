@@ -7,13 +7,13 @@ INSERT INTO risks (
     id, tenant_id, title, description, category, methodology,
     inherent_score, treatment, treatment_owner, residual_score,
     review_due_at, accepted_until, accepter, instrument_reference,
-    acceptance_status
+    acceptance_status, level, org_unit_id
 )
 VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9, $10,
     $11, $12, $13, $14,
-    $15
+    $15, $16, $17
 )
 RETURNING *;
 
@@ -224,3 +224,27 @@ WHERE tenant_id = $1
   AND (inherent_score->>'impact')::int     BETWEEN 1 AND 5
 GROUP BY likelihood, impact
 ORDER BY likelihood, impact;
+
+-- name: UpdateRiskPlacement :one
+-- #1749: move a risk between hierarchy levels and org units. The caller
+-- holds the row via LockRiskByID and has checked that level matches the
+-- org unit's level.
+UPDATE risks
+SET level = $3,
+    org_unit_id = $4,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: InsertRiskAuditLog :exec
+-- #1749: one append-only row per placement change, in the write's tx.
+INSERT INTO risk_audit_log (
+    tenant_id, risk_id, actor, action_type, before_state, after_state
+)
+VALUES ($1, $2, $3, $4, $5, $6);
+
+-- name: ListRiskAuditLog :many
+SELECT *
+FROM risk_audit_log
+WHERE tenant_id = $1 AND risk_id = $2
+ORDER BY created_at DESC, id DESC;

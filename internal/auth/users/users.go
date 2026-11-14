@@ -70,8 +70,11 @@ type User struct {
 	Email       string
 	DisplayName string
 	Status      string
-	IdpIssuer   string
-	IdpSubject  string
+	// Active is the SCIM deprovision mirror (users.active); false once the
+	// IdP deprovisions the user.
+	Active     bool
+	IdpIssuer  string
+	IdpSubject string
 	// TimeZone is an IANA timezone name (e.g. "America/Los_Angeles") or
 	// "" (empty = browser-derived; the backend never invents a timezone).
 	// Slice 108 added the column via an additive ALTER on users.
@@ -458,8 +461,8 @@ func burnPasswordVerify(plaintext string) {
 }
 
 // VerifyLocalLogin returns the User on a successful (tenant, email, password)
-// triple. Returns ErrInvalidCredentials when either no user exists or the
-// password does not verify — never both. The caller (HTTP login handler)
+// triple. Returns ErrInvalidCredentials when no user exists, the password
+// does not verify, or the user is deactivated. The caller (HTTP login handler)
 // surfaces 401 on this sentinel.
 func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email, plaintextPassword string) (User, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
@@ -493,10 +496,45 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	if err != nil {
 		return User{}, err
 	}
-	if !ok {
+	// A deactivated user is refused only after the full verify, with the
+	// same sentinel, so status is no oracle by response or timing (#1912).
+	usr := userFromRow(row)
+	if !ok || !usr.CanSignIn() {
 		return User{}, ErrInvalidCredentials
 	}
-	return userFromRow(row), nil
+	return usr, nil
+}
+
+// CanSignIn reports whether the user may start a session. Admin
+// revoke-membership sets status='disabled'; SCIM deprovision sets
+// active=false. Either one refuses (#1912).
+func (u User) CanSignIn() bool {
+	return SignInAllowed(u.Status, u.Active)
+}
+
+// SignInAllowed is CanSignIn over the raw users columns, for auth paths that
+// hold a dbx row rather than a User (#1915).
+func SignInAllowed(status string, active bool) bool {
+	return status == "active" && active
+}
+
+// RevokeAccess revokes every live session and every API key the user owns
+// (api_keys.issued_by), inside the caller's transaction. Deactivation calls
+// it in the same transaction that disables the user (#1915). Keys with no
+// owner are untouched. The caller drops the keys from credstore memory after
+// commit.
+func RevokeAccess(ctx context.Context, q *dbx.Queries, tenantID, userID uuid.UUID) error {
+	tid := pgtype.UUID{Bytes: tenantID, Valid: true}
+	uid := pgtype.UUID{Bytes: userID, Valid: true}
+	if _, err := q.RevokeAllSCIMUserSessions(ctx, dbx.RevokeAllSCIMUserSessionsParams{
+		TenantID: tid, UserID: uid,
+	}); err != nil {
+		return fmt.Errorf("users: revoke sessions: %w", err)
+	}
+	if _, err := q.RevokeUserAPIKeys(ctx, dbx.RevokeUserAPIKeysParams{TenantID: tid, IssuedBy: uid}); err != nil {
+		return fmt.Errorf("users: revoke api keys: %w", err)
+	}
+	return nil
 }
 
 // GetByID returns the user under (tenant, id) or ErrNotFound.
@@ -570,6 +608,7 @@ func userFromRow(row dbx.User) User {
 		Email:       row.Email,
 		DisplayName: row.DisplayName,
 		Status:      row.Status,
+		Active:      row.Active,
 		IdpIssuer:   row.IdpIssuer,
 		IdpSubject:  row.IdpSubject,
 		TimeZone:    row.TimeZone,

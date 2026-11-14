@@ -119,6 +119,10 @@ func TestContract_InstallState(t *testing.T) {
 		"post_first_install": {
 			firstInstall: false,
 		},
+		"post_first_install_single_tenant": {
+			firstInstall: false,
+			tenantCount:  1,
+		},
 	}
 
 	recorded := make(map[string]json.RawMessage, len(variants))

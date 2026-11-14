@@ -290,6 +290,12 @@ services:
       ATLAS_DEFAULT_USER_EMAIL: ${ATLAS_DEFAULT_USER_EMAIL:-admin@example.com}
       ATLAS_DEFAULT_USER_PASSWORD: ${ATLAS_DEFAULT_USER_PASSWORD:?}
       REPO_ROOT: /repo
+      # security-atlas#1733: seed a different SCF release or control set.
+      # Paths are in-container; the repo is mounted at /repo. Defaults
+      # match bootstrap.sh's own. See docs/SELF_HOSTING.md
+      # "Bring your own SCF release".
+      SCF_CATALOG: ${SCF_CATALOG:-/repo/migrations/fixtures/scf-sample.json}
+      CONTROLS_DIR: ${CONTROLS_DIR:-/repo/controls/soc2}
       # security-atlas#1888: bootstrap.sh prints the opt-in crosswalk
       # import commands with these, so they run from the repo root.
       ATLAS_COMPOSE_ARGS: -f deploy/docker/docker-compose.yml

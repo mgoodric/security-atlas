@@ -1305,6 +1305,8 @@ type Querier interface {
 	// (questionnaire_id, code) UNIQUE constraint protects against duplicate
 	// imports of the same row.
 	InsertQuestionnaireQuestion(ctx context.Context, arg InsertQuestionnaireQuestionParams) (QuestionnaireQuestion, error)
+	// #1749: one append-only row per placement change, in the write's tx.
+	InsertRiskAuditLog(ctx context.Context, arg InsertRiskAuditLogParams) error
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
@@ -2423,6 +2425,7 @@ type Querier interface {
 	// parents (e.g., an ownership-themed risk feeds both an org-level ownership
 	// meta-risk and a team-level meta-risk).
 	ListRiskAggregationParents(ctx context.Context, arg ListRiskAggregationParentsParams) ([]ListRiskAggregationParentsRow, error)
+	ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error)
 	// Slice 020: returns each control link for a risk WITH the per-link
 	// effectiveness weighting columns (migration `_029`). The residual derivation
 	// reads design_score + the three weights here; operational_score and
@@ -2994,6 +2997,10 @@ type Querier interface {
 	// the existence-oracle on cross-user ids. Idempotent: re-revoking an already-revoked
 	// row is a no-op but still returns 1 row affected (the row still matches the WHERE).
 	RevokeSessionForUser(ctx context.Context, arg RevokeSessionForUserParams) (int64, error)
+	// Deactivation (#1915): revoke every live key owned by the user (issued_by).
+	// Keys with no owner (issued_by IS NULL: the env bootstrap key, recovery
+	// keys, admin-issued push keys) never match. Returns the revoked ids.
+	RevokeUserAPIKeys(ctx context.Context, arg RevokeUserAPIKeysParams) ([]pgtype.UUID, error)
 	// Slice 067: risk-hierarchy backend read endpoints. Two read-only
 	// aggregation queries that fill the placeholders slice 056 (hierarchical
 	// risk dashboard) shipped binding empty-state affordances for. No
@@ -3181,6 +3188,10 @@ type Querier interface {
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
 	UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error)
+	// #1749: move a risk between hierarchy levels and org units. The caller
+	// holds the row via LockRiskByID and has checked that level matches the
+	// org unit's level.
+	UpdateRiskPlacement(ctx context.Context, arg UpdateRiskPlacementParams) (Risk, error)
 	// Slice 020: writes the freshly-derived residual_score JSONB onto a risk.
 	// This is the ONLY column the residual derivation mutates — it never touches
 	// inherent_score, never touches evidence (constitutional invariant #2). The
@@ -3335,7 +3346,8 @@ type Querier interface {
 	// (app-layer now(), no trigger — matches the repo convention).
 	UpsertTenantLLMRouting(ctx context.Context, arg UpsertTenantLLMRoutingParams) (TenantLlmRouting, error)
 	// Used by the OIDC callback: provision-on-first-sign-in by (idp_issuer, idp_subject).
-	// The composite UNIQUE index on (idp_issuer, idp_subject) WHERE both non-empty
+	// The per-tenant UNIQUE index users_idp_principal_unique on (tenant_id,
+	// idp_issuer, idp_subject) WHERE both non-empty
 	// is the conflict target. On conflict we update display_name + email (the IdP
 	// is canonical) and updated_at.
 	UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserByIdpSubjectParams) (User, error)
