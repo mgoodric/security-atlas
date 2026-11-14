@@ -268,6 +268,12 @@ func TestActorOf(t *testing.T) {
 	if got := actorOf(credstore.Credential{ID: "key_1", UserID: "key_1"}); got != "key_1" {
 		t.Fatalf("credential with no user: actorOf = %q, want the credential id", got)
 	}
+	// #2101: a machine JWT is recorded by its principal, never by its
+	// per-token "jwt:" id, which approval reads as a pre-#1807 session.
+	machine := credstore.Credential{ID: "jwt:session-m", UserID: "oauth_client:ci"}
+	if got := actorOf(machine); got != "oauth_client:ci" {
+		t.Fatalf("machine JWT: actorOf = %q, want its principal", got)
+	}
 }
 
 func TestWritePublishErr(t *testing.T) {

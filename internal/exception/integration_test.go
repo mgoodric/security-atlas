@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -233,15 +234,15 @@ func TestApprove_Transitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	approved, err := store.Approve(ctx, created.ID, "key_approver")
+	approved, err := store.Approve(ctx, created.ID, approverPerson)
 	if err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	if approved.Status != exception.StateApproved {
 		t.Fatalf("expected status=approved, got %q", approved.Status)
 	}
-	if approved.ApprovedBy == nil || *approved.ApprovedBy != "key_approver" {
-		t.Fatalf("expected approved_by=key_approver, got %v", approved.ApprovedBy)
+	if approved.ApprovedBy == nil || *approved.ApprovedBy != approverPerson.UserID {
+		t.Fatalf("expected approved_by=the approving person, got %v", approved.ApprovedBy)
 	}
 	// AC-7: audit log row for approved.
 	entries, _ := store.ListAuditLog(ctx, created.ID)
@@ -264,7 +265,7 @@ func TestApprove_RejectsSelfApproval(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	_, err = store.Approve(ctx, created.ID, "key_same")
+	_, err = store.Approve(ctx, created.ID, approval.Approver{UserID: uuid.NewString(), CredentialID: "key_same"})
 	if !errors.Is(err, exception.ErrSegregationOfDuties) {
 		t.Fatalf("expected ErrSegregationOfDuties, got %v", err)
 	}
@@ -279,7 +280,7 @@ func TestDeny_RejectsSelfDenial(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_same"))
-	_, err := store.Deny(ctx, created.ID, "key_same", "trying to deny myself")
+	_, err := store.Deny(ctx, created.ID, exception.Denier{Principal: "key_same"}, "trying to deny myself")
 	if !errors.Is(err, exception.ErrSegregationOfDuties) {
 		t.Fatalf("expected ErrSegregationOfDuties, got %v", err)
 	}
@@ -296,7 +297,7 @@ func TestDeny_Transitions(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_requester"))
-	denied, err := store.Deny(ctx, created.ID, "key_approver", "no executive backing")
+	denied, err := store.Deny(ctx, created.ID, exception.Denier{Principal: "key_approver"}, "no executive backing")
 	if err != nil {
 		t.Fatalf("Deny: %v", err)
 	}
@@ -320,7 +321,7 @@ func TestActivate_Transitions(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_requester"))
-	if _, err := store.Approve(ctx, created.ID, "key_approver"); err != nil {
+	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	active, err := store.Activate(ctx, created.ID, "key_approver", time.Time{})
@@ -346,8 +347,8 @@ func TestApprove_RejectsAlreadyDenied(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_requester"))
-	_, _ = store.Deny(ctx, created.ID, "key_approver", "")
-	_, err := store.Approve(ctx, created.ID, "key_approver")
+	_, _ = store.Deny(ctx, created.ID, exception.Denier{Principal: "key_approver"}, "")
+	_, err := store.Approve(ctx, created.ID, approverPerson)
 	if !errors.Is(err, exception.ErrWrongState) {
 		t.Fatalf("expected ErrWrongState, got %v", err)
 	}
@@ -381,7 +382,7 @@ func TestActive_ReturnsActiveRowsOnly(t *testing.T) {
 
 	// One active, one requested-only (should not appear in Active set).
 	a, _ := store.Create(ctx, validCreate(ctrl, "key_requester"))
-	_, _ = store.Approve(ctx, a.ID, "key_approver")
+	_, _ = store.Approve(ctx, a.ID, approverPerson)
 	_, _ = store.Activate(ctx, a.ID, "key_approver", time.Time{})
 	_, _ = store.Create(ctx, validCreate(ctrl, "key_requester2"))
 
@@ -411,7 +412,7 @@ func TestExpirer_ExpiresActiveRows(t *testing.T) {
 	// admin pool (the API rejects past-dated expires_at on Create; admin
 	// pool bypasses RLS to set it directly for test purposes).
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_requester"))
-	_, _ = store.Approve(ctx, created.ID, "key_approver")
+	_, _ = store.Approve(ctx, created.ID, approverPerson)
 	_, _ = store.Activate(ctx, created.ID, "key_approver", time.Time{})
 	if _, err := admin.Exec(context.Background(),
 		`UPDATE exceptions SET expires_at = now() - interval '1 hour' WHERE id = $1`,
@@ -461,7 +462,7 @@ func TestExpirer_IsIdempotent(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_requester"))
-	_, _ = store.Approve(ctx, created.ID, "key_approver")
+	_, _ = store.Approve(ctx, created.ID, approverPerson)
 	_, _ = store.Activate(ctx, created.ID, "key_approver", time.Time{})
 	_, _ = admin.Exec(context.Background(),
 		`UPDATE exceptions SET expires_at = now() - interval '1 hour' WHERE id = $1`, created.ID)
@@ -494,13 +495,13 @@ func TestExpiring_ReturnsRowsInsideWindow(t *testing.T) {
 	in1 := validCreate(ctrl, "key_requester")
 	in1.ExpiresAt = time.Now().UTC().Add(15 * 24 * time.Hour)
 	e1, _ := store.Create(ctx, in1)
-	_, _ = store.Approve(ctx, e1.ID, "key_approver")
+	_, _ = store.Approve(ctx, e1.ID, approverPerson)
 	_, _ = store.Activate(ctx, e1.ID, "key_approver", time.Time{})
 
 	in2 := validCreate(ctrl, "key_requester2")
 	in2.ExpiresAt = time.Now().UTC().Add(60 * 24 * time.Hour)
 	e2, _ := store.Create(ctx, in2)
-	_, _ = store.Approve(ctx, e2.ID, "key_approver")
+	_, _ = store.Approve(ctx, e2.ID, approverPerson)
 	_, _ = store.Activate(ctx, e2.ID, "key_approver", time.Time{})
 
 	rows, err := store.Expiring(ctx, time.Now().UTC(), 30*24*time.Hour)
@@ -523,7 +524,7 @@ func TestAuditLog_CapturesFullLifecycle(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_requester"))
-	_, _ = store.Approve(ctx, created.ID, "key_approver")
+	_, _ = store.Approve(ctx, created.ID, approverPerson)
 	_, _ = store.Activate(ctx, created.ID, "key_approver", time.Time{})
 
 	entries, err := store.ListAuditLog(ctx, created.ID)

@@ -11,6 +11,22 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const getTenantAllowSelfApproval = `-- name: GetTenantAllowSelfApproval :one
+SELECT allow_self_approval
+FROM tenants
+WHERE id = $1
+`
+
+// #2101: the caller-tenant's Allow self-approval setting. RLS scopes the row
+// to the current tenant. Returns ErrNoRows when no tenants row exists
+// (bare-UUID tenant); approval.AllowSelf maps that to the default, off.
+func (q *Queries) GetTenantAllowSelfApproval(ctx context.Context, id pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, getTenantAllowSelfApproval, id)
+	var allow_self_approval bool
+	err := row.Scan(&allow_self_approval)
+	return allow_self_approval, err
+}
+
 const getTenantBundleGateMode = `-- name: GetTenantBundleGateMode :one
 SELECT bundle_gate_mode
 FROM tenants
@@ -37,6 +53,7 @@ SELECT
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
     created_at,
     updated_at
 FROM tenants
@@ -49,6 +66,7 @@ type GetTenantByIDRow struct {
 	IsBootstrapTenant     bool               `json:"is_bootstrap_tenant"`
 	BundleGateMode        string             `json:"bundle_gate_mode"`
 	RiskReviewCadenceDays int32              `json:"risk_review_cadence_days"`
+	AllowSelfApproval     bool               `json:"allow_self_approval"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
@@ -75,6 +93,7 @@ func (q *Queries) GetTenantByID(ctx context.Context, id pgtype.UUID) (GetTenantB
 		&i.IsBootstrapTenant,
 		&i.BundleGateMode,
 		&i.RiskReviewCadenceDays,
+		&i.AllowSelfApproval,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -98,6 +117,56 @@ func (q *Queries) GetTenantVendorInitialReviewDays(ctx context.Context, id pgtyp
 	return vendor_initial_review_days, err
 }
 
+const updateTenantAllowSelfApproval = `-- name: UpdateTenantAllowSelfApproval :one
+UPDATE tenants
+SET allow_self_approval = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
+    risk_review_cadence_days,
+    allow_self_approval,
+    created_at,
+    updated_at
+`
+
+type UpdateTenantAllowSelfApprovalParams struct {
+	ID                pgtype.UUID `json:"id"`
+	AllowSelfApproval bool        `json:"allow_self_approval"`
+}
+
+type UpdateTenantAllowSelfApprovalRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	Name                  string             `json:"name"`
+	IsBootstrapTenant     bool               `json:"is_bootstrap_tenant"`
+	BundleGateMode        string             `json:"bundle_gate_mode"`
+	RiskReviewCadenceDays int32              `json:"risk_review_cadence_days"`
+	AllowSelfApproval     bool               `json:"allow_self_approval"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+// #2101: turn the caller-tenant's Allow self-approval on or off. RLS gates
+// this to the caller's own row; the handler gates it to admins and writes
+// the me_audit_log row in the same transaction.
+func (q *Queries) UpdateTenantAllowSelfApproval(ctx context.Context, arg UpdateTenantAllowSelfApprovalParams) (UpdateTenantAllowSelfApprovalRow, error) {
+	row := q.db.QueryRow(ctx, updateTenantAllowSelfApproval, arg.ID, arg.AllowSelfApproval)
+	var i UpdateTenantAllowSelfApprovalRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.IsBootstrapTenant,
+		&i.BundleGateMode,
+		&i.RiskReviewCadenceDays,
+		&i.AllowSelfApproval,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateTenantBundleGateMode = `-- name: UpdateTenantBundleGateMode :one
 UPDATE tenants
 SET bundle_gate_mode = $2
@@ -108,6 +177,7 @@ RETURNING
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
     created_at,
     updated_at
 `
@@ -123,6 +193,7 @@ type UpdateTenantBundleGateModeRow struct {
 	IsBootstrapTenant     bool               `json:"is_bootstrap_tenant"`
 	BundleGateMode        string             `json:"bundle_gate_mode"`
 	RiskReviewCadenceDays int32              `json:"risk_review_cadence_days"`
+	AllowSelfApproval     bool               `json:"allow_self_approval"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
@@ -140,6 +211,7 @@ func (q *Queries) UpdateTenantBundleGateMode(ctx context.Context, arg UpdateTena
 		&i.IsBootstrapTenant,
 		&i.BundleGateMode,
 		&i.RiskReviewCadenceDays,
+		&i.AllowSelfApproval,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -156,6 +228,7 @@ RETURNING
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
     created_at,
     updated_at
 `
@@ -171,6 +244,7 @@ type UpdateTenantNameRow struct {
 	IsBootstrapTenant     bool               `json:"is_bootstrap_tenant"`
 	BundleGateMode        string             `json:"bundle_gate_mode"`
 	RiskReviewCadenceDays int32              `json:"risk_review_cadence_days"`
+	AllowSelfApproval     bool               `json:"allow_self_approval"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
@@ -190,6 +264,7 @@ func (q *Queries) UpdateTenantName(ctx context.Context, arg UpdateTenantNamePara
 		&i.IsBootstrapTenant,
 		&i.BundleGateMode,
 		&i.RiskReviewCadenceDays,
+		&i.AllowSelfApproval,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -206,6 +281,7 @@ RETURNING
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
     created_at,
     updated_at
 `
@@ -221,6 +297,7 @@ type UpdateTenantRiskReviewCadenceRow struct {
 	IsBootstrapTenant     bool               `json:"is_bootstrap_tenant"`
 	BundleGateMode        string             `json:"bundle_gate_mode"`
 	RiskReviewCadenceDays int32              `json:"risk_review_cadence_days"`
+	AllowSelfApproval     bool               `json:"allow_self_approval"`
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
@@ -238,6 +315,7 @@ func (q *Queries) UpdateTenantRiskReviewCadence(ctx context.Context, arg UpdateT
 		&i.IsBootstrapTenant,
 		&i.BundleGateMode,
 		&i.RiskReviewCadenceDays,
+		&i.AllowSelfApproval,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
