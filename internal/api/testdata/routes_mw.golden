@@ -13,6 +13,7 @@ DELETE /v1/me/sessions 8
 DELETE /v1/me/sessions/{id} 8
 DELETE /v1/org_units/{id} 8
 DELETE /v1/policies/{id} 8
+DELETE /v1/risks/categories/{ref} 8
 DELETE /v1/risks/{id} 8
 DELETE /v1/risks/{id}/children/{child_id} 8
 DELETE /v1/risks/{id}/themes/{theme} 8
@@ -170,6 +171,7 @@ GET /v1/risks 8
 GET /v1/risks/categories 8
 GET /v1/risks/export 8
 GET /v1/risks/heatmap 8
+GET /v1/risks/review-cadence 8
 GET /v1/risks/theme-heatmap 8
 GET /v1/risks/{id} 8
 GET /v1/risks/{id}/action-plans 8
@@ -219,6 +221,7 @@ PATCH /v1/policies/{id}/approve 8
 PATCH /v1/policies/{id}/review-date 8
 PATCH /v1/policies/{id}/submit 8
 PATCH /v1/questionnaires/{id}/answers/{qid} 8
+PATCH /v1/risks/categories/{ref} 8
 PATCH /v1/risks/{id} 8
 PATCH /v1/tenants/{id} 8
 PATCH /v1/vendors/{id} 8
@@ -287,6 +290,7 @@ POST /v1/incidents/{id}/close 8
 POST /v1/framework-scopes 8
 POST /v1/framework-scopes/{id}/applicability/bulk 8
 POST /v1/framework-scopes/{id}/applicability/import 8
+POST /v1/framework-scopes/{id}/applicability:carry-over 8
 POST /v1/install/mark-first-signin 8
 POST /v1/mcp/write-proposals 8
 POST /v1/mcp/write-proposals/{id}/confirm 8
@@ -315,6 +319,10 @@ POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve 8
 POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject 8
 POST /v1/risks 8
 POST /v1/risks/aggregate 8
+POST /v1/risks/categories 8
+POST /v1/risks/categories/{ref}/archive 8
+POST /v1/risks/categories/{ref}/set-default 8
+POST /v1/risks/categories/{ref}/unarchive 8
 POST /v1/risks/{id}/children 8
 POST /v1/risks/{id}/controls 8
 POST /v1/risks/{id}/themes 8

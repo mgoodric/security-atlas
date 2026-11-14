@@ -60,6 +60,9 @@ type Credential struct {
 	// scopes for tenant B. IsAdmin implies IsApprover (admins can do
 	// anything an approver can) but the converse is not true.
 	//
+	// Policy approval also requires a person (#1807): a credential bound
+	// to no user (MinterUserID == "") holding IsApprover is refused there.
+	//
 	// In v1 the approver role is minted via IssueApprover. Slice 035
 	// will graduate this to full OPA-driven RBAC; until then the
 	// flag-on-credential pattern matches slice 014's IsAdmin shape.
@@ -86,6 +89,10 @@ type Credential struct {
 	// UserID is. Nothing authorizes on it. Set on recovery keys (#1892);
 	// a Rotate successor inherits it.
 	MintedBy string
+	// RetiresAt is api_keys.retires_at: non-zero on a rotated-out
+	// predecessor, which stops authenticating after it. Set by the
+	// DB-backed list (#1953); the in-memory maps track retirement apart.
+	RetiresAt time.Time
 	// System marks an in-process platform credential, not an API key:
 	// the identity a domain writer ingests its evidence under
 	// (ingest.SystemCredential). Never persisted and never authenticated;
@@ -548,6 +555,19 @@ func (s *Store) Revoke(id string) error {
 	}
 	r.state = stateRevoked
 	return nil
+}
+
+// TenantOf reports the tenant of the credential with id, in any state.
+// The gRPC admin service uses it to keep Rotate and Revoke inside the
+// caller's tenant (#2167).
+func (s *Store) TenantOf(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.byID[id]
+	if !ok {
+		return "", false
+	}
+	return r.cred.TenantID, true
 }
 
 // RevokePurpose revokes every live credential, in any tenant, marked with

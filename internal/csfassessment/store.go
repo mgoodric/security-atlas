@@ -60,7 +60,50 @@ var (
 	// ErrInvalidOutcome is returned when a selection outcome isn't one of the
 	// four canonical target outcomes. HTTP 400.
 	ErrInvalidOutcome = errors.New("csfassessment: invalid target outcome")
+	// ErrNotCSF is returned when a framework_version exists but belongs to a
+	// framework other than NIST CSF (#2065). HTTP 400.
+	ErrNotCSF = errors.New("csfassessment: framework version is not NIST CSF")
 )
+
+// CSFFrameworkSlug is the catalog slug of the NIST CSF framework. The
+// assessment tables are CSF-specific (slice 515 D1), so every route refuses a
+// framework_version whose framework carries any other slug.
+const CSFFrameworkSlug = "nist_csf"
+
+// FrameworkLabel names the framework a CSF assessment is keyed to, for the
+// page title.
+type FrameworkLabel struct {
+	Name    string
+	Version string
+}
+
+// IsCSF reports whether slug names the NIST CSF framework.
+func IsCSF(slug string) bool { return slug == CSFFrameworkSlug }
+
+// CSFVersion resolves fvID to its framework's name and version. It returns
+// ErrNotFound when the version is not visible to the tenant, and ErrNotCSF
+// when it belongs to any framework other than NIST CSF.
+func (s *Store) CSFVersion(ctx context.Context, fvID uuid.UUID) (FrameworkLabel, error) {
+	var out FrameworkLabel
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		row, err := q.GetFrameworkVersionLabel(ctx, dbx.GetFrameworkVersionLabelParams{
+			FrameworkVersionID: pgUUID(fvID),
+			TenantID:           pgUUID(tenantID),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get framework version label: %w", err)
+		}
+		if !IsCSF(row.FrameworkSlug) {
+			return ErrNotCSF
+		}
+		out = FrameworkLabel{Name: row.FrameworkName, Version: row.FrameworkVersion}
+		return nil
+	})
+	return out, err
+}
 
 // Canonical token sets (mirror the DB enum + CHECK constraints). Validated in
 // Go so a bad value is rejected with a 400 before it reaches the DB.

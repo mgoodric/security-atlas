@@ -53,6 +53,7 @@ import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect } from "react";
 
+import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -441,6 +442,9 @@ function ControlDetailPageInner() {
             >
               {control.lifecycle_state}
             </Badge>
+            {control.demo ? (
+              <DemoBadge className="ml-0" testId="control-demo-badge" />
+            ) : null}
             <span className="text-xs text-muted-foreground">
               {control.control_family}
             </span>

@@ -37,11 +37,15 @@ func (e *programEffectivenessEvaluator) Compute(ctx context.Context) (Result, er
 	if err := e.pool.QueryRow(ctx, query).Scan(&total, &passing); err != nil {
 		return Result{}, fmt.Errorf("program_effectiveness: query: %w", err)
 	}
+	return programEffectivenessResult(total, passing), nil
+}
+
+func programEffectivenessResult(total, passing int) Result {
 	if total == 0 {
-		return Result{Value: 0, Dimensions: map[string]string{"sample": "empty"}}, nil
+		return noData("No control evaluations recorded", nil)
 	}
 	return Result{
 		Value:      float64(passing) / float64(total),
 		Dimensions: map[string]string{"sample": "all_controls"},
-	}, nil
+	}
 }

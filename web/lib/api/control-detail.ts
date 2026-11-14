@@ -49,6 +49,9 @@ export type ControlWire = {
   anchor_fit_note?: string;
   // #1737 — control.yaml external_refs[]; omitted when the control has none.
   external_refs?: ExternalRefWire[];
+  // #2043 — true when the in-place demo seed added this control; omitted
+  // for real controls.
+  demo?: boolean;
 };
 
 // externalRefWire mirrors `externalRefWire` in internal/api/ucfcoverage/handlers.go.

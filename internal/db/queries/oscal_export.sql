@@ -171,3 +171,42 @@ WHERE cc.tenant_id = $1
   AND cc.claim_status = 'accepted'
   AND cc.is_vendor_claim = TRUE
 ORDER BY cmp.title ASC, cmp.component_uuid ASC, cc.control_id ASC, cc.requirement_uuid ASC;
+
+-- ===== #1792: excluded requirements -> SSP not-applicable entries =====
+
+-- name: ListExcludedRequirementsAsOfForExport :many
+-- The requirements excluded in the framework-scope revision that was in
+-- force for a framework version at the audit period's frozen_at. The
+-- revision is chosen exactly as GetFrameworkScopeAsOf chooses it (the
+-- revision active at that time); decisions on an activated or superseded
+-- revision are frozen, so its rows are exactly what applied at the freeze.
+-- A requirement excluded only after the freeze lives on a later revision
+-- and is not returned. RLS scopes every table to the caller tenant; the
+-- leading tenant predicates are defense-in-depth.
+WITH in_force AS (
+    SELECT fs.id, fs.tenant_id
+    FROM framework_scopes fs
+    WHERE fs.tenant_id = @tenant_id
+      AND fs.framework_version_id = @framework_version_id
+      AND fs.effective_from IS NOT NULL
+      AND fs.effective_from <= @frozen_at
+      AND (fs.superseded_at IS NULL OR fs.superseded_at > @frozen_at)
+    ORDER BY fs.effective_from DESC, fs.id ASC
+    LIMIT 1
+)
+SELECT
+    f.slug                       AS framework_slug,
+    fv.version                   AS framework_version,
+    r.code                       AS requirement_code,
+    r.title                      AS requirement_title,
+    a.justification              AS justification,
+    a.framework_scope_id         AS framework_scope_id
+FROM in_force s
+JOIN framework_scope_applicability a
+    ON a.framework_scope_id = s.id
+   AND a.tenant_id = s.tenant_id
+JOIN framework_requirements r ON r.id = a.framework_requirement_id
+JOIN framework_versions fv ON fv.id = r.framework_version_id
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE a.decision = 'excluded'
+ORDER BY r.code ASC, r.id ASC;

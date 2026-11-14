@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -93,6 +94,17 @@ func (s *Store) EvidenceForControl(ctx context.Context, controlID uuid.UUID, p e
 		return qerr
 	})
 	return rows, err
+}
+
+// DemoEvidence returns which of ids the in-place demo seed added (#2043).
+func (s *Store) DemoEvidence(ctx context.Context, ids []uuid.UUID) (demoprov.Set, error) {
+	var set demoprov.Set
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ uuid.UUID) error {
+		var err error
+		set, err = demoprov.Lookup(ctx, q, demoprov.TableEvidence, ids)
+		return err
+	})
+	return set, err
 }
 
 // EvidencePaged reads one page of the tenant-wide evidence ledger, bounded

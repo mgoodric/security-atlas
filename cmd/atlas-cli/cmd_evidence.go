@@ -83,7 +83,7 @@ func newEvidencePushCmd() *cobra.Command {
 
 	cmd.Flags().StringVar(&f.kind, "kind", "", "evidence_kind (e.g., sast.scan_result.v1) [required]")
 	cmd.Flags().StringVar(&f.schemaVersion, "schema-version", "1.0.0", "evidence_kind schema version")
-	cmd.Flags().StringVar(&f.control, "control", "", "control identifier [required]")
+	cmd.Flags().StringVar(&f.control, "control", "", "control UUID or bundle ID (links to the active control); any other value is a free-form, unlinked reference [required]")
 	cmd.Flags().StringVar(&f.scopeJSON, "scope", "", `JSON scope, e.g. '{"environment":"prod","cloud_account":"aws:111122223333"}' [required]`)
 	cmd.Flags().StringVar(&f.observedAt, "observed-at", "", "RFC3339 timestamp when the source observed reality [required]")
 	cmd.Flags().StringVar(&f.resultStr, "result", "", "pass | fail | na | inconclusive [required]")

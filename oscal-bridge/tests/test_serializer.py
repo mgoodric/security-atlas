@@ -82,6 +82,64 @@ def test_serialize_ssp_emits_valid_oscal():
     assert valid, errors
 
 
+def test_serialize_ssp_marks_excluded_requirements_not_applicable():
+    """#1792: each excluded requirement becomes its own namespaced
+    implemented-requirement with implementation-status not-applicable, the
+    justification as remarks and an atlas framework prop. The per-control
+    entry is unchanged, and the SSP survives the trestle round-trip."""
+    inp = _ssp_input()
+    inp.excluded_requirements.append(
+        oscal_pb2.ExcludedRequirement(
+            framework="iso27001-2022",
+            requirement_code="A.8.25",
+            requirement_title="Secure development life cycle",
+            justification="No in-house software development.",
+            framework_scope_id="scope-1",
+        )
+    )
+    data = serialize_ssp(inp)
+    impls = json.loads(data)["system-security-plan"]["control-implementation"][
+        "implemented-requirements"
+    ]
+    assert len(impls) == 2
+
+    by_id = {ir["control-id"]: ir for ir in impls}
+    na = by_id["iso27001-2022_A.8.25"]
+    props = {(p["name"], p.get("ns")): p["value"] for p in na["props"]}
+    assert props[("implementation-status", None)] == "not-applicable"
+    atlas_ns = "https://security-atlas.dev/ns/oscal"
+    assert props[("framework", atlas_ns)] == "iso27001-2022"
+    assert props[("requirement-code", atlas_ns)] == "A.8.25"
+    assert na["remarks"] == "No in-house software development."
+    assert not any(p["name"] == "evaluation-result" for p in na["props"])
+
+    # The per-control entry is unchanged.
+    ctrl = by_id["iac-06"]
+    assert {p["name"]: p["value"] for p in ctrl["props"]}["evaluation-result"] == "pass"
+    assert not any(p["name"] == "implementation-status" for p in ctrl["props"])
+
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
+def test_serialize_ssp_requirement_token_sanitizes_code():
+    """A code with characters outside the OSCAL token alphabet still yields a
+    valid control-id (round-trip passes)."""
+    inp = _ssp_input()
+    inp.excluded_requirements.append(
+        oscal_pb2.ExcludedRequirement(
+            framework="soc2-2017", requirement_code="CC 6.1/a", justification="n/a"
+        )
+    )
+    data = serialize_ssp(inp)
+    impls = json.loads(data)["system-security-plan"]["control-implementation"][
+        "implemented-requirements"
+    ]
+    assert "soc2-2017_CC-6.1-a" in {ir["control-id"] for ir in impls}
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
 def test_serialize_ssp_rejects_empty_control_implementations():
     bad = _ssp_input()
     del bad.control_implementations[:]
@@ -188,6 +246,63 @@ def test_serialize_ssp_excludes_rejected_and_needs_info_claims():
     assert not any(any(p["name"] == "vendor-attested" for p in c.get("props", [])) for c in comps)
     impls = ssp["control-implementation"]["implemented-requirements"]
     assert not any(any(p["name"] == "vendor-attested" for p in ir.get("props", [])) for ir in impls)
+
+
+def test_serialize_ssp_marks_demo_seed_controls():
+    # #2043: a control the in-place demo seed added carries a demo-seed prop;
+    # a real control carries none.
+    inp = _ssp_input()
+    inp.control_implementations.append(
+        oscal_pb2.ControlImplementation(
+            control_id="ctrl-demo",
+            title="Demo control",
+            statement="Demo statement.",
+            evaluation_result="pass",
+            demo=True,
+        )
+    )
+    data = serialize_ssp(inp)
+    impls = json.loads(data)["system-security-plan"]["control-implementation"][
+        "implemented-requirements"
+    ]
+
+    def demo_props(ir):
+        return [p for p in ir.get("props", []) if p["name"] == "demo-seed"]
+
+    marked = [ir["control-id"] for ir in impls if demo_props(ir)]
+    assert marked == ["ctrl-demo"], marked
+    assert len(impls) == 2
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
+def test_serialize_assessment_marks_demo_seed_sampled_evidence():
+    # #2043: only the sampled records the in-place demo seed added carry a
+    # demo-seed prop, keyed to their sample ordinal.
+    inp = oscal_pb2.AssessmentInput(
+        metadata=_metadata(),
+        tenant_id="11111111-1111-1111-1111-111111111111",
+        audit_period_id="period-1",
+        audit_period_name="SOC 2 2026 Q2",
+        populations=[
+            oscal_pb2.SamplePopulation(
+                population_id="pop-1",
+                control_id="ctrl-1",
+                population_size=40,
+                sampled_evidence_ids=["ev-1", "ev-2", "ev-3"],
+                demo_evidence_ids=["ev-2"],
+                frozen_at="2026-05-01T00:00:00+00:00",
+            )
+        ],
+    )
+    _, ar_json = serialize_assessment(inp)
+    result = json.loads(ar_json)["assessment-results"]["results"][0]
+    demo = {
+        p["name"]: p["value"] for p in result.get("props", []) if p["name"].endswith("-demo-seed")
+    }
+    assert demo == {"population-pop-1-sampled-1-demo-seed": "true"}
+    valid, errors = round_trip_validate("assessment-results", ar_json)
+    assert valid, errors
 
 
 def test_serialize_assessment_emits_valid_ap_and_ar():

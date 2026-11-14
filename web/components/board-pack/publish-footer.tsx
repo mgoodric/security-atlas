@@ -58,7 +58,7 @@ export function PublishFooter({
     return (
       <Card
         id="publish-footer"
-        className="border-emerald-200"
+        className="border-pass/25"
         data-testid="publish-footer-published"
       >
         <CardHeader>
@@ -89,7 +89,7 @@ export function PublishFooter({
   return (
     <Card
       id="publish-footer"
-      className="border-indigo-200"
+      className="border-brand/30"
       data-testid="publish-footer-draft"
     >
       <CardHeader>
@@ -118,7 +118,7 @@ export function PublishFooter({
           }}
         >
           <div className="space-y-1">
-            <label className="text-sm font-medium text-slate-700">
+            <label className="text-sm font-medium text-foreground">
               Approver name
             </label>
             <Input

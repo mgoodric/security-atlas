@@ -248,3 +248,13 @@ SELECT *
 FROM risk_audit_log
 WHERE tenant_id = $1 AND risk_id = $2
 ORDER BY created_at DESC, id DESC;
+
+-- name: GetRiskReviewCadenceDays :one
+-- #2059: the tenant's risk review cadence in days, as the
+-- risks_review_due_default trigger reads it: the tenants row's
+-- risk_review_cadence_days, or 365 for a tenant with no row (a bare-UUID
+-- tenant predating slice 144). RLS scopes tenants to the caller's own row.
+SELECT COALESCE(
+    (SELECT t.risk_review_cadence_days FROM tenants t WHERE t.id = $1),
+    365
+)::int AS cadence_days;

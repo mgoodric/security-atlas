@@ -48,7 +48,7 @@ func (h *PreferencesHandler) GetPreferences(w http.ResponseWriter, r *http.Reque
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	userUUID, err := uuid.Parse(cred.UserID)
+	userUUID, err := callerUserUUID(cred)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusNotFound, "no preferences for this credential")
 		return
@@ -75,7 +75,7 @@ func (h *PreferencesHandler) PatchPreferences(w http.ResponseWriter, r *http.Req
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	userUUID, err := uuid.Parse(cred.UserID)
+	userUUID, err := callerUserUUID(cred)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusNotFound, "no preferences for this credential")
 		return

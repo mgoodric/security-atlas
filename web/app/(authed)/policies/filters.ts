@@ -27,9 +27,9 @@
 //   so `?ack_status=ge95` etc. is bookmarkable (AC-3).
 //
 // #1806 — `review` predicate. Matches the `review_status` the API computes
-//   for a published policy with a review date (`overdue` once
-//   next_review_at has passed, `due-soon` within 30 days, else
-//   `upcoming`). Rows with no review status (no date, or not published)
+//   for a published policy with a review date (`overdue` once its due
+//   day, the UTC date of next_review_at, has ended; `due-soon` within 30
+//   days of it; else `upcoming`). Rows with no review status (no date, or not published)
 //   match only `ALL`. The values equal the API's `?review=` filter.
 //
 // Constitutional anti-criterion P0-A3 honored: only fields that exist

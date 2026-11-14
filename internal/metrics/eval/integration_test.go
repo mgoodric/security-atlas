@@ -662,15 +662,15 @@ func TestCriticalFindingsSLA_EmptyAndPopulated(t *testing.T) {
 	}
 
 	// Pre-seed: if no findings in the universe, hits the empty-sample
-	// branch which returns Value=1.0 + dims['sample']='empty'. If sibling
-	// tests left findings, hits the count > 0 branch which returns 0.0.
-	// Both are valid code paths.
+	// branch (Value=0 + the empty marker, #2064; it used to be 1.0). If
+	// sibling tests left findings, hits the count > 0 branch which returns
+	// 0.0. Both are valid code paths.
 	res, err := e.Compute(context.Background())
 	if err != nil {
 		t.Fatalf("Compute(pre-seed): %v", err)
 	}
-	if res.Value != 0.0 && res.Value != 1.0 {
-		t.Errorf("Compute(pre-seed) Value = %v; want 0.0 or 1.0 (v1 degraded shape)", res.Value)
+	if res.Value != 0.0 {
+		t.Errorf("Compute(pre-seed) Value = %v; want 0.0 (v1 degraded shape)", res.Value)
 	}
 	if res.Dimensions["v1_degraded"] != "no_severity_band_column" {
 		t.Errorf("Compute(pre-seed) dims['v1_degraded'] = %q; want no_severity_band_column", res.Dimensions["v1_degraded"])

@@ -184,7 +184,13 @@ export default function PolicyDetailPage({
           </div>
           {policy.next_review_at ? (
             <div>
-              <dt className="inline text-muted-foreground">Next review </dt>
+              {/* #2009 — a superseded version keeps the date it was due,
+                  as history; only the published version has a review next. */}
+              <dt className="inline text-muted-foreground">
+                {policy.status === "superseded"
+                  ? "Review was due "
+                  : "Next review "}
+              </dt>
               <dd
                 className="inline font-mono text-foreground"
                 data-testid="policy-detail-next-review"

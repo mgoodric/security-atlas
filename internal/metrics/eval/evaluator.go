@@ -26,6 +26,34 @@ type Result struct {
 	Dimensions map[string]string
 }
 
+// The empty marker. An evaluator whose inputs are absent (no rows to
+// measure) returns noData: Dimensions["sample"] = SampleEmpty plus a
+// one-line NoDataReasonKey the metrics UI shows in place of a value. The
+// Value is 0 and carries no meaning; consumers must check the marker
+// before reading it, so "no findings" never renders as a 100% pass or a
+// 0% fail (#2064).
+const (
+	SampleKey       = "sample"
+	SampleEmpty     = "empty"
+	NoDataReasonKey = "no_data_reason"
+)
+
+// noData builds the empty-marked Result. extra carries any context
+// dimensions (window_days, v1_degraded) the evaluator still wants to
+// expose; it must not set the marker keys.
+func noData(reason string, extra map[string]string) Result {
+	dims := make(map[string]string, len(extra)+2)
+	for k, v := range extra {
+		dims[k] = v
+	}
+	dims[SampleKey] = SampleEmpty
+	dims[NoDataReasonKey] = reason
+	return Result{Value: 0, Dimensions: dims}
+}
+
+// IsNoData reports whether r carries the empty marker.
+func (r Result) IsNoData() bool { return r.Dimensions[SampleKey] == SampleEmpty }
+
 // Evaluator is the uniform interface every starter evaluator implements.
 // The interface stays narrow (Name + Compute) to keep the registry small.
 type Evaluator interface {

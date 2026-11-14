@@ -126,9 +126,11 @@ func (s *Store) CrosswalkAnchors(ctx context.Context, scfVersionID string, requi
 	return out, err
 }
 
-// KeywordAnchors runs the question-mapping catalog keyword retrieval.
-func (s *Store) KeywordAnchors(ctx context.Context, keywords []string) ([]AnchorCandidate, error) {
-	cands, err := s.keyword.RetrieveCandidates(ctx, keywords)
+// KeywordAnchors runs the question-mapping catalog keyword retrieval against
+// one SCF release, the batch's, so keyword and crosswalk candidates come
+// from the same release.
+func (s *Store) KeywordAnchors(ctx context.Context, scfVersionID string, keywords []string) ([]AnchorCandidate, error) {
+	cands, err := s.keyword.RetrieveCandidatesInRelease(ctx, scfVersionID, keywords)
 	if err != nil {
 		return nil, err
 	}
@@ -141,8 +143,33 @@ func (s *Store) KeywordAnchors(ctx context.Context, keywords []string) ([]Anchor
 
 // SaveSuggestions replaces each row's candidates and flag and sets the
 // batch's suggestions status, in one transaction.
+//
+// A ready save lands only on a batch still pending (#2038). The status is
+// set first, which also locks the batch row against the sweeper; if the
+// batch is no longer pending the transaction rolls back before any
+// candidate is written and the save returns ErrSuggestionsNoLongerPending.
 func (s *Store) SaveSuggestions(ctx context.Context, batchID string, rows []RowSuggestions, status string) error {
 	return s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID string) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE control_import_batches
+			SET suggestions_status = $2, updated_at = now()
+			WHERE id = $1::uuid
+			  AND ($2 <> 'ready' OR suggestions_status = 'pending')
+		`, batchID, status)
+		if err != nil {
+			return fmt.Errorf("controlimport: set suggestions status: %w", err)
+		}
+		if tag.RowsAffected() == 0 {
+			var exists bool
+			if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM control_import_batches WHERE id = $1::uuid)`,
+				batchID).Scan(&exists); err != nil {
+				return fmt.Errorf("controlimport: read batch: %w", err)
+			}
+			if exists {
+				return ErrSuggestionsNoLongerPending
+			}
+			return ErrBatchNotFound
+		}
 		for _, r := range rows {
 			if _, err := tx.Exec(ctx, `DELETE FROM control_import_candidates WHERE row_id = $1::uuid`, r.RowID); err != nil {
 				return fmt.Errorf("controlimport: clear candidates: %w", err)
@@ -170,17 +197,6 @@ func (s *Store) SaveSuggestions(ctx context.Context, batchID string, rows []RowS
 			`, r.RowID, r.NoCandidateReaches, rerankState(r.LLMRerank)); err != nil {
 				return fmt.Errorf("controlimport: flag row: %w", err)
 			}
-		}
-		tag, err := tx.Exec(ctx, `
-			UPDATE control_import_batches
-			SET suggestions_status = $2, updated_at = now()
-			WHERE id = $1::uuid
-		`, batchID, status)
-		if err != nil {
-			return fmt.Errorf("controlimport: set suggestions status: %w", err)
-		}
-		if tag.RowsAffected() == 0 {
-			return ErrBatchNotFound
 		}
 		return nil
 	})

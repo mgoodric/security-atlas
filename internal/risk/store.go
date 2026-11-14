@@ -480,25 +480,36 @@ func sortByResidualThenAge(risks []Risk) {
 }
 
 // residualMagnitude extracts a sortable scalar from the opaque
-// residual_score JSONB. The v1 residual shape is {likelihood, impact}
-// (canvas §2.2, the 5x5 grid); the magnitude is their product. A score
-// missing either numeric field yields 0 — a malformed or empty score ranks
-// below every properly-scored risk rather than erroring the whole list.
+// residual_score JSONB. It reads every shape the platform writes, in the
+// board generator's order (internal/board extractSeverity): the residual
+// deriver's `score` (residualBlob), a precomputed `severity`, then a 5x5
+// {likelihood, impact} whose magnitude is their product (canvas §2.2).
+// Before #2058 only the last shape counted, so every derived residual
+// ranked as 0. A score with none of them yields 0 — a malformed or empty
+// score ranks below every properly-scored risk rather than erroring the
+// whole list.
 func residualMagnitude(raw []byte) float64 {
 	if len(raw) == 0 {
 		return 0
 	}
 	var score struct {
+		Score      *float64 `json:"score"`
+		Severity   *float64 `json:"severity"`
 		Likelihood *float64 `json:"likelihood"`
 		Impact     *float64 `json:"impact"`
 	}
 	if err := json.Unmarshal(raw, &score); err != nil {
 		return 0
 	}
-	if score.Likelihood == nil || score.Impact == nil {
-		return 0
+	switch {
+	case score.Score != nil:
+		return *score.Score
+	case score.Severity != nil:
+		return *score.Severity
+	case score.Likelihood != nil && score.Impact != nil:
+		return *score.Likelihood * *score.Impact
 	}
-	return *score.Likelihood * *score.Impact
+	return 0
 }
 
 // HeatmapCell is one (likelihood, impact) bucket in the 5x5 grid.
