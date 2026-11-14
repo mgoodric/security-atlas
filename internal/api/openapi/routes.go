@@ -295,6 +295,8 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/incidents", Tag: "incidents", Tier: "bearer", Internal: false, Summary: "POST /v1/incidents"},
 	{Method: "POST", Path: "/v1/incidents/{id}/close", Tag: "incidents", Tier: "bearer", Internal: false, Summary: "POST /v1/incidents/{id}/close"},
 	{Method: "POST", Path: "/v1/framework-scopes", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/framework-scopes"},
+	{Method: "POST", Path: "/v1/framework-scopes/{id}/applicability/bulk", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/framework-scopes/{id}/applicability/bulk — set one applicability decision on many requirements"},
+	{Method: "POST", Path: "/v1/framework-scopes/{id}/applicability/import", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/framework-scopes/{id}/applicability/import — import applicability decisions from CSV"},
 	{Method: "POST", Path: "/v1/install/mark-first-signin", Tag: "install", Tier: "bearer", Internal: false, Summary: "POST /v1/install/mark-first-signin"},
 	{Method: "POST", Path: "/v1/mcp/write-proposals", Tag: "mcp", Tier: "bearer", Internal: false, Summary: "POST /v1/mcp/write-proposals"},
 	{Method: "POST", Path: "/v1/mcp/write-proposals/{id}/confirm", Tag: "mcp", Tier: "bearer", Internal: false, Summary: "POST /v1/mcp/write-proposals/{id}/confirm"},

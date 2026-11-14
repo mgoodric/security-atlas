@@ -3154,6 +3154,46 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/{id}/applicability/bulk:
+    post:
+      summary: POST /v1/framework-scopes/{id}/applicability/bulk — set one applicability decision on many requirements
+      tags: [framework-scopes]
+      operationId: post-v1-framework-scopes-id-applicability-bulk
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/{id}/applicability/import:
+    post:
+      summary: POST /v1/framework-scopes/{id}/applicability/import — import applicability decisions from CSV
+      tags: [framework-scopes]
+      operationId: post-v1-framework-scopes-id-applicability-import
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}/applicability/{requirement_id}:
     put:
       summary: PUT /v1/framework-scopes/{id}/applicability/{requirement_id} — set one applicability decision
