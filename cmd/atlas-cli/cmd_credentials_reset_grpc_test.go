@@ -39,7 +39,7 @@ func (f *fakeResetServer) ResetBootstrap(ctx context.Context, req *adminv1.Reset
 }
 
 // startFakeResetServer serves fake on a loopback gRPC listener and points
-// the CLI's --endpoint, --insecure and --token at it.
+// the CLI's endpoint, insecure and token flags at it.
 func startFakeResetServer(t *testing.T, fake *fakeResetServer, token string) {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

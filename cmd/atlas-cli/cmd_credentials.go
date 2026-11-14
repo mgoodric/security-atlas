@@ -91,7 +91,7 @@ func newCredentialsIssueCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&f.force, "force", false,
 		"with --reset-bootstrap: allow the reset after first sign-in has occurred")
 	cmd.Flags().StringVar(&f.httpEndpoint, "http-endpoint", "",
-		"with --reset-bootstrap and a JWT --token: atlas HTTP endpoint (e.g. http://localhost:8080); defaults to deriving from --endpoint. An API-key --token resets over gRPC at --endpoint")
+		"with --reset-bootstrap and a JWT --token: atlas HTTP endpoint (e.g. http://localhost:8080); defaults to deriving from --endpoint. With an API key (as --token), the reset goes over gRPC at --endpoint")
 	return cmd
 }
 

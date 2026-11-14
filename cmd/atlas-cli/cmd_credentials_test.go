@@ -11,7 +11,7 @@ import (
 )
 
 // TestRunResetBootstrap_SendsOperatorTokenAsBearer pins #1851/#1885: a JWT
-// --token resets over HTTP (#2121); the reset POST is authorized by the
+// (as --token) resets over HTTP (#2121); the reset POST is authorized by the
 // operator's --token, and the body carries
 // --tenant and --force (no caller-minted token). The response's credential
 // is printed.
