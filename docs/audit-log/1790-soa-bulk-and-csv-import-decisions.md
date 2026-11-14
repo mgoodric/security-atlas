@@ -34,7 +34,7 @@ The bad rows are returned with their 1-based file line (the header is line
 1), the requirement code and a fixed reason string:
 
 - `unknown requirement code`
-- `requirement code appears more than once`
+- `requirement code appears more than once with different values` (D9)
 - `decision must be applicable or excluded`
 - `a justification is required to exclude a requirement`
 - `row could not be read`, for a CSV quoting error
@@ -68,3 +68,32 @@ could map one code onto another.
 /v1/framework-scopes/{id}/applicability/bulk` and `.../applicability/import`.
 They are under the existing `framework-scopes` resource, so the rego write
 gate (grc_engineer and admin) applies to them unchanged.
+
+## Follow-ups (#2036)
+
+From the review of #2027.
+
+**D9: A code repeated with different values rejects every row for it.**
+Originally the first row for a code was applied and later rows were
+rejected as duplicates, so the file's row order silently decided which
+decision won. Now, if a code appears more than once and the rows differ in
+decision, justification or implementation reference, every row for that
+code is rejected and nothing is written for it; the operator fixes the
+file. Rows that repeat a code with identical values are collapsed and
+applied once, since a copy-pasted row is not ambiguous. Comparison is after
+trimming every cell and case-folding the decision, so `Applicable` and
+`applicable` count as the same.
+
+**D10: Bulk case-folds its decision.** Bulk now trims and lower-cases
+`decision`, as the import does (D5), so `Excluded` works on both paths. The
+single PUT is unchanged.
+
+**D11: The bulk body is capped at 1 MiB.** It is read through
+`http.MaxBytesReader`, as `policies/import.go` does, and an oversized body
+returns 413. 1 MiB holds thousands of requirement ids.
+
+**Note for the SoA export ticket.** `justification` and
+`implementation_ref` are stored verbatim, as the operator typed or imported
+them. An export to CSV or a spreadsheet must neutralise cells that start
+with a formula character (`=`, `+`, `-`, `@`) so an exported SoA can't run
+a formula when opened.
