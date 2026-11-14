@@ -61,6 +61,8 @@ export function linkFor(ev: CalendarEvent): LinkForResult {
     case "exception":
       return { kind: "static", reason: EXCEPTION_REASON };
     case "policy":
+    case "policy_ack":
+      // #2130: an acknowledgement expiry has no page of its own either.
       return { kind: "static", reason: POLICY_REASON };
     case "vendor":
       // Slice 675: vendor review events link to the real per-vendor
@@ -68,6 +70,12 @@ export function linkFor(ev: CalendarEvent): LinkForResult {
       return { kind: "link", href: `/vendors/${ev.related_entity_id}` };
     case "control":
       return { kind: "link", href: `/controls/${ev.related_entity_id}` };
+    case "risk":
+      // #2130: risk review events link to the risk detail page.
+      return { kind: "link", href: `/risks/${ev.related_entity_id}` };
+    case "action_plan":
+      // #2130: action-plan due dates link to the plan's detail page.
+      return { kind: "link", href: `/action-plans/${ev.related_entity_id}` };
     default:
       return assertNever(ev.type);
   }

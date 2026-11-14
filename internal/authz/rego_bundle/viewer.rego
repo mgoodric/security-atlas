@@ -41,7 +41,7 @@ viewer_readable_resources := {
     # the most restrictive signed-in role and the program dashboard
     # is the entry surface every signed-in user lands on (slice 040
     # + 066 contract). Without these admits, OPA returns
-    # allow=false on GET /v1/activity and GET /v1/upcoming, the
+    # allow=false on GET /v1/activity and the upcoming rollup, the
     # React Query enters the isError branch, and the dashboard
     # Activity / Upcoming panels render "Failed to load." RLS keeps
     # the reads tenant-scoped (activity = admin_audit_log_v view,
@@ -57,7 +57,8 @@ viewer_readable_resources := {
     # continues to cover this path so a future maintainer who
     # narrows catalog_resources is surfaced at the unit-test layer.
     "activity",
-    "upcoming",
+    # (#2130 retired the upcoming rollup and its "upcoming" admit: the
+    # dashboard's Coming up reads "calendar", admitted above.)
 }
 
 # Slice 148: viewer can mint their own ICS subscription URL via
