@@ -16,6 +16,10 @@
 //   5. submit, approve and activate on the Scopes tab; dashboard coverage
 //      moves from 37.5% to 2/4 = 50.0% (SOA-01, 06, 07, 08 excluded), and
 //      the tab turns read-only.
+//
+// #2101: the e2e user submits and approves, which the fixture allows by
+// turning on the demo tenant's Allow self-approval; the approved scope
+// carries the "Self-approved" marker.
 
 import { expect, test } from "./fixtures";
 import { seedFromFixture } from "./seed";
@@ -195,6 +199,9 @@ test.describe("framework scope · Statement of Applicability tab (#1794)", () =>
       .getByRole("button", { name: "Submit for review", exact: true })
       .click();
     await page.getByRole("button", { name: "Approve", exact: true }).click();
+    await expect(page.getByTestId("framework-scope-self-approved")).toHaveText(
+      "Self-approved",
+    );
     await page.getByRole("button", { name: "Activate", exact: true }).click();
     await page.getByRole("button", { name: "Confirm", exact: true }).click();
     await expect(page.getByText("Current scope")).toBeVisible();
