@@ -18,9 +18,11 @@
 // The BFF is the only tenant context (cookie session -> upstream RLS,
 // invariant #6); the page never passes a tenant_id.
 //
-// Read-only (slice 681 anti-criterion): NO edit / delete / link
-// affordances. The one outbound action is "View in hierarchy", the same
-// org-tree scoping link the list row carries.
+// Slice 681 made this page read-only. #1748 adds one write surface: the
+// Parents / Children sections attach and detach child risks
+// (RiskHierarchyLinks). Edit and delete of the risk itself stay elsewhere.
+// The roll-up from the children sits beside the assessed severity and never
+// replaces it.
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
@@ -32,6 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
+import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
 import { APIError } from "@/lib/api/base";
 import { fetchRiskDetail, treatmentLabel } from "@/lib/api/risks";
 
@@ -236,6 +239,39 @@ export default function RiskDetailPage({
                 </div>
               </>
             )}
+            {risk.rollup ? (
+              <div
+                className="mt-3 border-t pt-2 text-sm"
+                data-testid="risk-detail-rollup"
+              >
+                <span
+                  className="text-[11px] uppercase tracking-wider text-muted-foreground"
+                  title="Roll-up severity: the child risks' severities combined by the severity function. It does not change the assessed score."
+                >
+                  Rolled up from children{" "}
+                </span>
+                <span
+                  className="font-semibold"
+                  data-testid="risk-detail-rollup-severity"
+                >
+                  {risk.rollup.severity}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {" "}
+                  ({risk.rollup.severity_function} of {risk.rollup.child_count}{" "}
+                  {risk.rollup.child_count === 1 ? "child" : "children"})
+                </span>
+                {risk.rollup.exceeds_assessed ? (
+                  <div
+                    className="mt-1 text-xs text-amber-700 dark:text-amber-300"
+                    data-testid="risk-detail-rollup-exceeds"
+                  >
+                    Higher than the assessed severity (
+                    {risk.rollup.assessed_severity}). Review the assessment.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -282,6 +318,9 @@ export default function RiskDetailPage({
           )}
         </CardContent>
       </Card>
+
+      {/* ============ PARENTS / CHILDREN (#1748) ============ */}
+      <RiskHierarchyLinks risk={risk} />
 
       {/* ============ LINKED ACTION PLANS (slice 384, AC-25) ============ */}
       <LinkedActionPlans target="risk" targetId={id} />

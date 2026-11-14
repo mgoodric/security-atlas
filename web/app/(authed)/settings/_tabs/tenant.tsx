@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
+import { showTenantChrome, useTenancy } from "@/lib/tenancy";
 
 import {
   DEFAULT_GATE_MODE,
@@ -123,6 +124,10 @@ async function patchTenantGateMode(
 
 export function TenantSection() {
   const qc = useQueryClient();
+  // #1764: on a single-tenant install the tenant is "your organisation"
+  // and its ID is not shown. Two or more tenants: as before.
+  const multiTenant = showTenantChrome(useTenancy());
+  const noun = multiTenant ? "tenant" : "organisation";
   const tenantsQuery = useQuery({
     queryKey: ["settings-my-tenants"],
     queryFn: fetchMyTenants,
@@ -160,10 +165,10 @@ export function TenantSection() {
       setSuccess(null);
       if (err.status === 409) {
         setConflict(
-          "Another tenant already uses that name. Pick a different one.",
+          `Another ${noun} already uses that name. Pick a different one.`,
         );
       } else if (err.status === 403) {
-        setConflict("You do not have permission to rename this tenant.");
+        setConflict(`You do not have permission to rename this ${noun}.`);
       } else {
         setConflict(err.message);
       }
@@ -179,10 +184,13 @@ export function TenantSection() {
   return (
     <Card id="tenant" data-testid="settings-section-tenant">
       <CardHeader>
-        <CardTitle>Tenant</CardTitle>
+        <CardTitle data-testid="settings-tenant-title">
+          {multiTenant ? "Tenant" : "Organisation"}
+        </CardTitle>
         <CardDescription>
-          Rename your current tenant. The new name shows up immediately in the
-          tenant switcher for everyone on this tenant.
+          {multiTenant
+            ? "Rename your current tenant. The new name shows up immediately in the tenant switcher for everyone on this tenant."
+            : "Your organisation's name and the settings that apply to everyone in it."}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -190,7 +198,7 @@ export function TenantSection() {
           <Skeleton className="h-10 w-full" />
         ) : tenantsQuery.error ? (
           <Alert variant="destructive">
-            <AlertTitle>Could not load tenant</AlertTitle>
+            <AlertTitle>Could not load {noun}</AlertTitle>
             <AlertDescription>
               {(tenantsQuery.error as Error).message}
             </AlertDescription>
@@ -206,13 +214,17 @@ export function TenantSection() {
         ) : (
           <>
             <dl className="grid grid-cols-3 gap-x-4 gap-y-3 text-sm">
-              <dt className="text-muted-foreground">Tenant ID</dt>
-              <dd
-                className="col-span-2 font-mono text-xs text-foreground"
-                data-testid="settings-tenant-id"
-              >
-                {currentTenant.id}
-              </dd>
+              {multiTenant ? (
+                <>
+                  <dt className="text-muted-foreground">Tenant ID</dt>
+                  <dd
+                    className="col-span-2 font-mono text-xs text-foreground"
+                    data-testid="settings-tenant-id"
+                  >
+                    {currentTenant.id}
+                  </dd>
+                </>
+              ) : null}
               <dt className="text-muted-foreground">Name</dt>
               <dd className="col-span-2">
                 <Input
@@ -223,7 +235,7 @@ export function TenantSection() {
                     setSuccess(null);
                   }}
                   maxLength={64}
-                  aria-label="Tenant name"
+                  aria-label={multiTenant ? "Tenant name" : "Organisation name"}
                   data-testid="settings-tenant-name-input"
                 />
               </dd>
@@ -256,7 +268,7 @@ export function TenantSection() {
                 </AlertDescription>
               </Alert>
             ) : null}
-            <GatePolicyControl tenantId={currentTenant.id} />
+            <GatePolicyControl tenantId={currentTenant.id} noun={noun} />
           </>
         )}
       </CardContent>
@@ -278,7 +290,13 @@ export function TenantSection() {
 // enforces for an unchanged tenant) and, after a successful PATCH, reflects
 // the authoritative value the PATCH response returns. The pending-vs-persisted
 // distinction is surfaced honestly to the operator.
-function GatePolicyControl({ tenantId }: { tenantId: string }) {
+function GatePolicyControl({
+  tenantId,
+  noun,
+}: {
+  tenantId: string;
+  noun: string;
+}) {
   // The committed value is what the server last confirmed (PATCH response) or
   // the documented default before any change this session. `selected` is the
   // operator's in-flight choice; it can diverge from `committed` until Save.
@@ -309,8 +327,8 @@ function GatePolicyControl({ tenantId }: { tenantId: string }) {
         </div>
         <p className="text-xs text-muted-foreground">
           Decides how the platform handles a control bundle whose tests fail or
-          that ships no tests. Applies to every control-bundle upload on this
-          tenant. Until you change it, this tenant uses the default (
+          that ships no tests. Applies to every control-bundle upload in this{" "}
+          {noun}. Until you change it, this {noun} uses the default (
           <code>strict</code>).
         </p>
       </div>

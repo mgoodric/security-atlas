@@ -25,12 +25,13 @@ runs, as plain processes:
 
 ## Prerequisites
 
-| Requirement       | Version and source                                                                                                                |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------- |
-| Go                | The toolchain `go.mod` pins. A Homebrew `go` with the default `GOTOOLCHAIN=auto` fetches it on first build.                       |
-| Postgres          | 16+, with `psql` on `PATH`. On macOS: `brew install postgresql@16 && brew services start postgresql@16`.                          |
-| Node.js           | The version in the repo-root `.nvmrc`, via [nvm](https://github.com/nvm-sh/nvm). Run `nvm install && nvm use` from the repo root. |
-| `curl`, `openssl` | Any current version. `bootstrap.sh` polls `/health` with `curl`; `openssl` generates secrets.                                     |
+| Requirement       | Version and source                                                                                                                                                    |
+| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Go                | The toolchain `go.mod` pins. A Homebrew `go` with the default `GOTOOLCHAIN=auto` fetches it on first build.                                                           |
+| Postgres          | 16+, with `psql` on `PATH`. On macOS: `brew install postgresql@16 && brew services start postgresql@16`.                                                              |
+| `psql` client     | 15+ on the machine that runs `migrate.sh`, which uses `\getenv`. Check this when it differs from the server, such as a managed database reached from an older client. |
+| Node.js           | The version in the repo-root `.nvmrc`, via [nvm](https://github.com/nvm-sh/nvm). Run `nvm install && nvm use` from the repo root.                                     |
+| `curl`, `openssl` | Any current version. `bootstrap.sh` polls `/health` with `curl`; `openssl` generates secrets.                                                                         |
 
 No C toolchain is needed: the server and CLI build with `CGO_ENABLED=0`.
 
@@ -161,6 +162,13 @@ password in Step 1. When it is set, `migrate.sh` re-applies it with
 `ALTER ROLE ... PASSWORD` on every run. The value goes to `psql` on
 stdin and never appears on its command line, but Postgres writes the
 statement to its server log if `log_statement` is `ddl` or `all`.
+
+The `atlas_migrate` password in `DATABASE_URL` stays off the command
+line too: `migrate.sh` and `bootstrap.sh` move it into `PGPASSWORD` and
+give `psql` the URL without it. Put the password in the URL's
+`user:password@` part, not in a `?password=` parameter, which is passed
+through unchanged. A URL with no password falls back to `PGPASSWORD` or
+`~/.pgpass`.
 
 ## Step 4 — apply migrations
 

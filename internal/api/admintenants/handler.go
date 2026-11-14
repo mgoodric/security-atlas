@@ -342,22 +342,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "tenant management unavailable: no auth pool")
 		return
 	}
-	if !h.allowMultiTenant() {
-		// The all-zeros row is not a tenant (#1885), as in
-		// platform.Status.TenantCount.
-		var existing int
-		if err := h.authPool.QueryRow(r.Context(),
-			`SELECT count(*) FROM tenants WHERE id <> $1`, uuid.Nil,
-		).Scan(&existing); err != nil {
-			httperr.WriteInternal(w, r, "count tenants", err)
-			return
-		}
-		if existing > 0 {
-			httpresp.WriteError(w, http.StatusForbidden,
-				"multi-tenant is not enabled on this install: set "+AllowMultiTenantEnvVar+"=true to create another tenant")
-			return
-		}
-	}
+	// The multi-tenant gate (#1763) counts tenants inside the create
+	// transaction, under installTenantCreateLockKey (#2015, step 0b).
+	allowMultiTenant := h.allowMultiTenant()
 
 	var req createRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&req); err != nil {
@@ -479,6 +466,33 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	); err != nil {
 		httperr.WriteInternal(w, r, "acquire actor lock", err)
 		return
+	}
+
+	// 0b. Multi-tenant gate (#1763) under an install-wide lock (#2015).
+	//     Counted outside a transaction, two concurrent creates could
+	//     both see zero tenants and both proceed, and the per-actor lock
+	//     above does not help when two super_admins race. So without the
+	//     opt-in every create takes one install-wide lock, then counts.
+	//     Under READ COMMITTED the count after the lock sees any tenant
+	//     a previous holder committed. Taken after the actor lock, in
+	//     the same order on every path, so the two cannot deadlock.
+	if !allowMultiTenant {
+		if _, err := tx.Exec(r.Context(),
+			`SELECT pg_advisory_xact_lock($1)`, installTenantCreateLockKey,
+		); err != nil {
+			httperr.WriteInternal(w, r, "acquire tenant-create lock", err)
+			return
+		}
+		existing, err := countTenants(r.Context(), tx)
+		if err != nil {
+			httperr.WriteInternal(w, r, "count tenants", err)
+			return
+		}
+		if existing > 0 {
+			_ = tx.Rollback(r.Context())
+			writeMultiTenantDisabled(w)
+			return
+		}
 	}
 
 	// 1. Rate-limit gate (inside the transaction; serialised against
@@ -734,6 +748,33 @@ func mustMarshal(v any) []byte {
 }
 
 func stringPtr(s string) *string { return &s }
+
+// installTenantCreateLockKey is the pg_advisory_xact_lock(BIGINT) key that
+// serialises tenant creation while the multi-tenant opt-in is off (#2015).
+// One key for the whole install, distinct from the slice-142
+// (0x142142142142), slice-198 (0x198198198198) and per-actor slice-143
+// (0x0143...) keys.
+const installTenantCreateLockKey int64 = 0x201520152015
+
+// rowQuerier is the QueryRow method shared by *pgxpool.Pool and pgx.Tx.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// countTenants counts the install's tenants. The all-zeros row is not a
+// tenant (#1885), as in platform.Status.TenantCount.
+func countTenants(ctx context.Context, q rowQuerier) (int, error) {
+	var n int
+	err := q.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE id <> $1`, uuid.Nil).Scan(&n)
+	return n, err
+}
+
+// writeMultiTenantDisabled writes the 403 for a create that the missing
+// opt-in blocks.
+func writeMultiTenantDisabled(w http.ResponseWriter) {
+	httpresp.WriteError(w, http.StatusForbidden,
+		"multi-tenant is not enabled on this install: set "+AllowMultiTenantEnvVar+"=true to create another tenant")
+}
 
 // actorAdvisoryKey derives a per-actor BIGINT key for the slice-143
 // per-actor advisory lock. The high bit of the key is the slice-143-

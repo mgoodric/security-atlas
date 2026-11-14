@@ -1,0 +1,7 @@
+Control ID,Title,Description,Tested Under,Implementation Type,Owner
+ORG-AC-01,MFA for workforce,All workforce accounts require multi-factor authentication.,CC6.1; CC6.2,automated,IT
+ORG-AC-02,Quarterly access review,Privileged access is reviewed every quarter.,CC6.2,manual_periodic,Security
+ORG-AC-03,,Access is removed within one day of termination.,CC6.2,,HR
+ORG-AC-04,Encryption at rest,Customer data is encrypted at rest.,CC9.9,,Engineering
+ORG-AC-01,MFA for contractors,Contractor accounts require multi-factor authentication.,CC6.1,,IT
+ORG-HR-01,Background checks,New hires pass a background check before their start date.,,manual_attested,HR
