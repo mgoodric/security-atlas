@@ -31,7 +31,14 @@ func (s *Service) Issue(_ context.Context, req *adminv1.IssueRequest) (*adminv1.
 	if req.GetTenantId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenant_id is required")
 	}
-	cred, bearer, err := s.store.Issue(req.GetTenantId(), req.GetScopePredicate(), req.GetKinds(), req.GetTtl().AsDuration())
+	// A nil ttl is 0, "no expiry". A negative one is refused, matching the
+	// HTTP path's ttl_seconds >= 0 (#1906). AsDuration saturates rather
+	// than wrapping, so no upper bound is needed here (#1914 D3).
+	ttl := req.GetTtl().AsDuration()
+	if ttl < 0 {
+		return nil, status.Error(codes.InvalidArgument, "ttl must not be negative")
+	}
+	cred, bearer, err := s.store.Issue(req.GetTenantId(), req.GetScopePredicate(), req.GetKinds(), ttl)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue: %v", err)
 	}

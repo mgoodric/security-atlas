@@ -330,6 +330,19 @@ revoked), and nothing recorded who minted it.
   The response says which happened (`revoked_credential_ids`,
   `recovery_key_kept`). The documented step is to sign in another way and
   revoke it: `atlas-cli credentials revoke --id <credential_id>`.
+  `mark-first-signin` requires an admin credential (#1906), so a
+  low-privilege key cannot call it first and revoke the recovery key out
+  from under the operator. The recovery key is itself an admin key.
+- **Rotation keeps the bound and the marker.** `Rotate` gives a recovery
+  key's successor the same TTL, counted from the successor's own issue
+  time, so it gets a fresh window. The successor keeps the
+  `bootstrap-recovery` marker, so the next reset or first sign-in still
+  revokes it.
+- **Revocation is install-wide.** Both revocations above match every live
+  recovery key on the install, across tenants, not only the caller's
+  tenant. The reset clears install-wide markers and rewrites the
+  install's one bootstrap-token file, so its recovery keys are an
+  install-wide set.
 - **Traceable.** The mint is logged at Info with `credential_id`,
   `tenant_id`, `expires_at`, the caller's credential id and subject, and the
   ids it revoked. The bearer is never logged, in whole or in part. A caller

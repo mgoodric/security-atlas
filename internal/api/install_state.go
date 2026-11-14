@@ -138,9 +138,14 @@ type markFirstSigninResponse struct {
 // bearer is required (so a drive-by attacker cannot flip the marker and
 // trick the login UX into hiding the fresh-install guidance for the
 // next operator). The bearer auth middleware applied by httpHandler
-// already gates this route. The leading /v1/install path lives outside
-// any /_internal namespace: the bearer-auth middleware is the access
-// control, not a path-prefix convention.
+// already gates this route, and the handler also requires an admin
+// credential (#1906): the first flip revokes the bootstrap-recovery keys,
+// so a low-privilege key calling it first after a reset would cut the
+// operator off from the recovery path. The recovery key is itself an admin
+// key, and a super_admin JWT bridges to IsAdmin, so both are admitted. The
+// leading /v1/install path lives outside any /_internal namespace: the
+// bearer-auth middleware is the access control, not a path-prefix
+// convention.
 //
 // The handler is idempotent: a subsequent call is a no-op (marked=false,
 // file_deleted=false). The cmd/atlas startup path mints the bootstrap
@@ -153,6 +158,17 @@ func (s *Server) handleMarkFirstSignin(w http.ResponseWriter, r *http.Request) {
 	if s.platformStatus == nil {
 		w.WriteHeader(http.StatusServiceUnavailable)
 		_, _ = w.Write([]byte(`{"error":"install state not configured"}`))
+		return
+	}
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"missing credential"}`))
+		return
+	}
+	if !cred.IsAdmin {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":"admin credential required"}`))
 		return
 	}
 	marked, err := s.platformStatus.MarkFirstSignin(r.Context(), time.Now().UTC())
