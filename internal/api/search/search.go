@@ -1,18 +1,22 @@
 // Package search serves the slice-268 unified `/v1/search` endpoint —
 // a single GET that aggregates lexical matches across controls,
-// risks, evidence, and (slice 661) the bundled SCF anchor catalog, and
-// returns them sorted by relevance.
+// risks, policies (#2067), evidence, and (slice 661) the bundled SCF
+// anchor catalog. Hits come back grouped by type in that order, the
+// organisation's own records before the catalog, best match first
+// within each group (#2067).
 //
-// Wire shape (slice 268; slice 661 adds the `anchors` type):
+// Wire shape (slice 268; slice 661 adds `anchors`; #2067 adds
+// `policies` and `groups`):
 //
-//	GET /v1/search?q=<query>&types=anchors,controls,risks,evidence&limit=N
+//	GET /v1/search?q=<query>&types=controls,risks,policies,evidence,anchors&limit=N
 //
 //	{
 //	  "hits": [
-//	    {"id":"<uuid>", "type":"anchors"|"controls"|"risks"|"evidence",
+//	    {"id":"<uuid>", "type":"controls"|"risks"|"policies"|"evidence"|"anchors",
 //	     "title":"...", "snippet":"...", "relevance_score":0.0..1.0}
 //	  ],
 //	  "count":  N,
+//	  "groups": [{"type":"controls","count":37}, ...], // full match count per admitted type
 //	  "partial_types": ["risks"]    // types filtered out by OPA
 //	}
 //
@@ -89,10 +93,6 @@ const (
 	MaxLimit = 50
 	// DefaultLimit is the assumed `limit` when the caller omits it.
 	DefaultLimit = 25
-	// PerTypeTopK is the per-type cap applied BEFORE the merge. Three
-	// types × 25 = up to 75 candidates feeding the global merge, which
-	// then truncates to `limit` (≤ MaxLimit) after sort.
-	PerTypeTopK = 25
 	// SnippetMaxLen is the AC-3 snippet cap (≤ 120 chars).
 	SnippetMaxLen = 120
 )
@@ -109,12 +109,18 @@ const (
 	// therefore reads the catalog directly, NOT through the tenant-GUC
 	// path. controls/risks/evidence stay RLS-scoped exactly as before.
 	TypeAnchors = "anchors"
+	// TypePolicies (#2067) searches the tenant's policies by title and
+	// body. It is admitted by the same OPA `policies` read rule that
+	// gates GET /v1/policies, so search shows a policy to exactly the
+	// callers who can already list it.
+	TypePolicies = "policies"
 )
 
-// allTypes is the default `types` set when the caller omits the param
-// (declared in canonical sort order so the response's partial_types
-// array reads deterministically). `anchors` sorts first alphabetically.
-var allTypes = []string{TypeAnchors, TypeControls, TypeEvidence, TypeRisks}
+// allTypes is the default `types` set when the caller omits the param.
+// It is declared in group order (#2067): the organisation's own records
+// first, the bundled SCF catalog last. The same order sorts the merged
+// hits, the `groups` array and the partial_types array.
+var allTypes = []string{TypeControls, TypeRisks, TypePolicies, TypeEvidence, TypeAnchors}
 
 // Handler bundles the slice-268 routes. It owns:
 //
@@ -151,10 +157,20 @@ type SearchHit struct {
 	RelevanceScore float64 `json:"relevance_score"`
 }
 
+// SearchGroup reports one result type's total match count (#2067), so
+// the UI can label a group "Controls 37" and offer "show all" when the
+// response carries fewer rows than that. Count is every matching row
+// the caller can see, not just the rows returned.
+type SearchGroup struct {
+	Type  string `json:"type"`
+	Count int    `json:"count"`
+}
+
 type searchResp struct {
-	Hits         []SearchHit `json:"hits"`
-	Count        int         `json:"count"`
-	PartialTypes []string    `json:"partial_types"`
+	Hits         []SearchHit   `json:"hits"`
+	Count        int           `json:"count"`
+	Groups       []SearchGroup `json:"groups"`
+	PartialTypes []string      `json:"partial_types"`
 }
 
 // Handle serves GET /v1/search. See package doc for the contract.
@@ -206,33 +222,21 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	// call opens its own short-lived tx so the GUC scope is bounded
 	// and concurrent searches don't share a tx.
 	tokens := tokenize(q)
-	var hits []SearchHit
+	perType := make(map[string][]SearchHit, len(admitted))
+	groups := make([]SearchGroup, 0, len(admitted))
 	for _, t := range admitted {
-		typeHits, qerr := h.searchType(r.Context(), t, q, tokens)
+		typeHits, total, qerr := h.searchType(r.Context(), t, q, tokens, limit)
 		if qerr != nil {
 			httperr.WriteInternal(w, r, "search "+t, qerr)
 			return
 		}
-		hits = append(hits, typeHits...)
+		perType[t] = typeHits
+		groups = append(groups, SearchGroup{Type: t, Count: total})
 	}
 
-	// AC-4: aggregate merge by relevance_score DESC; ties broken by
-	// type ASC then id ASC for stable ordering.
-	sort.SliceStable(hits, func(i, j int) bool {
-		if hits[i].RelevanceScore != hits[j].RelevanceScore {
-			return hits[i].RelevanceScore > hits[j].RelevanceScore
-		}
-		if hits[i].Type != hits[j].Type {
-			return hits[i].Type < hits[j].Type
-		}
-		return hits[i].ID < hits[j].ID
-	})
-
-	// AC-2 / P0-A6: truncate to `limit`. The defensive belt-and-
-	// suspenders: limit is already ≤ MaxLimit (parseLimit enforces).
-	if len(hits) > limit {
-		hits = hits[:limit]
-	}
+	// #2067: grouped by type, best match first within a group, the
+	// `limit` cap shared across groups.
+	hits := mergeGrouped(admitted, perType, limit)
 
 	// partial_types is always an array on the wire (never null) so
 	// downstream clients can iterate unconditionally.
@@ -243,9 +247,51 @@ func (h *Handler) Handle(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, searchResp{
 		Hits:         hits,
 		Count:        len(hits),
+		Groups:       groups,
 		PartialTypes: partial,
 	})
 
+}
+
+// mergeGrouped orders and caps the per-type hits (#2067). `types` is
+// already in allTypes order (parseTypes canonicalises it), so the hits
+// come out grouped controls, risks, policies, evidence, anchors, and a
+// common word never lists catalog anchors above the organisation's own
+// controls. Within a group the best match comes first.
+//
+// The `limit` cap is shared: rows are taken one per group in turn until
+// `limit` is reached, so a group with many matches cannot crowd a later
+// group out of the response. The response's `groups` array carries each
+// group's full count, so the UI knows when there is more to show.
+func mergeGrouped(types []string, perType map[string][]SearchHit, limit int) []SearchHit {
+	for _, t := range types {
+		rows := perType[t]
+		sort.SliceStable(rows, func(i, j int) bool {
+			if rows[i].RelevanceScore != rows[j].RelevanceScore {
+				return rows[i].RelevanceScore > rows[j].RelevanceScore
+			}
+			return rows[i].ID < rows[j].ID
+		})
+	}
+	take := make(map[string]int, len(types))
+	for n := 0; n < limit; {
+		progressed := false
+		for _, t := range types {
+			if n < limit && take[t] < len(perType[t]) {
+				take[t]++
+				n++
+				progressed = true
+			}
+		}
+		if !progressed {
+			break
+		}
+	}
+	out := make([]SearchHit, 0, limit)
+	for _, t := range types {
+		out = append(out, perType[t][:take[t]]...)
+	}
+	return out
 }
 
 // partitionByAdmit splits requestedTypes into (admitted, denied) by
@@ -285,20 +331,52 @@ func (h *Handler) partitionByAdmit(r *http.Request, requestedTypes []string) (ad
 // The cred.UserID surfaced on the audit channel via the upstream
 // authz middleware is sufficient for the slice's threat model — no
 // new audit-log surface is introduced (slice 268 narrative §I).
-func (h *Handler) searchType(ctx context.Context, t, q string, tokens []string) ([]SearchHit, error) {
+//
+// Each branch returns at most `limit` rows, plus the rows themselves so
+// the total match count (`count(*) OVER ()`, computed before LIMIT) can
+// be read off them.
+func (h *Handler) searchType(ctx context.Context, t, q string, tokens []string, limit int) ([]SearchHit, int, error) {
+	var (
+		hits []SearchHit
+		rows []map[string]string
+		err  error
+	)
 	switch t {
 	case TypeControls:
-		return h.searchControls(ctx, q, tokens)
+		hits, rows, err = h.searchControls(ctx, q, tokens, limit)
 	case TypeRisks:
-		return h.searchRisks(ctx, q, tokens)
+		hits, rows, err = h.searchRisks(ctx, q, tokens, limit)
+	case TypePolicies:
+		hits, rows, err = h.searchPolicies(ctx, q, tokens, limit)
 	case TypeEvidence:
-		return h.searchEvidence(ctx, q, tokens)
+		hits, rows, err = h.searchEvidence(ctx, q, tokens, limit)
 	case TypeAnchors:
-		return h.searchAnchors(ctx, q, tokens)
+		hits, rows, err = h.searchAnchors(ctx, q, tokens, limit)
 	default:
 		// Unreachable — parseTypes already validated the set.
-		return nil, fmt.Errorf("unknown search type %q", t)
+		return nil, 0, fmt.Errorf("unknown search type %q", t)
 	}
+	if err != nil {
+		return nil, 0, err
+	}
+	return hits, totalOf(rows), nil
+}
+
+// totalCol is the window count every per-type query projects: the
+// number of matching rows before LIMIT.
+const totalCol = `count(*) OVER () AS total`
+
+// totalOf reads the window count off the first row. No rows means no
+// matches.
+func totalOf(rows []map[string]string) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	var n int
+	if _, err := fmt.Sscanf(rows[0]["total"], "%d", &n); err != nil {
+		return len(rows)
+	}
+	return n
 }
 
 // searchControls queries `controls` (active versions only —
@@ -311,15 +389,15 @@ func (h *Handler) searchType(ctx context.Context, t, q string, tokens []string) 
 // #1737 — the control's external_refs (system, id, note per entry) are
 // a third searchable column, so an auditor's control number or a
 // "tested under" requirement code finds the control it was mapped to.
-func (h *Handler) searchControls(ctx context.Context, q string, tokens []string) ([]SearchHit, error) {
+func (h *Handler) searchControls(ctx context.Context, q string, tokens []string, limit int) ([]SearchHit, []map[string]string, error) {
 	stmt, args := buildTokenizedQuery(`
-		SELECT id::text, title, description, `+controlRefsTextExpr+` AS refs_text
+		SELECT id::text, title, description, `+controlRefsTextExpr+` AS refs_text, `+totalCol+`
 		FROM controls
 		WHERE superseded_by IS NULL
-		  AND `, []string{"title", "description", controlRefsTextExpr}, tokens, q, "ORDER BY title ASC")
+		  AND `, []string{"title", "description", controlRefsTextExpr}, tokens, q, "ORDER BY title ASC", limit)
 	rows, err := h.queryInTenantTx(ctx, stmt, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]SearchHit, 0, len(rows))
 	for _, r := range rows {
@@ -332,7 +410,7 @@ func (h *Handler) searchControls(ctx context.Context, q string, tokens []string)
 			RelevanceScore: relevance(tokens, text),
 		})
 	}
-	return out, nil
+	return out, rows, nil
 }
 
 // controlRefsTextExpr flattens controls.external_refs into one string
@@ -345,14 +423,14 @@ const controlRefsTextExpr = `coalesce((SELECT string_agg(concat_ws(' ', r->>'sys
 // a row matches when ANY token appears in either column. NO existing
 // risks-search query exists upstream (the spec calls this out) —
 // this is the minimal addition.
-func (h *Handler) searchRisks(ctx context.Context, q string, tokens []string) ([]SearchHit, error) {
+func (h *Handler) searchRisks(ctx context.Context, q string, tokens []string, limit int) ([]SearchHit, []map[string]string, error) {
 	stmt, args := buildTokenizedQuery(`
-		SELECT id::text, title, description
+		SELECT id::text, title, description, `+totalCol+`
 		FROM risks
-		WHERE `, []string{"title", "description"}, tokens, q, "ORDER BY title ASC")
+		WHERE `, []string{"title", "description"}, tokens, q, "ORDER BY title ASC", limit)
 	rows, err := h.queryInTenantTx(ctx, stmt, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]SearchHit, 0, len(rows))
 	for _, r := range rows {
@@ -364,7 +442,46 @@ func (h *Handler) searchRisks(ctx context.Context, q string, tokens []string) ([
 			RelevanceScore: relevance(tokens, r["title"]+" "+r["description"]),
 		})
 	}
-	return out, nil
+	return out, rows, nil
+}
+
+// searchPolicies queries `policies` (#2067) by title and markdown body.
+// Superseded versions are left out, so a policy appears once for its
+// current version, and once more while a next version is in progress.
+// A row that is not published says which version and state it is, so
+// those two rows read apart. RLS binds the rows like every other tenant
+// type.
+//
+// Who sees policy hits is decided by the per-type OPA admit on
+// resource.type="policies": the same rule GET /v1/policies passes, and
+// that list returns drafts to every caller it admits. Search adds no
+// visibility of its own.
+func (h *Handler) searchPolicies(ctx context.Context, q string, tokens []string, limit int) ([]SearchHit, []map[string]string, error) {
+	stmt, args := buildTokenizedQuery(`
+		SELECT id::text, title, body_md, status::text AS status, version::text AS version, `+totalCol+`
+		FROM policies
+		WHERE status <> 'superseded'
+		  AND `, []string{"title", "body_md"}, tokens, q, "ORDER BY title ASC, version DESC", limit)
+	rows, err := h.queryInTenantTx(ctx, stmt, args...)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := make([]SearchHit, 0, len(rows))
+	for _, r := range rows {
+		title := r["title"]
+		if r["status"] != "published" {
+			title += " · v" + r["version"] + " " + strings.ReplaceAll(r["status"], "_", " ")
+		}
+		text := r["title"] + " " + r["body_md"]
+		out = append(out, SearchHit{
+			ID:             r["id"],
+			Type:           TypePolicies,
+			Title:          title,
+			Snippet:        snippet(text, q),
+			RelevanceScore: relevance(tokens, text),
+		})
+	}
+	return out, rows, nil
 }
 
 // searchEvidence queries `evidence_records`. The table has no `title`
@@ -378,16 +495,16 @@ func (h *Handler) searchRisks(ctx context.Context, q string, tokens []string) ([
 // most relevant; we explicitly do NOT collapse to one row per
 // (kind, control_ref) — letting the global merge truncate is simpler
 // and matches the per-type top-K contract.
-func (h *Handler) searchEvidence(ctx context.Context, q string, tokens []string) ([]SearchHit, error) {
+func (h *Handler) searchEvidence(ctx context.Context, q string, tokens []string, limit int) ([]SearchHit, []map[string]string, error) {
 	stmt, args := buildTokenizedQuery(`
 		SELECT id::text,
 		       COALESCE(evidence_kind, '') AS evidence_kind,
-		       control_ref
+		       control_ref, `+totalCol+`
 		FROM evidence_records
-		WHERE `, []string{"evidence_kind", "control_ref"}, tokens, q, "ORDER BY observed_at DESC, id ASC")
+		WHERE `, []string{"evidence_kind", "control_ref"}, tokens, q, "ORDER BY observed_at DESC, id ASC", limit)
 	rows, err := h.queryInTenantTx(ctx, stmt, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]SearchHit, 0, len(rows))
 	for _, r := range rows {
@@ -404,7 +521,7 @@ func (h *Handler) searchEvidence(ctx context.Context, q string, tokens []string)
 			RelevanceScore: relevance(tokens, title),
 		})
 	}
-	return out, nil
+	return out, rows, nil
 }
 
 // searchAnchors queries the bundled `scf_anchors` SCF catalog (slice
@@ -430,17 +547,17 @@ func (h *Handler) searchEvidence(ctx context.Context, q string, tokens []string)
 // is "<scf_id> — <title>" so the FE renders a stable, code-prefixed
 // label. The hit ID is the anchor UUID, which the FE links to
 // /catalog/scf/<id> (the existing anchor-detail page accepts the UUID).
-func (h *Handler) searchAnchors(ctx context.Context, q string, tokens []string) ([]SearchHit, error) {
+func (h *Handler) searchAnchors(ctx context.Context, q string, tokens []string, limit int) ([]SearchHit, []map[string]string, error) {
 	stmt, args := buildTokenizedQuery(`
-		SELECT a.id::text, a.scf_id, a.title, a.description
+		SELECT a.id::text, a.scf_id, a.title, a.description, `+totalCol+`
 		FROM scf_anchors a
 		JOIN framework_versions fv ON fv.id = a.framework_version_id
 		JOIN frameworks f ON f.id = fv.framework_id
 		WHERE f.slug = 'scf' AND fv.status = 'current' AND f.tenant_id IS NULL
-		  AND `, []string{"a.scf_id", "a.title", "a.description"}, tokens, q, "ORDER BY a.scf_id ASC")
+		  AND `, []string{"a.scf_id", "a.title", "a.description"}, tokens, q, "ORDER BY a.scf_id ASC", limit)
 	rows, err := h.queryCatalog(ctx, stmt, args...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	out := make([]SearchHit, 0, len(rows))
 	for _, r := range rows {
@@ -454,7 +571,7 @@ func (h *Handler) searchAnchors(ctx context.Context, q string, tokens []string) 
 			RelevanceScore: relevance(tokens, haystack),
 		})
 	}
-	return out, nil
+	return out, rows, nil
 }
 
 // buildTokenizedQuery composes the WHERE clause + parameter list for
@@ -464,17 +581,17 @@ func (h *Handler) searchAnchors(ctx context.Context, q string, tokens []string) 
 //
 // `prefix` is the SELECT + FROM + initial WHERE prefix (caller-owned
 // so the per-table base — e.g. `superseded_by IS NULL AND` — can be
-// inlined). `orderBy` is appended after the WHERE clause; the LIMIT
-// clause uses the final placeholder.
+// inlined). Rows are ordered by how many query tokens they match, most
+// first (#2067), so the rows LIMIT keeps are the best matches and not
+// merely the alphabetically first; `orderBy` ("ORDER BY title ASC")
+// breaks ties. The LIMIT clause uses the final placeholder, `limit`.
 //
-// Returns (stmt, args) ready to pass to pgx Query. The last arg is
-// always PerTypeTopK so the per-type cap stays consistent across the
-// three branches.
+// Returns (stmt, args) ready to pass to pgx Query.
 //
 // Falls back to a single-pattern ILIKE on the raw query when the
 // caller passed an empty tokens slice — defensive, since Handle
 // validates q is ≥ MinQueryLen chars before reaching here.
-func buildTokenizedQuery(prefix string, columns, tokens []string, q, orderBy string) (string, []any) {
+func buildTokenizedQuery(prefix string, columns, tokens []string, q, orderBy string, limit int) (string, []any) {
 	if len(tokens) == 0 {
 		tokens = []string{strings.ToLower(strings.TrimSpace(q))}
 	}
@@ -489,7 +606,9 @@ func buildTokenizedQuery(prefix string, columns, tokens []string, q, orderBy str
 		}
 		clauses = append(clauses, "("+strings.Join(perCol, " OR ")+")")
 	}
-	args = append(args, PerTypeTopK)
+	args = append(args, limit)
+	matched := "(" + strings.Join(clauses, "::int + ") + "::int)"
+	orderBy = "ORDER BY " + matched + " DESC, " + strings.TrimPrefix(orderBy, "ORDER BY ")
 	stmt := prefix + "(" + strings.Join(clauses, " OR ") + ") " + orderBy + fmt.Sprintf(" LIMIT $%d", len(args))
 	return stmt, args
 }
@@ -629,19 +748,17 @@ func parseLimit(raw string) (int, error) {
 }
 
 // parseTypes splits the optional `types` CSV. An empty value defaults
-// to all three. Unknown type names trip a 400 (AC-7). The returned
-// slice preserves the canonical sort order regardless of the order
-// the caller supplied so the per-type query order — and therefore
-// the partial_types order — is deterministic.
+// to every type. Unknown type names trip a 400 (AC-7). The returned
+// slice is in allTypes (group) order regardless of the order the
+// caller supplied, so the per-type query order, the hit grouping and
+// the partial_types order are all deterministic.
 func parseTypes(raw string) ([]string, error) {
 	if raw == "" {
 		return append([]string{}, allTypes...), nil
 	}
-	known := map[string]bool{
-		TypeControls: true,
-		TypeRisks:    true,
-		TypeEvidence: true,
-		TypeAnchors:  true,
+	known := make(map[string]bool, len(allTypes))
+	for _, t := range allTypes {
+		known[t] = true
 	}
 	seen := map[string]bool{}
 	for _, part := range strings.Split(raw, ",") {
@@ -650,7 +767,7 @@ func parseTypes(raw string) ([]string, error) {
 			continue
 		}
 		if !known[t] {
-			return nil, fmt.Errorf("unknown type %q (allowed: anchors,controls,risks,evidence)", t)
+			return nil, fmt.Errorf("unknown type %q (allowed: controls,risks,policies,evidence,anchors)", t)
 		}
 		seen[t] = true
 	}

@@ -22,8 +22,10 @@ import { describe, expect, test } from "vitest";
 
 import {
   buildSearchRequestURL,
+  buildShowAllURL,
   GROUP_ORDER,
   groupByType,
+  groupCounts,
   hrefForHit,
   isShortcutTrigger,
   LISTBOX_ID,
@@ -36,7 +38,7 @@ import {
 
 interface Hit {
   id: string;
-  type: "anchors" | "controls" | "risks" | "evidence";
+  type: "controls" | "risks" | "policies" | "evidence" | "anchors";
   title: string;
   snippet: string;
   relevance_score: number;
@@ -54,20 +56,22 @@ function mkHit(overrides: Partial<Hit> = {}): Hit {
 }
 
 describe("groupByType", () => {
-  test("partitions an empty list to four empty buckets", () => {
+  test("partitions an empty list to five empty buckets", () => {
     expect(groupByType([])).toEqual({
-      anchors: [],
       controls: [],
       risks: [],
+      policies: [],
       evidence: [],
+      anchors: [],
     });
   });
 
-  test("partitions a mixed-type list into the four render buckets", () => {
+  test("partitions a mixed-type list into the five render buckets", () => {
     const hits = [
       mkHit({ id: "c1", type: "controls" }),
       mkHit({ id: "r1", type: "risks" }),
       mkHit({ id: "e1", type: "evidence" }),
+      mkHit({ id: "p1", type: "policies" }),
       mkHit({ id: "c2", type: "controls" }),
       mkHit({ id: "a1", type: "anchors" }),
     ];
@@ -75,7 +79,63 @@ describe("groupByType", () => {
     expect(out.anchors.map((h) => h.id)).toEqual(["a1"]);
     expect(out.controls.map((h) => h.id)).toEqual(["c1", "c2"]);
     expect(out.risks.map((h) => h.id)).toEqual(["r1"]);
+    expect(out.policies.map((h) => h.id)).toEqual(["p1"]);
     expect(out.evidence.map((h) => h.id)).toEqual(["e1"]);
+  });
+
+  test("drops a hit whose type this client does not know", () => {
+    const hits = [
+      mkHit({ id: "x1", type: "vendors" as unknown as Hit["type"] }),
+    ];
+    const out = groupByType(hits);
+    expect(Object.values(out).flat()).toEqual([]);
+  });
+});
+
+describe("GROUP_ORDER (#2067)", () => {
+  test("puts the organisation's own records before the SCF catalog", () => {
+    expect(GROUP_ORDER).toEqual([
+      "controls",
+      "risks",
+      "policies",
+      "evidence",
+      "anchors",
+    ]);
+  });
+});
+
+describe("groupCounts (#2067)", () => {
+  test("reports the upstream's full match count per group", () => {
+    const grouped = groupByType([
+      mkHit({ id: "c1", type: "controls" }),
+      mkHit({ id: "p1", type: "policies" }),
+    ]);
+    const counts = groupCounts(
+      [
+        { type: "controls", count: 37 },
+        { type: "policies", count: 1 },
+      ],
+      grouped,
+    );
+    expect(counts.controls).toBe(37);
+    expect(counts.policies).toBe(1);
+    expect(counts.anchors).toBe(0);
+  });
+
+  test("falls back to the returned rows when groups is absent", () => {
+    const grouped = groupByType([
+      mkHit({ id: "r1", type: "risks" }),
+      mkHit({ id: "r2", type: "risks" }),
+    ]);
+    expect(groupCounts(undefined, grouped).risks).toBe(2);
+  });
+});
+
+describe("buildShowAllURL (#2067)", () => {
+  test("narrows the same query to one type at the hard ceiling", () => {
+    expect(buildShowAllURL("  access control ", "policies")).toBe(
+      `/api/search?q=access%20control&types=policies&limit=${SEARCH_MAX_LIMIT}`,
+    );
   });
 
   test("preserves input order within each bucket", () => {
@@ -114,6 +174,12 @@ describe("hrefForHit", () => {
   test("risks hit routes to hierarchy?focus=<id> (no detail page yet)", () => {
     expect(hrefForHit(mkHit({ id: "r1", type: "risks" }))).toBe(
       "/risks/hierarchy?focus=r1",
+    );
+  });
+
+  test("policies hit routes to the policy detail page (#2067)", () => {
+    expect(hrefForHit(mkHit({ id: "p 1", type: "policies" }))).toBe(
+      "/policies/p%201",
     );
   });
 

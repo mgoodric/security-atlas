@@ -54,9 +54,45 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
 		"evidence_records",
+		"policies",
 		"risks",
 		"controls",
 	)
+}
+
+// seedPolicy inserts a policy row in `status` (#2067). Published and
+// superseded rows get an effective date, as the table's CHECK requires.
+func seedPolicy(t *testing.T, admin *pgxpool.Pool, tenant, title, body, status, version string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if body == "" {
+		body = "Policy body."
+	}
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO policies
+			(id, tenant_id, title, body_md, status, version, owner_role, approver_role, created_by, effective_date)
+		VALUES ($1, $2, $3, $4, $5, $6, 'grc_engineer', 'ciso', 'key_seed',
+		        CASE WHEN $5 IN ('published', 'superseded') THEN current_date END)
+	`, id, tenant, title, body, status, version); err != nil {
+		t.Fatalf("seed policy: %v", err)
+	}
+	return id
+}
+
+// groupsOf unwraps the `groups` field into type -> count, plus the
+// order the types appeared in.
+func groupsOf(body map[string]any) (map[string]int, []string) {
+	raw, _ := body["groups"].([]any)
+	counts := map[string]int{}
+	var order []string
+	for _, r := range raw {
+		m, _ := r.(map[string]any)
+		typ, _ := m["type"].(string)
+		n, _ := m["count"].(float64)
+		counts[typ] = int(n)
+		order = append(order, typ)
+	}
+	return counts, order
 }
 
 // seedControl inserts an active (non-superseded) control with the
@@ -589,5 +625,188 @@ func TestIssue1737_ControlSearchMatchesExternalRefs(t *testing.T) {
 	}
 	if hits := hitsAsSlice(body); len(hits) != 0 {
 		t.Fatalf("q=system: JSON key name must not match, got %v", hits)
+	}
+}
+
+// ===== #2067: policies, grouping, counts =====
+
+// TestIssue2067_PolicyFoundByTitleWord: a word that appears only in a
+// policy's title finds that policy. Superseded versions stay out; a
+// draft is labelled with its version and state.
+func TestIssue2067_PolicyFoundByTitleWord(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+
+	published := seedPolicy(t, admin, tenant, "Zebrafinch Acceptable Use Policy", "Rules for company devices.", "published", "2.0")
+	superseded := seedPolicy(t, admin, tenant, "Zebrafinch Acceptable Use Policy", "Old rules.", "superseded", "1.0")
+	draft := seedPolicy(t, admin, tenant, "Zebrafinch Acceptable Use Policy", "New rules.", "draft", "3.0")
+
+	env := testServer(t, app, tenant)
+	resp, body := doGet(t, env, "/v1/search?q=zebrafinch")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body=%v", resp.StatusCode, body)
+	}
+	got := map[string]string{}
+	for _, h := range hitsAsSlice(body) {
+		if h["type"] != "policies" {
+			t.Errorf("unexpected %v hit %v", h["type"], h["title"])
+			continue
+		}
+		id, _ := h["id"].(string)
+		title, _ := h["title"].(string)
+		got[id] = title
+	}
+	if got[published.String()] != "Zebrafinch Acceptable Use Policy" {
+		t.Errorf("published policy: got title %q, want the bare title (hits=%v)", got[published.String()], got)
+	}
+	if got[draft.String()] != "Zebrafinch Acceptable Use Policy · v3.0 draft" {
+		t.Errorf("draft policy: got title %q, want version + state suffix", got[draft.String()])
+	}
+	if _, ok := got[superseded.String()]; ok {
+		t.Errorf("superseded version must not be returned")
+	}
+	if counts, _ := groupsOf(body); counts["policies"] != 2 {
+		t.Errorf("groups.policies = %d, want 2", counts["policies"])
+	}
+}
+
+// TestIssue2067_TenantControlsBeforeCatalogAnchors: the query matches
+// the tenant's control and several SCF anchors, and some anchors match
+// more of its tokens than the control does. Every control hit still
+// comes before every anchor hit, the groups array is in group order,
+// and each group's count is the full match count.
+func TestIssue2067_TenantControlsBeforeCatalogAnchors(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	if err := scfseed.EnsureFullCatalog(context.Background(), admin); err != nil {
+		t.Fatalf("scfseed.EnsureFullCatalog: %v", err)
+	}
+	tenant := freshTenant(t, admin)
+	// Matches "encryption" but not "rest", so CRY-04 "Encryption At
+	// Rest" outscores it on relevance.
+	ctrl := seedControl(t, admin, tenant, "Disk encryption standard", "Laptops are encrypted.")
+	policy := seedPolicy(t, admin, tenant, "Encryption Policy", "How we encrypt.", "published", "1.0")
+
+	env := testServer(t, app, tenant)
+	resp, body := doGet(t, env, "/v1/search?q=encryption+rest&limit=50")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d body=%v", resp.StatusCode, body)
+	}
+	hits := hitsAsSlice(body)
+	if len(hits) < 3 {
+		t.Fatalf("want control, policy and anchor hits, got %v", hits)
+	}
+	if hits[0]["id"] != ctrl.String() {
+		t.Fatalf("first hit = %v %v, want the tenant control", hits[0]["type"], hits[0]["title"])
+	}
+	rank := map[string]int{"controls": 0, "risks": 1, "policies": 2, "evidence": 3, "anchors": 4}
+	var sawPolicy, sawAnchor bool
+	for i := 1; i < len(hits); i++ {
+		prev, _ := hits[i-1]["type"].(string)
+		cur, _ := hits[i]["type"].(string)
+		if rank[cur] < rank[prev] {
+			t.Errorf("hit %d (%s) sorts after %s; groups must run controls, risks, policies, evidence, anchors", i, cur, prev)
+		}
+		if hits[i]["id"] == policy.String() {
+			sawPolicy = true
+		}
+		if cur == "anchors" {
+			sawAnchor = true
+		}
+	}
+	if !sawPolicy || !sawAnchor {
+		t.Errorf("want both the policy and an anchor in the hits (policy=%v anchor=%v)", sawPolicy, sawAnchor)
+	}
+	// Within each group the best match comes first.
+	for i := 1; i < len(hits); i++ {
+		if hits[i]["type"] != hits[i-1]["type"] {
+			continue
+		}
+		prev, _ := hits[i-1]["relevance_score"].(float64)
+		cur, _ := hits[i]["relevance_score"].(float64)
+		if cur > prev {
+			t.Errorf("hit %d (%v, %v) outscores the hit before it in the same group", i, hits[i]["type"], cur)
+		}
+	}
+
+	counts, order := groupsOf(body)
+	if want := []string{"controls", "risks", "policies", "evidence", "anchors"}; strings.Join(order, ",") != strings.Join(want, ",") {
+		t.Errorf("groups order = %v, want %v", order, want)
+	}
+	if counts["controls"] != 1 || counts["policies"] != 1 || counts["anchors"] < 1 {
+		t.Errorf("group counts = %v", counts)
+	}
+}
+
+// TestIssue2067_GroupCountIsFullMatchCount: the group count reports
+// every match even when the response carries fewer rows, and the
+// shared limit keeps a later group in the response.
+func TestIssue2067_GroupCountIsFullMatchCount(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	const token = "quillcount"
+	for i := 0; i < 12; i++ {
+		seedControl(t, admin, tenant, token+" control "+uuid.NewString()[:8], "desc")
+	}
+	seedPolicy(t, admin, tenant, token+" policy", "", "published", "1.0")
+
+	env := testServer(t, app, tenant)
+	resp, body := doGet(t, env, "/v1/search?q="+token+"&limit=4")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", resp.StatusCode)
+	}
+	hits := hitsAsSlice(body)
+	if len(hits) != 4 {
+		t.Fatalf("len(hits) = %d, want 4", len(hits))
+	}
+	if hits[3]["type"] != "policies" {
+		t.Errorf("last hit type = %v, want policies (a crowded group must not push a later one out)", hits[3]["type"])
+	}
+	counts, _ := groupsOf(body)
+	if counts["controls"] != 12 || counts["policies"] != 1 {
+		t.Errorf("group counts = %v, want controls=12 policies=1", counts)
+	}
+}
+
+// TestIssue2067_PolicySearchCrossTenantIsolation: neither tenant sees
+// the other's policies (drafts included), and the other tenant's rows
+// do not inflate the group count.
+func TestIssue2067_PolicySearchCrossTenantIsolation(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenantA := freshTenant(t, admin)
+	tenantB := freshTenant(t, admin)
+	const token = "marmotpolicy"
+	seedPolicy(t, admin, tenantA, "Tenant A "+token, "", "published", "1.0")
+	seedPolicy(t, admin, tenantB, "Tenant B "+token, "", "published", "1.0")
+	seedPolicy(t, admin, tenantB, "Tenant B "+token+" next", "", "draft", "2.0")
+
+	cases := []struct {
+		tenant, own, other string
+		want               int
+	}{
+		{tenantA, "Tenant A", "Tenant B", 1},
+		{tenantB, "Tenant B", "Tenant A", 2},
+	}
+	for _, c := range cases {
+		env := testServer(t, app, c.tenant)
+		resp, body := doGet(t, env, "/v1/search?q="+token+"&types=policies")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status %d", c.own, resp.StatusCode)
+		}
+		hits := hitsAsSlice(body)
+		if len(hits) != c.want {
+			t.Errorf("%s: %d hits, want %d (%v)", c.own, len(hits), c.want, hits)
+		}
+		for _, h := range hits {
+			if title, _ := h["title"].(string); strings.Contains(title, c.other) {
+				t.Errorf("cross-tenant leak: %s search returned %q", c.own, title)
+			}
+		}
+		if counts, _ := groupsOf(body); counts["policies"] != c.want {
+			t.Errorf("%s: groups.policies = %d, want %d", c.own, counts["policies"], c.want)
+		}
 	}
 }

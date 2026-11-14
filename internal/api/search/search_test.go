@@ -82,25 +82,25 @@ func TestParseTypes_Default(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTypes(\"\"): %v", err)
 	}
-	// Default is the canonical-sorted set of all four (slice 661 added
-	// `anchors`, which sorts first alphabetically).
-	wantSlice := []string{TypeAnchors, TypeControls, TypeEvidence, TypeRisks}
+	// Default is every type in group order (#2067): the organisation's
+	// own records first, the SCF catalog last.
+	wantSlice := []string{TypeControls, TypeRisks, TypePolicies, TypeEvidence, TypeAnchors}
 	if !equalStringSlices(got, wantSlice) {
 		t.Errorf("parseTypes(\"\") = %v, want %v", got, wantSlice)
 	}
 }
 
 // TestParseTypes_AnchorsAdmitted pins the slice-661 admit-map addition:
-// `anchors` is a valid `types` value and survives the canonical sort
-// (it sorts first, ahead of controls).
+// `anchors` is a valid `types` value. Since #2067 it sorts last, after
+// the tenant's own controls.
 func TestParseTypes_AnchorsAdmitted(t *testing.T) {
-	got, err := parseTypes("controls,anchors")
+	got, err := parseTypes("anchors,policies,controls")
 	if err != nil {
-		t.Fatalf("parseTypes(\"controls,anchors\"): %v", err)
+		t.Fatalf("parseTypes: %v", err)
 	}
-	want := []string{TypeAnchors, TypeControls}
+	want := []string{TypeControls, TypePolicies, TypeAnchors}
 	if !equalStringSlices(got, want) {
-		t.Errorf("parseTypes(\"controls,anchors\") = %v, want %v", got, want)
+		t.Errorf("parseTypes(\"anchors,policies,controls\") = %v, want %v", got, want)
 	}
 }
 
@@ -109,8 +109,8 @@ func TestParseTypes_Subset(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseTypes: %v", err)
 	}
-	// Order MUST be canonical regardless of input order: controls
-	// (alphabetically first) then risks. Evidence is absent.
+	// Order MUST be group order regardless of input order: controls
+	// then risks. Evidence is absent.
 	want := []string{TypeControls, TypeRisks}
 	if !equalStringSlices(got, want) {
 		t.Errorf("parseTypes(\"risks,controls\") = %v, want %v", got, want)
