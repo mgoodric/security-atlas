@@ -104,6 +104,12 @@ type ReseededEdge struct {
 // the declaration becomes required in a later release (#1774).
 const SCFReleaseDeprecationWarning = "crosswalk declares no scf_release, so its scf_anchor codes were bound in the current SCF release; declare scf_release (or, for a workbook, pass --scf-release), which will become required"
 
+// SheetReleaseNotLoadedWarning is reported, formatted with the sheet's
+// release three times, for a workbook whose "SCF <release>" sheet names a release
+// that is not loaded (#1771). Its codes bind in the current SCF release, as
+// before. An explicit --scf-release is never relaxed this way.
+const SheetReleaseNotLoadedWarning = "workbook sheet \"SCF %s\" names SCF release %q, which is not loaded, so its scf_anchor codes were bound in the current SCF release; load that release with `atlas-cli catalog import-scf` to bind in it, or pass --scf-release %s to refuse the import instead of falling back"
+
 // SystemReviewerID is the reviewer_id on a tier-transition audit row written
 // by the importer rather than a person. fw_to_scf_edge_tier_transitions has a
 // NOT NULL uuid reviewer column, and no atlas user has the nil uuid, so the
@@ -180,7 +186,11 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 
 	// 0. Pick the SCF release the mappings bind in before writing anything,
 	//    so an unknown release fails the import cleanly (#1771).
-	bind, err := newAnchorBinder(ctx, q, cw.SCFRelease)
+	release, releaseWarning, err := effectiveSCFRelease(ctx, q, cw)
+	if err != nil {
+		return Report{}, err
+	}
+	bind, err := newAnchorBinder(ctx, q, release)
 	if err != nil {
 		return Report{}, err
 	}
@@ -245,11 +255,11 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		FrameworkID:           uuidString(framework.ID),
 		FrameworkVersionID:    uuidString(version.ID),
 		IsNewVersion:          isNew,
-		SCFRelease:            cw.SCFRelease,
+		SCFRelease:            release,
 		MappingsByAttribution: map[string]int{},
 	}
-	if cw.SCFRelease == "" {
-		report.Warnings = append(report.Warnings, SCFReleaseDeprecationWarning)
+	if releaseWarning != "" {
+		report.Warnings = append(report.Warnings, releaseWarning)
 	}
 
 	// 3. Upsert requirement rows. Track ids for the mapping pass. The
@@ -440,6 +450,33 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	}
 
 	return report, nil
+}
+
+// effectiveSCFRelease decides the release a crosswalk binds in, and the
+// warning (if any) to report:
+//
+//   - none declared: the current release, with SCFReleaseDeprecationWarning;
+//   - a release read from a workbook's sheet name alone that is not loaded:
+//     the current release, as before #1771, with a warning naming the sheet
+//     release and the remedy (#1774 may make this strict);
+//   - anything else (YAML scf_release, --scf-release, a loaded sheet
+//     release): that release, strictly.
+func effectiveSCFRelease(ctx context.Context, q *dbx.Queries, cw *Crosswalk) (string, string, error) {
+	if cw.SCFRelease == "" {
+		return "", SCFReleaseDeprecationWarning, nil
+	}
+	if !cw.SCFReleaseFromSheet {
+		return cw.SCFRelease, "", nil
+	}
+	_, err := scfrelease.Lookup(ctx, q, cw.SCFRelease)
+	switch {
+	case err == nil:
+		return cw.SCFRelease, "", nil
+	case errors.Is(err, scfrelease.ErrUnknownRelease):
+		return "", fmt.Sprintf(SheetReleaseNotLoadedWarning, cw.SCFRelease, cw.SCFRelease, cw.SCFRelease), nil
+	default:
+		return "", "", fmt.Errorf("crosswalk: scf_release: %w", err)
+	}
 }
 
 // newAnchorBinder returns the function that turns a mapping's scf_anchor

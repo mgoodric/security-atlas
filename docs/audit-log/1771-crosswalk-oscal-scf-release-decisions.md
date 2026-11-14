@@ -21,15 +21,28 @@ makes the declaration required.
 - `detection_tier_actual`: integration
 - `detection_tier_target`: integration
 
-The bug found during the work: three existing workbook integration tests
-(`TestImport_SCFWorkbookCreatesCommunityDraftEdges`,
-`TestImport_WorkbookPointsOfFocusRollUp`,
-`TestImport_FrozenVersionKeepsTitlesAndAddsEdges`) build workbooks with an
-`SCF 2026.2` or `SCF 2026.3` sheet against a database that holds only the
-sample catalog. Their sheets now declare a release that is not loaded, so the
-import is refused, which is the intended contract. They test edges and titles,
-not releases, so they now bind to the loaded sample release through
-`bindToLoadedSCF`; the sheet binding has its own test.
+The bug found during the work: the first version treated a workbook's sheet
+release as strictly declared. Four existing workbook integration tests (three
+in `soc2import`, one in `dashboard`) build `SCF 2026.2` or `SCF 2026.3`
+workbooks against a database that holds only the sample catalog, and they
+began to fail. That exposed a regression: an operator importing a workbook
+whose release they had not loaded was refused, with no workaround, in an
+expand step. D5 is the fix. The four tests pass unchanged.
+
+## D5 — An unloaded sheet release falls back, with a warning
+
+**Decision.** A release read only from a workbook's `SCF <release>` sheet name
+counts as declared only when `scfrelease.Lookup` finds it loaded. When it is
+not loaded, the import binds in the current release as before and reports
+`SheetReleaseNotLoadedWarning`. The warning names the sheet's release and the
+remedy: load it with `catalog import-scf`, or pass `--scf-release` to refuse
+the import instead. An explicit `--scf-release`, including one that agrees
+with the sheet, stays strict, as does a YAML `scf_release`.
+
+**Why.** This is the expand step: nothing that imports today may stop. A
+sheet name is the workbook's statement, not the operator's, and the
+operator may not yet have loaded that release. #1774, the contract step, can
+make the sheet release strict along with the rest of the declaration.
 
 ## D1 — OLIR STRM workbooks declare their release by flag
 

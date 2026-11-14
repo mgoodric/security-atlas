@@ -5,6 +5,7 @@ package soc2import_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -198,34 +199,7 @@ func TestImport_SCFRelease_WorkbookTakesReleaseFromSheetName(t *testing.T) {
 		}
 	})
 
-	f := excelize.NewFile()
-	mustSetSheetName(t, f, "Sheet1", "Focal Documents")
-	mustSetRows(t, f, "Focal Documents", [][]interface{}{
-		{"Geography", "SCF Column Header", "Focal Document Identifier (FDI)", "Source", "Focal Document Name (FDN)"},
-		{"General", "Release Test 1", releaseTestSlug, "Test", "Release test framework"},
-	})
-	sheet := "SCF " + workbookRelease
-	if _, err := f.NewSheet(sheet); err != nil {
-		t.Fatalf("NewSheet: %v", err)
-	}
-	mustSetRows(t, f, sheet, [][]interface{}{
-		{"SCF Domain", "SCF Control", "SCF #", "Release Test 1"},
-		{"Asset", "Diagrams", "AST-04", "R-1"},
-		{"Project", "SDLC", "PRM-07", "R-2"},
-	})
-	path := filepath.Join(t.TempDir(), "scf-release.xlsx")
-	if err := f.SaveAs(path); err != nil {
-		t.Fatalf("SaveAs: %v", err)
-	}
-
-	cw, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{
-		FrameworkSlug:    releaseTestSlug,
-		FrameworkVersion: "1",
-		AllowCodeTitles:  true,
-	})
-	if err != nil {
-		t.Fatalf("LoadSCFWorkbook: %v", err)
-	}
+	cw := loadReleaseWorkbook(t, workbookRelease, "", "AST-04", "PRM-07")
 	if cw.SCFRelease != workbookRelease {
 		t.Fatalf("SCFRelease = %q; want %q from the sheet name", cw.SCFRelease, workbookRelease)
 	}
@@ -237,5 +211,86 @@ func TestImport_SCFRelease_WorkbookTakesReleaseFromSheetName(t *testing.T) {
 		if got[code] != w {
 			t.Errorf("edge %s bound to %q; want %q", code, got[code], w)
 		}
+	}
+}
+
+// loadReleaseWorkbook writes and loads a wide workbook whose control sheet
+// is "SCF <sheetRelease>", mapping R-1, R-2, ... to the given SCF codes.
+// optRelease is passed as --scf-release ("" for none).
+func loadReleaseWorkbook(t *testing.T, sheetRelease, optRelease string, codes ...string) *soc2import.Crosswalk {
+	t.Helper()
+	f := excelize.NewFile()
+	mustSetSheetName(t, f, "Sheet1", "Focal Documents")
+	mustSetRows(t, f, "Focal Documents", [][]interface{}{
+		{"Geography", "SCF Column Header", "Focal Document Identifier (FDI)", "Source", "Focal Document Name (FDN)"},
+		{"General", "Release Test 1", releaseTestSlug, "Test", "Release test framework"},
+	})
+	sheet := "SCF " + sheetRelease
+	if _, err := f.NewSheet(sheet); err != nil {
+		t.Fatalf("NewSheet: %v", err)
+	}
+	rows := [][]interface{}{{"SCF Domain", "SCF Control", "SCF #", "Release Test 1"}}
+	for i, code := range codes {
+		rows = append(rows, []interface{}{"Domain", "Control", code, fmt.Sprintf("R-%d", i+1)})
+	}
+	mustSetRows(t, f, sheet, rows)
+	path := filepath.Join(t.TempDir(), "scf-release.xlsx")
+	if err := f.SaveAs(path); err != nil {
+		t.Fatalf("SaveAs: %v", err)
+	}
+	cw, err := soc2import.LoadSCFWorkbook(path, soc2import.SCFWorkbookOptions{
+		FrameworkSlug:    releaseTestSlug,
+		FrameworkVersion: "1",
+		AllowCodeTitles:  true,
+		SCFRelease:       optRelease,
+	})
+	if err != nil {
+		t.Fatalf("LoadSCFWorkbook: %v", err)
+	}
+	return cw
+}
+
+// unloadedSheetRelease is a sheet-form release label no test loads.
+const unloadedSheetRelease = "1771.9"
+
+// A workbook whose sheet names a release that is not loaded still imports,
+// as before #1771: its codes bind in the current release (B), and the
+// report warns, naming the sheet release and the remedy.
+func TestImport_SCFRelease_UnloadedSheetReleaseFallsBackWithWarning(t *testing.T) {
+	pool := setupReleases(t)
+
+	cw := loadReleaseWorkbook(t, unloadedSheetRelease, "", "AST-04")
+	report, err := soc2import.Import(context.Background(), pool, cw)
+	if err != nil {
+		t.Fatalf("Import: %v", err)
+	}
+	want := fmt.Sprintf(soc2import.SheetReleaseNotLoadedWarning, unloadedSheetRelease, unloadedSheetRelease, unloadedSheetRelease)
+	if len(report.Warnings) != 1 || report.Warnings[0] != want {
+		t.Fatalf("Warnings = %v; want [%q]", report.Warnings, want)
+	}
+	if report.SCFRelease != "" {
+		t.Fatalf("SCFRelease = %q; want empty (bound in the current release)", report.SCFRelease)
+	}
+	if got := edgeReleases(t, pool)["R-1"]; got != scfreleasetest.ReleaseB+"/AST-04" {
+		t.Fatalf("edge R-1 bound to %q; want current release B's AST-04", got)
+	}
+}
+
+// --scf-release stays strict: confirming an unloaded sheet release refuses
+// the import with the resolver's named error, and writes nothing.
+func TestImport_SCFRelease_ExplicitUnloadedReleaseIsStrict(t *testing.T) {
+	pool := setupReleases(t)
+	ctx := context.Background()
+
+	cw := loadReleaseWorkbook(t, unloadedSheetRelease, unloadedSheetRelease, "AST-04")
+	if _, err := soc2import.Import(ctx, pool, cw); !errors.Is(err, scfrelease.ErrUnknownRelease) {
+		t.Fatalf("err = %v; want ErrUnknownRelease", err)
+	}
+	var n int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM frameworks WHERE slug = $1 AND tenant_id IS NULL`, releaseTestSlug).Scan(&n); err != nil {
+		t.Fatalf("count frameworks: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("a refused import left %d framework rows", n)
 	}
 }

@@ -54,14 +54,19 @@ func TestLoadSCFWorkbook_SCFReleaseFromSheetName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}
-	if cw.SCFRelease != "2026.3" {
-		t.Fatalf("SCFRelease = %q; want 2026.3 from sheet \"SCF 2026.3\"", cw.SCFRelease)
+	if cw.SCFRelease != "2026.3" || !cw.SCFReleaseFromSheet {
+		t.Fatalf("SCFRelease = %q, from sheet = %v; want 2026.3 from sheet \"SCF 2026.3\"", cw.SCFRelease, cw.SCFReleaseFromSheet)
 	}
 
-	// An option that agrees with the sheet is accepted.
+	// An option that agrees with the sheet is accepted, and makes the
+	// release explicit (strict at import).
 	opts.SCFRelease = "2026.3"
-	if _, err := soc2import.LoadSCFWorkbook(xlsx, opts); err != nil {
+	cw, err = soc2import.LoadSCFWorkbook(xlsx, opts)
+	if err != nil {
 		t.Fatalf("agreeing --scf-release: %v", err)
+	}
+	if cw.SCFReleaseFromSheet {
+		t.Fatal("SCFReleaseFromSheet = true with --scf-release given; want explicit")
 	}
 
 	// One that contradicts it is refused.

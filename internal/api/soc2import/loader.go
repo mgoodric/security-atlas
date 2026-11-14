@@ -68,7 +68,15 @@ type Crosswalk struct {
 	// code within this release only. Workbook loaders fill it from the
 	// workbook's "SCF <release>" sheet. Empty still binds in the current
 	// release, with a deprecation warning, until #1774 makes it required.
-	SCFRelease   string        `yaml:"scf_release"`
+	SCFRelease string `yaml:"scf_release"`
+	// SCFReleaseFromSheet marks a SCFRelease read from a workbook's
+	// "SCF <release>" sheet name with no --scf-release to confirm it. Until
+	// #1774 such a release binds strictly only when it is loaded; when it is
+	// not, the import binds in the current release with
+	// SheetReleaseNotLoadedWarning, as it did before #1771. Never read from
+	// YAML.
+	SCFReleaseFromSheet bool `yaml:"-"`
+
 	Requirements []Requirement `yaml:"requirements"`
 	Mappings     []Mapping     `yaml:"mappings"`
 

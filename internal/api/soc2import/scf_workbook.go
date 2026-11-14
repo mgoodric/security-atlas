@@ -54,14 +54,18 @@ type SCFWorkbookOptions struct {
 // workbookSCFRelease decides a workbook crosswalk's SCF release from the
 // control sheet's name and the operator's option. The sheet is the
 // workbook's own statement, so an option that contradicts it is refused
-// rather than silently preferred.
-func workbookSCFRelease(sheet, opt string) (string, error) {
+// rather than silently preferred. The bool reports that the release came
+// from the sheet name alone, with no option to confirm it.
+func workbookSCFRelease(sheet, opt string) (string, bool, error) {
 	fromSheet := scfworkbook.SheetRelease(sheet)
 	opt = strings.TrimSpace(opt)
 	if fromSheet != "" && opt != "" && opt != fromSheet {
-		return "", fmt.Errorf("crosswalk: --scf-release %q contradicts the workbook's sheet %q (SCF release %q)", opt, sheet, fromSheet)
+		return "", false, fmt.Errorf("crosswalk: --scf-release %q contradicts the workbook's sheet %q (SCF release %q)", opt, sheet, fromSheet)
 	}
-	return firstNonEmpty(fromSheet, opt), nil
+	if opt != "" {
+		return opt, false, nil
+	}
+	return fromSheet, fromSheet != "", nil
 }
 
 type focalDocument struct {
@@ -193,21 +197,22 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 	}
 	sort.Slice(requirements, func(i, j int) bool { return requirements[i].Code < requirements[j].Code })
 
-	scfRelease, err := workbookSCFRelease(sheet, opts.SCFRelease)
+	scfRelease, fromSheet, err := workbookSCFRelease(sheet, opts.SCFRelease)
 	if err != nil {
 		return nil, err
 	}
 	cw := &Crosswalk{
-		SchemaVersion:     SchemaVersion,
-		SCFRelease:        scfRelease,
-		FrameworkSlug:     firstNonEmpty(opts.FrameworkSlug, slugFromFocal(meta, frameworkHeader)),
-		FrameworkName:     firstNonEmpty(opts.FrameworkName, meta.Name, normalizeHeader(frameworkHeader)),
-		FrameworkIssuer:   firstNonEmpty(opts.FrameworkIssuer, meta.Issuer),
-		FrameworkVersion:  firstNonEmpty(opts.FrameworkVersion, versionFromFocal(meta, frameworkHeader), versionFromSCFSheet(sheet)),
-		ReleaseDate:       opts.ReleaseDate,
-		SourceAttribution: "community_draft",
-		Requirements:      requirements,
-		Mappings:          mappings,
+		SchemaVersion:       SchemaVersion,
+		SCFRelease:          scfRelease,
+		SCFReleaseFromSheet: fromSheet,
+		FrameworkSlug:       firstNonEmpty(opts.FrameworkSlug, slugFromFocal(meta, frameworkHeader)),
+		FrameworkName:       firstNonEmpty(opts.FrameworkName, meta.Name, normalizeHeader(frameworkHeader)),
+		FrameworkIssuer:     firstNonEmpty(opts.FrameworkIssuer, meta.Issuer),
+		FrameworkVersion:    firstNonEmpty(opts.FrameworkVersion, versionFromFocal(meta, frameworkHeader), versionFromSCFSheet(sheet)),
+		ReleaseDate:         opts.ReleaseDate,
+		SourceAttribution:   "community_draft",
+		Requirements:        requirements,
+		Mappings:            mappings,
 
 		PointsOfFocusRollUp: rollUp,
 	}
@@ -292,21 +297,22 @@ func loadOLIRWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*
 		version := firstNonEmpty(opts.FrameworkVersion, generalInfoValue(f, "Focal Document Version"), generalInfoValue(f, "Reference Version"), versionFromFocal(focalDocument{Header: sheet, FDI: sheet}, sheet))
 		// An OLIR STRM workbook has no "SCF <release>" sheet (a workbook that
 		// has one is read as the wide shape), so its release is the option.
-		scfRelease, err := workbookSCFRelease(sheet, opts.SCFRelease)
+		scfRelease, fromSheet, err := workbookSCFRelease(sheet, opts.SCFRelease)
 		if err != nil {
 			return nil, err
 		}
 		cw := &Crosswalk{
-			SchemaVersion:     SchemaVersion,
-			SCFRelease:        scfRelease,
-			FrameworkSlug:     firstNonEmpty(opts.FrameworkSlug, slugify(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))), slugify(sheet)),
-			FrameworkName:     firstNonEmpty(opts.FrameworkName, sheet),
-			FrameworkIssuer:   opts.FrameworkIssuer,
-			FrameworkVersion:  version,
-			ReleaseDate:       opts.ReleaseDate,
-			SourceAttribution: "community_draft",
-			Requirements:      requirements,
-			Mappings:          mappings,
+			SchemaVersion:       SchemaVersion,
+			SCFRelease:          scfRelease,
+			SCFReleaseFromSheet: fromSheet,
+			FrameworkSlug:       firstNonEmpty(opts.FrameworkSlug, slugify(strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))), slugify(sheet)),
+			FrameworkName:       firstNonEmpty(opts.FrameworkName, sheet),
+			FrameworkIssuer:     opts.FrameworkIssuer,
+			FrameworkVersion:    version,
+			ReleaseDate:         opts.ReleaseDate,
+			SourceAttribution:   "community_draft",
+			Requirements:        requirements,
+			Mappings:            mappings,
 
 			PointsOfFocusRollUp: rollUp,
 		}

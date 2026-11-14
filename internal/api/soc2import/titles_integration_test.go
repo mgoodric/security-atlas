@@ -37,7 +37,6 @@ func TestImport_FrozenVersionKeepsTitlesAndAddsEdges(t *testing.T) {
 		if err != nil {
 			t.Fatalf("LoadSCFWorkbook: %v", err)
 		}
-		bindToLoadedSCF(t, pool, cw)
 		return cw
 	}
 

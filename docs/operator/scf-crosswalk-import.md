@@ -178,10 +178,17 @@ belong to, and the importer binds every code within that release only (#1771):
 | Full SCF workbook      | the `SCF <release>` sheet name: `SCF 2026.3` declares `2026.3`       |
 | SCF OLIR STRM workbook | `--scf-release`, because the OLIR shape has no `SCF <release>` sheet |
 
-Load the release first with `atlas-cli catalog import-scf`. A release that is
-not loaded fails the import (`unknown SCF release`), and so does a code the
-release does not have (`SCF code not in release`). Either way nothing is
-written. A `--scf-release` that contradicts the file is refused.
+Load the release first with `atlas-cli catalog import-scf`. A declared release
+(`scf_release` or `--scf-release`) that is not loaded fails the import
+(`unknown SCF release`), and so does a code the release does not have
+(`SCF code not in release`). Either way nothing is written. A `--scf-release`
+that contradicts the file is refused.
+
+A release read only from a workbook's sheet name is looser for now. When that
+release is loaded, codes bind in it. When it is not, the import binds in the
+current SCF release as it did before and prints a warning naming the sheet's
+release. Pass `--scf-release <release>` to make an unloaded sheet release an
+error instead.
 
 A crosswalk that declares no release still binds in the current SCF release and
 prints a deprecation warning. The declaration becomes required in a later

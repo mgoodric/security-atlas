@@ -11,9 +11,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
-	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
-	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
 // resetCatalog wipes every slice-007-owned catalog table so each test
@@ -173,7 +171,6 @@ func TestImport_SCFWorkbookCreatesCommunityDraftEdges(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}
-	bindToLoadedSCF(t, pool, cw)
 
 	report, err := soc2import.Import(context.Background(), pool, cw)
 	if err != nil {
@@ -396,19 +393,4 @@ func TestSchema_StrengthCheckConstraintRejectsOutOfRange(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected CHECK constraint to reject strength = 1.4")
 	}
-}
-
-// bindToLoadedSCF points a workbook crosswalk at the SCF release the test
-// database holds. A workbook names its release in its "SCF <release>"
-// sheet (#1771), and these fixtures name a real one (2026.2, 2026.3) while
-// the database holds only the sample catalog, whose label is not in the
-// sheet form. Tests about edges and titles bind against the sample
-// release; scf_release_integration_test.go covers the sheet binding.
-func bindToLoadedSCF(t *testing.T, pool *pgxpool.Pool, cw *soc2import.Crosswalk) {
-	t.Helper()
-	rel, err := scfrelease.Lookup(context.Background(), dbx.New(pool), "")
-	if err != nil {
-		t.Fatalf("current SCF release: %v", err)
-	}
-	cw.SCFRelease = rel.Version
 }
