@@ -198,6 +198,9 @@ RETURNING *;
 UPDATE policies
 SET status = 'superseded',
     superseded_at = now(),
+    -- #1806: the successor carries its own review date; the superseded
+    -- row no longer has one due.
+    next_review_at = NULL,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
@@ -209,12 +212,14 @@ RETURNING *;
 -- effective_date, published_at, published_by. predecessor_id is never
 -- changed: a first version keeps NULL, and a later version (a draft
 -- created with predecessor_id set) keeps the link to the row that Part 1
--- just superseded (#1747).
+-- just superseded (#1747). next_review_at is the review date the publisher
+-- names (#1806); NULL when none is given.
 UPDATE policies
 SET status = 'published',
     effective_date = $3,
     published_at = now(),
     published_by = $4,
+    next_review_at = $5,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
@@ -261,11 +266,13 @@ SELECT EXISTS (
 -- #1747 — append one row to the policy audit log.
 INSERT INTO policy_audit_log (
     tenant_id, policy_id, action, actor, source_file,
-    historical_approver_name, historical_approved_at, source_url
+    historical_approver_name, historical_approved_at, source_url,
+    previous_next_review_at, new_next_review_at
 )
 VALUES (
     sqlc.arg('tenant_id'), sqlc.arg('policy_id'), sqlc.arg('action'), sqlc.arg('actor'), sqlc.arg('source_file'),
-    sqlc.narg('historical_approver_name'), sqlc.narg('historical_approved_at'), sqlc.narg('source_url')
+    sqlc.narg('historical_approver_name'), sqlc.narg('historical_approved_at'), sqlc.narg('source_url'),
+    sqlc.narg('previous_next_review_at'), sqlc.narg('new_next_review_at')
 )
 RETURNING *;
 
@@ -275,3 +282,16 @@ SELECT *
 FROM policy_audit_log
 WHERE tenant_id = $1 AND policy_id = $2
 ORDER BY created_at ASC, id ASC;
+
+-- name: UpdatePolicyNextReviewAt :one
+-- #1806 — change the review date of a published policy in place. It is not
+-- a new version: the row keeps its id, version and approval. The caller
+-- writes the policy_audit_log row in the same transaction. Only the
+-- published chain tip has a review due, so other states do not match.
+UPDATE policies
+SET next_review_at = sqlc.narg('next_review_at'),
+    updated_at = now()
+WHERE tenant_id = sqlc.arg('tenant_id')
+  AND id = sqlc.arg('id')
+  AND status = 'published'
+RETURNING *;

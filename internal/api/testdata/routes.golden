@@ -13,6 +13,7 @@ DELETE /v1/me/sessions
 DELETE /v1/me/sessions/{id}
 DELETE /v1/org_units/{id}
 DELETE /v1/risks/{id}
+DELETE /v1/risks/{id}/children/{child_id}
 DELETE /v1/risks/{id}/themes/{theme}
 DELETE /v1/saved-views/{id}
 DELETE /v1/vendors/{id}
@@ -134,6 +135,7 @@ GET /v1/me/notifications
 GET /v1/me/preferences
 GET /v1/me/sessions
 GET /v1/me/slack-channel
+GET /v1/me/tenancy
 GET /v1/me/tenants
 GET /v1/me/webhook-channel
 GET /v1/metrics
@@ -166,6 +168,8 @@ GET /v1/risks/theme-heatmap
 GET /v1/risks/{id}
 GET /v1/risks/{id}/action-plans
 GET /v1/risks/{id}/aggregation
+GET /v1/risks/{id}/children
+GET /v1/risks/{id}/parents
 GET /v1/samples/{id}
 GET /v1/samples/{id}/annotations
 GET /v1/saved-views
@@ -206,6 +210,7 @@ PATCH /v1/me/preferences
 PATCH /v1/org_units/{id}
 PATCH /v1/oscal/component-claims/{id}/scf-anchor
 PATCH /v1/policies/{id}/approve
+PATCH /v1/policies/{id}/review-date
 PATCH /v1/policies/{id}/submit
 PATCH /v1/questionnaires/{id}/answers/{qid}
 PATCH /v1/risks/{id}
@@ -302,6 +307,7 @@ POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve
 POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject
 POST /v1/risks
 POST /v1/risks/aggregate
+POST /v1/risks/{id}/children
 POST /v1/risks/{id}/controls
 POST /v1/risks/{id}/themes
 POST /v1/samples

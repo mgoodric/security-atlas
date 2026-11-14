@@ -2,6 +2,7 @@ package api
 
 import (
 	"log/slog"
+	"net/http"
 
 	"github.com/go-chi/chi/v5"
 
@@ -148,6 +149,16 @@ func (s *Server) registerMe(root *chi.Mux) {
 	// renders honest tenant IDs without name enrichment.
 	meTenantsH := meapi.NewTenants(s.authPool)
 	root.Get("/v1/me/tenants", meTenantsH.ListTenants)
+	// #1763: GET /v1/me/tenancy — the install's tenant count, which
+	// drives tenant chrome in the web app (ADR 0023). platformStatus is
+	// read per request because cmd/atlas attaches it after construction.
+	root.Get("/v1/me/tenancy", func(w http.ResponseWriter, r *http.Request) {
+		var counter meapi.TenantCounter
+		if s.platformStatus != nil {
+			counter = s.platformStatus
+		}
+		meapi.NewTenancy(counter).Get(w, r)
+	})
 	// Slice 144: PATCH /v1/tenants/{id} — rename a tenant.
 	// Gated on per-tenant admin (slice-034 cred.IsAdmin OR
 	// slice-187 JWT roles[CURRENT][admin]) OR super_admin

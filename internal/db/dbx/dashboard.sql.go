@@ -65,6 +65,11 @@ covering_control AS (
     JOIN controls c
       ON c.scf_anchor_id = ra.scf_anchor_id
      AND c.tenant_id = $1
+     -- Any non-superseded control counts, whatever its lifecycle_state:
+     -- coverage measures defined controls. ListFrameworkScopeContradictions
+     -- (framework_scopes.sql) also requires lifecycle_state = 'active', on
+     -- purpose (#1789 D3). Do not align either one to the other. See
+     -- GLOSSARY "Active control".
      AND c.superseded_by IS NULL
 ),
 covered_now AS (

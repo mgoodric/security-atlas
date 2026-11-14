@@ -111,7 +111,8 @@ SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        owner_role, lifecycle_state, applicability_expr,
        evidence_queries, manual_evidence_schema, linked_policy_ids,
        freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
-       bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at
+       bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at,
+       external_refs
 FROM controls
 WHERE tenant_id = $1 AND id = $2
 `
@@ -146,6 +147,7 @@ type GetControlByIDRow struct {
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
 	CreatedAt            pgtype.Timestamptz        `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz        `json:"updated_at"`
+	ExternalRefs         []byte                    `json:"external_refs"`
 }
 
 func (q *Queries) GetControlByID(ctx context.Context, arg GetControlByIDParams) (GetControlByIDRow, error) {
@@ -176,6 +178,7 @@ func (q *Queries) GetControlByID(ctx context.Context, arg GetControlByIDParams) 
 		&i.BundleUploadedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ExternalRefs,
 	)
 	return i, err
 }
@@ -196,10 +199,10 @@ type InsertControlManifestRevisionParams struct {
 	ControlID pgtype.UUID `json:"control_id"`
 }
 
-// Issue #1908: record the manifest an in-place description update is about
+// Issue #1908: record the manifest an in-place metadata update is about
 // to overwrite. Copies the active row's current values in the same
-// transaction, just before UpdateControlDescriptionInPlace, so the prose
-// history is append-only in control_manifest_revisions.
+// transaction, just before UpdateControlMetadataInPlace, so the prose
+// and external-refs history is append-only in control_manifest_revisions.
 func (q *Queries) InsertControlManifestRevision(ctx context.Context, arg InsertControlManifestRevisionParams) (int64, error) {
 	result, err := q.db.Exec(ctx, insertControlManifestRevision, arg.TenantID, arg.ControlID)
 	if err != nil {
@@ -215,16 +218,16 @@ INSERT INTO controls (
     implementation_type, owner_role, lifecycle_state, applicability_expr,
     evidence_queries, manual_evidence_schema, linked_policy_ids,
     freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
-    bundle_uploaded_at, bundle_uploaded_by
+    bundle_uploaded_at, bundle_uploaded_by, external_refs
 ) VALUES (
     $1, $2, $3, $4, NULL,
     $5, $6, $7, $8, $9,
     $10, $11, $12, $13,
     $14, $15, $16,
     $17, $18, $19,
-    now(), $20
+    now(), $20, $21
 )
-RETURNING id, tenant_id, scf_id, title, description, control_family, implementation_type, owner_role, lifecycle_state, applicability_expr, version, created_at, updated_at, bundle_id, superseded_by, bundle_manifest_yaml, bundle_manifest_hash, scf_anchor_id, evidence_queries, manual_evidence_schema, linked_policy_ids, freshness_class, bundle_uploaded_at, bundle_uploaded_by
+RETURNING id, tenant_id, scf_id, title, description, control_family, implementation_type, owner_role, lifecycle_state, applicability_expr, version, created_at, updated_at, bundle_id, superseded_by, bundle_manifest_yaml, bundle_manifest_hash, scf_anchor_id, evidence_queries, manual_evidence_schema, linked_policy_ids, freshness_class, bundle_uploaded_at, bundle_uploaded_by, external_refs
 `
 
 type InsertControlVersionParams struct {
@@ -248,6 +251,7 @@ type InsertControlVersionParams struct {
 	BundleManifestYaml   string                    `json:"bundle_manifest_yaml"`
 	BundleManifestHash   string                    `json:"bundle_manifest_hash"`
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
+	ExternalRefs         []byte                    `json:"external_refs"`
 }
 
 // Insert a new control row (initial upload or supersession). Caller is
@@ -274,6 +278,7 @@ func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVer
 		arg.BundleManifestYaml,
 		arg.BundleManifestHash,
 		arg.BundleUploadedBy,
+		arg.ExternalRefs,
 	)
 	var i Control
 	err := row.Scan(
@@ -301,6 +306,7 @@ func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVer
 		&i.FreshnessClass,
 		&i.BundleUploadedAt,
 		&i.BundleUploadedBy,
+		&i.ExternalRefs,
 	)
 	return i, err
 }
@@ -1030,6 +1036,88 @@ func (q *Queries) ListControlsHistoryForExport(ctx context.Context, arg ListCont
 	return items, nil
 }
 
+const lockActiveControlByBundleID = `-- name: LockActiveControlByBundleID :one
+SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
+       title, description, control_family, implementation_type,
+       owner_role, lifecycle_state, applicability_expr,
+       evidence_queries, manual_evidence_schema, linked_policy_ids,
+       freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
+       bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at
+FROM controls
+WHERE tenant_id = $1 AND bundle_id = $2 AND superseded_by IS NULL
+FOR UPDATE
+`
+
+type LockActiveControlByBundleIDParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	BundleID string      `json:"bundle_id"`
+}
+
+type LockActiveControlByBundleIDRow struct {
+	ID                   pgtype.UUID               `json:"id"`
+	TenantID             pgtype.UUID               `json:"tenant_id"`
+	BundleID             string                    `json:"bundle_id"`
+	Version              int32                     `json:"version"`
+	SupersededBy         pgtype.UUID               `json:"superseded_by"`
+	ScfID                *string                   `json:"scf_id"`
+	ScfAnchorID          pgtype.UUID               `json:"scf_anchor_id"`
+	Title                string                    `json:"title"`
+	Description          string                    `json:"description"`
+	ControlFamily        string                    `json:"control_family"`
+	ImplementationType   ControlImplementationType `json:"implementation_type"`
+	OwnerRole            string                    `json:"owner_role"`
+	LifecycleState       ControlLifecycleState     `json:"lifecycle_state"`
+	ApplicabilityExpr    string                    `json:"applicability_expr"`
+	EvidenceQueries      []byte                    `json:"evidence_queries"`
+	ManualEvidenceSchema []byte                    `json:"manual_evidence_schema"`
+	LinkedPolicyIds      []string                  `json:"linked_policy_ids"`
+	FreshnessClass       *string                   `json:"freshness_class"`
+	BundleManifestYaml   string                    `json:"bundle_manifest_yaml"`
+	BundleManifestHash   string                    `json:"bundle_manifest_hash"`
+	BundleUploadedAt     pgtype.Timestamptz        `json:"bundle_uploaded_at"`
+	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
+	CreatedAt            pgtype.Timestamptz        `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz        `json:"updated_at"`
+}
+
+// Issue #1958: GetActiveControlByBundleID plus a row lock, for the upload
+// path. Two concurrent uploads of one bundle serialise on the active row,
+// so the second decides no-op / in-place / supersede against what the
+// first committed. Without it, two in-place uploads could both copy the
+// same manifest into control_manifest_revisions and the first one's text
+// would be overwritten without a trace.
+func (q *Queries) LockActiveControlByBundleID(ctx context.Context, arg LockActiveControlByBundleIDParams) (LockActiveControlByBundleIDRow, error) {
+	row := q.db.QueryRow(ctx, lockActiveControlByBundleID, arg.TenantID, arg.BundleID)
+	var i LockActiveControlByBundleIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.BundleID,
+		&i.Version,
+		&i.SupersededBy,
+		&i.ScfID,
+		&i.ScfAnchorID,
+		&i.Title,
+		&i.Description,
+		&i.ControlFamily,
+		&i.ImplementationType,
+		&i.OwnerRole,
+		&i.LifecycleState,
+		&i.ApplicabilityExpr,
+		&i.EvidenceQueries,
+		&i.ManualEvidenceSchema,
+		&i.LinkedPolicyIds,
+		&i.FreshnessClass,
+		&i.BundleManifestYaml,
+		&i.BundleManifestHash,
+		&i.BundleUploadedAt,
+		&i.BundleUploadedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const markControlSuperseded = `-- name: MarkControlSuperseded :exec
 UPDATE controls
 SET superseded_by = $3, updated_at = now()
@@ -1048,35 +1136,39 @@ func (q *Queries) MarkControlSuperseded(ctx context.Context, arg MarkControlSupe
 	return err
 }
 
-const updateControlDescriptionInPlace = `-- name: UpdateControlDescriptionInPlace :execrows
+const updateControlMetadataInPlace = `-- name: UpdateControlMetadataInPlace :execrows
 UPDATE controls
 SET description = $3,
-    bundle_manifest_yaml = $4,
-    bundle_manifest_hash = $5,
+    external_refs = $4,
+    bundle_manifest_yaml = $5,
+    bundle_manifest_hash = $6,
     bundle_uploaded_at = now(),
-    bundle_uploaded_by = $6,
+    bundle_uploaded_by = $7,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL
 `
 
-type UpdateControlDescriptionInPlaceParams struct {
+type UpdateControlMetadataInPlaceParams struct {
 	TenantID           pgtype.UUID `json:"tenant_id"`
 	ID                 pgtype.UUID `json:"id"`
 	Description        string      `json:"description"`
+	ExternalRefs       []byte      `json:"external_refs"`
 	BundleManifestYaml string      `json:"bundle_manifest_yaml"`
 	BundleManifestHash string      `json:"bundle_manifest_hash"`
 	BundleUploadedBy   *string     `json:"bundle_uploaded_by"`
 }
 
-// Issue #1908: a re-upload whose manifest differs from the active row's
-// only in `description` updates that row in place instead of versioning,
-// so every control-keyed row (owners, evidence, exceptions, links) stays
-// attached. The hash moves with the YAML so a repeat upload is a no-op.
-func (q *Queries) UpdateControlDescriptionInPlace(ctx context.Context, arg UpdateControlDescriptionInPlaceParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateControlDescriptionInPlace,
+// Issues #1908, #1958: a re-upload whose manifest differs from the active
+// row's only in `description` and/or `external_refs` updates that row in
+// place instead of versioning, so every control-keyed row (owners,
+// evidence, exceptions, links) stays attached. The hash moves with the
+// YAML so a repeat upload is a no-op.
+func (q *Queries) UpdateControlMetadataInPlace(ctx context.Context, arg UpdateControlMetadataInPlaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, updateControlMetadataInPlace,
 		arg.TenantID,
 		arg.ID,
 		arg.Description,
+		arg.ExternalRefs,
 		arg.BundleManifestYaml,
 		arg.BundleManifestHash,
 		arg.BundleUploadedBy,

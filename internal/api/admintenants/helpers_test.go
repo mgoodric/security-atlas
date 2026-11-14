@@ -318,3 +318,25 @@ func indexOf(s, sub string) int {
 	}
 	return -1
 }
+
+// #1763: only the exact string "true" opts an install into multi-tenant.
+func TestDefaultAllowMultiTenant_ExactTrue(t *testing.T) {
+	for _, tc := range []struct {
+		val  string
+		want bool
+	}{{"true", true}, {"", false}, {"1", false}, {"TRUE", false}, {"yes", false}} {
+		t.Setenv(AllowMultiTenantEnvVar, tc.val)
+		if got := DefaultAllowMultiTenant(); got != tc.want {
+			t.Errorf("%s=%q: got %v, want %v", AllowMultiTenantEnvVar, tc.val, got, tc.want)
+		}
+	}
+}
+
+// #1763: WithAllowMultiTenant replaces the env-reading default.
+func TestWithAllowMultiTenant_Overrides(t *testing.T) {
+	t.Parallel()
+	h := New(nil, nil).WithAllowMultiTenant(func() bool { return true })
+	if !h.allowMultiTenant() {
+		t.Fatal("WithAllowMultiTenant(true) not applied")
+	}
+}

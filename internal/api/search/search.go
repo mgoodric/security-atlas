@@ -307,28 +307,39 @@ func (h *Handler) searchType(ctx context.Context, t, q string, tokens []string) 
 // description per-token; a row matches when ANY token appears in
 // either column. Relevance is per-row token overlap on the
 // concatenation (see relevance()).
+//
+// #1737 — the control's external_refs (system, id, note per entry) are
+// a third searchable column, so an auditor's control number or a
+// "tested under" requirement code finds the control it was mapped to.
 func (h *Handler) searchControls(ctx context.Context, q string, tokens []string) ([]SearchHit, error) {
 	stmt, args := buildTokenizedQuery(`
-		SELECT id::text, title, description
+		SELECT id::text, title, description, `+controlRefsTextExpr+` AS refs_text
 		FROM controls
 		WHERE superseded_by IS NULL
-		  AND `, []string{"title", "description"}, tokens, q, "ORDER BY title ASC")
+		  AND `, []string{"title", "description", controlRefsTextExpr}, tokens, q, "ORDER BY title ASC")
 	rows, err := h.queryInTenantTx(ctx, stmt, args...)
 	if err != nil {
 		return nil, err
 	}
 	out := make([]SearchHit, 0, len(rows))
 	for _, r := range rows {
+		text := strings.TrimSpace(r["title"] + " " + r["description"] + " " + r["refs_text"])
 		out = append(out, SearchHit{
 			ID:             r["id"],
 			Type:           TypeControls,
 			Title:          r["title"],
-			Snippet:        snippet(r["title"]+" "+r["description"], q),
-			RelevanceScore: relevance(tokens, r["title"]+" "+r["description"]),
+			Snippet:        snippet(text, q),
+			RelevanceScore: relevance(tokens, text),
 		})
 	}
 	return out, nil
 }
+
+// controlRefsTextExpr flattens controls.external_refs into one string
+// of "system id note" per entry. It reads the element fields rather
+// than casting the JSONB to text, so the key names ("system", "note")
+// never match a query.
+const controlRefsTextExpr = `coalesce((SELECT string_agg(concat_ws(' ', r->>'system', r->>'id', r->>'note'), ' ') FROM jsonb_array_elements(external_refs) r), '')`
 
 // searchRisks queries `risks`. Searches title + description per-token;
 // a row matches when ANY token appears in either column. NO existing

@@ -274,6 +274,57 @@ func TestUpload_UnknownAnchor(t *testing.T) {
 	}
 }
 
+// TestUpload_StoresExternalRefs — #1737: external_refs from control.yaml
+// land on the new control row with the default kind filled in, and a
+// bundle without the field stores '[]'.
+func TestUpload_StoresExternalRefs(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	_, code := seedSCFAnchor(t, admin, "IAC-06", "IAC")
+	tenant := freshTenant(t, admin)
+	store := control.NewStore(app)
+	ctx, err := tenancy.WithTenant(context.Background(), tenant)
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+
+	withRefs := yamlFor("refs_control", code, "manual_periodic") + `external_refs:
+  - system: acme-audit
+    id: RA-03
+  - system: soc2
+    kind: tested_under
+    id: CC3.1
+    note: "FY25 report, section 4"
+`
+	cases := []struct {
+		yaml string
+		want string
+	}{
+		{withRefs, `[{"id": "RA-03", "kind": "reference", "system": "acme-audit"}, {"id": "CC3.1", "kind": "tested_under", "note": "FY25 report, section 4", "system": "soc2"}]`},
+		{yamlFor("no_refs_control", code, "automated"), `[]`},
+	}
+	for _, tc := range cases {
+		bundle, err := control.FinalizeBundleForHTTP([]byte(tc.yaml))
+		if err != nil {
+			t.Fatalf("FinalizeBundleForHTTP: %v", err)
+		}
+		res, err := store.Upload(ctx, bundle, "key_admin")
+		if err != nil {
+			t.Fatalf("Upload: %v", err)
+		}
+		var got string
+		if err := admin.QueryRow(context.Background(), `
+			SELECT external_refs::text FROM controls WHERE id = $1
+		`, res.ControlID).Scan(&got); err != nil {
+			t.Fatalf("read external_refs: %v", err)
+		}
+		if got != tc.want {
+			t.Errorf("external_refs = %s\nwant %s", got, tc.want)
+		}
+	}
+}
+
 // yamlFor builds a minimal manifest body for a given bundle id, anchor, and
 // implementation_type. Lets tests vary one axis at a time.
 func yamlFor(bundleID, anchor, impl string) string {

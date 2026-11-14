@@ -61,6 +61,7 @@ When uploaded as a tarball, the archive **MUST**:
 | `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.          |
 | `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                       |
 | `manual_evidence_schema` | JSON Schema | When `implementation_type` is `manual_*`, the schema of the attestation form. Authoritative for the manual upload UI. |
+| `external_refs`          | object[]    | Identifiers outside the platform that this control traces to. See §2.5.                                               |
 
 ### 2.3 Evidence queries
 
@@ -91,6 +92,32 @@ applicability_expr:
 Operators: `true`, `eq`, `in`, `and`, `or`, `not`. Empty / null / `{}` means "applies to every scope cell". The full operator reference lives in `internal/scope/expr.go`.
 
 AC-5: a bundle whose `applicability_expr` references an undeclared scope dimension (or uses an unknown operator, or malformed args) is **rejected at parse**.
+
+### 2.5 External references (#1737)
+
+`external_refs` keeps the trace from a control to the identifiers auditors and GRC teams work from: the organisation's own control number, an auditor's reference, or the framework requirement the control was tested under. A unified control merged from several audited activities lists one entry per activity instead of burying them in `description`.
+
+| Field    | Type   | Notes                                                                                                                                        |
+| -------- | ------ | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `system` | string | Required. Where the id comes from: a framework slug (`soc2`) or an organisation label (`acme-audit`). Pattern `^[a-z0-9][a-z0-9_.-]{0,63}$`. |
+| `kind`   | enum   | `reference` (default) or `tested_under`. For `tested_under`, `system` is the framework slug and `id` the requirement code.                   |
+| `id`     | string | Required, at most 200 characters. The identifier as the other system writes it (`RA-03`, `CC3.1`).                                           |
+| `note`   | string | Optional, at most 500 characters. E.g. `"FY25 report, section 4"`.                                                                           |
+
+A bundle may carry at most 100 entries, and no two may share the same `system` + `kind` + `id`. Length caps count characters, not bytes. The refs are stored per control version, shown in the control detail header, and matched by `/v1/search` (system, id and note).
+
+**Adding or editing refs updates the control in place (#1958).** Refs are trace metadata and do not feed evaluation, so a re-upload whose `control.yaml` differs from the active version only in `external_refs` and/or `description` keeps the control id and version. Owners, evidence, exceptions and links stay attached, and the prior manifest is kept in `control_manifest_revisions`. A refs change made together with any other field change still creates a new version. See §4 "Versioning + supersession".
+
+```yaml
+external_refs:
+  - system: acme-audit
+    id: RA-03
+    note: "2025 SOC 2 report, Section 4"
+  - system: soc2
+    kind: tested_under
+    id: CC3.1
+    note: "FY25 report, section 4"
+```
 
 ---
 
@@ -218,9 +245,9 @@ Responses:
 
 - Re-upload with the same `bundle_id` creates a **new row** and sets the prior row's `superseded_by` to the new row's id in the same transaction (AC-6). Two exceptions:
   - A byte-identical `control.yaml` is a no-op: the active row is returned unchanged (slice 068).
-  - A `control.yaml` that differs from the active version's **only in the top-level `description`** (rewording, reflow, adding or removing it) updates the active row in place. The control id and version stay the same, so owners, evidence, exceptions and links stay attached. The response is `200` with the existing `control_id` and `version` and no `superseded_id`. Any other change, including `title` or a nested `evidence_queries[].description`, still creates a new version. See `docs/audit-log/1908-control-description-in-place-decisions.md`.
+  - A `control.yaml` that differs from the active version's **only in the top-level `description` and/or `external_refs`** (rewording, reflow, adding, editing or removing either) updates the active row in place. The control id and version stay the same, so owners, evidence, exceptions and links stay attached. The response is `200` with the existing `control_id` and `version` and no `superseded_id`. Any other change, including `title` or a nested `evidence_queries[].description`, still creates a new version. See `docs/audit-log/1908-control-description-in-place-decisions.md` and `docs/audit-log/1958-control-external-refs-in-place-decisions.md`.
 - The partial unique index `controls_one_active_version_per_bundle` guarantees only one active version per `(tenant_id, bundle_id)`.
-- The full manifest YAML is stored verbatim on every version (`bundle_manifest_yaml`) plus its sha256 hex (`bundle_manifest_hash`) so auditors can prove byte-exact reproducibility. A description-only update overwrites both on the active row, so the prior manifest, its hash, uploader and upload time are first copied, in the same transaction, to the append-only `control_manifest_revisions` table. That table is where a control's prose history lives. A concurrent upload that supersedes the row mid-update returns `409`.
+- The full manifest YAML is stored verbatim on every version (`bundle_manifest_yaml`) plus its sha256 hex (`bundle_manifest_hash`) so auditors can prove byte-exact reproducibility. An in-place update overwrites both on the active row, so the prior manifest, its hash, uploader and upload time are first copied, in the same transaction, to the append-only `control_manifest_revisions` table. That table is where a control's prose and refs history lives. An upload locks the active row (`SELECT … FOR UPDATE`) before deciding, so concurrent uploads of one bundle run one after another and each in-place update records the manifest the previous one wrote. A concurrent upload that supersedes the row mid-update returns `409`.
 
 ---
 

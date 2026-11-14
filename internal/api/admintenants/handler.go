@@ -70,6 +70,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -124,6 +125,12 @@ const (
 	creatorJoinsAsAdmin = "admin"
 	creatorJoinsAsNone  = "none"
 
+	// AllowMultiTenantEnvVar is the deployment setting that opts an
+	// install into multi-tenant (ADR 0023 decision 4). Without it, Create
+	// refuses to add a tenant once one exists. It gates creation only:
+	// an install that already holds several tenants keeps working.
+	AllowMultiTenantEnvVar = "ATLAS_ALLOW_MULTI_TENANT"
+
 	// defaultDimensionName is the canonical builtin first scope
 	// dimension. Mirrors deploy/docker/bootstrap/seed.sql.
 	defaultDimensionName = "environment"
@@ -158,10 +165,18 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 //     POST create handler for the cross-tenant transaction
 //     (slice-198 D3 pattern).
 type Handler struct {
-	pool     *pgxpool.Pool
-	authPool *pgxpool.Pool
-	clock    func() time.Time
-	limit    int
+	pool             *pgxpool.Pool
+	authPool         *pgxpool.Pool
+	clock            func() time.Time
+	limit            int
+	allowMultiTenant func() bool
+}
+
+// DefaultAllowMultiTenant reads ATLAS_ALLOW_MULTI_TENANT. Only the exact
+// string "true" opts in, matching the ATLAS_ENABLE_DEMO_SEED gate, so a
+// stray "1" or "yes" does not make an install multi-tenant.
+func DefaultAllowMultiTenant() bool {
+	return os.Getenv(AllowMultiTenantEnvVar) == "true"
 }
 
 // New constructs a Handler. authPool MAY be nil — in that case POST
@@ -169,11 +184,18 @@ type Handler struct {
 // the slice-198 NewStoreWithAuthPool follows the same pattern).
 func New(pool, authPool *pgxpool.Pool) *Handler {
 	return &Handler{
-		pool:     pool,
-		authPool: authPool,
-		clock:    time.Now,
-		limit:    DefaultRateLimitPerDay,
+		pool:             pool,
+		authPool:         authPool,
+		clock:            time.Now,
+		limit:            DefaultRateLimitPerDay,
+		allowMultiTenant: DefaultAllowMultiTenant,
 	}
+}
+
+// WithAllowMultiTenant overrides the multi-tenant opt-in. Test-only.
+func (h *Handler) WithAllowMultiTenant(fn func() bool) *Handler {
+	h.allowMultiTenant = fn
+	return h
 }
 
 // WithLimit overrides the rate-limit cap. Test-only.
@@ -306,6 +328,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 // super_admin_audit_log count over the rolling window (P0-CT-2). 429
 // with Retry-After when exceeded.
 //
+// Multi-tenant opt-in (ADR 0023, #1763): once a tenant exists, a
+// further one is created only when ATLAS_ALLOW_MULTI_TENANT=true. 403
+// otherwise. The setting gates creation only; List and every other
+// surface ignore it.
+//
 // Returns 200 OK with the new tenant payload on success.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if !requireSuperAdmin(w, r) {
@@ -315,6 +342,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "tenant management unavailable: no auth pool")
 		return
 	}
+	// The multi-tenant gate (#1763) counts tenants inside the create
+	// transaction, under installTenantCreateLockKey (#2015, step 0b).
+	allowMultiTenant := h.allowMultiTenant()
 
 	var req createRequest
 	if err := json.NewDecoder(io.LimitReader(r.Body, 16*1024)).Decode(&req); err != nil {
@@ -436,6 +466,33 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	); err != nil {
 		httperr.WriteInternal(w, r, "acquire actor lock", err)
 		return
+	}
+
+	// 0b. Multi-tenant gate (#1763) under an install-wide lock (#2015).
+	//     Counted outside a transaction, two concurrent creates could
+	//     both see zero tenants and both proceed, and the per-actor lock
+	//     above does not help when two super_admins race. So without the
+	//     opt-in every create takes one install-wide lock, then counts.
+	//     Under READ COMMITTED the count after the lock sees any tenant
+	//     a previous holder committed. Taken after the actor lock, in
+	//     the same order on every path, so the two cannot deadlock.
+	if !allowMultiTenant {
+		if _, err := tx.Exec(r.Context(),
+			`SELECT pg_advisory_xact_lock($1)`, installTenantCreateLockKey,
+		); err != nil {
+			httperr.WriteInternal(w, r, "acquire tenant-create lock", err)
+			return
+		}
+		existing, err := countTenants(r.Context(), tx)
+		if err != nil {
+			httperr.WriteInternal(w, r, "count tenants", err)
+			return
+		}
+		if existing > 0 {
+			_ = tx.Rollback(r.Context())
+			writeMultiTenantDisabled(w)
+			return
+		}
 	}
 
 	// 1. Rate-limit gate (inside the transaction; serialised against
@@ -691,6 +748,33 @@ func mustMarshal(v any) []byte {
 }
 
 func stringPtr(s string) *string { return &s }
+
+// installTenantCreateLockKey is the pg_advisory_xact_lock(BIGINT) key that
+// serialises tenant creation while the multi-tenant opt-in is off (#2015).
+// One key for the whole install, distinct from the slice-142
+// (0x142142142142), slice-198 (0x198198198198) and per-actor slice-143
+// (0x0143...) keys.
+const installTenantCreateLockKey int64 = 0x201520152015
+
+// rowQuerier is the QueryRow method shared by *pgxpool.Pool and pgx.Tx.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// countTenants counts the install's tenants. The all-zeros row is not a
+// tenant (#1885), as in platform.Status.TenantCount.
+func countTenants(ctx context.Context, q rowQuerier) (int, error) {
+	var n int
+	err := q.QueryRow(ctx, `SELECT count(*) FROM tenants WHERE id <> $1`, uuid.Nil).Scan(&n)
+	return n, err
+}
+
+// writeMultiTenantDisabled writes the 403 for a create that the missing
+// opt-in blocks.
+func writeMultiTenantDisabled(w http.ResponseWriter) {
+	httpresp.WriteError(w, http.StatusForbidden,
+		"multi-tenant is not enabled on this install: set "+AllowMultiTenantEnvVar+"=true to create another tenant")
+}
 
 // actorAdvisoryKey derives a per-actor BIGINT key for the slice-143
 // per-actor advisory lock. The high bit of the key is the slice-143-

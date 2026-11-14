@@ -90,7 +90,12 @@ FROM (
 
     UNION ALL
 
-    -- policy review cycles: policies with next_review_at set.
+    -- policy review cycles: published policies with next_review_at set.
+    -- #1806: status is the review state, as for the other dated branches:
+    -- 'overdue' once next_review_at has passed, 'due-soon' within 30 days
+    -- (the window internal/policy ReviewDueSoonWindow names), otherwise
+    -- 'upcoming'. The policy lifecycle state moves to summary. Only the
+    -- published chain tip has a review due; superseded rows are history.
     SELECT
         p.id::text                                                    AS event_id,
         'policy'::text                                                AS event_type,
@@ -100,10 +105,15 @@ FROM (
         p.id::text                                                    AS related_entity_id,
         'policy'::text                                                AS related_entity_kind,
         p.status                                                      AS summary,
-        p.status                                                      AS status,
+        CASE
+            WHEN p.next_review_at < $5::timestamptz THEN 'overdue'
+            WHEN p.next_review_at <= $5::timestamptz + INTERVAL '30 days' THEN 'due-soon'
+            ELSE 'upcoming'
+        END                                                           AS status,
         NULL::text                                                    AS cadence
     FROM policies p
     WHERE p.tenant_id = $1
+      AND p.status = 'published'
       AND p.next_review_at IS NOT NULL
       AND p.next_review_at::timestamptz >= $2::timestamptz
       AND p.next_review_at::timestamptz <  $3::timestamptz
@@ -335,6 +345,7 @@ type ListCalendarEventsRow struct {
 //  1. audit_periods           — period_end is the audit's "report due" date
 //  2. exceptions              — expires_at is the waiver-lapse date
 //  3. policies                — next_review_at is the next review date
+//     (published only; overdue / due-soon, #1806)
 //  4. vendors                 — last_review_date + review_cadence interval is
 //     the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
 //     vendor branch so the two surfaces cannot drift (slice 675).

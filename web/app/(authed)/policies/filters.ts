@@ -26,6 +26,12 @@
 //   The band values are URL-safe short strings (`ge95`/`lt95`/`lt50`)
 //   so `?ack_status=ge95` etc. is bookmarkable (AC-3).
 //
+// #1806 — `review` predicate. Matches the `review_status` the API computes
+//   for a published policy with a review date (`overdue` once
+//   next_review_at has passed, `due-soon` within 30 days, else
+//   `upcoming`). Rows with no review status (no date, or not published)
+//   match only `ALL`. The values equal the API's `?review=` filter.
+//
 // Constitutional anti-criterion P0-A3 honored: only fields that exist
 // on `policyWire` are referenced — no invented columns.
 
@@ -62,16 +68,22 @@ export type AckStatusBand =
   | typeof ACK_STATUS_LT_95
   | typeof ACK_STATUS_LT_50;
 
+/** #1806 — `review` pill values; equal to the API's `review_status`. */
+export const REVIEW_OVERDUE = "overdue" as const;
+export const REVIEW_DUE_SOON = "due-soon" as const;
+
 export type PolicyFilters = {
   status: string;
   owner_role: string;
   ack_status: string;
+  review: string;
 };
 
 export const DEFAULT_FILTERS: PolicyFilters = {
   status: ALL,
   owner_role: ALL,
   ack_status: ALL,
+  review: ALL,
 };
 
 /**
@@ -81,7 +93,8 @@ export function isDefault(filters: PolicyFilters): boolean {
   return (
     filters.status === ALL &&
     filters.owner_role === ALL &&
-    filters.ack_status === ALL
+    filters.ack_status === ALL &&
+    filters.review === ALL
   );
 }
 
@@ -116,7 +129,17 @@ export function ackStatusMatches(row: Policy, band: string): boolean {
 }
 
 /**
- * Narrow a policy list against the active filter set. The three
+ * #1806 — true when the row's review status matches the `review` pill.
+ * Every row matches `ALL`; otherwise the row's `review_status` must equal
+ * the selected value, so undated and unpublished rows drop out.
+ */
+export function reviewMatches(row: Policy, review: string): boolean {
+  if (review === ALL) return true;
+  return row.review_status === review;
+}
+
+/**
+ * Narrow a policy list against the active filter set. The four
  * filters intersect.
  *
  * Unassigned-owner rows match `owner_role = "unassigned"` (the
@@ -134,6 +157,9 @@ export function applyFilters(rows: Policy[], filters: PolicyFilters): Policy[] {
       if (ownerNorm !== filters.owner_role) return false;
     }
     if (!ackStatusMatches(row, filters.ack_status)) {
+      return false;
+    }
+    if (!reviewMatches(row, filters.review)) {
       return false;
     }
     return true;

@@ -37,6 +37,13 @@ type SCFWorkbookOptions struct {
 	FrameworkIssuer  string
 	FrameworkVersion string
 	ReleaseDate      string
+	// TitlesPath names a YAML file in the crosswalk requirements format
+	// (code, title, body) whose titles take precedence over the bundled
+	// crosswalk's. Its mappings, if any, are ignored.
+	TitlesPath string
+	// AllowCodeTitles lets requirements that no title source covers import
+	// with their code as their title. Without it the load fails and lists them.
+	AllowCodeTitles bool
 }
 
 type focalDocument struct {
@@ -178,6 +185,9 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 		Requirements:      requirements,
 		Mappings:          mappings,
 	}
+	if err := resolveWorkbookTitles(cw, opts); err != nil {
+		return nil, err
+	}
 	if err := validate(cw); err != nil {
 		return nil, err
 	}
@@ -263,6 +273,9 @@ func loadOLIRWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions) (*
 			SourceAttribution: "community_draft",
 			Requirements:      requirements,
 			Mappings:          mappings,
+		}
+		if err := resolveWorkbookTitles(cw, opts); err != nil {
+			return nil, err
 		}
 		if err := validate(cw); err != nil {
 			return nil, err
