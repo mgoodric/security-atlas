@@ -212,6 +212,7 @@ function SectionStructured({ section }: { section: BoardPackSection }) {
         <CoverageTrend
           baseline={data.baseline_coverage_pct ?? 0}
           current={data.coverage_pct ?? 0}
+          noBaseline={data.no_baseline ?? false}
           delta={data.coverage_delta ?? 0}
         />
       );
@@ -247,6 +248,7 @@ function SectionStructured({ section }: { section: BoardPackSection }) {
           spendUSD={data.spend_usd ?? 0}
           coverageDelta={data.coverage_delta ?? 0}
           costPerCoveragePoint={data.cost_per_coverage_point ?? 0}
+          notAvailable={data.no_baseline ?? false}
         />
       );
     case "asks":
