@@ -60,6 +60,9 @@ type Credential struct {
 	// scopes for tenant B. IsAdmin implies IsApprover (admins can do
 	// anything an approver can) but the converse is not true.
 	//
+	// Policy approval also requires a person (#1807): a credential bound
+	// to no user (MinterUserID == "") holding IsApprover is refused there.
+	//
 	// In v1 the approver role is minted via IssueApprover. Slice 035
 	// will graduate this to full OPA-driven RBAC; until then the
 	// flag-on-credential pattern matches slice 014's IsAdmin shape.

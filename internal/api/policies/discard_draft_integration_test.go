@@ -132,7 +132,7 @@ func TestDiscardDraft_RefusesNonDraftStates(t *testing.T) {
 
 	approved := createDraftPolicy(t, s, "Approved Policy", "1.0", nil)
 	s.do(t, http.MethodPatch, "/v1/policies/"+approved+"/submit", nil, s.adminBear, http.StatusOK)
-	s.do(t, http.MethodPatch, "/v1/policies/"+approved+"/approve", nil, s.adminBear, http.StatusOK)
+	s.do(t, http.MethodPatch, "/v1/policies/"+approved+"/approve", nil, s.approverBear, http.StatusOK)
 
 	superseded := publishWithReview(t, s, "Retention Policy", "1.0", "")
 	v2 := decodePolicy(t, createNextVersion(t, s, superseded.ID, "2.0", http.StatusCreated))
