@@ -61,7 +61,12 @@ authed.describe("open-redirect defense on signIn", () => {
       const tokenInput = authedPage.locator('input[name="token"]');
       await tokenInput.waitFor({ state: "visible", timeout: 5_000 });
       await tokenInput.fill(process.env.TEST_BEARER ?? "");
-      await authedPage.getByRole("button", { name: /sign in/i }).click();
+      // #1756: the email/password form is always on /login too, so scope
+      // the submit to the bearer-token form.
+      await authedPage
+        .locator("form", { has: tokenInput })
+        .getByRole("button", { name: /sign in/i })
+        .click();
 
       // Wait for the redirect to settle off `/login`. The prior shape —
       // `(url) => url.origin === new URL(authedPage.url()).origin` —
