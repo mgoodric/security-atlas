@@ -229,15 +229,16 @@ func seedAPIKeyForUser(t *testing.T, admin *pgxpool.Pool, tenant string, userID 
 // ----- harness -----
 
 type setupResult struct {
-	server    *httptest.Server
-	app       *pgxpool.Pool
-	admin     *pgxpool.Pool
-	apiServer *api.Server
-	ingester  *ingest.Service
-	tenant    string
-	ctrlID    uuid.UUID
-	adminBear string
-	adminUser uuid.UUID
+	server       *httptest.Server
+	app          *pgxpool.Pool
+	admin        *pgxpool.Pool
+	apiServer    *api.Server
+	ingester     *ingest.Service
+	tenant       string
+	ctrlID       uuid.UUID
+	adminBear    string
+	approverBear string // a second person; approves what the admin submits
+	adminUser    uuid.UUID
 }
 
 func setup(t *testing.T) setupResult {
@@ -264,6 +265,11 @@ func setup(t *testing.T) setupResult {
 	adminClaims := testjwt.AdminFor(uuid.MustParse(tenant))
 	adminClaims.Subject = adminUser.String()
 	adminBearer := apiServer.IssueTestJWT(t, adminClaims)
+	// A second person approves what the admin submits (#1807). No users
+	// row is seeded, so acknowledgment-rate denominators are unchanged.
+	approverClaims := testjwt.AdminFor(uuid.MustParse(tenant))
+	approverClaims.Subject = uuid.NewString()
+	approverBearer := apiServer.IssueTestJWT(t, approverClaims)
 
 	h := apiServer.HTTPHandlerForTests()
 	if h == nil {
@@ -274,15 +280,16 @@ func setup(t *testing.T) setupResult {
 	// httptest server needs an explicit close here.
 	t.Cleanup(ts.Close)
 	return setupResult{
-		server:    ts,
-		app:       app,
-		admin:     admin,
-		apiServer: apiServer,
-		ingester:  ingester,
-		tenant:    tenant,
-		ctrlID:    ctrlID,
-		adminBear: adminBearer,
-		adminUser: adminUser,
+		server:       ts,
+		app:          app,
+		admin:        admin,
+		apiServer:    apiServer,
+		ingester:     ingester,
+		tenant:       tenant,
+		ctrlID:       ctrlID,
+		adminBear:    adminBearer,
+		approverBear: approverBearer,
+		adminUser:    adminUser,
 	}
 }
 
@@ -341,7 +348,7 @@ func createAndPublishPolicy(t *testing.T, s setupResult, title, version string, 
 	t.Helper()
 	id := createDraftPolicy(t, s, title, version, requiredRoles)
 	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/submit", nil, s.adminBear, http.StatusOK)
-	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/approve", nil, s.adminBear, http.StatusOK)
+	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/approve", nil, s.approverBear, http.StatusOK)
 	pubBody, _ := json.Marshal(map[string]any{"new_version": version})
 	raw := s.do(t, http.MethodPost, "/v1/policies/"+id+"/publish", pubBody, s.adminBear, http.StatusCreated)
 	var env struct {

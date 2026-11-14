@@ -531,3 +531,31 @@ func TestImportReport_Failed(t *testing.T) {
 		t.Error("a failed result should make the report failed")
 	}
 }
+
+// TestCheckApprover covers #1807: the submitter never approves their own
+// policy. A row with no recorded submitter (pre-dates the column) has no
+// one to collide with.
+func TestCheckApprover(t *testing.T) {
+	t.Parallel()
+	submitter := "user-1"
+	cases := []struct {
+		name        string
+		submittedBy *string
+		approver    string
+		want        error
+	}{
+		{"submitter approves own policy", &submitter, "user-1", ErrSelfApproval},
+		{"second person approves", &submitter, "user-2", nil},
+		{"no recorded submitter", nil, "user-1", nil},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			row := dbx.Policy{SubmittedBy: tc.submittedBy}
+			if got := checkApprover(row, tc.approver); !errors.Is(got, tc.want) {
+				t.Fatalf("checkApprover = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}

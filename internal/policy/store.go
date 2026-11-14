@@ -29,7 +29,8 @@
 //
 // Approver role gate: under_review->approved and approved->published both
 // require cred.IsApprover || cred.IsAdmin. Publish is gated because it
-// creates an audit-binding artifact; defense in depth.
+// creates an audit-binding artifact; defense in depth. Approve also
+// refuses the person who submitted the policy (#1807).
 package policy
 
 import (
@@ -80,6 +81,10 @@ var (
 	// ErrWrongState is returned when a transition is requested from a
 	// state that doesn't permit it. HTTP 409.
 	ErrWrongState = errors.New("policy: not in expected state")
+	// ErrSelfApproval is returned when the approver is the person who
+	// submitted the policy for review (#1807, segregation of duties).
+	// HTTP 403.
+	ErrSelfApproval = errors.New("policy: the submitter cannot approve their own policy; a second approver must approve it")
 	// ErrOrphanPublish is returned when publish is attempted on a policy
 	// with empty linked_control_ids (AC-7 + anti-criterion P0).
 	ErrOrphanPublish = errors.New("policy: cannot publish orphan policy (no linked controls)")
@@ -334,7 +339,8 @@ func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string)
 }
 
 // Approve transitions under_review -> approved. Handler validates
-// IsApprover before calling.
+// IsApprover before calling; the store refuses an approver who submitted
+// the policy (#1807), in the same transaction as the approval.
 func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver string) (Policy, error) {
 	if approver == "" {
 		return Policy{}, ErrCreatedByRequired
@@ -343,6 +349,21 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver string) (Pol
 		expectedPrior: StateUnderReview,
 		newState:      StateApproved,
 		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Policy, error) {
+			// submitted_by is written once, on draft -> under_review, and
+			// no transition returns a policy to draft, so reading it here
+			// and approving below in one transaction cannot race.
+			current, err := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       pgUUID(id),
+			})
+			if err != nil {
+				return dbx.Policy{}, err
+			}
+			if current.Status == StateUnderReview {
+				if err := checkApprover(current, approver); err != nil {
+					return dbx.Policy{}, err
+				}
+			}
 			return q.ApprovePolicy(ctx, dbx.ApprovePolicyParams{
 				TenantID:   pgUUID(tenantID),
 				ID:         pgUUID(id),
@@ -350,6 +371,17 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver string) (Pol
 			})
 		},
 	})
+}
+
+// checkApprover is the single segregation-of-duties rule for policy
+// approval (#1807): the approver must not be the submitter. It refuses
+// unconditionally for now; the organisation-level self-approval opt-in
+// (#2101) extends this function rather than adding a second check.
+func checkApprover(p dbx.Policy, approver string) error {
+	if p.SubmittedBy != nil && *p.SubmittedBy == approver {
+		return ErrSelfApproval
+	}
+	return nil
 }
 
 // PublishInput is the API shape for POST /v1/policies/{id}/publish. The

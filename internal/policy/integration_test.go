@@ -253,6 +253,36 @@ func TestApprove_RejectsFromDraft(t *testing.T) {
 	}
 }
 
+// ---- #1807: segregation of duties on approval ----
+
+func TestApprove_RefusesSubmitter(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctrl := seedControl(t, admin, tenant)
+	store := policy.NewStore(app)
+	ctx := ctxFor(t, tenant)
+
+	created, _ := store.Create(ctx, validCreate([]uuid.UUID{ctrl}, "key_author"))
+	if _, err := store.SubmitForReview(ctx, created.ID, "key_author"); err != nil {
+		t.Fatalf("SubmitForReview: %v", err)
+	}
+	_, err := store.Approve(ctx, created.ID, "key_author")
+	if !errors.Is(err, policy.ErrSelfApproval) {
+		t.Fatalf("submitter approving own policy: expected ErrSelfApproval, got %v", err)
+	}
+	got, err := store.Get(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != policy.StateUnderReview {
+		t.Fatalf("refused approval must leave the policy under_review, got %q", got.Status)
+	}
+	if _, err := store.Approve(ctx, created.ID, "key_approver"); err != nil {
+		t.Fatalf("a second person approving: %v", err)
+	}
+}
+
 // ---- AC-1: version chain stays within tenant ----
 
 func TestVersionChain_TenantBoundary(t *testing.T) {

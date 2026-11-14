@@ -23,6 +23,7 @@ package policies
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -232,6 +233,7 @@ func TestWriteTransitionErr(t *testing.T) {
 	}{
 		{policy.ErrNotFound, http.StatusNotFound},
 		{policy.ErrWrongState, http.StatusConflict},
+		{fmt.Errorf("transition: %w", policy.ErrSelfApproval), http.StatusForbidden},
 		{errors.New("boom"), http.StatusInternalServerError},
 	}
 	for _, tc := range cases {
@@ -244,6 +246,20 @@ func TestWriteTransitionErr(t *testing.T) {
 				t.Fatalf("writeTransitionErr(%v) = %d, want %d", tc.err, rec.Code, tc.want)
 			}
 		})
+	}
+}
+
+// TestActorOf pins #1807's identity rule: two JWT sessions of one user are
+// one actor, so the submitter cannot approve from a second session.
+func TestActorOf(t *testing.T) {
+	t.Parallel()
+	a := credstore.Credential{ID: "jwt:session-a", UserID: "user-1"}
+	b := credstore.Credential{ID: "jwt:session-b", UserID: "user-1"}
+	if actorOf(a) != actorOf(b) {
+		t.Fatalf("two sessions of one user: actorOf = %q and %q, want equal", actorOf(a), actorOf(b))
+	}
+	if got := actorOf(credstore.Credential{ID: "key-1"}); got != "key-1" {
+		t.Fatalf("credential with no user: actorOf = %q, want the credential id", got)
 	}
 }
 
