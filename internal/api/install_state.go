@@ -29,6 +29,9 @@ type PlatformStatus interface {
 	// bootstrap tenant can be resolved — the handler treats that as
 	// "no tenant_id to include" and degrades gracefully (slice 210).
 	BootstrapTenantID(ctx context.Context) (uuid.UUID, error)
+	// TenantCount returns how many real tenants exist (the all-zeros row
+	// excluded). install-state reports single_tenant from it (#1756).
+	TenantCount(ctx context.Context) (int, error)
 }
 
 // AttachPlatformStatus wires the slice-073 Status reader/writer onto the
@@ -64,9 +67,16 @@ func (s *Server) AttachLogger(l *slog.Logger) {
 // `omitempty` keeps the response shape unchanged for post-first-install
 // installs (which never carry a tenant_id) and for the graceful-degradation
 // path where the tenant lookup failed.
+//
+// #1756: SingleTenant is true when exactly one tenant exists, at any point
+// in the install's life. /login then signs in by email and password without
+// naming a tenant: POST /auth/local/login resolves the only tenant server
+// side. It is a boolean, not the tenant id, so the endpoint names no
+// tenant once first install is over.
 type installStateResponse struct {
 	FirstInstall bool   `json:"first_install"`
 	TenantID     string `json:"tenant_id,omitempty"`
+	SingleTenant bool   `json:"single_tenant"`
 }
 
 // handleInstallState answers GET /v1/install-state with
@@ -113,6 +123,14 @@ func (s *Server) handleInstallState(w http.ResponseWriter, r *http.Request) {
 			resp.TenantID = tid.String()
 		}
 	}
+	// #1756 — a failed count is non-fatal too: single_tenant stays false
+	// and /login asks for the tenant, which still signs in.
+	n, cerr := s.platformStatus.TenantCount(r.Context())
+	if cerr != nil {
+		s.installLogger().Warn("install-state tenant count failed",
+			slog.String("error", cerr.Error()))
+	}
+	resp.SingleTenant = cerr == nil && n == 1
 	_ = json.NewEncoder(w).Encode(resp)
 }
 

@@ -2,6 +2,8 @@ module github.com/mgoodric/security-atlas
 
 go 1.26.0
 
+toolchain go1.27.4
+
 require (
 	github.com/PaesslerAG/jsonpath v0.1.1
 	github.com/aws/aws-sdk-go-v2 v1.47.5
