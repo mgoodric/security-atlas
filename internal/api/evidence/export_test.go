@@ -80,6 +80,7 @@ func TestSlice138_EvidenceToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		PayloadURI:      "s3://bucket/artifact/abc",
 		ValidUntil:      now.Format(time.RFC3339),
 		CreatedAt:       now,
+		Demo:            true,
 	}
 	it := evidenceToRowIter([]evidenceExportRow{row})
 	var cells []string
@@ -99,6 +100,7 @@ func TestSlice138_EvidenceToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		"freshness_class":   "fresh",
 		"content_hash":      "sha256:abcdef",
 		"payload_uri":       "s3://bucket/artifact/abc",
+		"demo":              "true",
 	}
 	for col, expected := range want {
 		idx := -1

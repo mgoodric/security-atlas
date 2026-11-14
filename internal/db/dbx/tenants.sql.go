@@ -36,6 +36,7 @@ SELECT
     name,
     is_bootstrap_tenant,
     bundle_gate_mode,
+    risk_review_cadence_days,
     created_at,
     updated_at
 FROM tenants
@@ -43,12 +44,13 @@ WHERE id = $1
 `
 
 type GetTenantByIDRow struct {
-	ID                pgtype.UUID        `json:"id"`
-	Name              string             `json:"name"`
-	IsBootstrapTenant bool               `json:"is_bootstrap_tenant"`
-	BundleGateMode    string             `json:"bundle_gate_mode"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID                    pgtype.UUID        `json:"id"`
+	Name                  string             `json:"name"`
+	IsBootstrapTenant     bool               `json:"is_bootstrap_tenant"`
+	BundleGateMode        string             `json:"bundle_gate_mode"`
+	RiskReviewCadenceDays int32              `json:"risk_review_cadence_days"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Slice 144 — tenant identity queries.
@@ -72,6 +74,7 @@ func (q *Queries) GetTenantByID(ctx context.Context, id pgtype.UUID) (GetTenantB
 		&i.Name,
 		&i.IsBootstrapTenant,
 		&i.BundleGateMode,
+		&i.RiskReviewCadenceDays,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -87,6 +90,7 @@ RETURNING
     name,
     is_bootstrap_tenant,
     bundle_gate_mode,
+    risk_review_cadence_days,
     created_at,
     updated_at
 `
@@ -97,12 +101,13 @@ type UpdateTenantBundleGateModeParams struct {
 }
 
 type UpdateTenantBundleGateModeRow struct {
-	ID                pgtype.UUID        `json:"id"`
-	Name              string             `json:"name"`
-	IsBootstrapTenant bool               `json:"is_bootstrap_tenant"`
-	BundleGateMode    string             `json:"bundle_gate_mode"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID                    pgtype.UUID        `json:"id"`
+	Name                  string             `json:"name"`
+	IsBootstrapTenant     bool               `json:"is_bootstrap_tenant"`
+	BundleGateMode        string             `json:"bundle_gate_mode"`
+	RiskReviewCadenceDays int32              `json:"risk_review_cadence_days"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Slice 608: set the caller-tenant's control-bundle upload gate policy.
@@ -117,6 +122,7 @@ func (q *Queries) UpdateTenantBundleGateMode(ctx context.Context, arg UpdateTena
 		&i.Name,
 		&i.IsBootstrapTenant,
 		&i.BundleGateMode,
+		&i.RiskReviewCadenceDays,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -132,6 +138,7 @@ RETURNING
     name,
     is_bootstrap_tenant,
     bundle_gate_mode,
+    risk_review_cadence_days,
     created_at,
     updated_at
 `
@@ -142,12 +149,13 @@ type UpdateTenantNameParams struct {
 }
 
 type UpdateTenantNameRow struct {
-	ID                pgtype.UUID        `json:"id"`
-	Name              string             `json:"name"`
-	IsBootstrapTenant bool               `json:"is_bootstrap_tenant"`
-	BundleGateMode    string             `json:"bundle_gate_mode"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID                    pgtype.UUID        `json:"id"`
+	Name                  string             `json:"name"`
+	IsBootstrapTenant     bool               `json:"is_bootstrap_tenant"`
+	BundleGateMode        string             `json:"bundle_gate_mode"`
+	RiskReviewCadenceDays int32              `json:"risk_review_cadence_days"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Update a tenant's name. RLS gates this to the caller's own row.
@@ -164,6 +172,55 @@ func (q *Queries) UpdateTenantName(ctx context.Context, arg UpdateTenantNamePara
 		&i.Name,
 		&i.IsBootstrapTenant,
 		&i.BundleGateMode,
+		&i.RiskReviewCadenceDays,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateTenantRiskReviewCadence = `-- name: UpdateTenantRiskReviewCadence :one
+UPDATE tenants
+SET risk_review_cadence_days = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
+    risk_review_cadence_days,
+    created_at,
+    updated_at
+`
+
+type UpdateTenantRiskReviewCadenceParams struct {
+	ID                    pgtype.UUID `json:"id"`
+	RiskReviewCadenceDays int32       `json:"risk_review_cadence_days"`
+}
+
+type UpdateTenantRiskReviewCadenceRow struct {
+	ID                    pgtype.UUID        `json:"id"`
+	Name                  string             `json:"name"`
+	IsBootstrapTenant     bool               `json:"is_bootstrap_tenant"`
+	BundleGateMode        string             `json:"bundle_gate_mode"`
+	RiskReviewCadenceDays int32              `json:"risk_review_cadence_days"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+}
+
+// #2059: set the caller-tenant's risk review cadence in days. RLS gates this
+// to the caller's own row; `tenants_risk_review_cadence_days_chk` bounds it
+// to 1..3650 (defense in depth atop the handler's check). Existing risks keep
+// their review dates: the cadence is read only when a risk is inserted.
+func (q *Queries) UpdateTenantRiskReviewCadence(ctx context.Context, arg UpdateTenantRiskReviewCadenceParams) (UpdateTenantRiskReviewCadenceRow, error) {
+	row := q.db.QueryRow(ctx, updateTenantRiskReviewCadence, arg.ID, arg.RiskReviewCadenceDays)
+	var i UpdateTenantRiskReviewCadenceRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.IsBootstrapTenant,
+		&i.BundleGateMode,
+		&i.RiskReviewCadenceDays,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

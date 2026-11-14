@@ -179,6 +179,8 @@ export type AnchorRow = {
    */
   anchorFit?: AnchorFit;
   anchorFitNote?: string | null;
+  /** #2043 — the in-place demo seed added this control; the row shows a Demo badge. */
+  demo?: boolean;
 };
 
 export type AnchorFit = "exact" | "partial" | "none";
