@@ -87,9 +87,12 @@ test.describe("/risks roll-ups toggle (#2060)", () => {
 
     const toggle = page.getByTestId("risks-show-rollups");
     await expect(toggle).not.toBeChecked();
-    await toggle.check();
+    // The checkbox is URL-driven: its state flips once router.replace
+    // lands, not synchronously, so click and assert rather than check().
+    await toggle.click();
 
     await expect(page).toHaveURL(/[?&]rollups=1/);
+    await expect(toggle).toBeChecked();
     await expect(count).toHaveText("4 risks");
     const marker = page.getByTestId("risks-row-rollup");
     await expect(marker).toHaveCount(1);
@@ -99,8 +102,9 @@ test.describe("/risks roll-ups toggle (#2060)", () => {
       `/risks/${PARENT_ID}#children`,
     );
 
-    await toggle.uncheck();
+    await toggle.click();
     await expect(page).not.toHaveURL(/rollups=1/);
+    await expect(toggle).not.toBeChecked();
     await expect(count).toHaveText("3 risks");
     await expect(page.getByTestId("risks-row-rollup")).toHaveCount(0);
   });
