@@ -32,6 +32,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 
 import { switchTenant } from "@/lib/auth/switch-tenant";
+import { safeRedirectTarget } from "@/lib/safe-redirect";
 
 interface Tenant {
   id: string;
@@ -54,7 +55,11 @@ export default function SelectTenantPage() {
 function SelectTenantInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const returnTo = searchParams?.get("return_to") || "/dashboard";
+  // #2196 — `return_to` is user input that reaches router.replace(), so it
+  // goes through the open-redirect helper like every other redirect target.
+  const returnTo = safeRedirectTarget(
+    searchParams?.get("return_to") || "/dashboard",
+  );
 
   const [tenants, setTenants] = useState<Tenant[] | null>(null);
   const [pickingId, setPickingId] = useState<string | null>(null);
