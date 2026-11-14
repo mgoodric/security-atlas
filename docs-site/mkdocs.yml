@@ -85,6 +85,7 @@ plugins:
 
 nav:
   - Intro: index.md
+  - Getting started: getting-started.md
   - Install: install.md
   - Native install (no containers): install-native.md
   - Verify release artifacts: release-verification.md
