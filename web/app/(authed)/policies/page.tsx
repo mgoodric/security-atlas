@@ -455,10 +455,12 @@ function PoliciesPageInner() {
       // #1806 — next review date with an overdue / due-soon marker. Only
       // published policies have a review due (the API omits
       // review_status otherwise), so a draft's date shows without one.
+      // #2009 — a superseded version keeps the date it was due, as
+      // history; it has no next review, so the column shows none.
       id: "next_review_at",
       header: "Next review",
       cell: (row) => {
-        if (!row.next_review_at) {
+        if (!row.next_review_at || row.status === "superseded") {
           return (
             <span
               className="text-xs text-muted-foreground italic"

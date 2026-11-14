@@ -200,7 +200,8 @@ func TestNonceMismatchRejected(t *testing.T) {
 			stateCookie != nil, verifierCookie != nil, idpCookie != nil)
 	}
 
-	req := buildCallbackRequest(t, stateCookie, verifierCookie, idpCookie, nonceCookie)
+	req := buildCallbackRequest(t, stateCookie, verifierCookie, idpCookie, nonceCookie,
+		extractCookie(loginResult.Cookies, oidc.TenantCookie))
 
 	_, err = a.HandleCallback(context.Background(), req, tenantID)
 	if err == nil {
@@ -248,7 +249,8 @@ func TestNonceMatchAccepted(t *testing.T) {
 	// Mint an ID token whose nonce matches the cookie — happy path.
 	idp.mintNonce = nonceCookie.Value
 
-	req := buildCallbackRequest(t, stateCookie, verifierCookie, idpCookie, nonceCookie)
+	req := buildCallbackRequest(t, stateCookie, verifierCookie, idpCookie, nonceCookie,
+		extractCookie(loginResult.Cookies, oidc.TenantCookie))
 
 	cb, err := a.HandleCallback(context.Background(), req, tenantID)
 	if err != nil {
@@ -324,14 +326,14 @@ func TestStateStillEnforcedAlongsideNonce(t *testing.T) {
 
 // buildCallbackRequest constructs an http.Request mimicking what the
 // IdP would redirect the browser to: a GET to the callback URL with
-// ?code=...&state=<cookie value>, plus the four flow cookies on the
-// request. The token endpoint at the fixture's httptest server is
-// reached from HandleCallback's oa.Exchange call via go-oidc's
+// ?code=...&state=<cookie value>, plus the flow cookies on the
+// request (the tenant cookie, #1968, only when non-nil). The token
+// endpoint at the fixture's httptest server is reached from HandleCallback's oa.Exchange call via go-oidc's
 // discovered token endpoint, so this helper doesn't need a reference
 // to the fixture itself.
 func buildCallbackRequest(
 	t *testing.T,
-	stateCookie, verifierCookie, idpCookie, nonceCookie *http.Cookie,
+	stateCookie, verifierCookie, idpCookie, nonceCookie, tenantCookie *http.Cookie,
 ) *http.Request {
 	t.Helper()
 	rawURL := fmt.Sprintf("%s?code=test-code&state=%s",
@@ -345,5 +347,8 @@ func buildCallbackRequest(
 	req.AddCookie(verifierCookie)
 	req.AddCookie(idpCookie)
 	req.AddCookie(nonceCookie)
+	if tenantCookie != nil {
+		req.AddCookie(tenantCookie)
+	}
 	return req
 }

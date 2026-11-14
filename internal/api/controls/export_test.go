@@ -112,6 +112,7 @@ func TestSlice137_ControlsToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		UpdatedAt:          now,
 		AnchorFit:          "none",
 		AnchorFitNote:      "no SCF control covers audit committee independence",
+		Demo:               true,
 	}
 
 	it := controlsToRowIter([]controlExportRow{row})
@@ -141,6 +142,7 @@ func TestSlice137_ControlsToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		"bundle_manifest_hash": "sha256:abcdef0123456789",
 		"anchor_fit":           "none",
 		"anchor_fit_note":      "no SCF control covers audit committee independence",
+		"demo":                 "true",
 	}
 	for col, want := range checks {
 		idx := -1
@@ -200,6 +202,7 @@ func TestSlice137_ControlsExportHeader_StableOrder(t *testing.T) {
 		"updated_at",
 		"anchor_fit",
 		"anchor_fit_note",
+		"demo",
 	}
 	got := controlsExportHeader()
 	if len(got) != len(want) {

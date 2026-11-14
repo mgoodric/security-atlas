@@ -95,7 +95,9 @@ import {
   residualClass,
   residualState,
   reviewDuePending,
+  reviewOverdue,
   setFilter,
+  residualSeverity,
   severityBand,
   severityClasses,
   uniqueOwners,
@@ -110,6 +112,7 @@ import {
   type SortKey,
   type SortState,
 } from "./sort";
+import { SeverityPill } from "./severity-pill";
 import { SortableHeader } from "./sortable-header";
 
 // Slice 244 — six filter keys. Order mirrors the mockup
@@ -161,8 +164,9 @@ const SORT_PARAM = "sort";
 //   - INHERENT SEVERITY = likelihood × impact on the 5×5 grid, BEFORE
 //     any control mitigation (the risk's raw exposure).
 //   - RESIDUAL = inherent × (1 − control_effectiveness) — the exposure
-//     AFTER the linked controls' measured effectiveness, normalized to
-//     0..1.
+//     AFTER the linked controls' measured effectiveness, on the same
+//     1..25 scale and bands as inherent (#2058; it was once divided by 25
+//     into 0..1, which sat beside a 1..25 inherent number).
 //
 // Two risks with the same inherent severity legitimately carry
 // different residuals (different controls); two risks with the same
@@ -172,20 +176,21 @@ const SORT_PARAM = "sort";
 // scoring inconsistency. Copy/label only — the scoring model is
 // unchanged (anti-criterion).
 const SEVERITY_HEADER_TOOLTIP =
-  "Inherent severity: likelihood × impact on the 5×5 grid, before any control mitigation. Independent of the residual column.";
+  "Inherent severity (1–25): likelihood × impact on the 5×5 grid, before any control mitigation. Low 1–7, Medium 8–14, High 15–25.";
 const RESIDUAL_HEADER_TOOLTIP =
-  "Residual: inherent severity reduced by the linked controls' measured effectiveness (0..1). Two risks with the same inherent severity can have different residuals, and vice versa.";
+  "Residual (1–25): inherent severity reduced by the linked controls' measured effectiveness, on the same scale and bands as inherent. Two risks with the same inherent severity can have different residuals, and vice versa.";
 
 // Slice 680 / ATLAS-029 — pending-evaluation affordance copy.
 //
-// A newly-created risk has no residual_score or review_due_at until the
-// evaluator backfills them. The old cell rendered a bare "—", which
-// reads as broken. We render an explicit "Pending evaluation" label
-// (with a tooltip) instead so the empty state reads as "awaiting the
-// evaluator", not "missing data".
+// A newly-created risk has no residual_score until the evaluator
+// backfills it. The old cell rendered a bare "—", which reads as
+// broken. We render an explicit "Pending evaluation" label (with a
+// tooltip) instead so the empty state reads as "awaiting the
+// evaluator", not "missing data". The review-due date is not part of
+// this: since #2059 it is set when the risk is created.
 const PENDING_EVAL_LABEL = "Pending evaluation";
 const PENDING_EVAL_TOOLTIP =
-  "Awaiting the risk evaluator. Inherent severity computes immediately; the residual and review-due date are backfilled once controls are evaluated.";
+  "Awaiting the risk evaluator. Inherent severity computes immediately; the residual is backfilled once controls are evaluated.";
 
 const TREATMENT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All treatments" },
@@ -584,14 +589,32 @@ function RisksPageInner() {
             </span>
           );
         }
-        const formatted = formatResidualScore(row.residual_score);
+        const formatted = formatResidualScore(
+          row.residual_score,
+          row.methodology,
+        );
+        // #2058: a 5x5 residual shows on the inherent column's 1..25
+        // scale, as the same banded pill. A FAIR residual is dollars and
+        // carries no band.
+        const n = residualSeverity(row.residual_score);
+        if (row.methodology === "fair" || n == null) {
+          return (
+            <span
+              className="font-mono text-xs text-foreground"
+              data-testid="risks-row-residual"
+            >
+              {formatted}
+            </span>
+          );
+        }
         return (
-          <span
-            className={`font-mono text-xs ${residualClass(formatted)}`}
-            data-testid="risks-row-residual"
-          >
-            {formatted}
-          </span>
+          <SeverityPill
+            value={formatted}
+            band={severityBand(n)}
+            className={residualClass(formatted)}
+            testId="risks-row-residual"
+            title="Residual severity (1–25, after controls)"
+          />
         );
       },
     },
@@ -627,15 +650,13 @@ function RisksPageInner() {
         }
         const band = severityBand(row.severity);
         return (
-          <span
-            className={`inline-flex items-center justify-center w-6 h-6 text-[11px] font-semibold rounded ${severityClasses(
-              band,
-            )}`}
-            data-testid="risks-row-severity"
-            title="Inherent severity (likelihood × impact, before controls)"
-          >
-            {row.severity}
-          </span>
+          <SeverityPill
+            value={String(row.severity)}
+            band={band}
+            className={severityClasses(band)}
+            testId="risks-row-severity"
+            title="Inherent severity (1–25, likelihood × impact, before controls)"
+          />
         );
       },
     },
@@ -653,22 +674,40 @@ function RisksPageInner() {
           onSort={updateSort}
         />
       ),
-      cell: (row) =>
-        // Slice 680 / ATLAS-029: an unset review-due date on a new risk is
-        // "Pending evaluation", not a bare "—". A real date renders as-is.
-        reviewDuePending(row.review_due_at) ? (
-          <span
-            className="text-xs italic text-muted-foreground"
-            title={PENDING_EVAL_TOOLTIP}
-            data-testid="risks-row-review-due-pending"
-          >
-            {PENDING_EVAL_LABEL}
+      cell: (row) => {
+        // #2059: every risk gets a review date at creation (created +
+        // the organisation cadence), so a missing one is a data gap and
+        // reads as "Not set". A past due day is marked Overdue.
+        if (reviewDuePending(row.review_due_at)) {
+          return (
+            <span
+              className="text-xs italic text-muted-foreground"
+              data-testid="risks-row-review-due-missing"
+            >
+              Not set
+            </span>
+          );
+        }
+        const overdue = reviewOverdue(row.review_due_at);
+        return (
+          <span className="inline-flex items-center gap-2">
+            <span
+              className="font-mono text-xs text-muted-foreground"
+              data-testid="risks-row-review-due"
+            >
+              {row.review_due_at!.slice(0, 10)}
+            </span>
+            {overdue ? (
+              <span
+                className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-50 text-red-700"
+                data-testid="risks-row-review-overdue"
+              >
+                Overdue
+              </span>
+            ) : null}
           </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            {row.review_due_at!.slice(0, 10)}
-          </span>
-        ),
+        );
+      },
     },
     // Slice 185 (AC-2): explicit per-row "View in hierarchy" link
     // replaces the implicit row-click affordance. The link preserves

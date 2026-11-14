@@ -129,10 +129,13 @@ FROM (
 
     -- policy review cycles: published policies with next_review_at set.
     -- #1806: status is the review state, as for the other dated branches:
-    -- 'overdue' once next_review_at has passed, 'due-soon' within 30 days
-    -- (the window internal/policy ReviewDueSoonWindow names), otherwise
-    -- 'upcoming'. The policy lifecycle state moves to summary. Only the
-    -- published chain tip has a review due; superseded rows are history.
+    -- 'overdue' once the due day has ended, 'due-soon' within 30 days of
+    -- it (the window internal/policy ReviewDueSoonDays names), otherwise
+    -- 'upcoming'. #2009: the due day is next_review_at's UTC date, and the
+    -- comparison is in whole UTC days, as in internal/policy ReviewStatus,
+    -- so the list and the calendar agree at the boundary. The policy
+    -- lifecycle state moves to summary. Only the published chain tip has a
+    -- review due; superseded rows keep their date as history.
     SELECT
         p.id::text                                                    AS event_id,
         'policy'::text                                                AS event_type,
@@ -143,8 +146,10 @@ FROM (
         'policy'::text                                                AS related_entity_kind,
         p.status                                                      AS summary,
         CASE
-            WHEN p.next_review_at < sqlc.arg(now_ts)::timestamptz THEN 'overdue'
-            WHEN p.next_review_at <= sqlc.arg(now_ts)::timestamptz + INTERVAL '30 days' THEN 'due-soon'
+            WHEN (p.next_review_at AT TIME ZONE 'UTC')::date
+                 < (sqlc.arg(now_ts)::timestamptz AT TIME ZONE 'UTC')::date THEN 'overdue'
+            WHEN (p.next_review_at AT TIME ZONE 'UTC')::date
+                 <= (sqlc.arg(now_ts)::timestamptz AT TIME ZONE 'UTC')::date + 30 THEN 'due-soon'
             ELSE 'upcoming'
         END                                                           AS status,
         NULL::text                                                    AS cadence

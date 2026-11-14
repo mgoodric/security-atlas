@@ -313,7 +313,7 @@ func (h *Handler) Gap(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	fvID, ok := h.frameworkVersion(w, r)
+	fvID, label, ok := h.csfFrameworkVersion(w, r)
 	if !ok {
 		return
 	}
@@ -332,6 +332,8 @@ func (h *Handler) Gap(w http.ResponseWriter, r *http.Request) {
 
 	resp := map[string]any{
 		"framework_version_id": fvID.String(),
+		"framework_name":       label.Name,
+		"framework_version":    label.Version,
 		"gap":                  rows,
 		"gap_count":            len(rows),
 	}
@@ -399,19 +401,39 @@ func (h *Handler) editContext(w http.ResponseWriter, r *http.Request) (context.C
 	return r.Context(), actor, true
 }
 
-// frameworkVersion parses the required ?framework_version=<uuid> query param.
+// frameworkVersion parses the required ?framework_version=<uuid> query param
+// and refuses any version that is not NIST CSF (#2065).
 func (h *Handler) frameworkVersion(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool) {
+	fvID, _, ok := h.csfFrameworkVersion(w, r)
+	return fvID, ok
+}
+
+// csfFrameworkVersion parses ?framework_version=<uuid> and resolves it to its
+// framework label. An unknown version is a 404; a version of any framework
+// other than NIST CSF is a 400, on reads and writes alike.
+func (h *Handler) csfFrameworkVersion(w http.ResponseWriter, r *http.Request) (uuid.UUID, csfassessment.FrameworkLabel, bool) {
 	v := strings.TrimSpace(r.URL.Query().Get("framework_version"))
 	if v == "" {
 		httpresp.WriteError(w, http.StatusBadRequest, "framework_version query parameter is required")
-		return uuid.UUID{}, false
+		return uuid.UUID{}, csfassessment.FrameworkLabel{}, false
 	}
 	fvID, err := uuid.Parse(v)
 	if err != nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "framework_version must be a UUID")
-		return uuid.UUID{}, false
+		return uuid.UUID{}, csfassessment.FrameworkLabel{}, false
 	}
-	return fvID, true
+	label, err := h.store.CSFVersion(r.Context(), fvID)
+	switch {
+	case err == nil:
+		return fvID, label, true
+	case errors.Is(err, csfassessment.ErrNotFound):
+		httpresp.WriteError(w, http.StatusNotFound, "framework version not found")
+	case errors.Is(err, csfassessment.ErrNotCSF):
+		httpresp.WriteError(w, http.StatusBadRequest, "framework_version is not a NIST CSF version; the CSF assessment applies only to NIST CSF")
+	default:
+		httperr.WriteInternal(w, r, "resolve csf framework version", err)
+	}
+	return uuid.UUID{}, csfassessment.FrameworkLabel{}, false
 }
 
 // profileKind parses + validates the {kind} path param.

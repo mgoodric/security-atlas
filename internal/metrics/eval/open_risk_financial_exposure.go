@@ -32,21 +32,33 @@ func (e *openRiskFinancialExposureEvaluator) Compute(ctx context.Context) (Resul
 				COALESCE((residual_score->>'likelihood')::numeric, 0) *
 				COALESCE((residual_score->>'impact')::numeric, 0)
 			), 0) AS magnitude_sum,
-			COUNT(*) AS open_risks_count
+			COUNT(*) AS open_risks_count,
+			COUNT(*) FILTER (
+				WHERE residual_score->>'likelihood' IS NOT NULL
+				  AND residual_score->>'impact' IS NOT NULL
+			) AS scored_risks_count
 		FROM risks
 		WHERE treatment <> 'accept'
 		   OR acceptance_status IS DISTINCT FROM 'approved'
 	`
 	var magnitude float64
-	var count int
-	if err := e.pool.QueryRow(ctx, query).Scan(&magnitude, &count); err != nil {
+	var count, scored int
+	if err := e.pool.QueryRow(ctx, query).Scan(&magnitude, &count, &scored); err != nil {
 		return Result{}, fmt.Errorf("open_risk_financial_exposure: query: %w", err)
 	}
-	return Result{
-		Value: magnitude,
-		Dimensions: map[string]string{
-			"v1_proxy":         "likelihood_times_impact",
-			"open_risks_count": fmt.Sprintf("%d", count),
-		},
-	}, nil
+	return openRiskFinancialExposureResult(magnitude, count, scored), nil
+}
+
+// openRiskFinancialExposureResult marks the result empty when no open
+// risk carries a residual likelihood and impact: the sum would be 0 for
+// lack of inputs, not because exposure is nil.
+func openRiskFinancialExposureResult(magnitude float64, count, scored int) Result {
+	dims := map[string]string{
+		"v1_proxy":         "likelihood_times_impact",
+		"open_risks_count": fmt.Sprintf("%d", count),
+	}
+	if scored == 0 {
+		return noData("No open risk has a residual score", dims)
+	}
+	return Result{Value: magnitude, Dimensions: dims}
 }

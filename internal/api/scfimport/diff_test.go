@@ -1,6 +1,7 @@
 package scfimport
 
 import (
+	"os"
 	"strings"
 	"testing"
 
@@ -58,6 +59,49 @@ func TestDiffRelease(t *testing.T) {
 	for _, want := range []string{`"r1"`, "changed: A-2", "added: A-4", "missing: A-3", "new release label"} {
 		if !strings.Contains(msg, want) {
 			t.Errorf("error %q missing %q", msg, want)
+		}
+	}
+}
+
+func TestLoad_LegacySCFIDIsOptional(t *testing.T) {
+	t.Parallel()
+	path := t.TempDir() + "/cat.json"
+	body := `{"schema_version":"1.0","release_version":"r1","controls":[
+		{"scf_id":"IAC-06","family":"IAC","title":"MFA","legacy_scf_id":"IAC-06.1"},
+		{"scf_id":"IAC-07","family":"IAC","title":"Provisioning"}]}`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cat, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cat.Controls[0].LegacySCFID != "IAC-06.1" || cat.Controls[1].LegacySCFID != "" {
+		t.Fatalf("legacy ids = %q, %q; want IAC-06.1, empty", cat.Controls[0].LegacySCFID, cat.Controls[1].LegacySCFID)
+	}
+}
+
+func TestDiffRelease_LegacySCFID(t *testing.T) {
+	t.Parallel()
+	stored := "IAC-06.1"
+	other := "IAC-99"
+	for _, tc := range []struct {
+		name     string
+		stored   *string
+		incoming string
+		conflict bool
+	}{
+		{"stored NULL, incoming value backfills", nil, "IAC-06.1", false},
+		{"stored value, incoming empty", &stored, "", false},
+		{"same value", &stored, "IAC-06.1", false},
+		{"different value", &other, "IAC-06.1", true},
+		{"same value with surrounding whitespace", &stored, "  IAC-06.1\t", false},
+		{"blank incoming is absent", &other, "   ", false},
+	} {
+		row := dbx.ScfAnchor{ScfID: "IAC-06", Family: "IAC", Title: "MFA", LegacyScfID: tc.stored}
+		in := Control{SCFID: "IAC-06", Family: "IAC", Title: "MFA", LegacySCFID: tc.incoming}
+		if got := diffRelease("r1", []dbx.ScfAnchor{row}, []Control{in}); (got != nil) != tc.conflict {
+			t.Fatalf("%s: conflict = %v; want %v", tc.name, got, tc.conflict)
 		}
 	}
 }

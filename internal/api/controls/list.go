@@ -152,6 +152,9 @@ type controlWithStateWire struct {
 	// fit and is null for an exact one (issue #1736).
 	AnchorFit     string  `json:"anchor_fit"`
 	AnchorFitNote *string `json:"anchor_fit_note"`
+	// Demo is true when the in-place demo seed added this control to the
+	// organisation (#2043), so the page can badge it. Omitted otherwise.
+	Demo bool `json:"demo,omitempty"`
 }
 
 type listWithStateResp struct {
@@ -182,9 +185,19 @@ func (h *ListHandler) listWithState(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "list controls with state", err)
 		return
 	}
+	ids := make([]uuid.UUID, len(rows))
+	for i, row := range rows {
+		ids[i] = uuid.UUID(row.ID.Bytes)
+	}
+	demo, err := h.store.DemoControls(r.Context(), ids)
+	if err != nil {
+		httperr.WriteInternal(w, r, "list controls with state", err)
+		return
+	}
 	out := make([]controlWithStateWire, len(rows))
 	for i, row := range rows {
 		out[i] = controlWithStateWireFrom(row)
+		out[i].Demo = demo.Has(ids[i])
 	}
 	httpresp.WriteJSON(w, http.StatusOK, listWithStateResp{Controls: out, Count: len(out), Total: total})
 }

@@ -61,8 +61,11 @@ test.describe("first-time login UX", () => {
     // The grep-line shape is in the discovery commands; assert at least
     // one BOOTSTRAP_TOKEN mention.
     await expect(guidance).toContainText("BOOTSTRAP_TOKEN");
-    // The existing token form is preserved (P0-A5).
-    await expect(page.getByLabel("Bearer token")).toBeVisible();
+    // A sign-in form is still on the page (P0-A5). #2062: the token card
+    // is decided from the server-side install-state read, which this
+    // browser mock cannot reach (login-dev-token-signin.spec.ts covers
+    // it), so assert the always-present email/password form instead.
+    await expect(page.getByLabel("Email")).toBeVisible();
   });
 
   test("hides the first-install guidance when /v1/install-state reports not-fresh", async ({
@@ -77,7 +80,7 @@ test.describe("first-time login UX", () => {
 
     await expect(page.getByTestId("first-install-card")).toHaveCount(0);
     // The existing copy renders unchanged (P0-A5 regression guard).
-    await expect(page.getByLabel("Bearer token")).toBeVisible();
+    await expect(page.getByLabel("Email")).toBeVisible();
   });
 
   test("falls back to not-fresh when the metadata endpoint 503s", async ({
@@ -99,6 +102,6 @@ test.describe("first-time login UX", () => {
     await page.goto("/login");
 
     await expect(page.getByTestId("first-install-card")).toHaveCount(0);
-    await expect(page.getByLabel("Bearer token")).toBeVisible();
+    await expect(page.getByLabel("Email")).toBeVisible();
   });
 });

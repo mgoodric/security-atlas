@@ -58,6 +58,7 @@ import (
 	"io"
 	"iter"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -69,6 +70,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/export"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -145,6 +147,8 @@ type controlExportRow struct {
 	UpdatedAt          time.Time
 	AnchorFit          string
 	AnchorFitNote      string
+	// Demo is true for a control the in-place demo seed added (#2043).
+	Demo bool
 }
 
 // NewExportHandler constructs the slice 137 export handler. The pool
@@ -395,6 +399,8 @@ func parseControlsExportFormat(r *http.Request) (export.Format, error) {
 //	audit:       created_at, updated_at
 //	anchor fit:  anchor_fit, anchor_fit_note (issue #1736; appended so
 //	             every earlier column keeps its position)
+//	provenance:  demo — "true" for a control the in-place demo seed added
+//	             (#2043; appended for the same reason)
 func controlsExportHeader() []string {
 	return []string{
 		"id",
@@ -414,6 +420,7 @@ func controlsExportHeader() []string {
 		"updated_at",
 		"anchor_fit",
 		"anchor_fit_note",
+		"demo",
 	}
 }
 
@@ -457,6 +464,7 @@ func controlsToRowIter(rows []controlExportRow) iter.Seq[[]string] {
 				r.UpdatedAt.UTC().Format(time.RFC3339),
 				r.AnchorFit,
 				r.AnchorFitNote,
+				strconv.FormatBool(r.Demo),
 			}
 			if !yield(row) {
 				return
@@ -512,6 +520,14 @@ func (h *ExportHandler) listControlsDirect(ctx context.Context, limit int) ([]co
 	if err != nil {
 		return nil, false, fmt.Errorf("list active controls for export: %w", err)
 	}
+	ids := make([]uuid.UUID, len(dbRows))
+	for i, r := range dbRows {
+		ids[i] = uuid.UUID(r.ID.Bytes)
+	}
+	demo, err := demoprov.Lookup(ctx, q, demoprov.TableControls, ids)
+	if err != nil {
+		return nil, false, err
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("commit: %w", err)
 	}
@@ -550,6 +566,7 @@ func (h *ExportHandler) listControlsDirect(ctx context.Context, limit int) ([]co
 			FreshnessClass:     freshness,
 			BundleManifestHash: r.BundleManifestHash,
 			AnchorFit:          r.AnchorFit,
+			Demo:               demo.Has(uuid.UUID(r.ID.Bytes)),
 		}
 		if r.AnchorFitNote != nil {
 			out[i].AnchorFitNote = *r.AnchorFitNote

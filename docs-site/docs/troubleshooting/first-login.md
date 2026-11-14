@@ -1,6 +1,6 @@
 # Troubleshooting: First-time login
 
-A first-time user installing the docker-compose self-host bundle (slice 037) or the Helm chart (slice 038) lands on `/login` and needs the bootstrap admin bearer token. This page walks through every common failure mode.
+A first-time user installing the docker-compose self-host bundle (slice 037) or the Helm chart (slice 038) lands on `/login`. On a single-tenant install (the default) the page asks only for an email and password: sign in with `ATLAS_DEFAULT_USER_EMAIL` / `ATLAS_DEFAULT_USER_PASSWORD`, with no tenant ID. The email/password form stays available after the first sign-in. The bootstrap admin bearer token is the fallback when that account is not usable. This page walks through every common failure mode.
 
 The bootstrap admin token is generated at platform startup. You can find it via three orthogonal paths:
 
@@ -11,6 +11,8 @@ The bootstrap admin token is generated at platform startup. You can find it via 
 | Filesystem                      | `cat ${ATLAS_DATA_DIR:-/var/lib/atlas}/bootstrap-token`             |
 
 The token is **single-use**: on the first successful sign-in the platform atomically deletes the file AND marks `platform_status.first_signin_at` so the login page swaps back to the existing copy. Long-lived bootstrap tokens on disk are a credential leak shape this platform does not introduce.
+
+Paste the token into the **Developer sign-in** card on `/login`. That card is offered only while the install is in first-install state, which means no one has signed in yet, or a `--reset-bootstrap` (below) has put the install back into it. After the first sign-in, `/login` shows only the email and password form, and the web server refuses a pasted token. Set `ATLAS_WEB_DEV_TOKEN_SIGNIN=true` on the `web` service to keep the card available afterwards. See the [configuration reference](../configuration.md#web). If the web server cannot read the install state, it hides the card and refuses token sign-in.
 
 ---
 
@@ -55,7 +57,7 @@ atlas-cli credentials issue \
 The `--force` flag is the foot-gun gate: without it the CLI refuses because re-issuing bootstrap after a real user has signed in is rarely the right move. With it, the platform:
 
 1. Clears `platform_status.bootstrap_token_consumed_at` and `first_signin_at`.
-2. Mints a fresh admin bearer for the tenant of the `--token` credential. `--tenant`, if you pass it, must be that same tenant. Signing in with the new bearer gives an admin session.
+2. Mints a fresh admin bearer for the tenant of the `--token` credential (your organisation, on a single-tenant install). `--tenant <tenant uuid>`, if you pass it, must be that same tenant. Signing in with the new bearer gives an admin session.
 3. Writes the new token to `${ATLAS_DATA_DIR}/bootstrap-token` (mode 0600).
 4. Revokes any recovery key an earlier reset minted.
 5. Returns the new bearer plaintext, its `credential_id` and its `expires_at` to stdout.
@@ -126,7 +128,7 @@ Pods run as the non-root user configured in `deploy/helm/atlas/values.yaml`. The
 
 ## I'm running a multi-tenant install and I don't know which tenant the bootstrap admin is in
 
-The platform is intentionally single-tenant for the v1 self-host operator (canvas §5.4 + OQ #13 resolution). The bootstrap admin credential is bound to `ATLAS_BOOTSTRAP_TENANT` — the single seeded tenant. To verify:
+A single-tenant install is the default (see [ADR 0023](https://github.com/mgoodric/security-atlas/blob/main/docs/adr/0023-single-tenant-experience-by-default.md)), and on one nothing on this page needs a tenant ID. An install becomes multi-tenant only when a super-admin creates a second tenant with `ATLAS_ALLOW_MULTI_TENANT=true` set; see [Tenant membership](../tenant-membership.md#opting-in-to-multi-tenant). The bootstrap admin stays in the bootstrap tenant, `ATLAS_BOOTSTRAP_TENANT`. To list the tenants:
 
 **Verified on docker-compose:**
 
@@ -142,7 +144,7 @@ kubectl exec -it deploy/postgres -- psql -U atlas_migrate atlas \
   -c "SELECT id, name FROM tenants;"
 ```
 
-Expect exactly one row. If you see more than one, an admin operator has provisioned additional tenants; the bootstrap admin credential remains bound to `ATLAS_BOOTSTRAP_TENANT`. Use that tenant ID with the recovery `--reset-bootstrap --force` command if needed.
+One row means a single-tenant install. With several, pass the bootstrap tenant's ID as `--tenant` to the recovery `--reset-bootstrap --force` command if you need to name it.
 
 ---
 

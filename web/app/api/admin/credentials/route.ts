@@ -24,14 +24,17 @@ import {
 } from "@/lib/api/admin";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
-export async function GET() {
+// GET forwards ?minted_by (#1953) so the user revoke screen can list the
+// live keys that user minted. Nothing else on the query string flows.
+export async function GET(req: NextRequest) {
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
+  const mintedBy = req.nextUrl.searchParams.get("minted_by") ?? undefined;
   try {
-    const items = await listAdminCredentials(bearer);
+    const items = await listAdminCredentials(bearer, mintedBy);
     return NextResponse.json({ items });
   } catch (err) {
     const e = err as { status?: number; message?: string };

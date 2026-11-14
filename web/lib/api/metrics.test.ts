@@ -22,7 +22,10 @@ import { describe, expect, test } from "vitest";
 
 import {
   type CascadeNode,
+  DEFAULT_NO_DATA_REASON,
+  measuredObservations,
   neutralBadgeLabel,
+  noDataReason,
   reassembleCascade,
   thresholdBadgeColor,
 } from "./metrics";
@@ -267,5 +270,39 @@ describe("thresholdBadgeColor — target_is_better", () => {
     expect(thresholdBadgeColor(102, fallback)).toBe("green"); // within 5%
     expect(thresholdBadgeColor(108, fallback)).toBe("yellow"); // within 15%
     expect(thresholdBadgeColor(120, fallback)).toBe("red"); // beyond 15%
+  });
+});
+
+describe("noDataReason — the evaluators' empty marker (#2064)", () => {
+  test("an empty-marked observation yields its reason", () => {
+    expect(
+      noDataReason({
+        dimensions: {
+          sample: "empty",
+          no_data_reason: "No critical findings recorded in the last 90 days",
+        },
+      }),
+    ).toBe("No critical findings recorded in the last 90 days");
+  });
+
+  test("an empty marker without a reason falls back to the default copy", () => {
+    expect(noDataReason({ dimensions: { sample: "empty" } })).toBe(
+      DEFAULT_NO_DATA_REASON,
+    );
+    expect(
+      noDataReason({ dimensions: { sample: "empty", no_data_reason: " " } }),
+    ).toBe(DEFAULT_NO_DATA_REASON);
+  });
+
+  test("a measured observation is not no-data", () => {
+    expect(noDataReason({ dimensions: { sample: "all_controls" } })).toBeNull();
+    expect(noDataReason({ dimensions: {} })).toBeNull();
+    expect(noDataReason(undefined)).toBeNull();
+  });
+
+  test("measuredObservations drops empty-marked points", () => {
+    const real = { id: "a", dimensions: { total_controls: "4" } };
+    const empty = { id: "b", dimensions: { sample: "empty" } };
+    expect(measuredObservations([empty, real, empty])).toEqual([real]);
   });
 });

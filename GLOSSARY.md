@@ -305,6 +305,16 @@ P0 anti-criteria: anonymous ack rejected (slice 034 cred required); stale acks n
 - **Multi-tenant install** — an install that holds two or more tenants, so users choose which organisation they are working in. An operator opts into it deliberately; once an install is multi-tenant it does not go back.
 - **Bootstrap tenant** — the one tenant created when the install is first set up. On a single-tenant install it is the organisation; on a multi-tenant install it is the first of several.
 
+## Modules (in design)
+
+- **Module** — a top-level product area that a tenant switches on or off as a whole, such as Risk, Third-party risk, Policies, Questionnaires or Personnel security. _Avoid_: area, section, app.
+- **Core module** — a module that is always on because the platform's spine depends on it: Controls, Evidence, Frameworks and the SCF catalog, Scopes and framework scopes, Audit periods, Dashboard, and Settings & admin.
+- **Optional module** — a module a tenant can switch off: Risk, Third-party risk, Policies, Questionnaires, Personnel security, Exceptions and Board reporting.
+- **Feature** — a smaller switch inside one module, such as risk hierarchy inside Risk. A feature is on only when its module is on. _Avoid_: sub-module.
+- **Switched off** — the state of an optional module whose screens and API are hidden from everyone in the tenant. Its data is kept unchanged, and switching the module back on restores it. _Avoid_: disabled, deleted, archived.
+- **Module access** — the set of modules one member of a tenant may use. It says _where_ the member can work; the member's role says _what_ they can do there. Module access never reaches beyond the modules the tenant has switched on. Admins always have every switched-on module, and auditors are scoped by their audit periods instead.
+- **No access** — the state of a module that is switched on for the tenant but outside one member's module access. It is hidden from that member only. _Avoid_: forbidden, locked.
+
 ## User-tenant membership (slice 141, in design)
 
 Multi-tenant login enumeration. The `user_roles(tenant_id, user_id, role)` table is RLS-tenant-scoped — cross-tenant "which tenants does this user belong to?" queries fail under `atlas_app` without a pre-set tenant GUC. To break the chicken-and-egg at OIDC callback time, slice 141 adds:

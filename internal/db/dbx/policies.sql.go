@@ -948,7 +948,8 @@ SET status = 'under_review',
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
-  AND status = 'draft'
+  AND (status = 'draft'
+       OR (status = 'under_review' AND submitted_by LIKE 'jwt:%'))
 RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at
 `
 
@@ -959,6 +960,9 @@ type SubmitPolicyForReviewParams struct {
 }
 
 // Transition: draft -> under_review. Operator action; no role gate.
+// Also re-submits an under_review policy whose submitter was recorded
+// before #1807 as a session id ('jwt:<token id>'), which approval refuses
+// because it names no person: re-submitting records the person.
 func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyForReviewParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, submitPolicyForReview, arg.TenantID, arg.ID, arg.SubmittedBy)
 	var i Policy
@@ -1000,9 +1004,6 @@ const supersedePolicyAtPublish = `-- name: SupersedePolicyAtPublish :one
 UPDATE policies
 SET status = 'superseded',
     superseded_at = now(),
-    -- #1806: the successor carries its own review date; the superseded
-    -- row no longer has one due.
-    next_review_at = NULL,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
@@ -1022,6 +1023,12 @@ type SupersedePolicyAtPublishParams struct {
 // handler can audit who superseded it. Only matches when the row is
 // currently 'published' (defense-in-depth -- a chain can't supersede a
 // draft).
+//
+// next_review_at is left as it was (#2009): the successor carries its own
+// review date, and the superseded row keeps the date it was due so an
+// auditor can still see it and compare it with the successor's
+// published_at. Only a 'published' row has a review due, so the calendar
+// and the list's review_status ignore it.
 func (q *Queries) SupersedePolicyAtPublish(ctx context.Context, arg SupersedePolicyAtPublishParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, supersedePolicyAtPublish, arg.TenantID, arg.ID)
 	var i Policy

@@ -67,6 +67,8 @@ const (
 	KindWalkthrough     Kind = "walkthrough"
 	// KindFrameworkScope is framework_scope_workflow_log (issue #1786).
 	KindFrameworkScope Kind = "framework_scope"
+	// KindTaxonomy is taxonomy_audit_log (#1810): risk-category changes.
+	KindTaxonomy Kind = "taxonomy"
 )
 
 // SubjectModule constants (slice 180). The module identifier tagged onto
@@ -96,6 +98,7 @@ var AllKinds = []Kind{
 	KindMe,
 	KindWalkthrough,
 	KindFrameworkScope,
+	KindTaxonomy,
 }
 
 // IsCanonical reports whether k is one of the nine canonical kinds.

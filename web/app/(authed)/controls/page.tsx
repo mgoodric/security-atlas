@@ -55,6 +55,7 @@ import {
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
+import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -911,6 +912,7 @@ function ControlsPageInner() {
             >
               {row.anchor.name}
             </Link>
+            {row.demo ? <DemoBadge testId="controls-row-demo" /> : null}
             {marker}
           </>
         ) : (

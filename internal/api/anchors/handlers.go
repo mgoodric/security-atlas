@@ -518,6 +518,9 @@ type anchorWire struct {
 	Family      string `json:"family"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	// LegacySCFID is the anchor's code in the previous SCF release
+	// (#1769); absent when the imported catalog did not give one.
+	LegacySCFID *string `json:"legacy_scf_id,omitempty"`
 }
 
 type frameworkWire struct {
@@ -731,6 +734,7 @@ func latestRowsToStateWire(rows []dbx.ListSCFAnchorsLatestWithStateRow) []anchor
 				Family:      r.Family,
 				Name:        r.Title,
 				Description: r.Description,
+				LegacySCFID: r.LegacyScfID,
 			},
 			State:      anchorStateWireFrom(latestStateRow{r: r}),
 			Frameworks: frameworksWire(r.FrameworkSlugs),
@@ -755,6 +759,7 @@ func forVersionRowsToStateWire(rows []dbx.ListSCFAnchorsForVersionWithStateRow) 
 				Family:      r.Family,
 				Name:        r.Title,
 				Description: r.Description,
+				LegacySCFID: r.LegacyScfID,
 			},
 			State:      anchorStateWireFrom(forVersionStateRow{r: r}),
 			Frameworks: frameworksWire(r.FrameworkSlugs),
@@ -788,6 +793,7 @@ func anchorWireFromRow[R anchorRow](r R) anchorWire {
 		Family:      a.Family,
 		Name:        a.Title,
 		Description: a.Description,
+		LegacySCFID: a.LegacyScfID,
 	}
 }
 

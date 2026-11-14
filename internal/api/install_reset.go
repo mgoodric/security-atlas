@@ -36,6 +36,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
+	"github.com/mgoodric/security-atlas/internal/api/admin"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -303,9 +304,11 @@ func (g grpcBootstrapResetter) ResetBootstrap(ctx context.Context, req *adminv1.
 	if s.platformResetter == nil {
 		return nil, status.Error(codes.Unavailable, "platform resetter not configured")
 	}
-	cred, ok := authctx.CredentialFromContext(ctx)
-	if !ok {
-		return nil, status.Error(codes.Unauthenticated, "missing credential")
+	// The admin gate every AdminCredentialsService RPC passes (#2167),
+	// then the reset's own single-tenant condition.
+	cred, err := admin.RequireAdmin(ctx)
+	if err != nil {
+		return nil, err
 	}
 	if f := s.authorizeResetBootstrap(ctx, cred, false); f != nil {
 		return nil, f.grpcStatus()

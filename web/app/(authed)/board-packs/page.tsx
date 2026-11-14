@@ -24,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { TONE_CHIP } from "@/components/board-pack/tone";
 import { FeatureDisabledState } from "@/components/feature-disabled-state";
 import { APIError } from "@/lib/api/base";
 import { BoardPack, generateBoardPack, listBoardPacks } from "@/lib/api/board";
@@ -45,13 +46,13 @@ import {
 function StatusBadge({ status }: { status: string }) {
   if (status === "published") {
     return (
-      <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
+      <Badge variant="outline" className={TONE_CHIP.pass}>
         published
       </Badge>
     );
   }
   return (
-    <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
+    <Badge variant="outline" className={TONE_CHIP.warning}>
       draft
     </Badge>
   );
@@ -117,10 +118,13 @@ export default function BoardPacksPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6 p-8">
+    <div
+      className="mx-auto max-w-4xl space-y-6 p-8"
+      data-testid="board-packs-page"
+    >
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Board packs</h1>
-        <p className="mt-1 text-slate-600">
+        <p className="mt-1 text-muted-foreground">
           Quarterly board-meeting reports — posture, top risks, coverage trend,
           open findings, operational metrics, investment vs coverage, and asks
           of the board. Each pack is reviewed and approved section-by-section,
@@ -146,7 +150,7 @@ export default function BoardPacksPage() {
             <div className="space-y-1">
               <label
                 htmlFor="period-end"
-                className="text-sm font-medium text-slate-700"
+                className="text-sm font-medium text-foreground"
               >
                 Quarter end
               </label>
@@ -217,7 +221,7 @@ export default function BoardPacksPage() {
             </Alert>
           )}
           {packsQuery.data && packsQuery.data.length === 0 && (
-            <p className="text-sm text-slate-500">
+            <p className="text-sm text-muted-foreground">
               No board packs yet. Generate one above.
             </p>
           )}
@@ -240,13 +244,13 @@ export default function BoardPacksPage() {
                     <TableCell>
                       <StatusBadge status={pack.status} />
                     </TableCell>
-                    <TableCell className="text-slate-600">
+                    <TableCell className="text-muted-foreground">
                       {pack.published_by || "—"}
                     </TableCell>
                     <TableCell className="text-right">
                       <Link
                         href={`/board-packs/${pack.id}`}
-                        className="text-sm font-medium text-slate-900 underline"
+                        className="text-sm font-medium text-foreground underline"
                       >
                         Review
                       </Link>
