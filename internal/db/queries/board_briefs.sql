@@ -53,10 +53,21 @@ ORDER BY slug;
 -- extraction is done in Go, not a JSONB-path SQL expression that would trip
 -- pgx type inference). `created_at` lower bound is passed explicitly so pgx
 -- never has to infer a bare-placeholder type (SQLSTATE 42P08).
-SELECT * FROM risks
-WHERE tenant_id = $1
-  AND created_at <= $2
-ORDER BY updated_at ASC, id ASC;
+--
+-- Roll-up parents are left out (#2060): a parent summarises children that
+-- are already ranked here, so counting it too would show the same exposure
+-- twice. A risk is a roll-up when it had at least one child linked as of the
+-- brief's date.
+SELECT r.* FROM risks r
+WHERE r.tenant_id = $1
+  AND r.created_at <= $2
+  AND NOT EXISTS (
+    SELECT 1 FROM risk_aggregations ra
+    WHERE ra.tenant_id = r.tenant_id
+      AND ra.parent_risk_id = r.id
+      AND ra.created_at <= $2
+  )
+ORDER BY r.updated_at ASC, r.id ASC;
 
 -- name: BoardBriefExceptionAggregate :one
 -- Slice 751 — the DETERMINISTIC exception-status aggregate the board brief

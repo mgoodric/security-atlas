@@ -24,6 +24,12 @@ const eslintConfig = defineConfig([
     "playwright-report/**",
     "test-results/**",
   ]),
+  // #2040 — peer-chain.cjs is a `node --require` preload, which must be
+  // CommonJS.
+  {
+    files: ["**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
   // Slice 370 (AC-5) — soft cap on the per-domain api client modules to
   // prevent the god-file from re-accreting. The former `web/lib/api.ts`
   // was 2901 LOC / 219 exports (slice 328 H-2); after the per-domain
