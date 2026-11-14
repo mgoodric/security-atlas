@@ -68,6 +68,10 @@ type RequirementApplicability struct {
 	Code          string
 	Title         string
 	Decision      *Decision
+	// Contradiction is true when the requirement is excluded and at least
+	// one active tenant control reaches it through the crosswalk with a
+	// passing latest evaluation (#1789). Computed on read.
+	Contradiction bool
 }
 
 // ApplicabilityCounts tallies a revision's requirements. Undecided
@@ -78,6 +82,9 @@ type ApplicabilityCounts struct {
 	Applicable int
 	Excluded   int
 	Undecided  int
+	// Contradictions counts excluded requirements with passing controls
+	// behind them.
+	Contradictions int
 }
 
 // Applicability is the decision list for one revision. Scope is nil when an
@@ -255,6 +262,19 @@ func listApplicability(ctx context.Context, q *dbx.Queries, tenantID, frameworkV
 	if err != nil {
 		return Applicability{}, fmt.Errorf("list applicability: %w", err)
 	}
+	contradicted := map[uuid.UUID]bool{}
+	if sc != nil {
+		ids, cerr := q.ListFrameworkScopeContradictions(ctx, dbx.ListFrameworkScopeContradictionsParams{
+			TenantID:         pgUUID(tenantID),
+			FrameworkScopeID: scopeID,
+		})
+		if cerr != nil {
+			return Applicability{}, fmt.Errorf("list contradictions: %w", cerr)
+		}
+		for _, id := range ids {
+			contradicted[uuid.UUID(id.Bytes)] = true
+		}
+	}
 	out := Applicability{Scope: sc, Requirements: make([]RequirementApplicability, 0, len(rows))}
 	for _, r := range rows {
 		ra := RequirementApplicability{
@@ -279,6 +299,10 @@ func listApplicability(ctx context.Context, q *dbx.Queries, tenantID, frameworkV
 			ra.Decision = &d
 			if d.Decision == DecisionExcluded {
 				out.Counts.Excluded++
+				if contradicted[ra.RequirementID] {
+					ra.Contradiction = true
+					out.Counts.Contradictions++
+				}
 			} else {
 				out.Counts.Applicable++
 			}
@@ -363,4 +387,56 @@ func deref(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+// FilterUndecided is the ApplicabilityFilter.Decision value that selects
+// requirements with no decision.
+const FilterUndecided = "undecided"
+
+// ErrInvalidFilter is returned for an unrecognised decision filter. HTTP 400.
+var ErrInvalidFilter = errors.New("frameworkscope: decision filter must be `applicable`, `excluded` or `undecided`")
+
+// ApplicabilityFilter narrows a decision list. The zero value keeps every
+// requirement. Decision is applicable, excluded or undecided; Contradiction,
+// when set, keeps only requirements whose contradiction flag equals it.
+type ApplicabilityFilter struct {
+	Decision      string
+	Contradiction *bool
+}
+
+// Validate reports ErrInvalidFilter for an unknown decision filter.
+func (f ApplicabilityFilter) Validate() error {
+	switch f.Decision {
+	case "", DecisionApplicable, DecisionExcluded, FilterUndecided:
+		return nil
+	default:
+		return ErrInvalidFilter
+	}
+}
+
+// Filter returns the requirements that match f. Counts are left as they
+// are: they describe the whole revision, not the filtered list.
+func (a Applicability) Filter(f ApplicabilityFilter) Applicability {
+	if f.Decision == "" && f.Contradiction == nil {
+		return a
+	}
+	out := a
+	out.Requirements = make([]RequirementApplicability, 0, len(a.Requirements))
+	for _, r := range a.Requirements {
+		if f.Contradiction != nil && r.Contradiction != *f.Contradiction {
+			continue
+		}
+		switch f.Decision {
+		case FilterUndecided:
+			if r.Decision != nil {
+				continue
+			}
+		case DecisionApplicable, DecisionExcluded:
+			if r.Decision == nil || r.Decision.Decision != f.Decision {
+				continue
+			}
+		}
+		out.Requirements = append(out.Requirements, r)
+	}
+	return out
 }

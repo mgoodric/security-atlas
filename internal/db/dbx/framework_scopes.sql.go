@@ -532,6 +532,66 @@ func (q *Queries) ListFrameworkScopeApplicability(ctx context.Context, arg ListF
 	return items, nil
 }
 
+const listFrameworkScopeContradictions = `-- name: ListFrameworkScopeContradictions :many
+SELECT DISTINCT fsa.framework_requirement_id
+FROM framework_scope_applicability fsa
+JOIN effective_fw_to_scf_edges e
+  ON e.framework_requirement_id = fsa.framework_requirement_id
+ AND e.relationship_type <> 'no_relationship'
+ AND e.mapping_tier <> 'rejected'
+JOIN controls c
+  ON c.scf_anchor_id = e.scf_anchor_id
+ AND c.tenant_id = $1
+ AND c.lifecycle_state = 'active'
+ AND c.superseded_by IS NULL
+JOIN LATERAL (
+    SELECT ce.result
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = $1
+      AND ce.control_id = c.id
+    ORDER BY ce.evaluated_at DESC, ce.id DESC
+    LIMIT 1
+) latest ON latest.result = 'pass'
+WHERE fsa.tenant_id = $1
+  AND fsa.framework_scope_id = $2
+  AND fsa.decision = 'excluded'
+`
+
+type ListFrameworkScopeContradictionsParams struct {
+	TenantID         pgtype.UUID `json:"tenant_id"`
+	FrameworkScopeID pgtype.UUID `json:"framework_scope_id"`
+}
+
+// Requirements a scope revision excludes that still have passing controls
+// behind them (#1789). A requirement is in contradiction when it is excluded
+// on this revision and at least one active tenant control reaches it through
+// the crosswalk with a passing latest evaluation. Computed on read.
+//
+// The crosswalk is read through effective_fw_to_scf_edges, the one place
+// edge eligibility is decided (#1796). Tenant overlay edges (#1735) join
+// that view, so they count as a path here with no change to this query.
+// "Latest evaluation" is per control across scope cells, as in
+// FrameworkPosture.
+func (q *Queries) ListFrameworkScopeContradictions(ctx context.Context, arg ListFrameworkScopeContradictionsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listFrameworkScopeContradictions, arg.TenantID, arg.FrameworkScopeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var framework_requirement_id pgtype.UUID
+		if err := rows.Scan(&framework_requirement_id); err != nil {
+			return nil, err
+		}
+		items = append(items, framework_requirement_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFrameworkScopeWorkflowLog = `-- name: ListFrameworkScopeWorkflowLog :many
 SELECT id, tenant_id, framework_scope_id, action, from_state, to_state, before, after, actor, occurred_at, subject_module FROM framework_scope_workflow_log
 WHERE tenant_id = $1 AND framework_scope_id = $2
