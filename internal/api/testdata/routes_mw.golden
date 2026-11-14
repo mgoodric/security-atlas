@@ -13,6 +13,7 @@ DELETE /v1/me/sessions 8
 DELETE /v1/me/sessions/{id} 8
 DELETE /v1/org_units/{id} 8
 DELETE /v1/risks/{id} 8
+DELETE /v1/risks/{id}/children/{child_id} 8
 DELETE /v1/risks/{id}/themes/{theme} 8
 DELETE /v1/saved-views/{id} 8
 DELETE /v1/vendors/{id} 8
@@ -84,6 +85,8 @@ GET /v1/controls/checklist/{generationID}/export.md 8
 GET /v1/controls/drift 8
 GET /v1/controls/export 8
 GET /v1/controls/history/export 8
+GET /v1/controls/imports/{id} 8
+POST /v1/controls/imports 8
 GET /v1/controls/{id}/action-plans 8
 GET /v1/controls/{id}/applicability 8
 GET /v1/controls/{id}/attest-form 8
@@ -167,6 +170,8 @@ GET /v1/risks/theme-heatmap 8
 GET /v1/risks/{id} 8
 GET /v1/risks/{id}/action-plans 8
 GET /v1/risks/{id}/aggregation 8
+GET /v1/risks/{id}/children 8
+GET /v1/risks/{id}/parents 8
 GET /v1/samples/{id} 8
 GET /v1/samples/{id}/annotations 8
 GET /v1/saved-views 8
@@ -304,6 +309,7 @@ POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve 8
 POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject 8
 POST /v1/risks 8
 POST /v1/risks/aggregate 8
+POST /v1/risks/{id}/children 8
 POST /v1/risks/{id}/controls 8
 POST /v1/risks/{id}/themes 8
 POST /v1/samples 8

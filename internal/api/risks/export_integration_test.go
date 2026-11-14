@@ -7,6 +7,7 @@
 //	AC-1  → TestSlice136_RiskExportReturnsExpectedColumns
 //	AC-3  → TestSlice136_RiskExportColumnSetMatchesCanonical
 //	AC-4  → TestSlice136_CrossTenantIsolationAllThreeFormats
+//	#1748 → TestRiskExport_ParentRiskIDsColumn
 //	AC-6  → TestSlice136_MetaAuditRowWrittenOnEveryOutcome
 //	      → TestSlice136_ConcurrencyCapInherited
 //	      → TestSlice136_RoleGateForbidden
@@ -27,6 +28,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -211,6 +213,7 @@ func TestSlice136_RiskExportReturnsExpectedColumns(t *testing.T) {
 		"org_unit_id", "themes",
 		"review_due_at", "accepted_until", "created_at", "updated_at",
 		"acceptance_status", // #1746, appended
+		"parent_risk_ids",   // #1748, appended
 	}
 	if len(header) != len(expectedCols) {
 		t.Errorf("header column count = %d; want %d; header=%v", len(header), len(expectedCols), header)
@@ -261,6 +264,7 @@ func TestSlice136_RiskExportColumnSetMatchesCanonical(t *testing.T) {
 		"org_unit_id", "themes",
 		"review_due_at", "accepted_until", "created_at", "updated_at",
 		"acceptance_status", // #1746, appended
+		"parent_risk_ids",   // #1748, appended
 	}
 
 	t.Run("csv", func(t *testing.T) {
@@ -510,5 +514,53 @@ func TestSlice136_EmptyTenantStreamsEmptyResult(t *testing.T) {
 	}
 	if got := countRiskExportMetaAuditRows(t, tenant); got != 1 {
 		t.Errorf("meta-audit after empty-success: %d; want 1", got)
+	}
+}
+
+// #1748: parent_risk_ids lists the risks a row rolls up to,
+// semicolon-separated, and is empty for a risk with no parents.
+func TestRiskExport_ParentRiskIDsColumn(t *testing.T) {
+	tenant := uuid.New()
+	child := seedRiskForExport(t, tenant, "child risk", "operational")
+	parentA := seedRiskForExport(t, tenant, "parent A", "operational")
+	parentB := seedRiskForExport(t, tenant, "parent B", "operational")
+	admin := dbtest.NewMigratePool(t)
+	for _, p := range []uuid.UUID{parentA, parentB} {
+		if _, err := admin.Exec(context.Background(), `
+			INSERT INTO risk_aggregations (parent_risk_id, child_risk_id, tenant_id)
+			VALUES ($1, $2, $3)`, p, child, tenant); err != nil {
+			t.Fatalf("seed link: %v", err)
+		}
+	}
+
+	r := newRiskExportRouter(t, tenant, true, []string{"owner"})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/risks/export?format=csv", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body = %s", rec.Code, rec.Body.String())
+	}
+	rows := mustParseRiskCSV(t, rec.Body.String())
+	col := -1
+	for i, h := range rows[0] {
+		if h == "parent_risk_ids" {
+			col = i
+		}
+	}
+	if col == -1 {
+		t.Fatalf("header missing parent_risk_ids: %v", rows[0])
+	}
+	got := map[string]string{}
+	for _, row := range rows[1:] {
+		got[row[0]] = row[col]
+	}
+	parents := strings.Split(got[child.String()], ";")
+	sort.Strings(parents)
+	want := []string{parentA.String(), parentB.String()}
+	sort.Strings(want)
+	if strings.Join(parents, ";") != strings.Join(want, ";") {
+		t.Errorf("child parent_risk_ids = %q; want both of %v", got[child.String()], want)
+	}
+	if got[parentA.String()] != "" {
+		t.Errorf("parent A parent_risk_ids = %q; want empty", got[parentA.String()])
 	}
 }

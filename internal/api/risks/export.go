@@ -137,6 +137,8 @@ type riskRow struct {
 	Severity         int
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	// ParentIDs are the risks this one rolls up to (#1748).
+	ParentIDs []uuid.UUID
 }
 
 // NewExportHandler constructs the slice 136 export handler. The pool
@@ -403,6 +405,9 @@ func riskExportHeader() []string {
 		"updated_at",
 		// #1746: appended, not inserted, so existing column positions hold.
 		"acceptance_status",
+		// #1748: the parent risks this one rolls up to, semicolon-separated;
+		// empty when it has none. Appended for the same reason.
+		"parent_risk_ids",
 	}
 }
 
@@ -416,7 +421,8 @@ func riskExportHeader() []string {
 //
 // themes is rendered as a comma-separated string — XLSX / CSV
 // consumers don't have a natural array primitive. An empty themes
-// list renders as the empty string.
+// list renders as the empty string. parent_risk_ids is joined with
+// semicolons the same way.
 func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 	return func(yield func([]string) bool) {
 		for _, r := range rows {
@@ -440,6 +446,10 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 			if len(r.ResidualScore) > 0 {
 				residual = string(r.ResidualScore)
 			}
+			parents := make([]string, len(r.ParentIDs))
+			for i, p := range r.ParentIDs {
+				parents[i] = p.String()
+			}
 			row := []string{
 				r.ID.String(),
 				r.Title,
@@ -460,6 +470,7 @@ func risksToRowIter(rows []riskRow) iter.Seq[[]string] {
 				r.CreatedAt.UTC().Format(time.RFC3339),
 				r.UpdatedAt.UTC().Format(time.RFC3339),
 				r.AcceptanceStatus,
+				strings.Join(parents, ";"),
 			}
 			if !yield(row) {
 				return
@@ -512,6 +523,15 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 	if err != nil {
 		return nil, false, fmt.Errorf("list risks: %w", err)
 	}
+	links, err := q.ListRiskAggregationLinksForTenant(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
+	if err != nil {
+		return nil, false, fmt.Errorf("list risk parent links: %w", err)
+	}
+	parentsOf := make(map[uuid.UUID][]uuid.UUID)
+	for _, l := range links {
+		child := uuid.UUID(l.ChildRiskID.Bytes)
+		parentsOf[child] = append(parentsOf[child], uuid.UUID(l.ParentRiskID.Bytes))
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return nil, false, fmt.Errorf("commit: %w", err)
 	}
@@ -541,6 +561,7 @@ func (h *ExportHandler) listRisksDirect(ctx context.Context, limit int) ([]riskR
 			InstrumentRef:  r.InstrumentReference,
 			Themes:         append([]string(nil), r.Themes...),
 			Severity:       severityOf(r.InherentScore),
+			ParentIDs:      parentsOf[uuid.UUID(r.ID.Bytes)],
 		}
 		if r.AcceptanceStatus != nil {
 			out[i].AcceptanceStatus = string(*r.AcceptanceStatus)
