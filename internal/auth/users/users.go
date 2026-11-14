@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -567,26 +568,46 @@ func (s *Store) bootstrapAttempt(ctx context.Context, in BootstrapInput) (Bootst
 // VerifyLocalLogin verifies against it when the user or credential is
 // missing, so an unknown email or tenant costs the same argon2id work as a
 // wrong password and response time is no enumeration oracle (#1727).
+//
+// A failed build is logged and returns "": VerifyLocalLogin then fails
+// every login closed rather than answering a fast 401 (#1913).
 var timingDummyHash = sync.OnceValue(func() string {
-	h, err := password.Hash("atlas-login-timing-equalizer")
+	return buildTimingDummyHash(password.Hash)
+})
+
+func buildTimingDummyHash(hash func(string) (string, error)) string {
+	h, err := hash("atlas-login-timing-equalizer")
 	if err != nil {
+		slog.Error("users: build login timing-equalizer hash; local login fails closed", "err", err)
 		return ""
 	}
 	return h
-})
+}
 
-// burnPasswordVerify spends one password verification and discards the result.
-func burnPasswordVerify(plaintext string) {
-	if h := timingDummyHash(); h != "" {
-		_, _ = password.Verify(plaintext, h)
-	}
+// errTimingEqualizerUnavailable fails a login closed when the dummy hash
+// could not be built: answering 401 without the argon2id work would make
+// response time an account-existence oracle.
+var errTimingEqualizerUnavailable = errors.New("users: login timing equalizer unavailable")
+
+// burnPasswordVerify spends one password verification against dummyHash
+// and discards the result.
+func burnPasswordVerify(plaintext, dummyHash string) {
+	_, _ = password.Verify(plaintext, dummyHash)
 }
 
 // VerifyLocalLogin returns the User on a successful (tenant, email, password)
 // triple. Returns ErrInvalidCredentials when no user exists, the password
 // does not verify, or the user is deactivated. The caller (HTTP login handler)
 // surfaces 401 on this sentinel.
+//
+// Without the timing-equalizer hash every login fails closed with
+// errTimingEqualizerUnavailable, before any lookup, so known and unknown
+// accounts still answer alike (#1913).
 func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email, plaintextPassword string) (User, error) {
+	dummyHash := timingDummyHash()
+	if dummyHash == "" {
+		return User{}, errTimingEqualizerUnavailable
+	}
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return User{}, err
@@ -601,7 +622,7 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	row, err := q.GetUserByEmail(ctx, dbx.GetUserByEmailParams{TenantID: tIDU, Email: email})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			burnPasswordVerify(plaintextPassword)
+			burnPasswordVerify(plaintextPassword, dummyHash)
 			return User{}, ErrInvalidCredentials
 		}
 		return User{}, err
@@ -609,7 +630,7 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 	cred, err := q.GetLocalCredentialByUserID(ctx, dbx.GetLocalCredentialByUserIDParams{TenantID: tIDU, UserID: row.ID})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			burnPasswordVerify(plaintextPassword)
+			burnPasswordVerify(plaintextPassword, dummyHash)
 			return User{}, ErrInvalidCredentials
 		}
 		return User{}, err
