@@ -153,7 +153,7 @@ $COMPOSE up -d atlas web
     expose a `migrate` subcommand (this reconciles the slice-464
     SELF_HOSTING migrate-command drift). If you drive a bare Postgres
     outside the bundle, `just migrate-up` runs the same
-    `migrations/sql/*.sql` set via `psql`.
+    `deploy/docker/bootstrap/migrate.sh` ledgered runner.
 <!-- prettier-ignore-end -->
 
 ---
