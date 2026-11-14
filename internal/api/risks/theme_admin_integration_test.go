@@ -127,6 +127,16 @@ func TestThemeAdmin_CreateIsListedAndAssignable(t *testing.T) {
 			map[string]any{"name": "other"}); status != http.StatusForbidden {
 			t.Errorf("non-admin create: status %d, want 403", status)
 		}
+		if status, _ := taxCall(t, env, http.MethodPatch, "/v1/themes/shadow-it", bearer,
+			map[string]any{"name": "other"}); status != http.StatusForbidden {
+			t.Errorf("non-admin rename: status %d, want 403", status)
+		}
+		if status, _ := taxCall(t, env, http.MethodDelete, "/v1/themes/shadow-it", bearer, nil); status != http.StatusForbidden {
+			t.Errorf("non-admin delete: status %d, want 403", status)
+		}
+	}
+	if got := themeNames(t, env); got["shadow-it"] != "tenant" || got["other"] != "" {
+		t.Errorf("themes after refused writes = %v", got)
 	}
 	// A bad name is a 400.
 	if status, _ := taxCall(t, env, http.MethodPost, "/v1/themes", env.admin,

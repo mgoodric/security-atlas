@@ -50,13 +50,22 @@ name. The integration test proves it by running an evaluation after the
 rename and checking the rule still counts the renamed risks.
 
 A rule's `title_template` may contain the theme name literally; it is left
-alone (the `{theme}` placeholder already follows the rename). Existing
+alone (the `{theme}` placeholder already follows the rename). The same goes
+for a `custom_rego` severity policy that compares against the theme name as
+a string literal: the rename does not parse or rewrite Rego, so such a
+policy keeps the old name and its operator must edit it. Existing
 meta-risk titles are history and are not rewritten. A rename writes no
 `aggregation_rule_audit_log` row; the taxonomy trail records it, and the
 response carries `risks_updated` and `rules_updated`.
 
 Rename does not re-evaluate the rules. The same risks match the same rules
 before and after, so an evaluation would reach the same result.
+
+`updated_at` is bumped on the theme row and on each retargeted rule (their
+definitions changed), and deliberately left alone on the risks. A theme
+rename is a change to the organisation's vocabulary, not an edit to any
+risk, and bumping every tagged risk would make them all read as recently
+edited.
 
 ## D6 — locks: vocabulary, then rules, then rows
 
@@ -76,6 +85,19 @@ locks in the order a risk write does:
 An assignment takes (1) before its own (2) and row lock, so the order is the
 same on both sides. Delete takes only (1): it refuses when anything uses
 the theme, so it never touches a risk or rule.
+`internal/risk/aggrule/theme_rename_lock_integration_test.go` holds an
+assignment after it validates and shows the rename and the delete waiting
+for it, and a rename waiting for an in-flight evaluation, with no 40P01.
+With the shared lock removed, both assignment tests fail: the risk keeps
+the old name, and the delete removes a theme in use.
+
+What the vocabulary lock does not cover: aggregation rule create and
+threshold edits do not check `target_theme` against the vocabulary (a rule
+may target any string), and they do not take the lock. A rule created
+targeting the old name while a rename commits keeps that name, the same as
+a rule created today targeting a name that does not exist. Rename covers
+the rules that exist when it runs. Holding rule writes to the vocabulary is
+a separate change to the rule surface.
 
 ## D7 — no archive for themes
 
