@@ -557,7 +557,7 @@ mappings:
     scf_anchor: "IAC-11"
     relationship_type: "equal"
     strength: 0.8
-    rationale: "Slice 567 re-point (was IAC-10 @ 0.60). Emergency Access Procedure (procedures for obtaining necessary ePHI during an emergency) IS the break-glass control; privileged-account management was the covering anchor only because no break-glass anchor existed. IAC-11 Emergency Access (Break-Glass) Accounts is the direct equivalent. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 9."
+    rationale: "Slice 567 re-point (was IAC-10 @ 0.60). Emergency Access Procedure (procedures for obtaining necessary ePHI during an emergency) IS the break-glass control; privileged-account management was the covering anchor only because no break-glass anchor existed. IAC-11 Emergency Accounts is the direct equivalent. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 9."
   - requirement_code: "164.312(a)(2)(iii)"
     scf_anchor: "CFG-04.5"
     relationship_type: "equal"

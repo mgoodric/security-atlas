@@ -49,6 +49,16 @@ type Report struct {
 	// audit row by SystemReviewerID.
 	EdgesTierReseeded []ReseededEdge
 
+	// EdgesPruned lists the catalog edges this import deleted because the
+	// crosswalk no longer lists them (#1971). Only edges whose provenance the
+	// crosswalk writes are pruned; see staleEdges.
+	EdgesPruned []PrunedEdge
+
+	// EdgesUnlisted lists edges the crosswalk does not list but did not
+	// prune, because another source wrote them (a different
+	// source_attribution). They are reported so an operator can see them.
+	EdgesUnlisted []PrunedEdge
+
 	// MappingsByAttribution tallies edges by their source_attribution
 	// label. Exposed for the HITL audit summary so the orchestrator
 	// can read "X community-draft mappings ingested, 0 scf_official"
@@ -79,6 +89,54 @@ type ReseededEdge struct {
 	SCFAnchor       string
 	PreviousTier    string
 	NewTier         string
+}
+
+// PrunedEdge names one catalog edge the crosswalk no longer lists.
+type PrunedEdge struct {
+	RequirementCode string
+	SCFAnchor       string
+	Attribution     string
+	Tier            string
+}
+
+// edgeKey identifies a mapping the way the edges table does: one edge per
+// (requirement, anchor) pair.
+type edgeKey struct {
+	requirementCode string
+	scfAnchor       string
+}
+
+// staleEdges splits the stored edges of one framework version that the
+// crosswalk does not list into the ones to delete and the ones to leave.
+//
+// A crosswalk is the source of truth for the edges it writes, so an edge it
+// stopped listing is deleted: after an SCF remap moves a mapping to a new
+// anchor, the edge left on the old anchor would otherwise keep counting as
+// coverage (#1971). The importer only owns the provenance it writes, though.
+// An edge with a source_attribution the crosswalk never uses came from
+// another source (an scf_official workbook, a demo seed) and is left in
+// place and reported.
+func staleEdges(stored []dbx.ListFwToScfEdgesForVersionForUpdateRow, listed map[edgeKey]bool, owned map[dbx.CrosswalkSourceAttribution]bool) (prune []dbx.ListFwToScfEdgesForVersionForUpdateRow, keep []dbx.ListFwToScfEdgesForVersionForUpdateRow) {
+	for _, e := range stored {
+		if listed[edgeKey{e.RequirementCode, e.ScfID}] {
+			continue
+		}
+		if owned[e.SourceAttribution] {
+			prune = append(prune, e)
+		} else {
+			keep = append(keep, e)
+		}
+	}
+	return prune, keep
+}
+
+func prunedEdge(e dbx.ListFwToScfEdgesForVersionForUpdateRow) PrunedEdge {
+	return PrunedEdge{
+		RequirementCode: e.RequirementCode,
+		SCFAnchor:       e.ScfID,
+		Attribution:     string(e.SourceAttribution),
+		Tier:            string(e.MappingTier),
+	}
 }
 
 // SystemReviewerID is the reviewer_id on a tier-transition audit row written
@@ -391,6 +449,32 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		default:
 			return Report{}, fmt.Errorf("crosswalk: lookup edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, lookupErr)
 		}
+	}
+
+	// 6. Prune the edges this crosswalk wrote and no longer lists (#1971),
+	//    in the same transaction as the upsert so coverage never sees a
+	//    half-applied crosswalk.
+	listed := make(map[edgeKey]bool, len(cw.Mappings))
+	owned := map[dbx.CrosswalkSourceAttribution]bool{dbx.CrosswalkSourceAttribution(cw.SourceAttribution): true}
+	for _, m := range cw.Mappings {
+		listed[edgeKey{m.RequirementCode, m.SCFAnchor}] = true
+		if m.SourceAttribution != "" {
+			owned[dbx.CrosswalkSourceAttribution(m.SourceAttribution)] = true
+		}
+	}
+	stored, err := q.ListFwToScfEdgesForVersionForUpdate(ctx, version.ID)
+	if err != nil {
+		return Report{}, fmt.Errorf("crosswalk: list edges for prune: %w", err)
+	}
+	prune, keep := staleEdges(stored, listed, owned)
+	for _, e := range prune {
+		if err := q.DeleteFwToScfEdge(ctx, e.ID); err != nil {
+			return Report{}, fmt.Errorf("crosswalk: prune edge %s->%s: %w", e.RequirementCode, e.ScfID, err)
+		}
+		report.EdgesPruned = append(report.EdgesPruned, prunedEdge(e))
+	}
+	for _, e := range keep {
+		report.EdgesUnlisted = append(report.EdgesUnlisted, prunedEdge(e))
 	}
 
 	return report, nil

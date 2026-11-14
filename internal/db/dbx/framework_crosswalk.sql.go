@@ -34,6 +34,18 @@ func (q *Queries) CountFwToScfEdgesBySourceAttribution(ctx context.Context, sour
 	return count, err
 }
 
+const deleteFwToScfEdge = `-- name: DeleteFwToScfEdge :exec
+DELETE FROM fw_to_scf_edges WHERE id = $1
+`
+
+// Remove one catalog edge the crosswalk no longer lists. Its tier-transition
+// audit rows go with it (ON DELETE CASCADE); the importer reports every
+// pruned edge, tier included, so the removal is visible in the import output.
+func (q *Queries) DeleteFwToScfEdge(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteFwToScfEdge, id)
+	return err
+}
+
 const getFrameworkRequirementByCurrentVersion = `-- name: GetFrameworkRequirementByCurrentVersion :one
 SELECT fr.id, fr.framework_version_id, fr.code, fr.title, fr.body, fr.created_at, fr.updated_at
 FROM framework_requirements fr
@@ -470,6 +482,61 @@ func (q *Queries) ListFwToScfEdgesForRequirement(ctx context.Context, frameworkR
 			&i.ScfID,
 			&i.Family,
 			&i.AnchorTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFwToScfEdgesForVersionForUpdate = `-- name: ListFwToScfEdgesForVersionForUpdate :many
+SELECT
+    e.id,
+    fr.code AS requirement_code,
+    a.scf_id,
+    e.source_attribution,
+    e.mapping_tier
+FROM fw_to_scf_edges e
+JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+JOIN scf_anchors a ON a.id = e.scf_anchor_id
+WHERE fr.framework_version_id = $1
+ORDER BY fr.code, a.scf_id
+FOR UPDATE OF e
+`
+
+type ListFwToScfEdgesForVersionForUpdateRow struct {
+	ID                pgtype.UUID                `json:"id"`
+	RequirementCode   string                     `json:"requirement_code"`
+	ScfID             string                     `json:"scf_id"`
+	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
+	MappingTier       CrosswalkMappingTier       `json:"mapping_tier"`
+}
+
+// Every catalog edge under one framework_version, row-locked, with the
+// requirement code and anchor scf_id the importer keys mappings on. The
+// crosswalk importer reads this after its upsert pass to find edges the
+// crosswalk no longer lists (#1971): an SCF remap moves a mapping to a new
+// anchor, and the edge on the old anchor would otherwise keep counting as
+// coverage.
+func (q *Queries) ListFwToScfEdgesForVersionForUpdate(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFwToScfEdgesForVersionForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, listFwToScfEdgesForVersionForUpdate, frameworkVersionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListFwToScfEdgesForVersionForUpdateRow
+	for rows.Next() {
+		var i ListFwToScfEdgesForVersionForUpdateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RequirementCode,
+			&i.ScfID,
+			&i.SourceAttribution,
+			&i.MappingTier,
 		); err != nil {
 			return nil, err
 		}

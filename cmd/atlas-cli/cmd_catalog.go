@@ -157,8 +157,16 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 				report.FrameworkSlug, report.FrameworkVersion, report.FrameworkVersionID, report.IsNewVersion)
 			fmt.Printf("requirements created=%d updated=%d unchanged=%d\n",
 				report.RequirementsCreated, report.RequirementsUpdated, report.RequirementsUnchanged)
-			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d\n",
-				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped))
+			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d pruned=%d\n",
+				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped), len(report.EdgesPruned))
+			for _, pr := range report.EdgesPruned {
+				fmt.Printf("edge pruned %s->%s: no longer in the crosswalk (source_attribution=%s mapping_tier=%s)\n",
+					pr.RequirementCode, pr.SCFAnchor, pr.Attribution, pr.Tier)
+			}
+			for _, un := range report.EdgesUnlisted {
+				fmt.Printf("edge kept %s->%s: not in the crosswalk, but source_attribution=%s is another source's\n",
+					un.RequirementCode, un.SCFAnchor, un.Attribution)
+			}
 			for _, sk := range report.EdgesSkipped {
 				fmt.Printf("edge skipped %s->%s: existing source_attribution=%s outranks incoming %s\n",
 					sk.RequirementCode, sk.SCFAnchor, sk.ExistingAttribution, sk.IncomingAttribution)

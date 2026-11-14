@@ -323,3 +323,51 @@ func TestAttributionRank_CoversEveryEnumValue(t *testing.T) {
 		}
 	}
 }
+
+// staleEdges deletes only unlisted edges whose provenance the crosswalk
+// writes (#1971); listed edges and other sources' edges are never pruned.
+func TestStaleEdges(t *testing.T) {
+	t.Parallel()
+	row := func(code, anchor string, attr dbx.CrosswalkSourceAttribution) dbx.ListFwToScfEdgesForVersionForUpdateRow {
+		return dbx.ListFwToScfEdgesForVersionForUpdateRow{
+			RequirementCode:   code,
+			ScfID:             anchor,
+			SourceAttribution: attr,
+			MappingTier:       dbx.CrosswalkMappingTierDraft,
+		}
+	}
+	community := dbx.CrosswalkSourceAttributionCommunityDraft
+	official := dbx.CrosswalkSourceAttributionScfOfficial
+	stored := []dbx.ListFwToScfEdgesForVersionForUpdateRow{
+		row("R-1", "IAC-14", community), // listed: kept
+		row("R-1", "IAC-10", community), // remapped away: pruned
+		row("R-2", "IAC-37", official),  // unlisted, another source: kept, reported
+		row("R-3", "IAC-06", community), // requirement dropped: pruned
+	}
+	listed := map[edgeKey]bool{{"R-1", "IAC-14"}: true}
+	owned := map[dbx.CrosswalkSourceAttribution]bool{community: true}
+
+	prune, keep := staleEdges(stored, listed, owned)
+
+	var got []string
+	for _, e := range prune {
+		got = append(got, e.RequirementCode+"->"+e.ScfID)
+	}
+	if strings.Join(got, ",") != "R-1->IAC-10,R-3->IAC-06" {
+		t.Fatalf("prune = %v; want R-1->IAC-10, R-3->IAC-06", got)
+	}
+	if len(keep) != 1 || keep[0].ScfID != "IAC-37" {
+		t.Fatalf("keep = %+v; want only the scf_official R-2->IAC-37 edge", keep)
+	}
+	if p := prunedEdge(prune[0]); p.Attribution != "community_draft" || p.Tier != "draft" || p.SCFAnchor != "IAC-10" {
+		t.Fatalf("prunedEdge = %+v", p)
+	}
+}
+
+func TestStaleEdges_NothingStored(t *testing.T) {
+	t.Parallel()
+	prune, keep := staleEdges(nil, map[edgeKey]bool{}, map[dbx.CrosswalkSourceAttribution]bool{})
+	if len(prune) != 0 || len(keep) != 0 {
+		t.Fatalf("empty input gave prune=%v keep=%v", prune, keep)
+	}
+}
