@@ -8,10 +8,7 @@ package accessreview
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/csv"
-	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -22,7 +19,12 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/protobuf/types/known/structpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
+	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -67,13 +69,26 @@ var (
 	ErrIncomplete        = errors.New("access_review: campaign has pending review items")
 )
 
+// EvidenceCredentialID is the system credential the store ingests
+// completion evidence under (the credential_id the raw insert used to set).
+const EvidenceCredentialID = "access_review_campaign"
+
 type Store struct {
-	pool  *pgxpool.Pool
-	clock func() time.Time
+	pool   *pgxpool.Pool
+	clock  func() time.Time
+	ingest *ingest.Service
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, clock: func() time.Time { return time.Now().UTC() }}
+}
+
+// WithIngest makes s write completion evidence through svc. A store
+// without one fails Complete with ingest.ErrUnavailable rather than
+// writing the ledger directly (#1830).
+func (s *Store) WithIngest(svc *ingest.Service) *Store {
+	s.ingest = ingest.ForDomainWriter(svc)
+	return s
 }
 
 func (s *Store) WithClock(fn func() time.Time) *Store {
@@ -385,7 +400,7 @@ func (s *Store) Complete(ctx context.Context, campaignID uuid.UUID) (Rollup, err
 		`, tenantID, campaignID).Scan(&campaignName, &createdBy, &usersReviewed, &usersTerminated); err != nil {
 			return fmt.Errorf("access_review: completion stats: %w", err)
 		}
-		payload, err := json.Marshal(CompletionEvidencePayload(out, campaignName, createdBy, usersReviewed, usersTerminated))
+		payload, err := ingest.PayloadStruct(CompletionEvidencePayload(out, campaignName, createdBy, usersReviewed, usersTerminated))
 		if err != nil {
 			return err
 		}
@@ -394,41 +409,23 @@ func (s *Store) Complete(ctx context.Context, campaignID uuid.UUID) (Rollup, err
 		// matches control_id, or control_ref as a UUID string) picks the
 		// record up. Without the kit the record still lands with the bundle
 		// slug in control_ref for traceability.
-		var controlID *uuid.UUID
+		controlRef := CC6ControlRef
 		var resolved uuid.UUID
 		switch err := tx.QueryRow(ctx, `
 			SELECT id FROM controls
 			WHERE tenant_id = $1 AND bundle_id = $2 AND superseded_by IS NULL
 		`, tenantID, CC6ControlRef).Scan(&resolved); {
 		case err == nil:
-			controlID = &resolved
+			controlRef = resolved.String()
 		case errors.Is(err, pgx.ErrNoRows):
-			// kit not imported; leave control_id NULL
+			// kit not imported; the record carries the bundle slug only
 		default:
 			return fmt.Errorf("access_review: resolve control: %w", err)
 		}
-		evidenceID := uuid.New()
-		hash := sha256.Sum256(payload)
 		now := s.clock()
-		_, err = tx.Exec(ctx, `
-			INSERT INTO evidence_records (
-				id, tenant_id, control_id, control_ref, observed_at, provenance,
-				result, payload, hash, freshness_class, valid_until,
-				idempotency_key, evidence_kind, schema_version, credential_id,
-				ingestion_path, source_attribution, scope_canonical, observed_at_nanos
-			)
-			VALUES (
-				$1, $2, $11, $3, $4,
-				'{"source":"access_review_campaign"}'::jsonb,
-				'pass', $5, $6, 'quarterly', $7,
-				$8, $9, $12, 'access_review_campaign',
-				'manual_upload', '{"producer":"access_review"}'::jsonb, '{}'::jsonb, $10
-			)
-		`, evidenceID, tenantID, CC6ControlRef, now, payload, hex.EncodeToString(hash[:]),
-			now.Add(400*24*time.Hour), "access-review:"+campaignID.String()+":completion",
-			EvidenceKind, now.UnixNano(), controlID, EvidenceSchemaVersion)
+		evidenceID, err := s.ingestCompletion(ctx, tx, tenantID, campaignID, controlRef, payload, now)
 		if err != nil {
-			return fmt.Errorf("access_review: insert evidence: %w", err)
+			return err
 		}
 		_, err = tx.Exec(ctx, `
 			UPDATE access_review_campaigns
@@ -580,6 +577,42 @@ func parseManualCSV(r io.Reader, scope Scope) ([]Entitlement, error) {
 		}
 	}
 	return out, nil
+}
+
+// ingestCompletion writes the CC6 completion evidence through
+// ingest.Service.ProcessInTx in the completion transaction, so it is
+// schema-validated, kind-scoped and audited in evidence_audit_log, and
+// commits only with the campaign's completed status (#1830). It keeps the
+// quarterly freshness class and the 400-day valid_until the raw insert
+// used to set.
+func (s *Store) ingestCompletion(ctx context.Context, tx pgx.Tx, tenantID, campaignID uuid.UUID, controlRef string, payload *structpb.Struct, now time.Time) (uuid.UUID, error) {
+	rec := &evidencev1.EvidenceRecord{
+		IdempotencyKey: "access-review:" + campaignID.String() + ":completion",
+		EvidenceKind:   EvidenceKind,
+		SchemaVersion:  EvidenceSchemaVersion,
+		ControlId:      controlRef,
+		Scope:          []*evidencev1.ScopeDimension{{Key: "access_review_campaign_id", Values: []string{campaignID.String()}}},
+		ObservedAt:     timestamppb.New(now),
+		Result:         evidencev1.Result_RESULT_PASS,
+		Payload:        payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "system",
+			ActorId:   EvidenceCredentialID,
+		},
+	}
+	cred := ingest.SystemCredential(EvidenceCredentialID, tenantID.String(), EvidenceKind)
+	receipt, _, err := s.ingest.ProcessInTx(ctx, tx, rec, cred, ingest.LedgerOptions{
+		FreshnessClass: dbx.EvidenceFreshnessClassQuarterly,
+		ValidUntil:     now.Add(400 * 24 * time.Hour),
+	})
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("access_review: ingest evidence: %w", err)
+	}
+	evidenceID, err := uuid.Parse(receipt.RecordID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("access_review: parse evidence id: %w", err)
+	}
+	return evidenceID, nil
 }
 
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, uuid.UUID) error) error {

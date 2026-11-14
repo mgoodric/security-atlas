@@ -35,6 +35,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/personnelsecurity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -262,6 +263,8 @@ func (h *Handler) CompleteItem(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusNotFound, "checklist item not found")
 		case errors.Is(err, personnelsecurity.ErrCompleterRequired):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		case errors.Is(err, ingest.ErrUnavailable):
+			httpresp.WriteError(w, http.StatusServiceUnavailable, "evidence ingest unavailable")
 		default:
 			httperr.WriteInternal(w, r, "complete personnel checklist item", err)
 		}

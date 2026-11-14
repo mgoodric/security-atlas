@@ -238,6 +238,11 @@ func parseSinceDays(raw string) (time.Duration, error) {
 	if days < 1 {
 		return 0, errBadSince
 	}
+	// Clamp before multiplying: int32 days times 24h overflows
+	// time.Duration and wraps past the maxDriftWindow clamp (#1914).
+	if days > int64(maxDriftWindow/(24*time.Hour)) {
+		days = int64(maxDriftWindow / (24 * time.Hour))
+	}
 	return time.Duration(days) * 24 * time.Hour, nil
 }
 
