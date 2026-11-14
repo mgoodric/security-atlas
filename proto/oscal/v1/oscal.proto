@@ -127,6 +127,9 @@ message ControlImplementation {
   string evaluated_at = 6;
   // Policy ids linked to this control.
   repeated string linked_policy_ids = 7;
+  // True when the in-place demo seed added this control to the
+  // organisation (#2043). The SSP marks it with an atlas "demo-seed" prop.
+  bool demo = 8;
 }
 
 // ScopeCell is one multidimensional scope tuple included in the SSP
@@ -242,6 +245,9 @@ message SamplePopulation {
   repeated string sampled_evidence_ids = 4;
   // RFC-3339 horizon the population was frozen at.
   string frozen_at = 5;
+  // The subset of sampled_evidence_ids the in-place demo seed added
+  // (#2043). The AR marks those observations with an atlas "demo-seed" prop.
+  repeated string demo_evidence_ids = 6;
 }
 
 // WalkthroughAttachment is one screen-capture / transcript attached to a

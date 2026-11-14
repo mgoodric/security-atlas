@@ -12,6 +12,8 @@ The bootstrap admin token is generated at platform startup. You can find it via 
 
 The token is **single-use**: on the first successful sign-in the platform atomically deletes the file AND marks `platform_status.first_signin_at` so the login page swaps back to the existing copy. Long-lived bootstrap tokens on disk are a credential leak shape this platform does not introduce.
 
+Paste the token into the **Developer sign-in** card on `/login`. That card is offered only while the install is in first-install state, which means no one has signed in yet, or a `--reset-bootstrap` (below) has put the install back into it. After the first sign-in, `/login` shows only the email and password form, and the web server refuses a pasted token. Set `ATLAS_WEB_DEV_TOKEN_SIGNIN=true` on the `web` service to keep the card available afterwards. See the [configuration reference](../configuration.md#web). If the web server cannot read the install state, it hides the card and refuses token sign-in.
+
 ---
 
 ## Token has scrolled out of the log buffer

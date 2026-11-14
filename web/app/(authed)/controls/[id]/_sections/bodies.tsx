@@ -51,6 +51,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
+import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 
@@ -99,6 +100,7 @@ export function EvidenceStreamBody({
             kind={rec.evidence_kind}
             source={rec.source}
             result={rec.result}
+            demo={rec.demo === true}
           />
         ))}
         {evidenceQ.data.next_cursor ? (
@@ -337,12 +339,15 @@ export function EvidenceStreamRow({
   kind,
   source,
   result,
+  demo = false,
 }: {
   evidenceID: string;
   observedAt: string;
   kind: string | null;
   source: Record<string, unknown> | null;
   result: "pass" | "fail" | "na" | "inconclusive";
+  /** #2043 — the in-place demo seed added this record. */
+  demo?: boolean;
 }) {
   const dotClass =
     result === "pass"
@@ -370,6 +375,7 @@ export function EvidenceStreamRow({
       <div className="col-span-6 min-w-0">
         <div className="truncate text-sm text-foreground">
           {kind ?? evidenceID}
+          {demo ? <DemoBadge testId="evidence-stream-row-demo" /> : null}
         </div>
         <div className="truncate font-mono text-[11px] text-muted-foreground">
           {formatEvidenceSource(source)}

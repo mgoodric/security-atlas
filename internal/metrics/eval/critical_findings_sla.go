@@ -10,9 +10,10 @@ import (
 // criticalFindingsSLAEvaluator computes the fraction of P0/P1 audit
 // findings closed inside their SLA window. v1 proxy: there is no
 // `severity_band` column on audit_notes yet (slice 027 leaves severity
-// to the body text). The evaluator returns 1.0 (full compliance) when
-// zero P0/P1 findings exist — "no findings" is the desired board state
-// and the catalog notes this. When the slice-027 follow-on adds a
+// to the body text). When zero findings exist in the window there is
+// nothing to measure, so the evaluator returns the empty marker rather
+// than a value: before #2064 it returned 1.0, which the metrics page
+// rendered as a 100% pass. When the slice-027 follow-on adds a
 // `severity` column, the evaluator's WHERE clause picks it up.
 //
 // Documented in the slice's decisions log (D8). This is a degraded
@@ -25,9 +26,6 @@ func (e *criticalFindingsSLAEvaluator) Name() string { return "critical_findings
 
 func (e *criticalFindingsSLAEvaluator) Compute(ctx context.Context) (Result, error) {
 	// v1 query: count "finding"-scope audit_notes rows in the last 90 days.
-	// A small denominator is OK — the dimensions field carries the count
-	// so the consumer can distinguish "100% on a sample of 0" from a real
-	// success.
 	const query = `
 		SELECT COUNT(*) FROM audit_notes
 		WHERE scope_type = 'finding'
@@ -37,15 +35,15 @@ func (e *criticalFindingsSLAEvaluator) Compute(ctx context.Context) (Result, err
 	if err := e.pool.QueryRow(ctx, query).Scan(&findings); err != nil {
 		return Result{}, fmt.Errorf("critical_findings_sla: query: %w", err)
 	}
+	return criticalFindingsSLAResult(findings), nil
+}
+
+func criticalFindingsSLAResult(findings int) Result {
 	if findings == 0 {
-		return Result{
-			Value: 1.0,
-			Dimensions: map[string]string{
-				"sample":      "empty",
-				"window_days": "90",
-				"v1_degraded": "no_severity_band_column",
-			},
-		}, nil
+		return noData("No critical findings recorded in the last 90 days", map[string]string{
+			"window_days": "90",
+			"v1_degraded": "no_severity_band_column",
+		})
 	}
 	// Without a close_at + severity column the v1 evaluator emits a
 	// conservative 0.0 when findings exist (and dimensions flags the
@@ -58,5 +56,5 @@ func (e *criticalFindingsSLAEvaluator) Compute(ctx context.Context) (Result, err
 			"window_days":        "90",
 			"v1_degraded":        "no_severity_band_column",
 		},
-	}, nil
+	}
 }

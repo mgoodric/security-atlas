@@ -554,6 +554,19 @@ func (s *Store) Revoke(id string) error {
 	return nil
 }
 
+// TenantOf reports the tenant of the credential with id, in any state.
+// The gRPC admin service uses it to keep Rotate and Revoke inside the
+// caller's tenant (#2167).
+func (s *Store) TenantOf(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.byID[id]
+	if !ok {
+		return "", false
+	}
+	return r.cred.TenantID, true
+}
+
 // RevokePurpose revokes every live credential, in any tenant, marked with
 // purpose, except the one whose id is except (empty spares none). It
 // matches on the marker and the id only, never on a bearer. Returns the

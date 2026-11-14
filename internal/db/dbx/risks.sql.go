@@ -343,6 +343,24 @@ func (q *Queries) GetRiskControlLink(ctx context.Context, arg GetRiskControlLink
 	return i, err
 }
 
+const getRiskReviewCadenceDays = `-- name: GetRiskReviewCadenceDays :one
+SELECT COALESCE(
+    (SELECT t.risk_review_cadence_days FROM tenants t WHERE t.id = $1),
+    365
+)::int AS cadence_days
+`
+
+// #2059: the tenant's risk review cadence in days, as the
+// risks_review_due_default trigger reads it: the tenants row's
+// risk_review_cadence_days, or 365 for a tenant with no row (a bare-UUID
+// tenant predating slice 144). RLS scopes tenants to the caller's own row.
+func (q *Queries) GetRiskReviewCadenceDays(ctx context.Context, id pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, getRiskReviewCadenceDays, id)
+	var cadence_days int32
+	err := row.Scan(&cadence_days)
+	return cadence_days, err
+}
+
 const heatmapBuckets = `-- name: HeatmapBuckets :many
 SELECT
     (inherent_score->>'likelihood')::int  AS likelihood,

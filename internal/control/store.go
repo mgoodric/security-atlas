@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -553,6 +554,18 @@ func manifestsEqualIgnoringMetadata(priorYAML, nextYAML []byte) (bool, error) {
 // path can hydrate family/code from the same source of truth.
 func lookupAnchorRow(ctx context.Context, q *dbx.Queries, id uuid.UUID) (dbx.ScfAnchor, error) {
 	return q.GetSCFAnchorByID(ctx, pgUUID(id))
+}
+
+// DemoControls returns which of ids the in-place demo seed added (#2043), so
+// read surfaces and exports can mark them "demo".
+func (s *Store) DemoControls(ctx context.Context, ids []uuid.UUID) (demoprov.Set, error) {
+	var set demoprov.Set
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ uuid.UUID) error {
+		var err error
+		set, err = demoprov.Lookup(ctx, q, demoprov.TableControls, ids)
+		return err
+	})
+	return set, err
 }
 
 // inTx mirrors scope.Store.inTx. Opens a transaction, applies the tenant

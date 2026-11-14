@@ -32,7 +32,11 @@ func New(store *credstore.Store) *Service {
 // A user caller is recorded as the key's minter, for attribution only
 // (#1947): the key outlives that user's access.
 func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv1.IssueResponse, error) {
-	tenant, err := requestTenant(ctx, req.GetTenantId())
+	caller, err := RequireAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenant, err := requestTenant(caller, req.GetTenantId())
 	if err != nil {
 		return nil, err
 	}
@@ -43,11 +47,7 @@ func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv
 	if ttl < 0 {
 		return nil, status.Error(codes.InvalidArgument, "ttl must not be negative")
 	}
-	var minter string
-	if caller, ok := authctx.CredentialFromContext(ctx); ok {
-		minter = credstore.MinterUserID(caller)
-	}
-	cred, bearer, err := s.store.IssueMinted(tenant, req.GetScopePredicate(), req.GetKinds(), ttl, minter)
+	cred, bearer, err := s.store.IssueMinted(tenant, req.GetScopePredicate(), req.GetKinds(), ttl, credstore.MinterUserID(caller))
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue: %v", err)
 	}
@@ -58,9 +58,9 @@ func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv
 }
 
 // Rotate issues a successor token and starts the predecessor's grace window.
-func (s *Service) Rotate(_ context.Context, req *adminv1.RotateRequest) (*adminv1.RotateResponse, error) {
-	if req.GetId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "id is required")
+func (s *Service) Rotate(ctx context.Context, req *adminv1.RotateRequest) (*adminv1.RotateResponse, error) {
+	if err := s.requireOwnKey(ctx, req.GetId()); err != nil {
+		return nil, err
 	}
 	successor, bearer, predecessorExpiresAt, err := s.store.Rotate(req.GetId())
 	if err != nil {
@@ -77,9 +77,9 @@ func (s *Service) Rotate(_ context.Context, req *adminv1.RotateRequest) (*adminv
 }
 
 // Revoke invalidates the key immediately.
-func (s *Service) Revoke(_ context.Context, req *adminv1.RevokeRequest) (*adminv1.RevokeResponse, error) {
-	if req.GetId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "id is required")
+func (s *Service) Revoke(ctx context.Context, req *adminv1.RevokeRequest) (*adminv1.RevokeResponse, error) {
+	if err := s.requireOwnKey(ctx, req.GetId()); err != nil {
+		return nil, err
 	}
 	if err := s.store.Revoke(req.GetId()); err != nil {
 		if errors.Is(err, credstore.ErrUnknownKey) {
@@ -92,7 +92,11 @@ func (s *Service) Revoke(_ context.Context, req *adminv1.RevokeRequest) (*adminv
 
 // List enumerates active credentials for a tenant. No tokens returned.
 func (s *Service) List(ctx context.Context, req *adminv1.ListRequest) (*adminv1.ListResponse, error) {
-	tenant, err := requestTenant(ctx, req.GetTenantId())
+	caller, err := RequireAdmin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	tenant, err := requestTenant(caller, req.GetTenantId())
 	if err != nil {
 		return nil, err
 	}
@@ -104,20 +108,56 @@ func (s *Service) List(ctx context.Context, req *adminv1.ListRequest) (*adminv1.
 	return &adminv1.ListResponse{Handles: handles}, nil
 }
 
-// requestTenant is the tenant an Issue or List acts in: tenant_id when the
-// request names one, otherwise the caller's own credential tenant, so a CLI
-// on a single-tenant install need not name it (#1762). A caller with no
-// tenant (the all-zeros id a super_admin JWT carries outside any tenant)
-// must name one.
-func requestTenant(ctx context.Context, requested string) (string, error) {
-	if requested != "" {
-		return requested, nil
+// RequireAdmin is the gate every AdminCredentialsService RPC passes
+// first, the gRPC twin of the HTTP admincreds requireAdmin (#2167): the
+// caller must hold an admin credential. A missing credential is
+// Unauthenticated, a non-admin one PermissionDenied. It returns the
+// caller so the RPC can scope its work to the caller's tenant.
+func RequireAdmin(ctx context.Context) (credstore.Credential, error) {
+	caller, ok := authctx.CredentialFromContext(ctx)
+	if !ok {
+		return credstore.Credential{}, status.Error(codes.Unauthenticated, "missing credential")
 	}
-	if caller, ok := authctx.CredentialFromContext(ctx); ok &&
-		caller.TenantID != "" && caller.TenantID != uuid.Nil.String() {
-		return caller.TenantID, nil
+	if !caller.IsAdmin {
+		return credstore.Credential{}, status.Error(codes.PermissionDenied, "admin credential required")
 	}
-	return "", status.Error(codes.InvalidArgument, "tenant_id is required")
+	return caller, nil
+}
+
+// requireOwnKey gates Rotate and Revoke: an admin caller, acting on a key
+// in the caller's own tenant. A key in another tenant is NotFound, as on
+// the HTTP path, so a caller learns nothing about other tenants' ids.
+func (s *Service) requireOwnKey(ctx context.Context, id string) error {
+	caller, err := RequireAdmin(ctx)
+	if err != nil {
+		return err
+	}
+	if id == "" {
+		return status.Error(codes.InvalidArgument, "id is required")
+	}
+	if tenant, ok := s.store.TenantOf(id); !ok || tenant != caller.TenantID {
+		return status.Errorf(codes.NotFound, "unknown key id %q", id)
+	}
+	return nil
+}
+
+// requestTenant is the tenant an Issue or List acts in: the caller's own
+// credential tenant (#1762). Admin credentials are tenant-scoped, so a
+// tenant_id naming any other tenant is refused (#2167); naming the
+// caller's own is accepted for older clients. A caller with no tenant
+// (empty, or the all-zeros id) cannot act in any.
+func requestTenant(caller credstore.Credential, requested string) (string, error) {
+	own := caller.TenantID
+	if own == "" || own == uuid.Nil.String() {
+		if requested == "" {
+			return "", status.Error(codes.InvalidArgument, "tenant_id is required")
+		}
+		return "", status.Error(codes.PermissionDenied, "credential is not scoped to a tenant")
+	}
+	if requested != "" && requested != own {
+		return "", status.Error(codes.PermissionDenied, "tenant_id must be the calling credential's tenant")
+	}
+	return own, nil
 }
 
 func handleFromCred(c credstore.Credential) *adminv1.ApiKeyHandle {

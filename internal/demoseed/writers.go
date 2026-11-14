@@ -109,9 +109,11 @@ func writeUserAndCreds(ctx context.Context, tx pgx.Tx, u userRow, passwordHash s
 // or 'demo_seed_teardown'). The payload_json carries the slice-205
 // forensic mark (`demo_seed_v`).
 //
-// If actorTenantID is uuid.Nil (CLI-direct invocation without a
-// session-tenant context), the me_audit_log row anchors to the demo
-// tenant instead so the row is still tagged for forensic filtering.
+// The me_audit_log row always anchors to demoTenantID, the tenant the seed
+// wrote into, never to the actor's tenant (#2043). That row is the mark
+// tenantWasSeeded reads, so anchoring it to the actor's tenant made the
+// clicking admin's real organisation look like a demo tenant. The actor stays
+// on record in the super_admin_audit_log row.
 func writeAuditLogRow(ctx context.Context, tx pgx.Tx, action string,
 	actorUserID uuid.UUID, actorTenantID uuid.UUID, demoTenantID uuid.UUID,
 	payload map[string]any,
@@ -123,14 +125,10 @@ func writeAuditLogRow(ctx context.Context, tx pgx.Tx, action string,
 	if err := writeSuperAdminAuditRow(ctx, tx, action, actorUserID, actorTenantID, demoTenantID, payloadBytes); err != nil {
 		return err
 	}
-	tenantForMe := actorTenantID
-	if tenantForMe == uuid.Nil {
-		tenantForMe = demoTenantID
-	}
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO me_audit_log (tenant_id, user_id, action, before, after)
 		 VALUES ($1, $2, $3, '{}'::jsonb, $4::jsonb)`,
-		tenantForMe, nonZeroOrSelf(actorUserID), action, payloadBytes,
+		demoTenantID, nonZeroOrSelf(actorUserID), action, payloadBytes,
 	); err != nil {
 		return fmt.Errorf("demoseed: insert me_audit_log: %w", err)
 	}
@@ -138,9 +136,10 @@ func writeAuditLogRow(ctx context.Context, tx pgx.Tx, action string,
 }
 
 // writeSuperAdminAuditRow writes the super_admin_audit_log half of
-// writeAuditLogRow. That log has no tenant_id, so the in-place teardown
-// (#1765) records itself here alone and leaves the tenant's rows exactly as
-// they were before the seed.
+// writeAuditLogRow: the install-wide record of who ran the seed or teardown.
+// actor_tenant_id is the actor's tenant, or demoTenantID when the actor has
+// none (the column is NOT NULL). assertFreshDemoTenant reads the
+// demo_seed_apply row written here.
 func writeSuperAdminAuditRow(ctx context.Context, tx pgx.Tx, action string,
 	actorUserID uuid.UUID, actorTenantID uuid.UUID, demoTenantID uuid.UUID,
 	payloadBytes []byte,
