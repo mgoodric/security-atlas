@@ -146,6 +146,7 @@ func TestValidSurface(t *testing.T) {
 	t.Parallel()
 	for _, s := range []Surface{
 		SurfaceQuestionnaire, SurfaceBoardNarrative, SurfaceGapExplanation, SurfaceChecklist, SurfaceSummary,
+		SurfaceControlImport,
 	} {
 		if !ValidSurface(s) {
 			t.Errorf("ValidSurface(%q) = false, want true", s)

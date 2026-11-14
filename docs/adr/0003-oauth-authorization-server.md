@@ -402,7 +402,9 @@ again on those replicas until restart.
   should not outlive them: `atlas-cli credentials revoke --id
 <credential_id>` or `POST /v1/admin/credentials/{id}/revoke`. A follow-up
   ticket adds an admin-UI warning on the user-disable screen that lists that
-  user's still-live minted keys.
+  user's still-live minted keys. (#1953 shipped it: the Admin → Users
+  revoke dialog reads `GET /v1/admin/credentials?minted_by=<user>` and
+  never revokes on its own.)
 - **A durable revocation holds on every replica.** For a user-owned key
   with an `api_keys` row, the per-request user gate now also reads that row.
   It refuses the key when `revoked_at` is set or the row is missing, before

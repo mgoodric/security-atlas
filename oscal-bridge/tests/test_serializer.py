@@ -82,6 +82,64 @@ def test_serialize_ssp_emits_valid_oscal():
     assert valid, errors
 
 
+def test_serialize_ssp_marks_excluded_requirements_not_applicable():
+    """#1792: each excluded requirement becomes its own namespaced
+    implemented-requirement with implementation-status not-applicable, the
+    justification as remarks and an atlas framework prop. The per-control
+    entry is unchanged, and the SSP survives the trestle round-trip."""
+    inp = _ssp_input()
+    inp.excluded_requirements.append(
+        oscal_pb2.ExcludedRequirement(
+            framework="iso27001-2022",
+            requirement_code="A.8.25",
+            requirement_title="Secure development life cycle",
+            justification="No in-house software development.",
+            framework_scope_id="scope-1",
+        )
+    )
+    data = serialize_ssp(inp)
+    impls = json.loads(data)["system-security-plan"]["control-implementation"][
+        "implemented-requirements"
+    ]
+    assert len(impls) == 2
+
+    by_id = {ir["control-id"]: ir for ir in impls}
+    na = by_id["iso27001-2022_A.8.25"]
+    props = {(p["name"], p.get("ns")): p["value"] for p in na["props"]}
+    assert props[("implementation-status", None)] == "not-applicable"
+    atlas_ns = "https://security-atlas.dev/ns/oscal"
+    assert props[("framework", atlas_ns)] == "iso27001-2022"
+    assert props[("requirement-code", atlas_ns)] == "A.8.25"
+    assert na["remarks"] == "No in-house software development."
+    assert not any(p["name"] == "evaluation-result" for p in na["props"])
+
+    # The per-control entry is unchanged.
+    ctrl = by_id["iac-06"]
+    assert {p["name"]: p["value"] for p in ctrl["props"]}["evaluation-result"] == "pass"
+    assert not any(p["name"] == "implementation-status" for p in ctrl["props"])
+
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
+def test_serialize_ssp_requirement_token_sanitizes_code():
+    """A code with characters outside the OSCAL token alphabet still yields a
+    valid control-id (round-trip passes)."""
+    inp = _ssp_input()
+    inp.excluded_requirements.append(
+        oscal_pb2.ExcludedRequirement(
+            framework="soc2-2017", requirement_code="CC 6.1/a", justification="n/a"
+        )
+    )
+    data = serialize_ssp(inp)
+    impls = json.loads(data)["system-security-plan"]["control-implementation"][
+        "implemented-requirements"
+    ]
+    assert "soc2-2017_CC-6.1-a" in {ir["control-id"] for ir in impls}
+    valid, errors = round_trip_validate("system-security-plan", data)
+    assert valid, errors
+
+
 def test_serialize_ssp_rejects_empty_control_implementations():
     bad = _ssp_input()
     del bad.control_implementations[:]

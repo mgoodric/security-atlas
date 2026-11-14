@@ -145,6 +145,11 @@ type ListItem struct {
 	IsApprover     bool       `json:"is_approver"`
 	OwnerRoles     []string   `json:"owner_roles"`
 	RotatedFrom    string     `json:"rotated_from,omitempty"`
+	// ExpiresAt is IssuedAt + TTL; absent for a key that never expires.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// MintedBy is the users(id) of the admin who minted the key, for
+	// attribution only (#1947). Absent when no user minted it.
+	MintedBy string `json:"minted_by,omitempty"`
 }
 
 // ListResponse is the GET /v1/admin/credentials shape.
@@ -157,6 +162,11 @@ type ListResponse struct {
 // Slice 051: tenant is derived strictly from the calling credential.
 // The previously-accepted ?tenant_id query parameter is rejected with
 // 400 — see the Issue docstring for the rationale.
+//
+// ?minted_by=<user uuid> (#1953) narrows the list to the live keys that
+// user minted: not revoked, not past its rotation grace, not past expiry. The admin UI reads it to
+// warn, on the user revoke screen, about machine keys that outlive their
+// minter. It only lists; it never revokes.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if !requireAdmin(w, r) {
 		return
@@ -165,12 +175,24 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "tenant_id query parameter is not accepted; tenant is derived from the calling credential")
 		return
 	}
+	mintedBy := r.URL.Query().Get("minted_by")
+	if mintedBy != "" {
+		u, perr := uuid.Parse(mintedBy)
+		if perr != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "minted_by must be a user uuid")
+			return
+		}
+		mintedBy = u.String()
+	}
 	// requireAdmin returning true guarantees the credential is in context.
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	creds, err := h.store.List(r.Context(), cred.TenantID)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list failed", err)
 		return
+	}
+	if mintedBy != "" {
+		creds = liveMintedBy(creds, mintedBy, time.Now())
 	}
 	items := make([]ListItem, 0, len(creds))
 	for _, c := range creds {
@@ -185,10 +207,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			IsApprover:     c.IsApprover,
 			OwnerRoles:     c.OwnerRoles,
 			RotatedFrom:    c.RotatedFrom,
+			MintedBy:       c.MintedBy,
 		}
 		if !c.LastUsedAt.IsZero() {
 			lu := c.LastUsedAt
 			item.LastUsedAt = &lu
+		}
+		if exp := c.ExpiresAt(); !exp.IsZero() {
+			item.ExpiresAt = &exp
 		}
 		items = append(items, item)
 	}
@@ -273,6 +299,27 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 }
 
 // --- helpers ---
+
+// liveMintedBy keeps the credentials minted by userID that are still live
+// at now, matching apikeystore's keyLive. The store's list already drops
+// revoked rows; this also drops a rotated-out key past its grace window
+// (retires_at) and a key past its expiry.
+func liveMintedBy(creds []credstore.Credential, userID string, now time.Time) []credstore.Credential {
+	out := make([]credstore.Credential, 0, len(creds))
+	for _, c := range creds {
+		if c.MintedBy != userID {
+			continue
+		}
+		if !c.RetiresAt.IsZero() && now.After(c.RetiresAt) {
+			continue
+		}
+		if exp := c.ExpiresAt(); !exp.IsZero() && now.After(exp) {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())

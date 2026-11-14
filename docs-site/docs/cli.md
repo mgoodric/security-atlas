@@ -76,8 +76,15 @@ security-atlas-cli evidence push \
 
 `--scope` is the scope predicate as JSON. `--payload` takes a JSON literal or
 `@path/to/file.json`. `--result` is one of `pass | fail | na | inconclusive`.
+`--control` takes the control's UUID or its bundle ID; a bundle ID links the
+record to the tenant's active version of that bundle. Any other value is kept
+as a free-form reference and does not link to a control.
 Optional: `--schema-version` (default `1.0.0`), `--actor-type` (default
 `service_account`), `--session-id`, `--payload-uri`.
+
+The gRPC endpoint accepts API keys only, not a UI session token; issue one
+with `credentials issue`. [Push a first manual attestation](first-manual-attestation.md)
+walks the whole path.
 
 `evidence verify` re-hashes the ledger and reports mismatches:
 
@@ -92,14 +99,15 @@ Add `--page-size` to tune the keyset page size (default 1000).
 
 ```sh
 security-atlas-cli credentials issue --tenant <tenant id> \
-  --scope '{"environment":"prod"}' --kinds sast.scan_result.v1 --ttl 30d
+  --scope '{"environment":"prod"}' --kinds sast.scan_result.v1 --ttl 720h
 security-atlas-cli credentials list   --tenant <tenant id>
 security-atlas-cli credentials rotate --id <credential id>
 security-atlas-cli credentials revoke --id <credential id>
 ```
 
 The bearer is printed exactly once, at issue time. `--kinds` empty means all
-evidence kinds; `--ttl 0` (the default) means no expiry.
+evidence kinds; `--ttl` takes a Go duration (`24h`, `90m`) or whole days
+(`30d`), and `--ttl 0` (the default) means no expiry.
 
 `credentials issue --reset-bootstrap --force` is the first-login recovery
 path — see [First-time login](troubleshooting/first-login.md). It mints a tenant admin key that expires (24h by default, `--ttl` up to `168h`) and refuses `--scope` and `--kinds`; revoke the key once you have signed in another way.
@@ -115,6 +123,12 @@ security-atlas-cli catalog import-crosswalk data/crosswalks/soc2-tsc-2017.yaml
 ```
 
 `just import-scf <path>` and `just import-soc2 <path>` wrap these.
+
+The JSON catalog's shape is documented in
+[`docs/SELF_HOSTING.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/SELF_HOSTING.md),
+with `internal/api/scfimport/catalog.go` as the contract. Each control may
+carry an optional `legacy_scf_id`, its code in the previous SCF release;
+the anchor API returns it as `legacy_scf_id`.
 
 `import-scf` also reads SCF's published Excel workbook directly, with no
 conversion step. Download it from the

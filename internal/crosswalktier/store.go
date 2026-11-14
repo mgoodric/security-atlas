@@ -135,6 +135,13 @@ func (s *Store) CurrentTier(ctx context.Context, edgeID uuid.UUID) (Tier, error)
 // ListTransitions returns an edge's transition history (newest first). This is
 // the admin/maintainer-scoped read — reviewer identity stays behind the admin
 // boundary, never on the public /anchors payload (threat-model I / P0-483-6).
+//
+// A row whose ReviewerID is uuid.Nil was written by the crosswalk importer
+// (soc2import.SystemReviewerID), not a person. A reader that renders this
+// history (an HTTP route, the web UI, the unified audit log) shows it as a
+// named system actor such as "system:crosswalk-import", in line with the
+// system:* actors in the decision and exception packages, never as an
+// all-zeros user id (#1883).
 func (s *Store) ListTransitions(ctx context.Context, edgeID uuid.UUID) ([]Transition, error) {
 	rows, err := dbx.New(s.pool).ListFwToScfEdgeTierTransitions(ctx, pgUUID(edgeID))
 	if err != nil {

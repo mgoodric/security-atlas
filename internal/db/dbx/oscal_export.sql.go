@@ -164,6 +164,88 @@ func (q *Queries) ListAuditNotesForPeriod(ctx context.Context, arg ListAuditNote
 	return items, nil
 }
 
+const listExcludedRequirementsAsOfForExport = `-- name: ListExcludedRequirementsAsOfForExport :many
+
+WITH in_force AS (
+    SELECT fs.id, fs.tenant_id
+    FROM framework_scopes fs
+    WHERE fs.tenant_id = $1
+      AND fs.framework_version_id = $2
+      AND fs.effective_from IS NOT NULL
+      AND fs.effective_from <= $3
+      AND (fs.superseded_at IS NULL OR fs.superseded_at > $3)
+    ORDER BY fs.effective_from DESC, fs.id ASC
+    LIMIT 1
+)
+SELECT
+    f.slug                       AS framework_slug,
+    fv.version                   AS framework_version,
+    r.code                       AS requirement_code,
+    r.title                      AS requirement_title,
+    a.justification              AS justification,
+    a.framework_scope_id         AS framework_scope_id
+FROM in_force s
+JOIN framework_scope_applicability a
+    ON a.framework_scope_id = s.id
+   AND a.tenant_id = s.tenant_id
+JOIN framework_requirements r ON r.id = a.framework_requirement_id
+JOIN framework_versions fv ON fv.id = r.framework_version_id
+JOIN frameworks f ON f.id = fv.framework_id
+WHERE a.decision = 'excluded'
+ORDER BY r.code ASC, r.id ASC
+`
+
+type ListExcludedRequirementsAsOfForExportParams struct {
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	FrameworkVersionID pgtype.UUID        `json:"framework_version_id"`
+	FrozenAt           pgtype.Timestamptz `json:"frozen_at"`
+}
+
+type ListExcludedRequirementsAsOfForExportRow struct {
+	FrameworkSlug    string      `json:"framework_slug"`
+	FrameworkVersion string      `json:"framework_version"`
+	RequirementCode  string      `json:"requirement_code"`
+	RequirementTitle string      `json:"requirement_title"`
+	Justification    string      `json:"justification"`
+	FrameworkScopeID pgtype.UUID `json:"framework_scope_id"`
+}
+
+// ===== #1792: excluded requirements -> SSP not-applicable entries =====
+// The requirements excluded in the framework-scope revision that was in
+// force for a framework version at the audit period's frozen_at. The
+// revision is chosen exactly as GetFrameworkScopeAsOf chooses it (the
+// revision active at that time); decisions on an activated or superseded
+// revision are frozen, so its rows are exactly what applied at the freeze.
+// A requirement excluded only after the freeze lives on a later revision
+// and is not returned. RLS scopes every table to the caller tenant; the
+// leading tenant predicates are defense-in-depth.
+func (q *Queries) ListExcludedRequirementsAsOfForExport(ctx context.Context, arg ListExcludedRequirementsAsOfForExportParams) ([]ListExcludedRequirementsAsOfForExportRow, error) {
+	rows, err := q.db.Query(ctx, listExcludedRequirementsAsOfForExport, arg.TenantID, arg.FrameworkVersionID, arg.FrozenAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExcludedRequirementsAsOfForExportRow
+	for rows.Next() {
+		var i ListExcludedRequirementsAsOfForExportRow
+		if err := rows.Scan(
+			&i.FrameworkSlug,
+			&i.FrameworkVersion,
+			&i.RequirementCode,
+			&i.RequirementTitle,
+			&i.Justification,
+			&i.FrameworkScopeID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFailingEvaluationsAsOf = `-- name: ListFailingEvaluationsAsOf :many
 SELECT id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at, result, freshness_status, last_observed_at FROM (
     SELECT DISTINCT ON (control_id, scope_cell_id)

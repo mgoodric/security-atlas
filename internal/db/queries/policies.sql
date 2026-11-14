@@ -195,12 +195,15 @@ RETURNING *;
 -- handler can audit who superseded it. Only matches when the row is
 -- currently 'published' (defense-in-depth -- a chain can't supersede a
 -- draft).
+--
+-- next_review_at is left as it was (#2009): the successor carries its own
+-- review date, and the superseded row keeps the date it was due so an
+-- auditor can still see it and compare it with the successor's
+-- published_at. Only a 'published' row has a review due, so the calendar
+-- and the list's review_status ignore it.
 UPDATE policies
 SET status = 'superseded',
     superseded_at = now(),
-    -- #1806: the successor carries its own review date; the superseded
-    -- row no longer has one due.
-    next_review_at = NULL,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
