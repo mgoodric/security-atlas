@@ -889,7 +889,7 @@ func TestRollUps_BoardTopRisksExcludeRollUps(t *testing.T) {
 		t.Errorf("brief top risks = %v, want only the child", got)
 	}
 
-	pack, err := board.NewPackGenerator(board.NewPackStore(app), fixedFreshness{}, fixedDrift{}, nil).
+	pack, err := board.NewPackGenerator(board.NewPackStore(app), nil).
 		WithClock(func() time.Time { return genClock }).
 		Generate(ctx, "2026-06-30")
 	if err != nil {
