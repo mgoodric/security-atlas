@@ -117,6 +117,33 @@ rejects the token on the next request with `401`. The operator
 must sign in again — and at that point the new JWT will reflect
 the updated `available_tenants[]` (without the removed tenant).
 
+## API keys the operator minted
+
+API keys an admin mints (`POST /v1/admin/credentials`, or the
+**Admin → API keys** page) are machine keys for connectors and CI.
+They do not belong to the admin who minted them, so revoking that
+admin's roles or disabling the admin leaves them working. Atlas
+records the minter for attribution only.
+
+The **Revoke roles** dialog on **Admin → Users** lists the keys the
+user minted that are still live, with each key's scope, last use and
+expiry. Nothing in that list is revoked automatically. Revoke a key
+with its own **Revoke** button, or use **Revoke all**; both ask for
+confirmation first. The list covers your current tenant; for a user
+in another tenant, review that tenant's API keys page.
+
+The same list is available from the API (admin only):
+
+```bash
+curl -H "Authorization: Bearer <admin-token>" \
+  "https://<atlas-instance>/v1/admin/credentials?minted_by=<user-uuid>"
+```
+
+It returns the live keys (not revoked, not expired) that user minted
+in the caller's tenant. Revoke one with
+`POST /v1/admin/credentials/<id>/revoke` or
+`atlas-cli credentials revoke --id <id>`.
+
 ## Why eventual?
 
 Eventual eviction is the OAuth-standard contract for stateless
