@@ -170,6 +170,7 @@ type applicabilityResp struct {
 		Undecided      int `json:"undecided"`
 		Contradictions int `json:"contradictions"`
 	} `json:"counts"`
+	ContradictionsEvaluatedAgainst string `json:"contradictions_evaluated_against"`
 }
 
 type setResp struct {
