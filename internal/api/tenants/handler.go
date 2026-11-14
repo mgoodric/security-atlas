@@ -76,10 +76,15 @@ func New(pool *pgxpool.Pool) *Handler {
 //     (strict | advisory | mandatory_tests).
 //   - RiskReviewCadenceDays (#2059): days from a risk's creation to its
 //     default review date (1..3650). Affects new risks only.
+//   - AllowSelfApproval (#2101): whether the requester of a policy,
+//     framework-scope or exception approval may approve it themselves.
+//     Such approvals are flagged self-approved. Admin-only, like every
+//     field here; each change is written to me_audit_log.
 type patchTenantRequest struct {
 	Name                  *string `json:"name"`
 	BundleGateMode        *string `json:"bundle_gate_mode"`
 	RiskReviewCadenceDays *int    `json:"risk_review_cadence_days"`
+	AllowSelfApproval     *bool   `json:"allow_self_approval"`
 }
 
 // tenantWire is the JSON shape of a tenant row on the wire.
@@ -94,9 +99,13 @@ type tenantWire struct {
 	// RiskReviewCadenceDays is the #2059 organisation risk review cadence: a
 	// risk created without a review date is due this many days after it was
 	// created. Default 365.
-	RiskReviewCadenceDays int       `json:"risk_review_cadence_days"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	RiskReviewCadenceDays int `json:"risk_review_cadence_days"`
+	// AllowSelfApproval is the #2101 organisation setting: when true, the
+	// requester of an approval may approve it, and the record is flagged
+	// self-approved. Default false.
+	AllowSelfApproval bool      `json:"allow_self_approval"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // Validation constants -----------------------------------------------
@@ -123,6 +132,11 @@ const (
 	// written on a successful risk review cadence change (#2059). CHECK
 	// constraint extended in migration 20261015000000_risk_review_cadence.sql.
 	auditActionTenantRiskReviewCadence = "tenant_risk_review_cadence_update"
+
+	// auditActionTenantSelfApproval is the me_audit_log.action value written
+	// on a change to Allow self-approval (#2101). CHECK constraint extended
+	// in migration 20261031000000_self_approval.sql.
+	auditActionTenantSelfApproval = "tenant_self_approval_update"
 
 	// minRiskReviewCadenceDays / maxRiskReviewCadenceDays bound the cadence,
 	// mirroring tenants_risk_review_cadence_days_chk.
@@ -189,8 +203,8 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 	}
 	// A PATCH must carry at least one mutator. Each field is independently
 	// optional; none present is a 400 (nothing to change).
-	if req.Name == nil && req.BundleGateMode == nil && req.RiskReviewCadenceDays == nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "name, bundle_gate_mode or risk_review_cadence_days is required")
+	if req.Name == nil && req.BundleGateMode == nil && req.RiskReviewCadenceDays == nil && req.AllowSelfApproval == nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "name, bundle_gate_mode, risk_review_cadence_days or allow_self_approval is required")
 		return
 	}
 	if !validRiskReviewCadence(req.RiskReviewCadenceDays) {
@@ -321,6 +335,30 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 				return fmt.Errorf("audit insert (risk review cadence): %w", err)
 			}
 		}
+
+		if req.AllowSelfApproval != nil {
+			updated, uerr := q.UpdateTenantAllowSelfApproval(ctx, dbx.UpdateTenantAllowSelfApprovalParams{
+				ID:                pgtypeUUID(id),
+				AllowSelfApproval: *req.AllowSelfApproval,
+			})
+			if uerr != nil {
+				return fmt.Errorf("update tenant allow self-approval: %w", uerr)
+			}
+			beforeAllow := after.AllowSelfApproval
+			after = tenantFromUpdateAllowSelfApprovalRow(updated)
+
+			beforeBlob, _ := json.Marshal(map[string]any{"allow_self_approval": beforeAllow})
+			afterBlob, _ := json.Marshal(map[string]any{"allow_self_approval": after.AllowSelfApproval})
+			if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+				TenantID: pgtypeUUID(id),
+				UserID:   pgtypeUUID(actorUserID),
+				Action:   auditActionTenantSelfApproval,
+				Before:   beforeBlob,
+				After:    afterBlob,
+			}); err != nil {
+				return fmt.Errorf("audit insert (allow self-approval): %w", err)
+			}
+		}
 		return nil
 	})
 	if err != nil {
@@ -387,6 +425,24 @@ func (h *Handler) PatchTenant(w http.ResponseWriter, r *http.Request) {
 			TargetType:    "tenant",
 			TargetID:      id.String(),
 			Action:        auditActionTenantRiskReviewCadence,
+			RowID:         uuid.New(),
+			SubjectModule: unifiedlog.SubjectModuleCore,
+			PayloadJSON:   sinkPayload,
+		})
+	}
+	if req.AllowSelfApproval != nil {
+		sinkPayload, _ := json.Marshal(map[string]any{
+			"before": map[string]any{"allow_self_approval": before.AllowSelfApproval},
+			"after":  map[string]any{"allow_self_approval": after.AllowSelfApproval},
+		})
+		sink.EmitDefault(ctx, unifiedlog.Entry{
+			OccurredAt:    time.Now().UTC(),
+			ActorID:       actorUserID.String(),
+			TenantID:      id,
+			Kind:          unifiedlog.KindMe,
+			TargetType:    "tenant",
+			TargetID:      id.String(),
+			Action:        auditActionTenantSelfApproval,
 			RowID:         uuid.New(),
 			SubjectModule: unifiedlog.SubjectModuleCore,
 			PayloadJSON:   sinkPayload,
@@ -512,6 +568,7 @@ func tenantFromGetRow(r dbx.GetTenantByIDRow) tenantWire {
 		IsBootstrapTenant:     r.IsBootstrapTenant,
 		BundleGateMode:        r.BundleGateMode,
 		RiskReviewCadenceDays: int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:     r.AllowSelfApproval,
 		CreatedAt:             r.CreatedAt.Time,
 		UpdatedAt:             r.UpdatedAt.Time,
 	}
@@ -524,6 +581,7 @@ func tenantFromUpdateNameRow(r dbx.UpdateTenantNameRow) tenantWire {
 		IsBootstrapTenant:     r.IsBootstrapTenant,
 		BundleGateMode:        r.BundleGateMode,
 		RiskReviewCadenceDays: int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:     r.AllowSelfApproval,
 		CreatedAt:             r.CreatedAt.Time,
 		UpdatedAt:             r.UpdatedAt.Time,
 	}
@@ -536,6 +594,7 @@ func tenantFromUpdateGateModeRow(r dbx.UpdateTenantBundleGateModeRow) tenantWire
 		IsBootstrapTenant:     r.IsBootstrapTenant,
 		BundleGateMode:        r.BundleGateMode,
 		RiskReviewCadenceDays: int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:     r.AllowSelfApproval,
 		CreatedAt:             r.CreatedAt.Time,
 		UpdatedAt:             r.UpdatedAt.Time,
 	}
@@ -548,6 +607,20 @@ func tenantFromUpdateRiskReviewCadenceRow(r dbx.UpdateTenantRiskReviewCadenceRow
 		IsBootstrapTenant:     r.IsBootstrapTenant,
 		BundleGateMode:        r.BundleGateMode,
 		RiskReviewCadenceDays: int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:     r.AllowSelfApproval,
+		CreatedAt:             r.CreatedAt.Time,
+		UpdatedAt:             r.UpdatedAt.Time,
+	}
+}
+
+func tenantFromUpdateAllowSelfApprovalRow(r dbx.UpdateTenantAllowSelfApprovalRow) tenantWire {
+	return tenantWire{
+		ID:                    uuid.UUID(r.ID.Bytes).String(),
+		Name:                  r.Name,
+		IsBootstrapTenant:     r.IsBootstrapTenant,
+		BundleGateMode:        r.BundleGateMode,
+		RiskReviewCadenceDays: int(r.RiskReviewCadenceDays),
+		AllowSelfApproval:     r.AllowSelfApproval,
 		CreatedAt:             r.CreatedAt.Time,
 		UpdatedAt:             r.UpdatedAt.Time,
 	}

@@ -27,6 +27,7 @@ import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -153,6 +154,10 @@ export default function PolicyDetailPage({
               Imported
             </Badge>
           ) : null}
+          <SelfApprovedBadge
+            selfApproved={policy.self_approved}
+            testId="policy-detail-self-approved"
+          />
         </div>
         <h1
           className="text-2xl font-semibold tracking-tight"

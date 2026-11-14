@@ -18,7 +18,7 @@ SET claim_status      = $3,
     dispositioned_at  = now(),
     disposition_note  = $5
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note
+RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note, scf_release
 `
 
 type DispositionImportedComponentClaimParams struct {
@@ -58,6 +58,7 @@ func (q *Queries) DispositionImportedComponentClaim(ctx context.Context, arg Dis
 		&i.DispositionedBy,
 		&i.DispositionedAt,
 		&i.DispositionNote,
+		&i.ScfRelease,
 	)
 	return i, err
 }
@@ -95,7 +96,7 @@ func (q *Queries) GetImportedCatalogByID(ctx context.Context, arg GetImportedCat
 }
 
 const getImportedComponentClaimByID = `-- name: GetImportedComponentClaimByID :one
-SELECT id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note FROM imported_component_claims
+SELECT id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note, scf_release FROM imported_component_claims
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -124,6 +125,7 @@ func (q *Queries) GetImportedComponentClaimByID(ctx context.Context, arg GetImpo
 		&i.DispositionedBy,
 		&i.DispositionedAt,
 		&i.DispositionNote,
+		&i.ScfRelease,
 	)
 	return i, err
 }
@@ -429,9 +431,9 @@ func (q *Queries) InsertImportedComponent(ctx context.Context, arg InsertImporte
 
 const insertImportedComponentClaim = `-- name: InsertImportedComponentClaim :one
 INSERT INTO imported_component_claims
-    (id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note
+    (id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, scf_release)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note, scf_release
 `
 
 type InsertImportedComponentClaimParams struct {
@@ -442,12 +444,14 @@ type InsertImportedComponentClaimParams struct {
 	Statement           string      `json:"statement"`
 	RequirementUuid     string      `json:"requirement_uuid"`
 	ScfAnchorID         *string     `json:"scf_anchor_id"`
+	ScfRelease          *string     `json:"scf_release"`
 }
 
 // Append one vendor-attributed CLAIM (an implemented-requirement) mapped (or
 // flagged NULL for mapping) to an SCF anchor. is_vendor_claim defaults TRUE
 // and claim_status defaults 'asserted' (the table defaults) — the import never
-// writes anything else (P0-512-1).
+// writes anything else (P0-512-1). scf_release is the SCF release the code
+// was bound in (#1771); NULL with an unmapped claim.
 func (q *Queries) InsertImportedComponentClaim(ctx context.Context, arg InsertImportedComponentClaimParams) (ImportedComponentClaim, error) {
 	row := q.db.QueryRow(ctx, insertImportedComponentClaim,
 		arg.ID,
@@ -457,6 +461,7 @@ func (q *Queries) InsertImportedComponentClaim(ctx context.Context, arg InsertIm
 		arg.Statement,
 		arg.RequirementUuid,
 		arg.ScfAnchorID,
+		arg.ScfRelease,
 	)
 	var i ImportedComponentClaim
 	err := row.Scan(
@@ -473,6 +478,7 @@ func (q *Queries) InsertImportedComponentClaim(ctx context.Context, arg InsertIm
 		&i.DispositionedBy,
 		&i.DispositionedAt,
 		&i.DispositionNote,
+		&i.ScfRelease,
 	)
 	return i, err
 }
@@ -814,7 +820,7 @@ func (q *Queries) ListImportedComponentClaimDispositions(ctx context.Context, ar
 }
 
 const listImportedComponentClaims = `-- name: ListImportedComponentClaims :many
-SELECT id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note FROM imported_component_claims
+SELECT id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note, scf_release FROM imported_component_claims
 WHERE tenant_id = $1 AND imported_component_id = $2
 ORDER BY control_id ASC, requirement_uuid ASC
 `
@@ -849,6 +855,7 @@ func (q *Queries) ListImportedComponentClaims(ctx context.Context, arg ListImpor
 			&i.DispositionedBy,
 			&i.DispositionedAt,
 			&i.DispositionNote,
+			&i.ScfRelease,
 		); err != nil {
 			return nil, err
 		}
@@ -1076,15 +1083,17 @@ func (q *Queries) ListImportedProfiles(ctx context.Context, tenantID pgtype.UUID
 const mapImportedComponentClaimScfAnchor = `-- name: MapImportedComponentClaimScfAnchor :one
 
 UPDATE imported_component_claims
-SET scf_anchor_id = $3
+SET scf_anchor_id = $3,
+    scf_release   = $4
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note
+RETURNING id, tenant_id, imported_component_id, control_id, statement, requirement_uuid, scf_anchor_id, is_vendor_claim, claim_status, created_at, dispositioned_by, dispositioned_at, disposition_note, scf_release
 `
 
 type MapImportedComponentClaimScfAnchorParams struct {
 	TenantID    pgtype.UUID `json:"tenant_id"`
 	ID          pgtype.UUID `json:"id"`
 	ScfAnchorID *string     `json:"scf_anchor_id"`
+	ScfRelease  *string     `json:"scf_release"`
 }
 
 // ===== slice 620: operator maps an unmapped claim to an SCF anchor =====
@@ -1093,10 +1102,16 @@ type MapImportedComponentClaimScfAnchorParams struct {
 // SCF anchor only, invariant #7) — it is NOT a claim -> claim mapping and does
 // NOT touch control_evaluations or the evidence ledger (the claim stays a
 // claim; mapping only sets the crosswalk — invariant #2 / P0-512-1).
+// scf_release records the SCF release the code was validated in (#1771).
 // is_vendor_claim + claim_status are NOT touched. RLS rides the slice-512
 // tenant_update policy.
 func (q *Queries) MapImportedComponentClaimScfAnchor(ctx context.Context, arg MapImportedComponentClaimScfAnchorParams) (ImportedComponentClaim, error) {
-	row := q.db.QueryRow(ctx, mapImportedComponentClaimScfAnchor, arg.TenantID, arg.ID, arg.ScfAnchorID)
+	row := q.db.QueryRow(ctx, mapImportedComponentClaimScfAnchor,
+		arg.TenantID,
+		arg.ID,
+		arg.ScfAnchorID,
+		arg.ScfRelease,
+	)
 	var i ImportedComponentClaim
 	err := row.Scan(
 		&i.ID,
@@ -1112,6 +1127,7 @@ func (q *Queries) MapImportedComponentClaimScfAnchor(ctx context.Context, arg Ma
 		&i.DispositionedBy,
 		&i.DispositionedAt,
 		&i.DispositionNote,
+		&i.ScfRelease,
 	)
 	return i, err
 }

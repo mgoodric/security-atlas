@@ -29,6 +29,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
@@ -84,11 +85,16 @@ type scopeWire struct {
 	PredicateHashAtApproval  *string         `json:"predicate_hash_at_approval,omitempty"`
 	ApprovalEvidenceFileURL  *string         `json:"approval_evidence_file_url,omitempty"`
 	ApprovalEvidenceFileHash *string         `json:"approval_evidence_file_hash,omitempty"`
-	EffectiveFrom            *time.Time      `json:"effective_from,omitempty"`
-	SupersededBy             *string         `json:"superseded_by,omitempty"`
-	SupersededAt             *time.Time      `json:"superseded_at,omitempty"`
-	CreatedAt                time.Time       `json:"created_at"`
-	UpdatedAt                time.Time       `json:"updated_at"`
+	// SubmittedBy / SelfApproved (#2101): who submitted the scope for
+	// review, and whether that person approved it under the organisation's
+	// Allow self-approval setting.
+	SubmittedBy   *string    `json:"submitted_by,omitempty"`
+	SelfApproved  bool       `json:"self_approved"`
+	EffectiveFrom *time.Time `json:"effective_from,omitempty"`
+	SupersededBy  *string    `json:"superseded_by,omitempty"`
+	SupersededAt  *time.Time `json:"superseded_at,omitempty"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 func toWire(s frameworkscope.FrameworkScope) scopeWire {
@@ -102,6 +108,8 @@ func toWire(s frameworkscope.FrameworkScope) scopeWire {
 		PredicateHashAtApproval:  s.PredicateHashAtApproval,
 		ApprovalEvidenceFileURL:  s.ApprovalEvidenceFileURL,
 		ApprovalEvidenceFileHash: s.ApprovalEvidenceFileHash,
+		SubmittedBy:              s.SubmittedBy,
+		SelfApproved:             s.SelfApproved,
 		EffectiveFrom:            s.EffectiveFrom,
 		ApprovedAt:               s.ApprovedAt,
 		SupersededAt:             s.SupersededAt,
@@ -214,7 +222,7 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out, err := h.store.Submit(ctx, id, actorOf(r))
+	out, err := h.store.Submit(ctx, id, actorOf(r), personOf(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
@@ -282,7 +290,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 
 	out, err := h.store.Approve(ctx, frameworkscope.ApproveRequest{
 		ID:               id,
-		ApproverUserID:   cred.UserID,
+		ApproverUserID:   credstore.MinterUserID(cred),
 		Actor:            cred.ID,
 		EvidenceFileURL:  req.ApprovalEvidenceFileURL,
 		EvidenceFileHash: req.ApprovalEvidenceFileHash,
@@ -291,6 +299,12 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
+		case errors.Is(err, frameworkscope.ErrSelfApproval):
+			httpresp.WriteError(w, http.StatusForbidden, frameworkscope.ErrSelfApproval.Error())
+		case errors.Is(err, frameworkscope.ErrApproverNotPerson):
+			httpresp.WriteError(w, http.StatusForbidden, frameworkscope.ErrApproverNotPerson.Error())
+		case errors.Is(err, frameworkscope.ErrSubmitterUnknown):
+			httpresp.WriteError(w, http.StatusConflict, frameworkscope.ErrSubmitterUnknown.Error())
 		case errors.Is(err, frameworkscope.ErrWrongState):
 			httpresp.WriteError(w, http.StatusConflict, "scope must be in `review` to approve")
 		default:
@@ -550,4 +564,16 @@ func isLikelySha256Hex(s string) bool {
 func actorOf(r *http.Request) string {
 	cred, _ := authctx.CredentialFromContext(r.Context())
 	return cred.ID
+}
+
+// personOf names who is behind the calling credential: the bare users(id)
+// uuid for a person, else the credential's principal (an unbound key's own
+// id, "oauth_client:<id>", "bootstrap-admin"). It is the submitter
+// approval compares against (#2101). Never the JWT credential id: that is
+// per token ("jwt:<jti>"), so one person could submit through one session
+// and approve through another, and approval reads that prefix as a
+// pre-#1807 session submitter.
+func personOf(r *http.Request) string {
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	return credstore.PrincipalOf(cred)
 }

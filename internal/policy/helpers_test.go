@@ -535,7 +535,9 @@ func TestImportReport_Failed(t *testing.T) {
 // TestCheckApprover covers #1807: only a person approves, never the one who
 // submitted. A row with no recorded submitter (pre-dates the column) has
 // no one to collide with; a row submitted under a session id has no person
-// to compare and is refused until re-submitted.
+// to compare and is refused until re-submitted. #2101: with Allow
+// self-approval on, the submitter may approve and the result says so; a
+// machine credential is still refused.
 func TestCheckApprover(t *testing.T) {
 	t.Parallel()
 	submitter := "user-1"
@@ -543,28 +545,39 @@ func TestCheckApprover(t *testing.T) {
 	sessionSubmitter := "jwt:token-1"
 	empty := ""
 	person := func(u string) Approver { return Approver{UserID: u, CredentialID: "key_other"} }
+	machine := Approver{CredentialID: "key_machine"}
 	cases := []struct {
 		name        string
 		submittedBy *string
 		approver    Approver
+		allowSelf   bool
 		want        error
+		wantSelf    bool
 	}{
-		{"submitter approves own policy", &submitter, person("user-1"), ErrSelfApproval},
-		{"second person approves", &submitter, person("user-2"), nil},
-		{"no recorded submitter", nil, person("user-1"), nil},
-		{"empty recorded submitter", &empty, person("user-1"), nil},
-		{"no user behind the credential", &submitter, Approver{CredentialID: "key_machine"}, ErrApproverNotPerson},
-		{"no user, no submitter", nil, Approver{CredentialID: "key_machine"}, ErrApproverNotPerson},
-		{"submitted under a session id", &sessionSubmitter, person("user-2"), ErrSubmitterUnknown},
-		{"pre-1807 key submitter approves with that key", &keySubmitter, Approver{UserID: "user-1", CredentialID: "key_abc"}, ErrSelfApproval},
+		{"submitter approves own policy", &submitter, person("user-1"), false, ErrSelfApproval, false},
+		{"second person approves", &submitter, person("user-2"), false, nil, false},
+		{"no recorded submitter", nil, person("user-1"), false, nil, false},
+		{"empty recorded submitter", &empty, person("user-1"), false, nil, false},
+		{"no user behind the credential", &submitter, machine, false, ErrApproverNotPerson, false},
+		{"no user, no submitter", nil, machine, false, ErrApproverNotPerson, false},
+		{"submitted under a session id", &sessionSubmitter, person("user-2"), false, ErrSubmitterUnknown, false},
+		{"pre-1807 key submitter approves with that key", &keySubmitter, Approver{UserID: "user-1", CredentialID: "key_abc"}, false, ErrSelfApproval, false},
+		{"self-approval on: submitter approves, flagged", &submitter, person("user-1"), true, nil, true},
+		{"self-approval on: second person is not flagged", &submitter, person("user-2"), true, nil, false},
+		{"self-approval on: machine still refused", &submitter, machine, true, ErrApproverNotPerson, false},
+		{"self-approval on: session submitter still unknown", &sessionSubmitter, person("user-1"), true, ErrSubmitterUnknown, false},
 	}
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			row := dbx.Policy{SubmittedBy: tc.submittedBy}
-			if got := checkApprover(row, tc.approver); !errors.Is(got, tc.want) {
+			self, got := checkApprover(row, tc.approver, tc.allowSelf)
+			if !errors.Is(got, tc.want) {
 				t.Fatalf("checkApprover = %v, want %v", got, tc.want)
+			}
+			if self != tc.wantSelf {
+				t.Fatalf("selfApproved = %v, want %v", self, tc.wantSelf)
 			}
 		})
 	}
