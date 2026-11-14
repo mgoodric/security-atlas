@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { type CreateActionPlanInput } from "@/lib/api/action-plans";
 import { fetchTenantControlsList } from "@/lib/api/controls-list";
-import { fetchRisksList } from "@/lib/api/risks";
+import { fetchRisksListWithRollUps } from "@/lib/api/risks";
 
 import { EntityMultiSelect, type SelectOption } from "./entity-multi-select";
 import {
@@ -46,7 +46,7 @@ export function ActionPlanForm({ onSubmit }: Props) {
 
   const risksQ = useQuery({
     queryKey: ["action-plans", "risk-picker"],
-    queryFn: fetchRisksList,
+    queryFn: fetchRisksListWithRollUps,
     staleTime: 30_000,
   });
   const controlsQ = useQuery({
