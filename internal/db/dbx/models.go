@@ -2328,6 +2328,19 @@ type FrameworkScope struct {
 	SupersededAt             pgtype.Timestamptz `json:"superseded_at"`
 }
 
+type FrameworkScopeApplicability struct {
+	ID                     pgtype.UUID        `json:"id"`
+	TenantID               pgtype.UUID        `json:"tenant_id"`
+	FrameworkScopeID       pgtype.UUID        `json:"framework_scope_id"`
+	FrameworkRequirementID pgtype.UUID        `json:"framework_requirement_id"`
+	Decision               string             `json:"decision"`
+	Justification          string             `json:"justification"`
+	ImplementationRef      string             `json:"implementation_ref"`
+	UpdatedBy              string             `json:"updated_by"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
 type FrameworkScopeWorkflowLog struct {
 	ID               pgtype.UUID        `json:"id"`
 	TenantID         pgtype.UUID        `json:"tenant_id"`
