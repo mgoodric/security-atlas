@@ -1,12 +1,23 @@
 -- Reverse #1806: narrow policy_audit_log back to the import action.
 --
--- The append-only trigger refuses DELETE, so it is disabled for the one
--- statement that drops the review-date rows the narrowed CHECK would
--- reject, then re-enabled.
+-- policy_audit_log is append-only audit evidence, so this reversal refuses
+-- to run while any 'review_date_updated' row exists, rather than turning
+-- off the append-only trigger and deleting them (#2009). The narrowed
+-- CHECK would reject those rows, and the columns dropped below hold their
+-- before and after dates. To reverse a database that has them, export or
+-- archive the rows first and remove them deliberately as the owner.
 
-ALTER TABLE policy_audit_log DISABLE TRIGGER policy_audit_log_no_update_trg;
-DELETE FROM policy_audit_log WHERE action = 'review_date_updated';
-ALTER TABLE policy_audit_log ENABLE TRIGGER policy_audit_log_no_update_trg;
+DO $$
+DECLARE
+    n BIGINT;
+BEGIN
+    SELECT count(*) INTO n FROM policy_audit_log WHERE action = 'review_date_updated';
+    IF n > 0 THEN
+        RAISE EXCEPTION 'policy_audit_log holds % review_date_updated row(s); refusing to delete audit evidence', n
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20260903000000.';
+    END IF;
+END
+$$;
 
 ALTER TABLE policy_audit_log
     DROP CONSTRAINT IF EXISTS policy_audit_log_action_check;
