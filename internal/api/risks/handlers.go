@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -150,6 +151,9 @@ type riskWire struct {
 	// beside its own assessed Severity. Set on GET /v1/risks/{id} for a
 	// risk with at least one scored child; omitted otherwise.
 	RollUp *rollUpWire `json:"rollup,omitempty"`
+	// ChildCount is how many child risks roll up into this one (#2060).
+	// Set on GET /v1/risks; omitted for a risk that is not a roll-up.
+	ChildCount int `json:"child_count,omitempty"`
 }
 
 // CreateRisk handles POST /v1/risks (AC-1..AC-5).
@@ -246,9 +250,14 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 // risks contributing to one heatmap cell — slice 056's heatmap-cell-click
 // side panel.
 //
+// Roll-ups (#2060): a risk with at least one child linked is left out
+// unless ?include_rollups=true, so the register's rows and count never show
+// a parent beside the children it summarises. Included roll-ups carry
+// child_count.
+//
 // Every filter and the ?sort= ordering are additive and optional, and all
 // compose: omitting them all keeps the slice-019 default newest-first
-// unfiltered list.
+// list.
 func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 	// Slice 067 (AC-6): handler-level program-read guard. Runs FIRST —
 	// before tenant resolution — so an unauthorized role is a clean 403
@@ -282,6 +291,14 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		filter.OrgUnitID = &ouID
+	}
+	if raw := r.URL.Query().Get("include_rollups"); raw != "" {
+		include, perr := strconv.ParseBool(raw)
+		if perr != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "include_rollups must be true or false")
+			return
+		}
+		filter.IncludeRollUps = include
 	}
 	risks, err := h.lister.List(ctx, filter)
 	if err != nil {
@@ -612,6 +629,7 @@ func riskWireFrom(r risk.Risk) riskWire {
 	w.Level = string(r.Level)
 	w.Themes = append([]string{}, r.Themes...) // never null on the wire
 	w.Severity = severityOf(r.InherentScore)
+	w.ChildCount = r.ChildCount
 	return w
 }
 

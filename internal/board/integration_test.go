@@ -852,6 +852,80 @@ func TestPackGenerator_Generate_BadPeriodEndRejected(t *testing.T) {
 }
 
 // =========================================================================
+// #2060 — roll-up parents stay out of the board's top risks
+// =========================================================================
+
+// seedRollUpLink rolls child up into parent as of linkedAt.
+func seedRollUpLink(t *testing.T, admin *pgxpool.Pool, tenant string, parent, child uuid.UUID, linkedAt time.Time) {
+	t.Helper()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO risk_aggregations (parent_risk_id, child_risk_id, tenant_id, created_at)
+		VALUES ($1, $2, $3, $4)
+	`, parent, child, tenant, linkedAt); err != nil {
+		t.Fatalf("seed roll-up link: %v", err)
+	}
+}
+
+func riskTitles(rs []board.RiskAging) []string {
+	out := make([]string, len(rs))
+	for i, r := range rs {
+		out[i] = r.Title
+	}
+	return out
+}
+
+// AC: the board brief and the board pack rank only risks that are not
+// roll-ups, so a parent never takes a top-risk slot beside the children it
+// summarises, even when it outranks them. A risk counts as a roll-up from
+// the moment its first child was linked, so a read dated before the link
+// still shows it.
+func TestRollUps_BoardTopRisksExcludeRollUps(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := dbtest.SeedTenant(t, admin,
+		"board_packs", "board_briefs", "risk_aggregations", "risks", "frameworks")
+	ctx := ctxFor(t, tenant)
+
+	genClock := time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
+	linkedAt := genClock.Add(-24 * time.Hour)
+	seedFramework(t, admin, tenant, "test-fw-rollups", "Test FW (roll-ups)")
+	parent := seedRisk(t, admin, tenant, "Roll-up parent",
+		`{"score": 25}`, `{"likelihood": 5, "impact": 5}`, genClock, 10)
+	child := seedRisk(t, admin, tenant, "Rolled-up child",
+		`{"score": 12}`, `{"likelihood": 3, "impact": 4}`, genClock, 10)
+	seedRollUpLink(t, admin, tenant, parent, child, linkedAt)
+
+	brief, err := board.NewGenerator(board.NewStore(app), fixedFreshness{}, fixedDrift{}).
+		WithClock(func() time.Time { return genClock }).
+		Generate(ctx, "2026-06-30")
+	if err != nil {
+		t.Fatalf("brief Generate: %v", err)
+	}
+	if got := riskTitles(brief.Content.TopRisks); len(got) != 1 || got[0] != "Rolled-up child" {
+		t.Errorf("brief top risks = %v, want only the child", got)
+	}
+
+	pack, err := board.NewPackGenerator(board.NewPackStore(app), fixedFreshness{}, fixedDrift{}, nil).
+		WithClock(func() time.Time { return genClock }).
+		Generate(ctx, "2026-06-30")
+	if err != nil {
+		t.Fatalf("pack Generate: %v", err)
+	}
+	if got := riskTitles(pack.Content.Sections[board.SectionTopRisks].Data.TopRisks); len(got) != 1 || got[0] != "Rolled-up child" {
+		t.Errorf("pack top risks = %v, want only the child", got)
+	}
+
+	// Before the link existed the parent was a plain risk.
+	rows, err := board.NewStore(app).ListRisksAsOf(ctx, linkedAt.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("ListRisksAsOf: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Errorf("ListRisksAsOf before the link returned %d risks, want 2", len(rows))
+	}
+}
+
+// =========================================================================
 // helpers
 // =========================================================================
 

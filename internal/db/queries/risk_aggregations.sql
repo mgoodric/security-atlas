@@ -86,3 +86,14 @@ ORDER BY child_risk_id ASC, created_at ASC, parent_risk_id ASC;
 -- lock (LockAggregationKey) so the two locks are always acquired in the
 -- same order.
 SELECT pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || sqlc.arg(tenant_id)::uuid::text, 0));
+
+-- name: ListRiskChildCountsForTenant :many
+-- How many children each roll-up parent has, for the risk register (#2060).
+-- A risk with no row here is not a roll-up. The register leaves roll-ups
+-- out of its rows and counts by default, so a parent never reads as a
+-- duplicate of the children it summarises.
+SELECT parent_risk_id, COUNT(*)::int AS child_count
+FROM risk_aggregations
+WHERE tenant_id = $1
+GROUP BY parent_risk_id
+ORDER BY parent_risk_id ASC;

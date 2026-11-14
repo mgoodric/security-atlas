@@ -72,6 +72,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
   fetchRisksList,
+  fetchRisksListWithRollUps,
   treatmentLabel,
   type Risk,
   type RisksListResponse,
@@ -150,6 +151,12 @@ const PAGE_PARAM = "page";
 // top). The default sort (severity desc) is treated as "no param" so the
 // canonical register URL stays clean until a non-default sort is chosen.
 const SORT_PARAM = "sort";
+
+// #2060 — URL query-string key for the "Show roll-ups" toggle. A roll-up
+// is a parent risk with at least one child linked; it summarises risks
+// already in the register, so it is left out of the rows and the count
+// unless the toggle is on (`?rollups=1`).
+const ROLLUPS_PARAM = "rollups";
 
 // Slice 680 / ATLAS-038 — column-header clarity copy.
 //
@@ -331,9 +338,23 @@ function RisksPageInner() {
     router.replace(`/risks?${sp.toString()}`);
   };
 
+  const showRollUps = search.get(ROLLUPS_PARAM) === "1";
+  const toggleRollUps = () => {
+    const sp = new URLSearchParams(search.toString());
+    if (showRollUps) {
+      sp.delete(ROLLUPS_PARAM);
+    } else {
+      sp.set(ROLLUPS_PARAM, "1");
+    }
+    sp.delete(PAGE_PARAM);
+    router.replace(`/risks?${sp.toString()}`);
+  };
+
   const risksQ = useQuery<RisksListResponse>({
-    queryKey: ["risks", "list"],
-    queryFn: fetchRisksList,
+    queryKey: showRollUps
+      ? ["risks", "list", "with-rollups"]
+      : ["risks", "list"],
+    queryFn: showRollUps ? fetchRisksListWithRollUps : fetchRisksList,
   });
 
   // Slice 244 — Org unit pill options need org-unit *names*, not just
@@ -458,7 +479,7 @@ function RisksPageInner() {
   // only — page size + counts are unchanged (anti-criterion). See
   // `docs/audit-log/684-risks-count-semantics-decisions.md`.
   const countLabel = risksCountLabel(visible.length, rows.length);
-  const meta = (
+  const countMeta = (
     <span data-testid="risks-count-label">
       {countLabel.isFiltered ? (
         <>
@@ -475,6 +496,20 @@ function RisksPageInner() {
           risks
         </>
       )}
+    </span>
+  );
+  const meta = (
+    <span className="inline-flex items-center gap-3">
+      {countMeta}
+      <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={showRollUps}
+          onChange={toggleRollUps}
+          data-testid="risks-show-rollups"
+        />
+        Show roll-ups
+      </label>
     </span>
   );
 
@@ -500,22 +535,37 @@ function RisksPageInner() {
       // this restores a drill-in that truthfully advertises its
       // destination, now that the detail route exists (decisions log D2).
       cell: (row) => (
-        <Link
-          href={`/risks/${encodeURIComponent(row.id)}`}
-          className="text-primary hover:underline"
-          data-testid="risks-row-title"
-        >
-          {row.title}
-          {patternNoLongerMet(row.inherent_score) ? (
-            <span
-              className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
-              data-testid="risks-row-pattern-lapsed"
-              title="Rule-generated meta-risk with 0 child risks in the current window. The engine never closes it; review it."
+        <>
+          <Link
+            href={`/risks/${encodeURIComponent(row.id)}`}
+            className="text-primary hover:underline"
+            data-testid="risks-row-title"
+          >
+            {row.title}
+            {patternNoLongerMet(row.inherent_score) ? (
+              <span
+                className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                data-testid="risks-row-pattern-lapsed"
+                title="Rule-generated meta-risk with 0 child risks in the current window. The engine never closes it; review it."
+              >
+                Pattern no longer met
+              </span>
+            ) : null}
+          </Link>
+          {/* #2060: a roll-up only shows with the toggle on. The marker
+            links to the children it summarises on the detail page. */}
+          {row.child_count ? (
+            <Link
+              href={`/risks/${encodeURIComponent(row.id)}#children`}
+              className="ml-2 rounded border px-1.5 py-0.5 text-[11px] text-muted-foreground hover:underline"
+              data-testid="risks-row-rollup"
+              title="Roll-up of other risks in the register. It is left out of the count unless roll-ups are shown."
             >
-              Pattern no longer met
-            </span>
+              Roll-up · {row.child_count}{" "}
+              {row.child_count === 1 ? "child" : "children"}
+            </Link>
           ) : null}
-        </Link>
+        </>
       ),
     },
     {

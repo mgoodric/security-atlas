@@ -172,6 +172,43 @@ func (q *Queries) ListRiskAggregationParents(ctx context.Context, arg ListRiskAg
 	return items, nil
 }
 
+const listRiskChildCountsForTenant = `-- name: ListRiskChildCountsForTenant :many
+SELECT parent_risk_id, COUNT(*)::int AS child_count
+FROM risk_aggregations
+WHERE tenant_id = $1
+GROUP BY parent_risk_id
+ORDER BY parent_risk_id ASC
+`
+
+type ListRiskChildCountsForTenantRow struct {
+	ParentRiskID pgtype.UUID `json:"parent_risk_id"`
+	ChildCount   int32       `json:"child_count"`
+}
+
+// How many children each roll-up parent has, for the risk register (#2060).
+// A risk with no row here is not a roll-up. The register leaves roll-ups
+// out of its rows and counts by default, so a parent never reads as a
+// duplicate of the children it summarises.
+func (q *Queries) ListRiskChildCountsForTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListRiskChildCountsForTenantRow, error) {
+	rows, err := q.db.Query(ctx, listRiskChildCountsForTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRiskChildCountsForTenantRow
+	for rows.Next() {
+		var i ListRiskChildCountsForTenantRow
+		if err := rows.Scan(&i.ParentRiskID, &i.ChildCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRiskChildLinks = `-- name: ListRiskChildLinks :many
 SELECT r.id, r.title, r.level, r.org_unit_id, r.methodology, r.inherent_score,
        ra.rule_id, ra.created_at AS linked_at

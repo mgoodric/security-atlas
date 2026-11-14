@@ -2536,6 +2536,11 @@ type Querier interface {
 	ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error)
 	// The tenant's categories, active and archived, by display name.
 	ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) ([]OrgRiskCategory, error)
+	// How many children each roll-up parent has, for the risk register (#2060).
+	// A risk with no row here is not a roll-up. The register leaves roll-ups
+	// out of its rows and counts by default, so a parent never reads as a
+	// duplicate of the children it summarises.
+	ListRiskChildCountsForTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListRiskChildCountsForTenantRow, error)
 	// The children of a parent risk with the fields the hierarchy views show
 	// (#1748). rule_id NULL means the link was made by hand.
 	ListRiskChildLinks(ctx context.Context, arg ListRiskChildLinksParams) ([]ListRiskChildLinksRow, error)
@@ -2573,6 +2578,11 @@ type Querier interface {
 	// extraction is done in Go, not a JSONB-path SQL expression that would trip
 	// pgx type inference). `created_at` lower bound is passed explicitly so pgx
 	// never has to infer a bare-placeholder type (SQLSTATE 42P08).
+	//
+	// Roll-up parents are left out (#2060): a parent summarises children that
+	// are already ranked here, so counting it too would show the same exposure
+	// twice. A risk is a roll-up when it had at least one child linked as of the
+	// brief's date.
 	ListRisksForBoardBrief(ctx context.Context, arg ListRisksForBoardBriefParams) ([]Risk, error)
 	// AC-3: risks linked to one control via slice 020's risk_control_links.
 	// One join from the link table to risks; the per-link design_score is the
