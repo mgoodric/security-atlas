@@ -203,6 +203,24 @@ WITH unified AS (
         (to_jsonb(tx) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'subject_id' - 'subject_kind' - 'subject_module')::jsonb AS payload_json
     FROM taxonomy_audit_log tx
+
+    UNION ALL
+
+    -- 12. control_import_audit_log (#1782): import approvals, rejections
+    -- and duplicates, one per staged row decided.
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'control_import'::text AS kind,
+        'control_import_row'::text AS target_type,
+        row_id::text   AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ci) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'row_id' - 'subject_module')::jsonb AS payload_json
+    FROM control_import_audit_log ci
 )
 SELECT
     unified.occurred_at,

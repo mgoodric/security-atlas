@@ -69,6 +69,9 @@ const (
 	KindFrameworkScope Kind = "framework_scope"
 	// KindTaxonomy is taxonomy_audit_log (#1810): risk-category changes.
 	KindTaxonomy Kind = "taxonomy"
+	// KindControlImport is control_import_audit_log (#1782): control
+	// import approvals, rejections and duplicates.
+	KindControlImport Kind = "control_import"
 )
 
 // SubjectModule constants (slice 180). The module identifier tagged onto
@@ -99,6 +102,7 @@ var AllKinds = []Kind{
 	KindWalkthrough,
 	KindFrameworkScope,
 	KindTaxonomy,
+	KindControlImport,
 }
 
 // IsCanonical reports whether k is one of the nine canonical kinds.

@@ -295,6 +295,8 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/controls/checklist:generate", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/checklist:generate"},
 	{Method: "POST", Path: "/v1/controls/checklist/sections/{id}:approve", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/checklist/sections/{id}:approve"},
 	{Method: "POST", Path: "/v1/controls/imports", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/imports — upload a CSV/XLSX control sheet as a staged import batch (#1779)"},
+	{Method: "POST", Path: "/v1/controls/imports/{id}/rows/{row}/approve", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/imports/{id}/rows/{row}/approve — approve a staged row with a candidate or any anchor of the batch's SCF release, creating a control; a person must approve (#1782)"},
+	{Method: "POST", Path: "/v1/controls/imports/{id}/rows/{row}/reject", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/imports/{id}/rows/{row}/reject — reject a staged row with a reason (#1782)"},
 	{Method: "POST", Path: "/v1/controls/{id}/owner", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls/{id}/owner"},
 	{Method: "POST", Path: "/v1/controls:bulk-assign-owner", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls:bulk-assign-owner"},
 	{Method: "POST", Path: "/v1/controls:upload-bundle", Tag: "controls", Tier: "bearer", Internal: false, Summary: "POST /v1/controls:upload-bundle"},

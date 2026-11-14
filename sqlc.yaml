@@ -114,6 +114,13 @@ sql:
       - "migrations/sql/20261015000000_risk_review_cadence.sql"
       - "migrations/sql/20261018000000_vendor_initial_review_window.sql"
       - "migrations/sql/20261024000000_taxonomy_audit_log_themes.sql"
+      # The control import tables (#1779-#1781), which the #1782 approval
+      # migration alters; the unified audit log reads its audit table.
+      - "migrations/sql/20260907000000_control_import_batches.sql"
+      - "migrations/sql/20260925000000_control_import_candidates.sql"
+      - "migrations/sql/20260930000000_control_import_llm_rerank.sql"
+      - "migrations/sql/20261010000000_control_import_candidates_row_fk.sql"
+      - "migrations/sql/20261102000000_control_import_approval.sql"
     queries: "internal/db/queries"
     gen:
       go:
