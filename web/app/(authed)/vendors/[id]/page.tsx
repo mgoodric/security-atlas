@@ -156,6 +156,10 @@ export default function VendorDetailPage({
               <Badge variant="destructive" data-testid="vendor-detail-status">
                 overdue
               </Badge>
+            ) : vendor.first_review_due ? (
+              <Badge variant="outline" data-testid="vendor-detail-status">
+                First review due {formatDetailDate(vendor.first_review_due)}
+              </Badge>
             ) : (
               <Badge variant="secondary" data-testid="vendor-detail-status">
                 on time
