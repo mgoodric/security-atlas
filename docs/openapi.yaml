@@ -5881,20 +5881,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
-  /v1/upcoming:
-    get:
-      summary: GET /v1/upcoming
-      tags: [dashboard]
-      operationId: get-v1-upcoming
-      security:
-        - bearer: []
-      responses:
-        default:
-          description: Default response envelope.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Ack"
   /v1/vendors:
     get:
       summary: GET /v1/vendors
