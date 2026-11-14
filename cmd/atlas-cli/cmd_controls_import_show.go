@@ -134,6 +134,10 @@ func renderImportRows(out io.Writer, r controlimport.RowList) {
 		if row.LLMRerank == controlimport.RerankUnavailable {
 			_, _ = fmt.Fprintln(out, "  LLM rerank unavailable: deterministic order, no rationale")
 		}
+		if row.LLMRerank == controlimport.RerankApplied && row.LLMProvider != "" {
+			// Where the row's text went (ADR 0022 provenance, #2079).
+			_, _ = fmt.Fprintf(out, "  LLM rerank routes to %s\n", printable(row.LLMProvider))
+		}
 		if len(row.Candidates) == 0 {
 			_, _ = fmt.Fprintln(out, "  no candidates")
 			continue

@@ -61,6 +61,21 @@ func TestComparePurge(t *testing.T) {
 	}
 }
 
+func TestCompareLedgerTotals(t *testing.T) {
+	t.Parallel()
+	before := map[string]int64{"evidence_records": 40, "change_audit_log": 3}
+	if err := compareLedgerTotals(before, map[string]int64{"evidence_records": 40, "change_audit_log": 3}); err != nil {
+		t.Errorf("unchanged ledgers: err = %v", err)
+	}
+	err := compareLedgerTotals(before, map[string]int64{"evidence_records": 39, "change_audit_log": 3})
+	if err == nil || !strings.Contains(err.Error(), "changed ledger table evidence_records (40 rows across all tenants, now 39)") {
+		t.Errorf("changed ledger: err = %v", err)
+	}
+	if err := compareLedgerTotals(before, map[string]int64{"evidence_records": 40}); err == nil {
+		t.Error("ledger missing after purge: err = nil, want a change reported")
+	}
+}
+
 func TestTableRefString(t *testing.T) {
 	t.Parallel()
 	if got := (tableRef{schema: "public", name: "controls"}).String(); got != "controls" {

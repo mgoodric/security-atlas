@@ -160,20 +160,9 @@ func requireTenantAdmin(w http.ResponseWriter, r *http.Request) bool {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return false
 	}
-	if cred.IsAdmin || hasTenantAdminRole(cred.OwnerRoles) {
+	if authz.IsTenantAdmin(cred) {
 		return true
 	}
 	httpresp.WriteError(w, http.StatusForbidden, "tenant-admin role required")
-	return false
-}
-
-// hasTenantAdminRole reports whether the per-tenant role list grants the
-// admin role (the slice-056 RoleAdmin string).
-func hasTenantAdminRole(roles []string) bool {
-	for _, role := range roles {
-		if role == string(authz.RoleAdmin) {
-			return true
-		}
-	}
 	return false
 }
