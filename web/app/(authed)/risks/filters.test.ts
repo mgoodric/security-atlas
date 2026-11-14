@@ -24,6 +24,7 @@ import {
   residualClass,
   residualState,
   reviewDuePending,
+  reviewOverdue,
   setFilter,
   severityBand,
   severityClasses,
@@ -541,6 +542,27 @@ describe("reviewDuePending (slice 680 / ATLAS-029)", () => {
 
   test("a real ISO date is not pending", () => {
     expect(reviewDuePending("2026-09-30T00:00:00Z")).toBe(false);
+  });
+});
+
+describe("reviewOverdue (#2059)", () => {
+  const now = new Date("2026-11-14T10:00:00Z");
+
+  test("a due day before today (UTC) is overdue", () => {
+    expect(reviewOverdue("2026-11-13T23:59:59Z", now)).toBe(true);
+  });
+
+  test("a review due today is not overdue yet, even past its hour", () => {
+    expect(reviewOverdue("2026-11-14T00:00:00Z", now)).toBe(false);
+  });
+
+  test("a future due day is not overdue", () => {
+    expect(reviewOverdue("2027-11-14T00:00:00Z", now)).toBe(false);
+  });
+
+  test("an absent or unparseable date is never overdue", () => {
+    expect(reviewOverdue(undefined, now)).toBe(false);
+    expect(reviewOverdue("not a date", now)).toBe(false);
   });
 });
 

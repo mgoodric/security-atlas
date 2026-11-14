@@ -2,16 +2,18 @@
 // "Pending evaluation" affordance on the /risks list.
 //
 // A freshly-created risk has no residual_score (the create path stores an
-// empty `{}` JSONB) and no review_due_at until the evaluator backfills
-// them. The old cell rendered a bare "—", which reads as broken. This
-// slice surfaces an explicit "Pending evaluation" state instead.
+// empty `{}` JSONB) until the evaluator backfills it. The old cell
+// rendered a bare "—", which reads as broken. This slice surfaces an
+// explicit "Pending evaluation" state instead. Since #2059 the review
+// date is set at creation, so a row without one reads "Not set".
 //
 // This spec is HERMETIC: it route-mocks the `/api/risks` BFF GET so it
 // does not depend on the shared docker-compose seed (slice 594 shared-DB
 // → hermetic-mock convention). It mocks two rows:
 //
 //   - a PENDING risk: residual_score = {} (the new-risk shape), no
-//     review_due_at — both cells must read "Pending evaluation", not "—".
+//     review_due_at — the residual reads "Pending evaluation", the
+//     review-due "Not set", neither a bare "—".
 //   - a SCORED risk: a real {likelihood, impact} residual + a review_due
 //     date — the residual renders its 0..1 magnitude and the review-due
 //     renders the date, NOT the pending affordance.
@@ -105,11 +107,13 @@ test.describe("/risks new-risk pending-evaluation state (slice 680)", () => {
     await expect(pendingResidual).toHaveCount(1);
     await expect(pendingResidual).toContainText("Pending evaluation");
 
-    const pendingReviewDue = desktop.getByTestId(
-      "risks-row-review-due-pending",
+    // #2059: the review date is set at creation, not by the evaluator, so
+    // a row without one reads "Not set", never "Pending evaluation".
+    const missingReviewDue = desktop.getByTestId(
+      "risks-row-review-due-missing",
     );
-    await expect(pendingReviewDue).toHaveCount(1);
-    await expect(pendingReviewDue).toContainText("Pending evaluation");
+    await expect(missingReviewDue).toHaveCount(1);
+    await expect(missingReviewDue).toContainText("Not set");
 
     // The scored risk renders a real residual magnitude (2×3/25 = 0.24),
     // NOT the pending affordance.
@@ -118,9 +122,8 @@ test.describe("/risks new-risk pending-evaluation state (slice 680)", () => {
     await expect(scoredResidual).toContainText("0.24");
 
     // Anti-criterion / honesty: the pending affordance appears exactly
-    // twice in the desktop table (residual + review-due of the one
-    // pending row), and the old bare em-dash is gone from those cells.
-    await expect(desktop.getByText("Pending evaluation")).toHaveCount(2);
+    // once in the desktop table (the residual of the one pending row).
+    await expect(desktop.getByText("Pending evaluation")).toHaveCount(1);
   });
 
   test("column headers name the independent axes (Inherent severity vs Residual after controls)", async ({

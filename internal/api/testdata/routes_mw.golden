@@ -170,6 +170,7 @@ GET /v1/risks 8
 GET /v1/risks/categories 8
 GET /v1/risks/export 8
 GET /v1/risks/heatmap 8
+GET /v1/risks/review-cadence 8
 GET /v1/risks/theme-heatmap 8
 GET /v1/risks/{id} 8
 GET /v1/risks/{id}/action-plans 8
