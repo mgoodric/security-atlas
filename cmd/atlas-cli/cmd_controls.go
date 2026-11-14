@@ -384,5 +384,13 @@ func uploadBundleHTTP(path string) error {
 	} else {
 		fmt.Println(string(rspBody))
 	}
+	// Issue #1738: surface the no-framework-credit anchor warning on stderr so
+	// it is not lost in the JSON.
+	var warn struct {
+		AnchorWarning string `json:"anchor_warning"`
+	}
+	if json.Unmarshal(rspBody, &warn) == nil && warn.AnchorWarning != "" {
+		fmt.Fprintf(os.Stderr, "warning: %s\n", warn.AnchorWarning)
+	}
 	return nil
 }
