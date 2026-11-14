@@ -19,12 +19,12 @@ import (
 )
 
 // releaseLabel is the `scf_release` a coverage read echoes: the pinned
-// release's label, or "" when nothing was pinned (no current release).
-func releaseLabel(r *scfrelease.Release) string {
+// release's label, or nil (JSON null) when the read was not pinned.
+func releaseLabel(r *scfrelease.Release) *string {
 	if r == nil {
-		return ""
+		return nil
 	}
-	return r.Version
+	return &r.Version
 }
 
 // ===== /v1/requirements/{id}/coverage =====
@@ -46,8 +46,9 @@ func releaseLabel(r *scfrelease.Release) string {
 //     filtering. Caller-friendly so dashboards can start sending the
 //     param ahead of slice 012's eval engine.
 //   - ?scf_release=<version> — pin the anchors to one SCF release
-//     (#1770). Absent, the current release. `scf_release` in the
-//     response names the release used; an unknown label is 404.
+//     (#1770); an unknown label is 404. `scf_release` in the response
+//     names the pinned release, or is null when the read was unpinned
+//     (no parameter: every release's anchors, as before #1770).
 //
 // Returns:
 //   - 200 { requirement, anchors[], controls[] } on success
@@ -394,15 +395,21 @@ func (h *Handler) listControlsForAnchors(ctx context.Context, anchorIDs []pgtype
 }
 
 // resolveSCFRelease resolves ?scf_release=<label> to the SCF release the
-// coverage read is pinned to (#1770). Absent, it is the current release.
-// It returns a nil pin (no filter, the pre-#1770 read) only when no
-// release was named and none is current. An unknown label is
+// coverage read is pinned to (#1770). An unknown label is
 // scfrelease.ErrUnknownRelease.
+//
+// Absent, it returns a nil pin: the traversal stays unpinned, as before
+// #1770, and the response echoes `scf_release: null`. Defaulting to the
+// current release would show no anchors for every requirement between a
+// new SCF release import and the re-bind of its crosswalk edges (#1971),
+// so that default is the contract step, not this expand step. See
+// docs/audit-log/1770-release-aware-anchor-resolution-decisions.md D1.
 func (h *Handler) resolveSCFRelease(ctx context.Context, r *http.Request) (*scfrelease.Release, error) {
-	rel, err := scfrelease.Lookup(ctx, h.q, r.URL.Query().Get("scf_release"))
-	if errors.Is(err, scfrelease.ErrNoCurrentRelease) {
+	label := r.URL.Query().Get("scf_release")
+	if label == "" {
 		return nil, nil
 	}
+	rel, err := scfrelease.Lookup(ctx, h.q, label)
 	if err != nil {
 		return nil, err
 	}
