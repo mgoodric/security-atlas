@@ -43,6 +43,9 @@ func TestLiveMintedBy(t *testing.T) {
 		{ID: "key_live", MintedBy: user},
 		{ID: "key_ttl_live", MintedBy: user, IssuedAt: now.Add(-time.Hour), TTL: 2 * time.Hour},
 		{ID: "key_expired", MintedBy: user, IssuedAt: now.Add(-3 * time.Hour), TTL: time.Hour},
+		// A rotated-out predecessor authenticates until retires_at.
+		{ID: "key_in_grace", MintedBy: user, RetiresAt: now.Add(time.Hour)},
+		{ID: "key_past_grace", MintedBy: user, RetiresAt: now.Add(-time.Minute)},
 		{ID: "key_other", MintedBy: "6f1c2b8e-0000-4000-8000-000000000002"},
 		{ID: "key_unminted"},
 	}
@@ -51,8 +54,8 @@ func TestLiveMintedBy(t *testing.T) {
 	for _, c := range got {
 		ids = append(ids, c.ID)
 	}
-	if strings.Join(ids, ",") != "key_live,key_ttl_live" {
-		t.Fatalf("liveMintedBy = %v; want [key_live key_ttl_live]", ids)
+	if strings.Join(ids, ",") != "key_live,key_ttl_live,key_in_grace" {
+		t.Fatalf("liveMintedBy = %v; want [key_live key_ttl_live key_in_grace]", ids)
 	}
 }
 

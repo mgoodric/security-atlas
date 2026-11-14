@@ -164,7 +164,7 @@ type ListResponse struct {
 // 400 — see the Issue docstring for the rationale.
 //
 // ?minted_by=<user uuid> (#1953) narrows the list to the live keys that
-// user minted: not revoked and not past expiry. The admin UI reads it to
+// user minted: not revoked, not past its rotation grace, not past expiry. The admin UI reads it to
 // warn, on the user revoke screen, about machine keys that outlive their
 // minter. It only lists; it never revokes.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -301,12 +301,16 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 // --- helpers ---
 
 // liveMintedBy keeps the credentials minted by userID that are still live
-// at now. The store's list already drops revoked rows; this also drops
-// keys past their expiry.
+// at now, matching apikeystore's keyLive. The store's list already drops
+// revoked rows; this also drops a rotated-out key past its grace window
+// (retires_at) and a key past its expiry.
 func liveMintedBy(creds []credstore.Credential, userID string, now time.Time) []credstore.Credential {
 	out := make([]credstore.Credential, 0, len(creds))
 	for _, c := range creds {
 		if c.MintedBy != userID {
+			continue
+		}
+		if !c.RetiresAt.IsZero() && now.After(c.RetiresAt) {
 			continue
 		}
 		if exp := c.ExpiresAt(); !exp.IsZero() && now.After(exp) {

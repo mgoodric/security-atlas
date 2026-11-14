@@ -1,7 +1,7 @@
 # Decisions log — #1953: warn about a user's still-live minted API keys
 
-- detection_tier_actual: none
-- detection_tier_target: none
+- detection_tier_actual: manual_review
+- detection_tier_target: unit
 
 Ticket: security-atlas#1953, the follow-up named in the ADR 0003 #1947
 amendment. Admin-minted keys outlive their minter (Matt, 2026-11-13); this
@@ -15,13 +15,17 @@ No new route, no new query, no migration. The list response gains
 `minted_by` and `expires_at` for every caller, both of which are already
 on the row and carry no secret.
 
-## D2 — "Live" means not revoked and not past expiry
+## D2 — "Live" matches `keyLive`: not revoked, not retired, not expired
 
-The store's list already drops revoked rows. The filter also drops keys
-past `IssuedAt + TTL`. A rotated-out predecessor inside its grace window
-still authenticates, so it is listed; `retires_at` is not carried on the
-credential, and adding it was outside this ticket. Its successor inherits
-`minted_by` (#1947 D7), so both appear until the grace window ends.
+The store's list already drops revoked rows. The filter also drops a
+rotated-out predecessor once `retires_at` passes, and a key past
+`IssuedAt + TTL`, the same checks `apikeystore.keyLive` (#1995) makes.
+`credentialFromRow` now carries `retires_at` onto `Credential.RetiresAt`.
+Expiry uses the existing `Credential.ExpiresAt()`, which equals the
+`expires_at` column by construction, so no second expiry field was added.
+Inside its grace window a predecessor still authenticates, so it is listed
+next to its successor, which inherits `minted_by` (#1947 D7). The first
+review caught the missing `retires_at` check.
 
 ## D3 — The screen is the Admin → Users revoke dialog
 

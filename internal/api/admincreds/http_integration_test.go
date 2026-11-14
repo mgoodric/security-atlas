@@ -380,3 +380,66 @@ func TestList_MintedByFiltersLiveKeys(t *testing.T) {
 		t.Fatalf("second list = %d items; want 1", len(again.Items))
 	}
 }
+
+// #1953 review: a rotated-out predecessor is live inside its grace window
+// and gone from ?minted_by once retires_at passes, as apikeystore's
+// keyLive treats it. Both successors inherit minted_by (#1947 D7).
+func TestList_MintedByDropsKeysPastRotationGrace(t *testing.T) {
+	tenantID := uuid.New()
+	_, longStore, handler := newHandler(t, tenantID) // 7-day grace
+	defer cleanupTenant(tenantID)
+	hasher, err := bearer.NewHasher([]byte(testHashKey))
+	if err != nil {
+		t.Fatalf("bearer.NewHasher: %v", err)
+	}
+	shortStore := apikeystore.NewStore(appPool, adminPool, hasher, 50*time.Millisecond)
+	shortStore.SetPrefix(bearer.PrefixTest)
+
+	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	minter := uuid.New()
+	rotate := func(store *apikeystore.Store) (pred, succ string) {
+		t.Helper()
+		c, _, err := store.Issue(ctx, tenantID.String(), apikeystore.IssueInput{MintedBy: &minter})
+		if err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		id, _ := uuid.Parse(strings.TrimPrefix(c.ID, "key_"))
+		s, _, _, err := store.Rotate(ctx, tenantID.String(), id)
+		if err != nil {
+			t.Fatalf("Rotate: %v", err)
+		}
+		return c.ID, s.ID
+	}
+	inGrace, inGraceSucc := rotate(longStore)
+	pastGrace, pastGraceSucc := rotate(shortStore)
+	time.Sleep(200 * time.Millisecond) // let the 50ms grace run out
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/admin/credentials?minted_by="+minter.String(), nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("List: want 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp admincreds.ListResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := map[string]bool{}
+	for _, it := range resp.Items {
+		got[it.ID] = true
+	}
+	for _, id := range []string{inGrace, inGraceSucc, pastGraceSucc} {
+		if !got[id] {
+			t.Errorf("%s missing from minted_by list %v", id, got)
+		}
+	}
+	if got[pastGrace] {
+		t.Errorf("%s is past its rotation grace but was listed as live", pastGrace)
+	}
+	if len(resp.Items) != 3 {
+		t.Errorf("minted_by list = %d items; want 3", len(resp.Items))
+	}
+}
