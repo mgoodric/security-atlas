@@ -47,6 +47,10 @@ const (
 	scfSamplePath        = "../../../migrations/fixtures/scf-sample.json"
 )
 
+// knownMismatchCeiling caps knownMismatch at its seeded size. Lower it as
+// family groups land; never raise it.
+const knownMismatchCeiling = 73
+
 // knownMismatch: sample scf_id -> the sample title that does not match the
 // pin. Seeded 2026-11-13 with every mismatching row; drained by family.
 var knownMismatch = map[string]string{
@@ -195,6 +199,23 @@ func mismatches(sample []scfPinControl, pin map[string]string) map[string]string
 	return out
 }
 
+// duplicateIDs returns every scf_id the sample lists more than once. A
+// duplicate is never waivable: one SCF ID is one control.
+func duplicateIDs(sample []scfPinControl) []string {
+	seen := map[string]int{}
+	for _, c := range sample {
+		seen[c.SCFID]++
+	}
+	var out []string
+	for id, n := range seen {
+		if n > 1 {
+			out = append(out, id)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 func TestSCFSampleMatchesPinnedRelease(t *testing.T) {
 	t.Parallel()
 	pin := pinTitles(t)
@@ -208,6 +229,12 @@ func TestSCFSampleMatchesPinnedRelease(t *testing.T) {
 	got := mismatches(sample.Controls, pin)
 
 	var fails []string
+	if len(knownMismatch) > knownMismatchCeiling {
+		fails = append(fails, fmt.Sprintf("knownMismatch holds %d entries; the ceiling is %d and only ever comes down", len(knownMismatch), knownMismatchCeiling))
+	}
+	for _, id := range duplicateIDs(sample.Controls) {
+		fails = append(fails, fmt.Sprintf("%s: duplicate scf_id in the sample", id))
+	}
 	for id, why := range got {
 		if _, waived := knownMismatch[id]; !waived {
 			fails = append(fails, fmt.Sprintf("%s %s", id, why))
@@ -227,6 +254,16 @@ func TestSCFSampleMatchesPinnedRelease(t *testing.T) {
 	sort.Strings(fails)
 	if len(fails) > 0 {
 		t.Fatalf("scf-sample.json vs SCF %s pin:\n  %s", scfPinRelease, strings.Join(fails, "\n  "))
+	}
+}
+
+func TestDuplicateIDs(t *testing.T) {
+	t.Parallel()
+	got := duplicateIDs([]scfPinControl{
+		{SCFID: "TPM-10", Title: "a"}, {SCFID: "CRY-07", Title: "b"}, {SCFID: "TPM-10", Title: "c"},
+	})
+	if len(got) != 1 || got[0] != "TPM-10" {
+		t.Fatalf("duplicateIDs = %v; want [TPM-10]", got)
 	}
 }
 

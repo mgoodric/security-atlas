@@ -46,7 +46,7 @@ So the list can only shrink. The per-family follow-ups below each remap their ro
 - CC BY-ND 4.0 §2(a)(1)(A) permits reproducing and sharing the licensed material "in whole or in part". The ND restriction applies to _Adapted Material_, so a verbatim, unmodified excerpt is permitted, with attribution under §3(a).
 - The repo's own policy is stricter: `docs/RELEASE_READINESS.md` OQ #1 says the project "does NOT bundle pre-built SCF data in release artifacts".
 - So the pin carries **only `scf_id` and `title`**, verbatim and unmodified, which is the minimum the guard needs. Descriptions and every other column are left out.
-- The file lives under a Go `testdata/` directory, which is not shipped in any image or release artifact.
+- The file lives under a Go `testdata/` directory, so it is not in any built artifact: no container image, binary or release bundle carries it. It does travel in the GitHub source archives and the Go module zip. That is fine under CC BY-ND 4.0, because the excerpt is verbatim and attributed.
 - It carries the attribution, the license link, the source URL and the sha256 in its header.
 
 Left open, and flagged for Matt: the issue's fix says to regenerate the _sample_ with titles verbatim. The sample is seeded by the docker bootstrap (`deploy/docker/bootstrap/bootstrap.sh`), so verbatim SCF titles there arguably are bundled SCF data under OQ #1. The sample already ships SCF-shaped titles today, so this PR doesn't change that exposure. The follow-ups should keep sample descriptions as our own paraphrase rather than SCF text, or OQ #1 should be revisited explicitly.
@@ -145,7 +145,7 @@ How to read the Basis column:
 | `TPM-01`  | Third-Party Management                             | `TPM-02`   | Third-Party Management                                                | legacy  |                                                                                                                                                   |
 | `TPM-04`  | Third-Party Risk Assessments                       | `TPM-10`   | Third-Party Risk Assessments & Approvals                              | concept | sample concept is third-party risk assessment; legacy TPM-04 is Third-Party Services                                                              |
 | `TPM-05`  | Third-Party Contract Requirements                  | `TPM-14`   | Third-Party Contract Requirements                                     | legacy  |                                                                                                                                                   |
-| `VPM-01`  | Vulnerability & Patch Management Policy            | `VPM-02`   | Vulnerability & Patch Management Program (VPMP)                       | exact   |                                                                                                                                                   |
+| `VPM-01`  | Vulnerability & Patch Management Policy            | `VPM-01`   | Vulnerability & Patch Management Policy                               | exact   | 2026.3 added a dedicated policy control with this exact title                                                                                     |
 | `VPM-04`  | Vulnerability Remediation Process                  | `VPM-06`   | Vulnerability Remediation Process                                     | concept | sample concept is the remediation process; legacy VPM-04 is Continuous Remediation Activities                                                     |
 
 Hazards for the follow-ups:
