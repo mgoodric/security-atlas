@@ -61,9 +61,24 @@ type Crosswalk struct {
 	// it. The canonical use is "community_draft" for the agent-authored
 	// initial mapping set; "scf_official" when an SCF-published crosswalk
 	// is ingested later.
-	SourceAttribution string        `yaml:"source_attribution"`
-	Requirements      []Requirement `yaml:"requirements"`
-	Mappings          []Mapping     `yaml:"mappings"`
+	SourceAttribution string `yaml:"source_attribution"`
+	// SCFRelease is the SCF release (the SCF framework version label, e.g.
+	// "2026.3") whose anchors the mappings' scf_anchor codes name (#1771).
+	// The SCF reuses codes between releases, so the importer binds each
+	// code within this release only. Workbook loaders fill it from the
+	// workbook's "SCF <release>" sheet. Empty still binds in the current
+	// release, with a deprecation warning, until #1774 makes it required.
+	SCFRelease string `yaml:"scf_release"`
+	// SCFReleaseFromSheet marks a SCFRelease read from a workbook's
+	// "SCF <release>" sheet name with no --scf-release to confirm it. Until
+	// #1774 such a release binds strictly only when it is loaded; when it is
+	// not, the import binds in the current release with
+	// SheetReleaseNotLoadedWarning, as it did before #1771. Never read from
+	// YAML.
+	SCFReleaseFromSheet bool `yaml:"-"`
+
+	Requirements []Requirement `yaml:"requirements"`
+	Mappings     []Mapping     `yaml:"mappings"`
 
 	// PointsOfFocusRollUp reports what the workbook loaders folded into
 	// parent criteria, for the import summary. Never read from YAML.

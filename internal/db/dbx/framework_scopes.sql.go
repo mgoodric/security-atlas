@@ -17,7 +17,7 @@ SET state = 'activated',
     effective_from = $3,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND state = 'approved'
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 `
 
 type ActivateFrameworkScopeParams struct {
@@ -52,6 +52,8 @@ func (q *Queries) ActivateFrameworkScope(ctx context.Context, arg ActivateFramew
 		&i.EffectiveFrom,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.SelfApproved,
+		&i.SubmittedBy,
 	)
 	return i, err
 }
@@ -64,9 +66,10 @@ SET state = 'approved',
     predicate_hash_at_approval = predicate_hash,
     approval_evidence_file_url = $4,
     approval_evidence_file_hash = $5,
+    self_approved = $6,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND state = 'review'
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 `
 
 type ApproveFrameworkScopeParams struct {
@@ -75,6 +78,7 @@ type ApproveFrameworkScopeParams struct {
 	ApproverUserID           pgtype.UUID `json:"approver_user_id"`
 	ApprovalEvidenceFileUrl  *string     `json:"approval_evidence_file_url"`
 	ApprovalEvidenceFileHash *string     `json:"approval_evidence_file_hash"`
+	SelfApproved             bool        `json:"self_approved"`
 }
 
 // AC-7: review -> approved. Records approver_user_id, approved_at, and the
@@ -88,6 +92,7 @@ func (q *Queries) ApproveFrameworkScope(ctx context.Context, arg ApproveFramewor
 		arg.ApproverUserID,
 		arg.ApprovalEvidenceFileUrl,
 		arg.ApprovalEvidenceFileHash,
+		arg.SelfApproved,
 	)
 	var i FrameworkScope
 	err := row.Scan(
@@ -108,6 +113,8 @@ func (q *Queries) ApproveFrameworkScope(ctx context.Context, arg ApproveFramewor
 		&i.EffectiveFrom,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.SelfApproved,
+		&i.SubmittedBy,
 	)
 	return i, err
 }
@@ -122,7 +129,7 @@ VALUES (
     $1, $2, $3, $4,
     'draft', $5, $6
 )
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 `
 
 type CreateFrameworkScopeParams struct {
@@ -177,6 +184,8 @@ func (q *Queries) CreateFrameworkScope(ctx context.Context, arg CreateFrameworkS
 		&i.EffectiveFrom,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.SelfApproved,
+		&i.SubmittedBy,
 	)
 	return i, err
 }
@@ -243,7 +252,7 @@ func (q *Queries) GetActivatedExclusionForRequirement(ctx context.Context, arg G
 }
 
 const getActivatedFrameworkScope = `-- name: GetActivatedFrameworkScope :one
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 FROM framework_scopes
 WHERE tenant_id = $1
   AND framework_version_id = $2
@@ -279,6 +288,8 @@ func (q *Queries) GetActivatedFrameworkScope(ctx context.Context, arg GetActivat
 		&i.EffectiveFrom,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.SelfApproved,
+		&i.SubmittedBy,
 	)
 	return i, err
 }
@@ -344,7 +355,7 @@ func (q *Queries) GetFrameworkScopeApplicability(ctx context.Context, arg GetFra
 }
 
 const getFrameworkScopeAsOf = `-- name: GetFrameworkScopeAsOf :one
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 FROM framework_scopes
 WHERE tenant_id = $1
   AND framework_version_id = $2
@@ -386,12 +397,14 @@ func (q *Queries) GetFrameworkScopeAsOf(ctx context.Context, arg GetFrameworkSco
 		&i.EffectiveFrom,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.SelfApproved,
+		&i.SubmittedBy,
 	)
 	return i, err
 }
 
 const getFrameworkScopeByID = `-- name: GetFrameworkScopeByID :one
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 FROM framework_scopes
 WHERE tenant_id = $1 AND id = $2
 `
@@ -422,6 +435,8 @@ func (q *Queries) GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkSco
 		&i.EffectiveFrom,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.SelfApproved,
+		&i.SubmittedBy,
 	)
 	return i, err
 }
@@ -698,7 +713,7 @@ func (q *Queries) ListFrameworkScopeWorkflowLog(ctx context.Context, arg ListFra
 }
 
 const listFrameworkScopes = `-- name: ListFrameworkScopes :many
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 FROM framework_scopes
 WHERE tenant_id = $1
 ORDER BY created_at DESC, id ASC
@@ -735,6 +750,8 @@ func (q *Queries) ListFrameworkScopes(ctx context.Context, tenantID pgtype.UUID)
 			&i.EffectiveFrom,
 			&i.SupersededBy,
 			&i.SupersededAt,
+			&i.SelfApproved,
+			&i.SubmittedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -747,7 +764,7 @@ func (q *Queries) ListFrameworkScopes(ctx context.Context, tenantID pgtype.UUID)
 }
 
 const listFrameworkScopesByFrameworkVersion = `-- name: ListFrameworkScopesByFrameworkVersion :many
-SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 FROM framework_scopes
 WHERE tenant_id = $1 AND framework_version_id = $2
 ORDER BY created_at DESC, id ASC
@@ -785,6 +802,8 @@ func (q *Queries) ListFrameworkScopesByFrameworkVersion(ctx context.Context, arg
 			&i.EffectiveFrom,
 			&i.SupersededBy,
 			&i.SupersededAt,
+			&i.SelfApproved,
+			&i.SubmittedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -892,20 +911,27 @@ func (q *Queries) ListFrameworkVersionMigrationsInto(ctx context.Context, toVers
 const submitFrameworkScope = `-- name: SubmitFrameworkScope :one
 UPDATE framework_scopes
 SET state = 'review',
+    submitted_by = $3,
     updated_at = now()
-WHERE tenant_id = $1 AND id = $2 AND state = 'draft'
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+WHERE tenant_id = $1 AND id = $2
+  AND (state = 'draft'
+       OR (state = 'review' AND (submitted_by IS NULL OR submitted_by LIKE 'jwt:%')))
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 `
 
 type SubmitFrameworkScopeParams struct {
-	TenantID pgtype.UUID `json:"tenant_id"`
-	ID       pgtype.UUID `json:"id"`
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	ID          pgtype.UUID `json:"id"`
+	SubmittedBy *string     `json:"submitted_by"`
 }
 
 // AC-6: draft -> review. Guarded so callers can never re-submit an already
 // under-review row by accident (would still be valid but masks bugs).
+// #2101: records the submitter as a person, so approval can compare. Also
+// re-submits a review row whose submitter is unrecorded (NULL) or a session
+// id ('jwt:<token id>'), which approval refuses because it names no person.
 func (q *Queries) SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error) {
-	row := q.db.QueryRow(ctx, submitFrameworkScope, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, submitFrameworkScope, arg.TenantID, arg.ID, arg.SubmittedBy)
 	var i FrameworkScope
 	err := row.Scan(
 		&i.ID,
@@ -925,6 +951,8 @@ func (q *Queries) SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkS
 		&i.EffectiveFrom,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.SelfApproved,
+		&i.SubmittedBy,
 	)
 	return i, err
 }
@@ -962,7 +990,7 @@ SET predicate = $3,
     predicate_hash = $4,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
+RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 `
 
 type UpdateFrameworkScopePredicateParams struct {
@@ -1003,6 +1031,8 @@ func (q *Queries) UpdateFrameworkScopePredicate(ctx context.Context, arg UpdateF
 		&i.EffectiveFrom,
 		&i.SupersededBy,
 		&i.SupersededAt,
+		&i.SelfApproved,
+		&i.SubmittedBy,
 	)
 	return i, err
 }

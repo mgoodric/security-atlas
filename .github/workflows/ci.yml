@@ -312,6 +312,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-unit-coverage
+          retention-days: 7
           path: coverage.txt
           if-no-files-found: warn
 
@@ -374,6 +375,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: atlas-binary
+          retention-days: 7
           path: atlas
           if-no-files-found: error
 
@@ -652,6 +654,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-integration-coverage-${{ matrix.leg }}
+          retention-days: 7
           path: coverage.txt
           if-no-files-found: warn
       # ================================================================
@@ -833,6 +836,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: go-merged-coverage
+          retention-days: 7
           path: merged-coverage.txt
           if-no-files-found: warn
 
@@ -966,6 +970,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: fuzz-crashers
+          retention-days: 7
           path: "**/testdata/fuzz/**"
           if-no-files-found: ignore
 
@@ -1500,6 +1505,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: frontend-vitest-coverage
+          retention-days: 7
           path: web/coverage/coverage-summary.json
           if-no-files-found: warn
 
@@ -1739,6 +1745,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-report
+          retention-days: 3
           path: |
             web/playwright-report/
             web/test-results/
@@ -1993,6 +2000,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: playwright-report-prod-build
+          retention-days: 3
           path: |
             web/playwright-report/
             web/test-results/
@@ -2272,6 +2280,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ui-honesty-report-${{ github.run_id }}
+          retention-days: 3
           path: |
             web/e2e-audit/reports/
             comment-body.md
@@ -2374,6 +2383,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: govulncheck-report
+          retention-days: 7
           path: |
             govulncheck.txt
             govulncheck.sarif
@@ -2600,6 +2610,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: audit-deps-tsv
+          retention-days: 7
           path: |
             audit-deps.tsv
             audit-deps.stderr
@@ -2782,6 +2793,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: npm-audit-report
+          retention-days: 7
           path: |
             npm-audit.txt
             npm-audit.json
@@ -3024,6 +3036,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: branch-protection-drift-report
+          retention-days: 7
           path: |
             drift.stdout
             drift.stderr
@@ -3088,6 +3101,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: trivy-report
+          retention-days: 7
           path: trivy-report.txt
           if-no-files-found: warn
 
@@ -3652,6 +3666,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: assertion-density-report
+          retention-days: 7
           path: |
             density.txt
             density.warn
