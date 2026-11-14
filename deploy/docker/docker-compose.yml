@@ -441,8 +441,8 @@ services:
       # gives each browser its own per-IP login bucket. Nothing else can
       # connect from that address: a browser on the host-published :8080
       # arrives from a gateway or LAN address, which stays untrusted. If you
-      # set TRUSTED_PROXY_CIDRS for your own proxy, keep 10.125.0.2/32 in it.
-      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-10.125.0.2/32}
+      # set TRUSTED_PROXY_CIDRS for your own proxy, keep web's /32 in it.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-${WEB_BFF_IP:-10.125.0.2}/32}
       # OE-553: demo-seed opt-in gate (slices 205 + 278). The server's
       # admindemo handler and the atlas-cli `demo` commands both read this
       # ONE variable and admit only the exact lowercase string "true"
@@ -500,7 +500,7 @@ services:
     networks:
       default: {}
       bffnet:
-        ipv4_address: 10.125.0.3
+        ipv4_address: ${ATLAS_BFF_IP:-10.125.0.3}
     ports:
       - "${ATLAS_HTTP_PORT:-8080}:8080"
       - "${ATLAS_GRPC_PORT:-50051}:50051"
@@ -564,7 +564,7 @@ services:
     # client IP and no other container's.
     networks:
       bffnet:
-        ipv4_address: 10.125.0.2
+        ipv4_address: ${WEB_BFF_IP:-10.125.0.2}
     ports:
       - "${WEB_PORT:-3000}:3000"
     restart: unless-stopped
@@ -572,11 +572,14 @@ services:
 networks:
   # #2040: web <-> atlas only. Fixed so the web address is known ahead of
   # time; a /29 leaves the gateway, web and atlas a few spare addresses.
+  # If 10.125.0.0/29 collides with a network on the host, `up` fails with
+  # a pool-overlap error: set ATLAS_BFF_SUBNET, WEB_BFF_IP and ATLAS_BFF_IP
+  # together in .env to a free range.
   bffnet:
     driver: bridge
     ipam:
       config:
-        - subnet: 10.125.0.0/29
+        - subnet: ${ATLAS_BFF_SUBNET:-10.125.0.0/29}
 
 volumes:
   pg-data:

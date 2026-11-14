@@ -19,11 +19,25 @@ and a server action has no socket API. So the BFF cannot tell a forged
 header from a trusted proxy's from inside Next.
 
 `web/peer-chain.cjs` is loaded with `node --require` (the web.Dockerfile
-CMD and `npm run start`). It wraps `http.Server`/`https.Server` `emit` and,
-for every request, **overwrites** `x-atlas-peer-chain` with
-`<inbound XFF hops>, <socket peer>`. That is the chain a standards-following
-proxy would build, and any copy of the header the browser sent is
-discarded. It also sets a `globalThis` marker.
+CMD and `npm run start`). It wraps `http.Server`/`https.Server` `emit`.
+For every request it builds `<inbound XFF hops>, <socket peer>`, the chain
+a standards-following proxy would build, and walks it right-to-left
+against `WEB_TRUSTED_PROXY_CIDRS`. It then **replaces `X-Forwarded-For`
+itself** with the single resolved client IP, or deletes it when nothing
+resolves (no socket peer). It also sets a `globalThis` marker.
+
+The first version wrote the chain to a private header and left
+`X-Forwarded-For` alone. Review (B1) found the hole in that: Next's
+rewrite proxy for `/v1/*`, `/health` and `/metrics` forwards headers
+verbatim, so once atlas trusted web, a browser-forged `X-Forwarded-For`
+reached atlas through the rewrites. Overwriting the real header vets every
+path through web at once. `web/scripts/check-forwarded-for.mjs` proves it
+against the standalone build in CI. It fails without the preload: forged
+`198.51.100.66` reaches atlas on `/v1/me`.
+
+A malformed `WEB_TRUSTED_PROXY_CIDRS` throws in the preload, so web does
+not start. That mirrors atlas's boot-time CIDR parse (slice 466 D6) and
+avoids trusting the wrong range per request.
 
 Rejected:
 
@@ -34,12 +48,10 @@ Rejected:
 
 ## D2 — Fail closed without the preload
 
-`web/lib/client-ip.ts` reads the chain only when the marker is set. Without
-it (for example `next dev`), the header might be browser-supplied, so the
-BFF forwards no `X-Forwarded-For`, which is the pre-#2040 behaviour. The
-same applies to a malformed `WEB_TRUSTED_PROXY_CIDRS`, which is logged and
-not partly applied. Only the single resolved address is forwarded, never
-the inbound header.
+`web/lib/client-ip.ts` forwards `X-Forwarded-For` from the login action
+only when the marker is set and the header is exactly one IP. Without the
+marker (for example `next dev`), the header might be browser-supplied, so
+the BFF forwards nothing, which is the pre-#2040 behaviour.
 
 ## D3 — `WEB_TRUSTED_PROXY_CIDRS`, separate from `TRUSTED_PROXY_CIDRS`
 

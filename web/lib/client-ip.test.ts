@@ -1,145 +1,141 @@
-// #2040 — the BFF forwards the browser's IP from its own trusted chain,
-// never a browser-supplied X-Forwarded-For.
+// #2040 — web vets X-Forwarded-For at the socket (web/peer-chain.cjs), and
+// the login BFF forwards only that vetted value.
 //
-// The wire-level cases load web/peer-chain.cjs (the production preload)
-// and drive a real node http.Server over loopback, so the socket peer the
-// chain ends in is real, not hand-built.
+// The walk is unit-tested here through the preload's exports. The
+// end-to-end proof (a forged header through the real standalone build, on
+// both the /v1 rewrite and the login action) is
+// web/scripts/check-forwarded-for.mjs, run in CI's prod-build job.
 
 import { createRequire } from "node:module";
-import http from "node:http";
-import type { AddressInfo } from "node:net";
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import {
-  PEER_CHAIN_HEADER,
-  forwardedForHeaders,
-  parseTrustedProxies,
-  resolveClientIP,
-} from "./client-ip";
+import { clientIPFromRequest, forwardedForHeaders } from "./client-ip";
 
-function trusted(cidrs: string) {
-  const list = parseTrustedProxies(cidrs);
-  if (!list) throw new Error(`bad cidrs ${cidrs}`);
-  return list;
+type BlockList = import("node:net").BlockList;
+type PeerChain = {
+  PEER_CHAIN_INSTALLED: symbol;
+  parseTrustedProxies(raw: string | undefined): BlockList;
+  peerChain(req: {
+    headers: Record<string, string | string[] | undefined>;
+    socket?: { remoteAddress?: string };
+  }): string[];
+  resolveClientIP(hops: string[], trusted: BlockList): string | null;
+  vetForwardedFor(
+    req: {
+      headers: Record<string, string | string[] | undefined>;
+      socket?: { remoteAddress?: string };
+    },
+    trusted: BlockList,
+  ): void;
+};
+
+// Loading the preload installs its http.Server hook in this worker, which
+// is harmless here: no test in this file starts a server.
+const pc = createRequire(import.meta.url)("../peer-chain.cjs") as PeerChain;
+
+const trusted = (cidrs: string) => pc.parseTrustedProxies(cidrs);
+
+function vetted(
+  xff: string | undefined,
+  peer: string | undefined,
+  cidrs: string,
+): string | undefined {
+  const req = {
+    headers: xff === undefined ? {} : { "x-forwarded-for": xff },
+    socket: peer === undefined ? undefined : { remoteAddress: peer },
+  };
+  pc.vetForwardedFor(req, trusted(cidrs));
+  return req.headers["x-forwarded-for"] as string | undefined;
 }
 
-describe("resolveClientIP", () => {
-  it("returns the peer when no proxy is trusted, ignoring forged hops", () => {
-    expect(resolveClientIP("6.6.6.6, 198.51.100.7", trusted(""))).toBe(
-      "198.51.100.7",
-    );
+describe("peer-chain.cjs vetForwardedFor", () => {
+  it("replaces a forged header with the peer when no proxy is trusted", () => {
+    expect(vetted("198.51.100.66", "192.0.2.7", "")).toBe("192.0.2.7");
   });
 
-  it("steps over trusted proxies to the first untrusted hop", () => {
-    expect(
-      resolveClientIP("6.6.6.6, 198.51.100.7, 10.0.0.5", trusted("10.0.0.0/8")),
-    ).toBe("198.51.100.7");
+  it("gives two clients behind a trusted proxy two addresses", () => {
+    expect(vetted("198.51.100.1", "10.0.0.5", "10.0.0.0/8")).toBe(
+      "198.51.100.1",
+    );
+    expect(vetted("203.0.113.2", "10.0.0.5", "10.0.0.0/8")).toBe("203.0.113.2");
+  });
+
+  it("never reaches a forged prefix behind a trusted proxy", () => {
+    expect(vetted("6.6.6.6, 198.51.100.1", "10.0.0.5", "10.0.0.0/8")).toBe(
+      "198.51.100.1",
+    );
   });
 
   it("unwraps an IPv4-mapped peer before matching", () => {
-    expect(
-      resolveClientIP("203.0.113.9, ::ffff:10.0.0.5", trusted("10.0.0.0/8")),
-    ).toBe("203.0.113.9");
+    expect(vetted("203.0.113.9", "::ffff:10.0.0.5", "10.0.0.0/8")).toBe(
+      "203.0.113.9",
+    );
   });
 
   it("matches IPv6 proxies", () => {
-    expect(resolveClientIP("2001:db8::1, fd00::2", trusted("fd00::/8"))).toBe(
-      "2001:db8::1",
-    );
+    expect(vetted("2001:db8::1", "fd00::2", "fd00::/8")).toBe("2001:db8::1");
+  });
+
+  it("deletes the header when there is no socket peer", () => {
+    expect(vetted("198.51.100.66", undefined, "")).toBeUndefined();
   });
 
   it("stops at a malformed hop with the closest attributable address", () => {
-    expect(resolveClientIP("nonsense, 10.0.0.5", trusted("10.0.0.0/8"))).toBe(
-      "10.0.0.5",
-    );
+    expect(vetted("nonsense", "10.0.0.5", "10.0.0.0/8")).toBe("10.0.0.5");
   });
 
-  it("refuses an empty or oversized chain", () => {
-    expect(resolveClientIP("", trusted(""))).toBeNull();
+  it("refuses an oversized chain", () => {
     const long = Array.from({ length: 60 }, () => "10.0.0.1").join(", ");
-    expect(resolveClientIP(long, trusted("10.0.0.0/8"))).toBeNull();
+    expect(vetted(long, "10.0.0.1", "10.0.0.0/8")).toBeUndefined();
   });
 });
 
-describe("parseTrustedProxies", () => {
+describe("peer-chain.cjs parseTrustedProxies", () => {
   it.each(["10.0.0.0", "10.0.0.0/33", "fd00::/129", "nope/8", "10.0.0.0/8/1"])(
-    "rejects %s",
+    "throws on %s",
     (cidr) => {
-      expect(parseTrustedProxies(cidr)).toBeNull();
+      expect(() => pc.parseTrustedProxies(cidr)).toThrow(
+        /WEB_TRUSTED_PROXY_CIDRS/,
+      );
     },
   );
 
   it("accepts a list with blanks", () => {
-    expect(parseTrustedProxies(" 10.0.0.0/8, ,fd00::/8 ")).not.toBeNull();
+    expect(() =>
+      pc.parseTrustedProxies(" 10.0.0.0/8, ,fd00::/8 "),
+    ).not.toThrow();
   });
 });
 
-describe("forwardedForHeaders without the preload", () => {
-  it("forwards nothing: the chain header could be browser-supplied", () => {
-    // Clear the marker explicitly: the preload may already be loaded in
-    // this worker by the block below.
-    const h = new Headers({ [PEER_CHAIN_HEADER]: "6.6.6.6" });
-    const installed = Symbol.for("security-atlas.peer-chain");
-    const g = globalThis as Record<symbol, unknown>;
-    const prev = g[installed];
-    g[installed] = undefined;
-    try {
-      expect(forwardedForHeaders(h, {})).toEqual({});
-    } finally {
-      g[installed] = prev;
-    }
+describe("client-ip forwardedForHeaders", () => {
+  const g = globalThis as Record<symbol, unknown>;
+  const prev = g[pc.PEER_CHAIN_INSTALLED];
+  afterEach(() => {
+    g[pc.PEER_CHAIN_INSTALLED] = prev;
   });
-});
 
-describe("forwardedForHeaders over a real socket (peer-chain.cjs loaded)", () => {
-  let server: http.Server;
-  let port: number;
-  let env: Record<string, string | undefined> = {};
-
-  beforeAll(async () => {
-    createRequire(import.meta.url)("../peer-chain.cjs");
-    server = http.createServer((req, res) => {
-      const h = new Headers();
-      for (const [k, v] of Object.entries(req.headers)) {
-        if (typeof v === "string") h.set(k, v);
-      }
-      res.end(JSON.stringify(forwardedForHeaders(h, env)));
+  it("forwards the vetted address when the preload is installed", () => {
+    g[pc.PEER_CHAIN_INSTALLED] = true;
+    const h = new Headers({ "x-forwarded-for": "198.51.100.1" });
+    expect(forwardedForHeaders(h)).toEqual({
+      "X-Forwarded-For": "198.51.100.1",
     });
-    await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
-    port = (server.address() as AddressInfo).port;
   });
 
-  afterAll(async () => {
-    await new Promise<void>((r) => server.close(() => r()));
+  it("forwards nothing without the preload: the header could be the browser's", () => {
+    g[pc.PEER_CHAIN_INSTALLED] = undefined;
+    const h = new Headers({ "x-forwarded-for": "198.51.100.66" });
+    expect(forwardedForHeaders(h)).toEqual({});
   });
 
-  async function call(headers: Record<string, string>) {
-    const res = await fetch(`http://127.0.0.1:${port}/login`, { headers });
-    return (await res.json()) as Record<string, string>;
-  }
-
-  it("ignores a forged X-Forwarded-For and a forged chain header from a direct browser", async () => {
-    env = {};
+  it("forwards nothing when the header is not one address", () => {
+    g[pc.PEER_CHAIN_INSTALLED] = true;
     expect(
-      await call({
-        "X-Forwarded-For": "198.51.100.66",
-        [PEER_CHAIN_HEADER]: "198.51.100.67",
-      }),
-    ).toEqual({ "X-Forwarded-For": "127.0.0.1" });
-  });
-
-  it("gives two clients behind a trusted proxy two different addresses", async () => {
-    // The loopback peer stands in for the operator's reverse proxy.
-    env = { WEB_TRUSTED_PROXY_CIDRS: "127.0.0.0/8" };
-    const a = await call({ "X-Forwarded-For": "198.51.100.1" });
-    const b = await call({ "X-Forwarded-For": "203.0.113.2" });
-    expect(a).toEqual({ "X-Forwarded-For": "198.51.100.1" });
-    expect(b).toEqual({ "X-Forwarded-For": "203.0.113.2" });
-  });
-
-  it("forwards nothing when WEB_TRUSTED_PROXY_CIDRS is malformed", async () => {
-    env = { WEB_TRUSTED_PROXY_CIDRS: "not-a-cidr" };
-    expect(await call({})).toEqual({});
+      clientIPFromRequest(
+        new Headers({ "x-forwarded-for": "1.2.3.4, 5.6.7.8" }),
+      ),
+    ).toBeNull();
+    expect(clientIPFromRequest(new Headers())).toBeNull();
   });
 });

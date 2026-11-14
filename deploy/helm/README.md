@@ -170,9 +170,9 @@ through the web pod's login BFF, so two settings make that bucket per
 browser rather than one bucket for the whole web Deployment (#2040):
 
 - `web.trustedProxyCIDRs` — where the Ingress controller pods connect
-  from. The BFF walks `X-Forwarded-For` through these to the browser's IP
-  and forwards only that address; a header a browser forges is never
-  passed on.
+  from. Web walks `X-Forwarded-For` through these to the browser's IP and
+  replaces the header with that one address before anything reaches
+  atlas, so a header a browser forges is never passed on.
 - `atlas.trustedProxyCIDRs` — where the web pods connect from. atlas
   honours `X-Forwarded-For` only from these addresses.
 

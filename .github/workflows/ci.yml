@@ -1922,6 +1922,13 @@ jobs:
         # assets resolve under `node .next/standalone/web/server.js`.
         working-directory: web
         run: npm run build:standalone
+      # #2040: a browser-forged X-Forwarded-For must not reach atlas via
+      # the /v1 rewrite or the login BFF. Runs before atlas starts because
+      # the script's stand-in atlas binds :8080, the build-time rewrite
+      # destination.
+      - name: Check web vets X-Forwarded-For (standalone + preload)
+        working-directory: web
+        run: node scripts/check-forwarded-for.mjs
       - name: Install Playwright chromium
         working-directory: web
         run: npx playwright install --with-deps chromium
