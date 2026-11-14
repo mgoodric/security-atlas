@@ -57,7 +57,9 @@ left, stop at the first untrusted hop, cap of 50 hops.
 Trusting the compose default network is not safe. atlas publishes `:8080`,
 and a host-published connection can arrive from that network's gateway,
 which is inside the subnet. So web sits **only** on a new `bffnet`
-(`10.125.0.0/29`) at `10.125.0.2`, atlas joins `default` and `bffnet`, and
+(`10.125.0.0/29`) at `10.125.0.2`, atlas joins `default` and `bffnet`
+(pinned at `10.125.0.3`, since atlas starts first and would otherwise be
+handed `.2`), and
 atlas's `TRUSTED_PROXY_CIDRS` defaults to `10.125.0.2/32`. Web needs only
 atlas (`ATLAS_HTTP_URL`). The subnet sits next to the proxy harness's
 `10.123`/`10.124` and stays outside Docker's default `172.17–31` pools.
