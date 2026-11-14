@@ -18,14 +18,9 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"os"
 	"strings"
-	"time"
 
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/chromedp/remote"
+	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
 
 // Doc is the data passed to the renderer. Pure-content; the caller
@@ -40,24 +35,21 @@ type Doc struct {
 	BodyMd        string
 }
 
-// DefaultTimeout is the wall-clock budget for a single render. Headless
-// Chrome boot + PrintToPDF on a 1-page policy is typically <2s on a
-// developer laptop, but the GitHub Actions ubuntu-latest runner with
-// StepSecurity Harden-Runner audit-mode egress instrumentation (slice 117)
-// can take 20-40s to print its DevTools websocket URL on a cold start
-// because Chrome's startup network calls (component-updater, GPU blocklist
-// refresh) traverse the audited egress hook. The 90s budget was 60s WS-URL
-// read window + 30s render headroom. chromedp v0.23 launches Chrome over a
-// pipe, so the WS-URL window no longer applies; the budget is kept as is.
-// Slice 340 raised this from the original 30s after diagnosing the
-// `--- FAIL: TestRender_ProducesRealPDF (20.04s)` chromedp websocket-url
-// timeout flake (5 consecutive CI failures across slices 312/315/320).
-const DefaultTimeout = 90 * time.Second
+// DefaultTimeout is the wall-clock budget a caller gives a single render.
+// It matches the shared pdfrender.DefaultRenderTimeout. Slice 340 raised it
+// from 30s to 90s (a 60s DevTools websocket-URL window plus 30s to render)
+// after the `TestRender_ProducesRealPDF (20.04s)` cold-start flake. chromedp
+// v0.23 launches Chrome over a pipe, so that window is gone, and #1847 stops
+// the component-update calls that made a cold start slow. The budget is kept
+// at 90s as a hang bound rather than a render estimate: a healthy render
+// finishes in a few seconds, and lowering it buys nothing but flake risk on
+// a loaded runner.
+const DefaultTimeout = pdfrender.DefaultRenderTimeout
 
 // ErrChromeUnavailable is returned when chromedp could not launch a
 // browser. The HTTP handler maps this to 503 so operators can run the
 // platform without Chrome (PDF endpoint disabled) until they install it.
-var ErrChromeUnavailable = errors.New("policy/pdf: chrome browser unavailable")
+var ErrChromeUnavailable = pdfrender.ErrChromeUnavailable
 
 // Render returns a PDF byte stream for the supplied document. The
 // returned bytes begin with the literal `%PDF-` magic header. Blocking;
@@ -67,67 +59,9 @@ func Render(ctx context.Context, doc Doc) ([]byte, error) {
 		return nil, errors.New("policy/pdf: nil context")
 	}
 	htmlDoc := buildHTML(doc)
-	// Browser allocation has two paths:
-	//
-	//   1. CHROME_DEBUG_URL set → connect to a remote Chrome DevTools
-	//      Protocol endpoint (typically a `chromedp/headless-shell`
-	//      container exposed on port 9222). Used by CI and by local dev
-	//      machines without a Chrome install.
-	//   2. Otherwise → launch a local Chrome via ExecAllocator with
-	//      --no-sandbox so it runs in CI containers as well as locally.
-	//
-	// We never load untrusted URLs; only the inline data: URL we
-	// construct ourselves.
-	var browserCtx context.Context
-	var cancelAlloc context.CancelFunc
-	var cancelBrowser context.CancelFunc
-	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	} else {
-		opts := append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoSandbox,
-			chromedp.DisableGPU,
-			chromedp.Headless,
-			chromedp.Flag("hide-scrollbars", true),
-		)
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	}
-	defer cancelBrowser()
-	defer cancelAlloc()
-
-	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
-	var buf []byte
-	err := chromedp.Do(browserCtx,
-		chromedp.Navigate(dataURL),
-		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
-			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
-				PrintBackground: new(true),
-				MarginTop:       new(0.4),
-				MarginBottom:    new(0.4),
-				MarginLeft:      new(0.4),
-				MarginRight:     new(0.4),
-			})
-			buf = res.Data
-			return err
-		}),
-	)
+	buf, err := pdfrender.PrintHTML(ctx, htmlDoc)
 	if err != nil {
-		// Heuristic: any failure to launch the browser executable
-		// returns an error matching "exec:" or "executable file not
-		// found". Surface as ErrChromeUnavailable so callers can
-		// distinguish missing-dependency from real render failures.
-		if isChromeUnavailable(err) {
-			return nil, fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
-		}
-		return nil, fmt.Errorf("policy/pdf: chromedp run: %w", err)
-	}
-	if len(buf) < 5 || string(buf[:5]) != "%PDF-" {
-		return nil, fmt.Errorf("policy/pdf: invalid PDF output (len=%d, prefix=%q)", len(buf), safePrefix(buf))
+		return nil, fmt.Errorf("policy/pdf: %w", err)
 	}
 	return buf, nil
 }
@@ -293,37 +227,4 @@ func renderInline(s string) string {
 		i++
 	}
 	return b.String()
-}
-
-// encodeForDataURL percent-encodes the small set of characters that would
-// confuse chromedp's data-URL parser. Full URL encoding is overkill; only
-// `#`, `%`, and `&` (and the quote chars) need attention because
-// `data:text/html;charset=utf-8,` introduces the inline document.
-func encodeForDataURL(s string) string {
-	r := strings.NewReplacer(
-		"%", "%25",
-		"#", "%23",
-		"&", "%26",
-		"?", "%3F",
-		"\n", "%0A",
-		"\r", "",
-	)
-	return r.Replace(s)
-}
-
-func isChromeUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "exec:") ||
-		strings.Contains(msg, "executable file not found") ||
-		strings.Contains(msg, "no chrome found")
-}
-
-func safePrefix(b []byte) string {
-	if len(b) > 16 {
-		return string(b[:16])
-	}
-	return string(b)
 }

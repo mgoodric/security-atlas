@@ -549,6 +549,7 @@ func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx, *db
 	if err != nil {
 		return fmt.Errorf("incident: parse tenant id: %w", err)
 	}
+	ctx, audit := ingest.WithAuditOutbox(ctx)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("incident: begin tx: %w", err)
@@ -563,6 +564,7 @@ func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx, *db
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("incident: commit: %w", err)
 	}
+	audit.Flush(ctx)
 	return nil
 }
 
