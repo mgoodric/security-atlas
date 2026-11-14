@@ -309,10 +309,11 @@ P0 anti-criteria: anonymous ack rejected (slice 034 cred required); stale acks n
 
 - **Module** — a top-level product area that a tenant switches on or off as a whole, such as Risk, Third-party risk, Policies, Questionnaires or Personnel security. _Avoid_: area, section, app.
 - **Core module** — a module that is always on because the platform's spine depends on it: Controls, Evidence, Frameworks and the SCF catalog, Scopes and framework scopes, Audit periods, Dashboard, and Settings & admin.
-- **Optional module** — a module a tenant can switch off: Risk, Third-party risk, Policies, Questionnaires, Personnel security, Exceptions, Board reporting and OSCAL export.
+- **Optional module** — a module a tenant can switch off: Risk, Third-party risk, Policies, Questionnaires, Personnel security, Exceptions and Board reporting.
 - **Feature** — a smaller switch inside one module, such as risk hierarchy inside Risk. A feature is on only when its module is on. _Avoid_: sub-module.
 - **Switched off** — the state of an optional module whose screens and API are hidden from everyone in the tenant. Its data is kept unchanged, and switching the module back on restores it. _Avoid_: disabled, deleted, archived.
-- **Module access** — the set of modules one member of a tenant may use. It says _where_ the member can work; the member's role says _what_ they can do there. Module access never reaches beyond the modules the tenant has switched on.
+- **Module access** — the set of modules one member of a tenant may use. It says _where_ the member can work; the member's role says _what_ they can do there. Module access never reaches beyond the modules the tenant has switched on. Admins always have every switched-on module, and auditors are scoped by their audit periods instead.
+- **No access** — the state of a module that is switched on for the tenant but outside one member's module access. It is hidden from that member only. _Avoid_: forbidden, locked.
 
 ## User-tenant membership (slice 141, in design)
 
