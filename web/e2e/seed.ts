@@ -102,7 +102,11 @@ export type FixtureName =
   | "controls-top-bar"
   | "controls-list"
   | "global-search"
-  | "tenant-switch";
+  | "tenant-switch"
+  // #1794 — synthetic ISO/IEC 27001 version + crosswalk + three
+  // evaluated controls for the SoA tab (framework-scope-soa.spec.ts).
+  // Deletes the version's scope revisions so each run starts clean.
+  | "framework-scope-soa";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

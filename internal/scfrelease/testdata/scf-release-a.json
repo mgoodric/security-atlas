@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-1770-a",
+  "release_date": "2025-01-01",
+  "controls": [
+    {
+      "scf_id": "IAC-06",
+      "family": "IAC",
+      "title": "Multi-Factor Authentication (MFA)",
+      "description": "Release A: MFA for privileged and remote access."
+    },
+    {
+      "scf_id": "GOV-01",
+      "family": "GOV",
+      "title": "Cybersecurity & Data Protection Governance Program",
+      "description": "Release A: governance program."
+    },
+    {
+      "scf_id": "CRY-03",
+      "family": "CRY",
+      "title": "Transmission Confidentiality",
+      "description": "Release A: protect data in transit."
+    },
+    {
+      "scf_id": "AST-04",
+      "family": "AST",
+      "title": "Network Diagrams & Data Flow Diagrams (DFDs)",
+      "description": "Release A: maintain network and data flow diagrams."
+    },
+    {
+      "scf_id": "AST-09",
+      "family": "AST",
+      "title": "Secure Disposal, Destruction or Re-Use of Equipment",
+      "description": "Release A: dispose of equipment securely."
+    },
+    {
+      "scf_id": "PRM-07",
+      "family": "PRM",
+      "title": "Secure Development Life Cycle (SDLC) Management",
+      "description": "Release A: manage the SDLC."
+    }
+  ]
+}

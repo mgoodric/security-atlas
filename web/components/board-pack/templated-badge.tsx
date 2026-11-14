@@ -17,7 +17,7 @@ export function TemplatedBadge({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-slate-700",
+        "inline-flex items-center gap-1.5 rounded bg-muted px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-foreground",
         className,
       )}
       data-testid="templated-badge"
@@ -45,7 +45,7 @@ export function HumanAuthoredBadge({ className }: { className?: string }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 rounded bg-slate-100 px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-slate-600",
+        "inline-flex items-center gap-1.5 rounded bg-muted px-2 py-0.5 font-mono text-[10px] font-semibold uppercase tracking-wider text-muted-foreground",
         className,
       )}
       data-testid="human-authored-badge"

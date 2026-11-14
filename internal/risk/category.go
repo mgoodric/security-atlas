@@ -97,6 +97,27 @@ func (s *Store) ReviewCadenceDays(ctx context.Context) (int, error) {
 // and returns it with the enum value the risk row still carries. An unknown
 // ref is an UnknownCategoryError naming the tenant's slugs.
 func resolveCategory(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, dbx.RiskCategory, error) {
+	return ResolveCategoryTx(ctx, q, tenantID, ref)
+}
+
+// IsCategoryRefusal reports whether err is a category the caller named but
+// cannot assign to a new risk: unknown, archived, or one that cannot hold
+// risks yet. Callers map it to a client error.
+func IsCategoryRefusal(err error) bool {
+	var (
+		archived *ArchivedCategoryError
+		invalid  *InvalidCategoryError
+	)
+	return IsUnknownCategory(err) || errors.As(err, &archived) || errors.As(err, &invalid)
+}
+
+// ResolveCategoryTx resolves ref (a slug or an id) to one of the tenant's
+// categories inside the caller's tenant-scoped transaction, for writers
+// outside Store such as the MCP create_risk applier (#1810). It returns the
+// category with the enum value the risk row still carries, or an error that
+// IsCategoryRefusal recognises when the category is unknown, archived, or
+// cannot hold risks yet.
+func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, dbx.RiskCategory, error) {
 	if err := q.SeedRiskCategories(ctx, pgUUID(tenantID)); err != nil {
 		return Category{}, "", fmt.Errorf("seed risk categories: %w", err)
 	}
@@ -110,12 +131,18 @@ func resolveCategory(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, re
 	if err != nil {
 		return Category{}, "", fmt.Errorf("resolve risk category: %w", err)
 	}
+	if row.Archived {
+		// #1810: archived categories stay on the risks that have them but
+		// take no new assignments.
+		return Category{}, "", &ArchivedCategoryError{Slug: row.Slug}
+	}
 	enum := dbx.RiskCategory(row.Slug)
 	if !slices.Contains(dbx.AllRiskCategoryValues(), enum) {
-		// Only the seeded slugs exist until the management API lands with
-		// the contract step, so this is unreachable today; refuse rather
-		// than write an enum value the column cannot hold.
-		return Category{}, "", fmt.Errorf("risk: category %q has no legacy enum value", row.Slug)
+		// A category added through the management API (#1810) has no enum
+		// value until #1745's contract step drops the enum column; refuse
+		// rather than write a value the column cannot hold.
+		return Category{}, "", &InvalidCategoryError{Reason: fmt.Sprintf(
+			"category %q cannot hold risks until the risk_category enum is retired (#1745)", row.Slug)}
 	}
 	return categoryFromRow(row), enum, nil
 }

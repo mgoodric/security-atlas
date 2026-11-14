@@ -164,6 +164,9 @@ ORDER BY chain.created_at ASC, chain.id ASC;
 
 -- name: SubmitPolicyForReview :one
 -- Transition: draft -> under_review. Operator action; no role gate.
+-- Also re-submits an under_review policy whose submitter was recorded
+-- before #1807 as a session id ('jwt:<token id>'), which approval refuses
+-- because it names no person: re-submitting records the person.
 UPDATE policies
 SET status = 'under_review',
     submitted_at = now(),
@@ -171,7 +174,8 @@ SET status = 'under_review',
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
-  AND status = 'draft'
+  AND (status = 'draft'
+       OR (status = 'under_review' AND submitted_by LIKE 'jwt:%'))
 RETURNING *;
 
 -- name: ApprovePolicy :one

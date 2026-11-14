@@ -39,10 +39,10 @@
 // `controls` array omits the field entirely rather than emitting null,
 // so slice 012 can add it without a breaking change.
 //
-// The `?as-of=<timestamp>` and `?scf_release=<version>` query parameters
-// are accepted and documented but no-op in v1; slice 012 (point-in-time
-// evidence filtering) and a future SCF-release-import feature will
-// activate them.
+// The `?as-of=<timestamp>` query parameter is accepted and documented but
+// no-op in v1; slice 012 (point-in-time evidence filtering) will activate
+// it. `?scf_release=<version>` is live since #1770: it picks the SCF
+// release an anchor code resolves in, defaulting to the current one.
 package ucfcoverage
 
 import (

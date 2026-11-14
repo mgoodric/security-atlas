@@ -1,18 +1,15 @@
 package ucfcoverage
 
 import (
-	"context"
 	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
 // ===== /v1/anchors/{id}/requirements =====
@@ -29,10 +26,15 @@ import (
 //   - ?framework_version=slug:version — pin the response to one
 //     framework_version (e.g. `soc2:2017`). When the param is absent,
 //     every framework version is included.
+//   - ?scf_release=<label> — resolve an scf_id within that SCF release
+//     (#1770). Absent, an scf_id resolves in the current release and a
+//     UUID in whichever release holds it. `scf_release` in the response
+//     names the release the anchor was read from.
 //
 // Returns:
-//   - 200 { anchor, requirements[] }
-//   - 404 when the anchor id doesn't resolve
+//   - 200 { anchor, requirements[], scf_release }
+//   - 404 when the anchor id doesn't resolve, the scf_release is not
+//     loaded, or the scf_id is not in that release
 //   - 401 when bearer auth is missing
 //
 // Backwards-compat: the response key `requirements` matches the
@@ -42,13 +44,16 @@ import (
 // supersets of the in-memory shape.
 func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	anchor, ok, err := h.lookupAnchor(ctx, chi.URLParam(r, "id"))
-	if err != nil {
-		httperr.WriteInternal(w, r, "lookup anchor", err)
+	anchor, rel, err := scfrelease.Resolve(ctx, h.q, r.URL.Query().Get("scf_release"), chi.URLParam(r, "id"))
+	switch {
+	case errors.Is(err, scfrelease.ErrUnknownRelease), errors.Is(err, scfrelease.ErrCodeNotInRelease):
+		httpresp.WriteError(w, http.StatusNotFound, err.Error())
 		return
-	}
-	if !ok {
+	case errors.Is(err, scfrelease.ErrNoCurrentRelease):
 		httpresp.WriteError(w, http.StatusNotFound, "anchor not found")
+		return
+	case err != nil:
+		httperr.WriteInternal(w, r, "lookup anchor", err)
 		return
 	}
 
@@ -61,6 +66,7 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 				"anchor":       anchorWireFromRow(anchor),
 				"requirements": []requirementForAnchorWire{},
+				"scf_release":  rel.Version,
 			})
 
 			return
@@ -89,31 +95,9 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"anchor":       anchorWireFromRow(anchor),
 		"requirements": out,
+		"scf_release":  rel.Version,
 	})
 
-}
-
-// lookupAnchor resolves the {id} path segment to a scf_anchors row,
-// supporting UUID and bare scf_id forms.
-func (h *Handler) lookupAnchor(ctx context.Context, idOrSCFID string) (dbx.ScfAnchor, bool, error) {
-	if uid, err := uuid.Parse(idOrSCFID); err == nil {
-		row, err := h.q.GetSCFAnchorByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
-		if errors.Is(err, pgx.ErrNoRows) {
-			return dbx.ScfAnchor{}, false, nil
-		}
-		if err != nil {
-			return dbx.ScfAnchor{}, false, err
-		}
-		return row, true, nil
-	}
-	row, err := h.q.GetSCFAnchorBySCFID(ctx, idOrSCFID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return dbx.ScfAnchor{}, false, nil
-	}
-	if err != nil {
-		return dbx.ScfAnchor{}, false, err
-	}
-	return row, true, nil
 }
 
 // anchorWireFromRow maps a bare scf_anchors row to the anchorWire JSON

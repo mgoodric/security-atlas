@@ -66,9 +66,10 @@ allow if {
 
 # audit-notes write: gated by the period assignment match. The
 # request body's audit_period_id is surfaced on
-# input.resource.attrs.audit_period_id by the handler before calling
-# Decide (slice 025 wiring); the rule denies cross-period writes
-# (P0-3 / AC-4).
+# input.resource.attrs.audit_period_id by the authz middleware's
+# hydrator (auditnotes.PeriodResourceAttrs, #2193), only when the
+# period exists in the caller's tenant; the rule denies cross-period
+# and cross-tenant writes (P0-3 / AC-4).
 #
 # Slice 029 note: the auditor can write both 'auditor_only' (private)
 # and 'shared' (Audit Hub) notes. The period gate is the same for
@@ -82,8 +83,9 @@ allow if {
 
 # Slice 029: /v1/me/notifications -- self-info notification surface.
 # Any authenticated role (auditor included) can read their own
-# notifications. The query layer pins recipient_user_id = caller.UserID
-# so cross-recipient leakage is impossible. Mark-read (PATCH) is
+# notifications. The query layer pins recipient_user_id to the caller's
+# bare users(id), resolved by credstore.CallerUserID (#2183), so
+# cross-recipient leakage is impossible. Mark-read (PATCH) is
 # allowed by the same rule.
 allow if {
     has_role("auditor")
