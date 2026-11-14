@@ -199,10 +199,14 @@ type SectionData struct {
 	// end, against the mean of their coverage at the start of the 90-day
 	// posture trend (#2056). The operator may overwrite the baseline
 	// (decision D5); the delta is recomputed on every edit.
-	CoveragePct          float64 `json:"coverage_pct,omitempty"`
-	BaselineCoveragePct  float64 `json:"baseline_coverage_pct,omitempty"`
-	CoverageDelta        float64 `json:"coverage_delta,omitempty"`
-	ScopedFrameworkCount int     `json:"scoped_framework_count,omitempty"`
+	CoveragePct         float64 `json:"coverage_pct,omitempty"`
+	BaselineCoveragePct float64 `json:"baseline_coverage_pct,omitempty"`
+	CoverageDelta       float64 `json:"coverage_delta,omitempty"`
+	// ScopedFrameworkCount is nil on packs stored before #2056, which never
+	// recorded it: their figures render as stored, not as "no framework
+	// scoped". Read it through ScopeCountUnknown / NoScopedFrameworks /
+	// ScopedFrameworks.
+	ScopedFrameworkCount *int `json:"scoped_framework_count,omitempty"`
 	// NoBaseline (coverage_trend, mirrored on investment): there is no
 	// baseline to compare against — a scoped framework has less than 90 days
 	// of evaluation history, or no framework is scoped — so the delta and
@@ -293,4 +297,22 @@ func allSectionsApproved(p Pack) (string, bool) {
 		}
 	}
 	return "", true
+}
+
+// ScopeCountUnknown reports a pack stored before #2056, which never recorded
+// how many frameworks were scoped.
+func (d SectionData) ScopeCountUnknown() bool { return d.ScopedFrameworkCount == nil }
+
+// NoScopedFrameworks reports a recorded count of zero scoped frameworks. A
+// legacy pack (count unknown) is not "no scoped framework".
+func (d SectionData) NoScopedFrameworks() bool {
+	return d.ScopedFrameworkCount != nil && *d.ScopedFrameworkCount == 0
+}
+
+// ScopedFrameworks is the recorded count, 0 when unknown.
+func (d SectionData) ScopedFrameworks() int {
+	if d.ScopedFrameworkCount == nil {
+		return 0
+	}
+	return *d.ScopedFrameworkCount
 }

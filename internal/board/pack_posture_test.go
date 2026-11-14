@@ -1,6 +1,7 @@
 package board
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -134,7 +135,7 @@ func TestCoverageTrend_AnyFrameworkWithoutHistoryMeansNoBaseline(t *testing.T) {
 func TestRecomputeDerived_NoBaselineMakesCostNA(t *testing.T) {
 	t.Parallel()
 	p := Pack{PeriodEnd: "2026-09-30", Sections: map[string]Section{
-		SectionCoverageTrend: newSection(SectionCoverageTrend, SectionData{CoveragePct: 70, ScopedFrameworkCount: 2, NoBaseline: true}),
+		SectionCoverageTrend: newSection(SectionCoverageTrend, SectionData{CoveragePct: 70, ScopedFrameworkCount: intPtr(2), NoBaseline: true}),
 		SectionInvestment:    newSection(SectionInvestment, SectionData{SpendUSD: 30000}),
 	}}
 	recomputeDerived(p.Sections)
@@ -178,7 +179,7 @@ func TestRecomputeDerived_NoScopedFrameworkMakesCostNA(t *testing.T) {
 	t.Parallel()
 	baseline := 40
 	p := Pack{PeriodEnd: "2026-09-30", Sections: map[string]Section{
-		SectionCoverageTrend: newSection(SectionCoverageTrend, SectionData{NoBaseline: true}),
+		SectionCoverageTrend: newSection(SectionCoverageTrend, SectionData{NoBaseline: true, ScopedFrameworkCount: intPtr(0)}),
 		SectionInvestment:    newSection(SectionInvestment, SectionData{SpendUSD: 30000}),
 	}}
 	out := applySectionEdit(p, SectionEdit{SectionKey: SectionCoverageTrend, Inputs: &SectionInputs{BaselineCoveragePct: &baseline}})
@@ -222,7 +223,7 @@ func TestRenderSectionNarrative_PerFrameworkPosture(t *testing.T) {
 func TestRenderSectionNarrative_CoverageTrendFromPosture(t *testing.T) {
 	t.Parallel()
 	sec := newSection(SectionCoverageTrend, SectionData{
-		CoveragePct: 70, BaselineCoveragePct: 65, CoverageDelta: 5, ScopedFrameworkCount: 2,
+		CoveragePct: 70, BaselineCoveragePct: 65, CoverageDelta: 5, ScopedFrameworkCount: intPtr(2),
 	})
 	text, err := renderSectionNarrative(sec, "2026-09-30")
 	if err != nil {
@@ -232,7 +233,7 @@ func TestRenderSectionNarrative_CoverageTrendFromPosture(t *testing.T) {
 	if !strings.Contains(text, want) {
 		t.Errorf("coverage trend narrative = %q, want it to contain %q", text, want)
 	}
-	empty, _ := renderSectionNarrative(newSection(SectionCoverageTrend, SectionData{}), "2026-09-30")
+	empty, _ := renderSectionNarrative(newSection(SectionCoverageTrend, SectionData{ScopedFrameworkCount: intPtr(0)}), "2026-09-30")
 	if !strings.Contains(empty, "No framework has an activated scope") {
 		t.Errorf("empty coverage trend narrative = %q", empty)
 	}
@@ -316,5 +317,52 @@ func TestSignedPtsAndFormatPct(t *testing.T) {
 		if got := formatPct(v); got != want {
 			t.Errorf("formatPct(%v) = %q, want %q", v, got, want)
 		}
+	}
+}
+
+func intPtr(n int) *int { return &n }
+
+// Second review, item 1: a coverage_trend section stored before #2056 has no
+// scoped_framework_count. Its PDF and narrative must show the stored
+// figures, not "No framework has an activated scope", and editing the
+// draft must not turn its investment cost into n/a.
+func TestLegacyCoverageTrend_RendersStoredFigures(t *testing.T) {
+	t.Parallel()
+	var legacy SectionData
+	if err := json.Unmarshal([]byte(`{"coverage_pct":92,"baseline_coverage_pct":89,"coverage_delta":3}`), &legacy); err != nil {
+		t.Fatalf("decode legacy section: %v", err)
+	}
+	if !legacy.ScopeCountUnknown() || legacy.NoScopedFrameworks() {
+		t.Fatalf("legacy section = %+v, want an unknown scope count", legacy)
+	}
+
+	sp := newDraftPack()
+	trend := sp.Content.Sections[SectionCoverageTrend]
+	trend.Data = legacy
+	sp.Content.Sections[SectionCoverageTrend] = trend
+	html := buildPackHTML(sp)
+	if strings.Contains(html, "No framework has an activated scope") {
+		t.Errorf("legacy PDF says no framework is scoped over real figures")
+	}
+	if !strings.Contains(html, "Coverage 92% · baseline 89% · delta +3 pts") {
+		t.Errorf("legacy PDF missing the stored figures")
+	}
+
+	text, err := renderSectionNarrative(newSection(SectionCoverageTrend, legacy), "2026-03-31")
+	if err != nil {
+		t.Fatalf("renderSectionNarrative: %v", err)
+	}
+	if want := "Control coverage stands at 92% at quarter end, against a baseline of 89% — a +3 point change."; !strings.Contains(text, want) {
+		t.Errorf("legacy narrative = %q, want %q", text, want)
+	}
+
+	p := Pack{PeriodEnd: "2026-03-31", Sections: map[string]Section{
+		SectionCoverageTrend: newSection(SectionCoverageTrend, legacy),
+		SectionInvestment:    newSection(SectionInvestment, SectionData{}),
+	}}
+	spend := 30000
+	out := applySectionEdit(p, SectionEdit{SectionKey: SectionInvestment, Inputs: &SectionInputs{SpendUSD: &spend}})
+	if inv := out.Sections[SectionInvestment].Data; inv.NoBaseline || inv.CostPerCoveragePoint != 10000 {
+		t.Errorf("legacy investment = %+v, want cost 10000 (30000 / 3 pts)", inv)
 	}
 }

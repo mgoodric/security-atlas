@@ -91,14 +91,19 @@ var sectionSources = map[string]string{
 		`{{ range $i, $r := .Data.TopRisks }}{{ add1 $i }}) {{ $r.Title }} ({{ $r.Category }}, treatment: {{ $r.Treatment }}, residual severity {{ printf "%.1f" $r.ResidualSeverity }} of 25, {{ band $r.ResidualSeverity }}, open {{ $r.AgeDays }} {{ pluralize $r.AgeDays "day" "days" }}){{ end }}.` +
 		`{{ else }}No open risks in the register.{{ end }}`,
 
-	SectionCoverageTrend: `{{ if .Data.ScopedFrameworkCount }}Control coverage averages {{ pct .Data.CoveragePct }}% across ` +
-		`the {{ .Data.ScopedFrameworkCount }} {{ pluralize .Data.ScopedFrameworkCount "framework" "frameworks" }} with an activated scope` +
+	// A pack stored before #2056 has no scoped-framework count; its figures
+	// render as stored (ScopeCountUnknown), never as "no framework scoped".
+	SectionCoverageTrend: `{{ if .Data.NoScopedFrameworks }}No framework has an activated scope, so there is no coverage to trend. ` +
+		`Activate a framework scope to populate this section.` +
+		`{{ else if .Data.ScopeCountUnknown }}Control coverage stands at {{ pct .Data.CoveragePct }}% at quarter end, ` +
+		`against a baseline of {{ pct .Data.BaselineCoveragePct }}% — a {{ pts .Data.CoverageDelta }} point change.` +
+		`{{ else }}Control coverage averages {{ pct .Data.CoveragePct }}% across ` +
+		`the {{ .Data.ScopedFrameworks }} {{ pluralize .Data.ScopedFrameworks "framework" "frameworks" }} with an activated scope` +
 		`{{ if .Data.NoBaseline }}, with {{ noBaseline }}, so no change is reported. ` +
 		`Set baseline_coverage_pct to compare against a prior-quarter figure.` +
 		`{{ else }}, against a baseline of {{ pct .Data.BaselineCoveragePct }}% — a {{ pts .Data.CoverageDelta }} point change. ` +
 		`The baseline is the same frameworks' coverage at the start of the 90-day posture trend, unless the operator has set baseline_coverage_pct.{{ end }}` +
-		`{{ else }}No framework has an activated scope, so there is no coverage to trend. ` +
-		`Activate a framework scope to populate this section.{{ end }}`,
+		`{{ end }}`,
 
 	SectionOpenFindings: `{{ if .Data.Findings }}{{ .Data.FindingsCount }} open {{ pluralize .Data.FindingsCount "finding" "findings" }} ` +
 		`as of {{ .PeriodEnd }} — each is a control whose latest evaluation is failing as of the quarter-end horizon.` +
@@ -129,7 +134,7 @@ var sectionSources = map[string]string{
 
 	SectionInvestment: `{{ if gt .Data.SpendUSD 0 }}Security spend for the quarter was ${{ .Data.SpendUSD }}. ` +
 		`{{ if .Data.NoBaseline }}Cost per coverage point: n/a — ` +
-		`{{ if .Data.ScopedFrameworkCount }}{{ noBaseline }}{{ else }}no framework has an activated scope{{ end }}.` +
+		`{{ if .Data.NoScopedFrameworks }}no framework has an activated scope{{ else }}{{ noBaseline }}{{ end }}.` +
 		`{{ else }}Against a {{ pts .Data.CoverageDelta }} point coverage change, that is approximately ` +
 		`${{ printf "%.0f" .Data.CostPerCoveragePoint }} per coverage point gained.{{ end }}` +
 		`{{ else }}Investment vs coverage is operator-entered — enter the quarter's security spend (spend_usd). ` +

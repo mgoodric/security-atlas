@@ -503,7 +503,7 @@ func recomputeDerived(sections map[string]Section) {
 	inv.Data.ScopedFrameworkCount = trend.Data.ScopedFrameworkCount
 	// No baseline, or nothing scoped to measure coverage against: the cost
 	// per coverage point is n/a, not spend divided by a made-up delta.
-	inv.Data.NoBaseline = trend.Data.NoBaseline || trend.Data.ScopedFrameworkCount == 0
+	inv.Data.NoBaseline = trend.Data.NoBaseline || trend.Data.NoScopedFrameworks()
 	inv.Data.CostPerCoveragePoint = 0
 	if !inv.Data.NoBaseline {
 		inv.Data.CostPerCoveragePoint = costPerCoveragePoint(inv.Data.SpendUSD, delta)

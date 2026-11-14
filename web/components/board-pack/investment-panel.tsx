@@ -18,6 +18,7 @@ export function InvestmentPanel({
   costPerCoveragePoint,
   notAvailable = false,
 }: InvestmentPanelProps) {
+  const delta = Number(coverageDelta.toFixed(1));
   return (
     <div
       className="grid grid-cols-1 gap-5 md:grid-cols-2"
@@ -48,12 +49,12 @@ export function InvestmentPanel({
         >
           {notAvailable
             ? "n/a"
-            : coverageDelta > 0
-              ? `+${coverageDelta}`
-              : coverageDelta === 0
+            : delta > 0
+              ? `+${delta}`
+              : delta === 0
                 ? "flat"
-                : coverageDelta}
-          {!notAvailable && coverageDelta !== 0 ? " pts" : ""}
+                : delta}
+          {!notAvailable && delta !== 0 ? " pts" : ""}
         </div>
         <p className="text-sm text-muted-foreground">
           Current coverage minus the baseline: coverage at the start of the

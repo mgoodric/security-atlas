@@ -187,7 +187,7 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 	pack.Sections[SectionCoverageTrend] = newSection(SectionCoverageTrend, SectionData{
 		CoveragePct:          coveragePct,
 		BaselineCoveragePct:  baselinePct,
-		ScopedFrameworkCount: scopedCount,
+		ScopedFrameworkCount: &scopedCount,
 		NoBaseline:           !hasBaseline,
 	})
 	pack.Sections[SectionOpenFindings] = newSection(SectionOpenFindings, SectionData{

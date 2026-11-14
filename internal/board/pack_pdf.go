@@ -158,7 +158,7 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 
 	case SectionCoverageTrend:
 		switch {
-		case d.ScopedFrameworkCount == 0:
+		case d.NoScopedFrameworks():
 			w.WriteString(`<div class="muted">No framework has an activated scope.</div>`)
 		case d.NoBaseline:
 			fmt.Fprintf(w, `<div class="muted">Coverage %s%% · baseline n/a (%s)</div>`,

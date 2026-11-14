@@ -193,9 +193,9 @@ func TestPackGenerator_PostureIsTheDashboardsPerFramework(t *testing.T) {
 	// Coverage trend: the mean over the two scoped frameworks, baseline from
 	// the trend's start.
 	trend := stored.Content.Sections[board.SectionCoverageTrend].Data
-	if trend.ScopedFrameworkCount != 2 || trend.CoveragePct != 47.5 || trend.BaselineCoveragePct != 12.5 || trend.CoverageDelta != 35 {
+	if trend.ScopedFrameworks() != 2 || trend.CoveragePct != 47.5 || trend.BaselineCoveragePct != 12.5 || trend.CoverageDelta != 35 {
 		t.Errorf("coverage_trend = (scoped %d, coverage %v, baseline %v, delta %v), want (2, 47.5, 12.5, 35)",
-			trend.ScopedFrameworkCount, trend.CoveragePct, trend.BaselineCoveragePct, trend.CoverageDelta)
+			trend.ScopedFrameworks(), trend.CoveragePct, trend.BaselineCoveragePct, trend.CoverageDelta)
 	}
 	if inv := stored.Content.Sections[board.SectionInvestment].Data; inv.CoverageDelta != 35 {
 		t.Errorf("investment coverage delta = %v, want 35 (mirrors coverage_trend)", inv.CoverageDelta)

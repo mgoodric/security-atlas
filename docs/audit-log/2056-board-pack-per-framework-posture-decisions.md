@@ -112,6 +112,12 @@ it:
 An operator-entered `baseline_coverage_pct` clears `no_baseline` on the
 section, as a prior-quarter figure is a real baseline.
 
+`trend_history` is per version and true on _any_ pre-cutoff evaluation, so
+partial history still understates the baseline: a requirement whose covering
+controls were all first evaluated inside the window counts as not covered
+90 days ago, and the delta credits it as a gain. Only the no-history case is
+caught here; the partial case is the dashboard's trend as it stands.
+
 Known quirk, left as it is: `covered_now` counts a requirement as covered when
 a non-superseded control is _defined_ on its anchor, while `covered_then`
 needs that control to have a _passing_ evaluation at the cutoff. A tenant
@@ -123,10 +129,11 @@ this ticket; the trend is labelled as the dashboard's, and the two now agree.
 
 With no framework scoped there is no coverage for spend to buy. The
 investment section is n/a (`no_baseline`, cost absent) whenever
-`scoped_framework_count` is 0, even if the operator types a baseline. A pack
-generated before #2056 carries no scoped count, so editing one of those
-drafts also shows n/a; its old coverage figure was the formula this ticket
-removes.
+`scoped_framework_count` is recorded as 0, even if the operator types a
+baseline. A pack stored before #2056 has no `scoped_framework_count` at all;
+`SectionData.ScopedFrameworkCount` is a pointer so that absent stays distinct
+from zero, and such a pack's coverage trend, PDF and investment render the
+figures it stored rather than "no framework has an activated scope".
 
 ## D10 — a posture row whose framework is not in the tenant's list (review N3)
 
