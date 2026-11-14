@@ -2,14 +2,11 @@ bundle_schema_version: "1"
 bundle_id: soc2_pi1_1_processing_objectives
 title: "Processing objectives documented for in-scope services"
 description: |
-  The entity obtains or generates, uses, and communicates relevant,
-  quality information regarding the objectives related to processing,
-  including definitions of data processed and product and service
-  specifications, to support the use of products and services (TSC
-  PI1.1). The control owner attests annually that each in-scope
-  service has documented processing objectives: what data it handles,
-  what transformations it performs, what success and failure modes
-  are, and what published SLAs apply.
+  Each service documents what it processes and how it is meant to behave,
+  so customers can use it correctly (TSC PI1.1). The control owner attests
+  annually that each in-scope service has documented processing
+  objectives: what data it handles, what transformations it performs, what
+  success and failure modes are, and what published SLAs apply.
 
 scf_anchor_id: GOV-01
 control_family: GOV

@@ -205,20 +205,27 @@ type Store struct {
 	gate          UserGate
 }
 
-// UserGate reports whether the user a credential belongs to may still use
-// it (#1915). Authenticate consults it for every credential owned by a user,
-// including ones served from memory, so a deactivated user's key is refused
-// even if its in-memory record outlived the revocation. Credentials with no
-// user (UserID is their own "key_..." id: the env bootstrap key, recovery
-// keys, admin-issued push keys) skip it.
+// UserGate is the per-request durable check Authenticate runs on top of the
+// in-memory record.
 //
-// keyID is the credential's id when the store holds an api_keys row for it,
-// and empty for a memory-only credential. With a keyID the gate also refuses
-// a key whose row is revoked (#1947): RevokeUserInMemory reaches only the
-// replica that ran the deactivation, so on every other replica the durable
+// UserCanAuthenticate reports whether the user a credential belongs to may
+// still use it (#1915). Authenticate consults it for every credential owned
+// by a user, including ones served from memory, so a deactivated user's key
+// is refused even if its in-memory record outlived the revocation. keyID is
+// the credential's id when the store holds an api_keys row for it, and empty
+// for a memory-only credential. With a keyID the gate also refuses a key
+// whose row is revoked (#1947): RevokeUserInMemory reaches only the replica
+// that ran the deactivation, so on every other replica the durable
 // revoked_at is what keeps the key dead once the user is re-activated.
+//
+// KeyCanAuthenticate covers a persisted credential with no user (#1964):
+// admin-minted and push keys, rehydrated into every replica's memory at
+// boot. Revoke reaches only the replica that ran it, so the key's api_keys
+// row must exist and not be revoked. Memory-only credentials with no user
+// (the env bootstrap key, IssueFixedAdmin) have no row and skip the gate.
 type UserGate interface {
 	UserCanAuthenticate(tenantID, userID, keyID string) (bool, error)
+	KeyCanAuthenticate(tenantID, keyID string) (bool, error)
 }
 
 // SetUserGate wires the user-status check. Nil disables it.
@@ -616,26 +623,39 @@ func (s *Store) RebindUserIDForTests(token, userID string) error {
 // LastUsedAt on success (in-memory only — the durable last_used_at column
 // is a cosmetic mirror the auth hot path deliberately does not touch).
 //
-// A credential owned by a user is also checked against the UserGate, outside
-// the lock so a slow DB never stalls other lookups. A deactivated owner
-// refuses with ErrUnknownKey; a gate error fails closed.
+// A credential owned by a user, and any persisted credential, is also
+// checked against the UserGate, outside the lock so a slow DB never stalls
+// other lookups. A deactivated owner or a durably revoked key refuses with
+// ErrUnknownKey; a gate error fails closed. The gate reads the database on
+// every such request, uncached, so a revocation committed on any replica
+// holds here from the next request (#1964).
 func (s *Store) Authenticate(token string) (Credential, error) {
 	cred, gate, persisted, err := s.authenticateLocked(token)
 	if err != nil {
 		return Credential{}, err
 	}
-	if gate != nil && OwnedByUser(cred) {
+	if gate == nil {
+		return cred, nil
+	}
+	var ok bool
+	var gerr error
+	switch {
+	case OwnedByUser(cred):
 		keyID := ""
 		if persisted {
 			keyID = cred.ID
 		}
-		ok, gerr := gate.UserCanAuthenticate(cred.TenantID, cred.UserID, keyID)
-		if gerr != nil {
-			return Credential{}, fmt.Errorf("credstore: user gate: %w", gerr)
-		}
-		if !ok {
-			return Credential{}, ErrUnknownKey
-		}
+		ok, gerr = gate.UserCanAuthenticate(cred.TenantID, cred.UserID, keyID)
+	case persisted:
+		ok, gerr = gate.KeyCanAuthenticate(cred.TenantID, cred.ID)
+	default:
+		return cred, nil
+	}
+	if gerr != nil {
+		return Credential{}, fmt.Errorf("credstore: user gate: %w", gerr)
+	}
+	if !ok {
+		return Credential{}, ErrUnknownKey
 	}
 	return cred, nil
 }

@@ -13,7 +13,7 @@
 //   - Body size: capped via http.MaxBytesReader BEFORE the multipart
 //     parse, so an oversized payload doesn't burn memory or temp-file
 //     storage. Returns 413 with a clear error.
-//   - Content hash: re-computed server-side inside artifact.Store.Put.
+//   - Content hash: computed server-side inside artifact.Store.PutReader.
 //     The handler never trusts a client-supplied hash.
 //   - Presign TTL: clamped inside artifact.ClampTTL. Client requests
 //     above 1h fold to 1h; default 15m.
@@ -28,11 +28,8 @@ package artifacts
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -125,25 +122,10 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = file.Close() }()
 
-	// Read the whole body. We hash twice — once here for the
-	// PutInput.ContentHash field (so the store can defence-in-depth
-	// the re-compute), once inside Put. The body is bounded by the
-	// MaxBytesReader above, so memory use is capped.
-	body, err := io.ReadAll(file)
-	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", artifact.MaxUploadBytes))
-			return
-		}
-		httpresp.WriteError(w, http.StatusBadRequest, "read body: "+err.Error())
-		return
-	}
-	if int64(len(body)) > artifact.MaxUploadBytes {
-		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", artifact.MaxUploadBytes))
-		return
-	}
-	if len(body) == 0 {
+	// Past MaxMultipartMemory the part is already on disk. Stream it
+	// into the store rather than reading it into memory: PutReader
+	// hashes and size-caps it, then streams it into S3 (#1939).
+	if header.Size == 0 {
 		httpresp.WriteError(w, http.StatusBadRequest, "empty file")
 		return
 	}
@@ -153,22 +135,16 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		contentType = "application/octet-stream"
 	}
 
-	sum := sha256.Sum256(body)
-	hash := hex.EncodeToString(sum[:])
-
 	ctx, ok := h.tenantContext(r)
 	if !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
 
-	art, err := h.store.Put(ctx, artifact.PutInput{
+	art, err := h.store.PutReader(ctx, artifact.PutInput{
 		ContentType: contentType,
-		SizeBytes:   int64(len(body)),
-		ContentHash: hash,
 		UploadedBy:  cred.ID,
-		Body:        body,
-	})
+	}, file)
 	if err != nil {
 		h.writeStoreErr(w, r, "put artifact", err)
 		return
