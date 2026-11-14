@@ -219,6 +219,12 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 			httpresp.WriteError(w, http.StatusBadRequest, "ttl must be a non-negative integer (seconds)")
 			return
 		}
+		// Clamp in seconds before converting: a huge ttl would wrap
+		// time.Duration negative and Presign would hand back the default
+		// instead of the max (#1914).
+		if secs > int(artifact.MaxDownloadTTL/time.Second) {
+			secs = int(artifact.MaxDownloadTTL / time.Second)
+		}
 		ttl = time.Duration(secs) * time.Second
 	}
 
