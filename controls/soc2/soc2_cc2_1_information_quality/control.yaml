@@ -2,12 +2,11 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc2_1_information_quality
 title: "Security program operates on documented, reviewed information sources"
 description: |
-  The entity obtains or generates and uses relevant, quality information
-  to support the functioning of internal control (TSC CC2.1). For a v1
-  security program this resolves to: the asset inventory, the vendor
-  inventory, the data-flow diagram, and the system description are all
-  reviewed and updated at least annually, with the reviewer named and
-  the review date captured in the attestation.
+  Controls run on accurate, current information about the system (TSC
+  CC2.1). For a v1 security program this resolves to: the asset inventory,
+  the vendor inventory, the data-flow diagram, and the system description
+  are all reviewed and updated at least annually, with the reviewer named
+  and the review date captured in the attestation.
 
 scf_anchor_id: GOV-01
 control_family: GOV

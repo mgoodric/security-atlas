@@ -2,13 +2,12 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc5_2_general_tech_controls
 title: "Secure engineering principles documented and applied to new systems"
 description: |
-  The entity selects and develops general control activities over
-  technology to support the achievement of objectives (TSC CC5.2). The
-  control owner attests annually that a documented secure-engineering
-  reference (architecture-review-board criteria, default-deny baselines,
-  least-privilege design defaults, mandatory threat modeling for
-  net-new services) is in force and was applied to each new service
-  shipped in the period.
+  Baseline technology controls apply across the whole engineering estate
+  (TSC CC5.2). The control owner attests annually that a documented
+  secure-engineering reference (architecture-review-board criteria,
+  default-deny baselines, least-privilege design defaults, mandatory
+  threat modeling for net-new services) is in force and was applied to
+  each new service shipped in the period.
 
 scf_anchor_id: SEA-01
 control_family: SEA

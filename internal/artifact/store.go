@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -105,8 +106,49 @@ func (s *Store) Put(ctx context.Context, in PutInput) (Artifact, error) {
 	// Server-side hash re-compute. Whatever the caller supplied is
 	// IGNORED on the persisted row; we overwrite with this value.
 	sum := sha256.Sum256(in.Body)
-	canonicalHash := hex.EncodeToString(sum[:])
+	return s.put(ctx, in, bytes.NewReader(in.Body), int64(len(in.Body)), hex.EncodeToString(sum[:]))
+}
 
+// PutReader is Put for a body the caller has not loaded into memory
+// (security-atlas#1939): an upload handler passes the multipart file,
+// which net/http has already spooled to disk past its in-memory
+// threshold. in.Body must be nil; the size and hash come from body.
+//
+// body is read twice. The first pass streams it through sha256 behind
+// a MaxUploadBytes+1 limit, so an oversized body is rejected after at
+// most cap+1 bytes and the dedup lookup still runs before any S3
+// write. The second pass streams it into PutObject. It has to be
+// seekable for that: the SDK signs a seekable body by reading and
+// rewinding it rather than buffering it. Memory stays at a copy
+// buffer, not the upload size.
+func (s *Store) PutReader(ctx context.Context, in PutInput, body io.ReadSeeker) (Artifact, error) {
+	if err := validateMeta(in); err != nil {
+		return Artifact{}, err
+	}
+	if in.Body != nil {
+		return Artifact{}, fmt.Errorf("%w: PutReader takes the body as a reader, not in.Body", ErrInvalidInput)
+	}
+	h := sha256.New()
+	size, err := io.Copy(h, io.LimitReader(body, MaxUploadBytes+1))
+	if err != nil {
+		return Artifact{}, fmt.Errorf("artifact: read body: %w", err)
+	}
+	if size > MaxUploadBytes {
+		return Artifact{}, ErrOversized
+	}
+	if size == 0 {
+		return Artifact{}, fmt.Errorf("%w: body must be non-empty", ErrInvalidInput)
+	}
+	if _, err := body.Seek(0, io.SeekStart); err != nil {
+		return Artifact{}, fmt.Errorf("artifact: rewind body: %w", err)
+	}
+	return s.put(ctx, in, body, size, hex.EncodeToString(h.Sum(nil)))
+}
+
+// put is the shared tail of Put and PutReader: dedup, S3 write, and
+// metadata insert. size and canonicalHash were computed by the caller
+// from the bytes body yields.
+func (s *Store) put(ctx context.Context, in PutInput, body io.ReadSeeker, size int64, canonicalHash string) (Artifact, error) {
 	// Defence-in-depth: if the caller passed a hash AND it doesn't
 	// match the re-computed one, surface ErrHashMismatch. This should
 	// never trip in production (the handler always supplies its own
@@ -146,13 +188,12 @@ func (s *Store) Put(ctx context.Context, in PutInput) (Artifact, error) {
 		// leak orphan blobs; if the S3 write fails we never touched DB.
 		artifactID := uuid.New()
 		key := StorageKeyForTenant(tenantID, artifactID)
-		body := bytes.NewReader(in.Body)
 		_, putErr := s.s3.PutObject(ctx, &s3.PutObjectInput{
 			Bucket:        aws.String(s.bucket),
 			Key:           aws.String(key),
 			Body:          body,
 			ContentType:   aws.String(in.ContentType),
-			ContentLength: aws.Int64(int64(len(in.Body))),
+			ContentLength: aws.Int64(size),
 			// The content type is uploader-supplied. Serving an
 			// uploaded text/html or image/svg+xml inline would be
 			// stored XSS on the object-store origin, so every object
@@ -168,7 +209,7 @@ func (s *Store) Put(ctx context.Context, in PutInput) (Artifact, error) {
 			TenantID:    pgUUID(tenantID),
 			StorageKey:  key,
 			ContentHash: &canonicalHash,
-			SizeBytes:   int64(len(in.Body)),
+			SizeBytes:   size,
 			ContentType: in.ContentType,
 			UploadedBy:  in.UploadedBy,
 		})
@@ -303,17 +344,25 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries)
 }
 
 func validatePut(in PutInput) error {
-	if strings.TrimSpace(in.ContentType) == "" {
-		return fmt.Errorf("%w: content_type is required", ErrInvalidInput)
-	}
-	if strings.TrimSpace(in.UploadedBy) == "" {
-		return fmt.Errorf("%w: uploaded_by is required", ErrInvalidInput)
+	if err := validateMeta(in); err != nil {
+		return err
 	}
 	if len(in.Body) == 0 {
 		return fmt.Errorf("%w: body must be non-empty", ErrInvalidInput)
 	}
 	if int64(len(in.Body)) > MaxUploadBytes {
 		return ErrOversized
+	}
+	return nil
+}
+
+// validateMeta checks the PutInput fields Put and PutReader share.
+func validateMeta(in PutInput) error {
+	if strings.TrimSpace(in.ContentType) == "" {
+		return fmt.Errorf("%w: content_type is required", ErrInvalidInput)
+	}
+	if strings.TrimSpace(in.UploadedBy) == "" {
+		return fmt.Errorf("%w: uploaded_by is required", ErrInvalidInput)
 	}
 	return nil
 }

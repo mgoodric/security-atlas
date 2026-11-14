@@ -133,6 +133,21 @@ func newDeactivationFixture(t *testing.T) *deactivationFixture {
 	return f
 }
 
+// otherReplica boots a second credstore over the same api_keys, the way
+// another replica would, with the given rotation grace.
+func (f *deactivationFixture) otherReplica(t *testing.T, grace time.Duration) *credstore.Store {
+	t.Helper()
+	hasher, err := bearer.NewHasher([]byte("test-bearer-hash-key-at-least-32-bytes-long!!"))
+	if err != nil {
+		t.Fatalf("hasher: %v", err)
+	}
+	r := credstore.New(grace)
+	if _, err := r.AttachPersistence(apikeystore.NewPersister(f.app, f.admin, hasher)); err != nil {
+		t.Fatalf("other replica attach persistence: %v", err)
+	}
+	return r
+}
+
 func (f *deactivationFixture) seedUser(t *testing.T, email string) uuid.UUID {
 	t.Helper()
 	id := uuid.New()
@@ -254,6 +269,78 @@ func TestDeactivation_RevokedKeyStaysDeadOnOtherReplicaAfterReprovision(t *testi
 	}
 	f.requireStatus(t, http.StatusUnauthorized, f.memToken, f.dbToken)
 	f.requireStatus(t, http.StatusOK, f.keylessToken)
+}
+
+// #1964: a machine key (no user, rehydrated into every replica's memory at
+// boot) revoked on replica A is refused on replica B from the next request,
+// although B's in-memory record of it was never revoked.
+func TestDeactivation_RevokedMachineKeyRefusedOnOtherReplica(t *testing.T) {
+	f := newDeactivationFixture(t)
+	replicaA := f.otherReplica(t, 0)
+	machine, err := replicaA.Authenticate(f.keylessToken)
+	if err != nil {
+		t.Fatalf("replica A authenticate machine key: %v", err)
+	}
+	if credstore.OwnedByUser(machine) {
+		t.Fatalf("precondition: key %s is user-owned; want a machine key", machine.ID)
+	}
+	if err := replicaA.Revoke(machine.ID); err != nil {
+		t.Fatalf("replica A revoke: %v", err)
+	}
+
+	// f.auth is replica B: f.creds rehydrated the key at boot and nothing
+	// on B revoked it.
+	f.requireStatus(t, http.StatusUnauthorized, f.keylessToken)
+	f.requireStatus(t, http.StatusOK, f.memToken, f.dbToken)
+}
+
+// #1995: a machine key rotated on replica A keeps working on replica B
+// through the grace period and is refused there once it ends, although B's
+// in-memory record of the predecessor carries no grace deadline.
+func TestDeactivation_RotatedKeyRefusedOnOtherReplicaAfterGrace(t *testing.T) {
+	f := newDeactivationFixture(t)
+	const grace = 2 * time.Second
+	replicaA := f.otherReplica(t, grace)
+	machine, err := replicaA.Authenticate(f.keylessToken)
+	if err != nil {
+		t.Fatalf("replica A authenticate machine key: %v", err)
+	}
+	_, successor, deadline, err := replicaA.Rotate(machine.ID)
+	if err != nil {
+		t.Fatalf("replica A rotate: %v", err)
+	}
+
+	// f.auth is replica B. Within the grace period both bearers work.
+	f.requireStatus(t, http.StatusOK, f.keylessToken, successor)
+	if time.Now().After(deadline) {
+		t.Fatalf("grace period ended before the within-grace check; raise grace")
+	}
+
+	time.Sleep(time.Until(deadline) + 100*time.Millisecond)
+	f.requireStatus(t, http.StatusUnauthorized, f.keylessToken)
+	f.requireStatus(t, http.StatusOK, successor, f.memToken, f.dbToken)
+}
+
+// #1995: a key whose api_keys.expires_at has passed is refused on a replica
+// whose in-memory record still holds the old (here: no) expiry.
+func TestDeactivation_ExpiredKeyRefusedOnOtherReplica(t *testing.T) {
+	f := newDeactivationFixture(t)
+	machine, err := f.otherReplica(t, 0).Authenticate(f.keylessToken)
+	if err != nil {
+		t.Fatalf("authenticate machine key: %v", err)
+	}
+	kid, ok := strings.CutPrefix(machine.ID, "key_")
+	if !ok {
+		t.Fatalf("credential id %q lacks key_ prefix", machine.ID)
+	}
+	if _, err := f.admin.Exec(context.Background(),
+		`UPDATE api_keys SET expires_at = now() - interval '1 second' WHERE tenant_id = $1 AND id = $2`,
+		f.tenant, kid); err != nil {
+		t.Fatalf("expire key: %v", err)
+	}
+
+	f.requireStatus(t, http.StatusUnauthorized, f.keylessToken)
+	f.requireStatus(t, http.StatusOK, f.memToken, f.dbToken)
 }
 
 // #1947: a key an admin mints through POST /v1/admin/credentials or gRPC

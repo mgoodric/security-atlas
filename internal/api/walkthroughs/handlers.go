@@ -24,7 +24,6 @@ package walkthroughs
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -58,7 +57,7 @@ const MaxMultipartMemory = int64(8 * 1024 * 1024) // 8 MiB
 // slice-036 artifact store. Tests inject an in-memory fake; production
 // passes the real *artifact.Store via the adapter below.
 type ArtifactUploader interface {
-	Put(ctx context.Context, in artifact.PutInput) (artifact.Artifact, error)
+	PutReader(ctx context.Context, in artifact.PutInput, body io.ReadSeeker) (artifact.Artifact, error)
 }
 
 // walkthroughReader is the per-route read seam the two GET read paths —
@@ -281,21 +280,7 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = file.Close() }()
 
-	body, err := io.ReadAll(file)
-	if err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
-			return
-		}
-		httpresp.WriteError(w, http.StatusBadRequest, "read body: "+err.Error())
-		return
-	}
-	if int64(len(body)) > MaxAttachmentBytes {
-		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, fmt.Sprintf("body exceeds %d-byte cap", MaxAttachmentBytes))
-		return
-	}
-	if len(body) == 0 {
+	if header.Size == 0 {
 		httpresp.WriteError(w, http.StatusBadRequest, "empty file")
 		return
 	}
@@ -304,9 +289,6 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 	if contentType == "" {
 		contentType = "application/octet-stream"
 	}
-
-	sum := sha256.Sum256(body)
-	hash := hex.EncodeToString(sum[:])
 
 	// Annotations JSON (optional). Validate that it parses; the schema
 	// is intentionally free-form (v1 ships with no canonical shape).
@@ -320,17 +302,23 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Persist the blob to the slice-036 artifact store FIRST. If the
+	// Reject a missing, finalized or frozen walkthrough BEFORE storing
+	// the blob, so a refused attach leaves no unreferenced artifact
+	// (#1939). AddAttachment re-checks inside its own transaction.
+	if err := h.store.CheckAttachable(ctx, id, cred.ID); err != nil {
+		h.writeStoreErr(w, r, "check walkthrough", err)
+		return
+	}
+
+	// Persist the blob to the slice-036 artifact store next. If the
 	// store-level write fails, we never wrote the walkthrough_attachments
 	// row, so the walkthrough's canonical_hash stays consistent with its
-	// current attachment set.
-	art, err := h.uploader.Put(ctx, artifact.PutInput{
+	// current attachment set. The part is streamed, not read into
+	// memory (#1939).
+	art, err := h.uploader.PutReader(ctx, artifact.PutInput{
 		ContentType: contentType,
-		SizeBytes:   int64(len(body)),
-		ContentHash: hash,
 		UploadedBy:  cred.ID,
-		Body:        body,
-	})
+	}, file)
 	if err != nil {
 		writeArtifactErr(w, r, "store attachment blob", err)
 		return
@@ -343,7 +331,7 @@ func (h *Handler) AddAttachment(w http.ResponseWriter, r *http.Request) {
 		StorageKey:     art.StorageKey,
 		ContentType:    art.ContentType,
 		SizeBytes:      art.SizeBytes,
-		SHA256Hex:      hash,
+		SHA256Hex:      art.ContentHash,
 		AnnotationsRaw: []byte(annotationsRaw),
 		UploadedBy:     cred.ID,
 	})

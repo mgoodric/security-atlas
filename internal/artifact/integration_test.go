@@ -8,6 +8,7 @@
 package artifact_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -16,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -402,6 +404,78 @@ func TestStore_Put_DedupOnContentHash(t *testing.T) {
 	}
 	if first.ID != second.ID {
 		t.Fatalf("dedup failed: ids differ %v vs %v", first.ID, second.ID)
+	}
+}
+
+// security-atlas#1939 — PutReader streams a file-backed body (the shape
+// an upload handler hands it once net/http has spooled the multipart
+// part to disk) into S3 and records the same hash and size Put would.
+func TestStore_PutReader_StreamsFileRoundTrip(t *testing.T) {
+	store, _, admin, cli, bucket := buildStore(t)
+	tenant := freshTenant(t, admin)
+	ctx := tenantCtx(t, tenant)
+
+	// Larger than the handlers' 8 MiB in-memory multipart threshold.
+	line := []byte("atlas-1939 " + uuid.NewString() + "\n")
+	body := bytes.Repeat(line, 9*1024*1024/len(line))
+	path := filepath.Join(t.TempDir(), "upload.bin")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatalf("write temp file: %v", err)
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open temp file: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	art, err := store.PutReader(ctx, artifact.PutInput{
+		ContentType: "application/octet-stream",
+		UploadedBy:  "key_test",
+	}, f)
+	if err != nil {
+		t.Fatalf("PutReader: %v", err)
+	}
+	if art.ContentHash != hashOf(body) {
+		t.Fatalf("hash: got %q want %q", art.ContentHash, hashOf(body))
+	}
+	if art.SizeBytes != int64(len(body)) {
+		t.Fatalf("size: got %d want %d", art.SizeBytes, len(body))
+	}
+	if got := art.StorageKey; got != "tenant-"+tenant.String()+"/"+art.ID.String() {
+		t.Fatalf("storage_key shape: got %q", got)
+	}
+
+	getCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := cli.GetObject(getCtx, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(art.StorageKey),
+	})
+	if err != nil {
+		t.Fatalf("S3 GetObject: %v", err)
+	}
+	got, _ := io.ReadAll(out.Body)
+	_ = out.Body.Close()
+	if !bytes.Equal(got, body) {
+		t.Fatalf("S3 body mismatch: got %d bytes want %d", len(got), len(body))
+	}
+	if cd := aws.ToString(out.ContentDisposition); cd != artifact.DownloadContentDisposition {
+		t.Fatalf("Content-Disposition: got %q want %q", cd, artifact.DownloadContentDisposition)
+	}
+
+	// The same bytes again dedup to the same artifact.
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		t.Fatalf("rewind: %v", err)
+	}
+	again, err := store.PutReader(ctx, artifact.PutInput{
+		ContentType: "application/octet-stream",
+		UploadedBy:  "key_test",
+	}, f)
+	if err != nil {
+		t.Fatalf("PutReader 2: %v", err)
+	}
+	if again.ID != art.ID {
+		t.Fatalf("dedup failed: ids differ %v vs %v", again.ID, art.ID)
 	}
 }
 

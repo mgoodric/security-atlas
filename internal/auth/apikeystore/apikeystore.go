@@ -320,8 +320,8 @@ const userGateTimeout = 2 * time.Second
 // cache: every user-bound key auth reads the row, so a deactivation is
 // seen on the next request.
 //
-// A non-empty keyID names the key's api_keys row, which must exist and not
-// be revoked (#1947). Deactivation revokes the row durably but the
+// A non-empty keyID names the key's api_keys row, which must be live (see
+// keyLive; #1947, #1995). Deactivation revokes the row durably but the
 // credstore's in-memory record only on the replica that ran it; without
 // this read, re-activating the user (a SCIM reprovision) would reopen the
 // key on every other replica until restart.
@@ -338,22 +338,60 @@ func (s *Store) UserCanAuthenticate(tenantID, userID, keyID string) (bool, error
 	defer cancel()
 	q := dbx.New(s.authPool)
 	if keyID != "" {
-		kid, kerr := keyIDToPg(keyID)
-		if kerr != nil {
-			return false, nil
-		}
-		row, kerr := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tid, ID: kid})
-		if kerr != nil {
-			if errors.Is(kerr, pgx.ErrNoRows) {
-				return false, nil
-			}
-			return false, fmt.Errorf("apikeystore: key status: %w", kerr)
-		}
-		if row.RevokedAt.Valid {
-			return false, nil
+		ok, kerr := keyLive(ctx, q, tid, keyID, s.clock())
+		if kerr != nil || !ok {
+			return false, kerr
 		}
 	}
 	return userCanAuthenticate(ctx, q, tid, uid)
+}
+
+// KeyCanAuthenticate implements credstore.UserGate for a persisted key with
+// no user (#1964): admin-minted and push keys. The key's api_keys row must
+// exist, not be revoked, and be inside its rotation grace and TTL (#1995).
+// Like UserCanAuthenticate it reads the row on
+// every authentication, uncached, so a revocation committed on any replica
+// is refused here from the next request.
+func (s *Store) KeyCanAuthenticate(tenantID, keyID string) (bool, error) {
+	tid, err := uuidToPg(tenantID)
+	if err != nil {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), userGateTimeout)
+	defer cancel()
+	return keyLive(ctx, dbx.New(s.authPool), tid, keyID, s.clock())
+}
+
+// keyLive reports whether the api_keys row named by keyID exists in
+// tenantID, is not revoked, and at now is neither past its retires_at nor
+// its expires_at. A malformed id or a missing row refuses.
+//
+// The time checks matter across replicas (#1995): a rotation on replica A
+// sets the predecessor's retires_at only in A's memory and in the row, so
+// replica B, which loaded the key at boot, learns of the grace deadline
+// only here. The checks mirror Authenticate's.
+func keyLive(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, keyID string, now time.Time) (bool, error) {
+	kid, err := keyIDToPg(keyID)
+	if err != nil {
+		return false, nil
+	}
+	row, err := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tenantID, ID: kid})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("apikeystore: key status: %w", err)
+	}
+	if row.RevokedAt.Valid {
+		return false, nil
+	}
+	if row.RetiresAt.Valid && now.After(row.RetiresAt.Time) {
+		return false, nil
+	}
+	if row.ExpiresAt.Valid && now.After(row.ExpiresAt.Time) {
+		return false, nil
+	}
+	return true, nil
 }
 
 // userCanAuthenticate reports whether the users row (tenantID, userID)

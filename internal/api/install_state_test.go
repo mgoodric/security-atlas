@@ -12,6 +12,8 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/platform"
 )
 
@@ -271,7 +273,7 @@ func TestHandleMarkFirstSignin_HappyPath(t *testing.T) {
 	srv.AttachPlatformStatus(&fakePlatformStatus{markDid: true})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/install/mark-first-signin", nil)
+	req := adminMarkFirstSigninRequest()
 	srv.handleMarkFirstSignin(rec, req)
 
 	if rec.Code != http.StatusOK {
@@ -292,7 +294,7 @@ func TestHandleMarkFirstSignin_Idempotent(t *testing.T) {
 	srv.AttachPlatformStatus(fake)
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/install/mark-first-signin", nil)
+	req := adminMarkFirstSigninRequest()
 	srv.handleMarkFirstSignin(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d; want 200", rec.Code)
@@ -309,7 +311,7 @@ func TestHandleMarkFirstSignin_WriteNotConfigured_503(t *testing.T) {
 	srv.AttachPlatformStatus(&fakePlatformStatus{markErr: platform.ErrWriteNotConfigured})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/install/mark-first-signin", nil)
+	req := adminMarkFirstSigninRequest()
 	srv.handleMarkFirstSignin(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d; want 503 when write pool is not configured", rec.Code)
@@ -319,7 +321,7 @@ func TestHandleMarkFirstSignin_WriteNotConfigured_503(t *testing.T) {
 func TestHandleMarkFirstSignin_NotConfigured_503(t *testing.T) {
 	srv := New(Config{})
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/v1/install/mark-first-signin", nil)
+	req := adminMarkFirstSigninRequest()
 	srv.handleMarkFirstSignin(rec, req)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d; want 503 when PlatformStatus is nil", rec.Code)
@@ -327,4 +329,11 @@ func TestHandleMarkFirstSignin_NotConfigured_503(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), "not configured") {
 		t.Fatalf("body = %q; want 'not configured'", rec.Body.String())
 	}
+}
+
+// adminMarkFirstSigninRequest builds a mark-first-signin request carrying
+// an admin credential, which the handler requires (#1906).
+func adminMarkFirstSigninRequest() *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/v1/install/mark-first-signin", nil)
+	return req.WithContext(authctx.WithCredential(req.Context(), credstore.Credential{ID: "admin", IsAdmin: true}))
 }

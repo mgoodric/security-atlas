@@ -2,10 +2,9 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc7_5_incident_recovery
 title: "Tabletop exercise for incident recovery completed annually"
 description: |
-  The entity identifies, develops, and implements activities to recover
-  from identified security incidents (TSC CC7.5). The control owner
-  attests annually that an incident-recovery tabletop exercise was
-  conducted, including a date, participants, scenario tested,
+  Recovery from an incident is planned ahead and carried out (TSC CC7.5).
+  The control owner attests annually that an incident-recovery tabletop
+  exercise was conducted, including a date, participants, scenario tested,
   identified gaps, and remediation items filed. Tabletops are the
   auditor-canonical recovery-capability evidence absent real incidents.
 
