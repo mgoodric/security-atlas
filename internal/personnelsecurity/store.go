@@ -2,8 +2,6 @@ package personnelsecurity
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -14,15 +12,32 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/mgoodric/security-atlas/connectors/hris/worker"
+	evidencev1 "github.com/mgoodric/security-atlas/gen/proto/evidence/v1"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
+// EvidenceCredentialID is the system credential the store ingests
+// checklist-completion evidence under.
+const EvidenceCredentialID = "system:personnel-security"
+
 type Store struct {
-	pool  *pgxpool.Pool
-	clock func() time.Time
+	pool   *pgxpool.Pool
+	clock  func() time.Time
+	ingest *ingest.Service
+}
+
+// WithIngest returns a copy of s that writes completion evidence through
+// svc. A store without one fails CompleteItem with ingest.ErrUnavailable
+// rather than writing the ledger directly (#1830).
+func (s *Store) WithIngest(svc *ingest.Service) *Store {
+	out := *s
+	out.ingest = ingest.ForDomainWriter(svc)
+	return &out
 }
 
 func NewStore(pool *pgxpool.Pool) *Store {
@@ -119,7 +134,7 @@ func (s *Store) CompleteItem(ctx context.Context, in Completion) (Item, error) {
 		in.ObservedAt = s.clock()
 	}
 	var out Item
-	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+	err := s.withTx(ctx, func(ctx context.Context, tx pgx.Tx, q *dbx.Queries, tenantID uuid.UUID) error {
 		item, err := q.GetPersonnelChecklistItem(ctx, dbx.GetPersonnelChecklistItemParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(in.ItemID),
@@ -140,7 +155,7 @@ func (s *Store) CompleteItem(ctx context.Context, in Completion) (Item, error) {
 		if err != nil {
 			return err
 		}
-		evID, err := s.insertEvidence(ctx, q, tenantID, checklist, item, in)
+		evID, err := s.insertEvidence(ctx, tx, tenantID, checklist, item, in)
 		if err != nil {
 			return err
 		}
@@ -338,17 +353,18 @@ func (s *Store) create(ctx context.Context, in createInput) (Checklist, error) {
 	return out, err
 }
 
-func (s *Store) insertEvidence(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, checklist dbx.PersonnelSecurityChecklist, item dbx.PersonnelSecurityChecklistItem, in Completion) (uuid.UUID, error) {
-	evID := uuid.New()
+// insertEvidence writes the item-completion evidence through
+// ingest.Service.ProcessInTx in the completion transaction: the
+// caller-supplied observed_at is skew-checked, the payload
+// schema-validated, and the decision lands in evidence_audit_log (#1830).
+func (s *Store) insertEvidence(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, checklist dbx.PersonnelSecurityChecklist, item dbx.PersonnelSecurityChecklistItem, in Completion) (uuid.UUID, error) {
 	checklistID := uuid.UUID(checklist.ID.Bytes)
 	itemID := uuid.UUID(item.ID.Bytes)
 	controlRef := DefaultControlRef
-	controlID := pgtype.UUID{}
 	if checklist.ControlID.Valid {
-		controlID = checklist.ControlID
 		controlRef = uuid.UUID(checklist.ControlID.Bytes).String()
 	}
-	payload, _ := json.Marshal(map[string]any{
+	payload, err := ingest.PayloadStruct(map[string]any{
 		"checklist_id":       checklistID.String(),
 		"item_id":            itemID.String(),
 		"workflow_kind":      checklist.WorkflowKind,
@@ -359,51 +375,47 @@ func (s *Store) insertEvidence(ctx context.Context, q *dbx.Queries, tenantID uui
 		"evidence_uri":       strings.TrimSpace(in.EvidenceURI),
 		"notes":              strings.TrimSpace(in.Notes),
 	})
-	sum := sha256.Sum256(payload)
-	hash := "sha256:" + hex.EncodeToString(sum[:])
-	provenance, _ := json.Marshal(map[string]any{
-		"ingestion_path": "manual_upload",
-		"actor":          "personnel_security.workflow",
-	})
-	source, _ := json.Marshal(map[string]any{
-		"actor_type": "system",
-		"actor_id":   "personnel_security.workflow",
-	})
-	scope, _ := json.Marshal([]map[string]any{
-		{"key": "person_external_id", "values": []string{checklist.PersonExternalID}},
-		{"key": "workflow_kind", "values": []string{checklist.WorkflowKind}},
-	})
-	observedNanos := in.ObservedAt.UnixNano()
-	kind := EvidenceKind
-	version := SchemaVersion
-	idem := "personnel-security:" + checklistID.String() + ":" + itemID.String()
-	_, err := q.InsertEvidenceRecord(ctx, dbx.InsertEvidenceRecordParams{
-		ID:                pgUUID(evID),
-		TenantID:          pgUUID(tenantID),
-		ControlID:         controlID,
-		ControlRef:        controlRef,
-		ScopeID:           pgtype.UUID{},
-		ObservedAt:        pgTime(in.ObservedAt),
-		Provenance:        provenance,
-		Result:            dbx.EvidenceResultPass,
-		Payload:           payload,
-		Hash:              hash,
-		FreshnessClass:    dbx.EvidenceFreshnessClassMonthly,
-		IdempotencyKey:    &idem,
-		EvidenceKind:      &kind,
-		SchemaVersion:     &version,
-		IngestionPath:     "manual_upload",
-		SourceAttribution: source,
-		ScopeCanonical:    scope,
-		ObservedAtNanos:   &observedNanos,
-	})
 	if err != nil {
-		return uuid.Nil, fmt.Errorf("personnel security: insert evidence: %w", err)
+		return uuid.Nil, err
+	}
+	rec := &evidencev1.EvidenceRecord{
+		IdempotencyKey: "personnel-security:" + checklistID.String() + ":" + itemID.String(),
+		EvidenceKind:   EvidenceKind,
+		SchemaVersion:  SchemaVersion,
+		ControlId:      controlRef,
+		Scope: []*evidencev1.ScopeDimension{
+			{Key: "person_external_id", Values: []string{checklist.PersonExternalID}},
+			{Key: "workflow_kind", Values: []string{checklist.WorkflowKind}},
+		},
+		ObservedAt: timestamppb.New(in.ObservedAt),
+		Result:     evidencev1.Result_RESULT_PASS,
+		Payload:    payload,
+		SourceAttribution: &evidencev1.SourceAttribution{
+			ActorType: "system",
+			ActorId:   "personnel_security.workflow",
+		},
+	}
+	cred := ingest.SystemCredential(EvidenceCredentialID, tenantID.String(), EvidenceKind)
+	receipt, _, err := s.ingest.ProcessInTx(ctx, tx, rec, cred, ingest.LedgerOptions{})
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("personnel security: ingest evidence: %w", err)
+	}
+	evID, err := uuid.Parse(receipt.RecordID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("personnel security: parse evidence id: %w", err)
 	}
 	return evID, nil
 }
 
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries, uuid.UUID) error) error {
+	return s.withTx(ctx, func(ctx context.Context, _ pgx.Tx, q *dbx.Queries, tenantID uuid.UUID) error {
+		return fn(ctx, q, tenantID)
+	})
+}
+
+// withTx is inTx with the transaction exposed, for writes that hand it to
+// ingest.Service.ProcessInTx.
+func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx, *dbx.Queries, uuid.UUID) error) error {
 	tenantStr, err := tenancy.TenantFromContext(ctx)
 	if err != nil {
 		return err
@@ -420,7 +432,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
 		return err
 	}
-	if err := fn(ctx, dbx.New(tx), tenantID); err != nil {
+	if err := fn(ctx, tx, dbx.New(tx), tenantID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

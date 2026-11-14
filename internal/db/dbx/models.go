@@ -2304,6 +2304,20 @@ type FrameworkScope struct {
 	SupersededAt             pgtype.Timestamptz `json:"superseded_at"`
 }
 
+type FrameworkScopeWorkflowLog struct {
+	ID               pgtype.UUID        `json:"id"`
+	TenantID         pgtype.UUID        `json:"tenant_id"`
+	FrameworkScopeID pgtype.UUID        `json:"framework_scope_id"`
+	Action           string             `json:"action"`
+	FromState        *string            `json:"from_state"`
+	ToState          string             `json:"to_state"`
+	Before           []byte             `json:"before"`
+	After            []byte             `json:"after"`
+	Actor            string             `json:"actor"`
+	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule    string             `json:"subject_module"`
+}
+
 type FrameworkVersion struct {
 	ID               pgtype.UUID            `json:"id"`
 	TenantID         pgtype.UUID            `json:"tenant_id"`

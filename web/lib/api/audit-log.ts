@@ -29,6 +29,7 @@ export const AUDIT_LOG_KINDS = [
   "feature_flag",
   "me",
   "walkthrough",
+  "framework_scope",
 ] as const;
 
 export type AuditLogKind = (typeof AUDIT_LOG_KINDS)[number];

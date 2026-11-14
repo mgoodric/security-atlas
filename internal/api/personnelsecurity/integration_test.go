@@ -35,8 +35,10 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/personnelsecurity"
 )
 
@@ -53,7 +55,16 @@ func setup(t *testing.T) *harness {
 	t.Helper()
 	app := dbtest.NewAppPool(t)
 	migrate := dbtest.NewMigratePool(t)
-	apiServer := api.New(api.Config{RotationGrace: time.Hour})
+	// #1830: complete-item writes its evidence through ingest, so the
+	// harness wires the production ingest service (DB-backed schema
+	// registry seeded with the bundled platform schemas).
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	reg := schemaregistry.NewService(migrate)
+	if _, _, err := reg.ImportPlatformSchemas(ctx, schemaregistry.PlatformSchemasFS()); err != nil {
+		t.Fatalf("ImportPlatformSchemas: %v", err)
+	}
+	apiServer := api.New(api.Config{RotationGrace: time.Hour, IngestService: ingest.New(app, reg)})
 	apiServer.AttachDB(app)
 	// Wire the slice-190 JWT validator BEFORE building the router — the
 	// jwtmw mount in buildRouter is gated on the signer being present
