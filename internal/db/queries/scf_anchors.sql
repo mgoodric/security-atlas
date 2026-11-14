@@ -62,9 +62,19 @@ WHERE framework_version_id = $1 AND scf_id = $2;
 -- name: InsertSCFAnchor :one
 -- Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 -- ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
-INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics, legacy_scf_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
+
+-- name: BackfillSCFAnchorLegacySCFID :execrows
+-- #1769: fill legacy_scf_id on an anchor imported without one. Only a
+-- NULL is filled, so a stored value is never rewritten; the importer
+-- refuses a re-import whose legacy_scf_id differs from a stored one.
+-- legacy_scf_id is outside trg_scf_anchor_immutability's guarded columns.
+UPDATE scf_anchors
+SET legacy_scf_id = $2,
+    updated_at    = now()
+WHERE id = $1 AND legacy_scf_id IS NULL;
 
 -- name: UpdateSCFAnchor :one
 -- Update an existing anchor in place. Touches updated_at; the caller
@@ -266,6 +276,7 @@ anchor_controls AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit `::evidence_result` /
     -- `::text` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
@@ -395,6 +406,7 @@ anchor_frameworks AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit `::evidence_result` /
     -- `::text` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.

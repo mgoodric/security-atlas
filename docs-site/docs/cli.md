@@ -116,6 +116,12 @@ security-atlas-cli catalog import-crosswalk data/crosswalks/soc2-tsc-2017.yaml
 
 `just import-scf <path>` and `just import-soc2 <path>` wrap these.
 
+The JSON catalog's shape is documented in
+[`docs/SELF_HOSTING.md`](https://github.com/mgoodric/security-atlas/blob/main/docs/SELF_HOSTING.md),
+with `internal/api/scfimport/catalog.go` as the contract. Each control may
+carry an optional `legacy_scf_id`, its code in the previous SCF release;
+the anchor API returns it as `legacy_scf_id`.
+
 `import-scf` also reads SCF's published Excel workbook directly, with no
 conversion step. Download it from the
 [SCF website](https://securecontrolsframework.com/) or the

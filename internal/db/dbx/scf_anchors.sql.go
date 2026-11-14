@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const backfillSCFAnchorLegacySCFID = `-- name: BackfillSCFAnchorLegacySCFID :execrows
+UPDATE scf_anchors
+SET legacy_scf_id = $2,
+    updated_at    = now()
+WHERE id = $1 AND legacy_scf_id IS NULL
+`
+
+type BackfillSCFAnchorLegacySCFIDParams struct {
+	ID          pgtype.UUID `json:"id"`
+	LegacyScfID *string     `json:"legacy_scf_id"`
+}
+
+// #1769: fill legacy_scf_id on an anchor imported without one. Only a
+// NULL is filled, so a stored value is never rewritten; the importer
+// refuses a re-import whose legacy_scf_id differs from a stored one.
+// legacy_scf_id is outside trg_scf_anchor_immutability's guarded columns.
+func (q *Queries) BackfillSCFAnchorLegacySCFID(ctx context.Context, arg BackfillSCFAnchorLegacySCFIDParams) (int64, error) {
+	result, err := q.db.Exec(ctx, backfillSCFAnchorLegacySCFID, arg.ID, arg.LegacyScfID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countSCFAnchorsForVersion = `-- name: CountSCFAnchorsForVersion :one
 SELECT count(*) FROM scf_anchors WHERE framework_version_id = $1
 `
@@ -69,7 +93,7 @@ func (q *Queries) DemoteCurrentFrameworkVersions(ctx context.Context, frameworkI
 }
 
 const getSCFAnchorByID = `-- name: GetSCFAnchorByID :one
-SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at FROM scf_anchors WHERE id = $1
+SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id FROM scf_anchors WHERE id = $1
 `
 
 func (q *Queries) GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error) {
@@ -85,12 +109,13 @@ func (q *Queries) GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnch
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }
 
 const getSCFAnchorBySCFID = `-- name: GetSCFAnchorBySCFID :one
-SELECT a.id, a.framework_version_id, a.scf_id, a.family, a.title, a.description, a.subtopics, a.created_at, a.updated_at
+SELECT a.id, a.framework_version_id, a.scf_id, a.family, a.title, a.description, a.subtopics, a.created_at, a.updated_at, a.legacy_scf_id
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
@@ -112,12 +137,13 @@ func (q *Queries) GetSCFAnchorBySCFID(ctx context.Context, scfID string) (ScfAnc
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }
 
 const getSCFAnchorByVersionAndSCFID = `-- name: GetSCFAnchorByVersionAndSCFID :one
-SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at FROM scf_anchors
+SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id FROM scf_anchors
 WHERE framework_version_id = $1 AND scf_id = $2
 `
 
@@ -143,14 +169,15 @@ func (q *Queries) GetSCFAnchorByVersionAndSCFID(ctx context.Context, arg GetSCFA
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }
 
 const insertSCFAnchor = `-- name: InsertSCFAnchor :one
-INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at
+INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description, subtopics, legacy_scf_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id
 `
 
 type InsertSCFAnchorParams struct {
@@ -161,6 +188,7 @@ type InsertSCFAnchorParams struct {
 	Title              string      `json:"title"`
 	Description        string      `json:"description"`
 	Subtopics          []byte      `json:"subtopics"`
+	LegacyScfID        *string     `json:"legacy_scf_id"`
 }
 
 // Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
@@ -174,6 +202,7 @@ func (q *Queries) InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams
 		arg.Title,
 		arg.Description,
 		arg.Subtopics,
+		arg.LegacyScfID,
 	)
 	var i ScfAnchor
 	err := row.Scan(
@@ -186,6 +215,7 @@ func (q *Queries) InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }
@@ -440,7 +470,7 @@ func (q *Queries) ListFrameworks(ctx context.Context) ([]Framework, error) {
 }
 
 const listSCFAnchorsForVersion = `-- name: ListSCFAnchorsForVersion :many
-SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at
+SELECT id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id
 FROM scf_anchors
 WHERE framework_version_id = $1
 ORDER BY scf_id
@@ -474,6 +504,7 @@ func (q *Queries) ListSCFAnchorsForVersion(ctx context.Context, arg ListSCFAncho
 			&i.Subtopics,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyScfID,
 		); err != nil {
 			return nil, err
 		}
@@ -558,6 +589,7 @@ anchor_frameworks AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit ` + "`" + `::evidence_result` + "`" + ` /
     -- ` + "`" + `::text` + "`" + ` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
@@ -605,6 +637,7 @@ type ListSCFAnchorsForVersionWithStateRow struct {
 	Subtopics            []byte             `json:"subtopics"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	LegacyScfID          *string            `json:"legacy_scf_id"`
 	StateResult          *EvidenceResult    `json:"state_result"`
 	StateFreshnessStatus *string            `json:"state_freshness_status"`
 	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
@@ -652,6 +685,7 @@ func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg Lis
 			&i.Subtopics,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyScfID,
 			&i.StateResult,
 			&i.StateFreshnessStatus,
 			&i.StateLastObservedAt,
@@ -669,7 +703,7 @@ func (q *Queries) ListSCFAnchorsForVersionWithState(ctx context.Context, arg Lis
 }
 
 const listSCFAnchorsLatest = `-- name: ListSCFAnchorsLatest :many
-SELECT a.id, a.framework_version_id, a.scf_id, a.family, a.title, a.description, a.subtopics, a.created_at, a.updated_at
+SELECT a.id, a.framework_version_id, a.scf_id, a.family, a.title, a.description, a.subtopics, a.created_at, a.updated_at, a.legacy_scf_id
 FROM scf_anchors a
 JOIN framework_versions fv ON fv.id = a.framework_version_id
 JOIN frameworks f ON f.id = fv.framework_id
@@ -703,6 +737,7 @@ func (q *Queries) ListSCFAnchorsLatest(ctx context.Context, arg ListSCFAnchorsLa
 			&i.Subtopics,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyScfID,
 		); err != nil {
 			return nil, err
 		}
@@ -806,6 +841,7 @@ anchor_controls AS (
 SELECT
     a.id, a.framework_version_id, a.scf_id, a.family, a.title,
     a.description, a.subtopics, a.created_at, a.updated_at,
+    a.legacy_scf_id,
     -- Slice 159 Option C: drop the explicit ` + "`" + `::evidence_result` + "`" + ` /
     -- ` + "`" + `::text` + "`" + ` casts on the outer SELECT so sqlc v1.31.1 sees the
     -- CTE's nullable-via-LEFT-JOIN typing flow through naturally.
@@ -866,6 +902,7 @@ type ListSCFAnchorsLatestWithStateRow struct {
 	Subtopics            []byte             `json:"subtopics"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	LegacyScfID          *string            `json:"legacy_scf_id"`
 	StateResult          *EvidenceResult    `json:"state_result"`
 	StateFreshnessStatus *string            `json:"state_freshness_status"`
 	StateLastObservedAt  pgtype.Timestamptz `json:"state_last_observed_at"`
@@ -963,6 +1000,7 @@ func (q *Queries) ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCF
 			&i.Subtopics,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyScfID,
 			&i.StateResult,
 			&i.StateFreshnessStatus,
 			&i.StateLastObservedAt,
@@ -1006,7 +1044,7 @@ SET family      = $2,
     subtopics   = $5,
     updated_at  = now()
 WHERE id = $1
-RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at
+RETURNING id, framework_version_id, scf_id, family, title, description, subtopics, created_at, updated_at, legacy_scf_id
 `
 
 type UpdateSCFAnchorParams struct {
@@ -1038,6 +1076,7 @@ func (q *Queries) UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams
 		&i.Subtopics,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyScfID,
 	)
 	return i, err
 }
