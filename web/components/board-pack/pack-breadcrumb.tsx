@@ -10,8 +10,8 @@
 // `Board reports` segments (no session-bound tenant name + no parent
 // route on main). See pack-breadcrumb.ts for the honesty rationale.
 //
-// Render shape (Tailwind, matches the mockup's `text-xs text-slate-500`
-// styling with the trailing segment as `text-slate-900 font-medium`):
+// Render shape (Tailwind, matches the mockup's `text-xs text-muted-foreground`
+// styling with the trailing segment as `text-foreground font-medium`):
 //
 //   Board packs  ›  Q1 2026
 //   <link>       <chev>  <plain text>
@@ -32,7 +32,7 @@ export function PackBreadcrumb({ periodEnd }: PackBreadcrumbProps) {
     <nav
       aria-label="breadcrumb"
       data-testid="pack-breadcrumb"
-      className="flex items-center gap-1 text-xs text-slate-500"
+      className="flex items-center gap-1 text-xs text-muted-foreground"
     >
       {segments.map((seg, i) => {
         const isLast = i === segments.length - 1;
@@ -42,14 +42,14 @@ export function PackBreadcrumb({ periodEnd }: PackBreadcrumbProps) {
               <Link
                 href={seg.href}
                 data-testid={seg.testId}
-                className="hover:text-slate-700"
+                className="hover:text-foreground"
               >
                 {seg.label}
               </Link>
             ) : (
               <span
                 data-testid={seg.testId}
-                className="font-medium text-slate-900"
+                className="font-medium text-foreground"
                 aria-current={isLast ? "page" : undefined}
               >
                 {seg.label}

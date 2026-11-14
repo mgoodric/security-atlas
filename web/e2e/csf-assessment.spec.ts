@@ -19,6 +19,8 @@ const FV = "11111111-1111-4111-8111-111111111111";
 
 const GAP_BODY = {
   framework_version_id: FV,
+  framework_name: "NIST Cybersecurity Framework",
+  framework_version: "2.0",
   gap: [
     {
       subcategory_code: "GV.OC-01",
@@ -52,6 +54,8 @@ const GAP_BODY = {
 
 const EMPTY_BODY = {
   framework_version_id: FV,
+  framework_name: "NIST Cybersecurity Framework",
+  framework_version: "2.0",
   gap: [],
   gap_count: 0,
   tier_rating: null,
@@ -99,5 +103,51 @@ test.describe("CSF 2.0 assessment page", () => {
 
     await expect(authedPage.getByTestId("csf-gap-empty")).toBeVisible();
     await expect(authedPage.getByTestId("csf-tier-empty")).toBeVisible();
+  });
+
+  // #2065: the title names the real framework and version, never a
+  // hard-coded "CSF 2.0".
+  test("titles the page from the framework name and version", async ({
+    authedPage,
+  }) => {
+    await authedPage.route("**/api/csf/gap*", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...EMPTY_BODY,
+          framework_name: "NIST CSF",
+          framework_version: "2.1",
+        }),
+      }),
+    );
+
+    await authedPage.goto(`/csf/${FV}`);
+
+    await expect(authedPage.getByTestId("csf-title")).toHaveText(
+      "NIST CSF 2.1 Assessment",
+    );
+  });
+
+  // #2065: the API refuses a non-CSF framework version (400); the page shows
+  // a not-found state instead of rendering it as a CSF assessment.
+  test("shows the not-found state for a non-CSF framework version", async ({
+    authedPage,
+  }) => {
+    await authedPage.route("**/api/csf/gap*", (route) =>
+      route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error:
+            "framework_version is not a NIST CSF version; the CSF assessment applies only to NIST CSF",
+        }),
+      }),
+    );
+
+    await authedPage.goto(`/csf/${FV}`);
+
+    await expect(authedPage.getByTestId("csf-not-found")).toBeVisible();
+    await expect(authedPage.getByTestId("csf-assessment")).toHaveCount(0);
   });
 });

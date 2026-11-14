@@ -161,6 +161,9 @@ type Querier interface {
 	// WITH CHECK on tenant_write rejects a tenant_id that does not match the GUC,
 	// so a mis-scoped write fails closed rather than landing in another tenant.
 	ClaimStalenessRollup(ctx context.Context, arg ClaimStalenessRollupParams) (pgtype.UUID, error)
+	// First half of moving the default: the partial unique index allows one
+	// default per tenant, so the old one is cleared before the new one is set.
+	ClearRiskCategoryDefault(ctx context.Context, arg ClearRiskCategoryDefaultParams) error
 	// Used before re-binding the full cell set on an update.
 	ClearVendorScopeCells(ctx context.Context, arg ClearVendorScopeCellsParams) error
 	CloseIncident(ctx context.Context, arg CloseIncidentParams) (Incident, error)
@@ -426,6 +429,7 @@ type Querier interface {
 	// DB-side CHECK constraints (slice 019) are defense-in-depth, not the
 	// primary validation path.
 	CreateRisk(ctx context.Context, arg CreateRiskParams) (Risk, error)
+	CreateRiskCategory(ctx context.Context, arg CreateRiskCategoryParams) (OrgRiskCategory, error)
 	// Slice 733 — SCIM /Groups resource queries.
 	//
 	// Two clusters:
@@ -536,6 +540,7 @@ type Querier interface {
 	// Detach one child from one parent, reporting how many rows went, so the
 	// caller can tell a removed link from one that never existed (#1748).
 	DeleteRiskAggregationLink(ctx context.Context, arg DeleteRiskAggregationLinkParams) (int64, error)
+	DeleteRiskCategory(ctx context.Context, arg DeleteRiskCategoryParams) error
 	// Delete one of the caller's own views. The user_id predicate means a
 	// caller can never delete another user's view even within the same tenant.
 	// RETURNING lets the handler 404 when the id was not the caller's.
@@ -1389,6 +1394,10 @@ type Querier interface {
 	// a unique-violation the handler maps to 409. filters is the handler-
 	// validated criteria payload (threat-model T).
 	InsertSavedView(ctx context.Context, arg InsertSavedViewParams) (SavedView, error)
+	// ===== taxonomy_audit_log (#1810) =====
+	//
+	// Append-only. Written in the same transaction as the change it records.
+	InsertTaxonomyAuditLog(ctx context.Context, arg InsertTaxonomyAuditLogParams) error
 	// Adds a single (tenant, user, role) assignment. Idempotent under the
 	// composite PK; conflicts are silently no-op so concurrent admins
 	// granting the same role don't fail.
@@ -2560,6 +2569,11 @@ type Querier interface {
 	ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error)
 	// The tenant's categories, active and archived, by display name.
 	ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) ([]OrgRiskCategory, error)
+	// ===== #1810: category management =====
+	// The tenant's categories with how many risks reference each and how many
+	// aggregation rules have produced a meta-risk in it. Archived categories
+	// are included only when include_archived is true.
+	ListRiskCategoriesWithUsage(ctx context.Context, arg ListRiskCategoriesWithUsageParams) ([]ListRiskCategoriesWithUsageRow, error)
 	// The children of a parent risk with the fields the hierarchy views show
 	// (#1748). rule_id NULL means the link was made by hand.
 	ListRiskChildLinks(ctx context.Context, arg ListRiskChildLinksParams) ([]ListRiskChildLinksRow, error)
@@ -3023,6 +3037,9 @@ type Querier interface {
 	// not conflict with the FOR KEY SHARE an aggregation evaluation takes when
 	// it links this risk as a child, so an evaluation is never blocked by it.
 	LockRiskByID(ctx context.Context, arg LockRiskByIDParams) (Risk, error)
+	// Resolve a category by slug or id and lock it for the rest of the
+	// transaction, so a management write sees the row it changes.
+	LockRiskCategory(ctx context.Context, arg LockRiskCategoryParams) (OrgRiskCategory, error)
 	// #1748: serialize every write that can add a hierarchy link in one tenant
 	// (POST /v1/risks/{id}/children, the link_child_risks MCP applier, and the
 	// aggregation engine), so two concurrent links cannot each pass the cycle
@@ -3177,6 +3194,9 @@ type Querier interface {
 	// cycle exactly when C reaches P (#1748). UNION, not UNION ALL, so the walk
 	// terminates even over a graph that already holds a cycle.
 	RiskAggregationReaches(ctx context.Context, arg RiskAggregationReachesParams) (bool, error)
+	// The usage counts for one category, as ListRiskCategoriesWithUsage
+	// computes them. Delete reads this after locking the row.
+	RiskCategoryUsage(ctx context.Context, arg RiskCategoryUsageParams) (RiskCategoryUsageRow, error)
 	// Slice 067: risk-hierarchy backend read endpoints. Two read-only
 	// aggregation queries that fill the placeholders slice 056 (hierarchical
 	// risk dashboard) shipped binding empty-state affordances for. No
@@ -3264,6 +3284,8 @@ type Querier interface {
 	// query path then enforces `observed_at <= populations.frozen_at` on
 	// subsequent draws.
 	SetPopulationFrozenAt(ctx context.Context, arg SetPopulationFrozenAtParams) error
+	SetRiskCategoryArchived(ctx context.Context, arg SetRiskCategoryArchivedParams) (OrgRiskCategory, error)
+	SetRiskCategoryDefault(ctx context.Context, arg SetRiskCategoryDefaultParams) (OrgRiskCategory, error)
 	// Soft-disables / re-enables a group (Delete = active=false). Bumps updated_at.
 	SetSCIMGroupActive(ctx context.Context, arg SetSCIMGroupActiveParams) (ScimGroup, error)
 	// SCIM Patch `active` flip (AC-4) — the deprovision/reprovision signal. Keeps
@@ -3287,6 +3309,9 @@ type Querier interface {
 	// under-review row by accident (would still be valid but masks bugs).
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
 	// Transition: draft -> under_review. Operator action; no role gate.
+	// Also re-submits an under_review policy whose submitter was recorded
+	// before #1807 as a session id ('jwt:<token id>'), which approval refuses
+	// because it names no person: re-submitting records the person.
 	SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyForReviewParams) (Policy, error)
 	// Slice 055: mark a decision superseded and point superseded_by at the
 	// replacement. The WHERE status = 'active' guard means a non-active (already
@@ -3388,6 +3413,8 @@ type Querier interface {
 	// updated_at is set explicitly so the schema's per-row default doesn't
 	// silently keep stale values.
 	UpdateRisk(ctx context.Context, arg UpdateRiskParams) (Risk, error)
+	// Rename: name and description only. The slug is immutable (trigger).
+	UpdateRiskCategoryText(ctx context.Context, arg UpdateRiskCategoryTextParams) (OrgRiskCategory, error)
 	// #1749: move a risk between hierarchy levels and org units. The caller
 	// holds the row via LockRiskByID and has checked that level matches the
 	// org unit's level.

@@ -49,10 +49,17 @@ const OUTCOME_LABEL: Record<string, string> = {
   fully: "Fully",
 };
 
+// NotCsfVersion marks a framework version the API refused: unknown (404) or
+// not a NIST CSF version (400, #2065). The page renders a not-found state.
+class NotCsfVersion extends Error {}
+
 async function fetchGap(fv: string): Promise<CsfGapView> {
   const res = await fetch(
     `/api/csf/gap?framework_version=${encodeURIComponent(fv)}`,
   );
+  if (res.status === 400 || res.status === 404) {
+    throw new NotCsfVersion(`not a CSF framework version: ${res.status}`);
+  }
   if (!res.ok) {
     throw new Error(`gap fetch failed: ${res.status}`);
   }
@@ -63,16 +70,37 @@ export default function CsfAssessmentPage() {
   const params = useParams<{ framework_version_id: string }>();
   const fv = params.framework_version_id;
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ["csf-gap", fv],
     queryFn: () => fetchGap(fv),
     enabled: !!fv,
+    retry: (count, err) => !(err instanceof NotCsfVersion) && count < 3,
   });
+
+  if (error instanceof NotCsfVersion) {
+    return (
+      <div className="space-y-2" data-testid="csf-not-found">
+        <h1 className="text-2xl font-semibold">Assessment not found</h1>
+        <p className="text-muted-foreground text-sm">
+          This framework version is not a NIST CSF version, so it has no CSF
+          assessment.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6" data-testid="csf-assessment">
       <div>
-        <h1 className="text-2xl font-semibold">CSF 2.0 Assessment</h1>
+        {data ? (
+          <h1 className="text-2xl font-semibold" data-testid="csf-title">
+            {data.framework_name} {data.framework_version} Assessment
+          </h1>
+        ) : isLoading ? (
+          <Skeleton className="h-8 w-64" />
+        ) : (
+          <h1 className="text-2xl font-semibold">CSF Assessment</h1>
+        )}
         <p className="text-muted-foreground text-sm">
           Tier rating and Current-vs-Target profile gap for this CSF version.
         </p>

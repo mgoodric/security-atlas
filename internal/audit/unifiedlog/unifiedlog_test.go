@@ -31,12 +31,13 @@ func TestIsCanonical_RejectsUnknown(t *testing.T) {
 	}
 }
 
-func TestAllKinds_TenExactly(t *testing.T) {
+func TestAllKinds_ElevenExactly(t *testing.T) {
 	t.Parallel()
 	// Slice 124 wired nine per-domain audit-log tables; issue #1786 added
-	// framework_scope_workflow_log as the tenth. A change
+	// framework_scope_workflow_log as the tenth and #1810
+	// taxonomy_audit_log as the eleventh. A change
 	// to this count must come with a slice (extension or retirement).
-	if got, want := len(unifiedlog.AllKinds), 10; got != want {
+	if got, want := len(unifiedlog.AllKinds), 11; got != want {
 		t.Errorf("AllKinds len = %d; want %d", got, want)
 	}
 }

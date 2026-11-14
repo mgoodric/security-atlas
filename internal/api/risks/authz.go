@@ -70,3 +70,38 @@ func requireProgramRead(w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
+
+// hasTaxonomyAdmin reports whether the credential may manage the tenant's
+// risk taxonomy (#1810): risk-admin or tenant-admin.
+//
+//	IsAdmin / IsApprover                      -> admin / grc_engineer
+//	OwnerRoles contains admin or grc_engineer -> a JWT user holding that
+//	                                             tenant role
+//
+// A JWT carries the user's tenant roles in OwnerRoles (jwtmw), so a tenant
+// admin who is not a super-admin is recognised by role name. control_owner,
+// auditor, viewer and a bare credential are refused.
+func hasTaxonomyAdmin(c credstore.Credential) bool {
+	if c.IsAdmin || c.IsApprover {
+		return true
+	}
+	for _, role := range c.OwnerRoles {
+		if role == "admin" || role == "grc_engineer" {
+			return true
+		}
+	}
+	return false
+}
+
+// requireTaxonomyAdmin is the guard the #1810 category write handlers call
+// first. The OPA middleware is the primary gate in production (writes under
+// /v1/risks are the grc_engineer and admin `risks` resource); this is its
+// defense-in-depth twin and the testable enforcement point.
+func requireTaxonomyAdmin(w http.ResponseWriter, r *http.Request) bool {
+	cred, ok := authctx.CredentialFromContext(r.Context())
+	if !ok || !hasTaxonomyAdmin(cred) {
+		httpresp.WriteError(w, http.StatusForbidden, "role does not grant risk taxonomy management")
+		return false
+	}
+	return true
+}

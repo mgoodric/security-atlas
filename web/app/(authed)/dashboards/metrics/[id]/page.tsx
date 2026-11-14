@@ -45,6 +45,8 @@ import {
   fetchMetric,
   fetchObservations,
   fetchTarget,
+  measuredObservations,
+  noDataReason,
   type Observation,
 } from "@/lib/api/metrics";
 import { getSessionMe } from "@/lib/api/board";
@@ -108,7 +110,12 @@ export default function MetricDetailPage({
   const metric = detail.metric;
   const observations = obsQuery.data?.observations ?? [];
   const target = targetQuery.data ?? null;
-  const latest = latestValue(observations);
+  // #2064: the newest observation may carry the evaluators' empty
+  // marker (computed with no inputs). Its number is a placeholder, so the
+  // page shows "No data" and the reason, a neutral badge, and a chart of
+  // measured points only.
+  const emptyReason = noDataReason(observations[0]);
+  const latest = emptyReason ? undefined : latestValue(observations);
 
   const manualInputs = observations.filter(
     (o) => o.source?.startsWith("manual:"),
@@ -165,10 +172,12 @@ export default function MetricDetailPage({
         >
           <CardHeader>
             <CardTitle>Observations</CardTitle>
-            <CardDescription>
-              {latest
-                ? `Latest ${formatValue(parseValue(latest), metric.unit)}`
-                : "No observations in window"}
+            <CardDescription data-testid="metric-detail-latest">
+              {emptyReason
+                ? `No data — ${emptyReason}`
+                : latest
+                  ? `Latest ${formatValue(parseValue(latest), metric.unit)}`
+                  : "No observations in window"}
               {target?.target_value
                 ? ` · target ${formatValue(
                     parseValue(target.target_value),
@@ -182,7 +191,7 @@ export default function MetricDetailPage({
               <Skeleton className="h-[200px] w-full" />
             ) : (
               <LineChart
-                observations={observations}
+                observations={measuredObservations(observations)}
                 target={target}
                 testid="metric-detail-chart-svg"
               />

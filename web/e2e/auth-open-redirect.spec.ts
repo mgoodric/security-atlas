@@ -39,60 +39,52 @@
 //
 // Hard rule (P0-A9 from slice 069's fixtures): no vendor-prefixed token
 // strings in this file. GitGuardian scans test files too.
+//
+// #2062 — /login no longer renders a form for a signed-in visitor: it
+// redirects them, and the developer token card is offered only with
+// ATLAS_WEB_DEV_TOKEN_SIGNIN=true (or during first install). So this
+// signIn-action check now drives the token form from a SIGNED-OUT page and
+// runs only where the card is offered: the production-build CI leg sets
+// the flag and runs this spec. login-signed-in-redirect.spec.ts covers the
+// same attacker `from` on the signed-in redirect, on every leg.
 
-import { test as authed, expect } from "./fixtures";
+import { expect, test } from "@playwright/test";
 
-authed.describe("open-redirect defense on signIn", () => {
-  authed(
-    "sign-in with attacker ?from= lands on /dashboard, not attacker URL",
-    async ({ authedPage }) => {
-      // Drive the login URL with an attacker-controlled `from` value.
-      // The login form preserves `from` from the query string into a
-      // hidden input, so a successful sign-in would otherwise redirect
-      // there. With slice 086's helper in place, the redirect lands on
-      // /dashboard instead.
-      await authedPage.goto("/login?from=https://evil.example.com/phish");
+const flagOn = process.env.ATLAS_WEB_DEV_TOKEN_SIGNIN === "true";
 
-      // The fixture already injected the session cookie, but `/login`
-      // still renders the form (it has no signed-in redirect on the
-      // server side). Fill + submit. The server action runs, the
-      // helper rejects the attacker URL, and the post-sign-in redirect
-      // targets `/dashboard`.
-      const tokenInput = authedPage.locator('input[name="token"]');
-      await tokenInput.waitFor({ state: "visible", timeout: 5_000 });
-      await tokenInput.fill(process.env.TEST_BEARER ?? "");
-      // #1756: the email/password form is always on /login too, so scope
-      // the submit to the bearer-token form.
-      await authedPage
-        .locator("form", { has: tokenInput })
-        .getByRole("button", { name: /sign in/i })
-        .click();
-
-      // Wait for the redirect to settle off `/login`. The prior shape —
-      // `(url) => url.origin === new URL(authedPage.url()).origin` —
-      // was a no-op: `authedPage.url()` returns the current page URL
-      // at evaluation time, so the predicate compared the candidate
-      // URL's origin against itself and resolved immediately. That
-      // meant `authedPage.url()` at line `final = new URL(...)` below
-      // was read mid-flight, capturing the pre-redirect `/login` URL
-      // even though the server action HAD redirected to `/dashboard`.
-      // The page snapshot at assertion-failure time showed the
-      // dashboard fully rendered while `final.pathname` was still
-      // `/login` — classic racy-wait. See slice 161 decisions log.
-      //
-      // The fix: wait until pathname is no longer `/login`. That's the
-      // post-sign-in transition we actually care about. The host-and-
-      // pathname assertions below then run on the settled URL.
-      await authedPage.waitForURL((url) => !url.pathname.startsWith("/login"), {
-        timeout: 5_000,
-      });
-
-      const final = new URL(authedPage.url());
-      expect(final.host).not.toBe("evil.example.com");
-      // The fallback destination is /dashboard. We accept either an
-      // exact match or any path that starts with /dashboard (e.g. if
-      // the dashboard route ever introduces a sub-route).
-      expect(final.pathname.startsWith("/dashboard")).toBe(true);
-    },
+test.describe("open-redirect defense on signIn", () => {
+  test.skip(
+    !flagOn,
+    "#2062: the token form is only offered with ATLAS_WEB_DEV_TOKEN_SIGNIN=true",
   );
+
+  test("sign-in with attacker ?from= lands on /dashboard, not attacker URL", async ({
+    page,
+  }) => {
+    // Drive the login URL with an attacker-controlled `from` value. The
+    // login form preserves `from` from the query string into a hidden
+    // input, so a successful sign-in would otherwise redirect there. With
+    // slice 086's helper in place, the redirect lands on /dashboard.
+    await page.goto("/login?from=https://evil.example.com/phish");
+
+    const tokenInput = page.locator('input[name="token"]');
+    await tokenInput.waitFor({ state: "visible", timeout: 5_000 });
+    await tokenInput.fill(process.env.TEST_BEARER ?? "");
+    // #1756: the email/password form is always on /login too, so scope
+    // the submit to the bearer-token form.
+    await page
+      .locator("form", { has: tokenInput })
+      .getByRole("button", { name: /sign in/i })
+      .click();
+
+    // Slice 161: wait until the pathname is no longer `/login` (the
+    // post-sign-in transition), then assert on the settled URL.
+    await page.waitForURL((url) => !url.pathname.startsWith("/login"), {
+      timeout: 5_000,
+    });
+
+    const final = new URL(page.url());
+    expect(final.host).not.toBe("evil.example.com");
+    expect(final.pathname.startsWith("/dashboard")).toBe(true);
+  });
 });
