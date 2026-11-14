@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -271,6 +272,58 @@ func TestReviewDate_CalendarStatus(t *testing.T) {
 	}
 }
 
+// TestReviewDate_DueDayBoundary pins #2009's semantics: a policy is
+// overdue only after its due day (UTC), and due-soon through 30 whole
+// days ahead, with the list's review_status and the calendar agreeing.
+func TestReviewDate_DueDayBoundary(t *testing.T) {
+	s := setup(t)
+	today := time.Now().UTC()
+	date := func(d int) string { return today.AddDate(0, 0, d).Format("2006-01-02") }
+	want := map[string]string{
+		publishWithReview(t, s, "Due Yesterday", "1.0", date(-1)).ID: "overdue",
+		publishWithReview(t, s, "Due Today", "1.0", date(0)).ID:      "due-soon",
+		publishWithReview(t, s, "Due In 30", "1.0", date(30)).ID:     "due-soon",
+		publishWithReview(t, s, "Due In 31", "1.0", date(31)).ID:     "upcoming",
+	}
+
+	raw := s.do(t, http.MethodGet, "/v1/policies", nil, s.adminBear, http.StatusOK)
+	var list struct {
+		Policies []reviewPolicyWire `json:"policies"`
+	}
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatalf("decode list: %v (%s)", err, raw)
+	}
+	listed := map[string]string{}
+	for _, p := range list.Policies {
+		listed[p.ID] = p.ReviewStatus
+	}
+
+	path := "/v1/calendar?types=policy&from=" + date(-10) + "&to=" + date(40)
+	raw = s.do(t, http.MethodGet, path, nil, s.adminBear, http.StatusOK)
+	var cal struct {
+		Events []struct {
+			RelatedEntityID string `json:"related_entity_id"`
+			Status          string `json:"status"`
+		} `json:"events"`
+	}
+	if err := json.Unmarshal(raw, &cal); err != nil {
+		t.Fatalf("decode calendar: %v (%s)", err, raw)
+	}
+	calendared := map[string]string{}
+	for _, e := range cal.Events {
+		calendared[e.RelatedEntityID] = e.Status
+	}
+
+	for id, status := range want {
+		if listed[id] != status {
+			t.Errorf("policy %s: list review_status = %q, want %q", id, listed[id], status)
+		}
+		if calendared[id] != status {
+			t.Errorf("policy %s: calendar status = %q, want %q", id, calendared[id], status)
+		}
+	}
+}
+
 func listIDs(t *testing.T, s setupResult, path string) []string {
 	t.Helper()
 	raw := s.do(t, http.MethodGet, path, nil, s.adminBear, http.StatusOK)
@@ -332,8 +385,22 @@ func TestReviewDate_NewVersionCarriesItsOwnDate(t *testing.T) {
 		t.Fatalf("v2 next_review_at = %v", v2.NextReviewAt)
 	}
 	old := decodePolicy(t, s.do(t, http.MethodGet, "/v1/policies/"+v1.ID, nil, s.adminBear, http.StatusOK))
-	if old.Status != "superseded" || old.NextReviewAt != nil {
-		t.Fatalf("superseded v1: status=%s next_review_at=%v", old.Status, old.NextReviewAt)
+	if old.Status != "superseded" {
+		t.Fatalf("v1 status = %s, want superseded", old.Status)
+	}
+	// #2009: v1 keeps the date it was due, as audit history, but has no
+	// review status and no calendar event: only the published tip is due.
+	if !reviewAt(t, old).Equal(time.Date(2027, 1, 15, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("superseded v1 next_review_at = %v, want its own 2027-01-15", old.NextReviewAt)
+	}
+	if old.ReviewStatus != "" {
+		t.Errorf("superseded v1 review_status = %q, want none", old.ReviewStatus)
+	}
+	if cal := string(s.do(t, http.MethodGet, "/v1/calendar?types=policy&from=2027-01-01&to=2027-02-01", nil, s.adminBear, http.StatusOK)); strings.Contains(cal, v1.ID) {
+		t.Errorf("calendar lists superseded v1: %s", cal)
+	}
+	if cal := string(s.do(t, http.MethodGet, "/v1/calendar?types=policy&from=2028-02-01&to=2028-04-01", nil, s.adminBear, http.StatusOK)); !strings.Contains(cal, v2.ID) {
+		t.Errorf("calendar misses published v2: %s", cal)
 	}
 	// The superseded row has no review due, so it cannot be changed.
 	patchReviewDate(t, s, v1.ID, "2027-02-01", s.adminBear, http.StatusConflict)

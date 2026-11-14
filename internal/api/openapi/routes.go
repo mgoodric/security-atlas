@@ -304,6 +304,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "POST", Path: "/v1/framework-scopes", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/framework-scopes"},
 	{Method: "POST", Path: "/v1/framework-scopes/{id}/applicability/bulk", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/framework-scopes/{id}/applicability/bulk — set one applicability decision on many requirements"},
 	{Method: "POST", Path: "/v1/framework-scopes/{id}/applicability/import", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/framework-scopes/{id}/applicability/import — import applicability decisions from CSV"},
+	{Method: "POST", Path: "/v1/framework-scopes/{id}/applicability:carry-over", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "POST /v1/framework-scopes/{id}/applicability:carry-over — copy the tenant's decisions on the prior framework version into this draft revision; approving a version-migration queue row decides what may be carried, it does not write any tenant's decisions"},
 	{Method: "POST", Path: "/v1/install/mark-first-signin", Tag: "install", Tier: "bearer", Internal: false, Summary: "POST /v1/install/mark-first-signin"},
 	{Method: "POST", Path: "/v1/mcp/write-proposals", Tag: "mcp", Tier: "bearer", Internal: false, Summary: "POST /v1/mcp/write-proposals"},
 	{Method: "POST", Path: "/v1/mcp/write-proposals/{id}/confirm", Tag: "mcp", Tier: "bearer", Internal: false, Summary: "POST /v1/mcp/write-proposals/{id}/confirm"},
