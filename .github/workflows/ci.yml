@@ -1046,6 +1046,12 @@ jobs:
           cache: "npm"
       - name: Install workspaces
         run: npm ci --no-audit --no-fund
+      # `next build` typechecks tsconfig.json only, which excludes
+      # **/*.test.ts (slice 450). `typecheck` also runs tsconfig.test.json,
+      # so a type error in a vitest file reddens this job, and merge-gate
+      # with it (#1895).
+      - name: Typecheck web workspace (app + tests)
+        run: npm run typecheck --workspace @security-atlas/web
       - name: Build web workspace
         run: npm run build --workspace @security-atlas/web --if-present
       - name: Build sdk-typescript workspace
