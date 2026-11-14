@@ -234,17 +234,13 @@ func TestPackUpdateSection_InvestmentSpendRecomputes(t *testing.T) {
 	tenant := freshPackTenant(t, admin)
 	env := testServer(t, app, tenant)
 
-	seedFramework(t, admin, tenant, "soc2", "SOC 2")
-	ctrl := seedControl(t, admin, tenant, "monthly")
-	seedEvidence(t, admin, tenant, ctrl, time.Now().UTC().AddDate(0, 0, -5))
-	if _, err := env.freshness.Refresh(ctxFor(t, tenant)); err != nil {
-		t.Fatalf("freshness refresh: %v", err)
-	}
 	packID := generateDraftPack(t, env, "2026-03-31")
 
-	// Set the coverage baseline to 40 so the delta is meaningful, then enter
-	// $30000 spend. With one fresh control with evidence, coverage is 100%;
-	// delta = 100 - 40 = 60; cost-per-point = 30000/60 = 500.
+	// Coverage is the dashboard's per-framework posture (#2056); this tenant
+	// has no activated framework scope, so the generated coverage is 0. Set
+	// the baseline to 40, then enter $30000 spend: delta = 0 - 40 = -40 on
+	// both sections, and the cost-per-point denominator floors at 1, so
+	// cost-per-point = 30000.
 	resp, _ := doJSON(t, env, http.MethodPut,
 		"/v1/board-packs/"+packID+"/sections/coverage_trend",
 		map[string]any{"inputs": map[string]any{"baseline_coverage_pct": 40}})
@@ -264,11 +260,11 @@ func TestPackUpdateSection_InvestmentSpendRecomputes(t *testing.T) {
 	if spend, _ := data["spend_usd"].(float64); spend != 30000 {
 		t.Errorf("investment spend_usd = %v, want 30000", data["spend_usd"])
 	}
-	if delta, _ := data["coverage_delta"].(float64); delta != 60 {
-		t.Errorf("investment coverage_delta = %v, want 60", data["coverage_delta"])
+	if delta, _ := data["coverage_delta"].(float64); delta != -40 {
+		t.Errorf("investment coverage_delta = %v, want -40 (0 - 40)", data["coverage_delta"])
 	}
-	if cpp, _ := data["cost_per_coverage_point"].(float64); cpp != 500 {
-		t.Errorf("cost_per_coverage_point = %v, want 500", data["cost_per_coverage_point"])
+	if cpp, _ := data["cost_per_coverage_point"].(float64); cpp != 30000 {
+		t.Errorf("cost_per_coverage_point = %v, want 30000 (denominator floored at 1)", data["cost_per_coverage_point"])
 	}
 }
 
