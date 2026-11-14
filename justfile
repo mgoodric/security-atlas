@@ -178,6 +178,21 @@ db-up:
 db-down:
     docker rm -f security-atlas-pg
 
+# No Docker; needs initdb/pg_ctl on PATH. Safe beside other worktrees'
+# clusters: it refuses to run SQL against a server whose data_directory is
+# not its own (#2033). Load the URLs with: eval "$(scripts/scratch-pg.sh env)"
+# Per-worktree scratch Postgres on a free port, migrated
+scratch-pg-up:
+    bash scripts/scratch-pg.sh up
+
+# Stop and delete this worktree's scratch cluster
+scratch-pg-down:
+    bash scripts/scratch-pg.sh down
+
+# Self-test: scratch-pg.sh refuses a foreign cluster and drops nothing
+scratch-pg-test:
+    bash scripts/scratch-pg_test.sh
+
 # Pinned sqlc version. The committed `internal/db/dbx/*.go` files were
 # emitted by sqlc v1.31.1; running `sqlc generate` with any other version
 # will produce drift that no committer intended. The pin lives here as the
