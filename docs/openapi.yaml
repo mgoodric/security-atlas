@@ -5014,6 +5014,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/risks/review-cadence:
+    get:
+      summary: GET /v1/risks/review-cadence
+      tags: [risks]
+      operationId: get-v1-risks-review-cadence
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/risks/theme-heatmap:
     get:
       summary: GET /v1/risks/theme-heatmap

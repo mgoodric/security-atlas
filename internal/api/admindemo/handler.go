@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/admintenants"
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
@@ -66,6 +67,13 @@ func demoSeedRefusalMessage(err error) (string, bool) {
 	}
 }
 
+// multiTenantDisabledMessage is the 403 body for a seed click the missing
+// ATLAS_ALLOW_MULTI_TENANT opt-in refuses (#2043). It matches the tenant
+// create refusal in admintenants, and adds the CLI's in-place alternative.
+const multiTenantDisabledMessage = "multi-tenant is not enabled on this install: set " +
+	admintenants.AllowMultiTenantEnvVar + "=true to create a separate demo tenant, " +
+	"or load the demo into your organisation with `atlas-cli demo seed` (no --tenant-slug)"
+
 // isEnabledFunc returns true when the env-var gate is satisfied.
 // Injected at construction so tests can override without touching
 // the real process env.
@@ -93,14 +101,18 @@ func DefaultEnabledFunc() bool {
 //     it to the seeded tenant (invariant #6). May be nil in the unit-server
 //     harness — evaluation is then skipped (logged), not fatal.
 //   - isEnabled — test-injectable env-var gate.
+//   - allowMultiTenant — test-injectable ATLAS_ALLOW_MULTI_TENANT opt-in
+//     (#2043): without it, Seed never creates the demo tenant beside an
+//     existing one.
 //   - limiter  — per-IP token bucket (1 token, 60s replenish).
 //   - clock    — test-injectable clock.
 type Handler struct {
-	authPool  *pgxpool.Pool
-	appPool   *pgxpool.Pool
-	isEnabled isEnabledFunc
-	limiter   *ipBucketLimiter
-	clock     func() time.Time
+	authPool         *pgxpool.Pool
+	appPool          *pgxpool.Pool
+	isEnabled        isEnabledFunc
+	allowMultiTenant func() bool
+	limiter          *ipBucketLimiter
+	clock            func() time.Time
 }
 
 // New constructs a Handler. authPool MUST be non-nil for the
@@ -112,11 +124,18 @@ func New(authPool *pgxpool.Pool, enabled isEnabledFunc) *Handler {
 		enabled = DefaultEnabledFunc
 	}
 	return &Handler{
-		authPool:  authPool,
-		isEnabled: enabled,
-		limiter:   newIPBucketLimiter(rateLimitWindow),
-		clock:     time.Now,
+		authPool:         authPool,
+		isEnabled:        enabled,
+		allowMultiTenant: admintenants.DefaultAllowMultiTenant,
+		limiter:          newIPBucketLimiter(rateLimitWindow),
+		clock:            time.Now,
 	}
+}
+
+// WithAllowMultiTenant overrides the multi-tenant opt-in. Test-only.
+func (h *Handler) WithAllowMultiTenant(fn func() bool) *Handler {
+	h.allowMultiTenant = fn
+	return h
 }
 
 // SetAppPool attaches the RLS-enforced app-role pool used by slice 671 to
@@ -194,7 +213,9 @@ func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
 //  2. Env-var gate.
 //  3. Rate-limit gate (per-IP, 60s).
 //  4. Write me_audit_log + super_admin_audit_log rows BEFORE invoking.
-//  5. Invoke demoseed.Seeder.Apply with default slug + scale.
+//  5. Invoke demoseed.Seeder.Seed with default slug + scale. Without the
+//     ATLAS_ALLOW_MULTI_TENANT opt-in it refuses to create the demo tenant
+//     beside an existing tenant -> 403 (#2043).
 //  6. Return summary JSON.
 //
 // FAIL CLOSED: if the audit-log write fails, the seeder does NOT
@@ -245,8 +266,9 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Invoke the seeder. Slice 205's Apply is idempotent on slug, so
-	// a re-click on an already-seeded tenant returns Idempotent=true.
+	// Invoke the seeder through Seed, the multi-tenant-gated entry point
+	// (#2043). It re-runs idempotently against an existing demo tenant, and
+	// creates one beside another tenant only with ATLAS_ALLOW_MULTI_TENANT.
 	seeder, err := demoseed.NewSeeder(h.authPool, demoseed.DefaultScale)
 	if err != nil {
 		httperr.WriteInternal(w, r, "build seeder", err)
@@ -254,11 +276,16 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Minute)
 	defer cancel()
-	res, err := seeder.Apply(ctx, demoseed.ApplyInput{
-		Slug:          demoTenantSlug,
-		ActorUserID:   actorID,
-		ActorTenantID: actorTenantID,
+	res, err := seeder.Seed(ctx, demoseed.SeedInput{
+		Slug:             demoTenantSlug,
+		AllowMultiTenant: h.allowMultiTenant(),
+		ActorUserID:      actorID,
+		ActorTenantID:    actorTenantID,
 	})
+	if errors.Is(err, demoseed.ErrMultiTenantNotEnabled) {
+		httpresp.WriteError(w, http.StatusForbidden, multiTenantDisabledMessage)
+		return
+	}
 	if err != nil {
 		// A populated/unmarked tenant is an operator precondition, not an
 		// internal fault — surface it as a clear 409 instead of a masked

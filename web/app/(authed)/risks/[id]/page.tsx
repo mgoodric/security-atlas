@@ -181,7 +181,7 @@ export default function RiskDetailPage({
               data-testid="risk-detail-review-due"
             >
               {reviewDuePending(risk.review_due_at)
-                ? "Pending evaluation"
+                ? "Not set"
                 : formatDate(risk.review_due_at)}
             </dd>
           </div>

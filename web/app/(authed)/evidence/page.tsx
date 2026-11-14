@@ -47,6 +47,7 @@ import {
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
+import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
@@ -532,12 +533,15 @@ function EvidencePageInner() {
       id: "evidence_kind",
       header: "Evidence kind",
       cell: (row) => (
-        <span
-          className="font-mono text-xs"
-          data-testid="evidence-row-evidence-kind"
-        >
-          {row.evidence_kind ?? "—"}
-        </span>
+        <>
+          <span
+            className="font-mono text-xs"
+            data-testid="evidence-row-evidence-kind"
+          >
+            {row.evidence_kind ?? "—"}
+          </span>
+          {row.demo ? <DemoBadge testId="evidence-row-demo" /> : null}
+        </>
       ),
     },
     {
@@ -871,7 +875,12 @@ function EvidencePageInner() {
             data-testid="evidence-row-drawer"
           >
             <DialogHeader>
-              <DialogTitle>Evidence record</DialogTitle>
+              <DialogTitle>
+                Evidence record
+                {drawerRecord?.demo ? (
+                  <DemoBadge testId="evidence-drawer-demo" />
+                ) : null}
+              </DialogTitle>
               <DialogDescription>
                 {drawerRecord
                   ? `${drawerRecord.evidence_kind ?? "(no kind)"} · observed ${
