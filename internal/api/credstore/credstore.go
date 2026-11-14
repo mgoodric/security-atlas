@@ -83,6 +83,11 @@ type Credential struct {
 	// UserID is. Nothing authorizes on it. Set on recovery keys (#1892);
 	// a Rotate successor inherits it.
 	MintedBy string
+	// System marks an in-process platform credential, not an API key:
+	// the identity a domain writer ingests its evidence under
+	// (ingest.SystemCredential). Never persisted and never authenticated;
+	// ingest records it as credential_type "system" in provenance.
+	System bool
 }
 
 // PurposeBootstrapRecovery marks the admin key POST

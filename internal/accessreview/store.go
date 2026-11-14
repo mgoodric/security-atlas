@@ -624,6 +624,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, uuid.
 	if err != nil {
 		return err
 	}
+	ctx, audit := ingest.WithAuditOutbox(ctx)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -635,7 +636,11 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, uuid.
 	if err := fn(ctx, tx, tenantID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	audit.Flush(ctx)
+	return nil
 }
 
 const rollupSQL = `
