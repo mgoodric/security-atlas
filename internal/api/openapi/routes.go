@@ -184,6 +184,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/requirements/{id}/coverage", Tag: "ucf", Tier: "bearer", Internal: false, Summary: "GET /v1/requirements/{id}/coverage"},
 	{Method: "GET", Path: "/v1/risks", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks"},
 	{Method: "GET", Path: "/v1/risks/categories", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks/categories — the organisation's risk categories with usage counts; ?include_archived=true lists archived ones"},
+	{Method: "GET", Path: "/v1/risks/review-cadence", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks/review-cadence"},
 	{Method: "GET", Path: "/v1/risks/export", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks/export"},
 	{Method: "GET", Path: "/v1/risks/heatmap", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks/heatmap"},
 	{Method: "GET", Path: "/v1/risks/theme-heatmap", Tag: "risks", Tier: "bearer", Internal: false, Summary: "GET /v1/risks/theme-heatmap"},

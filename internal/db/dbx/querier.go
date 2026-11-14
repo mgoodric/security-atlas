@@ -555,6 +555,13 @@ type Querier interface {
 	// "replace the role set" semantics for PATCH .../roles.
 	DeleteUserRoles(ctx context.Context, arg DeleteUserRolesParams) error
 	DeleteVendor(ctx context.Context, arg DeleteVendorParams) error
+	// #2043 demo provenance: returns the subset of ids that the in-place demo
+	// seed (#1765) added to table_name, for the caller's tenant (RLS). Read
+	// surfaces and exports mark those rows "demo" so an auditor never mistakes
+	// demo evidence for real evidence. The row_key of a single-uuid-key table is
+	// {"id": "<uuid>"}, so the lookup matches whole keys and is served by the
+	// demo_seed_rows_unique index.
+	DemoSeededIDs(ctx context.Context, arg DemoSeededIDsParams) ([]pgtype.UUID, error)
 	// Flip every "current" framework_version for the given framework to "legacy"
 	// so a new release can take over without violating the at-most-one-current
 	// invariant. Caller scopes the transaction.
@@ -968,6 +975,11 @@ type Querier interface {
 	// Slice 020: one link row by (risk, control). Used to confirm a link exists
 	// before returning its effectiveness breakdown.
 	GetRiskControlLink(ctx context.Context, arg GetRiskControlLinkParams) (GetRiskControlLinkRow, error)
+	// #2059: the tenant's risk review cadence in days, as the
+	// risks_review_due_default trigger reads it: the tenants row's
+	// risk_review_cadence_days, or 365 for a tenant with no row (a bare-UUID
+	// tenant predating slice 144). RLS scopes tenants to the caller's own row.
+	GetRiskReviewCadenceDays(ctx context.Context, id pgtype.UUID) (int32, error)
 	// Idempotency lookup: find the meta-risk a rule activation already created.
 	// The key, sha256(rule_id|activated_at) since #1861, is stored on the
 	// meta-risk's inherent_score JSONB as 'aggregation_key' (slice 053
@@ -3421,6 +3433,11 @@ type Querier interface {
 	// The case-insensitive UNIQUE expression index on LOWER(name) raises
 	// `unique_violation` on duplicate; the handler maps to 409.
 	UpdateTenantName(ctx context.Context, arg UpdateTenantNameParams) (UpdateTenantNameRow, error)
+	// #2059: set the caller-tenant's risk review cadence in days. RLS gates this
+	// to the caller's own row; `tenants_risk_review_cadence_days_chk` bounds it
+	// to 1..3650 (defense in depth atop the handler's check). Existing risks keep
+	// their review dates: the cadence is read only when a risk is inserted.
+	UpdateTenantRiskReviewCadence(ctx context.Context, arg UpdateTenantRiskReviewCadenceParams) (UpdateTenantRiskReviewCadenceRow, error)
 	// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
 	// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
 	// value to leave the column unchanged. The handler builds the diff from the request

@@ -4,10 +4,11 @@
 //
 // Bound DIRECTLY to the slice-019 `createReq` wire shape
 // (`internal/api/risks/handlers.go`). No invented fields per P0-A4. The
-// optional fields not enumerated in AC-2 (description, residual_score,
-// review_due_at, accepted_until, accepter, instrument_reference,
-// linked_control_ids) are omitted from the UI rather than fabricated —
-// a future slice adds the richer editor.
+// optional fields not enumerated in AC-2 (residual_score, accepted_until,
+// accepter, instrument_reference) are omitted from the UI rather than
+// fabricated — a future slice adds the richer editor. review_due_at
+// (#2059) shows created + the organisation review cadence and is sent
+// only when the user changes it.
 //
 // Enum option lists mirror `internal/db/dbx/models.go`:
 //   RiskCategory:    confidentiality | integrity | availability | privacy
@@ -32,6 +33,7 @@
 // submit row and the form state is preserved (the user can fix the
 // flagged field and resubmit without re-typing everything).
 
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -40,6 +42,11 @@ import { Input } from "@/components/ui/input";
 import { RiskCreateInput } from "@/lib/api/risks";
 
 import { ControlMultiSelect } from "./control-multi-select";
+import {
+  DEFAULT_REVIEW_CADENCE_DAYS,
+  defaultReviewDueDate,
+  reviewDueToSend,
+} from "./review-due";
 import {
   DEFAULT_TREATMENT,
   FieldErrors,
@@ -94,6 +101,9 @@ type FormState = {
   // hidden (treatment !== mitigate) so toggling treatment back to
   // mitigate does NOT wipe the user's prior selection (D-151-Q8).
   linked_control_ids: string[];
+  // #2059: the review date the user picked, YYYY-MM-DD. Empty until they
+  // touch the field; the field shows the computed default meanwhile.
+  review_due: string;
 };
 
 function initialState(): FormState {
@@ -111,7 +121,22 @@ function initialState(): FormState {
     loss_event_frequency: "1",
     loss_magnitude: "50000",
     linked_control_ids: [],
+    review_due: "",
   };
+}
+
+// #2059: the organisation risk review cadence, read so the form can show
+// the review date the platform will set. Falls back to the platform
+// default when the read fails; the platform applies the real cadence
+// either way when the date is left unchanged.
+async function fetchReviewCadenceDays(): Promise<number> {
+  const res = await fetch("/api/risks/review-cadence", { cache: "no-store" });
+  if (!res.ok) throw new Error(`review cadence: ${res.status}`);
+  const body = (await res.json()) as { risk_review_cadence_days?: unknown };
+  const days = body.risk_review_cadence_days;
+  return typeof days === "number" && days > 0
+    ? days
+    : DEFAULT_REVIEW_CADENCE_DAYS;
 }
 
 function fairNumbers(s: FormState) {
@@ -121,7 +146,10 @@ function fairNumbers(s: FormState) {
   return { lossEventFrequency, lossMagnitude, annualizedLossExposure };
 }
 
-function toCreateInput(s: FormState): RiskCreateInput {
+function toCreateInput(
+  s: FormState,
+  reviewDueDefault: string,
+): RiskCreateInput {
   const inherentScore =
     s.methodology === "fair"
       ? {
@@ -147,6 +175,10 @@ function toCreateInput(s: FormState): RiskCreateInput {
   // backend defaults to no links absent the field (D-151-4).
   if (s.treatment === "mitigate" && s.linked_control_ids.length > 0) {
     body.linked_control_ids = s.linked_control_ids;
+  }
+  const reviewDue = reviewDueToSend(s.review_due, reviewDueDefault);
+  if (reviewDue) {
+    body.review_due_at = reviewDue;
   }
   return body;
 }
@@ -185,6 +217,13 @@ export function RiskForm({ onSubmit }: Props) {
   // means clearing on input is required for honest UX.
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
+  const cadence = useQuery({
+    queryKey: ["risks", "review-cadence"],
+    queryFn: fetchReviewCadenceDays,
+    staleTime: 60_000,
+  });
+  const cadenceDays = cadence.data ?? DEFAULT_REVIEW_CADENCE_DAYS;
+  const reviewDueDefault = defaultReviewDueDate(cadenceDays);
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setState((prev) => {
@@ -211,7 +250,7 @@ export function RiskForm({ onSubmit }: Props) {
     setSubmitting(true);
     setError(null);
     try {
-      await onSubmit(toCreateInput(state));
+      await onSubmit(toCreateInput(state, reviewDueDefault));
     } catch (err) {
       const msg = (err as Error).message ?? "failed to create risk";
       setError(msg);
@@ -372,6 +411,26 @@ export function RiskForm({ onSubmit }: Props) {
             </p>
           )}
         </div>
+      </div>
+
+      <div>
+        <label className={LABEL_CLASS} htmlFor="risk-review-due">
+          Review due
+        </label>
+        <Input
+          id="risk-review-due"
+          name="review_due"
+          type="date"
+          className="w-48"
+          value={state.review_due || reviewDueDefault}
+          onChange={(e) => update("review_due", e.target.value)}
+          data-testid="risks-create-review-due"
+        />
+        <p className={HELP_CLASS} data-testid="risks-create-review-due-help">
+          Defaults to {cadenceDays} days from today, your organisation&apos;s
+          risk review cadence. Change it for this risk if it needs an earlier or
+          later review.
+        </p>
       </div>
 
       {/* Slice 151: Control-link multi-select. Renders ONLY when

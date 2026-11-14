@@ -56,6 +56,9 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	root.Post("/v1/risks/categories/{ref}/archive", risksH.ArchiveCategory)
 	root.Post("/v1/risks/categories/{ref}/unarchive", risksH.UnarchiveCategory)
 	root.Post("/v1/risks/categories/{ref}/set-default", risksH.SetDefaultCategory)
+	// #2059: the organisation risk review cadence. Literal-segment route
+	// declared before the generic /v1/risks/{id}.
+	root.Get("/v1/risks/review-cadence", risksH.GetReviewCadence)
 	// Slice 136: risk register data export (CSV / JSON / XLSX). Reuses
 	// the slice 135 data-export library + slice 145 concurrency cap.
 	// Literal-segment route declared before the generic /v1/risks/{id}

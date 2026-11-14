@@ -174,7 +174,7 @@ func tenantRows(t *testing.T, tenantID uuid.UUID) map[string][]string {
 func withoutAuditTables(rows map[string][]string) map[string][]string {
 	out := map[string][]string{}
 	for table, r := range rows {
-		if strings.HasSuffix(table, "_audit_log") || strings.HasSuffix(table, "_audit") {
+		if demoseed.IsTenantAuditTable(table) {
 			continue
 		}
 		out[table] = r

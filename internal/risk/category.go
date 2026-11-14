@@ -76,6 +76,23 @@ func (s *Store) ListCategories(ctx context.Context) ([]Category, error) {
 	return out, err
 }
 
+// ReviewCadenceDays returns the tenant's risk review cadence (#2059): a risk
+// created without a review date is due this many days after creation. The
+// default is applied by the risks_review_due_default trigger; this read
+// lets a caller show the date before the risk exists.
+func (s *Store) ReviewCadenceDays(ctx context.Context) (int, error) {
+	var days int32
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		d, err := q.GetRiskReviewCadenceDays(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("read risk review cadence: %w", err)
+		}
+		days = d
+		return nil
+	})
+	return int(days), err
+}
+
 // resolveCategory finds the tenant's category named by ref, a slug or an id,
 // and returns it with the enum value the risk row still carries. An unknown
 // ref is an UnknownCategoryError naming the tenant's slugs.

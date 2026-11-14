@@ -232,3 +232,21 @@ func decodeStrict(w http.ResponseWriter, r *http.Request, dst any) bool {
 	}
 	return true
 }
+
+// GetReviewCadence handles GET /v1/risks/review-cadence (#2059): the
+// organisation risk review cadence, so the new-risk form can show the
+// review date a risk will get before it is created. Set via
+// PATCH /v1/tenants/{id} risk_review_cadence_days.
+func (h *Handler) GetReviewCadence(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	days, err := h.store.ReviewCadenceDays(ctx)
+	if err != nil {
+		httperr.WriteInternal(w, r, "read risk review cadence", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"risk_review_cadence_days": days})
+}
