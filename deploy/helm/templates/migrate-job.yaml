@@ -65,7 +65,7 @@ spec:
       containers:
         - name: migrate
           # The bootstrap image bakes migrations/ + controls/ into /repo and
-          # ships psql + a POSIX shell (postgres:16-alpine base). It is
+          # ships psql + a POSIX shell (postgres:18-alpine base). It is
           # self-contained — no repo bind-mount required.
           image: "{{ .Values.image.registry }}/{{ .Values.image.repository }}/bootstrap:{{ $imageTag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
