@@ -46,11 +46,26 @@ type RevocationEndpoint struct {
 	revoked *revocation.Store
 	clients *oauthclient.Store
 	issuer  string
+	limiter *clientAuthLimiter
 }
 
 // RevocationEndpointConfig is the constructor parameter bag.
 type RevocationEndpointConfig struct {
 	Issuer string
+
+	// ClientRatePerMinute and IPRatePerMinute throttle client
+	// authentication before the argon2id verify (#2041). Zero falls
+	// back to DefaultClientAuthRatePerMin / DefaultClientAuthIPRatePerMin.
+	ClientRatePerMinute int
+	IPRatePerMinute     int
+
+	// ClientIP resolves the caller IP for the per-IP bucket. Production
+	// wires auth.ClientIP (TRUSTED_PROXY_CIDRS); nil uses the direct
+	// TCP peer.
+	ClientIP func(*http.Request) string
+
+	// Now is the limiter clock; nil falls back to time.Now.
+	Now func() time.Time
 }
 
 // NewRevocationEndpoint builds a RevocationEndpoint. signer +
@@ -72,6 +87,7 @@ func NewRevocationEndpoint(signer *tokensign.Signer, revoked *revocation.Store, 
 		revoked: revoked,
 		clients: clients,
 		issuer:  cfg.Issuer,
+		limiter: newClientAuthLimiter(cfg.ClientRatePerMinute, cfg.IPRatePerMinute, cfg.ClientIP, cfg.Now),
 	}
 }
 
@@ -91,6 +107,12 @@ func (e *RevocationEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	tokenIn := strings.TrimSpace(r.FormValue("token"))
 	if tokenIn == "" {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "token is required")
+		return
+	}
+
+	// Throttle client authentication before any verify or DB lookup
+	// (#2041). Writes the 429 itself.
+	if !e.limiter.allow(w, r) {
 		return
 	}
 
