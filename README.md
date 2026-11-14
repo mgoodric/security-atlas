@@ -44,7 +44,7 @@ security-atlas spans the disciplines a security program runs day to day — not 
 | **Policy & exception management**            | A policy library with acknowledgment tracking, an exception workflow (request → approve → active → auto-expire, with compensating controls and a hard expiry cap), and **Action Plans** for tracking remediation commitments to closure.                                                                                        |
 | **Trust & questionnaires**                   | Answer inbound security questionnaires from one place, with AI-assist that drafts answers grounded in your actual evidence and policies (every suggestion cited; see the AI boundary below).                                                                                                                                    |
 | **Metrics & board reporting**                | KPI and metric dashboards for program health, plus first-class **board pack** generation — the quarterly security update for leadership, built from real program data rather than hand-assembled slides.                                                                                                                        |
-| **Identity, access & multi-tenancy**         | Sign-in through your existing IdP (Okta, Entra ID, Google) over OIDC, role-based and attribute-based access control, and multi-tenant isolation enforced in the database itself — not just in application code.                                                                                                                 |
+| **Identity, access & isolation**             | Sign-in through your existing IdP (Okta, Entra ID, Google) over OIDC, and role-based and attribute-based access control. Organisation data is isolated in the database itself — not just in application code — as defence in depth, and the same isolation backs the opt-in multi-tenant mode.                                  |
 
 ## What makes it different
 
@@ -82,6 +82,8 @@ security-atlas is the right fit when you want to **own your data and your contro
 ## Who it's for
 
 Built first for the **solo security leader at a 50–150-person company** who runs the entire program alone — risk register, board reporting, SOC 2, vendor reviews, policies, exceptions — and whose own customers scrutinize how they handle security. The goal is concrete: run your next SOC 2 audit out of security-atlas and build your next board pack from it, without reaching for a spreadsheet to fill a gap. It scales up from there to a small security team.
+
+security-atlas is **self-hosted by one organisation**: a fresh install has one tenant, and nobody signs in with or types a tenant ID. Running several organisations from one install (consultancies, MSPs, or groups running several entities) is an advanced **multi-tenant** mode that an operator opts into deliberately ([ADR 0023](./docs/adr/0023-single-tenant-experience-by-default.md)).
 
 ## Project status
 

@@ -269,6 +269,13 @@ GET  /v1/policies/{id}/acknowledgment-rate     (auth required; numerator/denomin
 
 P0 anti-criteria: anonymous ack rejected (slice 034 cred required); stale acks not counted; superseded-version ack does not satisfy current.
 
+## Tenancy (ADR 0023)
+
+- **Tenant** — the isolation boundary for all organisation data. Every control, risk, piece of evidence, policy and setting that belongs to an organisation belongs to exactly one tenant, and no tenant can see another's. Shared catalog data (frameworks, SCF anchors, crosswalk mappings) belongs to no tenant. In user-facing copy on a single-tenant install, the tenant is "your organisation".
+- **Single-tenant install** — an install that holds exactly one tenant: the default, and how almost every adopter runs security-atlas. Nobody chooses, enters or sees a tenant; everything happens in the bootstrap tenant.
+- **Multi-tenant install** — an install that holds two or more tenants, so users choose which organisation they are working in. An operator opts into it deliberately; once an install is multi-tenant it does not go back.
+- **Bootstrap tenant** — the one tenant created when the install is first set up. On a single-tenant install it is the organisation; on a multi-tenant install it is the first of several.
+
 ## User-tenant membership (slice 141, in design)
 
 Multi-tenant login enumeration. The `user_roles(tenant_id, user_id, role)` table is RLS-tenant-scoped — cross-tenant "which tenants does this user belong to?" queries fail under `atlas_app` without a pre-set tenant GUC. To break the chicken-and-egg at OIDC callback time, slice 141 adds:
