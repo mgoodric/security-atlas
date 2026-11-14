@@ -241,6 +241,8 @@ Responses:
 | 404    | `scf_anchor_id` does not resolve to an `scf_anchors` row.                                                          |
 | 413    | Tarball over the size limit.                                                                                       |
 
+A successful response carries `anchor_warning` when the `scf_anchor_id` reaches no requirement in an enabled framework, so the control earns no framework credit (#1738). Enabled means the tenant's activated FrameworkScopes, or every current framework version when none is activated. The warning names the parent anchor (`NET-26.5` -> `NET-26`) when that one is mapped. It is non-fatal: the control is persisted, and `atlas-cli controls upload` repeats it on stderr. `validate` does not check it, because it is local-only and has no catalog.
+
 ### Versioning + supersession
 
 - Re-upload with the same `bundle_id` creates a **new row** and sets the prior row's `superseded_by` to the new row's id in the same transaction (AC-6). Two exceptions:
