@@ -38,6 +38,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/exception"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -88,16 +89,19 @@ type exceptionWire struct {
 	RequestedAt          time.Time       `json:"requested_at"`
 	ApprovedBy           *string         `json:"approved_by,omitempty"`
 	ApprovedAt           *time.Time      `json:"approved_at,omitempty"`
-	DeniedBy             *string         `json:"denied_by,omitempty"`
-	DeniedAt             *time.Time      `json:"denied_at,omitempty"`
-	ActivatedBy          *string         `json:"activated_by,omitempty"`
-	ActivatedAt          *time.Time      `json:"activated_at,omitempty"`
-	EffectiveFrom        *time.Time      `json:"effective_from,omitempty"`
-	ExpiresAt            time.Time       `json:"expires_at"`
-	ExpiredAt            *time.Time      `json:"expired_at,omitempty"`
-	Status               string          `json:"status"`
-	CreatedAt            time.Time       `json:"created_at"`
-	UpdatedAt            time.Time       `json:"updated_at"`
+	// SelfApproved marks an exception its requester approved under the
+	// organisation's Allow self-approval setting (#2101).
+	SelfApproved  bool       `json:"self_approved"`
+	DeniedBy      *string    `json:"denied_by,omitempty"`
+	DeniedAt      *time.Time `json:"denied_at,omitempty"`
+	ActivatedBy   *string    `json:"activated_by,omitempty"`
+	ActivatedAt   *time.Time `json:"activated_at,omitempty"`
+	EffectiveFrom *time.Time `json:"effective_from,omitempty"`
+	ExpiresAt     time.Time  `json:"expires_at"`
+	ExpiredAt     *time.Time `json:"expired_at,omitempty"`
+	Status        string     `json:"status"`
+	CreatedAt     time.Time  `json:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
 // CreateException handles POST /v1/exceptions (AC-1).
@@ -135,8 +139,10 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 		ScopeCellPredicate:   []byte(req.ScopeCellPredicate),
 		Justification:        req.Justification,
 		CompensatingControls: req.CompensatingControls,
-		RequestedBy:          cred.ID,
-		ExpiresAt:            req.ExpiresAt.UTC(),
+		// The person, not the per-token JWT credential id, so approval can
+		// compare one person across sessions (#2101).
+		RequestedBy: credstore.PrincipalOf(cred),
+		ExpiresAt:   req.ExpiresAt.UTC(),
 	}
 	created, err := h.store.Create(ctx, in)
 	if err != nil {
@@ -292,7 +298,12 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
 		return
 	}
-	approved, err := h.store.Approve(ctx, id, cred.ID)
+	// Only a person approves (#2101): UserID is empty for an unbound key,
+	// an OAuth client or the bootstrap admin, and the store refuses it.
+	approved, err := h.store.Approve(ctx, id, approval.Approver{
+		UserID:       credstore.MinterUserID(cred),
+		CredentialID: cred.ID,
+	})
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -320,7 +331,7 @@ func (h *Handler) Deny(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength > 0 {
 		_ = json.NewDecoder(r.Body).Decode(&req) // reason is optional
 	}
-	denied, err := h.store.Deny(ctx, id, cred.ID, req.Reason)
+	denied, err := h.store.Deny(ctx, id, credstore.PrincipalOf(cred), req.Reason)
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return
@@ -390,6 +401,8 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 		httpresp.WriteError(w, http.StatusConflict, "exception not in expected state for this transition")
 	case errors.Is(err, exception.ErrSegregationOfDuties):
 		httpresp.WriteError(w, http.StatusForbidden, "approver must differ from requester (segregation of duties)")
+	case errors.Is(err, exception.ErrApproverNotPerson):
+		httpresp.WriteError(w, http.StatusForbidden, exception.ErrApproverNotPerson.Error())
 	default:
 		httperr.WriteInternal(w, r, "transition", err)
 	}
@@ -428,6 +441,7 @@ func exceptionWireFrom(e exception.Exception) exceptionWire {
 	}
 	out.ApprovedBy = e.ApprovedBy
 	out.ApprovedAt = e.ApprovedAt
+	out.SelfApproved = e.SelfApproved
 	out.DeniedBy = e.DeniedBy
 	out.DeniedAt = e.DeniedAt
 	out.ActivatedBy = e.ActivatedBy

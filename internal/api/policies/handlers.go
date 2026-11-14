@@ -160,10 +160,13 @@ type policyWire struct {
 	SubmittedBy                 *string    `json:"submitted_by,omitempty"`
 	ApprovedAt                  *time.Time `json:"approved_at,omitempty"`
 	ApprovedBy                  *string    `json:"approved_by,omitempty"`
-	PublishedAt                 *time.Time `json:"published_at,omitempty"`
-	PublishedBy                 *string    `json:"published_by,omitempty"`
-	SupersededAt                *time.Time `json:"superseded_at,omitempty"`
-	NextReviewAt                *time.Time `json:"next_review_at,omitempty"`
+	// SelfApproved marks a policy its submitter approved under the
+	// organisation's Allow self-approval setting (#2101).
+	SelfApproved bool       `json:"self_approved"`
+	PublishedAt  *time.Time `json:"published_at,omitempty"`
+	PublishedBy  *string    `json:"published_by,omitempty"`
+	SupersededAt *time.Time `json:"superseded_at,omitempty"`
+	NextReviewAt *time.Time `json:"next_review_at,omitempty"`
 	// ReviewStatus is overdue / due-soon / upcoming for a published
 	// policy with a review date, computed at response time (#1806).
 	ReviewStatus string `json:"review_status,omitempty"`
@@ -430,6 +433,7 @@ func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
 		SubmittedBy:                 r.SubmittedBy,
 		ApprovedAt:                  timestamptzPtr(r.ApprovedAt),
 		ApprovedBy:                  r.ApprovedBy,
+		SelfApproved:                r.SelfApproved,
 		PublishedAt:                 timestamptzPtr(r.PublishedAt),
 		PublishedBy:                 r.PublishedBy,
 		SupersededAt:                timestamptzPtr(r.SupersededAt),
@@ -799,15 +803,14 @@ func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err err
 
 // actorOf names the person behind a credential: the bare users(id) uuid,
 // whether the caller is a JWT ("user:<uuid>") or a key bound to the user
-// ("<uuid>"), else the credential id. A JWT credential's id is per token
-// ("jwt:"+jti), and the two UserID shapes differ, so comparing either raw
-// would let one person submit through one and approve through another
-// (#1807).
+// ("<uuid>"), else the credential's principal (credstore.PrincipalOf). A
+// JWT credential's id is per token ("jwt:"+jti), and the two UserID shapes
+// differ, so comparing either raw would let one person submit through one
+// and approve through another (#1807). A machine JWT is recorded by its
+// principal, not its token id, which approval would read as a pre-#1807
+// session submitter (#2101).
 func actorOf(cred credstore.Credential) string {
-	if u := credstore.MinterUserID(cred); u != "" {
-		return u
-	}
-	return cred.ID
+	return credstore.PrincipalOf(cred)
 }
 
 func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err error) {
@@ -869,6 +872,7 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		SubmittedBy:                 p.SubmittedBy,
 		ApprovedAt:                  p.ApprovedAt,
 		ApprovedBy:                  p.ApprovedBy,
+		SelfApproved:                p.SelfApproved,
 		PublishedAt:                 p.PublishedAt,
 		PublishedBy:                 p.PublishedBy,
 		SupersededAt:                p.SupersededAt,

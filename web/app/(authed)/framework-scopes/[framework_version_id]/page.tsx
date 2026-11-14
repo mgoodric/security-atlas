@@ -20,6 +20,7 @@ import { useState } from "react";
 import { useParams } from "next/navigation";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -281,7 +282,13 @@ function ScopeTable({
           >
             <TableCell className="font-medium">{s.name}</TableCell>
             <TableCell>
-              <StateBadge state={s.state} />
+              <span className="inline-flex items-center gap-1.5">
+                <StateBadge state={s.state} />
+                <SelfApprovedBadge
+                  selfApproved={s.self_approved}
+                  testId="framework-scope-self-approved"
+                />
+              </span>
             </TableCell>
             <TableCell>
               <PredicateEditor
