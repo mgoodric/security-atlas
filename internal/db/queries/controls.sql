@@ -13,6 +13,23 @@ SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
 FROM controls
 WHERE tenant_id = $1 AND bundle_id = $2 AND superseded_by IS NULL;
 
+-- name: LockActiveControlByBundleID :one
+-- Issue #1958: GetActiveControlByBundleID plus a row lock, for the upload
+-- path. Two concurrent uploads of one bundle serialise on the active row,
+-- so the second decides no-op / in-place / supersede against what the
+-- first committed. Without it, two in-place uploads could both copy the
+-- same manifest into control_manifest_revisions and the first one's text
+-- would be overwritten without a trace.
+SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
+       title, description, control_family, implementation_type,
+       owner_role, lifecycle_state, applicability_expr,
+       evidence_queries, manual_evidence_schema, linked_policy_ids,
+       freshness_class, bundle_manifest_yaml, bundle_manifest_hash,
+       bundle_uploaded_at, bundle_uploaded_by, created_at, updated_at
+FROM controls
+WHERE tenant_id = $1 AND bundle_id = $2 AND superseded_by IS NULL
+FOR UPDATE;
+
 -- name: GetControlByID :one
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        title, description, control_family, implementation_type,
@@ -275,10 +292,10 @@ SET superseded_by = $3, updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 
 -- name: InsertControlManifestRevision :execrows
--- Issue #1908: record the manifest an in-place description update is about
+-- Issue #1908: record the manifest an in-place metadata update is about
 -- to overwrite. Copies the active row's current values in the same
--- transaction, just before UpdateControlDescriptionInPlace, so the prose
--- history is append-only in control_manifest_revisions.
+-- transaction, just before UpdateControlMetadataInPlace, so the prose
+-- and external-refs history is append-only in control_manifest_revisions.
 INSERT INTO control_manifest_revisions (
     tenant_id, control_id, bundle_manifest_yaml, bundle_manifest_hash,
     bundle_uploaded_by, bundle_uploaded_at
@@ -288,17 +305,19 @@ SELECT c.tenant_id, c.id, c.bundle_manifest_yaml, c.bundle_manifest_hash,
 FROM controls c
 WHERE c.tenant_id = @tenant_id AND c.id = @control_id AND c.superseded_by IS NULL;
 
--- name: UpdateControlDescriptionInPlace :execrows
--- Issue #1908: a re-upload whose manifest differs from the active row's
--- only in `description` updates that row in place instead of versioning,
--- so every control-keyed row (owners, evidence, exceptions, links) stays
--- attached. The hash moves with the YAML so a repeat upload is a no-op.
+-- name: UpdateControlMetadataInPlace :execrows
+-- Issues #1908, #1958: a re-upload whose manifest differs from the active
+-- row's only in `description` and/or `external_refs` updates that row in
+-- place instead of versioning, so every control-keyed row (owners,
+-- evidence, exceptions, links) stays attached. The hash moves with the
+-- YAML so a repeat upload is a no-op.
 UPDATE controls
 SET description = $3,
-    bundle_manifest_yaml = $4,
-    bundle_manifest_hash = $5,
+    external_refs = $4,
+    bundle_manifest_yaml = $5,
+    bundle_manifest_hash = $6,
     bundle_uploaded_at = now(),
-    bundle_uploaded_by = $6,
+    bundle_uploaded_by = $7,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 

@@ -161,13 +161,16 @@ type applicabilityResp struct {
 		Undecided         bool    `json:"undecided"`
 		Justification     string  `json:"justification"`
 		ImplementationRef string  `json:"implementation_ref"`
+		Contradiction     bool    `json:"contradiction"`
 	} `json:"requirements"`
 	Counts struct {
-		Total      int `json:"total"`
-		Applicable int `json:"applicable"`
-		Excluded   int `json:"excluded"`
-		Undecided  int `json:"undecided"`
+		Total          int `json:"total"`
+		Applicable     int `json:"applicable"`
+		Excluded       int `json:"excluded"`
+		Undecided      int `json:"undecided"`
+		Contradictions int `json:"contradictions"`
 	} `json:"counts"`
+	ContradictionsEvaluatedAgainst string `json:"contradictions_evaluated_against"`
 }
 
 type setResp struct {

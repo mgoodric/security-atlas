@@ -35,9 +35,131 @@ export type Risk = {
   updated_at: string;
   // Slice 067 additions — surfaced by the same handler.
   org_unit_id?: string;
+  // #1749: the risk's hierarchy tier.
+  level?: RiskLevel;
   themes: string[];
   severity: number;
+  // #1748: the severity computed from the risk's children, beside its own
+  // assessed `severity`. Only GET /v1/risks/{id} carries it, and only for a
+  // risk with at least one scored child.
+  rollup?: RiskRollUp;
 };
+
+export type RiskLevel = "team" | "org" | "company";
+
+// ----- #1748: risk hierarchy links -----
+//
+// A parent risk's children roll up to it. Linking never changes the
+// parent's stored score or treatment: the roll-up is computed from the
+// children with the parent's severity function (max when it has none) and
+// shown beside the assessed score.
+
+export type RiskRollUp = {
+  severity: number;
+  severity_function: "max" | "weighted_max" | "sum";
+  child_count: number;
+  assessed_severity: number;
+  // True when the children roll up higher than the parent was assessed.
+  exceeds_assessed: boolean;
+};
+
+export type LinkedRisk = {
+  id: string;
+  title: string;
+  level: RiskLevel;
+  org_unit_id?: string;
+  severity: number;
+  // manual = attached by hand; rule = made by an aggregation rule.
+  link_source: "manual" | "rule";
+  rule_id?: string;
+  linked_at: string;
+};
+
+export type RiskChildrenResponse = {
+  children: LinkedRisk[];
+  count: number;
+  rollup?: RiskRollUp;
+};
+
+export type RiskParentsResponse = {
+  parents: LinkedRisk[];
+  count: number;
+};
+
+const LEVEL_RANK: Record<RiskLevel, number> = { team: 1, org: 2, company: 3 };
+
+// canBeChildOf mirrors the platform's level rule: a child sits strictly
+// below its parent (team < org < company). The attach picker offers only
+// these; the platform re-checks, and also refuses cycles.
+export function canBeChildOf(
+  child: Pick<Risk, "level">,
+  parent: Pick<Risk, "level">,
+): boolean {
+  const c = child.level ? LEVEL_RANK[child.level] : 0;
+  const p = parent.level ? LEVEL_RANK[parent.level] : 0;
+  return c > 0 && c < p;
+}
+
+async function hierarchyRequest<T>(
+  url: string,
+  init?: RequestInit,
+): Promise<T | null> {
+  const res = await fetch(url, init);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  if (res.status === 204) return null;
+  return (await res.json()) as T;
+}
+
+export async function fetchRiskChildren(
+  id: string,
+): Promise<RiskChildrenResponse> {
+  return (await hierarchyRequest<RiskChildrenResponse>(
+    `/api/risks/${encodeURIComponent(id)}/children`,
+  )) as RiskChildrenResponse;
+}
+
+export async function fetchRiskParents(
+  id: string,
+): Promise<RiskParentsResponse> {
+  return (await hierarchyRequest<RiskParentsResponse>(
+    `/api/risks/${encodeURIComponent(id)}/parents`,
+  )) as RiskParentsResponse;
+}
+
+export async function attachChildRisks(
+  id: string,
+  childRiskIDs: string[],
+): Promise<RiskChildrenResponse> {
+  return (await hierarchyRequest<RiskChildrenResponse>(
+    `/api/risks/${encodeURIComponent(id)}/children`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ child_risk_ids: childRiskIDs }),
+    },
+  )) as RiskChildrenResponse;
+}
+
+export async function detachChildRisk(
+  id: string,
+  childID: string,
+): Promise<void> {
+  await hierarchyRequest<null>(
+    `/api/risks/${encodeURIComponent(id)}/children/${encodeURIComponent(
+      childID,
+    )}`,
+    { method: "DELETE" },
+  );
+}
 
 export type RisksListResponse = {
   risks: Risk[];

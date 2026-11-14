@@ -8,7 +8,13 @@ package frameworkscopes
 //	GET /v1/framework-scopes/applicability?framework_version=…&as_of=… — decisions in force at as_of
 //
 // Every requirement of the framework version is listed; one with no decision
-// is `undecided` (which counts as applicable) and is tallied in counts.
+// is `undecided` (which counts as applicable) and is tallied in counts. An
+// excluded requirement with a passing active control behind it carries
+// `contradiction: true` (#1789). Both GETs filter with
+// ?decision=applicable|excluded|undecided and ?contradiction=true|false;
+// counts always describe the whole revision. Contradictions are computed
+// against current control evaluations on both GETs, including as_of
+// (`contradictions_evaluated_against: "current"`).
 // Writes use the same gate as the predicate PATCH: the rego bundle admits
 // writes on `framework-scopes` from grc_engineer and admin only. An edit on a
 // revision in review or approved sends it back to draft
@@ -54,13 +60,39 @@ type requirementWire struct {
 	ImplementationRef string     `json:"implementation_ref"`
 	UpdatedBy         *string    `json:"updated_by,omitempty"`
 	UpdatedAt         *time.Time `json:"updated_at,omitempty"`
+	Contradiction     bool       `json:"contradiction"`
 }
 
 type countsWire struct {
-	Total      int `json:"total"`
-	Applicable int `json:"applicable"`
-	Excluded   int `json:"excluded"`
-	Undecided  int `json:"undecided"`
+	Total          int `json:"total"`
+	Applicable     int `json:"applicable"`
+	Excluded       int `json:"excluded"`
+	Undecided      int `json:"undecided"`
+	Contradictions int `json:"contradictions"`
+}
+
+// parseFilter reads ?decision=applicable|excluded|undecided and
+// ?contradiction=true|false. It writes a 400 and returns false on a bad value.
+func parseFilter(w http.ResponseWriter, r *http.Request) (frameworkscope.ApplicabilityFilter, bool) {
+	q := r.URL.Query()
+	f := frameworkscope.ApplicabilityFilter{Decision: strings.TrimSpace(q.Get("decision"))}
+	if err := f.Validate(); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		return f, false
+	}
+	if raw := strings.TrimSpace(q.Get("contradiction")); raw != "" {
+		var v bool
+		switch raw {
+		case "true":
+			v = true
+		case "false":
+		default:
+			httpresp.WriteError(w, http.StatusBadRequest, "contradiction must be true or false")
+			return f, false
+		}
+		f.Contradiction = &v
+	}
+	return f, true
 }
 
 func toDecisionWire(d frameworkscope.Decision) decisionWire {
@@ -82,6 +114,7 @@ func applicabilityBody(a frameworkscope.Applicability, frameworkVersionID uuid.U
 			Code:          r.Code,
 			Title:         r.Title,
 			Undecided:     r.Decision == nil,
+			Contradiction: r.Contradiction,
 		}
 		if d := r.Decision; d != nil {
 			dec, by, at := d.Decision, d.UpdatedBy, d.UpdatedAt
@@ -101,11 +134,15 @@ func applicabilityBody(a frameworkscope.Applicability, frameworkVersionID uuid.U
 		"framework_version_id": frameworkVersionID.String(),
 		"framework_scope":      scopeW,
 		"requirements":         reqs,
+		// The flag is always computed against current control evaluations,
+		// even when the decisions are those in force at as_of (#1789 D6).
+		"contradictions_evaluated_against": "current",
 		"counts": countsWire{
-			Total:      a.Counts.Total,
-			Applicable: a.Counts.Applicable,
-			Excluded:   a.Counts.Excluded,
-			Undecided:  a.Counts.Undecided,
+			Total:          a.Counts.Total,
+			Applicable:     a.Counts.Applicable,
+			Excluded:       a.Counts.Excluded,
+			Undecided:      a.Counts.Undecided,
+			Contradictions: a.Counts.Contradictions,
 		},
 	}
 }
@@ -121,6 +158,10 @@ func (h *Handler) ListApplicability(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	filter, ok := parseFilter(w, r)
+	if !ok {
+		return
+	}
 	out, err := h.store.ListDecisions(ctx, id)
 	if err != nil {
 		if errors.Is(err, frameworkscope.ErrNotFound) {
@@ -130,12 +171,15 @@ func (h *Handler) ListApplicability(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "list applicability", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, applicabilityBody(out, out.Scope.FrameworkVersionID))
+	httpresp.WriteJSON(w, http.StatusOK, applicabilityBody(out.Filter(filter), out.Scope.FrameworkVersionID))
 }
 
 // ApplicabilityAsOf — GET /v1/framework-scopes/applicability?framework_version=…&as_of=….
 // Returns the decisions of the revision active at as_of; framework_scope is
-// null (and every requirement undecided) when none was.
+// null (and every requirement undecided) when none was. The decisions are
+// point-in-time, but `contradiction` is not: it is computed against current
+// control evaluations ("would this exclusion be contradicted now"), and the
+// body says so with `contradictions_evaluated_against: "current"` (#1789 D6).
 func (h *Handler) ApplicabilityAsOf(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
@@ -157,12 +201,16 @@ func (h *Handler) ApplicabilityAsOf(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "as_of must be RFC3339: "+err.Error())
 		return
 	}
+	filter, ok := parseFilter(w, r)
+	if !ok {
+		return
+	}
 	out, err := h.store.DecisionsAsOf(ctx, fvID, t)
 	if err != nil {
 		httperr.WriteInternal(w, r, "applicability as_of", err)
 		return
 	}
-	httpresp.WriteJSON(w, http.StatusOK, applicabilityBody(out, fvID))
+	httpresp.WriteJSON(w, http.StatusOK, applicabilityBody(out.Filter(filter), fvID))
 }
 
 // SetApplicability — PUT /v1/framework-scopes/{id}/applicability/{requirement_id}.
