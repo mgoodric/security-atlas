@@ -177,30 +177,70 @@ export function clearFilters(): RiskFilters {
 // ----- formatters -----
 
 /**
- * Format a `residual_score` JSONB blob into the mockup's display string.
+ * #2058 — the residual on the inherent-severity scale (1..25).
  *
- * `residual_score` follows the canvas §2.2 5x5 shape: `{likelihood,
- * impact}` numerics. The display value mirrors the platform's
- * `residualMagnitude` (internal/risk/store.go): `likelihood × impact`
- * normalized against the 5x5 ceiling (25) so the rendered scalar is in
- * `0..1`. A malformed score (missing either component, non-JSON, or a
- * FAIR-shaped score with no L×I) renders as `"—"` — the same
- * graceful-degradation posture as the residual-magnitude sort.
+ * The platform writes `residual_score` in more than one shape, and the
+ * UI reads all of them so a derived residual never shows as pending:
  *
- * Returned as a string so the cell renderer can drop it straight into
- * the table without re-formatting.
+ *   - `{score, inherent_score, weighted_control_effectiveness, ...}` —
+ *     the residual deriver (internal/risk/residual_store.go
+ *     `residualBlob`). `score` = inherent × (1 − effectiveness), already
+ *     on the 1..25 scale for a 5x5 risk.
+ *   - `{severity}` — a precomputed scalar (aggregated parents).
+ *   - `{likelihood, impact}` — an operator-entered 5x5 residual; the
+ *     scalar is their product.
+ *
+ * Same precedence as the board generator's `extractSeverity`
+ * (internal/board/generator.go). Returns `null` when no shape carries a
+ * finite number: that is the only "pending evaluation" case.
  */
-export function formatResidualScore(score: unknown): string {
+export function residualSeverity(score: unknown): number | null {
+  if (score == null || typeof score !== "object") return null;
+  const s = score as {
+    score?: unknown;
+    severity?: unknown;
+    likelihood?: unknown;
+    impact?: unknown;
+  };
+  const finite = (v: unknown): v is number =>
+    typeof v === "number" && Number.isFinite(v);
+  if (finite(s.score)) return s.score;
+  if (finite(s.severity)) return s.severity;
+  if (finite(s.likelihood) && finite(s.impact)) {
+    const product = s.likelihood * s.impact;
+    return Number.isFinite(product) ? product : null;
+  }
+  return null;
+}
+
+/**
+ * Format a 1..25 severity scalar: whole numbers as-is, a fractional
+ * residual (inherent × (1 − effectiveness)) to one decimal.
+ */
+export function formatSeverity(n: number): string {
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+/**
+ * Format a `residual_score` JSONB blob for display.
+ *
+ * A 5x5 residual renders on the same 1..25 scale as inherent severity
+ * (#2058 — it used to be divided by 25 into 0..1, which sat beside a
+ * 1..25 inherent number). A FAIR residual renders as dollars: a
+ * FAIR-shaped blob via its annualized exposure, and a deriver `{score}`
+ * blob on a FAIR risk (pass `methodology`) as the dollar scalar it is.
+ * No usable residual renders as `"—"`.
+ */
+export function formatResidualScore(
+  score: unknown,
+  methodology?: string,
+): string {
   const fair = fairScore(score);
   if (fair != null) return formatDollars(fair.annualized_loss_exposure);
-  if (score == null || typeof score !== "object") return "—";
-  const s = score as { likelihood?: unknown; impact?: unknown };
-  const l = typeof s.likelihood === "number" ? s.likelihood : null;
-  const i = typeof s.impact === "number" ? s.impact : null;
-  if (l == null || i == null) return "—";
-  const normalized = (l * i) / 25;
-  if (!Number.isFinite(normalized)) return "—";
-  return normalized.toFixed(2);
+  const n = residualSeverity(score);
+  if (n == null) return "—";
+  if (methodology === "fair") return formatDollars(n);
+  return formatSeverity(n);
 }
 
 export type FairScore = {
@@ -258,19 +298,21 @@ export function formatDollars(n: number): string {
  *
  * A freshly-created risk has no residual_score yet: the create path
  * stores an empty `{}` JSONB (internal/risk/store.go `defaultResidual`)
- * and the evaluator backfills `{likelihood, impact}` asynchronously
+ * and the residual deriver backfills `{score, inherent_score, ...}`
  * (slice 020 residual derivation). The old cell rendered a bare "—" for
  * that case, which reads as broken rather than "awaiting evaluation".
  *
- * This classifier distinguishes the three states the cell must render
+ * This classifier distinguishes the two states the cell must render
  * differently:
  *
  *   - "pending": no residual yet — null / undefined / empty object /
- *     an object with no numeric likelihood+impact. The common case for
+ *     an object no `residualSeverity` shape reads. The common case for
  *     a brand-new risk. The cell renders a "Pending evaluation"
  *     affordance, NOT a bare dash.
- *   - "scored": a valid {likelihood, impact} — the cell renders the
- *     normalized 0..1 magnitude via formatResidualScore.
+ *   - "scored": any shape `residualSeverity` or `fairScore` reads — the
+ *     cell renders the 1..25 severity (or FAIR dollars) via
+ *     formatResidualScore. Before #2058 only `{likelihood, impact}`
+ *     counted, so every deriver-written `{score}` residual read pending.
  *
  * Note: there is no separate "malformed" state. A partially-shaped
  * score (e.g. only likelihood) is indistinguishable from "not yet
@@ -284,13 +326,7 @@ export type ResidualState = "pending" | "scored";
 
 export function residualState(score: unknown): ResidualState {
   if (fairScore(score) != null) return "scored";
-  if (score == null || typeof score !== "object") return "pending";
-  const s = score as { likelihood?: unknown; impact?: unknown };
-  const l = typeof s.likelihood === "number" ? s.likelihood : null;
-  const i = typeof s.impact === "number" ? s.impact : null;
-  if (l == null || i == null) return "pending";
-  if (!Number.isFinite((l * i) / 25)) return "pending";
-  return "scored";
+  return residualSeverity(score) == null ? "pending" : "scored";
 }
 
 /**
@@ -311,16 +347,28 @@ export function patternNoLongerMet(score: unknown): boolean {
 }
 
 /**
- * Slice 680 / ATLAS-029 — review-due evaluation state.
- *
- * The evaluator backfills `review_due_at` alongside the residual; until
- * then the wire omits it (`review_due_at?: string`). An absent /
- * empty-string value is the "pending evaluation" signal — the same
- * not-yet-evaluated state as the residual. A present ISO string is a
- * real due date.
+ * Whether a risk has no review date. Since #2059 a risk created without
+ * one is due created_at + the organisation review cadence, and existing
+ * risks were backfilled, so an absent / empty `review_due_at` is a gap in
+ * the data, not a state the evaluator will fill.
  */
 export function reviewDuePending(reviewDueAt: string | undefined): boolean {
   return reviewDueAt == null || reviewDueAt.trim() === "";
+}
+
+/**
+ * #2059 — a risk review is overdue once its due day has passed, compared
+ * as UTC calendar days (the policy-review rule, #2075): a review due today
+ * is not overdue yet. An absent or unparseable date is never overdue.
+ */
+export function reviewOverdue(
+  reviewDueAt: string | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (reviewDuePending(reviewDueAt)) return false;
+  const due = new Date(reviewDueAt!);
+  if (Number.isNaN(due.getTime())) return false;
+  return due.toISOString().slice(0, 10) < now.toISOString().slice(0, 10);
 }
 
 /**
@@ -343,15 +391,29 @@ export function severityClasses(band: SeverityBand): string {
 }
 
 /**
- * Map a residual numeric (the formatted string parsed back) to its
- * Tailwind color class — rose for the high band, amber for medium,
- * emerald for low, neutral for unparseable. Mirrors the mockup palette.
+ * Display label for a severity band (#2058). Inherent and residual both
+ * use it, so the two columns read on one scale.
+ */
+export function severityBandLabel(band: SeverityBand): string {
+  switch (band) {
+    case "high":
+      return "High";
+    case "medium":
+      return "Medium";
+    case "low":
+      return "Low";
+    case "none":
+    default:
+      return "None";
+  }
+}
+
+/**
+ * Map a formatted residual (the 1..25 scalar as a string) to the pill
+ * classes of its severity band, the same palette the inherent column
+ * uses. A dollar (FAIR) or "—" value is not banded and renders muted.
  */
 export function residualClass(formatted: string): string {
-  if (formatted === "—") return "text-muted-foreground";
-  const n = parseFloat(formatted);
-  if (!Number.isFinite(n)) return "text-muted-foreground";
-  if (n >= 0.6) return "text-rose-700 font-semibold";
-  if (n >= 0.32) return "text-amber-700 font-semibold";
-  return "text-emerald-700 font-semibold";
+  if (!/^-?\d+(\.\d+)?$/.test(formatted)) return "text-muted-foreground";
+  return severityClasses(severityBand(parseFloat(formatted)));
 }

@@ -319,8 +319,9 @@ const ErrMsgBootstrapAmbiguousTenant = "several organisations exist and no user 
 
 // OIDCCallback handles GET /auth/oidc/callback?code=...&state=...
 // It verifies state (CSRF), exchanges code, upserts user, and sets the
-// session cookie. The tenant_id is bound to the flow via the IdP cookie's
-// preceding /auth/oidc/login resolution.
+// session cookie. The tenant is bound to the flow: /auth/oidc/login sets
+// the oidc.TenantCookie, and the callback refuses (400) a resolved tenant
+// that differs from it (#1968).
 //
 // Slice 198 — OIDC-first-install bootstrap branch:
 //
@@ -354,6 +355,10 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, oidc.ErrStateMismatch) {
 			writeAuthError(w, http.StatusBadRequest, "state mismatch (CSRF guard tripped)")
+			return
+		}
+		if errors.Is(err, oidc.ErrTenantMismatch) {
+			writeAuthError(w, http.StatusBadRequest, "tenant does not match the login flow")
 			return
 		}
 		writeAuthError(w, http.StatusBadGateway, "OIDC callback: "+err.Error())

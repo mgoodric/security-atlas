@@ -106,6 +106,11 @@ type Querier interface {
 	// attachment; if the period is still open, frozen_at remains NULL and the
 	// slice-026 query path keeps the population live until the period freezes.
 	AttachPopulationToPeriod(ctx context.Context, arg AttachPopulationToPeriodParams) error
+	// #1769: fill legacy_scf_id on an anchor imported without one. Only a
+	// NULL is filled, so a stored value is never rewritten; the importer
+	// refuses a re-import whose legacy_scf_id differs from a stored one.
+	// legacy_scf_id is outside trg_scf_anchor_immutability's guarded columns.
+	BackfillSCFAnchorLegacySCFID(ctx context.Context, arg BackfillSCFAnchorLegacySCFIDParams) (int64, error)
 	// Slice 751 — the DETERMINISTIC exception-status aggregate the board brief
 	// freezes into `content.exceptions` and the AI-drafted exception-status
 	// narrative section grounds every numeric claim on.
@@ -545,6 +550,13 @@ type Querier interface {
 	// "replace the role set" semantics for PATCH .../roles.
 	DeleteUserRoles(ctx context.Context, arg DeleteUserRolesParams) error
 	DeleteVendor(ctx context.Context, arg DeleteVendorParams) error
+	// #2043 demo provenance: returns the subset of ids that the in-place demo
+	// seed (#1765) added to table_name, for the caller's tenant (RLS). Read
+	// surfaces and exports mark those rows "demo" so an auditor never mistakes
+	// demo evidence for real evidence. The row_key of a single-uuid-key table is
+	// {"id": "<uuid>"}, so the lookup matches whole keys and is served by the
+	// demo_seed_rows_unique index.
+	DemoSeededIDs(ctx context.Context, arg DemoSeededIDsParams) ([]pgtype.UUID, error)
 	// Flip every "current" framework_version for the given framework to "legacy"
 	// so a new release can take over without violating the at-most-one-current
 	// invariant. Caller scopes the transaction.
@@ -958,6 +970,11 @@ type Querier interface {
 	// Slice 020: one link row by (risk, control). Used to confirm a link exists
 	// before returning its effectiveness breakdown.
 	GetRiskControlLink(ctx context.Context, arg GetRiskControlLinkParams) (GetRiskControlLinkRow, error)
+	// #2059: the tenant's risk review cadence in days, as the
+	// risks_review_due_default trigger reads it: the tenants row's
+	// risk_review_cadence_days, or 365 for a tenant with no row (a bare-UUID
+	// tenant predating slice 144). RLS scopes tenants to the caller's own row.
+	GetRiskReviewCadenceDays(ctx context.Context, id pgtype.UUID) (int32, error)
 	// Idempotency lookup: find the meta-risk a rule activation already created.
 	// The key, sha256(rule_id|activated_at) since #1861, is stored on the
 	// meta-risk's inherent_score JSONB as 'aggregation_key' (slice 053
@@ -2217,6 +2234,9 @@ type Querier interface {
 	ListFrameworkVersionLinkedControls(ctx context.Context, arg ListFrameworkVersionLinkedControlsParams) ([]ListFrameworkVersionLinkedControlsRow, error)
 	// The review queue for one version pair, oldest first. Admin-scoped read.
 	ListFrameworkVersionMigrations(ctx context.Context, arg ListFrameworkVersionMigrationsParams) ([]FrameworkVersionMigration, error)
+	// Every version-migration queue row (ADR 0019) whose target is one framework
+	// version, for the applicability carry-over (#1793). Catalog rows: no tenant.
+	ListFrameworkVersionMigrationsInto(ctx context.Context, toVersionID pgtype.UUID) ([]FrameworkVersionMigration, error)
 	// ===== migration-suggest review queue =====
 	// All requirement codes for a version, used by the suggest engine to compute
 	// the exact-code set-intersection / set-difference between two versions.
@@ -3272,6 +3292,12 @@ type Querier interface {
 	// handler can audit who superseded it. Only matches when the row is
 	// currently 'published' (defense-in-depth -- a chain can't supersede a
 	// draft).
+	//
+	// next_review_at is left as it was (#2009): the successor carries its own
+	// review date, and the superseded row keeps the date it was due so an
+	// auditor can still see it and compare it with the successor's
+	// published_at. Only a 'published' row has a review due, so the calendar
+	// and the list's review_status ignore it.
 	SupersedePolicyAtPublish(ctx context.Context, arg SupersedePolicyAtPublishParams) (Policy, error)
 	// AC-8: in the same transaction as ActivateFrameworkScope, transition the
 	// previously-activated row (if any) to `superseded`, point its
@@ -3383,6 +3409,11 @@ type Querier interface {
 	// The case-insensitive UNIQUE expression index on LOWER(name) raises
 	// `unique_violation` on duplicate; the handler maps to 409.
 	UpdateTenantName(ctx context.Context, arg UpdateTenantNameParams) (UpdateTenantNameRow, error)
+	// #2059: set the caller-tenant's risk review cadence in days. RLS gates this
+	// to the caller's own row; `tenants_risk_review_cadence_days_chk` bounds it
+	// to 1..3650 (defense in depth atop the handler's check). Existing risks keep
+	// their review dates: the cadence is read only when a risk is inserted.
+	UpdateTenantRiskReviewCadence(ctx context.Context, arg UpdateTenantRiskReviewCadenceParams) (UpdateTenantRiskReviewCadenceRow, error)
 	// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
 	// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
 	// value to leave the column unchanged. The handler builds the diff from the request

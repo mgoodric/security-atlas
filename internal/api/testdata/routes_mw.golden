@@ -170,6 +170,7 @@ GET /v1/risks 8
 GET /v1/risks/categories 8
 GET /v1/risks/export 8
 GET /v1/risks/heatmap 8
+GET /v1/risks/review-cadence 8
 GET /v1/risks/theme-heatmap 8
 GET /v1/risks/{id} 8
 GET /v1/risks/{id}/action-plans 8
@@ -287,6 +288,7 @@ POST /v1/incidents/{id}/close 8
 POST /v1/framework-scopes 8
 POST /v1/framework-scopes/{id}/applicability/bulk 8
 POST /v1/framework-scopes/{id}/applicability/import 8
+POST /v1/framework-scopes/{id}/applicability:carry-over 8
 POST /v1/install/mark-first-signin 8
 POST /v1/mcp/write-proposals 8
 POST /v1/mcp/write-proposals/{id}/confirm 8

@@ -50,6 +50,13 @@ const (
 	// code-interception).
 	NonceCookie = "atlas_oidc_nonce"
 
+	// TenantCookie holds the tenant id /auth/oidc/login resolved (#1968).
+	// The callback refuses a tenant that differs from it, so the tenant is
+	// bound to the flow: a tenant change between login and callback (a
+	// second tenant created on a single-tenant install, or a hand-edited
+	// tenant_id) cannot move the login into another tenant.
+	TenantCookie = "atlas_oidc_tenant"
+
 	// FlowCookieMaxAge is how long state/verifier cookies live. 10 minutes
 	// is generous for a user to authenticate but short enough that an
 	// abandoned tab does not leave persistent verifier material around.
@@ -104,6 +111,11 @@ var ErrStateMismatch = errors.New("oidc: state mismatch (CSRF guard)")
 // attempt apart from an ID-token replay attempt — operationally and
 // forensically different signals.
 var ErrNonceMismatch = errors.New("oidc: nonce mismatch (ID-token replay guard)")
+
+// ErrTenantMismatch is the flow-binding guard's sentinel (#1968): the
+// callback's tenant is not the one /auth/oidc/login bound the flow to, or
+// the tenant cookie is missing. The callback returns 400 when it fires.
+var ErrTenantMismatch = errors.New("oidc: tenant does not match the login flow")
 
 // Authenticator drives the RP-side OIDC flow.
 type Authenticator struct {
@@ -199,6 +211,7 @@ func (a *Authenticator) BeginLogin(ctx context.Context, in LoginInput, secureCoo
 		flowCookie(VerifierCookie, verifier, secureCookies),
 		flowCookie(IdpCookie, in.IdpName, secureCookies),
 		flowCookie(NonceCookie, nonce, secureCookies),
+		flowCookie(TenantCookie, in.TenantID.String(), secureCookies),
 	}
 	return LoginResult{AuthURL: authURL, Cookies: cookies}, nil
 }
@@ -273,6 +286,14 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 	}
 	if stateCookie.Value != queryState {
 		return CallbackResult{}, ErrStateMismatch
+	}
+	// #1968: the tenant is bound to the flow by the cookie BeginLogin set.
+	tenantCookie, err := r.Cookie(TenantCookie)
+	if err != nil {
+		return CallbackResult{}, ErrTenantMismatch
+	}
+	if flowTenant, perr := uuid.Parse(tenantCookie.Value); perr != nil || flowTenant != tenantID {
+		return CallbackResult{}, ErrTenantMismatch
 	}
 
 	cfg, err := a.resolver.ResolveIdp(ctx, tenantID, idpCookie.Value)
@@ -382,11 +403,11 @@ func parseEmailVerified(v any) *bool {
 	return nil
 }
 
-// ClearFlowCookies sets MaxAge=-1 on state/verifier/idp/nonce cookies.
-// The login success handler calls this after establishing the session.
-// Slice 365 added NonceCookie to the list.
+// ClearFlowCookies sets MaxAge=-1 on state/verifier/idp/nonce/tenant
+// cookies. The login success handler calls this after establishing the
+// session. Slice 365 added NonceCookie to the list, #1968 TenantCookie.
 func ClearFlowCookies(w http.ResponseWriter, secure bool) {
-	for _, name := range []string{StateCookie, VerifierCookie, IdpCookie, NonceCookie} {
+	for _, name := range []string{StateCookie, VerifierCookie, IdpCookie, NonceCookie, TenantCookie} {
 		http.SetCookie(w, &http.Cookie{
 			Name:     name,
 			Value:    "",

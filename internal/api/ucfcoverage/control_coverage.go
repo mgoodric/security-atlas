@@ -15,6 +15,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
 )
 
@@ -128,6 +129,7 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 	var (
 		controlOK bool
 		ctrl      dbx.GetControlByIDRow
+		demo      demoprov.Set
 	)
 	if err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		got, err := q.GetControlByID(ctx, dbx.GetControlByIDParams{
@@ -142,7 +144,9 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 		}
 		ctrl = got
 		controlOK = true
-		return nil
+		// #2043: badge a control the in-place demo seed added.
+		demo, err = demoprov.Lookup(ctx, q, demoprov.TableControls, []uuid.UUID{cid})
+		return err
 	}); err != nil {
 		return coverageView{}, false, fmt.Errorf("lookup control: %w", err)
 	}
@@ -154,6 +158,7 @@ func (h *Handler) assembleCoverage(ctx context.Context, cid uuid.UUID, fvParam s
 	if err != nil {
 		return coverageView{}, false, err
 	}
+	cw.Demo = demo.Has(cid)
 	view := coverageView{Control: cw}
 	if !ctrl.ScfAnchorID.Valid {
 		// Control exists but isn't anchored.

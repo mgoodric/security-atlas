@@ -3,6 +3,11 @@
 // Renders the slice-032 RiskAging rows as a table with treatment chip,
 // residual severity, and aging days. Data only — no fabrication.
 
+import {
+  formatSeverity,
+  severityBand,
+  severityBandLabel,
+} from "@/app/(authed)/risks/filters";
 import { cn } from "@/lib/utils";
 
 import { TONE_CHIP } from "./tone";
@@ -69,7 +74,17 @@ export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
               </span>
             </td>
             <td className="py-3 pr-3 text-right font-mono text-foreground">
-              {risk.residual_severity.toFixed(2)}
+              {/* #2058: the board generator's residual_severity is on the
+                  1..25 scale; show it with the register's band label. */}
+              <span data-testid="top-risks-residual">
+                {formatSeverity(risk.residual_severity)}
+              </span>{" "}
+              <span
+                className="text-[11px] text-muted-foreground"
+                data-testid="top-risks-residual-band"
+              >
+                {severityBandLabel(severityBand(risk.residual_severity))}
+              </span>
             </td>
             <td className="py-3 text-right font-mono text-muted-foreground">
               {risk.age_days} d
