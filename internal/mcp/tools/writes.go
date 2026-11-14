@@ -7,6 +7,9 @@
 //                             as an evidence record per invariant #2)
 //   - push_evidence         — propose an evidence record append
 //   - update_risk_treatment — propose a risk treatment + owner change
+//   - link_child_risks      — propose attaching risks under an existing
+//                             parent risk (#1748)
+//   - unlink_child_risk     — propose detaching a child risk (#1748)
 //   - confirm_write         — operator-driven approval of a pending proposal
 //
 // Each write tool dispatches to POST /v1/mcp/write-proposals; the platform
@@ -322,6 +325,95 @@ func (t *UpdateRiskTreatmentTool) Handle(ctx context.Context, args json.RawMessa
 	return fileProposal(ctx, t.client, "update_risk_treatment", args)
 }
 
+// ===== link_child_risks (#1748) =====
+
+const linkChildRisksInputSchema = `{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["parent_risk_id", "child_risk_ids"],
+  "properties": {
+    "parent_risk_id": {
+      "type": "string",
+      "description": "UUID of the existing parent risk."
+    },
+    "child_risk_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string"},
+      "description": "UUIDs of existing risks to attach. Each must sit at a lower level than the parent (team < org < company), be scored on the 5x5 grid, and not be the parent or one of its ancestors. A child already attached is left as it is."
+    }
+  }
+}`
+
+// LinkChildRisksTool files a link_child_risks proposal.
+type LinkChildRisksTool struct {
+	client *mcp.Client
+}
+
+// NewLinkChildRisks constructs the tool.
+func NewLinkChildRisks(c *mcp.Client) *LinkChildRisksTool {
+	return &LinkChildRisksTool{client: c}
+}
+
+// Definition implements mcp.Tool.
+func (t *LinkChildRisksTool) Definition() mcp.ToolDefinition {
+	return mcp.ToolDefinition{
+		Name: "link_child_risks",
+		Description: "Propose attaching existing risks as children of an existing parent risk, " +
+			"so they roll up to it. The parent's own score and treatment are not changed. " +
+			"Proposal sits at state='ai_proposed' until an approver confirms.",
+		InputSchema: json.RawMessage(linkChildRisksInputSchema),
+	}
+}
+
+// Handle implements mcp.Tool.
+func (t *LinkChildRisksTool) Handle(ctx context.Context, args json.RawMessage) (any, error) {
+	return fileProposal(ctx, t.client, "link_child_risks", args)
+}
+
+// ===== unlink_child_risk (#1748) =====
+
+const unlinkChildRiskInputSchema = `{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["parent_risk_id", "child_risk_id"],
+  "properties": {
+    "parent_risk_id": {
+      "type": "string",
+      "description": "UUID of the parent risk."
+    },
+    "child_risk_id": {
+      "type": "string",
+      "description": "UUID of the child risk to detach. It must be linked to the parent."
+    }
+  }
+}`
+
+// UnlinkChildRiskTool files an unlink_child_risk proposal.
+type UnlinkChildRiskTool struct {
+	client *mcp.Client
+}
+
+// NewUnlinkChildRisk constructs the tool.
+func NewUnlinkChildRisk(c *mcp.Client) *UnlinkChildRiskTool {
+	return &UnlinkChildRiskTool{client: c}
+}
+
+// Definition implements mcp.Tool.
+func (t *UnlinkChildRiskTool) Definition() mcp.ToolDefinition {
+	return mcp.ToolDefinition{
+		Name: "unlink_child_risk",
+		Description: "Propose detaching a child risk from its parent risk. Neither risk is " +
+			"deleted. Proposal sits at state='ai_proposed' until an approver confirms.",
+		InputSchema: json.RawMessage(unlinkChildRiskInputSchema),
+	}
+}
+
+// Handle implements mcp.Tool.
+func (t *UnlinkChildRiskTool) Handle(ctx context.Context, args json.RawMessage) (any, error) {
+	return fileProposal(ctx, t.client, "unlink_child_risk", args)
+}
+
 // ===== confirm_write =====
 
 const confirmWriteInputSchema = `{
@@ -426,6 +518,8 @@ func AllWrites(client *mcp.Client) []mcp.Tool {
 		NewUpdateControlState(client),
 		NewPushEvidence(client),
 		NewUpdateRiskTreatment(client),
+		NewLinkChildRisks(client),
+		NewUnlinkChildRisk(client),
 		NewConfirmWrite(client),
 	}
 }

@@ -13,6 +13,7 @@ DELETE /v1/me/sessions
 DELETE /v1/me/sessions/{id}
 DELETE /v1/org_units/{id}
 DELETE /v1/risks/{id}
+DELETE /v1/risks/{id}/children/{child_id}
 DELETE /v1/risks/{id}/themes/{theme}
 DELETE /v1/saved-views/{id}
 DELETE /v1/vendors/{id}
@@ -164,6 +165,8 @@ GET /v1/risks/theme-heatmap
 GET /v1/risks/{id}
 GET /v1/risks/{id}/action-plans
 GET /v1/risks/{id}/aggregation
+GET /v1/risks/{id}/children
+GET /v1/risks/{id}/parents
 GET /v1/samples/{id}
 GET /v1/samples/{id}/annotations
 GET /v1/saved-views
@@ -299,6 +302,7 @@ POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/approve
 POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/{proposalID}/reject
 POST /v1/risks
 POST /v1/risks/aggregate
+POST /v1/risks/{id}/children
 POST /v1/risks/{id}/controls
 POST /v1/risks/{id}/themes
 POST /v1/samples

@@ -11,6 +11,27 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const deleteRiskAggregationLink = `-- name: DeleteRiskAggregationLink :execrows
+DELETE FROM risk_aggregations
+WHERE tenant_id = $1 AND parent_risk_id = $2 AND child_risk_id = $3
+`
+
+type DeleteRiskAggregationLinkParams struct {
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ParentRiskID pgtype.UUID `json:"parent_risk_id"`
+	ChildRiskID  pgtype.UUID `json:"child_risk_id"`
+}
+
+// Detach one child from one parent, reporting how many rows went, so the
+// caller can tell a removed link from one that never existed (#1748).
+func (q *Queries) DeleteRiskAggregationLink(ctx context.Context, arg DeleteRiskAggregationLinkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteRiskAggregationLink, arg.TenantID, arg.ParentRiskID, arg.ChildRiskID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const linkRiskAggregation = `-- name: LinkRiskAggregation :exec
 INSERT INTO risk_aggregations (parent_risk_id, child_risk_id, rule_id, tenant_id)
 VALUES ($1, $2, $3, $4)
@@ -76,6 +97,40 @@ func (q *Queries) ListRiskAggregationChildren(ctx context.Context, arg ListRiskA
 	return items, nil
 }
 
+const listRiskAggregationLinksForTenant = `-- name: ListRiskAggregationLinksForTenant :many
+SELECT child_risk_id, parent_risk_id
+FROM risk_aggregations
+WHERE tenant_id = $1
+ORDER BY child_risk_id ASC, created_at ASC, parent_risk_id ASC
+`
+
+type ListRiskAggregationLinksForTenantRow struct {
+	ChildRiskID  pgtype.UUID `json:"child_risk_id"`
+	ParentRiskID pgtype.UUID `json:"parent_risk_id"`
+}
+
+// Every parent link in the tenant, for the risk register export's
+// parent_risk_ids column (#1748): one query, folded per child in Go.
+func (q *Queries) ListRiskAggregationLinksForTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListRiskAggregationLinksForTenantRow, error) {
+	rows, err := q.db.Query(ctx, listRiskAggregationLinksForTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRiskAggregationLinksForTenantRow
+	for rows.Next() {
+		var i ListRiskAggregationLinksForTenantRow
+		if err := rows.Scan(&i.ChildRiskID, &i.ParentRiskID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRiskAggregationParents = `-- name: ListRiskAggregationParents :many
 SELECT parent_risk_id, rule_id, created_at
 FROM risk_aggregations
@@ -115,6 +170,149 @@ func (q *Queries) ListRiskAggregationParents(ctx context.Context, arg ListRiskAg
 		return nil, err
 	}
 	return items, nil
+}
+
+const listRiskChildLinks = `-- name: ListRiskChildLinks :many
+SELECT r.id, r.title, r.level, r.org_unit_id, r.methodology, r.inherent_score,
+       ra.rule_id, ra.created_at AS linked_at
+FROM risk_aggregations ra
+JOIN risks r ON r.tenant_id = ra.tenant_id AND r.id = ra.child_risk_id
+WHERE ra.tenant_id = $1 AND ra.parent_risk_id = $2
+ORDER BY ra.created_at ASC, r.id ASC
+`
+
+type ListRiskChildLinksParams struct {
+	TenantID     pgtype.UUID `json:"tenant_id"`
+	ParentRiskID pgtype.UUID `json:"parent_risk_id"`
+}
+
+type ListRiskChildLinksRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	Title         string             `json:"title"`
+	Level         RiskLevel          `json:"level"`
+	OrgUnitID     pgtype.UUID        `json:"org_unit_id"`
+	Methodology   RiskMethodology    `json:"methodology"`
+	InherentScore []byte             `json:"inherent_score"`
+	RuleID        pgtype.UUID        `json:"rule_id"`
+	LinkedAt      pgtype.Timestamptz `json:"linked_at"`
+}
+
+// The children of a parent risk with the fields the hierarchy views show
+// (#1748). rule_id NULL means the link was made by hand.
+func (q *Queries) ListRiskChildLinks(ctx context.Context, arg ListRiskChildLinksParams) ([]ListRiskChildLinksRow, error) {
+	rows, err := q.db.Query(ctx, listRiskChildLinks, arg.TenantID, arg.ParentRiskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRiskChildLinksRow
+	for rows.Next() {
+		var i ListRiskChildLinksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Level,
+			&i.OrgUnitID,
+			&i.Methodology,
+			&i.InherentScore,
+			&i.RuleID,
+			&i.LinkedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRiskParentLinks = `-- name: ListRiskParentLinks :many
+SELECT r.id, r.title, r.level, r.org_unit_id, r.methodology, r.inherent_score,
+       ra.rule_id, ra.created_at AS linked_at
+FROM risk_aggregations ra
+JOIN risks r ON r.tenant_id = ra.tenant_id AND r.id = ra.parent_risk_id
+WHERE ra.tenant_id = $1 AND ra.child_risk_id = $2
+ORDER BY ra.created_at ASC, r.id ASC
+`
+
+type ListRiskParentLinksParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	ChildRiskID pgtype.UUID `json:"child_risk_id"`
+}
+
+type ListRiskParentLinksRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	Title         string             `json:"title"`
+	Level         RiskLevel          `json:"level"`
+	OrgUnitID     pgtype.UUID        `json:"org_unit_id"`
+	Methodology   RiskMethodology    `json:"methodology"`
+	InherentScore []byte             `json:"inherent_score"`
+	RuleID        pgtype.UUID        `json:"rule_id"`
+	LinkedAt      pgtype.Timestamptz `json:"linked_at"`
+}
+
+// The parents a risk rolls up to, same shape as ListRiskChildLinks (#1748).
+func (q *Queries) ListRiskParentLinks(ctx context.Context, arg ListRiskParentLinksParams) ([]ListRiskParentLinksRow, error) {
+	rows, err := q.db.Query(ctx, listRiskParentLinks, arg.TenantID, arg.ChildRiskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRiskParentLinksRow
+	for rows.Next() {
+		var i ListRiskParentLinksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Title,
+			&i.Level,
+			&i.OrgUnitID,
+			&i.Methodology,
+			&i.InherentScore,
+			&i.RuleID,
+			&i.LinkedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const riskAggregationReaches = `-- name: RiskAggregationReaches :one
+WITH RECURSIVE descendants(id) AS (
+    SELECT ra.child_risk_id
+    FROM risk_aggregations ra
+    WHERE ra.tenant_id = $3 AND ra.parent_risk_id = $2
+    UNION
+    SELECT ra.child_risk_id
+    FROM risk_aggregations ra
+    JOIN descendants d ON ra.parent_risk_id = d.id
+    WHERE ra.tenant_id = $3
+)
+SELECT ($1::uuid = $2::uuid
+        OR EXISTS (SELECT 1 FROM descendants WHERE id = $1::uuid))::boolean AS reaches
+`
+
+type RiskAggregationReachesParams struct {
+	TargetRiskID pgtype.UUID `json:"target_risk_id"`
+	FromRiskID   pgtype.UUID `json:"from_risk_id"`
+	TenantID     pgtype.UUID `json:"tenant_id"`
+}
+
+// Reports whether target_risk_id is from_risk_id or one of its descendants
+// (children, grandchildren, ...). Linking parent P -> child C would close a
+// cycle exactly when C reaches P (#1748). UNION, not UNION ALL, so the walk
+// terminates even over a graph that already holds a cycle.
+func (q *Queries) RiskAggregationReaches(ctx context.Context, arg RiskAggregationReachesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, riskAggregationReaches, arg.TargetRiskID, arg.FromRiskID, arg.TenantID)
+	var reaches bool
+	err := row.Scan(&reaches)
+	return reaches, err
 }
 
 const unlinkRiskAggregation = `-- name: UnlinkRiskAggregation :exec

@@ -73,6 +73,8 @@ type metaRiskWriter interface {
 	ListCandidateRisksForRule(ctx context.Context, arg dbx.ListCandidateRisksForRuleParams) ([]dbx.Risk, error)
 	GetRuleMetaRiskByKey(ctx context.Context, arg dbx.GetRuleMetaRiskByKeyParams) (dbx.Risk, error)
 	ListRiskAggregationChildren(ctx context.Context, arg dbx.ListRiskAggregationChildrenParams) ([]dbx.ListRiskAggregationChildrenRow, error)
+	// hierarchy cycle check (#1748)
+	RiskAggregationReaches(ctx context.Context, arg dbx.RiskAggregationReachesParams) (bool, error)
 	// transaction-scoped advisory lock on a meta-risk key (#1861)
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
 	// the five — and only five — writes
@@ -232,14 +234,41 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 		return Evaluation{}, fmt.Errorf("aggrule: list candidates for rule %s: %w", ruleID, err)
 	}
 
+	existing, err := e.w.GetRuleMetaRiskByKey(ctx, dbx.GetRuleMetaRiskByKeyParams{
+		TenantID: pgUUID(tenantID),
+		Column2:  key,
+	})
+	found := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return Evaluation{}, fmt.Errorf("aggrule: meta-risk key lookup for rule %s: %w", ruleID, err)
+	}
+
 	// CYCLE EXCLUSION: drop any candidate that is itself a rule-generated
 	// meta-risk. Without this, a rule would immediately re-aggregate its own
 	// output (a rule-generated meta-risk carries the union of its children's
 	// themes, which always includes target_theme).
+	//
+	// Links made by hand can also place an existing meta-risk under one of
+	// the candidates (#1748). Linking that candidate back under the
+	// meta-risk would close a cycle, so it is dropped too, before it counts
+	// toward the thresholds or the score. A new meta-risk has no ancestors.
 	eligible := make([]dbx.Risk, 0, len(candidates))
 	for _, c := range candidates {
 		if isRuleGenerated(c.InherentScore) {
 			continue
+		}
+		if found {
+			cycle, cerr := e.w.RiskAggregationReaches(ctx, dbx.RiskAggregationReachesParams{
+				TenantID:     pgUUID(tenantID),
+				FromRiskID:   c.ID,
+				TargetRiskID: existing.ID,
+			})
+			if cerr != nil {
+				return Evaluation{}, fmt.Errorf("aggrule: cycle check for rule %s: %w", ruleID, cerr)
+			}
+			if cycle {
+				continue
+			}
 		}
 		eligible = append(eligible, c)
 	}
@@ -299,15 +328,6 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 	inherent, err := metaRiskInherent(rule, key, windowStart, severity, likelihood, impact, riskCount)
 	if err != nil {
 		return Evaluation{}, err
-	}
-
-	existing, err := e.w.GetRuleMetaRiskByKey(ctx, dbx.GetRuleMetaRiskByKeyParams{
-		TenantID: pgUUID(tenantID),
-		Column2:  key,
-	})
-	found := err == nil
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return Evaluation{}, fmt.Errorf("aggrule: meta-risk key lookup for rule %s: %w", ruleID, err)
 	}
 
 	if !thresholdMet {

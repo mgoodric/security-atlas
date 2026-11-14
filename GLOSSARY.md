@@ -63,6 +63,16 @@ How the program has decided to handle a risk. `risks.treatment` is the `risk_tre
 
 **Open exposure** — a risk counts as open unless it is an `approved` acceptance. `untreated` risks and `proposed` acceptances stay open (`risk.IsOpenTreatment`, the `open_risk_financial_exposure` metric). `untreated` is never grouped with `avoid`.
 
+## Risk hierarchy links (#1748)
+
+Risks roll up through the `risk_aggregations` join table (parent → child, many-to-many). A risk can have several parents and several children.
+
+**Parent risk** — a risk that other risks roll up to, such as an enterprise risk that team findings evidence. Any existing risk at `org` or `company` level can be a parent: children are attached through `POST /v1/risks/{id}/children` (or the `link_child_risks` MCP proposal), or created with it by `POST /v1/risks/aggregate` and by an aggregation rule's meta-risk.
+
+**Child risk** — a risk linked under a parent. Its level must be strictly below the parent's (`team` < `org` < `company`), it must be scored on the 5x5 grid, and it can be neither the parent nor any of the parent's ancestors (a cycle is refused with 409). Org units are not compared: a child may come from any team. A link is `manual` (attached by hand, `rule_id` NULL) or `rule` (made by an aggregation rule). Detaching a child (`DELETE /v1/risks/{id}/children/{child_id}`) deletes neither risk.
+
+**Roll-up severity** — the parent's severity computed from its children with a severity function (`max`, `weighted_max`, `sum`): the one stored on the parent's `inherent_score`, else `max`. It is computed on read and never stored. It sits beside the parent's **assessed severity**, the score the parent was given itself (`inherent_score`), which linking and unlinking never change. When the roll-up is higher than the assessed severity, the API sets `exceeds_assessed` and the risk detail page flags the parent for review. Children without a 5x5 score do not count toward the roll-up.
+
 ## Exception (slice 021)
 
 A time-bounded, scope-bounded waiver of a control's normal evaluation. Always:
