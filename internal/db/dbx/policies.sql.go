@@ -948,7 +948,8 @@ SET status = 'under_review',
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
-  AND status = 'draft'
+  AND (status = 'draft'
+       OR (status = 'under_review' AND submitted_by LIKE 'jwt:%'))
 RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at
 `
 
@@ -959,6 +960,9 @@ type SubmitPolicyForReviewParams struct {
 }
 
 // Transition: draft -> under_review. Operator action; no role gate.
+// Also re-submits an under_review policy whose submitter was recorded
+// before #1807 as a session id ('jwt:<token id>'), which approval refuses
+// because it names no person: re-submitting records the person.
 func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyForReviewParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, submitPolicyForReview, arg.TenantID, arg.ID, arg.SubmittedBy)
 	var i Policy

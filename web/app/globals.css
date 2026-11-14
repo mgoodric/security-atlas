@@ -2,7 +2,10 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-@custom-variant dark (&:is(.dark *));
+/* `.paper` (#2057) opts a subtree out of dark mode: the board-pack sheet is a
+   printable document and always renders light, so `dark:` utilities must not
+   fire inside it even when <html> carries `.dark`. */
+@custom-variant dark (&:is(.dark *):not(:where(.paper, .paper *)));
 
 @theme inline {
   --color-background: var(--background);
@@ -56,7 +59,10 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-:root {
+/* `.paper` re-declares the light token set on its own element, so a board-pack
+   sheet reads as paper in any app theme while still using only theme tokens. */
+:root,
+.paper {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -169,5 +175,9 @@
   }
   html {
     @apply font-sans;
+  }
+  .paper {
+    color-scheme: light;
+    @apply bg-background text-foreground;
   }
 }

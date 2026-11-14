@@ -347,16 +347,28 @@ export function patternNoLongerMet(score: unknown): boolean {
 }
 
 /**
- * Slice 680 / ATLAS-029 — review-due evaluation state.
- *
- * The evaluator backfills `review_due_at` alongside the residual; until
- * then the wire omits it (`review_due_at?: string`). An absent /
- * empty-string value is the "pending evaluation" signal — the same
- * not-yet-evaluated state as the residual. A present ISO string is a
- * real due date.
+ * Whether a risk has no review date. Since #2059 a risk created without
+ * one is due created_at + the organisation review cadence, and existing
+ * risks were backfilled, so an absent / empty `review_due_at` is a gap in
+ * the data, not a state the evaluator will fill.
  */
 export function reviewDuePending(reviewDueAt: string | undefined): boolean {
   return reviewDueAt == null || reviewDueAt.trim() === "";
+}
+
+/**
+ * #2059 — a risk review is overdue once its due day has passed, compared
+ * as UTC calendar days (the policy-review rule, #2075): a review due today
+ * is not overdue yet. An absent or unparseable date is never overdue.
+ */
+export function reviewOverdue(
+  reviewDueAt: string | undefined,
+  now: Date = new Date(),
+): boolean {
+  if (reviewDuePending(reviewDueAt)) return false;
+  const due = new Date(reviewDueAt!);
+  if (Number.isNaN(due.getTime())) return false;
+  return due.toISOString().slice(0, 10) < now.toISOString().slice(0, 10);
 }
 
 /**

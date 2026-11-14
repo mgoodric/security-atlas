@@ -56,7 +56,7 @@ func publishWithReview(t *testing.T, s setupResult, title, version, nextReview s
 func publishDraft(t *testing.T, s setupResult, id, version, nextReview string) reviewPolicyWire {
 	t.Helper()
 	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/submit", nil, s.adminBear, http.StatusOK)
-	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/approve", nil, s.adminBear, http.StatusOK)
+	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/approve", nil, s.approverBear, http.StatusOK)
 	req := map[string]any{"new_version": version}
 	if nextReview != "" {
 		req["next_review_at"] = nextReview
@@ -209,7 +209,7 @@ func TestReviewDate_UpdateValidation(t *testing.T) {
 
 	draft2 := createDraftPolicy(t, s, "Bad Date Policy", "1.0", nil)
 	s.do(t, http.MethodPatch, "/v1/policies/"+draft2+"/submit", nil, s.adminBear, http.StatusOK)
-	s.do(t, http.MethodPatch, "/v1/policies/"+draft2+"/approve", nil, s.adminBear, http.StatusOK)
+	s.do(t, http.MethodPatch, "/v1/policies/"+draft2+"/approve", nil, s.approverBear, http.StatusOK)
 	body, _ := json.Marshal(map[string]any{"new_version": "1.0", "next_review_at": "next year"})
 	s.do(t, http.MethodPost, "/v1/policies/"+draft2+"/publish", body, s.adminBear, http.StatusBadRequest)
 }

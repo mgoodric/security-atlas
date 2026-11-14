@@ -248,7 +248,7 @@ func createAndPublishPolicy(t *testing.T, s setupResult, title, version string, 
 	id := s.postJSON(t, "/v1/policies", createBody, s.adminBear, http.StatusCreated)
 	// submit -> approve -> publish.
 	s.patchJSON(t, "/v1/policies/"+id+"/submit", nil, s.adminBear, http.StatusOK)
-	s.patchJSON(t, "/v1/policies/"+id+"/approve", nil, s.adminBear, http.StatusOK)
+	s.patchJSON(t, "/v1/policies/"+id+"/approve", nil, s.approverBear, http.StatusOK)
 	pubBody, _ := json.Marshal(map[string]any{"new_version": version})
 	publishedID := s.postJSON(t, "/v1/policies/"+id+"/publish", pubBody, s.adminBear, http.StatusCreated)
 	if publishedID == "" {
@@ -270,6 +270,7 @@ type setupResult struct {
 	tenant       string
 	controlID    uuid.UUID
 	adminBear    string
+	approverBear string // a second person; approves what the admin submits
 	adminUser    uuid.UUID
 	requiredRole string
 }
@@ -368,6 +369,7 @@ func setup(t *testing.T) setupResult {
 	adminClaims := testjwt.AdminFor(uuid.MustParse(tenant))
 	adminClaims.Subject = adminUser.String()
 	adminBearer := apiServer.IssueTestJWT(t, adminClaims)
+	approverBearer := issueSecondApprover(t, apiServer, tenant)
 
 	h := apiServer.HTTPHandlerForTests()
 	if h == nil {
@@ -385,9 +387,20 @@ func setup(t *testing.T) setupResult {
 		tenant:       tenant,
 		controlID:    controlID,
 		adminBear:    adminBearer,
+		approverBear: approverBearer,
 		adminUser:    adminUser,
 		requiredRole: "employee",
 	}
+}
+
+// issueSecondApprover mints an approver bearer for a person other than the
+// admin, because the submitter cannot approve their own policy (#1807). It
+// seeds no users row, so acknowledgment-rate denominators are unchanged.
+func issueSecondApprover(t *testing.T, apiServer *api.Server, tenant string) string {
+	t.Helper()
+	claims := testjwt.AdminFor(uuid.MustParse(tenant))
+	claims.Subject = uuid.NewString()
+	return apiServer.IssueTestJWT(t, claims)
 }
 
 // makeUserAndBearer seeds a users row + an api_keys row, then mints a

@@ -95,6 +95,7 @@ import {
   residualClass,
   residualState,
   reviewDuePending,
+  reviewOverdue,
   setFilter,
   residualSeverity,
   severityBand,
@@ -181,14 +182,15 @@ const RESIDUAL_HEADER_TOOLTIP =
 
 // Slice 680 / ATLAS-029 — pending-evaluation affordance copy.
 //
-// A newly-created risk has no residual_score or review_due_at until the
-// evaluator backfills them. The old cell rendered a bare "—", which
-// reads as broken. We render an explicit "Pending evaluation" label
-// (with a tooltip) instead so the empty state reads as "awaiting the
-// evaluator", not "missing data".
+// A newly-created risk has no residual_score until the evaluator
+// backfills it. The old cell rendered a bare "—", which reads as
+// broken. We render an explicit "Pending evaluation" label (with a
+// tooltip) instead so the empty state reads as "awaiting the
+// evaluator", not "missing data". The review-due date is not part of
+// this: since #2059 it is set when the risk is created.
 const PENDING_EVAL_LABEL = "Pending evaluation";
 const PENDING_EVAL_TOOLTIP =
-  "Awaiting the risk evaluator. Inherent severity computes immediately; the residual and review-due date are backfilled once controls are evaluated.";
+  "Awaiting the risk evaluator. Inherent severity computes immediately; the residual is backfilled once controls are evaluated.";
 
 const TREATMENT_OPTIONS: { value: string; label: string }[] = [
   { value: ALL, label: "All treatments" },
@@ -672,22 +674,40 @@ function RisksPageInner() {
           onSort={updateSort}
         />
       ),
-      cell: (row) =>
-        // Slice 680 / ATLAS-029: an unset review-due date on a new risk is
-        // "Pending evaluation", not a bare "—". A real date renders as-is.
-        reviewDuePending(row.review_due_at) ? (
-          <span
-            className="text-xs italic text-muted-foreground"
-            title={PENDING_EVAL_TOOLTIP}
-            data-testid="risks-row-review-due-pending"
-          >
-            {PENDING_EVAL_LABEL}
+      cell: (row) => {
+        // #2059: every risk gets a review date at creation (created +
+        // the organisation cadence), so a missing one is a data gap and
+        // reads as "Not set". A past due day is marked Overdue.
+        if (reviewDuePending(row.review_due_at)) {
+          return (
+            <span
+              className="text-xs italic text-muted-foreground"
+              data-testid="risks-row-review-due-missing"
+            >
+              Not set
+            </span>
+          );
+        }
+        const overdue = reviewOverdue(row.review_due_at);
+        return (
+          <span className="inline-flex items-center gap-2">
+            <span
+              className="font-mono text-xs text-muted-foreground"
+              data-testid="risks-row-review-due"
+            >
+              {row.review_due_at!.slice(0, 10)}
+            </span>
+            {overdue ? (
+              <span
+                className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-50 text-red-700"
+                data-testid="risks-row-review-overdue"
+              >
+                Overdue
+              </span>
+            ) : null}
           </span>
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            {row.review_due_at!.slice(0, 10)}
-          </span>
-        ),
+        );
+      },
     },
     // Slice 185 (AC-2): explicit per-row "View in hierarchy" link
     // replaces the implicit row-click affordance. The link preserves

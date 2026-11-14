@@ -18,6 +18,7 @@ SELECT
     name,
     is_bootstrap_tenant,
     bundle_gate_mode,
+    risk_review_cadence_days,
     created_at,
     updated_at
 FROM tenants
@@ -48,6 +49,7 @@ RETURNING
     name,
     is_bootstrap_tenant,
     bundle_gate_mode,
+    risk_review_cadence_days,
     created_at,
     updated_at;
 
@@ -64,5 +66,23 @@ RETURNING
     name,
     is_bootstrap_tenant,
     bundle_gate_mode,
+    risk_review_cadence_days,
+    created_at,
+    updated_at;
+
+-- name: UpdateTenantRiskReviewCadence :one
+-- #2059: set the caller-tenant's risk review cadence in days. RLS gates this
+-- to the caller's own row; `tenants_risk_review_cadence_days_chk` bounds it
+-- to 1..3650 (defense in depth atop the handler's check). Existing risks keep
+-- their review dates: the cadence is read only when a risk is inserted.
+UPDATE tenants
+SET risk_review_cadence_days = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
+    risk_review_cadence_days,
     created_at,
     updated_at;

@@ -95,6 +95,11 @@ describe("rowsFromControls", () => {
       last_observed_at: null,
     });
   });
+  test("carries the demo mark; an omitted mark is a real control (#2043)", () => {
+    const [real, demo] = rowsFromControls([control(), control({ demo: true })]);
+    expect(real.demo).toBe(false);
+    expect(demo.demo).toBe(true);
+  });
   test("carries the anchor fit and note; an omitted fit is exact", () => {
     const [omitted, none] = rowsFromControls([
       control(),

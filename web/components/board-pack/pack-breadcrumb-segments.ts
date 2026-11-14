@@ -51,7 +51,7 @@ export type PackBreadcrumbSegment = {
  *
  * The current-location segment carries NO href (rendered as plain text);
  * this is the standard breadcrumb pattern and matches the mockup's
- * `text-slate-900 font-medium` styling for the trailing segment.
+ * `text-foreground font-medium` styling for the trailing segment.
  */
 export function packBreadcrumbSegments(
   periodEnd: string,

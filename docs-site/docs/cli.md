@@ -109,6 +109,10 @@ The bearer is printed exactly once, at issue time. `--kinds` empty means all
 evidence kinds; `--ttl` takes a Go duration (`24h`, `90m`) or whole days
 (`30d`), and `--ttl 0` (the default) means no expiry.
 
+These commands need an admin `--token`, and they act only in that
+credential's tenant: a `--tenant` naming another tenant is refused, and
+`rotate` or `revoke` of another tenant's key reports it as unknown.
+
 `credentials issue --reset-bootstrap --force` is the first-login recovery
 path — see [First-time login](troubleshooting/first-login.md). It mints a tenant admin key that expires (24h by default, `--ttl` up to `168h`) and refuses `--scope` and `--kinds`; revoke the key once you have signed in another way.
 

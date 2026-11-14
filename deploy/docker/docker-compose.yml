@@ -541,6 +541,8 @@ services:
       # one hostname. Override only when the browser must reach atlas at
       # a different origin than the web frontend.
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+      # #2062 — opt-in developer token sign-in on /login. Unset = off.
+      ATLAS_WEB_DEV_TOKEN_SIGNIN: ${ATLAS_WEB_DEV_TOKEN_SIGNIN:-}
     ports:
       - "${WEB_PORT:-3000}:3000"
     restart: unless-stopped
