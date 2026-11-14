@@ -30,6 +30,10 @@ const (
 // ActionApplicabilityUpdate is the workflow-log action for a decision change.
 const ActionApplicabilityUpdate = "applicability.update"
 
+// ActionApplicabilityCarryOver is the workflow-log action for a decision
+// copied from the prior framework version's revision (#1793).
+const ActionApplicabilityCarryOver = "applicability.carry_over"
+
 // constraintDecisionsFrozen is the constraint name the guard trigger raises
 // for a write on an activated or superseded revision.
 const constraintDecisionsFrozen = "framework_scope_applicability_frozen"
@@ -146,6 +150,10 @@ type DecisionInput struct {
 	Decision          string
 	Justification     string
 	ImplementationRef string
+
+	// carriedFrom is set only by CarryOverDecisions (#1793): the write is
+	// logged as applicability.carry_over and names its source.
+	carriedFrom *carrySource
 }
 
 // SetDecisions records several decisions on one scope revision as a single
@@ -249,7 +257,7 @@ func writeDecisions(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, bef
 		if aerr != nil {
 			return nil, before, fmt.Errorf("re-read framework_scope: %w", aerr)
 		}
-		if lerr := logDecisionChange(ctx, q, actor, before, after, prior, row); lerr != nil {
+		if lerr := logDecisionChange(ctx, q, actor, before, after, prior, row, it.carriedFrom); lerr != nil {
 			return nil, before, lerr
 		}
 		decs = append(decs, rowToDecision(row))
@@ -374,21 +382,27 @@ func listApplicability(ctx context.Context, q *dbx.Queries, tenantID, frameworkV
 // before/after images are the scope row snapshots (so a reset to draft shows
 // in from_state/to_state and the approval columns) with the decision under
 // an `applicability` key; before's decision is null when the requirement was
-// undecided.
-func logDecisionChange(ctx context.Context, q *dbx.Queries, actor string, before, after dbx.FrameworkScope, prior *dbx.FrameworkScopeApplicability, row dbx.FrameworkScopeApplicability) error {
-	beforeJSON, err := snapshotWithDecision(before, prior)
+// undecided. A carried-over decision (from non-nil) is logged as
+// applicability.carry_over with its source under `carried_over_from` in
+// after.
+func logDecisionChange(ctx context.Context, q *dbx.Queries, actor string, before, after dbx.FrameworkScope, prior *dbx.FrameworkScopeApplicability, row dbx.FrameworkScopeApplicability, from *carrySource) error {
+	beforeJSON, err := snapshotWithDecision(before, prior, nil)
 	if err != nil {
 		return err
 	}
-	afterJSON, err := snapshotWithDecision(after, &row)
+	afterJSON, err := snapshotWithDecision(after, &row, from)
 	if err != nil {
 		return err
+	}
+	action := ActionApplicabilityUpdate
+	if from != nil {
+		action = ActionApplicabilityCarryOver
 	}
 	fromState := before.State
 	if err := q.InsertFrameworkScopeWorkflowLog(ctx, dbx.InsertFrameworkScopeWorkflowLogParams{
 		TenantID:         after.TenantID,
 		FrameworkScopeID: after.ID,
-		Action:           ActionApplicabilityUpdate,
+		Action:           action,
 		FromState:        &fromState,
 		ToState:          after.State,
 		Before:           beforeJSON,
@@ -400,7 +414,7 @@ func logDecisionChange(ctx context.Context, q *dbx.Queries, actor string, before
 	return nil
 }
 
-func snapshotWithDecision(sc dbx.FrameworkScope, d *dbx.FrameworkScopeApplicability) ([]byte, error) {
+func snapshotWithDecision(sc dbx.FrameworkScope, d *dbx.FrameworkScopeApplicability, from *carrySource) ([]byte, error) {
 	base, err := snapshot(sc)
 	if err != nil {
 		return nil, err
@@ -418,6 +432,9 @@ func snapshotWithDecision(sc dbx.FrameworkScope, d *dbx.FrameworkScopeApplicabil
 			"justification":            d.Justification,
 			"implementation_ref":       d.ImplementationRef,
 		}
+	}
+	if from != nil {
+		m["carried_over_from"] = from
 	}
 	b, err := json.Marshal(m)
 	if err != nil {
