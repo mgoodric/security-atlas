@@ -96,8 +96,8 @@ func (h *EmailChannelHandler) Put(w http.ResponseWriter, r *http.Request) {
 // parseCredIDs resolves the (tenant, user) UUIDs from the credential,
 // writing the appropriate error response on failure.
 func parseCredIDs(w http.ResponseWriter, cred credstore.Credential) (tenantUUID, userUUID uuid.UUID, ok bool) {
-	u, err := callerUserUUID(cred)
-	if err != nil {
+	u, ok := credstore.CallerUserID(cred)
+	if !ok {
 		httpresp.WriteError(w, http.StatusNotFound, "no email channel for this credential")
 		return uuid.Nil, uuid.Nil, false
 	}

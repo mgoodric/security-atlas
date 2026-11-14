@@ -459,3 +459,45 @@ func TestSavedViews_DuplicateName_409(t *testing.T) {
 		t.Fatalf("duplicate name: expected 409; got %d body=%s", status, raw)
 	}
 }
+
+// #2183: a local-login / PKCE / device-grant JWT bridges Subject
+// "user:<uuid>" into cred.UserID. Owner assignment records that user as the
+// actor and saved views scope to it, through credstore.CallerUserID.
+func TestOwnerAssignAndSavedViews_UserPrefixedSubject(t *testing.T) {
+	migrate := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := dbtest.SeedTenant(t, migrate, ownerAssignCleanupTables()...)
+
+	owner := seedUser(t, migrate, tenant)
+	actor := seedUser(t, migrate, tenant)
+	c1 := seedControl(t, migrate, tenant)
+	ts := ownerAssignServer(t, app, tenant, "user:"+actor.String())
+
+	status, raw := postJSON(t, ts.URL+"/v1/controls:bulk-assign-owner",
+		fmt.Sprintf(`{"owner_user_id":%q,"control_ids":[%q]}`, owner, c1))
+	if status != http.StatusOK {
+		t.Fatalf("bulk-assign: expected 200; got %d body=%s", status, raw)
+	}
+	var auditActor uuid.UUID
+	if err := migrate.QueryRow(context.Background(),
+		`SELECT actor_user_id FROM control_owner_assignment_audit_log WHERE tenant_id=$1`,
+		tenant).Scan(&auditActor); err != nil {
+		t.Fatalf("read audit row: %v", err)
+	}
+	if auditActor != actor {
+		t.Fatalf("audit actor = %s; want the subject's user %s", auditActor, actor)
+	}
+
+	status, raw = postJSON(t, ts.URL+"/v1/saved-views", `{"name":"2183 view","filters":{"family":"IAC"}}`)
+	if status != http.StatusCreated {
+		t.Fatalf("create view: expected 201; got %d body=%s", status, raw)
+	}
+	var viewUser uuid.UUID
+	if err := migrate.QueryRow(context.Background(),
+		`SELECT user_id FROM saved_views WHERE tenant_id=$1`, tenant).Scan(&viewUser); err != nil {
+		t.Fatalf("read saved view: %v", err)
+	}
+	if viewUser != actor {
+		t.Fatalf("saved view user_id = %s; want the subject's user %s", viewUser, actor)
+	}
+}

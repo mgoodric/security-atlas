@@ -416,22 +416,3 @@ func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	}
 	return true
 }
-
-// credentialFromContext is the slice-478 thin re-export of
-// authctx.CredentialFromContext, used by the assign-path actor resolution
-// fallback for the within-tenant tenant-admin legacy-bearer case.
-func credentialFromContext(ctx context.Context) (cred credentialView, ok bool) {
-	c, present := authctx.CredentialFromContext(ctx)
-	if !present {
-		return credentialView{}, false
-	}
-	return credentialView{UserID: c.UserID, TenantID: c.TenantID, IsAdmin: c.IsAdmin}, true
-}
-
-// credentialView is the minimal slice of credstore.Credential the slice-478
-// assign path consumes — kept local so assign.go need not import credstore.
-type credentialView struct {
-	UserID   string
-	TenantID string
-	IsAdmin  bool
-}

@@ -18,6 +18,7 @@ import (
 
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -447,14 +448,11 @@ func (h *Handler) resolveActor(ctx context.Context) (uuid.UUID, uuid.UUID, error
 		}
 	}
 	if actorID == uuid.Nil {
-		// Legacy bearer path — try the credstore credential's UserID.
-		// jwtmw also populates this with the "user:<uuid>" Subject, so
-		// strip the prefix here too.
+		// Legacy bearer path — the credstore credential's user, which
+		// resolves a "user:<uuid>" JWT Subject and a user-bound key alike.
 		cred, _ := authctx.CredentialFromContext(ctx)
-		if cred.UserID != "" {
-			if u, err := uuid.Parse(subjectUserID(cred.UserID)); err == nil {
-				actorID = u
-			}
+		if u, ok := credstore.CallerUserID(cred); ok {
+			actorID = u
 		}
 	}
 	if actorID == uuid.Nil {

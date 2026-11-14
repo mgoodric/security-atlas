@@ -22,7 +22,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
-	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -132,8 +131,8 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	userUUID, err := callerUserUUID(cred)
-	if err != nil {
+	userUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		// API-key / bootstrap credentials with no users row cannot PATCH a
 		// profile they don't have. Honest 404.
 		httpresp.WriteError(w, http.StatusNotFound, "no profile for this credential")
@@ -256,7 +255,7 @@ func (h *ProfileHandler) buildProfile(ctx context.Context, cred credstore.Creden
 	if cred.IsAdmin {
 		role = "admin"
 	}
-	if u, err := callerUserUUID(cred); err == nil {
+	if u, ok := credstore.CallerUserID(cred); ok {
 		tenantUUID, terr := uuid.Parse(cred.TenantID)
 		if terr == nil {
 			usr, uerr := h.users.GetByID(ctx, tenantUUID, u)
@@ -282,16 +281,6 @@ func (h *ProfileHandler) buildProfile(ctx context.Context, cred credstore.Creden
 		IsAdmin:     cred.IsAdmin,
 		OwnerRoles:  append([]string(nil), cred.OwnerRoles...),
 	}, nil
-}
-
-// callerUserUUID resolves the users.id behind cred. A JWT session (local
-// login, PKCE, device grant) carries cred.UserID = "user:<uuid>", so the
-// prefix is stripped via jwtmw.SubjectUserID before the parse (#2055). Machine
-// tokens ("oauth_client:<id>") still fail to parse, and API-key / bootstrap
-// credentials, whose UserID is their own credential id, find no users row; both
-// keep the credential profile. Authorization does not read this value.
-func callerUserUUID(cred credstore.Credential) (uuid.UUID, error) {
-	return uuid.Parse(jwtmw.SubjectUserID(cred.UserID))
 }
 
 func profileWireFrom(u users.User, cred credstore.Credential) profileWire {

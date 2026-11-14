@@ -41,6 +41,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/controls"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
@@ -430,7 +431,7 @@ func actorFromContext(ctx context.Context) uuid.UUID {
 		}
 	}
 	if cred, ok := authctx.CredentialFromContext(ctx); ok {
-		if u, err := uuid.Parse(cred.UserID); err == nil {
+		if u, ok := credstore.CallerUserID(cred); ok {
 			return u
 		}
 	}

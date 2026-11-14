@@ -802,3 +802,46 @@ func TestDeriveAckToken_DayBuckets(t *testing.T) {
 		t.Fatalf("cross-day tokens equal: %s == %s", a, c)
 	}
 }
+
+// #2183: a local-login / PKCE / device-grant JWT bridges Subject
+// "user:<uuid>" into cred.UserID. /v1/me/acknowledgments read that as a
+// non-user and returned an empty list, and acknowledge failed its raw parse.
+// Both now resolve the user through credstore.CallerUserID.
+func TestAcknowledge_UserPrefixedSubject(t *testing.T) {
+	s := setup(t)
+	policyID := createAndPublishPolicy(t, s, "2183 Policy", "1", []string{s.requiredRole}, s.controlID)
+	user := seedUser(t, s.admin, s.tenant, "user2183@test")
+	seedAPIKeyForUser(t, s.admin, s.tenant, user, false, false, []string{s.requiredRole})
+	claims := testjwt.OwnerFor(uuid.MustParse(s.tenant), []string{s.requiredRole})
+	claims.Subject = "user:" + user.String()
+	bearer := s.apiServer.IssueTestJWT(t, claims)
+
+	pendingCount := func() int {
+		raw := s.getJSON(t, "/v1/me/acknowledgments", bearer, http.StatusOK)
+		var resp struct {
+			Count int `json:"count"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("unmarshal pending: %v body=%s", err, raw)
+		}
+		return resp.Count
+	}
+	if got := pendingCount(); got != 1 {
+		t.Fatalf("pending before ack = %d; want 1", got)
+	}
+
+	_ = s.postJSON(t, "/v1/policies/"+policyID+"/acknowledge", []byte("{}"), bearer, http.StatusCreated)
+
+	var ackUser uuid.UUID
+	if err := s.admin.QueryRow(context.Background(),
+		`SELECT user_id FROM policy_acknowledgments WHERE tenant_id = $1`,
+		s.tenant).Scan(&ackUser); err != nil {
+		t.Fatalf("read ack row: %v", err)
+	}
+	if ackUser != user {
+		t.Errorf("ack user_id = %s; want the subject's user %s", ackUser, user)
+	}
+	if got := pendingCount(); got != 0 {
+		t.Errorf("pending after ack = %d; want 0", got)
+	}
+}

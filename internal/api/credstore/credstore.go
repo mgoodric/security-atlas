@@ -687,14 +687,39 @@ func (s *Store) authenticateLocked(token string) (Credential, UserGate, bool, er
 // issued by a user carries the bare uuid; a bootstrap or machine
 // credential carries neither and records no minter.
 func MinterUserID(c Credential) string {
+	u, ok := CallerUserID(c)
+	if !ok {
+		return ""
+	}
+	return u.String()
+}
+
+// CallerUserID returns the users(id) behind the caller c, and false when c
+// is not a user. It is the one place code turns cred.UserID into a users(id)
+// (#2183); never parse cred.UserID raw (TestNoRawCredUserIDParse guards it).
+//
+//   - A JWT session (local login, PKCE, device grant) carries "user:<uuid>":
+//     the prefix is stripped and the uuid resolves.
+//   - A key issued to a user carries that user's bare uuid: it resolves.
+//   - An unbound key (UserID == its own "key_..." ID), the bootstrap admin
+//     ("bootstrap-admin") and a machine token ("oauth_client:<id>") are not
+//     users and never resolve, even when the remainder happens to parse.
+//
+// Authorization never reads this value: resolveRoles and authz.BuildInput
+// keep the raw cred.UserID.
+func CallerUserID(c Credential) (uuid.UUID, bool) {
+	if c.UserID == "" || c.UserID == c.ID {
+		return uuid.Nil, false
+	}
 	id := strings.TrimPrefix(c.UserID, "user:")
 	if id == c.ID {
-		return ""
+		return uuid.Nil, false
 	}
-	if _, err := uuid.Parse(id); err != nil {
-		return ""
+	u, err := uuid.Parse(id)
+	if err != nil || u == uuid.Nil {
+		return uuid.Nil, false
 	}
-	return id
+	return u, true
 }
 
 // OwnedByUser reports whether c belongs to a user: its UserID is a users(id)
