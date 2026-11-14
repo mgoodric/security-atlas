@@ -3693,6 +3693,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/me/tenancy:
+    get:
+      summary: GET /v1/me/tenancy
+      tags: [me]
+      operationId: get-v1-me-tenancy
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/me/tenants:
     get:
       summary: GET /v1/me/tenants

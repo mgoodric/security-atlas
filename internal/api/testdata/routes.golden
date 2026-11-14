@@ -134,6 +134,7 @@ GET /v1/me/notifications
 GET /v1/me/preferences
 GET /v1/me/sessions
 GET /v1/me/slack-channel
+GET /v1/me/tenancy
 GET /v1/me/tenants
 GET /v1/me/webhook-channel
 GET /v1/metrics

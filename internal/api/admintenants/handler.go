@@ -70,6 +70,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -124,6 +125,12 @@ const (
 	creatorJoinsAsAdmin = "admin"
 	creatorJoinsAsNone  = "none"
 
+	// AllowMultiTenantEnvVar is the deployment setting that opts an
+	// install into multi-tenant (ADR 0023 decision 4). Without it, Create
+	// refuses to add a tenant once one exists. It gates creation only:
+	// an install that already holds several tenants keeps working.
+	AllowMultiTenantEnvVar = "ATLAS_ALLOW_MULTI_TENANT"
+
 	// defaultDimensionName is the canonical builtin first scope
 	// dimension. Mirrors deploy/docker/bootstrap/seed.sql.
 	defaultDimensionName = "environment"
@@ -158,10 +165,18 @@ var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 //     POST create handler for the cross-tenant transaction
 //     (slice-198 D3 pattern).
 type Handler struct {
-	pool     *pgxpool.Pool
-	authPool *pgxpool.Pool
-	clock    func() time.Time
-	limit    int
+	pool             *pgxpool.Pool
+	authPool         *pgxpool.Pool
+	clock            func() time.Time
+	limit            int
+	allowMultiTenant func() bool
+}
+
+// DefaultAllowMultiTenant reads ATLAS_ALLOW_MULTI_TENANT. Only the exact
+// string "true" opts in, matching the ATLAS_ENABLE_DEMO_SEED gate, so a
+// stray "1" or "yes" does not make an install multi-tenant.
+func DefaultAllowMultiTenant() bool {
+	return os.Getenv(AllowMultiTenantEnvVar) == "true"
 }
 
 // New constructs a Handler. authPool MAY be nil — in that case POST
@@ -169,11 +184,18 @@ type Handler struct {
 // the slice-198 NewStoreWithAuthPool follows the same pattern).
 func New(pool, authPool *pgxpool.Pool) *Handler {
 	return &Handler{
-		pool:     pool,
-		authPool: authPool,
-		clock:    time.Now,
-		limit:    DefaultRateLimitPerDay,
+		pool:             pool,
+		authPool:         authPool,
+		clock:            time.Now,
+		limit:            DefaultRateLimitPerDay,
+		allowMultiTenant: DefaultAllowMultiTenant,
 	}
+}
+
+// WithAllowMultiTenant overrides the multi-tenant opt-in. Test-only.
+func (h *Handler) WithAllowMultiTenant(fn func() bool) *Handler {
+	h.allowMultiTenant = fn
+	return h
 }
 
 // WithLimit overrides the rate-limit cap. Test-only.
@@ -306,6 +328,11 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 // super_admin_audit_log count over the rolling window (P0-CT-2). 429
 // with Retry-After when exceeded.
 //
+// Multi-tenant opt-in (ADR 0023, #1763): once a tenant exists, a
+// further one is created only when ATLAS_ALLOW_MULTI_TENANT=true. 403
+// otherwise. The setting gates creation only; List and every other
+// surface ignore it.
+//
 // Returns 200 OK with the new tenant payload on success.
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if !requireSuperAdmin(w, r) {
@@ -314,6 +341,22 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	if h.authPool == nil {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "tenant management unavailable: no auth pool")
 		return
+	}
+	if !h.allowMultiTenant() {
+		// The all-zeros row is not a tenant (#1885), as in
+		// platform.Status.TenantCount.
+		var existing int
+		if err := h.authPool.QueryRow(r.Context(),
+			`SELECT count(*) FROM tenants WHERE id <> $1`, uuid.Nil,
+		).Scan(&existing); err != nil {
+			httperr.WriteInternal(w, r, "count tenants", err)
+			return
+		}
+		if existing > 0 {
+			httpresp.WriteError(w, http.StatusForbidden,
+				"multi-tenant is not enabled on this install: set "+AllowMultiTenantEnvVar+"=true to create another tenant")
+			return
+		}
 	}
 
 	var req createRequest
