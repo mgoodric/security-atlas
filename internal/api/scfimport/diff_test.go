@@ -95,6 +95,8 @@ func TestDiffRelease_LegacySCFID(t *testing.T) {
 		{"stored value, incoming empty", &stored, "", false},
 		{"same value", &stored, "IAC-06.1", false},
 		{"different value", &other, "IAC-06.1", true},
+		{"same value with surrounding whitespace", &stored, "  IAC-06.1\t", false},
+		{"blank incoming is absent", &other, "   ", false},
 	} {
 		row := dbx.ScfAnchor{ScfID: "IAC-06", Family: "IAC", Title: "MFA", LegacyScfID: tc.stored}
 		in := Control{SCFID: "IAC-06", Family: "IAC", Title: "MFA", LegacySCFID: tc.incoming}

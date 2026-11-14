@@ -32,7 +32,7 @@ func legacyCatalog() *scfimport.Catalog {
 		ReleaseDate:    "2026-11-01",
 		Controls: []scfimport.Control{
 			{SCFID: "IAC-06", Family: "IAC", Title: "Multi-Factor Authentication (MFA)", Description: "MFA.", LegacySCFID: "IAC-06.1"},
-			{SCFID: "IAC-07", Family: "IAC", Title: "User Provisioning & Lifecycle", Description: "Provisioning."},
+			{SCFID: "IAC-07", Family: "IAC", Title: "User Provisioning & Lifecycle", Description: "Provisioning.", LegacySCFID: "  "},
 		},
 	}
 }

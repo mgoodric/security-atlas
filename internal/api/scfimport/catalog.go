@@ -56,8 +56,9 @@ type Control struct {
 	Description string     `json:"description"`
 	Subtopics   []Subtopic `json:"subtopics,omitempty"`
 	// LegacySCFID is the anchor's code in the previous SCF release (the
-	// workbook's "Legacy SCF #" column). Optional: empty means the catalog
-	// does not say, and the anchor stores NULL.
+	// workbook's "Legacy SCF #" column). Optional: surrounding whitespace is
+	// trimmed, and an empty or blank value means the catalog does not say,
+	// so the anchor stores NULL.
 	LegacySCFID string `json:"legacy_scf_id,omitempty"`
 }
 
@@ -321,7 +322,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cat *Catalog) (Report, error) 
 			Title:              ctl.Title,
 			Description:        ctl.Description,
 			Subtopics:          subtopics,
-			LegacyScfID:        optionalText(ctl.LegacySCFID),
+			LegacyScfID:        optionalText(legacySCFID(ctl)),
 		}); err != nil {
 			return Report{}, fmt.Errorf("scfimport: insert anchor %s: %w", ctl.SCFID, err)
 		}
@@ -355,7 +356,14 @@ func anchorContentEqual(row dbx.ScfAnchor, ctl Control) bool {
 // legacy_scf_id that differs from one already stored. An incoming empty
 // value, or a stored NULL, is never a conflict.
 func legacyConflicts(row dbx.ScfAnchor, ctl Control) bool {
-	return ctl.LegacySCFID != "" && row.LegacyScfID != nil && *row.LegacyScfID != ctl.LegacySCFID
+	id := legacySCFID(ctl)
+	return id != "" && row.LegacyScfID != nil && *row.LegacyScfID != id
+}
+
+// legacySCFID is the control's legacy_scf_id with surrounding whitespace
+// removed; a blank value counts as absent.
+func legacySCFID(ctl Control) string {
+	return strings.TrimSpace(ctl.LegacySCFID)
 }
 
 // backfillLegacySCFIDs fills legacy_scf_id on stored anchors that have none
@@ -364,8 +372,8 @@ func legacyConflicts(row dbx.ScfAnchor, ctl Control) bool {
 func backfillLegacySCFIDs(ctx context.Context, q *dbx.Queries, stored []dbx.ScfAnchor, incoming []Control) (int, error) {
 	legacy := make(map[string]string, len(incoming))
 	for _, ctl := range incoming {
-		if ctl.LegacySCFID != "" {
-			legacy[ctl.SCFID] = ctl.LegacySCFID
+		if id := legacySCFID(ctl); id != "" {
+			legacy[ctl.SCFID] = id
 		}
 	}
 	filled := 0
