@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // TestRunResetBootstrap_SendsOperatorTokenAsBearer pins #1851/#1885: the
@@ -87,6 +88,42 @@ func TestDeriveHTTPEndpoint(t *testing.T) {
 		got := deriveHTTPEndpoint(c.in)
 		if got != c.want {
 			t.Errorf("deriveHTTPEndpoint(%q) = %q; want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// #2100: --ttl accepts a whole number of days, which the help text and
+// cli.md have always shown (30d) but time.ParseDuration refuses.
+func TestParseDurationDays(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		in      string
+		want    time.Duration
+		wantErr bool
+	}{
+		{in: "0", want: 0},
+		{in: "", want: 0},
+		{in: "24h", want: 24 * time.Hour},
+		{in: "90m", want: 90 * time.Minute},
+		{in: "30d", want: 30 * 24 * time.Hour},
+		{in: "1d", want: 24 * time.Hour},
+		{in: "d", wantErr: true},
+		{in: "1.5d", wantErr: true},
+		{in: "-1d", wantErr: true},
+		{in: "1h30d", wantErr: true},
+		{in: "999999999999d", wantErr: true},
+		{in: "30x", wantErr: true},
+	}
+	for _, tc := range cases {
+		got, err := parseDuration(tc.in)
+		if tc.wantErr {
+			if err == nil {
+				t.Errorf("parseDuration(%q) = %v, want an error", tc.in, got)
+			}
+			continue
+		}
+		if err != nil || got != tc.want {
+			t.Errorf("parseDuration(%q) = %v, %v; want %v", tc.in, got, err, tc.want)
 		}
 	}
 }
