@@ -116,3 +116,6 @@ web/e2e-audit/reports/
 
 ### Slice 057 — README capture pipeline bundled artifact
 web/scripts/.capture-readme-screenshots.bundled.js
+
+### Local scratch Postgres (scripts/scratch-pg.sh)
+.scratch-pg/
