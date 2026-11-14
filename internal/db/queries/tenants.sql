@@ -18,6 +18,7 @@ SELECT
     name,
     is_bootstrap_tenant,
     bundle_gate_mode,
+    risk_review_cadence_days,
     created_at,
     updated_at
 FROM tenants
@@ -30,6 +31,15 @@ WHERE id = $1;
 -- exists for the caller (e.g. a bare-UUID tenant that predates slice 144) —
 -- the resolver maps that absence to the 'strict' default.
 SELECT bundle_gate_mode
+FROM tenants
+WHERE id = $1;
+
+-- name: GetTenantVendorInitialReviewDays :one
+-- #2061: the caller-tenant's vendor initial-review window in days. RLS scopes
+-- the row to the current tenant. Returns ErrNoRows when no tenants row exists
+-- (bare-UUID tenant); the vendor store maps that to the 30-day default, the
+-- same COALESCE the vendor overdue queries use.
+SELECT vendor_initial_review_days
 FROM tenants
 WHERE id = $1;
 
@@ -48,6 +58,7 @@ RETURNING
     name,
     is_bootstrap_tenant,
     bundle_gate_mode,
+    risk_review_cadence_days,
     created_at,
     updated_at;
 
@@ -64,5 +75,23 @@ RETURNING
     name,
     is_bootstrap_tenant,
     bundle_gate_mode,
+    risk_review_cadence_days,
+    created_at,
+    updated_at;
+
+-- name: UpdateTenantRiskReviewCadence :one
+-- #2059: set the caller-tenant's risk review cadence in days. RLS gates this
+-- to the caller's own row; `tenants_risk_review_cadence_days_chk` bounds it
+-- to 1..3650 (defense in depth atop the handler's check). Existing risks keep
+-- their review dates: the cadence is read only when a risk is inserted.
+UPDATE tenants
+SET risk_review_cadence_days = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
+    risk_review_cadence_days,
     created_at,
     updated_at;

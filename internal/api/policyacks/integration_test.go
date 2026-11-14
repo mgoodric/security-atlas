@@ -248,7 +248,7 @@ func createAndPublishPolicy(t *testing.T, s setupResult, title, version string, 
 	id := s.postJSON(t, "/v1/policies", createBody, s.adminBear, http.StatusCreated)
 	// submit -> approve -> publish.
 	s.patchJSON(t, "/v1/policies/"+id+"/submit", nil, s.adminBear, http.StatusOK)
-	s.patchJSON(t, "/v1/policies/"+id+"/approve", nil, s.adminBear, http.StatusOK)
+	s.patchJSON(t, "/v1/policies/"+id+"/approve", nil, s.approverBear, http.StatusOK)
 	pubBody, _ := json.Marshal(map[string]any{"new_version": version})
 	publishedID := s.postJSON(t, "/v1/policies/"+id+"/publish", pubBody, s.adminBear, http.StatusCreated)
 	if publishedID == "" {
@@ -270,6 +270,7 @@ type setupResult struct {
 	tenant       string
 	controlID    uuid.UUID
 	adminBear    string
+	approverBear string // a second person; approves what the admin submits
 	adminUser    uuid.UUID
 	requiredRole string
 }
@@ -368,6 +369,7 @@ func setup(t *testing.T) setupResult {
 	adminClaims := testjwt.AdminFor(uuid.MustParse(tenant))
 	adminClaims.Subject = adminUser.String()
 	adminBearer := apiServer.IssueTestJWT(t, adminClaims)
+	approverBearer := issueSecondApprover(t, apiServer, tenant)
 
 	h := apiServer.HTTPHandlerForTests()
 	if h == nil {
@@ -385,9 +387,20 @@ func setup(t *testing.T) setupResult {
 		tenant:       tenant,
 		controlID:    controlID,
 		adminBear:    adminBearer,
+		approverBear: approverBearer,
 		adminUser:    adminUser,
 		requiredRole: "employee",
 	}
+}
+
+// issueSecondApprover mints an approver bearer for a person other than the
+// admin, because the submitter cannot approve their own policy (#1807). It
+// seeds no users row, so acknowledgment-rate denominators are unchanged.
+func issueSecondApprover(t *testing.T, apiServer *api.Server, tenant string) string {
+	t.Helper()
+	claims := testjwt.AdminFor(uuid.MustParse(tenant))
+	claims.Subject = uuid.NewString()
+	return apiServer.IssueTestJWT(t, claims)
 }
 
 // makeUserAndBearer seeds a users row + an api_keys row, then mints a
@@ -800,5 +813,48 @@ func TestDeriveAckToken_DayBuckets(t *testing.T) {
 	}
 	if a == c {
 		t.Fatalf("cross-day tokens equal: %s == %s", a, c)
+	}
+}
+
+// #2183: a local-login / PKCE / device-grant JWT bridges Subject
+// "user:<uuid>" into cred.UserID. /v1/me/acknowledgments read that as a
+// non-user and returned an empty list, and acknowledge failed its raw parse.
+// Both now resolve the user through credstore.CallerUserID.
+func TestAcknowledge_UserPrefixedSubject(t *testing.T) {
+	s := setup(t)
+	policyID := createAndPublishPolicy(t, s, "2183 Policy", "1", []string{s.requiredRole}, s.controlID)
+	user := seedUser(t, s.admin, s.tenant, "user2183@test")
+	seedAPIKeyForUser(t, s.admin, s.tenant, user, false, false, []string{s.requiredRole})
+	claims := testjwt.OwnerFor(uuid.MustParse(s.tenant), []string{s.requiredRole})
+	claims.Subject = "user:" + user.String()
+	bearer := s.apiServer.IssueTestJWT(t, claims)
+
+	pendingCount := func() int {
+		raw := s.getJSON(t, "/v1/me/acknowledgments", bearer, http.StatusOK)
+		var resp struct {
+			Count int `json:"count"`
+		}
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			t.Fatalf("unmarshal pending: %v body=%s", err, raw)
+		}
+		return resp.Count
+	}
+	if got := pendingCount(); got != 1 {
+		t.Fatalf("pending before ack = %d; want 1", got)
+	}
+
+	_ = s.postJSON(t, "/v1/policies/"+policyID+"/acknowledge", []byte("{}"), bearer, http.StatusCreated)
+
+	var ackUser uuid.UUID
+	if err := s.admin.QueryRow(context.Background(),
+		`SELECT user_id FROM policy_acknowledgments WHERE tenant_id = $1`,
+		s.tenant).Scan(&ackUser); err != nil {
+		t.Fatalf("read ack row: %v", err)
+	}
+	if ackUser != user {
+		t.Errorf("ack user_id = %s; want the subject's user %s", ackUser, user)
+	}
+	if got := pendingCount(); got != 0 {
+		t.Errorf("pending after ack = %d; want 0", got)
 	}
 }

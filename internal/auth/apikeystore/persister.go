@@ -227,7 +227,7 @@ func (p *Persister) insertRow(ctx context.Context, q *dbx.Queries, rec credstore
 	// that parses as a bare uuid (the slice-034 OIDC issue path) is a real
 	// users(id) and rides in issued_by so it round-trips too.
 	var issuedBy pgtype.UUID
-	if u, uerr := uuid.Parse(rec.Cred.UserID); uerr == nil {
+	if u, ok := credstore.CallerUserID(rec.Cred); ok {
 		issuedBy = pgtype.UUID{Bytes: u, Valid: true}
 	}
 	var purpose *string

@@ -216,10 +216,9 @@ type ApplyInput struct {
 	ActorUserID uuid.UUID
 
 	// ActorTenantID is the actor's session tenant_id — written into
-	// super_admin_audit_log.actor_tenant_id + me_audit_log.tenant_id.
-	// May be uuid.Nil when called from a non-tenant-bound context (the
-	// audit-log row then anchors to the new demo tenant; see comment
-	// inside writeAuditLog).
+	// super_admin_audit_log.actor_tenant_id only. The me_audit_log mark
+	// always anchors to the demo tenant (#2043; see writeAuditLogRow).
+	// May be uuid.Nil when called from a non-tenant-bound context.
 	ActorTenantID uuid.UUID
 }
 
@@ -661,19 +660,28 @@ func (s *Seeder) lookupTenantBySlug(ctx context.Context, slug string) (*uuid.UUI
 	return &id, nil
 }
 
-// tenantWasSeeded returns true if at least one me_audit_log row on the
-// target tenant carries a `demo_seed_v` key in its payload. Reads via
-// the auth pool.
+// tenantWasSeeded reports whether the tenant is a whole demo tenant: its
+// me_audit_log holds a demo_seed_apply or demo_seed_teardown mark whose
+// payload names the tenant's own slug, and the mark is not an in-place one.
+// Teardown deletes a tenant only when this is true. Reads via the auth pool.
+//
+// The slug match is load-bearing (#2043). Before #2043 the mark was written
+// to the actor's tenant, so a demo button click left a mark naming the demo
+// slug inside the clicking admin's real organisation. Matching the slug keeps
+// those existing marks from qualifying the organisation for deletion.
 func (s *Seeder) tenantWasSeeded(ctx context.Context, tenantID uuid.UUID) (bool, error) {
 	var has bool
 	err := s.authPool.QueryRow(ctx, `
 		SELECT EXISTS (
-			SELECT 1 FROM me_audit_log
-			WHERE tenant_id = $1
-			  AND action IN ('demo_seed_apply', 'demo_seed_teardown')
+			SELECT 1
+			FROM me_audit_log m
+			JOIN tenants t ON t.id = m.tenant_id
+			WHERE m.tenant_id = $1
+			  AND m.action IN ('demo_seed_apply', 'demo_seed_teardown')
+			  AND m.after->>'slug' = t.slug
 			  -- An in-place seed's marks outlive its teardown (M2, #2039) and
 			  -- sit in a real organisation; they never mark a demo tenant.
-			  AND COALESCE(after->>'in_place', '') <> 'true'
+			  AND COALESCE(m.after->>'in_place', '') <> 'true'
 		)
 	`, tenantID).Scan(&has)
 	if err != nil {

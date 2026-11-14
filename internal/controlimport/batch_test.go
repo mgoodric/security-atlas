@@ -23,6 +23,12 @@ type fakeBatchStore struct {
 	mu     sync.Mutex
 	saved  []RowSuggestions
 	status string
+	// keywordVersions records the SCF version each keyword retrieval was
+	// pinned to; saveErr, when it returns non-nil for a status, fails that
+	// save; saveCalls records every save's status in order.
+	keywordVersions []string
+	saveErr         func(status string) error
+	saveCalls       []string
 }
 
 func (f *fakeBatchStore) ResolveFramework(_ context.Context, slug string) (FrameworkRef, bool, error) {
@@ -46,6 +52,9 @@ func (f *fakeBatchStore) CreateBatch(_ context.Context, b Batch) (Batch, error) 
 		b.Staged[i].ID = fmt.Sprintf("row-%d", b.Staged[i].RowNumber)
 	}
 	f.created = &b
+	f.mu.Lock()
+	f.status = b.SuggestionsStatus
+	f.mu.Unlock()
 	return b, nil
 }
 
@@ -53,7 +62,13 @@ func (f *fakeBatchStore) GetBatch(_ context.Context, id string) (Batch, error) {
 	if f.created == nil || f.created.ID != id {
 		return Batch{}, ErrBatchNotFound
 	}
-	return *f.created, nil
+	b := *f.created
+	f.mu.Lock()
+	if f.status != "" {
+		b.SuggestionsStatus = f.status
+	}
+	f.mu.Unlock()
+	return b, nil
 }
 
 func (f *fakeBatchStore) ResolveSCFRelease(context.Context) (SCFRelease, bool, error) {
@@ -78,7 +93,10 @@ func (f *fakeBatchStore) CrosswalkAnchors(_ context.Context, _ string, reqIDs []
 	return out, nil
 }
 
-func (f *fakeBatchStore) KeywordAnchors(_ context.Context, keywords []string) ([]AnchorCandidate, error) {
+func (f *fakeBatchStore) KeywordAnchors(_ context.Context, scfVersionID string, keywords []string) ([]AnchorCandidate, error) {
+	f.mu.Lock()
+	f.keywordVersions = append(f.keywordVersions, scfVersionID)
+	f.mu.Unlock()
 	if len(keywords) == 0 {
 		return nil, nil
 	}
@@ -88,6 +106,16 @@ func (f *fakeBatchStore) KeywordAnchors(_ context.Context, keywords []string) ([
 func (f *fakeBatchStore) SaveSuggestions(_ context.Context, _ string, rows []RowSuggestions, status string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.saveCalls = append(f.saveCalls, status)
+	// The Postgres store's guard: a ready save lands only on a pending batch.
+	if status == SuggestionsReady && f.status != "" && f.status != SuggestionsPending {
+		return ErrSuggestionsNoLongerPending
+	}
+	if f.saveErr != nil {
+		if err := f.saveErr(status); err != nil {
+			return err
+		}
+	}
 	f.saved = rows
 	f.status = status
 	return nil

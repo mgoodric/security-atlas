@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/identity"
 )
 
 // ErrUnknownKey indicates a lookup or operation referenced a key that
@@ -59,6 +61,9 @@ type Credential struct {
 	// it is tenant-scoped: an approver for tenant A cannot approve
 	// scopes for tenant B. IsAdmin implies IsApprover (admins can do
 	// anything an approver can) but the converse is not true.
+	//
+	// Policy approval also requires a person (#1807): a credential bound
+	// to no user (MinterUserID == "") holding IsApprover is refused there.
 	//
 	// In v1 the approver role is minted via IssueApprover. Slice 035
 	// will graduate this to full OPA-driven RBAC; until then the
@@ -554,6 +559,19 @@ func (s *Store) Revoke(id string) error {
 	return nil
 }
 
+// TenantOf reports the tenant of the credential with id, in any state.
+// The gRPC admin service uses it to keep Rotate and Revoke inside the
+// caller's tenant (#2167).
+func (s *Store) TenantOf(id string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	r, ok := s.byID[id]
+	if !ok {
+		return "", false
+	}
+	return r.cred.TenantID, true
+}
+
 // RevokePurpose revokes every live credential, in any tenant, marked with
 // purpose, except the one whose id is except (empty spares none). It
 // matches on the marker and the id only, never on a bearer. Returns the
@@ -687,14 +705,35 @@ func (s *Store) authenticateLocked(token string) (Credential, UserGate, bool, er
 // issued by a user carries the bare uuid; a bootstrap or machine
 // credential carries neither and records no minter.
 func MinterUserID(c Credential) string {
-	id := strings.TrimPrefix(c.UserID, "user:")
-	if id == c.ID {
+	u, ok := CallerUserID(c)
+	if !ok {
 		return ""
 	}
-	if _, err := uuid.Parse(id); err != nil {
-		return ""
+	return u.String()
+}
+
+// CallerUserID returns the users(id) behind the caller c, and false when c
+// is not a user. It is the one place code turns cred.UserID into a users(id)
+// (#2183); never parse cred.UserID raw (TestNoRawCredUserIDParse guards it).
+//
+//   - A JWT session (local login, PKCE, device grant) carries "user:<uuid>":
+//     the prefix is stripped and the uuid resolves.
+//   - A key issued to a user carries that user's bare uuid: it resolves.
+//   - An unbound key (UserID == its own "key_..." ID), the bootstrap admin
+//     ("bootstrap-admin") and a machine token ("oauth_client:<id>") are not
+//     users and never resolve, even when the remainder happens to parse.
+//
+// Authorization inputs never carry this value: resolveRoles and
+// authz.BuildInput keep the raw cred.UserID. The prefix rule itself lives in
+// identity.UserID, shared with the auditor attrs resolver.
+func CallerUserID(c Credential) (uuid.UUID, bool) {
+	if c.UserID == "" || c.UserID == c.ID {
+		return uuid.Nil, false
 	}
-	return id
+	if strings.TrimPrefix(c.UserID, "user:") == c.ID {
+		return uuid.Nil, false
+	}
+	return identity.UserID(c.UserID)
 }
 
 // OwnedByUser reports whether c belongs to a user: its UserID is a users(id)

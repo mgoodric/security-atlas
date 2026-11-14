@@ -40,6 +40,11 @@ export type EvidenceRecord = {
    * the column is NOT NULL on the table.
    */
   result: EvidenceResultEnum;
+  /**
+   * #2043 — true when the in-place demo seed added this record to the
+   * organisation. Omitted for real evidence.
+   */
+  demo?: boolean;
 };
 
 export type EvidenceListResponse = {

@@ -9,3 +9,7 @@ func (s *Seeder) WithBeforeRecordHook(fn func(ctx context.Context)) *Seeder {
 	s.beforeRecord = fn
 	return s
 }
+
+// IsTenantAuditTable exposes isTenantAuditTable to the integration tests,
+// so "exactly the pre-seed rows" excludes the same tables the seed does.
+var IsTenantAuditTable = isTenantAuditTable

@@ -204,8 +204,25 @@ type Vendor struct {
 	Status         CommercialStatus
 	BillingCadence *BillingCadence
 	ScopeCellIDs   []uuid.UUID
+	// FirstReviewDue is the UTC date a vendor that has never been reviewed
+	// is due its first review: CreatedAt's UTC date plus the tenant's
+	// initial-review window (#2061). Nil once LastReviewDate is set; the
+	// cadence applies from then on. The store populates it.
+	FirstReviewDue *time.Time
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+}
+
+// DefaultInitialReviewDays is the initial-review window for a tenant with no
+// `tenants` row. It matches the column DEFAULT and the COALESCE in the
+// vendor overdue queries.
+const DefaultInitialReviewDays = 30
+
+// FirstReviewDueDate returns the UTC date (midnight UTC) a vendor created at
+// createdAt is due its first review, given the tenant's initial-review window.
+func FirstReviewDueDate(createdAt time.Time, windowDays int) time.Time {
+	c := createdAt.UTC()
+	return time.Date(c.Year(), c.Month(), c.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, windowDays)
 }
 
 // IsOverdueAsOf computes the derived overdue flag without a database round
@@ -214,11 +231,18 @@ type Vendor struct {
 // API handler from re-fetching when it already has the row.
 //
 // Contract:
-//   - NULL last_review_date  => overdue (never reviewed counts as overdue)
+//   - NULL last_review_date => overdue only after the first-review due day:
+//     the UTC date of cutoff is later than FirstReviewDue (#2061). A
+//     never-reviewed vendor with no FirstReviewDue is never overdue.
 //   - otherwise: last_review + cadence < cutoff
 func (v Vendor) IsOverdueAsOf(cutoff time.Time) bool {
 	if v.LastReviewDate == nil {
-		return true
+		if v.FirstReviewDue == nil {
+			return false
+		}
+		c := cutoff.UTC()
+		cutoffDay := time.Date(c.Year(), c.Month(), c.Day(), 0, 0, 0, 0, time.UTC)
+		return v.FirstReviewDue.Before(cutoffDay)
 	}
 	due := v.LastReviewDate.Add(v.ReviewCadence.Duration())
 	return due.Before(cutoff)

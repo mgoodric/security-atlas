@@ -53,8 +53,12 @@ func (e *policyAttestationRateEvaluator) Compute(ctx context.Context) (Result, e
 	if err := e.pool.QueryRow(ctx, query).Scan(&expected, &got); err != nil {
 		return Result{}, fmt.Errorf("policy_attestation_rate: query: %w", err)
 	}
+	return policyAttestationRateResult(expected, got), nil
+}
+
+func policyAttestationRateResult(expected, got int) Result {
 	if expected == 0 {
-		return Result{Value: 0, Dimensions: map[string]string{"sample": "empty"}}, nil
+		return noData("No published policy, or no acknowledgments in the last 365 days", nil)
 	}
 	val := float64(got) / float64(expected)
 	if val > 1.0 {
@@ -66,5 +70,5 @@ func (e *policyAttestationRateEvaluator) Compute(ctx context.Context) (Result, e
 			"expected_acks": fmt.Sprintf("%d", expected),
 			"got_acks":      fmt.Sprintf("%d", got),
 		},
-	}, nil
+	}
 }

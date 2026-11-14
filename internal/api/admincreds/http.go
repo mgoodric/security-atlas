@@ -51,8 +51,12 @@ type IssueRequest struct {
 	AllowedKinds   []string `json:"allowed_kinds"`
 	TTLSeconds     int64    `json:"ttl_seconds"` // 0 = no expiry; at most maxTTLSeconds
 	IsAdmin        bool     `json:"is_admin"`
-	IsApprover     bool     `json:"is_approver"`
-	OwnerRoles     []string `json:"owner_roles"`
+	// IsApprover grants the approver role. A key minted here is a machine
+	// key bound to no user, and only people approve policies (#1807), so
+	// it cannot approve a policy even with this flag set; it still gates
+	// the approver-only routes that do not require a person.
+	IsApprover bool     `json:"is_approver"`
+	OwnerRoles []string `json:"owner_roles"`
 }
 
 // maxTTLSeconds is the largest ttl_seconds whose Duration does not

@@ -131,8 +131,8 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
 		return
 	}
-	userUUID, err := uuid.Parse(cred.UserID)
-	if err != nil {
+	userUUID, ok := credstore.CallerUserID(cred)
+	if !ok {
 		// API-key / bootstrap credentials with no users row cannot PATCH a
 		// profile they don't have. Honest 404.
 		httpresp.WriteError(w, http.StatusNotFound, "no profile for this credential")
@@ -255,7 +255,7 @@ func (h *ProfileHandler) buildProfile(ctx context.Context, cred credstore.Creden
 	if cred.IsAdmin {
 		role = "admin"
 	}
-	if u, err := uuid.Parse(cred.UserID); err == nil {
+	if u, ok := credstore.CallerUserID(cred); ok {
 		tenantUUID, terr := uuid.Parse(cred.TenantID)
 		if terr == nil {
 			usr, uerr := h.users.GetByID(ctx, tenantUUID, u)

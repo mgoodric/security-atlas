@@ -299,6 +299,10 @@ function VendorTable({ vendors }: { vendors: Vendor[] }) {
               <TableCell>
                 {v.overdue ? (
                   <Badge variant="destructive">overdue</Badge>
+                ) : v.first_review_due ? (
+                  <Badge variant="outline">
+                    First review due {v.first_review_due}
+                  </Badge>
                 ) : (
                   <Badge variant="secondary">on time</Badge>
                 )}

@@ -27,13 +27,14 @@ import (
 const tenantA = "11111111-1111-1111-1111-111111111111"
 
 // testHarness boots an in-process gRPC server on bufconn and returns it
-// with a pre-issued bearer token for tenantA.
+// with a pre-issued push bearer and an admin bearer for tenantA.
 type testHarness struct {
-	srv    *api.Server
-	dialer func(context.Context, string) (net.Conn, error)
-	bearer string
-	credID string
-	tenant string
+	srv         *api.Server
+	dialer      func(context.Context, string) (net.Conn, error)
+	bearer      string
+	adminBearer string
+	credID      string
+	tenant      string
 }
 
 func newHarness(t *testing.T) *testHarness {
@@ -52,12 +53,17 @@ func newHarness(t *testing.T) *testHarness {
 	if err != nil {
 		t.Fatalf("IssueBootstrapCredential: %v", err)
 	}
+	_, adminBearer, err := srv.IssueBootstrapAdminCredential(tenantA)
+	if err != nil {
+		t.Fatalf("IssueBootstrapAdminCredential: %v", err)
+	}
 	return &testHarness{
-		srv:    srv,
-		dialer: func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) },
-		bearer: bearer,
-		credID: cred.ID,
-		tenant: tenantA,
+		srv:         srv,
+		dialer:      func(ctx context.Context, _ string) (net.Conn, error) { return listener.DialContext(ctx) },
+		bearer:      bearer,
+		adminBearer: adminBearer,
+		credID:      cred.ID,
+		tenant:      tenantA,
 	}
 }
 
@@ -237,7 +243,7 @@ func TestCredentials_IssueReturnsTokenListDoesNot(t *testing.T) {
 	stub, done := h.adminClient(t)
 	defer done()
 
-	issued, err := stub.Issue(bearerCtx(h.bearer), &adminv1.IssueRequest{
+	issued, err := stub.Issue(bearerCtx(h.adminBearer), &adminv1.IssueRequest{
 		TenantId: h.tenant,
 		Kinds:    []string{"sast.scan_result.v1"},
 		Ttl:      durationpb.New(time.Hour),
@@ -249,7 +255,7 @@ func TestCredentials_IssueReturnsTokenListDoesNot(t *testing.T) {
 		t.Fatal("Issue returned empty bearer_token")
 	}
 
-	listed, err := stub.List(bearerCtx(h.bearer), &adminv1.ListRequest{TenantId: h.tenant})
+	listed, err := stub.List(bearerCtx(h.adminBearer), &adminv1.ListRequest{TenantId: h.tenant})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -273,7 +279,7 @@ func TestCredentials_RevokeInvalidatesImmediately(t *testing.T) {
 	evid, doneEvid := h.evidenceClient(t)
 	defer doneEvid()
 
-	issued, err := admin.Issue(bearerCtx(h.bearer), &adminv1.IssueRequest{TenantId: h.tenant})
+	issued, err := admin.Issue(bearerCtx(h.adminBearer), &adminv1.IssueRequest{TenantId: h.tenant})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
@@ -285,7 +291,7 @@ func TestCredentials_RevokeInvalidatesImmediately(t *testing.T) {
 		t.Fatalf("baseline push with victim: %v", err)
 	}
 
-	if _, err := admin.Revoke(bearerCtx(h.bearer), &adminv1.RevokeRequest{Id: id}); err != nil {
+	if _, err := admin.Revoke(bearerCtx(h.adminBearer), &adminv1.RevokeRequest{Id: id}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 
@@ -306,14 +312,14 @@ func TestCredentials_RotateBothWorkUntilGraceExpires(t *testing.T) {
 	evid, doneEvid := h.evidenceClient(t)
 	defer doneEvid()
 
-	issued, err := admin.Issue(bearerCtx(h.bearer), &adminv1.IssueRequest{TenantId: h.tenant})
+	issued, err := admin.Issue(bearerCtx(h.adminBearer), &adminv1.IssueRequest{TenantId: h.tenant})
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
 	oldBearer := issued.GetBearerToken()
 	oldID := issued.GetHandle().GetId()
 
-	rotated, err := admin.Rotate(bearerCtx(h.bearer), &adminv1.RotateRequest{Id: oldID})
+	rotated, err := admin.Rotate(bearerCtx(h.adminBearer), &adminv1.RotateRequest{Id: oldID})
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)
 	}
@@ -335,6 +341,75 @@ func TestCredentials_RotateBothWorkUntilGraceExpires(t *testing.T) {
 	rec2.IdempotencyKey = "ci-new-key"
 	if _, err := evid.Push(bearerCtx(newBearer), &evidencev1.PushRequest{Record: rec2}); err != nil {
 		t.Fatalf("push with new bearer: %v", err)
+	}
+}
+
+// #2167: every AdminCredentialsService RPC refuses a non-admin key and
+// an admin key from another tenant, over the real gRPC stack (auth
+// interceptor included). Only tenant A's own admin gets through.
+func TestCredentials_AdminGateAndTenantScope(t *testing.T) {
+	h := newHarness(t)
+	stub, done := h.adminClient(t)
+	defer done()
+
+	const tenantB = "22222222-2222-2222-2222-222222222222"
+	_, otherAdmin, err := h.srv.IssueBootstrapAdminCredential(tenantB)
+	if err != nil {
+		t.Fatalf("IssueBootstrapAdminCredential: %v", err)
+	}
+	// A tenant-A key for Rotate and Revoke to aim at.
+	target, err := stub.Issue(bearerCtx(h.adminBearer), &adminv1.IssueRequest{})
+	if err != nil {
+		t.Fatalf("admin Issue: %v", err)
+	}
+	id := target.GetHandle().GetId()
+
+	callers := []struct {
+		name, bearer string
+		// issueList is the code for Issue/List naming tenant A;
+		// byID is the code for Rotate/Revoke of tenant A's key.
+		issueList, byID codes.Code
+	}{
+		{name: "non-admin key, tenant A", bearer: h.bearer, issueList: codes.PermissionDenied, byID: codes.PermissionDenied},
+		{name: "admin key, tenant B", bearer: otherAdmin, issueList: codes.PermissionDenied, byID: codes.NotFound},
+	}
+	for _, c := range callers {
+		t.Run(c.name, func(t *testing.T) {
+			ctx := bearerCtx(c.bearer)
+			_, issueErr := stub.Issue(ctx, &adminv1.IssueRequest{TenantId: h.tenant})
+			_, listErr := stub.List(ctx, &adminv1.ListRequest{TenantId: h.tenant})
+			_, rotErr := stub.Rotate(ctx, &adminv1.RotateRequest{Id: id})
+			_, revErr := stub.Revoke(ctx, &adminv1.RevokeRequest{Id: id})
+			for rpc, got := range map[string]struct {
+				err  error
+				want codes.Code
+			}{
+				"Issue":  {issueErr, c.issueList},
+				"List":   {listErr, c.issueList},
+				"Rotate": {rotErr, c.byID},
+				"Revoke": {revErr, c.byID},
+			} {
+				if status.Code(got.err) != got.want {
+					t.Errorf("%s: got %v, want %v", rpc, got.err, got.want)
+				}
+			}
+		})
+	}
+
+	// The refused calls changed nothing: tenant A still lists the key it
+	// issued, with no successor rotated from it.
+	listed, err := stub.List(bearerCtx(h.adminBearer), &adminv1.ListRequest{})
+	if err != nil {
+		t.Fatalf("admin List: %v", err)
+	}
+	var ids []string
+	for _, hd := range listed.GetHandles() {
+		if hd.GetId() == id || hd.GetRotatedFrom() == id {
+			ids = append(ids, hd.GetId())
+		}
+	}
+	if len(ids) != 1 || ids[0] != id {
+		t.Fatalf("tenant A keys touching %s = %v, want just the original", id, ids)
 	}
 }
 

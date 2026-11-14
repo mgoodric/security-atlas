@@ -28,7 +28,7 @@ function mockRisks() {
       inherent_score: { likelihood: 3, impact: 4 },
       treatment: "mitigate",
       treatment_owner: "owner-b",
-      residual_score: { likelihood: 3, impact: 3 }, // 9/25 = 0.36
+      residual_score: { likelihood: 3, impact: 3 }, // 9
       review_due_at: "2026-09-01T00:00:00Z",
       accepter: "",
       instrument_reference: "",
@@ -48,7 +48,7 @@ function mockRisks() {
       inherent_score: { likelihood: 5, impact: 5 },
       treatment: "mitigate",
       treatment_owner: "owner-a",
-      residual_score: { likelihood: 5, impact: 5 }, // 25/25 = 1.00
+      residual_score: { likelihood: 5, impact: 5 }, // 25
       review_due_at: "2026-12-01T00:00:00Z",
       accepter: "",
       instrument_reference: "",
@@ -68,7 +68,7 @@ function mockRisks() {
       inherent_score: { likelihood: 1, impact: 2 },
       treatment: "mitigate",
       treatment_owner: "owner-c",
-      residual_score: { likelihood: 1, impact: 1 }, // 1/25 = 0.04
+      residual_score: { likelihood: 1, impact: 1 }, // 1
       review_due_at: "2026-06-01T00:00:00Z",
       accepter: "",
       instrument_reference: "",
@@ -168,7 +168,7 @@ test.describe("/risks sortable columns (slice 681 AC-1)", () => {
 
     const desktop = authedPage.locator('[data-testid="list-table-wrap"]');
     await desktop.getByTestId("risks-sort-residual").click();
-    // Residual desc: Alpha (1.00), Bravo (0.36), Charlie (0.04).
+    // Residual desc: Alpha (25), Bravo (9), Charlie (1).
     await expect
       .poll(() => titleOrder(authedPage))
       .toEqual(["Risk Alpha", "Risk Bravo", "Risk Charlie"]);

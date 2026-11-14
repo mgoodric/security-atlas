@@ -257,6 +257,24 @@ func TestPatchRolesRejectsSelfDemotionWithoutConfirm(t *testing.T) {
 	}
 }
 
+// #2183: a local-login admin's cred.UserID is "user:<uuid>". The guard used
+// to string-compare it with the bare target id, never matched, and let the
+// admin drop their own admin role without the confirmation.
+func TestPatchRolesRejectsSelfDemotionWithoutConfirm_UserPrefixedSubject(t *testing.T) {
+	tenant := uuid.New()
+	cleanupUsers(t, tenant)
+	uID := seedUser(t, tenant, "selfdemo-2183@example.com", "Self Demo 2183")
+	seedUserRole(t, tenant, uID.String(), "admin")
+
+	r := newRouter(t, tenant, "user:"+uID.String(), true)
+	body, _ := json.Marshal(adminusers.PatchRolesRequest{Roles: []string{"viewer"}})
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPatch, "/v1/admin/users/"+uID.String()+"/roles", bytes.NewReader(body)))
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d; want 400 (self-demotion rejected); body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 // AC-5 (counterpart): self-demotion WITH confirm_self_demotion=true succeeds.
 func TestPatchRolesAllowsSelfDemotionWithConfirm(t *testing.T) {
 	tenant := uuid.New()

@@ -12,6 +12,7 @@ import (
 
 	oscalv1 "github.com/mgoodric/security-atlas/gen/proto/oscal/v1"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/demoprov"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -62,6 +63,11 @@ type aggregate struct {
 	// frozen population — so the draw is frozen-correct by construction
 	// (invariant #10) and never re-sampled from live data (D1).
 	sampledEvidence map[uuid.UUID][]uuid.UUID
+	// demoControls and demoEvidence are the controls and sampled evidence
+	// the in-place demo seed added (#2043). The SSP and AR mark them with an
+	// atlas "demo-seed" prop so an auditor never takes them for real ones.
+	demoControls demoprov.Set
+	demoEvidence demoprov.Set
 	// walkthroughAttachments maps walkthrough_id -> its attachment refs
 	// (slice 494, AC-4/AC-5). Metadata only — the attachment bytes are
 	// never read; the AR references them by hash + storage URI (D2).
@@ -147,10 +153,15 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 		return nil, fmt.Errorf("oscal: list active controls: %w", err)
 	}
 	agg.controls = controls
+	controlIDs := make([]uuid.UUID, 0, len(controls))
 	for _, c := range controls {
 		cid := uuid.UUID(c.ID.Bytes)
 		agg.controlOwner[cid] = c.OwnerRole
 		agg.controlTitle[cid] = c.Title
+		controlIDs = append(controlIDs, cid)
+	}
+	if agg.demoControls, err = demoprov.Lookup(ctx, q, demoprov.TableControls, controlIDs); err != nil {
+		return nil, fmt.Errorf("oscal: %w", err)
 	}
 
 	// 4. Policies (SSP linked governance documents).
@@ -215,11 +226,15 @@ func (e *Exporter) Aggregate(ctx context.Context, in ExportInput) (*aggregate, e
 	}
 	// Rows arrive ordered by (population_id, ordinal); appending preserves
 	// the deterministic shuffle order the auditor's sample carries (AC-9).
+	sampledIDs := make([]uuid.UUID, 0, len(sampledRows))
 	for _, r := range sampledRows {
 		popID := uuid.UUID(r.PopulationID.Bytes)
-		agg.sampledEvidence[popID] = append(
-			agg.sampledEvidence[popID], uuid.UUID(r.EvidenceRecordID.Bytes),
-		)
+		eid := uuid.UUID(r.EvidenceRecordID.Bytes)
+		agg.sampledEvidence[popID] = append(agg.sampledEvidence[popID], eid)
+		sampledIDs = append(sampledIDs, eid)
+	}
+	if agg.demoEvidence, err = demoprov.Lookup(ctx, q, demoprov.TableEvidence, sampledIDs); err != nil {
+		return nil, fmt.Errorf("oscal: %w", err)
 	}
 
 	// 6. Walkthroughs pinned to this period (AR observations).
@@ -354,6 +369,7 @@ func (a *aggregate) sspInput() *oscalv1.SspInput {
 			Statement:        controlStatement(c), // filled exactly once (AC-4)
 			EvaluationResult: "",                  // filled below from failingEvals/none
 			LinkedPolicyIds:  linked,
+			Demo:             a.demoControls.Has(uuid.UUID(c.ID.Bytes)),
 		})
 	}
 
@@ -466,6 +482,7 @@ func (a *aggregate) assessmentInput() *oscalv1.AssessmentInput {
 			PopulationSize:     p.RowCount,
 			SampledEvidenceIds: a.sampledFor(popID),
 			FrozenAt:           frozen,
+			DemoEvidenceIds:    a.demoSampledFor(popID),
 		})
 	}
 
@@ -528,6 +545,18 @@ func (a *aggregate) assessmentInput() *oscalv1.AssessmentInput {
 // dropped. Revisit once real walkthroughs exceed it; the overflow note makes
 // the cap safe to tune without a schema change.
 const maxAttachmentRefsPerWalkthrough = 50
+
+// demoSampledFor returns the population's drawn evidence ids that the
+// in-place demo seed added (#2043), in sample order, or nil when none are.
+func (a *aggregate) demoSampledFor(populationID uuid.UUID) []string {
+	var out []string
+	for _, id := range a.sampledEvidence[populationID] {
+		if a.demoEvidence.Has(id) {
+			out = append(out, id.String())
+		}
+	}
+	return out
+}
 
 // sampledFor returns the drawn sample evidence ids for a population as
 // stable strings in the deterministic shuffle order (AC-1/AC-9). A

@@ -2,9 +2,11 @@ package controlimport
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Candidate sources (#1780). Crosswalk candidates come from the framework's
@@ -180,21 +182,58 @@ func buildCandidates(row BatchControl, edges []CrosswalkEdge, keyword []AnchorCa
 // batch's SCF release, then marks the batch's suggestions ready (or failed).
 // With rerank set, the LLM reorders and explains each row's candidates; its
 // failure leaves the deterministic candidates as computed.
+//
+// Every error path marks the batch failed (best effort), so a run that ends
+// never leaves it pending. A run that never ends (the process stops) is the
+// sweeper's to fail. Failed is final: a run whose batch the sweeper failed,
+// before the run started or before it saved, is dropped with
+// ErrSuggestionsNoLongerPending and writes nothing.
 func (s *Stager) suggest(ctx context.Context, b Batch, rerank bool) ([]RowSuggestions, error) {
+	select {
+	case s.runs <- struct{}{}:
+	case <-ctx.Done():
+		return nil, s.markFailed(ctx, b.ID, fmt.Errorf("controlimport: waiting for a suggestion slot: %w", ctx.Err()))
+	}
+	defer func() { <-s.runs }()
+
+	// The wait for a slot can outlast the sweeper's cutoff.
+	cur, err := s.store.GetBatch(ctx, b.ID)
+	if err != nil {
+		return nil, s.markFailed(ctx, b.ID, fmt.Errorf("controlimport: re-read batch: %w", err))
+	}
+	if cur.SuggestionsStatus != SuggestionsPending {
+		return nil, ErrSuggestionsNoLongerPending
+	}
+
 	out, err := s.computeSuggestions(ctx, b)
-	if err == nil && rerank {
+	if err != nil {
+		return nil, s.markFailed(ctx, b.ID, err)
+	}
+	if rerank {
 		s.reranker.rerankAll(ctx, b.Staged, out)
 	}
-	if err != nil {
-		if markErr := s.store.SaveSuggestions(ctx, b.ID, nil, SuggestionsFailed); markErr != nil {
-			return nil, fmt.Errorf("%w (and marking the batch failed: %v)", err, markErr)
-		}
-		return nil, err
-	}
 	if err := s.store.SaveSuggestions(ctx, b.ID, out, SuggestionsReady); err != nil {
-		return nil, err
+		if errors.Is(err, ErrSuggestionsNoLongerPending) {
+			return nil, err
+		}
+		return nil, s.markFailed(ctx, b.ID, err)
 	}
 	return out, nil
+}
+
+// markFailedTimeout bounds the best-effort failed mark, which runs even when
+// the run's own context is done.
+const markFailedTimeout = 10 * time.Second
+
+// markFailed records the batch's suggestions as failed and returns err,
+// annotated if the mark itself failed.
+func (s *Stager) markFailed(ctx context.Context, batchID string, err error) error {
+	mctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), markFailedTimeout)
+	defer cancel()
+	if markErr := s.store.SaveSuggestions(mctx, batchID, nil, SuggestionsFailed); markErr != nil {
+		return fmt.Errorf("%w (and marking the batch failed: %v)", err, markErr)
+	}
+	return err
 }
 
 func (s *Stager) computeSuggestions(ctx context.Context, b Batch) ([]RowSuggestions, error) {
@@ -216,7 +255,7 @@ func (s *Stager) computeSuggestions(ctx context.Context, b Batch) ([]RowSuggesti
 	for _, c := range b.Staged {
 		sc := StagedControl{ExternalID: c.ExternalID, Title: c.Title, Description: c.Description}
 		keywords := keywordsFrom(sc.ExternalID + " " + sc.Title + " " + sc.Description)
-		retrieved, err := s.store.KeywordAnchors(ctx, keywords)
+		retrieved, err := s.store.KeywordAnchors(ctx, b.SCFRelease.VersionID, keywords)
 		if err != nil {
 			return nil, fmt.Errorf("controlimport: keyword anchors for row %d: %w", c.RowNumber, err)
 		}

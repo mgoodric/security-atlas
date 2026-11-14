@@ -435,7 +435,7 @@ print-version version:
 #
 # Before the first `self-host-up`, copy the env template and edit it:
 #   cp deploy/docker/.env.example deploy/docker/.env
-# See docs/SELF_HOSTING.md and docs/getting-started/first-evidence.md.
+# See docs/SELF_HOSTING.md and docs-site/docs/getting-started.md.
 
 _self_host_compose := "docker compose -f deploy/docker/docker-compose.yml --env-file deploy/docker/.env"
 

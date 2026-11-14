@@ -162,7 +162,6 @@ The export runs against a **frozen** period only, and needs the
 
 ```sh
 security-atlas-cli oscal-export \
-  --tenant-id <tenant id> \
   --period-id <period id> \
   --out ./oscal-soc2-q2-2026/
 ```

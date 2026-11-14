@@ -46,6 +46,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/backup"
 	metricscatalog "github.com/mgoodric/security-atlas/internal/catalog/metrics"
+	"github.com/mgoodric/security-atlas/internal/controlimport"
 	"github.com/mgoodric/security-atlas/internal/decision"
 	"github.com/mgoodric/security-atlas/internal/eval"
 	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
@@ -1254,6 +1255,31 @@ func main() {
 				fmt.Fprintf(os.Stderr, "atlas: staleness scheduler ticking every %s (weekly digest Mondays 09:00 UTC)\n", interval.String())
 				if err := ss.Run(ctx, interval); err != nil {
 					errCh <- fmt.Errorf("staleness scheduler: %w", err)
+				}
+			}()
+		}
+	}
+
+	// #2038: control import suggestion sweeper. A background suggestion run
+	// dies with its process, leaving the batch pending; this fails batches
+	// pending past a cutoff, once at start and every 10 minutes. The
+	// migrator pool only lists tenant IDs; each tenant's update runs on the
+	// app pool under tenancy.WithTenant. Safe on every replica (FOR UPDATE
+	// SKIP LOCKED).
+	if migratorURL := os.Getenv("DATABASE_URL"); migratorURL != "" && pool != nil {
+		cctx, ccancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ciPool, err := atlasotel.NewTracedPool(cctx, migratorURL)
+		ccancel()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: control import sweeper pool: %v\n", err)
+		} else {
+			sweeper := controlimport.NewSweeper(ciPool, pool, logger, controlimport.DefaultStaleSuggestionsAfter)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer ciPool.Close()
+				if err := sweeper.Run(ctx, controlimport.DefaultSweepInterval); err != nil {
+					errCh <- fmt.Errorf("control import sweeper: %w", err)
 				}
 			}()
 		}

@@ -113,21 +113,22 @@ func pushRecord(idemKey string) *evidencev1.EvidenceRecord {
 
 // issueTenantCred mints a tenant push credential the way the chaos run's
 // ensure-chaos-tenant.sh did: a bootstrap admin bearer calling the
-// AdminCredentials.Issue RPC.
-func issueTenantCred(t *testing.T, p *atlasProcess, tenantID string) (id, bearer string) {
+// AdminCredentials.Issue RPC. It returns that admin bearer too, for the
+// Rotate and Revoke RPCs, which need an admin of the key's tenant (#2167).
+func issueTenantCred(t *testing.T, p *atlasProcess, tenantID string) (id, bearer, adminBearer string) {
 	t.Helper()
-	// The bootstrap bearer lives on its own ops tenant so the target
-	// tenant's api_keys rows are exactly the ones the tests issue for it.
-	_, adminBearer, err := p.srv.IssueBootstrapCredential(uuid.New().String())
-	if err != nil {
-		t.Fatalf("IssueBootstrapCredential: %v", err)
+	// A fixed-admin bearer is memory-only, so the target tenant's api_keys
+	// rows are exactly the ones the tests issue for it.
+	adminBearer = "bootstrap-" + uuid.New().String()
+	if _, err := p.srv.IssueBootstrapFixedAdminCredential(tenantID, adminBearer); err != nil {
+		t.Fatalf("IssueBootstrapFixedAdminCredential: %v", err)
 	}
 	stub := adminv1.NewAdminCredentialsServiceClient(p.dial(t))
 	resp, err := stub.Issue(credBearerCtx(adminBearer), &adminv1.IssueRequest{TenantId: tenantID})
 	if err != nil {
 		t.Fatalf("AdminCredentials.Issue: %v", err)
 	}
-	return resp.GetHandle().GetId(), resp.GetBearerToken()
+	return resp.GetHandle().GetId(), resp.GetBearerToken(), adminBearer
 }
 
 func mustPush(t *testing.T, p *atlasProcess, bearer, idemKey, credID string) {
@@ -159,7 +160,7 @@ func TestCredPersist_IssueRestartPush(t *testing.T) {
 	tenant := uuid.New().String()
 
 	atlas1 := bootAtlas(t)
-	credID, bearer := issueTenantCred(t, atlas1, tenant)
+	credID, bearer, _ := issueTenantCred(t, atlas1, tenant)
 	// Tick 0-10 equivalent: proven working before the restart.
 	mustPush(t, atlas1, bearer, "pre-restart", credID)
 
@@ -179,11 +180,11 @@ func TestCredPersist_RevokeSurvivesRestart(t *testing.T) {
 	tenant := uuid.New().String()
 
 	atlas1 := bootAtlas(t)
-	credID, bearer := issueTenantCred(t, atlas1, tenant)
+	credID, bearer, adminBearer := issueTenantCred(t, atlas1, tenant)
 	mustPush(t, atlas1, bearer, "before-revoke", credID)
 
 	stub := adminv1.NewAdminCredentialsServiceClient(atlas1.dial(t))
-	if _, err := stub.Revoke(credBearerCtx(bearer), &adminv1.RevokeRequest{Id: credID}); err != nil {
+	if _, err := stub.Revoke(credBearerCtx(adminBearer), &adminv1.RevokeRequest{Id: credID}); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
 	mustPushFail(t, atlas1, bearer, "after-revoke", codes.Unauthenticated)
@@ -201,10 +202,10 @@ func TestCredPersist_RotateSurvivesRestart(t *testing.T) {
 	tenant := uuid.New().String()
 
 	atlas1 := bootAtlas(t)
-	predID, predBearer := issueTenantCred(t, atlas1, tenant)
+	predID, predBearer, adminBearer := issueTenantCred(t, atlas1, tenant)
 
 	stub := adminv1.NewAdminCredentialsServiceClient(atlas1.dial(t))
-	resp, err := stub.Rotate(credBearerCtx(predBearer), &adminv1.RotateRequest{Id: predID})
+	resp, err := stub.Rotate(credBearerCtx(adminBearer), &adminv1.RotateRequest{Id: predID})
 	if err != nil {
 		t.Fatalf("Rotate: %v", err)
 	}
@@ -276,7 +277,7 @@ func TestCredPersist_RLSAndHashedAtRest(t *testing.T) {
 	tenantB := uuid.New()
 
 	atlas1 := bootAtlas(t)
-	credID, bearer := issueTenantCred(t, atlas1, tenantA.String())
+	credID, bearer, _ := issueTenantCred(t, atlas1, tenantA.String())
 
 	// Tenant A sees its row through the RLS-bound app pool; tenant B
 	// sees nothing (constitutional invariant #6).

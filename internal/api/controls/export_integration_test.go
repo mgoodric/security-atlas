@@ -301,6 +301,7 @@ func TestSlice137_ControlsExportReturnsCanonicalColumns(t *testing.T) {
 		"freshness_class", "bundle_manifest_hash",
 		"created_at", "updated_at",
 		"anchor_fit", "anchor_fit_note",
+		"demo",
 	}
 	if len(header) != len(expectedCols) {
 		t.Errorf("header column count = %d; want %d; header=%v", len(header), len(expectedCols), header)
