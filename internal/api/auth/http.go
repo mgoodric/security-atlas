@@ -401,13 +401,15 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 			Issuer:        result.Issuer,
 			Subject:       result.Subject,
 			EmailVerified: result.EmailVerified,
+			IDPConfigID:   result.IDPConfigID,
 		})
 		if errors.Is(err, users.ErrIdentityConflict) {
-			// #1944: the email is held by a user bound to another IdP
-			// principal, or the IdP says it is unverified. Refuse like a
-			// deactivated user; the reason stays in the server log.
+			// #1944: the email is held by a user this sign-in may not link
+			// to (another IdP principal, a local password, a super_admin),
+			// or the IdP says it is unverified. Refuse like a deactivated
+			// user; the reason stays in the server log, without the email.
 			slog.WarnContext(r.Context(), "oidc sign-in refused: email held by another identity",
-				"idp_issuer", result.Issuer)
+				"idp_issuer", result.Issuer, "idp_config_id", result.IDPConfigID)
 			oidc.ClearFlowCookies(w, h.secureCookies)
 			writeAuthError(w, http.StatusUnauthorized, "invalid credentials")
 			return

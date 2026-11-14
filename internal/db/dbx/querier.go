@@ -1386,12 +1386,18 @@ type Querier interface {
 	// is an update, not a 23505. The slice-019 LinkRiskControl (no weights) stays
 	// for the create-risk path — it relies on the column DEFAULTs.
 	LinkRiskControlWithWeights(ctx context.Context, arg LinkRiskControlWithWeightsParams) error
-	// #1944: first OIDC sign-in for a user SCIM (or local mode) already created.
-	// Binds the IdP principal to the same-tenant row with the same email
-	// (case-insensitive, matching GetSCIMUserByEmail) ONLY while that row's idp
-	// tuple is empty, so a row already bound to another principal is never
-	// re-linked. The NOT EXISTS keeps a returning user on their own row. Status
-	// and active are left untouched: a deprovisioned row stays refused.
+	// #1944: first OIDC sign-in for a user SCIM already created. Binds the IdP
+	// principal to the same-tenant row with the same email (case-insensitive,
+	// matching GetSCIMUserByEmail) ONLY while that row's idp tuple is empty, so a
+	// row already bound to another principal is never re-linked.
+	//
+	// Only scim_managed rows link. A row with a local password or a super_admins
+	// grant never links even when SCIM manages it: an IdP the tenant admin
+	// controls could otherwise assert that email and take the account over
+	// (the #2007 review, B1). Those rows keep the OIDCFirstSignInEmailTaken 401.
+	//
+	// The last NOT EXISTS keeps a returning user on their own row. Status and
+	// active are left untouched: a deprovisioned row stays refused.
 	LinkUserIdpByEmail(ctx context.Context, arg LinkUserIdpByEmailParams) (User, error)
 	// All generations for one surface subject, newest first. Powers the
 	// per-subject "recent AI drafts" rail. Served by

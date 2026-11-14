@@ -15,6 +15,7 @@ package users
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -175,29 +176,71 @@ type UpsertOIDCInput struct {
 	Issuer      string
 	Subject     string
 	// EmailVerified is the ID token's email_verified claim; nil when the IdP
-	// omits it. Only an explicit false blocks the email link (#1944).
+	// omits it. UnverifiedEmail decides what it means for the email link
+	// (#1944).
 	EmailVerified *bool
+	// UnverifiedEmail is the IdP's policy for linking on an email the IdP has
+	// not marked verified. The zero value is the D3 default.
+	UnverifiedEmail UnverifiedEmailPolicy
+	// IDPConfigID is the oidc_idp_configs row the sign-in came through, kept
+	// in the link audit row. uuid.Nil when the resolver supplied none.
+	IDPConfigID uuid.UUID
+}
+
+// UnverifiedEmailPolicy says whether an OIDC sign-in may claim an existing
+// SCIM row by email when the IdP has not marked the email verified (#1944).
+// It is a per-IdP setting in waiting: today every IdP uses the zero value.
+type UnverifiedEmailPolicy int
+
+const (
+	// LinkUnlessUnverified links when email_verified is true or absent and
+	// refuses only an explicit false. Absent links because some IdPs (Entra
+	// ID) never send the claim (decisions log D3).
+	LinkUnlessUnverified UnverifiedEmailPolicy = iota
+	// LinkOnlyIfVerified links only when email_verified is true.
+	LinkOnlyIfVerified
+)
+
+// allowsLink reports whether the policy lets a sign-in with this
+// email_verified claim (nil = absent) link by email.
+func (p UnverifiedEmailPolicy) allowsLink(verified *bool) bool {
+	if verified != nil {
+		return *verified
+	}
+	return p == LinkUnlessUnverified
 }
 
 // ErrIdentityConflict is returned by UpsertOIDC when the sign-in's email
 // already belongs to a same-tenant user it may not link to: one bound to a
-// different IdP principal, or an unbound one while the IdP says the email is
-// unverified (#1944). The callback refuses the sign-in.
+// different IdP principal, one with a local password or a super_admin grant,
+// or an unbound one while the IdP says the email is unverified (#1944). The
+// callback refuses the sign-in.
 var ErrIdentityConflict = errors.New("users: email belongs to another identity")
 
-// emailLinkAllowed reports whether an OIDC sign-in may claim an existing row
-// by email. An explicit email_verified=false refuses; an absent claim links,
-// because some IdPs (Entra ID) never send it and the IdP is the tenant's own
-// configured one (decisions: docs/audit-log/1944-oidc-scim-email-link-decisions.md).
-func emailLinkAllowed(verified *bool) bool {
-	return verified == nil || *verified
+// oidcLinkAuditAction is the me_audit_log action for an email link
+// (migration 20260910000000).
+const oidcLinkAuditAction = "oidc_identity_link"
+
+// isUniqueViolationOn reports whether err is a unique_violation on one of the
+// named constraints or indexes.
+func isUniqueViolationOn(err error, names ...string) bool {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != pgUniqueViolation {
+		return false
+	}
+	for _, n := range names {
+		if pgErr.ConstraintName == n {
+			return true
+		}
+	}
+	return false
 }
 
 // UpsertOIDC provisions-or-updates the user keyed on (idp_issuer, idp_subject).
-// On first sign-in it links to a same-tenant row with the same email and an
-// empty idp tuple (a SCIM-provisioned user, #1944) instead of inserting.
-// Returns the resulting row, or ErrIdentityConflict when the email belongs to
-// a row it may not link to.
+// On first sign-in it links to a same-tenant SCIM-provisioned row with the
+// same email and an empty idp tuple (#1944) instead of inserting, and audits
+// the link. Returns the resulting row, or ErrIdentityConflict when the email
+// belongs to a row it may not link to.
 func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error) {
 	if in.Issuer == "" || in.Subject == "" {
 		return User{}, fmt.Errorf("users: UpsertOIDC requires non-empty issuer + subject")
@@ -214,14 +257,8 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 
 	id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 	tIDU := pgtype.UUID{Bytes: in.TenantID, Valid: true}
-	if emailLinkAllowed(in.EmailVerified) {
-		linked, err := q.LinkUserIdpByEmail(ctx, dbx.LinkUserIdpByEmailParams{
-			IdpIssuer:   in.Issuer,
-			IdpSubject:  in.Subject,
-			DisplayName: in.DisplayName,
-			TenantID:    tIDU,
-			Email:       in.Email,
-		})
+	if in.UnverifiedEmail.allowsLink(in.EmailVerified) {
+		linked, err := linkByEmail(ctx, q, in, tIDU)
 		switch {
 		case err == nil:
 			if err := tx.Commit(ctx); err != nil {
@@ -229,7 +266,7 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 			}
 			return userFromRow(linked), nil
 		case !errors.Is(err, pgx.ErrNoRows):
-			return User{}, fmt.Errorf("users: link OIDC by email: %w", err)
+			return User{}, err
 		}
 	}
 	taken, err := q.OIDCFirstSignInEmailTaken(ctx, dbx.OIDCFirstSignInEmailTakenParams{
@@ -254,9 +291,7 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 		IdpSubject:  in.Subject,
 	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation &&
-			pgErr.ConstraintName == "users_email_per_tenant_unique" {
+		if isUniqueViolationOn(err, "users_email_per_tenant_unique") {
 			return User{}, ErrIdentityConflict
 		}
 		return User{}, fmt.Errorf("users: upsert OIDC: %w", err)
@@ -265,6 +300,49 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 		return User{}, err
 	}
 	return userFromRow(row), nil
+}
+
+// linkByEmail binds the principal to the SCIM row and writes the
+// oidc_identity_link audit row in the caller's transaction. pgx.ErrNoRows
+// means no row qualified. A concurrent sign-in that bound the same principal
+// first trips users_idp_principal_unique; that is a refusal, not a 500.
+func linkByEmail(ctx context.Context, q *dbx.Queries, in UpsertOIDCInput, tIDU pgtype.UUID) (dbx.User, error) {
+	linked, err := q.LinkUserIdpByEmail(ctx, dbx.LinkUserIdpByEmailParams{
+		IdpIssuer:   in.Issuer,
+		IdpSubject:  in.Subject,
+		DisplayName: in.DisplayName,
+		TenantID:    tIDU,
+		Email:       in.Email,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return dbx.User{}, err
+		}
+		if isUniqueViolationOn(err, "users_idp_principal_unique") {
+			return dbx.User{}, ErrIdentityConflict
+		}
+		return dbx.User{}, fmt.Errorf("users: link OIDC by email: %w", err)
+	}
+	// No email in the row: the issuer and IdP config say which IdP now
+	// signs this user in.
+	after := map[string]string{"idp_issuer": in.Issuer, "idp_config_id": ""}
+	if in.IDPConfigID != uuid.Nil {
+		after["idp_config_id"] = in.IDPConfigID.String()
+	}
+	payload, err := json.Marshal(after)
+	if err != nil {
+		return dbx.User{}, fmt.Errorf("users: marshal link audit: %w", err)
+	}
+	if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+		TenantID: tIDU,
+		UserID:   linked.ID,
+		Action:   oidcLinkAuditAction,
+		Before:   []byte("{}"),
+		After:    payload,
+	}); err != nil {
+		return dbx.User{}, fmt.Errorf("users: audit OIDC link: %w", err)
+	}
+	return linked, nil
 }
 
 // ErrBootstrapUnavailable is returned by BootstrapFirstInstallOrUpsert
