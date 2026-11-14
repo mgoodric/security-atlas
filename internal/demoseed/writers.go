@@ -24,6 +24,10 @@ func writeTenantRow(ctx context.Context, tx pgx.Tx, t tenantRow, actorUserID uui
 	if err != nil {
 		return fmt.Errorf("demoseed: insert tenant: %w", err)
 	}
+	// The tenant's seven seeded risk categories (#1809).
+	if _, err := tx.Exec(ctx, `SELECT seed_risk_categories($1)`, t.ID); err != nil {
+		return fmt.Errorf("demoseed: seed risk categories: %w", err)
+	}
 	return nil
 }
 

@@ -95,6 +95,10 @@ security-atlas-cli evidence push \
 Optional: `--schema-version` (default `1.0.0`), `--actor-type` (default
 `service_account`), `--session-id`, `--payload-uri`.
 
+The gRPC endpoint accepts API keys only, not a UI session token; issue one
+with `credentials issue`. [Push a first manual attestation](first-manual-attestation.md)
+walks the whole path.
+
 `evidence verify` re-hashes the ledger and reports mismatches:
 
 ```sh
