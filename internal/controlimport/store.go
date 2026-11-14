@@ -231,7 +231,7 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string, f RowFilter) ([]
 	rows, err := tx.Query(ctx, `
 		SELECT id::text, row_number, org_control_id, title, description, tested_under,
 		       COALESCE(implementation_type, ''), COALESCE(applicability, ''), status,
-		       no_candidate_reaches
+		       no_candidate_reaches, llm_rerank
 		FROM control_import_rows
 		WHERE batch_id = $1::uuid
 		  AND ($2::text = '' OR status = $2::text)
@@ -247,7 +247,7 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string, f RowFilter) ([]
 		var c BatchControl
 		var tested []byte
 		if err := rows.Scan(&c.ID, &c.RowNumber, &c.ExternalID, &c.Title, &c.Description, &tested,
-			&c.ImplementationType, &c.Applicability, &c.Status, &c.NoCandidateReaches); err != nil {
+			&c.ImplementationType, &c.Applicability, &c.Status, &c.NoCandidateReaches, &c.LLMRerank); err != nil {
 			return nil, fmt.Errorf("controlimport: scan staged row: %w", err)
 		}
 		if err := json.Unmarshal(tested, &c.TestedUnder); err != nil {

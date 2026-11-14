@@ -504,6 +504,9 @@ WITH latest_eval AS (
         ce.last_observed_at,
         ce.evaluated_at
     FROM control_evaluations ce
+    -- #1895: narrow to the caller's tenant before DISTINCT ON, so the
+    -- sort does not cover every tenant's evaluations where RLS is bypassed.
+    WHERE ce.tenant_id = $4
     ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 worst_per_anchor AS (
@@ -733,6 +736,9 @@ WITH latest_eval AS (
         ce.last_observed_at,
         ce.evaluated_at
     FROM control_evaluations ce
+    -- #1895: narrow to the caller's tenant before DISTINCT ON, so the
+    -- sort does not cover every tenant's evaluations where RLS is bypassed.
+    WHERE ce.tenant_id = $4
     ORDER BY ce.tenant_id, ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
 ),
 worst_per_anchor AS (

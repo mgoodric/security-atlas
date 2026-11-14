@@ -24,29 +24,51 @@ func writeTenantRow(ctx context.Context, tx pgx.Tx, t tenantRow, actorUserID uui
 	if err != nil {
 		return fmt.Errorf("demoseed: insert tenant: %w", err)
 	}
+	// The tenant's seven seeded risk categories (#1809).
+	if _, err := tx.Exec(ctx, `SELECT seed_risk_categories($1)`, t.ID); err != nil {
+		return fmt.Errorf("demoseed: seed risk categories: %w", err)
+	}
 	return nil
 }
 
 // writeScopeDimensionAndCell inserts the default `environment`
 // dimension + "All" cell. Mirrors the admintenants Create path.
 func writeScopeDimensionAndCell(ctx context.Context, tx pgx.Tx, fs *fixtureSet) error {
+	if err := writeScopeDimension(ctx, tx, fs.tenant.ID, fs.scope.DimensionID); err != nil {
+		return err
+	}
+	return writeScopeCell(ctx, tx, fs.tenant.ID, fs.scope.CellID)
+}
+
+// prodScopeCellHash is the dimensions_hash of the {"environment":"prod"}
+// cell, matching deploy/docker/bootstrap/seed.sql.
+func prodScopeCellHash() string {
+	hash := sha256.Sum256([]byte(`{"environment":"prod"}`))
+	return hex.EncodeToString(hash[:])
+}
+
+// writeScopeDimension inserts the built-in `environment` dimension.
+func writeScopeDimension(ctx context.Context, tx pgx.Tx, tenantID, dimensionID uuid.UUID) error {
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO scope_dimensions
 		 (id, tenant_id, name, value_type, allowed_values, is_required, is_builtin)
 		 VALUES ($1, $2, 'environment', 'string', $3::jsonb, FALSE, TRUE)`,
-		fs.scope.DimensionID, fs.tenant.ID,
+		dimensionID, tenantID,
 		`["prod", "staging", "dev"]`,
 	); err != nil {
 		return fmt.Errorf("demoseed: insert scope_dimension: %w", err)
 	}
-	dimensions := `{"environment":"prod"}`
-	hash := sha256.Sum256([]byte(dimensions))
+	return nil
+}
+
+// writeScopeCell inserts the "All" {"environment":"prod"} scope cell.
+func writeScopeCell(ctx context.Context, tx pgx.Tx, tenantID, cellID uuid.UUID) error {
 	if _, err := tx.Exec(ctx,
 		`INSERT INTO scope_cells
 		 (id, tenant_id, label, dimensions, dimensions_hash)
 		 VALUES ($1, $2, $3, $4::jsonb, $5)`,
-		fs.scope.CellID, fs.tenant.ID, "All",
-		`{"environment": "prod"}`, hex.EncodeToString(hash[:]),
+		cellID, tenantID, "All",
+		`{"environment": "prod"}`, prodScopeCellHash(),
 	); err != nil {
 		return fmt.Errorf("demoseed: insert scope_cell: %w", err)
 	}
@@ -98,17 +120,8 @@ func writeAuditLogRow(ctx context.Context, tx pgx.Tx, action string,
 	if err != nil {
 		return fmt.Errorf("demoseed: marshal audit payload: %w", err)
 	}
-	if _, err := tx.Exec(ctx,
-		`INSERT INTO super_admin_audit_log
-		 (action, target_user_id, actor_user_id, actor_tenant_id, payload_json)
-		 VALUES ($1, $2, $3, $4, $5::jsonb)`,
-		action,
-		nonZeroOrSelf(actorUserID),
-		nonZeroOrSelf(actorUserID),
-		nonZeroOrTenant(actorTenantID, demoTenantID),
-		payloadBytes,
-	); err != nil {
-		return fmt.Errorf("demoseed: insert super_admin_audit_log: %w", err)
+	if err := writeSuperAdminAuditRow(ctx, tx, action, actorUserID, actorTenantID, demoTenantID, payloadBytes); err != nil {
+		return err
 	}
 	tenantForMe := actorTenantID
 	if tenantForMe == uuid.Nil {
@@ -120,6 +133,29 @@ func writeAuditLogRow(ctx context.Context, tx pgx.Tx, action string,
 		tenantForMe, nonZeroOrSelf(actorUserID), action, payloadBytes,
 	); err != nil {
 		return fmt.Errorf("demoseed: insert me_audit_log: %w", err)
+	}
+	return nil
+}
+
+// writeSuperAdminAuditRow writes the super_admin_audit_log half of
+// writeAuditLogRow. That log has no tenant_id, so the in-place teardown
+// (#1765) records itself here alone and leaves the tenant's rows exactly as
+// they were before the seed.
+func writeSuperAdminAuditRow(ctx context.Context, tx pgx.Tx, action string,
+	actorUserID uuid.UUID, actorTenantID uuid.UUID, demoTenantID uuid.UUID,
+	payloadBytes []byte,
+) error {
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO super_admin_audit_log
+		 (action, target_user_id, actor_user_id, actor_tenant_id, payload_json)
+		 VALUES ($1, $2, $3, $4, $5::jsonb)`,
+		action,
+		nonZeroOrSelf(actorUserID),
+		nonZeroOrSelf(actorUserID),
+		nonZeroOrTenant(actorTenantID, demoTenantID),
+		payloadBytes,
+	); err != nil {
+		return fmt.Errorf("demoseed: insert super_admin_audit_log: %w", err)
 	}
 	return nil
 }
@@ -1038,10 +1074,17 @@ const ctxKeyTenantID ctxKey = 1
 // writer is pointed at a tenant that tx did not create and demo-mark.
 var ErrNotDemoSeedContext = errors.New("demoseed: evidence writes are confined to a tenant created and demo-marked in the same transaction")
 
-// assertFreshDemoTenant guards the demoseed ingest exception (#1830): it
-// passes only when tx itself inserted the tenants row (its xmin is tx's
-// transaction id) and tx has written the demo_seed_apply
-// super_admin_audit_log row for its slug. A real tenant, or a demo tenant seeded by an earlier transaction,
+// assertFreshDemoTenant guards the demoseed ingest exception (#1830). It
+// passes in one of two demo-seed contexts:
+//
+//   - tx itself inserted the tenants row (its xmin is tx's transaction id)
+//     and wrote the demo_seed_apply super_admin_audit_log row for its slug
+//     (Apply: a new demo tenant); or
+//   - tx wrote an in-place demo_seed_apply row naming this tenant id, and
+//     the tenant holds no evidence that tx did not write (ApplyInPlace,
+//     #1765: the sole tenant of a fresh install, still evidence-free).
+//
+// A tenant holding real evidence, or one seeded by an earlier transaction,
 // fails, so the backdated raw insert cannot reach live tenant data.
 func assertFreshDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
 	var fresh bool
@@ -1055,6 +1098,19 @@ func assertFreshDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) e
 			 AND a.xmin::text::bigint = (txid_current() & 4294967295)
 			WHERE t.id = $1
 			  AND t.xmin::text::bigint = (txid_current() & 4294967295)
+		) OR (
+			EXISTS (
+				SELECT 1 FROM super_admin_audit_log a
+				WHERE a.action = 'demo_seed_apply'
+				  AND a.payload_json->>'in_place' = 'true'
+				  AND a.payload_json->>'tenant_id' = $1::text
+				  AND a.xmin::text::bigint = (txid_current() & 4294967295)
+			)
+			AND NOT EXISTS (
+				SELECT 1 FROM evidence_records e
+				WHERE e.tenant_id = $1
+				  AND e.xmin::text::bigint <> (txid_current() & 4294967295)
+			)
 		)
 	`, tenantID).Scan(&fresh)
 	if err != nil {

@@ -129,7 +129,7 @@ func (s *Service) Suggest(ctx context.Context, control StagedControl) (Proposal,
 	}
 
 	res, err := s.client.Generate(ctx, llm.GenerateRequest{
-		Surface:       llm.SurfaceQuestionnaire,
+		Surface:       llm.SurfaceControlImport,
 		PromptVersion: promptVersion,
 		SystemPrompt:  buildMatchPrompt(control, candidates),
 		Context:       generationContext(control, candidates),

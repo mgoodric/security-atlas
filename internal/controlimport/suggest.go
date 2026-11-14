@@ -46,6 +46,11 @@ type Candidate struct {
 	Reaches     []Requirement `json:"reaches"`
 	TestedCount int           `json:"tested_count"`
 	Strength    float64       `json:"strength,omitempty"`
+	// AIAssisted marks a candidate the LLM placed and explained (#1781);
+	// Rationale is its explanation. Both are unset when no LLM reranked
+	// the row.
+	AIAssisted bool   `json:"ai_assisted"`
+	Rationale  string `json:"rationale,omitempty"`
 }
 
 // Fit renders the candidate's coverage of the row's tested criteria, e.g.
@@ -80,6 +85,9 @@ type RowSuggestions struct {
 	RowID              string
 	Candidates         []Candidate
 	NoCandidateReaches bool
+	// LLMRerank is the row's rerank state: RerankOff, RerankApplied or
+	// RerankUnavailable.
+	LLMRerank string
 }
 
 // buildCandidates ranks one row's candidates: crosswalk anchors first, by
@@ -164,13 +172,19 @@ func buildCandidates(row BatchControl, edges []CrosswalkEdge, keyword []AnchorCa
 		RowID:              row.ID,
 		Candidates:         out,
 		NoCandidateReaches: len(row.TestedUnder) > 0 && len(crosswalk) == 0,
+		LLMRerank:          RerankOff,
 	}
 }
 
 // suggest computes and stores every staged row's candidates, drawn from the
 // batch's SCF release, then marks the batch's suggestions ready (or failed).
-func (s *Stager) suggest(ctx context.Context, b Batch) ([]RowSuggestions, error) {
+// With rerank set, the LLM reorders and explains each row's candidates; its
+// failure leaves the deterministic candidates as computed.
+func (s *Stager) suggest(ctx context.Context, b Batch, rerank bool) ([]RowSuggestions, error) {
 	out, err := s.computeSuggestions(ctx, b)
+	if err == nil && rerank {
+		s.reranker.rerankAll(ctx, b.Staged, out)
+	}
 	if err != nil {
 		if markErr := s.store.SaveSuggestions(ctx, b.ID, nil, SuggestionsFailed); markErr != nil {
 			return nil, fmt.Errorf("%w (and marking the batch failed: %v)", err, markErr)

@@ -153,11 +153,14 @@ func isRuleGeneratedScore(inherent []byte) bool {
 // Risk is the domain shape returned from store calls. It mirrors the sqlc Risk
 // but exposes more idiomatic Go types (uuid.UUID, time.Time, json.RawMessage).
 type Risk struct {
-	ID            uuid.UUID
-	TenantID      uuid.UUID
-	Title         string
-	Description   string
-	Category      dbx.RiskCategory
+	ID          uuid.UUID
+	TenantID    uuid.UUID
+	Title       string
+	Description string
+	Category    dbx.RiskCategory
+	// CategoryID references the tenant's own category (#1809), the one
+	// whose slug equals Category.
+	CategoryID    uuid.UUID
 	Methodology   dbx.RiskMethodology
 	InherentScore []byte
 	Treatment     dbx.RiskTreatment
@@ -184,9 +187,13 @@ type Risk struct {
 // CreateInput is the API-shape for POST /v1/risks. The store re-validates
 // every rule the handler should have validated already; defense in depth.
 type CreateInput struct {
-	Title         string
-	Description   string
-	Category      dbx.RiskCategory
+	Title       string
+	Description string
+	Category    dbx.RiskCategory
+	// CategoryRef names the risk's category by slug or by id (#1809). When
+	// empty, Category is used as the slug. Either way the risk is written
+	// with both the tenant's category reference and the matching enum.
+	CategoryRef   string
 	Methodology   dbx.RiskMethodology
 	InherentScore []byte
 	// Treatment defaults to untreated when empty: no create path records a
@@ -260,13 +267,22 @@ func (s *Store) Create(ctx context.Context, in CreateInput) (Risk, error) {
 		if err != nil {
 			return err
 		}
+		categoryRef := in.CategoryRef
+		if categoryRef == "" {
+			categoryRef = string(in.Category)
+		}
+		category, categoryEnum, err := resolveCategory(ctx, q, tenantID, categoryRef)
+		if err != nil {
+			return err
+		}
 		id := uuid.New()
 		row, err := q.CreateRisk(ctx, dbx.CreateRiskParams{
 			ID:                  pgUUID(id),
 			TenantID:            pgUUID(tenantID),
 			Title:               in.Title,
 			Description:         in.Description,
-			Category:            in.Category,
+			Category:            categoryEnum,
+			CategoryID:          pgUUID(category.ID),
 			Methodology:         in.Methodology,
 			InherentScore:       in.InherentScore,
 			Treatment:           in.Treatment,
@@ -737,6 +753,7 @@ func riskFromRow(r dbx.Risk) Risk {
 		Title:               r.Title,
 		Description:         r.Description,
 		Category:            r.Category,
+		CategoryID:          uuid.UUID(r.CategoryID.Bytes),
 		Methodology:         r.Methodology,
 		InherentScore:       r.InherentScore,
 		Treatment:           r.Treatment,
