@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/fetch"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/page"
@@ -61,43 +62,64 @@ func allocatorOptions() []chromedp.ExecAllocatorOption {
 //  2. Otherwise: launch a local Chrome with allocatorOptions.
 //
 // Only the inline data: URL built here is ever loaded, never an untrusted
-// URL. Every other request the document makes (img, link, script, iframe,
-// CSS url()) is failed through Fetch interception before it leaves the
-// browser, on both paths, so a builder that misses an escape cannot turn the
-// renderer into an SSRF client (#1941). PrintHTML does not take a render
-// slot; callers that serve requests wrap it in Default().Do so the shared
-// concurrency cap and deadline apply.
+// URL. Two guards hold that on both paths, so a builder that misses an
+// escape cannot turn the renderer into an SSRF client (#1941):
+//
+//   - script is disabled, so nothing can open a WebSocket, start a worker
+//     or build a request after load. No builder emits script;
+//   - every other request the document makes (img, link, iframe, CSS url())
+//     is failed through Fetch interception before it leaves the browser.
+//
+// PrintHTML does not take a render slot; callers that serve requests wrap it
+// in Default().Do so the shared concurrency cap and deadline apply.
 func PrintHTML(ctx context.Context, htmlDoc string) ([]byte, error) {
-	return printHTML(ctx, htmlDoc, allocatorOptions())
+	return renderer{opts: allocatorOptions()}.print(ctx, htmlDoc)
 }
 
-// printHTML is PrintHTML with the local allocator options as a parameter, so
-// the network-block test can switch off Chrome's own loopback protection.
-func printHTML(ctx context.Context, htmlDoc string, opts []chromedp.ExecAllocatorOption) ([]byte, error) {
+// renderer is PrintHTML's configuration. Production sets only opts; the
+// network tests set the other fields to remove one guard at a time and show
+// each one holds on its own.
+type renderer struct {
+	opts         []chromedp.ExecAllocatorOption
+	noFetchBlock bool
+	allowScript  bool
+}
+
+func (r renderer) print(ctx context.Context, htmlDoc string) ([]byte, error) {
 	var allocCtx context.Context
 	var cancelAlloc context.CancelFunc
 	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
 		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
 	} else {
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
+		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, r.opts...)
 	}
 	defer cancelAlloc()
 	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
 	defer cancelBrowser()
 
-	if err := blockNonDataRequests(browserCtx); err != nil {
-		return nil, renderError(err)
+	var guards []chromedp.Action[chromedp.Void]
+	if !r.allowScript {
+		guards = append(guards, chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+			_, err := cdp.Call(ctx, t, emulation.SetScriptExecutionDisabled,
+				emulation.SetScriptExecutionDisabledParams{Value: true})
+			return err
+		}))
 	}
-
-	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
-	var buf []byte
-	err := chromedp.Do(browserCtx,
-		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+	if !r.noFetchBlock {
+		if err := blockNonDataRequests(browserCtx); err != nil {
+			return nil, renderError(err)
+		}
+		guards = append(guards, chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
 			_, err := cdp.Call(ctx, t, fetch.Enable, fetch.EnableParams{
 				Patterns: []*fetch.RequestPattern{{URLPattern: "*"}},
 			})
 			return err
-		}),
+		}))
+	}
+
+	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
+	var buf []byte
+	err := chromedp.Do(browserCtx, append(guards,
 		chromedp.Navigate(dataURL),
 		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
 			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
@@ -110,7 +132,7 @@ func printHTML(ctx context.Context, htmlDoc string, opts []chromedp.ExecAllocato
 			buf = res.Data
 			return err
 		}),
-	)
+	)...)
 	if err != nil {
 		return nil, renderError(err)
 	}

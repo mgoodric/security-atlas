@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -38,9 +39,13 @@ var lnaOff = chromedp.Flag("disable-features",
 	"Translate,BlinkGenPropertyTrees,OptimizationHints,MediaRouter,"+
 		"LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,PrivateNetworkAccessSendPreflights")
 
-func printOrSkip(t *testing.T, htmlDoc string, opts []chromedp.ExecAllocatorOption) []byte {
+// noResolverBlock drops host-resolver-rules, as a remote CHROME_DEBUG_URL
+// browser does (its flags are not ours to set).
+var noResolverBlock = chromedp.Flag("host-resolver-rules", false)
+
+func printOrSkip(t *testing.T, htmlDoc string, r renderer) []byte {
 	t.Helper()
-	pdf, err := printHTML(t.Context(), htmlDoc, opts)
+	pdf, err := r.print(t.Context(), htmlDoc)
 	if errors.Is(err, ErrChromeUnavailable) && !RequireRealPDF() {
 		t.Skipf("chrome unavailable: %v", err)
 	}
@@ -62,11 +67,11 @@ func canaryHTML(base string) string {
 </body></html>`, base)
 }
 
-func assertNoCanaryHits(t *testing.T, opts []chromedp.ExecAllocatorOption) {
+func assertNoCanaryHits(t *testing.T, r renderer) {
 	t.Helper()
 	t.Setenv("CHROME_DEBUG_URL", "")
 	srv, hits := newCanary(t)
-	pdf := printOrSkip(t, canaryHTML(srv.URL), opts)
+	pdf := printOrSkip(t, canaryHTML(srv.URL), r)
 	if string(pdf[:5]) != "%PDF-" {
 		t.Fatalf("output is not a PDF: %q", safePrefix(pdf))
 	}
@@ -78,14 +83,42 @@ func assertNoCanaryHits(t *testing.T, opts []chromedp.ExecAllocatorOption) {
 // TestPrintHTML_BlocksNonDataRequests renders with the production local
 // flags (Fetch block + host-resolver-rules).
 func TestPrintHTML_BlocksNonDataRequests(t *testing.T) {
-	assertNoCanaryHits(t, append(allocatorOptions(), lnaOff))
+	assertNoCanaryHits(t, renderer{opts: append(allocatorOptions(), lnaOff)})
 }
 
-// TestPrintHTML_FetchBlockAlone drops host-resolver-rules, as a remote
-// CHROME_DEBUG_URL browser does (its flags are not ours to set), so the
-// Fetch interception is the only guard left.
+// TestPrintHTML_FetchBlockAlone drops host-resolver-rules, as on the remote
+// path, so the Fetch interception is the only network guard left. The
+// canary page's markup needs no script to make its requests.
 func TestPrintHTML_FetchBlockAlone(t *testing.T) {
-	assertNoCanaryHits(t, append(allocatorOptions(), lnaOff, chromedp.Flag("host-resolver-rules", false)))
+	assertNoCanaryHits(t, renderer{opts: append(allocatorOptions(), lnaOff, noResolverBlock)})
+}
+
+// TestPrintHTML_ScriptDisabled covers what Fetch interception cannot see:
+// a WebSocket, a worker, an image built by script after load. With script
+// off none of them is ever created. Fetch interception and
+// host-resolver-rules are both removed here, so a hit can only mean script
+// ran. The fetch() and WebSocket go to the canary by IP literal.
+func TestPrintHTML_ScriptDisabled(t *testing.T) {
+	t.Setenv("CHROME_DEBUG_URL", "")
+	srv, hits := newCanary(t)
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http")
+	htmlDoc := fmt.Sprintf(`<!doctype html><html><body><p>script</p>
+<script>
+fetch(%[1]q + "/canary-fetch").catch(function(){});
+try { new WebSocket(%[2]q + "/canary-ws"); } catch (e) {}
+new Image().src = %[1]q + "/canary-img";
+</script></body></html>`, srv.URL, wsURL)
+
+	pdf := printOrSkip(t, htmlDoc, renderer{
+		opts:         append(allocatorOptions(), lnaOff, noResolverBlock),
+		noFetchBlock: true,
+	})
+	if string(pdf[:5]) != "%PDF-" {
+		t.Fatalf("output is not a PDF: %q", safePrefix(pdf))
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("canary server received %d request(s); PrintHTML must not run script", n)
+	}
 }
 
 // TestAllocatorOptions_BlockHostResolution pins the host-resolver-rules flag
@@ -102,7 +135,7 @@ func TestAllocatorOptions_BlockHostResolution(t *testing.T) {
 func TestPrintHTML_AllowsDataResources(t *testing.T) {
 	t.Setenv("CHROME_DEBUG_URL", "")
 	const png1x1 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
-	pdf := printOrSkip(t, `<!doctype html><html><body><img src="`+png1x1+`"><p>ok</p></body></html>`, allocatorOptions())
+	pdf := printOrSkip(t, `<!doctype html><html><body><img src="`+png1x1+`"><p>ok</p></body></html>`, renderer{opts: allocatorOptions()})
 	if string(pdf[:5]) != "%PDF-" {
 		t.Fatalf("output is not a PDF: %q", safePrefix(pdf))
 	}
