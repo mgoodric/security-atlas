@@ -144,6 +144,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/framework-scopes/applicability/export", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/applicability/export — export the Statement of Applicability as CSV or xlsx"},
 	{Method: "GET", Path: "/v1/framework-scopes/{id}", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}"},
 	{Method: "GET", Path: "/v1/framework-scopes/{id}/applicability", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}/applicability — list a revision's applicability decisions"},
+	{Method: "GET", Path: "/v1/framework-scopes/{id}/applicability/diff", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision"},
 	{Method: "GET", Path: "/v1/frameworks", Tag: "frameworks", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks"},
 	{Method: "GET", Path: "/v1/frameworks/posture", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks/posture"},
 	{Method: "GET", Path: "/v1/frameworks/scf/versions", Tag: "frameworks", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks/scf/versions"},

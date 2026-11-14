@@ -119,3 +119,64 @@ export function defaultRevision(
     .sort((a, b) => b.created_at.localeCompare(a.created_at));
   return open[0] ?? scopes.find((s) => s.state === "activated") ?? scopes[0];
 }
+
+// #1795 — the applicability diff a revision in review is approved against.
+// Mirrors `decisionChangeWire` in internal/api/frameworkscopes/applicability.go.
+export type ApplicabilityChangeKind =
+  | "added"
+  | "removed"
+  | "decision_changed"
+  | "justification_changed";
+
+export type DecisionSide = {
+  decision: ApplicabilityDecision;
+  justification: string;
+  implementation_ref: string;
+};
+
+export type ApplicabilityChange = {
+  requirement_id: string;
+  code: string;
+  title: string;
+  change: ApplicabilityChangeKind;
+  before: DecisionSide | null;
+  after: DecisionSide | null;
+};
+
+export type ApplicabilityDiff = {
+  framework_scope: FrameworkScope;
+  // The activated revision compared against; null when none is.
+  baseline: FrameworkScope | null;
+  predicate: { changed: boolean; before: unknown; after: unknown };
+  changes: ApplicabilityChange[];
+};
+
+export const CHANGE_LABELS: Record<ApplicabilityChangeKind, string> = {
+  added: "Added",
+  removed: "Removed",
+  decision_changed: "Decision changed",
+  justification_changed: "Justification changed",
+};
+
+// summarizeChanges tallies a diff by kind, for the review panel's header.
+export function summarizeChanges(
+  changes: ApplicabilityChange[],
+): Record<ApplicabilityChangeKind, number> {
+  const out: Record<ApplicabilityChangeKind, number> = {
+    added: 0,
+    removed: 0,
+    decision_changed: 0,
+    justification_changed: 0,
+  };
+  for (const c of changes) out[c.change]++;
+  return out;
+}
+
+// describeSide renders one side of a change: "excluded — <justification>",
+// or "undecided" when the requirement had no decision on that side.
+export function describeSide(side: DecisionSide | null): string {
+  if (!side) return "undecided";
+  return side.justification
+    ? `${side.decision} — ${side.justification}`
+    : side.decision;
+}

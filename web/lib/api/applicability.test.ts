@@ -4,8 +4,11 @@ import {
   applicabilityQuery,
   buildSoAExportURL,
   defaultRevision,
+  describeSide,
   isFrozen,
   soaTitle,
+  summarizeChanges,
+  type ApplicabilityChange,
 } from "./applicability";
 import type { FrameworkScope } from "./framework-scopes";
 
@@ -86,5 +89,46 @@ describe("isFrozen", () => {
     expect(isFrozen({ state: "superseded" })).toBe(true);
     expect(isFrozen({ state: "draft" })).toBe(false);
     expect(isFrozen({ state: "approved" })).toBe(false);
+  });
+});
+
+describe("summarizeChanges", () => {
+  it("tallies each change kind, zero for kinds absent", () => {
+    const c = (change: ApplicabilityChange["change"]): ApplicabilityChange => ({
+      requirement_id: change,
+      code: change,
+      title: "",
+      change,
+      before: null,
+      after: null,
+    });
+    expect(
+      summarizeChanges([c("added"), c("added"), c("decision_changed")]),
+    ).toEqual({
+      added: 2,
+      removed: 0,
+      decision_changed: 1,
+      justification_changed: 0,
+    });
+  });
+});
+
+describe("describeSide", () => {
+  it("names the decision, its justification, or undecided", () => {
+    expect(describeSide(null)).toBe("undecided");
+    expect(
+      describeSide({
+        decision: "applicable",
+        justification: "",
+        implementation_ref: "x",
+      }),
+    ).toBe("applicable");
+    expect(
+      describeSide({
+        decision: "excluded",
+        justification: "No card data",
+        implementation_ref: "",
+      }),
+    ).toBe("excluded — No card data");
   });
 });

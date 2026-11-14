@@ -126,6 +126,7 @@ GET /v1/framework-scopes/applicability 8
 GET /v1/framework-scopes/applicability/export 8
 GET /v1/framework-scopes/{id} 8
 GET /v1/framework-scopes/{id}/applicability 8
+GET /v1/framework-scopes/{id}/applicability/diff 8
 GET /v1/frameworks 8
 GET /v1/frameworks/posture 8
 GET /v1/frameworks/scf/versions 8
