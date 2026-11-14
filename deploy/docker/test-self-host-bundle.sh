@@ -88,6 +88,9 @@
 #      and does not duplicate seed rows (slice 065 bug #3 idempotency,
 #      AC-7). The first boot printed the opt-in crosswalk commands and the
 #      re-run does not (security-atlas#1888).
+#   8c. (bundled mode, security-atlas#1928) An artifact uploaded through
+#      POST /v1/artifacts:upload reads back byte-identical from the
+#      bundled MinIO via its presigned URL, served as an attachment.
 #
 # AC-9 is covered by the `external` mode's pre-created non-superuser
 # atlas_migrate: if the cluster-admin one-time grant (BYPASSRLS +
@@ -175,6 +178,7 @@ ATLAS_DEFAULT_USER_PASSWORD=test-default-user-password
 POSTGRES_DB=security_atlas
 ATLAS_BOOTSTRAP_TENANT=00000000-0000-4000-8000-000000000001
 ARTIFACTS_BUCKET=atlas-artifacts
+ARTIFACTS_S3_PUBLIC_ENDPOINT=http://127.0.0.1:9000
 AWS_REGION=us-east-1
 ATLAS_SECURE_COOKIES=false
 NEXT_PUBLIC_API_BASE_URL=
@@ -653,6 +657,46 @@ SOC2_MAPPED="$(db_count "SELECT count(DISTINCT fr.id)
 [ "${SOC2_MAPPED}" = "${SOC2_WITH_EDGES}" ] \
     || fail "stock SOC 2 controls map to ${SOC2_MAPPED:-?} SOC 2 requirements, want ${SOC2_WITH_EDGES} (the SOC 2 requirements that have edges)"
 log "stock SOC 2 controls map to ${SOC2_MAPPED} SOC 2 requirements"
+
+# ---------------------------------------------------------------------
+# Assertion 8c (security-atlas#1928) — BUNDLED MODE: the artifact store is
+# wired from ARTIFACTS_* and round-trips through the bundled MinIO. Upload
+# an HTML file through POST /v1/artifacts:upload, fetch its presigned URL
+# from GET /v1/artifacts/{id}, download it from MinIO and require the
+# exact bytes back, served as an attachment (never rendered inline).
+# ARTIFACTS_S3_PUBLIC_ENDPOINT in .env.test points presigned URLs at the
+# host-published MinIO port so this runner can follow them.
+# ---------------------------------------------------------------------
+if [ "${MODE}" = "bundled" ]; then
+    log "artifact store: upload + read back through MinIO"
+    ART_FILE="$(mktemp)"
+    ART_RESP="$(mktemp)"
+    ART_DL="$(mktemp)"
+    ART_HDRS="$(mktemp)"
+    printf '<html><script>window.atlasProbe=%s</script></html>' "$(date +%s%N)" > "${ART_FILE}"
+    ART_CODE="$(curl -sS -o "${ART_RESP}" -w "%{http_code}" \
+        -H "Authorization: Bearer ${TOKEN}" \
+        -F "file=@${ART_FILE};type=text/html;filename=probe.html" \
+        "http://127.0.0.1:${ATLAS_HOSTPORT}/v1/artifacts:upload")"
+    [ "${ART_CODE}" = "201" ] \
+        || fail "POST /v1/artifacts:upload: HTTP ${ART_CODE} (want 201); body: $(head -c 400 "${ART_RESP}")"
+    ART_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["artifact"]["id"])' "${ART_RESP}")"
+    ART_CODE="$(curl -sS -o "${ART_RESP}" -w "%{http_code}" \
+        -H "Authorization: Bearer ${TOKEN}" \
+        "http://127.0.0.1:${ATLAS_HOSTPORT}/v1/artifacts/${ART_ID}")"
+    [ "${ART_CODE}" = "200" ] \
+        || fail "GET /v1/artifacts/${ART_ID}: HTTP ${ART_CODE} (want 200); body: $(head -c 400 "${ART_RESP}")"
+    ART_URL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["url"])' "${ART_RESP}")"
+    ART_CODE="$(curl -sS -D "${ART_HDRS}" -o "${ART_DL}" -w "%{http_code}" "${ART_URL}")"
+    [ "${ART_CODE}" = "200" ] || fail "presigned download: HTTP ${ART_CODE} (want 200)"
+    cmp -s "${ART_FILE}" "${ART_DL}" || fail "artifact read back from MinIO differs from the upload"
+    grep -qi '^content-disposition: *attachment' "${ART_HDRS}" \
+        || fail "presigned download is not served as an attachment; headers: $(tr -d '\r' < "${ART_HDRS}")"
+    grep -qi '^content-type: *application/octet-stream' "${ART_HDRS}" \
+        || fail "presigned download is not served as application/octet-stream; headers: $(tr -d '\r' < "${ART_HDRS}")"
+    rm -f "${ART_FILE}" "${ART_RESP}" "${ART_DL}" "${ART_HDRS}"
+    log "artifact ${ART_ID} uploaded and read back byte-identical from MinIO, as an octet-stream attachment"
+fi
 
 # ---------------------------------------------------------------------
 # Assertions 9 + 10 (slice 470) — PROXY MODE ONLY: the trusted-proxy
