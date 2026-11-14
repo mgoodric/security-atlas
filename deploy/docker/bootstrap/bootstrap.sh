@@ -65,6 +65,13 @@ CROSSWALKS_DIR="${CROSSWALKS_DIR:-$REPO_ROOT/data/crosswalks}"
 
 log() { echo "[bootstrap] $*"; }
 
+# security-atlas#2005: psql gets PSQL_URL (no password) and reads the
+# password from PGPASSWORD, so it never appears in the process list.
+# atlas-cli still reads DATABASE_URL from its environment, not argv.
+# shellcheck source=deploy/docker/bootstrap/pg-conn.sh
+. "$BOOTSTRAP_DIR/pg-conn.sh"
+pg_conn_split
+
 # security-atlas#1723: the script also runs outside the bundled image (an
 # adopter running it by hand on macOS), so it must not assume busybox wget
 # or a compose stack. in_container gates every `docker compose` hint;
@@ -94,7 +101,7 @@ fi
 # Postgres accepting this fresh connection.
 log "waiting for Postgres..."
 i=0
-until psql "$DATABASE_URL" -c 'SELECT 1' >/dev/null 2>&1; do
+until psql "$PSQL_URL" -c 'SELECT 1' >/dev/null 2>&1; do
     i=$((i + 1))
     if [ "$i" -ge 60 ]; then
         log "ERROR: Postgres not reachable after 60 attempts"
@@ -114,7 +121,7 @@ log "generating argon2id hash for the default user password..."
 DEFAULT_USER_HASH="$(printf '%s\n' "$ATLAS_DEFAULT_USER_PASSWORD" | atlas-cli bootstrap hash-password)"
 
 log "seeding default tenant + scope + user..."
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+psql "$PSQL_URL" -v ON_ERROR_STOP=1 \
     -v default_tenant_id="$ATLAS_BOOTSTRAP_TENANT" \
     -v default_user_email="$ATLAS_DEFAULT_USER_EMAIL" \
     -v default_user_password_hash="$DEFAULT_USER_HASH" \
@@ -136,7 +143,7 @@ atlas-cli catalog import-scf "$SCF_CATALOG"
 # First install = the SOC 2 framework row did not exist before this import.
 COMPOSE_ARGS="${ATLAS_COMPOSE_ARGS:--f deploy/docker/docker-compose.yml}"
 BOOTSTRAP_SERVICE="${ATLAS_BOOTSTRAP_SERVICE:-atlas-bootstrap}"
-SOC2_PRESENT="$(psql "$DATABASE_URL" -tAc "SELECT count(*) FROM frameworks WHERE slug = 'soc2'")"
+SOC2_PRESENT="$(psql "$PSQL_URL" -tAc "SELECT count(*) FROM frameworks WHERE slug = 'soc2'")"
 log "importing SOC 2 crosswalk from $CROSSWALKS_DIR/soc2-tsc-2017.yaml ..."
 atlas-cli catalog import-crosswalk "$CROSSWALKS_DIR/soc2-tsc-2017.yaml"
 if [ "$SOC2_PRESENT" = "0" ]; then

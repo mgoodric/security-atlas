@@ -2181,6 +2181,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/imports:
+    post:
+      summary: POST /v1/controls/imports — upload a CSV/XLSX control sheet as a staged import batch (#1779)
+      tags: [controls]
+      operationId: post-v1-controls-imports
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/controls/imports/{id}:
+    get:
+      summary: GET /v1/controls/imports/{id} — an import batch with its counts, staged rows and rejected rows (#1779)
+      tags: [controls]
+      operationId: get-v1-controls-imports-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/action-plans:
     get:
       summary: GET /v1/controls/{id}/action-plans

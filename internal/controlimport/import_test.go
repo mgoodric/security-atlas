@@ -1,8 +1,10 @@
 package controlimport
 
 import (
+	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -75,12 +77,223 @@ func TestParseXLSXControlSetRoundTrip(t *testing.T) {
 	if !strings.Contains(c.Description, "quarterly") {
 		t.Fatalf("description did not round-trip: %+v", c)
 	}
+	// The incomplete row is reported, not dropped.
+	if len(got.Rejected) != 1 || got.Rejected[0].RowNumber != 5 || got.Rejected[0].Reason != RejectMissingField ||
+		got.Rejected[0].Detail != "missing title" {
+		t.Fatalf("rejected = %+v, want row 5 missing title", got.Rejected)
+	}
+}
+
+func TestParseAccountsForEveryRow(t *testing.T) {
+	raw := []byte("Control ID,Title,Description,Tested Under,Implementation Type,Applicability\n" +
+		"AC-1,MFA,Users use MFA,\"CC6.1; CC6.2\nCC6.1\",Semi-Automated,env:prod\n" +
+		",No ID,Has no id,,,\n" +
+		"AC-2,,Has no title,,,\n" +
+		"ac-1,Dup,Duplicate id in another case,,,\n" +
+		"AC-3,Bad type,Unknown implementation type,,sometimes,\n" +
+		"AC-4,Plain,No tested-under data,N/A,,\n")
+	got, err := ParseCSV(raw)
+	if err != nil {
+		t.Fatalf("ParseCSV: %v", err)
+	}
+	if len(got.Controls)+len(got.Rejected) != 6 {
+		t.Fatalf("staged %d + rejected %d != 6 data rows", len(got.Controls), len(got.Rejected))
+	}
+	if len(got.Controls) != 2 {
+		t.Fatalf("controls = %+v", got.Controls)
+	}
+	first := got.Controls[0]
+	if strings.Join(first.TestedUnder, ",") != "CC6.1,CC6.2" {
+		t.Errorf("tested under = %v, want split and de-duplicated", first.TestedUnder)
+	}
+	if first.ImplementationType != "semi_automated" || first.Applicability != "env:prod" {
+		t.Errorf("optional fields = %q / %q", first.ImplementationType, first.Applicability)
+	}
+	if got.Controls[1].ExternalID != "AC-4" || len(got.Controls[1].TestedUnder) != 0 {
+		t.Errorf("no-tested-under row = %+v", got.Controls[1])
+	}
+	want := []struct {
+		row    int
+		reason string
+	}{
+		{3, RejectMissingField}, {4, RejectMissingField}, {5, RejectDuplicateID}, {6, RejectInvalidImplementationType},
+	}
+	for i, w := range want {
+		if got.Rejected[i].RowNumber != w.row || got.Rejected[i].Reason != w.reason {
+			t.Errorf("rejected[%d] = %+v, want row %d %s", i, got.Rejected[i], w.row, w.reason)
+		}
+	}
+}
+
+func TestParseColumnMap(t *testing.T) {
+	raw := []byte("Ref No.,Control Name,What we do,ID\nX-1,MFA,Users use MFA,ignored\n")
+	got, err := ParseCSVWith(raw, ParseOptions{ColumnMap: map[string]string{
+		FieldID: "ref no.", FieldDescription: "What We Do",
+	}})
+	if err != nil {
+		t.Fatalf("ParseCSVWith: %v", err)
+	}
+	if len(got.Controls) != 1 || got.Controls[0].ExternalID != "X-1" || got.Controls[0].Description != "Users use MFA" {
+		t.Fatalf("controls = %+v", got.Controls)
+	}
+	// The mapped field wins over the column the aliases would have picked.
+	if strings.Join(got.UnmappedColumns, ",") != "ID" {
+		t.Errorf("unmapped = %v, want [ID]", got.UnmappedColumns)
+	}
+
+	if _, err := ParseCSVWith(raw, ParseOptions{ColumnMap: map[string]string{"owner": "Ref No."}}); !errors.Is(err, ErrInvalidColumnMap) {
+		t.Errorf("unknown field err = %v", err)
+	}
+	if _, err := ParseCSVWith(raw, ParseOptions{ColumnMap: map[string]string{FieldID: "Ref No.", FieldTestedUnder: "Criteria"}}); !errors.Is(err, ErrMappedColumnAbsent) {
+		t.Errorf("absent header err = %v", err)
+	}
+}
+
+func TestParseRowCapAndFormat(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("Control ID,Title,Description\n")
+	for i := 0; i < MaxRows; i++ {
+		b.WriteString("C,T,D\n")
+	}
+	if _, err := ParseCSV([]byte(b.String())); !errors.Is(err, ErrTooManyRows) {
+		t.Errorf("row cap err = %v", err)
+	}
+	if _, err := Parse("controls.pdf", []byte("x"), ParseOptions{}); !errors.Is(err, ErrUnsupportedFormat) {
+		t.Errorf("format err = %v", err)
+	}
+	if FormatOf("A.XLSX") != "xlsx" || FormatOf("a.csv") != "csv" {
+		t.Errorf("FormatOf is not case-insensitive")
+	}
 }
 
 func TestParseRequiresMinimumColumns(t *testing.T) {
 	_, err := ParseCSV([]byte("ID,Title\nAC-1,MFA\n"))
 	if !errors.Is(err, ErrNoHeaderRow) {
 		t.Fatalf("want ErrNoHeaderRow, got %v", err)
+	}
+}
+
+// padXLSX re-zips a workbook with an extra entry of n zero bytes. Zeros
+// deflate about 1000:1, so the result stays small on the wire while its
+// declared uncompressed size is n.
+func padXLSX(t *testing.T, raw []byte, n int) []byte {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		t.Fatalf("read xlsx zip: %v", err)
+	}
+	var out bytes.Buffer
+	zw := zip.NewWriter(&out)
+	for _, f := range zr.File {
+		if err := zw.Copy(f); err != nil {
+			t.Fatalf("copy %s: %v", f.Name, err)
+		}
+	}
+	w, err := zw.Create("xl/media/pad.bin")
+	if err != nil {
+		t.Fatalf("create pad: %v", err)
+	}
+	chunk := make([]byte, 1<<20)
+	for written := 0; written < n; written += len(chunk) {
+		if _, err := w.Write(chunk[:min(len(chunk), n-written)]); err != nil {
+			t.Fatalf("write pad: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return out.Bytes()
+}
+
+// rowsXLSX streams a workbook with a header and n data rows.
+func rowsXLSX(t *testing.T, n int) []byte {
+	t.Helper()
+	f := excelize.NewFile()
+	defer f.Close()
+	sw, err := f.NewStreamWriter(f.GetSheetName(0))
+	if err != nil {
+		t.Fatalf("stream writer: %v", err)
+	}
+	_ = sw.SetRow("A1", []any{"Control ID", "Title", "Description"})
+	for i := 0; i < n; i++ {
+		cell, _ := excelize.CoordinatesToCellName(1, i+2)
+		_ = sw.SetRow(cell, []any{fmt.Sprintf("C-%d", i), "T", "D"})
+	}
+	if err := sw.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write xlsx: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestParseXLSXRefusesDecompressionBomb(t *testing.T) {
+	clean := makeControlXLSX(t, [][]string{{"ID", "Title", "Description"}, {"A", "B", "C"}})
+	bomb := padXLSX(t, clean, MaxUnzipBytes+1)
+	if len(bomb) > MaxUploadBytes/10 {
+		t.Fatalf("bomb is %d bytes on the wire; want it well under the upload cap", len(bomb))
+	}
+	if _, err := ParseXLSX(bomb); !errors.Is(err, ErrWorkbookTooLarge) {
+		t.Fatalf("bomb err = %v, want ErrWorkbookTooLarge", err)
+	}
+	// Padding that stays under the cap still parses.
+	if got, err := ParseXLSX(padXLSX(t, clean, 1<<20)); err != nil || len(got.Controls) != 1 {
+		t.Fatalf("padded-under-cap = %+v, %v", got, err)
+	}
+}
+
+// TestParseXLSXUnzipSumDoesNotWrap: a 10 MiB entry followed by one declaring
+// 2^64 - 5 MiB sums to 5 MiB in uint64, under the cap, if the check adds
+// before comparing.
+func TestParseXLSXUnzipSumDoesNotWrap(t *testing.T) {
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, size := range []uint64{10 << 20, ^uint64(0) - (5 << 20) + 1} {
+		w, err := zw.CreateRaw(&zip.FileHeader{
+			Name: fmt.Sprintf("xl/part-%d.xml", size), Method: zip.Store,
+			UncompressedSize64: size, CompressedSize64: 1,
+		})
+		if err != nil {
+			t.Fatalf("CreateRaw: %v", err)
+		}
+		_, _ = w.Write([]byte("x"))
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if _, err := ParseXLSX(buf.Bytes()); !errors.Is(err, ErrWorkbookTooLarge) {
+		t.Fatalf("wrapping sizes err = %v, want ErrWorkbookTooLarge", err)
+	}
+}
+
+func TestParseXLSXColumnCap(t *testing.T) {
+	far := make([]string, 16384) // a value in column XFD
+	far[0], far[1], far[2], far[16383] = "C-1", "T", "D", "stray"
+	raw := makeControlXLSX(t, [][]string{{"Control ID", "Title", "Description"}, far})
+	if _, err := ParseXLSX(raw); !errors.Is(err, ErrTooManyColumns) {
+		t.Fatalf("far cell err = %v, want ErrTooManyColumns", err)
+	}
+	// A cell at the cap is fine.
+	atCap := make([]string, MaxColumns)
+	atCap[0], atCap[1], atCap[2], atCap[MaxColumns-1] = "C-1", "T", "D", "note"
+	got, err := ParseXLSX(makeControlXLSX(t, [][]string{{"Control ID", "Title", "Description"}, atCap}))
+	if err != nil || len(got.Controls) != 1 {
+		t.Fatalf("at-cap = %+v, %v", got, err)
+	}
+}
+
+func TestParseXLSXRowCapStopsTheRead(t *testing.T) {
+	if _, err := ParseXLSX(rowsXLSX(t, MaxRows)); !errors.Is(err, ErrTooManyRows) {
+		t.Fatalf("header + %d rows err = %v, want ErrTooManyRows", MaxRows, err)
+	}
+	got, err := ParseXLSX(rowsXLSX(t, MaxRows-1))
+	if err != nil {
+		t.Fatalf("header + %d rows: %v", MaxRows-1, err)
+	}
+	if len(got.Controls) != MaxRows-1 {
+		t.Fatalf("controls = %d, want %d", len(got.Controls), MaxRows-1)
 	}
 }
 
