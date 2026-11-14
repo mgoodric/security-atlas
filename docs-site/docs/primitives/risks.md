@@ -44,7 +44,27 @@ treatment, owner, and review due date.
 
 The register supports a hierarchy view (slice 113): roll risks up by
 business unit, by category, or by parent risk. The hierarchy is also
-exportable (slice 136) as CSV / JSON / XLSX for board reporting.
+exportable (slice 136) as CSV / JSON / XLSX for board reporting; the
+`parent_risk_ids` column lists the risks each row rolls up to.
+
+## Rolling risks up into a parent risk
+
+An org or company risk can have child risks: team findings that
+evidence it, for example, under an enterprise risk you imported. On
+the parent's detail page, **Children** lists them and **Attach a
+lower-level risk** adds one. **Parents** on a child's page lists the
+risks it rolls up to.
+
+- A child must sit at a lower level than its parent (team < org <
+  company) and be scored on the 5x5 grid. A risk cannot be attached
+  under itself or under one of its own children, at any depth.
+- Attaching or detaching never changes the parent's own score or
+  treatment. The page shows the **roll-up** from the children beside
+  the assessed severity, and flags the parent when the children roll
+  up higher than it was assessed.
+- The API is `POST /v1/risks/{id}/children` with
+  `{"child_risk_ids": [...]}`, `DELETE /v1/risks/{id}/children/{child_id}`,
+  and `GET` on `/v1/risks/{id}/children` and `/v1/risks/{id}/parents`.
 
 ## Linking risks to controls
 

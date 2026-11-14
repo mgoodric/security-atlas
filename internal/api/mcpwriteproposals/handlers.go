@@ -299,11 +299,21 @@ type transitionErrBody struct {
 // an unknown kind is a 400 here because the proposal's input is at fault,
 // not a precondition the caller can fix by registering a schema first.
 // The risk appliers' treatment-validation refusal carries the code
-// POST /v1/risks uses (internal/api/risks/handlers.go, #1844).
+// POST /v1/risks uses (internal/api/risks/handlers.go, #1844). The
+// hierarchy-link appliers' refusals take the statuses
+// POST /v1/risks/{id}/children returns (#1748).
 func applyErrStatus(err error) (int, string, bool) {
 	switch {
 	case risk.IsTreatmentValidation(err):
 		return http.StatusBadRequest, "treatment_validation_failed", true
+	case errors.Is(err, risk.ErrAggregationCycle):
+		return http.StatusConflict, "hierarchy_cycle", true
+	case risk.IsChildLinkValidation(err):
+		return http.StatusBadRequest, "hierarchy_validation_failed", true
+	case errors.Is(err, risk.ErrNotFound), errors.Is(err, risk.ErrChildrenNotFound):
+		return http.StatusNotFound, "risk_not_found", true
+	case errors.Is(err, risk.ErrLinkNotFound):
+		return http.StatusNotFound, "link_not_found", true
 	case errors.Is(err, ingest.ErrObservedAtSkew):
 		return http.StatusBadRequest, "observed_at_skew", true
 	case errors.Is(err, ingest.ErrValidation):

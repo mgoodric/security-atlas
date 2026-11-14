@@ -9,9 +9,12 @@ package frameworkscope_test
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -156,9 +159,62 @@ func TestHTTP_Applicability_ContradictionFilterAndCount(t *testing.T) {
 		}
 	}
 
-	for _, q := range []string{"?decision=maybe", "?contradiction=sometimes"} {
+	for _, q := range []string{"?decision=maybe", "?contradiction=sometimes", "?contradiction=1", "?contradiction=t", "?contradiction=TRUE"} {
 		if code, _, payload := c.get(base + q); code != http.StatusBadRequest {
 			t.Fatalf("%s: status %d, want 400; body %s", q, code, payload)
 		}
+	}
+}
+
+// The as_of GET returns the decisions in force at as_of, but flags them
+// against current evaluations (#1789 D6): a failing evaluation recorded
+// after as_of clears the flag on a past read, and the body says "current".
+func TestHTTP_ApplicabilityAsOf_ContradictionAgainstCurrentEvaluations(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := soaTenant(t, admin)
+	f := seedSoAFixture(t, admin, tenant)
+	ts, bearer, approver := setupHTTPServer(t, tenant)
+	c := soaClient{t: t, base: ts.URL, bearer: bearer}
+	scopeID := c.createScope(f.FrameworkVersionID, "ISMS")
+	applyFixtureDecisions(c, f, scopeID)
+
+	now := time.Now().UTC().Truncate(time.Second)
+	c.transition(scopeID, "submit", bearer, "")
+	c.transition(scopeID, "approve", approver, "")
+	c.transition(scopeID, "activate", bearer, fmt.Sprintf(`{"effective_from":%q}`, now.Add(-2*time.Hour).Format(time.RFC3339)))
+
+	past := now.Add(-time.Hour)
+	asOf := func() applicabilityResp {
+		t.Helper()
+		q := url.Values{"framework_version": {f.FrameworkVersionID.String()}, "as_of": {past.Format(time.RFC3339)}}
+		code, out, payload := c.get("/v1/framework-scopes/applicability?" + q.Encode())
+		if code != http.StatusOK {
+			t.Fatalf("as_of: status %d; body %s", code, payload)
+		}
+		return out
+	}
+
+	before := asOf()
+	if before.ContradictionsEvaluatedAgainst != "current" {
+		t.Fatalf("contradictions_evaluated_against = %q, want current", before.ContradictionsEvaluatedAgainst)
+	}
+	if got := strings.Join(contradicted(before), ","); got != "R-01" || before.Counts.Contradictions != 1 {
+		t.Fatalf("as_of before C1 fails: contradictions = %q (count %d), want R-01", got, before.Counts.Contradictions)
+	}
+
+	// C1 fails now, after as_of. A point-in-time flag would still show R-01.
+	if _, err := admin.Exec(context.Background(), `INSERT INTO control_evaluations (
+			id, tenant_id, control_id, scope_cell_id, eval_run_id,
+			evaluated_at, result, freshness_status, evidence_count_in_window, trigger
+		) VALUES ($1, $2, $3, NULL, $4, now() + interval '1 minute', 'fail', 'fresh', 1, 'manual')`,
+		uuid.New(), tenant, f.Controls["C1"], uuid.New()); err != nil {
+		t.Fatalf("insert fail evaluation: %v", err)
+	}
+	after := asOf()
+	if got := contradicted(after); len(got) != 0 || after.Counts.Contradictions != 0 {
+		t.Fatalf("as_of after C1 fails: contradictions = %v (count %d), want none", got, after.Counts.Contradictions)
+	}
+	if after.FrameworkScope == nil || after.FrameworkScope.ID != scopeID {
+		t.Fatalf("as_of scope = %+v, want %s", after.FrameworkScope, scopeID)
 	}
 }

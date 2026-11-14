@@ -20,6 +20,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
+import { AdminSectionNav } from "@/components/admin/admin-section-nav";
 import { Sidebar } from "@/components/shell/sidebar";
 import { TopBar } from "@/components/shell/topbar";
 import {
@@ -101,41 +102,7 @@ function AdminBreadcrumb({
 }) {
   return (
     <div className="space-y-4">
-      <nav
-        aria-label="Admin sections"
-        className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground"
-      >
-        <Link href="/admin" className="hover:text-foreground">
-          Admin
-        </Link>
-        <span>·</span>
-        <Link href="/admin/sso" className="hover:text-foreground">
-          SSO
-        </Link>
-        <Link href="/admin/users" className="hover:text-foreground">
-          Users
-        </Link>
-        <Link href="/admin/api-keys" className="hover:text-foreground">
-          API keys
-        </Link>
-        <Link href="/admin/features" className="hover:text-foreground">
-          Features
-        </Link>
-        <Link href="/admin/audit" className="hover:text-foreground">
-          Audit
-        </Link>
-        <Link href="/admin/super-admins" className="hover:text-foreground">
-          Super admins
-        </Link>
-        <Link href="/admin/tenants" className="hover:text-foreground">
-          Tenants
-        </Link>
-        {demoEnabled ? (
-          <Link href="/admin/demo" className="hover:text-foreground">
-            Demo
-          </Link>
-        ) : null}
-      </nav>
+      <AdminSectionNav demoEnabled={demoEnabled} />
       {children}
     </div>
   );
