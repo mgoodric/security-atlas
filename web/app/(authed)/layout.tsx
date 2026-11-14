@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { MobileSidebar } from "@/components/shell/mobile-sidebar";
 import { Sidebar, getAuthedNav } from "@/components/shell/sidebar";
 import { TopBar } from "@/components/shell/topbar";
+import { ToastProvider } from "@/components/ui/toast";
 import { VersionFooter } from "@/components/version-footer";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
@@ -48,7 +49,9 @@ export default async function AuthedLayout({
           tabIndex={-1}
           className="flex-1 overflow-y-auto p-6"
         >
-          {children}
+          {/* #2089: the provider lives in this persistent layout, so a
+            toast raised before router.push shows on the landing page. */}
+          <ToastProvider>{children}</ToastProvider>
         </main>
       </div>
       {/* Slice 072: build-version footer. Fixed-position; does not

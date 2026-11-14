@@ -106,7 +106,10 @@ export type FixtureName =
   // #1794 — synthetic ISO/IEC 27001 version + crosswalk + three
   // evaluated controls for the SoA tab (framework-scope-soa.spec.ts).
   // Deletes the version's scope revisions so each run starts clean.
-  | "framework-scope-soa";
+  | "framework-scope-soa"
+  // #2089 — one manual_attested control so attest.spec.ts can load the
+  // real attest form (the base control is automated).
+  | "attest";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

@@ -263,8 +263,11 @@ export function RiskForm({ onSubmit }: Props) {
   const fair = fairNumbers(state);
 
   return (
+    // #2089: noValidate — validateRiskForm renders errors inline beside
+    // each field instead of the browser's native bubbles.
     <form
       onSubmit={handleSubmit}
+      noValidate
       className="space-y-6"
       data-testid="risks-create-form"
     >
@@ -286,10 +289,13 @@ export function RiskForm({ onSubmit }: Props) {
           value={state.title}
           onChange={(e) => update("title", e.target.value)}
           placeholder="Short, scannable risk statement"
+          aria-invalid={fieldErrors.title ? true : undefined}
+          aria-describedby={fieldErrors.title ? "risk-title-error" : undefined}
           data-testid="risks-create-title"
         />
         {fieldErrors.title && (
           <p
+            id="risk-title-error"
             className="mt-1 text-sm text-destructive"
             data-testid="risks-create-title-error"
           >
@@ -400,10 +406,17 @@ export function RiskForm({ onSubmit }: Props) {
             value={state.treatment_owner}
             onChange={(e) => update("treatment_owner", e.target.value)}
             placeholder="Person or role accountable for treatment"
+            aria-invalid={fieldErrors.treatment_owner ? true : undefined}
+            aria-describedby={
+              fieldErrors.treatment_owner
+                ? "risk-treatment-owner-error"
+                : undefined
+            }
             data-testid="risks-create-treatment-owner"
           />
           {fieldErrors.treatment_owner && (
             <p
+              id="risk-treatment-owner-error"
               className="mt-1 text-sm text-destructive"
               data-testid="risks-create-treatment-owner-error"
             >
@@ -570,7 +583,7 @@ export function RiskForm({ onSubmit }: Props) {
           {submitting ? "Creating…" : "Create risk"}
         </Button>
         <span className="text-xs text-muted-foreground">
-          On success you return to the risk register.
+          On success you land on the new risk.
         </span>
       </div>
     </form>
