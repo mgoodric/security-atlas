@@ -33,7 +33,7 @@ vi.mock("@/lib/api/dashboard", () => ({
   getControlDrift: vi.fn(),
   getEvidenceFreshness: vi.fn(),
   getMitigateRisks: vi.fn(),
-  getUpcoming: vi.fn(),
+  getComingUp: vi.fn(),
   getFrameworkPosture: vi.fn(),
   getActivity: vi.fn(),
 }));
@@ -50,7 +50,7 @@ beforeEach(() => {
     "getControlDrift",
     "getEvidenceFreshness",
     "getMitigateRisks",
-    "getUpcoming",
+    "getComingUp",
     "getFrameworkPosture",
     "getActivity",
   ]) {
@@ -77,8 +77,8 @@ describe("DASHBOARD_QUERY_KEYS (key parity with page.tsx useQuery)", () => {
   it("risks key matches the page useQuery key", () => {
     expect(DASHBOARD_QUERY_KEYS.risks).toEqual(["dashboard", "risks"]);
   });
-  it("upcoming key matches the page useQuery key", () => {
-    expect(DASHBOARD_QUERY_KEYS.upcoming).toEqual(["dashboard", "upcoming"]);
+  it("coming-up key matches the page useQuery key", () => {
+    expect(DASHBOARD_QUERY_KEYS.comingUp).toEqual(["dashboard", "coming-up"]);
   });
   it("framework-posture key matches the page useQuery key", () => {
     expect(DASHBOARD_QUERY_KEYS.frameworkPosture).toEqual([
@@ -112,14 +112,14 @@ describe("prefetchDashboard (parallel fan-out, fail-soft)", () => {
       total_stale: 0,
     };
     const drift = { snapshots: [] };
-    const upcoming = { items: [], count: 0, next_cursor: "" };
+    const comingUp = { events: [], count: 0, truncated: false };
     const activity = { activity: [], count: 0, next_cursor: "" };
 
     mocked.getFrameworkPosture.mockResolvedValue(posture);
     mocked.getMitigateRisks.mockResolvedValue(risks);
     mocked.getEvidenceFreshness.mockResolvedValue(freshness);
     mocked.getControlDrift.mockResolvedValue(drift);
-    mocked.getUpcoming.mockResolvedValue(upcoming);
+    mocked.getComingUp.mockResolvedValue(comingUp);
     mocked.getActivity.mockResolvedValue(activity);
 
     const qc = new QueryClient();
@@ -131,7 +131,7 @@ describe("prefetchDashboard (parallel fan-out, fail-soft)", () => {
     expect(qc.getQueryData(["dashboard", "risks"])).toEqual(risks);
     expect(qc.getQueryData(["dashboard", "freshness"])).toEqual(freshness);
     expect(qc.getQueryData(["dashboard", "drift"])).toEqual(drift);
-    expect(qc.getQueryData(["dashboard", "upcoming"])).toEqual(upcoming);
+    expect(qc.getQueryData(["dashboard", "coming-up"])).toEqual(comingUp);
     expect(qc.getQueryData(["dashboard", "activity"])).toEqual(activity);
   });
 
@@ -144,7 +144,7 @@ describe("prefetchDashboard (parallel fan-out, fail-soft)", () => {
     // getControlDrift is called with one arg (the bearer); its `since`
     // param defaults to "7d" inside the fn, matching the client path.
     expect(mocked.getControlDrift).toHaveBeenCalledWith("the-bearer");
-    expect(mocked.getUpcoming).toHaveBeenCalledWith("the-bearer");
+    expect(mocked.getComingUp).toHaveBeenCalledWith("the-bearer");
     expect(mocked.getActivity).toHaveBeenCalledWith("the-bearer");
   });
 
@@ -155,7 +155,7 @@ describe("prefetchDashboard (parallel fan-out, fail-soft)", () => {
     mocked.getMitigateRisks.mockResolvedValue([]);
     mocked.getEvidenceFreshness.mockResolvedValue({ ok: 1 });
     mocked.getControlDrift.mockRejectedValue(new Error("upstream 500"));
-    mocked.getUpcoming.mockResolvedValue({ ok: 1 });
+    mocked.getComingUp.mockResolvedValue({ ok: 1 });
     mocked.getActivity.mockResolvedValue({ ok: 1 });
 
     const qc = new QueryClient();
@@ -166,7 +166,7 @@ describe("prefetchDashboard (parallel fan-out, fail-soft)", () => {
     expect(qc.getQueryData(["dashboard", "framework-posture"])).toEqual({
       ok: 1,
     });
-    expect(qc.getQueryData(["dashboard", "upcoming"])).toEqual({ ok: 1 });
+    expect(qc.getQueryData(["dashboard", "coming-up"])).toEqual({ ok: 1 });
 
     // The failed panel is UNseeded (undefined) -- NOT an error state.
     // This is the load-bearing fail-soft property: the client useQuery
