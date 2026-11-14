@@ -2410,8 +2410,10 @@ type FwToScfEdge struct {
 	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
-	// Crosswalk source that wrote this edge (yaml:<file>, scf-workbook:<columns>, scf-olir:<sheet>); NULL = predates #1971. The importer prunes only its own source.
+	// Crosswalk source that wrote this edge (yaml:<file>, scf-workbook:<columns>, scf-olir:<sheet>); NULL = predates #1971. The importer retires only its own source's edges.
 	CrosswalkSource *string `json:"crosswalk_source"`
+	// Set when the crosswalk that wrote this edge stopped listing it (#1971); cleared when it lists it again. Retired edges are excluded from effective_fw_to_scf_edges.
+	RetiredAt pgtype.Timestamptz `json:"retired_at"`
 }
 
 type FwToScfEdgeTierTransition struct {

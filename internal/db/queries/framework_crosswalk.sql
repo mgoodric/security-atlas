@@ -59,8 +59,10 @@ WHERE id = $1;
 -- Look up one edge by (requirement, anchor). Returns ErrNoRows when the
 -- edge doesn't exist yet. Importer calls this first to classify
 -- Created/Updated/Unchanged.
+-- Retired edges (#1971) are excluded.
 SELECT * FROM fw_to_scf_edges
-WHERE framework_requirement_id = $1 AND scf_anchor_id = $2;
+WHERE framework_requirement_id = $1 AND scf_anchor_id = $2
+  AND retired_at IS NULL;
 
 -- name: GetFwToScfEdgeForUpdate :one
 -- Row-lock one edge by (requirement, anchor) inside the import transaction.
@@ -69,6 +71,8 @@ WHERE framework_requirement_id = $1 AND scf_anchor_id = $2;
 -- check against the old row would overwrite a just-committed scf_official
 -- edge at READ COMMITTED. Same read-validate-write guard as
 -- GetFwToScfEdgeTierForUpdate. Returns ErrNoRows when the edge doesn't exist.
+-- Unlike every other reader it also returns a RETIRED edge (#1971): a
+-- crosswalk that lists the pair again restores it (RestoreFwToScfEdge).
 SELECT * FROM fw_to_scf_edges
 WHERE framework_requirement_id = $1 AND scf_anchor_id = $2
 FOR UPDATE;
@@ -96,14 +100,16 @@ WHERE id = $1
 RETURNING *;
 
 -- name: ListFwToScfEdgesForVersionForUpdate :many
--- Every catalog edge under one framework_version, row-locked, with the
--- requirement code and anchor scf_id the importer keys mappings on. The
--- crosswalk importer reads this after its upsert pass to find edges the
--- crosswalk no longer lists (#1971): an SCF remap moves a mapping to a new
--- anchor, and the edge on the old anchor would otherwise keep counting as
--- coverage.
+-- Every live catalog edge under one framework_version, row-locked, with the
+-- requirement code and anchor scf_id for the import report. The crosswalk
+-- importer reads this after its upsert pass to find edges the crosswalk no
+-- longer lists (#1971): an SCF remap or a new SCF release moves a mapping to
+-- another anchor row, and the edge on the old one would otherwise keep
+-- counting as coverage. Already-retired edges are not returned.
 SELECT
     e.id,
+    e.framework_requirement_id,
+    e.scf_anchor_id,
     fr.code AS requirement_code,
     a.scf_id,
     e.source_attribution,
@@ -113,14 +119,27 @@ FROM fw_to_scf_edges e
 JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE fr.framework_version_id = $1
+  AND e.retired_at IS NULL
 ORDER BY fr.code, a.scf_id
 FOR UPDATE OF e;
 
--- name: DeleteFwToScfEdge :exec
--- Remove one catalog edge the crosswalk no longer lists. Its tier-transition
--- audit rows go with it (ON DELETE CASCADE); the importer reports every
--- pruned edge, tier included, so the removal is visible in the import output.
-DELETE FROM fw_to_scf_edges WHERE id = $1;
+-- name: RetireFwToScfEdge :exec
+-- Retire one catalog edge the crosswalk no longer lists (#1971). The row and
+-- its append-only tier-transition history stay; effective_fw_to_scf_edges
+-- and the other readers stop seeing it. The importer writes a transition row
+-- recording the retirement in the same transaction.
+UPDATE fw_to_scf_edges
+SET retired_at = now(),
+    updated_at = now()
+WHERE id = $1 AND retired_at IS NULL;
+
+-- name: RestoreFwToScfEdge :exec
+-- Clear retired_at on an edge a crosswalk lists again (#1971). The importer
+-- writes a transition row recording the restore in the same transaction.
+UPDATE fw_to_scf_edges
+SET retired_at = NULL,
+    updated_at = now()
+WHERE id = $1;
 
 -- name: ListFwToScfEdgesForRequirement :many
 -- Reverse traversal — given a requirement, return all SCF anchors it maps
@@ -145,7 +164,8 @@ ORDER BY e.strength DESC, a.scf_id;
 
 -- name: CountFwToScfEdgesBySourceAttribution :one
 -- Audit query — exposed for integration tests + the audit log.
-SELECT count(*) FROM fw_to_scf_edges WHERE source_attribution = $1;
+SELECT count(*) FROM fw_to_scf_edges
+WHERE source_attribution = $1 AND retired_at IS NULL;
 
 -- ===== slice 483: crosswalk mapping-tier governance =====
 
@@ -155,7 +175,7 @@ SELECT count(*) FROM fw_to_scf_edges WHERE source_attribution = $1;
 -- variant is for read-only callers. Returns ErrNoRows for an unknown edge.
 SELECT id, mapping_tier, source_attribution
 FROM fw_to_scf_edges
-WHERE id = $1;
+WHERE id = $1 AND retired_at IS NULL;
 
 -- name: GetFwToScfEdgeTierForUpdate :one
 -- Row-lock the edge's tier inside the transition transaction so a concurrent
@@ -163,7 +183,7 @@ WHERE id = $1;
 -- an unknown edge (the handler maps that to 404).
 SELECT id, mapping_tier, source_attribution
 FROM fw_to_scf_edges
-WHERE id = $1
+WHERE id = $1 AND retired_at IS NULL
 FOR UPDATE;
 
 -- name: SetFwToScfEdgeTier :exec

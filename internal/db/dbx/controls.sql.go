@@ -1136,6 +1136,41 @@ func (q *Queries) MarkControlSuperseded(ctx context.Context, arg MarkControlSupe
 	return err
 }
 
+const rebindControlAnchorInPlace = `-- name: RebindControlAnchorInPlace :execrows
+UPDATE controls
+SET scf_anchor_id = $3,
+    scf_id = $4,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL
+`
+
+type RebindControlAnchorInPlaceParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	ID          pgtype.UUID `json:"id"`
+	ScfAnchorID pgtype.UUID `json:"scf_anchor_id"`
+	ScfID       *string     `json:"scf_id"`
+}
+
+// Issue #1971: a re-upload whose manifest names its anchor by SCF code, and
+// whose code now resolves to a different anchor row because a new SCF
+// release was imported (#1768 mints new anchor rows per release), moves the
+// active row to the current release's anchor in place. The manifest itself
+// is unchanged, so superseding would orphan owners, evidence and links for
+// nothing; coverage joins controls to edges by anchor row, so leaving the
+// control on the legacy row would drop it out of coverage.
+func (q *Queries) RebindControlAnchorInPlace(ctx context.Context, arg RebindControlAnchorInPlaceParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rebindControlAnchorInPlace,
+		arg.TenantID,
+		arg.ID,
+		arg.ScfAnchorID,
+		arg.ScfID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const updateControlMetadataInPlace = `-- name: UpdateControlMetadataInPlace :execrows
 UPDATE controls
 SET description = $3,

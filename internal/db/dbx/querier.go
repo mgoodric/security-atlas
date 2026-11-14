@@ -507,10 +507,6 @@ type Querier interface {
 	// a scope (supersession is the lifecycle exit); the row is preserved as
 	// audit trail.
 	DeleteFrameworkScope(ctx context.Context, arg DeleteFrameworkScopeParams) error
-	// Remove one catalog edge the crosswalk no longer lists. Its tier-transition
-	// audit rows go with it (ON DELETE CASCADE); the importer reports every
-	// pruned edge, tier included, so the removal is visible in the import output.
-	DeleteFwToScfEdge(ctx context.Context, id pgtype.UUID) error
 	// Revokes a SPECIFIC group-derived role from the user. The origin='group-derived'
 	// predicate is the safety belt (AC-4): a manual row with the same (tenant, user,
 	// role) is never deleted by this query. Returns the affected-row count.
@@ -852,6 +848,7 @@ type Querier interface {
 	// Look up one edge by (requirement, anchor). Returns ErrNoRows when the
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
+	// Retired edges (#1971) are excluded.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
 	// Row-lock one edge by (requirement, anchor) inside the import transaction.
 	// The importer compares source_attribution precedence before it updates
@@ -859,6 +856,8 @@ type Querier interface {
 	// check against the old row would overwrite a just-committed scf_official
 	// edge at READ COMMITTED. Same read-validate-write guard as
 	// GetFwToScfEdgeTierForUpdate. Returns ErrNoRows when the edge doesn't exist.
+	// Unlike every other reader it also returns a RETIRED edge (#1971): a
+	// crosswalk that lists the pair again restores it (RestoreFwToScfEdge).
 	GetFwToScfEdgeForUpdate(ctx context.Context, arg GetFwToScfEdgeForUpdateParams) (FwToScfEdge, error)
 	// ===== slice 483: crosswalk mapping-tier governance =====
 	// Read the current trust tier of one edge by id. The transition store calls
@@ -1631,8 +1630,8 @@ type Querier interface {
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
 	ListAllEvidenceKindSchemas(ctx context.Context) ([]EvidenceKindSchema, error)
-	// Slice 174: anchor catalog export edges projection. Returns EVERY
-	// fw_to_scf_edges row whose target anchor is in the current SCF
+	// Slice 174: anchor catalog export edges projection. Returns EVERY live
+	// (not retired) fw_to_scf_edges row whose target anchor is in the current SCF
 	// framework_version, joined to framework_requirements +
 	// framework_versions + frameworks so consumers get the natural-key
 	// (`framework_slug:version:code`) without a second query.
@@ -2190,12 +2189,12 @@ type Querier interface {
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
-	// Every catalog edge under one framework_version, row-locked, with the
-	// requirement code and anchor scf_id the importer keys mappings on. The
-	// crosswalk importer reads this after its upsert pass to find edges the
-	// crosswalk no longer lists (#1971): an SCF remap moves a mapping to a new
-	// anchor, and the edge on the old anchor would otherwise keep counting as
-	// coverage.
+	// Every live catalog edge under one framework_version, row-locked, with the
+	// requirement code and anchor scf_id for the import report. The crosswalk
+	// importer reads this after its upsert pass to find edges the crosswalk no
+	// longer lists (#1971): an SCF remap or a new SCF release moves a mapping to
+	// another anchor row, and the edge on the old one would otherwise keep
+	// counting as coverage. Already-retired edges are not returned.
 	ListFwToScfEdgesForVersionForUpdate(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFwToScfEdgesForVersionForUpdateRow, error)
 	// ===== user_roles origin-aware reconciliation =====
 	// The user's CURRENT group-derived roles (origin='group-derived') in the
@@ -3043,6 +3042,14 @@ type Querier interface {
 	// explicitly so the publish writes the final, operator-reviewed snapshot in
 	// the same UPDATE that flips the status — one atomic transition.
 	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
+	// Issue #1971: a re-upload whose manifest names its anchor by SCF code, and
+	// whose code now resolves to a different anchor row because a new SCF
+	// release was imported (#1768 mints new anchor rows per release), moves the
+	// active row to the current release's anchor in place. The manifest itself
+	// is unchanged, so superseding would orphan owners, evidence and links for
+	// nothing; coverage joins controls to edges by anchor row, so leaving the
+	// control on the legacy row would drop it out of coverage.
+	RebindControlAnchorInPlace(ctx context.Context, arg RebindControlAnchorInPlaceParams) (int64, error)
 	// Clears every member of a group (Replace `members`, or Delete soft-disable).
 	// Returns affected-row count.
 	RemoveAllSCIMGroupMembers(ctx context.Context, arg RemoveAllSCIMGroupMembersParams) (int64, error)
@@ -3070,6 +3077,14 @@ type Querier interface {
 	// (P0-509-1 fail-closed). Returns the triggering group alongside the role so
 	// the audit row can record WHICH group granted it (AC-7).
 	ResolveRolesForGroups(ctx context.Context, arg ResolveRolesForGroupsParams) ([]ResolveRolesForGroupsRow, error)
+	// Clear retired_at on an edge a crosswalk lists again (#1971). The importer
+	// writes a transition row recording the restore in the same transaction.
+	RestoreFwToScfEdge(ctx context.Context, id pgtype.UUID) error
+	// Retire one catalog edge the crosswalk no longer lists (#1971). The row and
+	// its append-only tier-transition history stay; effective_fw_to_scf_edges
+	// and the other readers stop seeing it. The importer writes a transition row
+	// recording the retirement in the same transaction.
+	RetireFwToScfEdge(ctx context.Context, id pgtype.UUID) error
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	// Deprovision (AC-4): revoke EVERY valid session for the user so the
 	// deprovisioned account loses all access immediately. No keep-id — unlike the

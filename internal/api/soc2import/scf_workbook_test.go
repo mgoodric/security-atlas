@@ -146,7 +146,7 @@ func TestLoadSCFWorkbook_CombinesColumnsWithPrefix(t *testing.T) {
 		t.Fatalf("metadata should come from the first column: %+v", cw)
 	}
 	// #1971: the source names the columns read, so it never matches the
-	// bundled YAML's and the two imports prune only their own edges.
+	// bundled YAML's and the two imports retire only their own edges.
 	if want := "scf-workbook:ISO 27001 2022+ISO 27002 2022=A."; cw.Source != want {
 		t.Fatalf("Source = %q; want %q", cw.Source, want)
 	}

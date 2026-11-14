@@ -7,8 +7,10 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -18,11 +20,12 @@ import (
 )
 
 // Issue #1971: the SCF 2026.3 IAC remap, applied to an install that already
-// ran the pre-#1971 bootstrap. scfimport updates anchors in place by scf_id,
-// so the IAC-10 row changes meaning from Authenticator Management to PAM. If
-// the crosswalk import only upserted, HIPAA Password Management would keep
-// its old edge on that row and the PAM control would falsely cover it. The
-// import prunes the edges the crosswalk no longer lists.
+// ran the pre-#1971 bootstrap. The sample moves to a new release label
+// (test-2026.1 -> test-2026.3), so scfimport mints a new framework version
+// with new anchor rows and leaves the old one legacy (#1768). The crosswalk
+// import then retires every edge it wrote to the legacy rows and writes the
+// current mapping to the new ones. Without the retire pass, HIPAA Password
+// Management would keep its edge to the legacy Authenticator Management row.
 
 // preRemap is the inverse of the #1971 remap: 2026.3 ID -> the pre-#1971
 // sample ID and title.
@@ -36,10 +39,11 @@ var preRemap = map[string]struct{ id, title string }{
 	"CFG-04.5": {"IAC-25", "Session Termination"},
 }
 
-// preRemapOnly are the pre-#1971 IDs that no 2026.3 sample row reuses.
-var preRemapOnly = []string{"IAC-06", "IAC-07", "IAC-15", "IAC-21", "IAC-24", "IAC-25"}
-
-const passwordManagement = "164.308(a)(5)(ii)(D)"
+const (
+	passwordManagement = "164.308(a)(5)(ii)(D)"
+	preRemapRelease    = "test-2026.1"
+	hipaaSource        = "yaml:hipaa-security-rule.yaml"
+)
 
 func loadSCFSample(t *testing.T) *scfimport.Catalog {
 	t.Helper()
@@ -53,33 +57,60 @@ func loadSCFSample(t *testing.T) *scfimport.Catalog {
 func importSCF(t *testing.T, pool *pgxpool.Pool, cat *scfimport.Catalog) {
 	t.Helper()
 	if _, err := scfimport.Import(context.Background(), pool, cat); err != nil {
-		t.Fatalf("scfimport.Import: %v", err)
+		t.Fatalf("scfimport.Import(%s): %v", cat.ReleaseVersion, err)
 	}
 }
 
-// hipaaAnchors returns the scf_ids one HIPAA requirement maps to.
+// wipeSCFReleases removes every SCF release and the frameworks this test
+// imports, so the test can start from the pre-#1971 release alone. Same
+// statements and FK order as scfseed's full reseed, plus HIPAA.
+func wipeSCFReleases(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	for _, stmt := range []string{
+		`TRUNCATE controls RESTART IDENTITY CASCADE`,
+		`DELETE FROM fw_to_scf_edges`,
+		`DELETE FROM framework_requirements`,
+		`DELETE FROM scf_anchors`,
+		`DELETE FROM framework_versions WHERE framework_id IN (
+			SELECT id FROM frameworks WHERE slug IN ('scf', 'soc2', 'hipaa_security_rule') AND tenant_id IS NULL)`,
+		`DELETE FROM frameworks WHERE slug IN ('scf', 'soc2', 'hipaa_security_rule') AND tenant_id IS NULL`,
+	} {
+		if _, err := pool.Exec(context.Background(), stmt); err != nil {
+			t.Fatalf("wipe %q: %v", stmt, err)
+		}
+	}
+}
+
+// hipaaAnchors returns "scf_id@release" for the live edges of one HIPAA
+// requirement.
 func hipaaAnchors(t *testing.T, pool *pgxpool.Pool, code string) []string {
 	t.Helper()
-	rows, err := pool.Query(context.Background(), `
-		SELECT a.scf_id
-		FROM fw_to_scf_edges e
+	return queryStrings(t, pool, `
+		SELECT a.scf_id || '@' || afv.version
+		FROM effective_fw_to_scf_edges e
 		JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
 		JOIN framework_versions fv ON fv.id = fr.framework_version_id
 		JOIN frameworks f ON f.id = fv.framework_id
 		JOIN scf_anchors a ON a.id = e.scf_anchor_id
+		JOIN framework_versions afv ON afv.id = a.framework_version_id
 		WHERE f.slug = 'hipaa_security_rule' AND f.tenant_id IS NULL AND fr.code = $1
-		ORDER BY a.scf_id`, code)
+		ORDER BY 1`, code)
+}
+
+func queryStrings(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) []string {
+	t.Helper()
+	rows, err := pool.Query(context.Background(), sql, args...)
 	if err != nil {
-		t.Fatalf("query HIPAA %s anchors: %v", code, err)
+		t.Fatalf("query: %v", err)
 	}
 	defer rows.Close()
 	var out []string
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var s string
+		if err := rows.Scan(&s); err != nil {
 			t.Fatalf("scan: %v", err)
 		}
-		out = append(out, id)
+		out = append(out, s)
 	}
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows: %v", err)
@@ -87,22 +118,37 @@ func hipaaAnchors(t *testing.T, pool *pgxpool.Pool, code string) []string {
 	return out
 }
 
-func TestSCFRemapUpgrade_PrunesEdgesLeftOnOldAnchors(t *testing.T) {
+func countRows(t *testing.T, pool *pgxpool.Pool, sql string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := pool.QueryRow(context.Background(), sql, args...).Scan(&n); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	return n
+}
+
+const hipaaEdgesWhere = `
+	FROM fw_to_scf_edges e
+	JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+	JOIN framework_versions fv ON fv.id = fr.framework_version_id
+	JOIN frameworks f ON f.id = fv.framework_id
+	JOIN scf_anchors a ON a.id = e.scf_anchor_id
+	JOIN framework_versions afv ON afv.id = a.framework_version_id
+	WHERE f.slug = 'hipaa_security_rule' AND f.tenant_id IS NULL`
+
+func TestSCFRemapUpgrade_RetiresEdgesLeftOnTheOldRelease(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)
 	ctx := context.Background()
-	resetHIPAA(t, pool)
-	ensureSCFLoaded(t, pool)
+	wipeSCFReleases(t, pool)
 	t.Cleanup(func() {
-		resetHIPAA(t, pool)
-		if _, err := pool.Exec(ctx, `DELETE FROM scf_anchors WHERE scf_id = ANY($1)`, preRemapOnly); err != nil {
-			t.Errorf("cleanup pre-#1971 anchors: %v", err)
-		}
-		importSCF(t, pool, loadSCFSample(t)) // restores the IAC-10 title
+		wipeSCFReleases(t, pool)
+		ensureSCFLoaded(t, pool) // the shared catalog the other tests expect
 	})
 
-	// Pre-#1971 state: the old sample IDs and titles, and the HIPAA crosswalk
-	// anchored on them.
+	// Pre-#1971 install: the old sample IDs and titles under the old label,
+	// and the HIPAA crosswalk anchored on them, with no crosswalk_source.
 	old := loadSCFSample(t)
+	old.ReleaseVersion = preRemapRelease
 	for i, c := range old.Controls {
 		if p, ok := preRemap[c.SCFID]; ok {
 			old.Controls[i].SCFID, old.Controls[i].Title, old.Controls[i].Family = p.id, p.title, "IAC"
@@ -118,78 +164,99 @@ func TestSCFRemapUpgrade_PrunesEdgesLeftOnOldAnchors(t *testing.T) {
 	if _, err := soc2import.Import(ctx, pool, oldCW); err != nil {
 		t.Fatalf("pre-#1971 HIPAA Import: %v", err)
 	}
-	// A pre-#1971 install has no crosswalk_source on its edges.
-	if _, err := pool.Exec(ctx, `
-		UPDATE fw_to_scf_edges SET crosswalk_source = NULL
-		WHERE framework_requirement_id IN (
-			SELECT fr.id FROM framework_requirements fr
-			JOIN framework_versions fv ON fv.id = fr.framework_version_id
-			JOIN frameworks f ON f.id = fv.framework_id
-			WHERE f.slug = 'hipaa_security_rule' AND f.tenant_id IS NULL)`); err != nil {
+	if _, err := pool.Exec(ctx, `UPDATE fw_to_scf_edges SET crosswalk_source = NULL`); err != nil {
 		t.Fatalf("clear crosswalk_source: %v", err)
 	}
-	if got := hipaaAnchors(t, pool, passwordManagement); !slices.Equal(got, []string{"IAC-10"}) {
-		t.Fatalf("pre-#1971 Password Management anchors = %v; want [IAC-10] (the old Authenticator Management row)", got)
+	if got := hipaaAnchors(t, pool, passwordManagement); !slices.Equal(got, []string{"IAC-10@" + preRemapRelease}) {
+		t.Fatalf("pre-#1971 Password Management anchors = %v; want [IAC-10@%s]", got, preRemapRelease)
 	}
 
-	// Re-run the bootstrap: the current sample, then the current crosswalk.
-	importSCF(t, pool, loadSCFSample(t))
+	// The upgraded bootstrap: the current sample (a new release label, so a
+	// new framework version), then the current crosswalk.
+	cur := loadSCFSample(t)
+	if cur.ReleaseVersion == preRemapRelease {
+		t.Fatalf("scf-sample.json is still labelled %s; its content changed, so it needs a new release_version", preRemapRelease)
+	}
+	importSCF(t, pool, cur)
+	if got := countRows(t, pool, `
+		SELECT count(*) FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.version = $1 AND fv.status = 'legacy'`, preRemapRelease); got != 1 {
+		t.Fatalf("the %s release is not legacy after the upgrade import", preRemapRelease)
+	}
 	cw := loadHIPAACrosswalk(t)
 	report, err := soc2import.Import(ctx, pool, cw)
 	if err != nil {
 		t.Fatalf("post-#1971 HIPAA Import: %v", err)
 	}
 
-	if got := hipaaAnchors(t, pool, passwordManagement); !slices.Equal(got, []string{"IAC-14"}) {
-		t.Fatalf("Password Management anchors after upgrade = %v; want only [IAC-14]", got)
+	if got := hipaaAnchors(t, pool, passwordManagement); !slices.Equal(got, []string{"IAC-14@" + cur.ReleaseVersion}) {
+		t.Fatalf("Password Management anchors after upgrade = %v; want only [IAC-14@%s]", got, cur.ReleaseVersion)
 	}
-	if len(report.EdgesPruned) == 0 {
-		t.Fatal("upgrade import pruned no edges; the edges left on the old anchors survived")
+
+	// Every edge to the legacy release is retired, not deleted, and its
+	// retirement is on the edge's tier history.
+	if len(report.EdgesRetired) != len(oldCW.Mappings) {
+		t.Fatalf("upgrade retired %d edges; want all %d edges to the legacy release", len(report.EdgesRetired), len(oldCW.Mappings))
 	}
-	for _, p := range report.EdgesPruned {
-		if p.Attribution != "community_draft" || p.Source != soc2import.LegacySource {
-			t.Errorf("pruned %s->%s (attribution %s, source %s); only the legacy community_draft edges may go", p.RequirementCode, p.SCFAnchor, p.Attribution, p.Source)
+	for _, r := range report.EdgesRetired {
+		if r.Source != soc2import.LegacySource || r.Attribution != "community_draft" {
+			t.Errorf("retired %s->%s (source %s, attribution %s); want only the legacy community_draft edges", r.RequirementCode, r.SCFAnchor, r.Source, r.Attribution)
 		}
 	}
-
-	// Every HIPAA edge now matches the crosswalk exactly: nothing is left on
-	// a pre-#1971-only anchor, and IAC-10 carries only what the YAML maps to PAM.
-	var stored int
-	if err := pool.QueryRow(ctx, `
-		SELECT count(*)
-		FROM fw_to_scf_edges e
-		JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
-		JOIN framework_versions fv ON fv.id = fr.framework_version_id
-		JOIN frameworks f ON f.id = fv.framework_id
-		WHERE f.slug = 'hipaa_security_rule' AND f.tenant_id IS NULL`).Scan(&stored); err != nil {
-		t.Fatalf("count HIPAA edges: %v", err)
+	if got := countRows(t, pool, `SELECT count(*)`+hipaaEdgesWhere+` AND e.retired_at IS NOT NULL AND afv.version = $1`, preRemapRelease); got != len(oldCW.Mappings) {
+		t.Fatalf("retired legacy edges kept = %d; want %d", got, len(oldCW.Mappings))
 	}
-	if stored != len(cw.Mappings) {
-		t.Fatalf("HIPAA edges after upgrade = %d; want exactly the crosswalk's %d", stored, len(cw.Mappings))
-	}
-	var onOld int
-	if err := pool.QueryRow(ctx, `
-		SELECT count(*) FROM fw_to_scf_edges e
-		JOIN scf_anchors a ON a.id = e.scf_anchor_id
-		WHERE a.scf_id = ANY($1)`, preRemapOnly).Scan(&onOld); err != nil {
-		t.Fatalf("count edges on pre-#1971 anchors: %v", err)
-	}
-	if onOld != 0 {
-		t.Fatalf("%d edges still point at pre-#1971-only anchors %v", onOld, preRemapOnly)
+	if got := countRows(t, pool, `
+		SELECT count(*) FROM fw_to_scf_edge_tier_transitions tt
+		JOIN fw_to_scf_edges e ON e.id = tt.edge_id
+		WHERE e.retired_at IS NOT NULL AND tt.reviewer_id = $1 AND tt.note = $2`,
+		soc2import.SystemReviewerID, "retired: dropped by crosswalk "+hipaaSource); got != len(oldCW.Mappings) {
+		t.Fatalf("retirement transition rows = %d; want one per retired edge (%d)", got, len(oldCW.Mappings))
 	}
 
-	// The prune is idempotent: a second bootstrap removes nothing more.
+	// The live edge set is exactly the crosswalk, all on the current release.
+	if got := countRows(t, pool, `SELECT count(*)`+hipaaEdgesWhere+` AND e.retired_at IS NULL`); got != len(cw.Mappings) {
+		t.Fatalf("live HIPAA edges = %d; want the crosswalk's %d", got, len(cw.Mappings))
+	}
+	if got := countRows(t, pool, `SELECT count(*)`+hipaaEdgesWhere+` AND e.retired_at IS NULL AND afv.status <> 'current'`); got != 0 {
+		t.Fatalf("%d live HIPAA edges point at a non-current SCF release", got)
+	}
+
+	// Idempotent: a second boot retires nothing more.
 	again, err := soc2import.Import(ctx, pool, cw)
 	if err != nil {
 		t.Fatalf("second post-#1971 HIPAA Import: %v", err)
 	}
-	if len(again.EdgesPruned) != 0 || again.EdgesUnchanged != len(cw.Mappings) {
-		t.Fatalf("re-import pruned=%v unchanged=%d; want no prunes and %d unchanged", again.EdgesPruned, again.EdgesUnchanged, len(cw.Mappings))
+	if len(again.EdgesRetired) != 0 || len(again.EdgesRestored) != 0 || again.EdgesUnchanged != len(cw.Mappings) {
+		t.Fatalf("re-import retired=%d restored=%d unchanged=%d; want 0, 0 and %d",
+			len(again.EdgesRetired), len(again.EdgesRestored), again.EdgesUnchanged, len(cw.Mappings))
 	}
 }
 
-// An edge another source wrote is never pruned, even when the crosswalk does
-// not list it: the importer owns only the provenance it writes.
+// readProvenanceEdge returns the attribution and retired state of the
+// provenance fixture's P-1 edge to one anchor, or ok=false when there is none.
+func readProvenanceEdgeTo(t *testing.T, pool *pgxpool.Pool, scfID string) (attr string, retired bool, ok bool) {
+	t.Helper()
+	err := pool.QueryRow(context.Background(), `
+		SELECT e.source_attribution::text, e.retired_at IS NOT NULL
+		FROM fw_to_scf_edges e
+		JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
+		JOIN framework_versions fv ON fv.id = fr.framework_version_id
+		JOIN frameworks f ON f.id = fv.framework_id
+		JOIN scf_anchors a ON a.id = e.scf_anchor_id
+		WHERE f.slug = $1 AND f.tenant_id IS NULL AND fr.code = 'P-1' AND a.scf_id = $2`,
+		provenanceSlug, scfID).Scan(&attr, &retired)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, false
+	}
+	if err != nil {
+		t.Fatalf("read P-1->%s: %v", scfID, err)
+	}
+	return attr, retired, true
+}
+
+// An edge another source wrote is never retired, even when the crosswalk
+// does not list it: the importer owns only the provenance it writes.
 func TestImport_KeepsUnlistedEdgeFromAnotherSource(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)
 	ctx := context.Background()
@@ -207,57 +274,128 @@ func TestImport_KeepsUnlistedEdgeFromAnotherSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("community Import: %v", err)
 	}
-	if len(report.EdgesPruned) != 0 {
-		t.Fatalf("community import pruned %+v; the scf_official edge is not its to remove", report.EdgesPruned)
+	if len(report.EdgesRetired) != 0 {
+		t.Fatalf("community import retired %+v; the scf_official edge is not its to retire", report.EdgesRetired)
 	}
 	if len(report.EdgesUnlisted) != 1 || report.EdgesUnlisted[0].SCFAnchor != "GOV-01" || report.EdgesUnlisted[0].Attribution != "scf_official" {
 		t.Fatalf("EdgesUnlisted = %+v; want the scf_official P-1->GOV-01 edge", report.EdgesUnlisted)
 	}
-	if got := readProvenanceEdgeTo(t, pool, "GOV-01"); got != "scf_official" {
-		t.Fatalf("P-1->GOV-01 attribution = %q; want scf_official kept", got)
+	if attr, retired, _ := readProvenanceEdgeTo(t, pool, "GOV-01"); attr != "scf_official" || retired {
+		t.Fatalf("P-1->GOV-01 = %q retired=%v; want the scf_official edge kept live", attr, retired)
 	}
 
-	// A same-source crosswalk that drops the mapping does prune it.
+	// A same-source crosswalk that drops the mapping does retire it.
 	moved := provenanceCrosswalk("scf_official", "official rationale")
 	moved.Mappings[0].SCFAnchor = "IAC-01"
 	report, err = soc2import.Import(ctx, pool, moved)
 	if err != nil {
 		t.Fatalf("moved official Import: %v", err)
 	}
-	if len(report.EdgesPruned) != 1 || report.EdgesPruned[0].SCFAnchor != "GOV-01" {
-		t.Fatalf("EdgesPruned = %+v; want the dropped P-1->GOV-01 edge", report.EdgesPruned)
+	if len(report.EdgesRetired) != 1 || report.EdgesRetired[0].SCFAnchor != "GOV-01" {
+		t.Fatalf("EdgesRetired = %+v; want the dropped P-1->GOV-01 edge", report.EdgesRetired)
 	}
-	if got := readProvenanceEdgeTo(t, pool, "GOV-01"); got != "" {
-		t.Fatalf("P-1->GOV-01 still stored with attribution %q", got)
+	if _, retired, ok := readProvenanceEdgeTo(t, pool, "GOV-01"); !ok || !retired {
+		t.Fatalf("P-1->GOV-01 ok=%v retired=%v; want the row kept and retired", ok, retired)
 	}
 }
 
-// readProvenanceEdgeTo returns the attribution of the provenance fixture's
-// P-1 edge to one anchor, or "" when there is none.
-func readProvenanceEdgeTo(t *testing.T, pool *pgxpool.Pool, scfID string) string {
-	t.Helper()
-	var attr string
-	err := pool.QueryRow(context.Background(), `
-		SELECT e.source_attribution::text
-		FROM fw_to_scf_edges e
+// Retiring an edge keeps its row and its append-only tier history, takes it
+// out of coverage, and a crosswalk that lists it again restores it (#1971).
+func TestImport_RetiredEdgeKeepsTierHistoryAndComesBack(t *testing.T) {
+	pool := dbtest.NewMigratePool(t)
+	ctx := context.Background()
+	resetFrameworkCatalog(t, pool, provenanceSlug)
+	t.Cleanup(func() { resetFrameworkCatalog(t, pool, provenanceSlug) })
+	ensureSCFLoaded(t, pool)
+
+	const src = "yaml:provenance.yaml"
+	cw := func(anchors ...string) *soc2import.Crosswalk {
+		c := provenanceCrosswalk("community_draft", "rationale")
+		c.Source = src
+		c.Mappings = nil
+		for _, a := range anchors {
+			c.Mappings = append(c.Mappings, soc2import.Mapping{
+				RequirementCode: "P-1", SCFAnchor: a, RelationshipType: "equal", Strength: 0.9, Rationale: "rationale",
+			})
+		}
+		return c
+	}
+	if _, err := soc2import.Import(ctx, pool, cw("GOV-01")); err != nil {
+		t.Fatalf("first Import: %v", err)
+	}
+	var edgeID uuid.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT e.id FROM fw_to_scf_edges e
 		JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
 		JOIN framework_versions fv ON fv.id = fr.framework_version_id
 		JOIN frameworks f ON f.id = fv.framework_id
 		JOIN scf_anchors a ON a.id = e.scf_anchor_id
-		WHERE f.slug = $1 AND f.tenant_id IS NULL AND fr.code = 'P-1' AND a.scf_id = $2`,
-		provenanceSlug, scfID).Scan(&attr)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ""
+		WHERE f.slug = $1 AND f.tenant_id IS NULL AND a.scf_id = 'GOV-01'`, provenanceSlug).Scan(&edgeID); err != nil {
+		t.Fatalf("read edge id: %v", err)
 	}
+	// A reviewer verified the mapping.
+	reviewer := uuid.New()
+	if _, err := pool.Exec(ctx, `UPDATE fw_to_scf_edges SET mapping_tier = 'verified' WHERE id = $1`, edgeID); err != nil {
+		t.Fatalf("verify edge: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO fw_to_scf_edge_tier_transitions (edge_id, reviewer_id, from_tier, to_tier, note)
+		VALUES ($1, $2, 'draft', 'verified', 'reviewed')`, edgeID, reviewer); err != nil {
+		t.Fatalf("record review: %v", err)
+	}
+	history := func() []string {
+		t.Helper()
+		return queryStrings(t, pool, `
+			SELECT from_tier::text || '>' || to_tier::text || ' ' || note
+			FROM fw_to_scf_edge_tier_transitions WHERE edge_id = $1 ORDER BY created_at, id`, edgeID)
+	}
+	live := func() int {
+		t.Helper()
+		return countRows(t, pool, `SELECT count(*) FROM effective_fw_to_scf_edges WHERE id = $1`, edgeID)
+	}
+
+	// The crosswalk drops GOV-01: retired, history intact, out of coverage.
+	r, err := soc2import.Import(ctx, pool, cw("IAC-01"))
 	if err != nil {
-		t.Fatalf("read P-1->%s: %v", scfID, err)
+		t.Fatalf("dropping Import: %v", err)
 	}
-	return attr
+	if len(r.EdgesRetired) != 1 || r.EdgesRetired[0].SCFAnchor != "GOV-01" || r.EdgesRetired[0].Tier != "verified" {
+		t.Fatalf("EdgesRetired = %+v; want the verified P-1->GOV-01 edge", r.EdgesRetired)
+	}
+	want := []string{"draft>verified reviewed", "verified>verified retired: dropped by crosswalk " + src}
+	if got := history(); !slices.Equal(got, want) {
+		t.Fatalf("history after retire = %v; want %v", got, want)
+	}
+	if live() != 0 {
+		t.Fatal("a retired edge is still in effective_fw_to_scf_edges")
+	}
+
+	// The crosswalk lists GOV-01 again: restored, same row, tier kept.
+	r, err = soc2import.Import(ctx, pool, cw("GOV-01", "IAC-01"))
+	if err != nil {
+		t.Fatalf("re-listing Import: %v", err)
+	}
+	if len(r.EdgesRestored) != 1 || r.EdgesRestored[0].SCFAnchor != "GOV-01" {
+		t.Fatalf("EdgesRestored = %+v; want P-1->GOV-01", r.EdgesRestored)
+	}
+	if live() != 1 {
+		t.Fatal("the re-listed edge is not back in effective_fw_to_scf_edges")
+	}
+	got := history()
+	if len(got) != 3 || got[2] != "verified>verified restored: listed again by crosswalk "+src {
+		t.Fatalf("history after restore = %v; want the review, the retirement and a restore row", got)
+	}
+	if attr, retired, _ := readProvenanceEdgeTo(t, pool, "GOV-01"); retired || attr != "community_draft" {
+		t.Fatalf("restored edge attribution=%q retired=%v", attr, retired)
+	}
+	if tier := queryStrings(t, pool, `SELECT mapping_tier::text FROM fw_to_scf_edges WHERE id = $1`, edgeID); !slices.Equal(tier, []string{"verified"}) {
+		t.Fatalf("restored edge tier = %v; want verified kept", tier)
+	}
 }
 
 // A YAML crosswalk and a workbook import can write into the same framework
 // version, both as community_draft (docs/operator/scf-crosswalk-import.md,
-// "Combining columns"). Each re-import prunes only the edges its own source
+// "Combining columns"). Each re-import retires only the edges its own source
 // wrote (fw_to_scf_edges.crosswalk_source, #1971).
 const coexistSlug = "coexist-1971"
 
@@ -287,37 +425,22 @@ func coexistCrosswalk(source string, mappings ...[2]string) *soc2import.Crosswal
 	return cw
 }
 
-// coexistEdges returns "code->scf_id@source" for every edge of the fixture.
+// coexistEdges returns "code->scf_id@source" for every live edge of the
+// fixture.
 func coexistEdges(t *testing.T, pool *pgxpool.Pool) []string {
 	t.Helper()
-	rows, err := pool.Query(context.Background(), `
+	return queryStrings(t, pool, `
 		SELECT fr.code || '->' || a.scf_id || '@' || coalesce(e.crosswalk_source, '')
 		FROM fw_to_scf_edges e
 		JOIN framework_requirements fr ON fr.id = e.framework_requirement_id
 		JOIN framework_versions fv ON fv.id = fr.framework_version_id
 		JOIN frameworks f ON f.id = fv.framework_id
 		JOIN scf_anchors a ON a.id = e.scf_anchor_id
-		WHERE f.slug = $1 AND f.tenant_id IS NULL
+		WHERE f.slug = $1 AND f.tenant_id IS NULL AND e.retired_at IS NULL
 		ORDER BY 1`, coexistSlug)
-	if err != nil {
-		t.Fatalf("query fixture edges: %v", err)
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var s string
-		if err := rows.Scan(&s); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		out = append(out, s)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("rows: %v", err)
-	}
-	return out
 }
 
-func TestImport_YAMLAndWorkbookPruneOnlyTheirOwnEdges(t *testing.T) {
+func TestImport_YAMLAndWorkbookRetireOnlyTheirOwnEdges(t *testing.T) {
 	pool := dbtest.NewMigratePool(t)
 	ctx := context.Background()
 	resetFrameworkCatalog(t, pool, coexistSlug)
@@ -343,11 +466,11 @@ func TestImport_YAMLAndWorkbookPruneOnlyTheirOwnEdges(t *testing.T) {
 		t.Fatalf("after both imports edges = %v; want %v", got, want)
 	}
 
-	// A YAML re-import that moves R-2 to IAC-14 prunes its own old edge and
+	// A YAML re-import that moves R-2 to IAC-14 retires its own old edge and
 	// leaves the workbook's edges untouched.
 	r := importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-01"}, [2]string{"R-2", "IAC-14"}))
-	if len(r.EdgesPruned) != 1 || r.EdgesPruned[0].SCFAnchor != "IAC-01" || r.EdgesPruned[0].Source != yamlSrc {
-		t.Fatalf("YAML re-import pruned %+v; want only its own R-2->IAC-01", r.EdgesPruned)
+	if len(r.EdgesRetired) != 1 || r.EdgesRetired[0].SCFAnchor != "IAC-01" || r.EdgesRetired[0].Source != yamlSrc {
+		t.Fatalf("YAML re-import retired %+v; want only its own R-2->IAC-01", r.EdgesRetired)
 	}
 	if len(r.EdgesUnlisted) != 2 {
 		t.Fatalf("YAML re-import reported %d unlisted edges; want the workbook's 2", len(r.EdgesUnlisted))
@@ -360,18 +483,18 @@ func TestImport_YAMLAndWorkbookPruneOnlyTheirOwnEdges(t *testing.T) {
 		t.Fatalf("after YAML re-import edges = %v; want %v", got, want)
 	}
 
-	// A workbook re-import that drops R-2 prunes its own edge and leaves the
+	// A workbook re-import that drops R-2 retires its own edge and leaves the
 	// YAML's edges untouched.
 	r = importCW(coexistCrosswalk(wbSrc, [2]string{"R-1", "IAC-37"}))
-	if len(r.EdgesPruned) != 1 || r.EdgesPruned[0].SCFAnchor != "IAC-04" || r.EdgesPruned[0].Source != wbSrc {
-		t.Fatalf("workbook re-import pruned %+v; want only its own R-2->IAC-04", r.EdgesPruned)
+	if len(r.EdgesRetired) != 1 || r.EdgesRetired[0].SCFAnchor != "IAC-04" || r.EdgesRetired[0].Source != wbSrc {
+		t.Fatalf("workbook re-import retired %+v; want only its own R-2->IAC-04", r.EdgesRetired)
 	}
 	want = []string{"R-1->GOV-01@" + yamlSrc, "R-1->IAC-37@" + wbSrc, "R-2->IAC-14@" + yamlSrc}
 	if got := coexistEdges(t, pool); !slices.Equal(got, want) {
 		t.Fatalf("after workbook re-import edges = %v; want %v", got, want)
 	}
 
-	// A workbook import never prunes an edge with no recorded source: those
+	// A workbook import never retires an edge with no recorded source: those
 	// predate #1971 and belong to the YAML crosswalk.
 	if _, err := pool.Exec(ctx, `
 		UPDATE fw_to_scf_edges SET crosswalk_source = NULL
@@ -379,11 +502,14 @@ func TestImport_YAMLAndWorkbookPruneOnlyTheirOwnEdges(t *testing.T) {
 		t.Fatalf("clear YAML sources: %v", err)
 	}
 	r = importCW(coexistCrosswalk(wbSrc, [2]string{"R-1", "IAC-37"}))
-	if len(r.EdgesPruned) != 0 {
-		t.Fatalf("workbook import pruned legacy edges %+v", r.EdgesPruned)
+	if len(r.EdgesRetired) != 0 {
+		t.Fatalf("workbook import retired legacy edges %+v", r.EdgesRetired)
 	}
 	r = importCW(coexistCrosswalk(yamlSrc, [2]string{"R-1", "GOV-01"}))
-	if len(r.EdgesPruned) != 1 || r.EdgesPruned[0].SCFAnchor != "IAC-14" || r.EdgesPruned[0].Source != soc2import.LegacySource {
-		t.Fatalf("YAML import pruned %+v; want the legacy R-2->IAC-14", r.EdgesPruned)
+	if len(r.EdgesRetired) != 1 || r.EdgesRetired[0].SCFAnchor != "IAC-14" || r.EdgesRetired[0].Source != soc2import.LegacySource {
+		t.Fatalf("YAML import retired %+v; want the legacy R-2->IAC-14", r.EdgesRetired)
+	}
+	if !strings.HasPrefix(r.EdgesRetired[0].RequirementCode, "R-2") {
+		t.Fatalf("retired edge requirement = %q; want R-2", r.EdgesRetired[0].RequirementCode)
 	}
 }

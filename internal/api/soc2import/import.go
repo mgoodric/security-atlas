@@ -56,15 +56,20 @@ type Report struct {
 	// audit row by SystemReviewerID.
 	EdgesTierReseeded []ReseededEdge
 
-	// EdgesPruned lists the catalog edges this import deleted because the
-	// crosswalk no longer lists them (#1971). Only edges this crosswalk's
-	// source wrote are pruned; see staleEdges.
-	EdgesPruned []PrunedEdge
+	// EdgesRetired lists the catalog edges this import retired because the
+	// crosswalk no longer lists them (#1971). A retired edge keeps its row and
+	// tier history but drops out of coverage. Only edges this crosswalk's
+	// source wrote are retired; see staleEdges.
+	EdgesRetired []CatalogEdge
 
-	// EdgesUnlisted lists edges the crosswalk does not list but did not
-	// prune, because another source wrote them (another crosswalk_source or
+	// EdgesRestored lists retired edges this crosswalk lists again; their
+	// retired_at is cleared (#1971).
+	EdgesRestored []CatalogEdge
+
+	// EdgesUnlisted lists live edges the crosswalk does not list but did not
+	// retire, because another source wrote them (another crosswalk_source or
 	// source_attribution). They are reported so an operator can see them.
-	EdgesUnlisted []PrunedEdge
+	EdgesUnlisted []CatalogEdge
 
 	// MappingsByAttribution tallies edges by their source_attribution
 	// label. Exposed for the HITL audit summary so the orchestrator
@@ -98,9 +103,9 @@ type ReseededEdge struct {
 	NewTier         string
 }
 
-// PrunedEdge names one catalog edge the crosswalk does not list. Source is
-// the edge's recorded crosswalk_source, or LegacySource when it has none.
-type PrunedEdge struct {
+// CatalogEdge names one catalog edge in an import report. Source is the
+// edge's recorded crosswalk_source, or LegacySource when it has none.
+type CatalogEdge struct {
 	RequirementCode string
 	SCFAnchor       string
 	Attribution     string
@@ -113,18 +118,20 @@ type PrunedEdge struct {
 // that does not set it.
 const LegacySource = "(none)"
 
-// edgeKey identifies a mapping the way the edges table does: one edge per
-// (requirement, anchor) pair.
+// edgeKey identifies an edge the way the edges table does: one edge per
+// (requirement row, anchor row) pair. It is keyed on row ids, not codes, so
+// an edge on the same SCF code in an older SCF release (a different anchor
+// row) counts as unlisted and is retired (#1971).
 type edgeKey struct {
-	requirementCode string
-	scfAnchor       string
+	requirementID [16]byte
+	anchorID      [16]byte
 }
 
-// ownsEdge reports whether an import from source may prune an edge recorded
+// ownsEdge reports whether an import from source may retire an edge recorded
 // under edgeSource. Each source owns the edges it wrote. An edge with no
 // recorded source predates #1971, when the YAML crosswalks were the only
 // importer, so a YAML import (or an in-memory crosswalk with no Source)
-// owns it too; a workbook import never prunes one.
+// owns it too; a workbook import never retires one.
 func ownsEdge(source string, edgeSource *string) bool {
 	if edgeSource == nil {
 		return source == "" || strings.HasPrefix(source, yamlSourcePrefix)
@@ -133,51 +140,66 @@ func ownsEdge(source string, edgeSource *string) bool {
 }
 
 // staleEdges splits the stored edges of one framework version that the
-// crosswalk does not list into the ones to delete and the ones to leave.
+// crosswalk does not list into the ones to retire and the ones to leave.
 //
 // A crosswalk is the source of truth for the edges it writes, so an edge it
-// stopped listing is deleted: after an SCF remap moves a mapping to a new
-// anchor, the edge left on the old anchor would otherwise keep counting as
-// coverage (#1971). An import only prunes what it owns, though: an edge
+// stopped listing is retired: after an SCF remap or a new SCF release moves a
+// mapping to another anchor row, the edge left on the old one would otherwise
+// keep counting as coverage (#1971). An import only retires what it owns, though: an edge
 // another source wrote (see ownsEdge), or one with a source_attribution the
 // crosswalk never uses, is left in place and reported. fw_to_scf_edges holds
 // catalog (platform) edges only; it has no tenant rows to touch.
-func staleEdges(stored []dbx.ListFwToScfEdgesForVersionForUpdateRow, listed map[edgeKey]bool, source string, owned map[dbx.CrosswalkSourceAttribution]bool) (prune []dbx.ListFwToScfEdgesForVersionForUpdateRow, keep []dbx.ListFwToScfEdgesForVersionForUpdateRow) {
+func staleEdges(stored []dbx.ListFwToScfEdgesForVersionForUpdateRow, listed map[edgeKey]bool, source string, owned map[dbx.CrosswalkSourceAttribution]bool) (retire []dbx.ListFwToScfEdgesForVersionForUpdateRow, keep []dbx.ListFwToScfEdgesForVersionForUpdateRow) {
 	for _, e := range stored {
-		if listed[edgeKey{e.RequirementCode, e.ScfID}] {
+		if listed[edgeKey{e.FrameworkRequirementID.Bytes, e.ScfAnchorID.Bytes}] {
 			continue
 		}
 		if ownsEdge(source, e.CrosswalkSource) && owned[e.SourceAttribution] {
-			prune = append(prune, e)
+			retire = append(retire, e)
 		} else {
 			keep = append(keep, e)
 		}
 	}
-	return prune, keep
+	return retire, keep
 }
 
-func prunedEdge(e dbx.ListFwToScfEdgesForVersionForUpdateRow) PrunedEdge {
-	source := LegacySource
-	if e.CrosswalkSource != nil {
-		source = *e.CrosswalkSource
-	}
-	return PrunedEdge{
+func catalogEdge(e dbx.ListFwToScfEdgesForVersionForUpdateRow) CatalogEdge {
+	return CatalogEdge{
 		RequirementCode: e.RequirementCode,
 		SCFAnchor:       e.ScfID,
 		Attribution:     string(e.SourceAttribution),
 		Tier:            string(e.MappingTier),
-		Source:          source,
+		Source:          sourceLabel(e.CrosswalkSource),
 	}
 }
 
-// PrunedBySource counts the pruned edges by their recorded source, for the
+// sourceLabel names a recorded crosswalk_source for a report or audit note.
+func sourceLabel(s *string) string {
+	if s == nil {
+		return LegacySource
+	}
+	return *s
+}
+
+// RetiredBySource counts the retired edges by their recorded source, for the
 // import summary.
-func (r Report) PrunedBySource() map[string]int {
+func (r Report) RetiredBySource() map[string]int {
 	out := map[string]int{}
-	for _, p := range r.EdgesPruned {
+	for _, p := range r.EdgesRetired {
 		out[p.Source]++
 	}
 	return out
+}
+
+// retireNote and restoreNote are the tier-transition notes the importer
+// writes when it retires or restores an edge. The tier does not change, so
+// from_tier = to_tier; the row exists to keep the edge's history complete.
+func retireNote(source string) string {
+	return "retired: dropped by crosswalk " + sourceLabel(sourceParam(source))
+}
+
+func restoreNote(source string) string {
+	return "restored: listed again by crosswalk " + sourceLabel(sourceParam(source))
 }
 
 // sourceParam is the crosswalk_source an import stamps on the edges it
@@ -399,6 +421,10 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	//    a panic and never a dangling edge (AC-2 / P0-438-4 / threat-model
 	//    T). Every edge is requirement -> SCF anchor; there is no
 	//    requirement -> requirement path (invariant #7 / P0-438-1).
+	//
+	//    listed collects every (requirement row, anchor row) pair the
+	//    crosswalk names, skipped rows included, for the retire pass (6).
+	listed := make(map[edgeKey]bool, len(cw.Mappings))
 	for _, m := range cw.Mappings {
 		reqID, ok := reqIDByCode[m.RequirementCode]
 		if !ok {
@@ -419,18 +445,51 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		relType := dbx.StrmRelationshipType(m.RelationshipType)
 		srcAttr := dbx.CrosswalkSourceAttribution(attribution)
 
-		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.RequirementCode + "-" + m.SCFAnchor)
+		listed[edgeKey{reqID.Bytes, anchor.ID.Bytes}] = true
+
+		// The anchor row id is in the seed: a new SCF release mints new
+		// anchor rows under the same codes, and the edge to the new row must
+		// not collide with the (now retired) edge to the old one (#1971).
+		edgeID := uuidFromString("edge-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + m.RequirementCode + "-" + m.SCFAnchor + "-" + uuidString(anchor.ID))
 
 		// FOR UPDATE: the precedence check below reads, then writes. Without
 		// the row lock a concurrent weaker import that passed its check
 		// against the old row would overwrite a just-committed stronger edge.
+		// This lookup also finds a retired edge.
 		existing, lookupErr := q.GetFwToScfEdgeForUpdate(ctx, dbx.GetFwToScfEdgeForUpdateParams{
 			FrameworkRequirementID: reqID,
 			ScfAnchorID:            anchor.ID,
 		})
 		switch {
 		case lookupErr == nil:
-			if attributionRank(srcAttr) < attributionRank(existing.SourceAttribution) {
+			// A retired edge the crosswalk lists again comes back (#1971).
+			// Its old content no longer stands for anything, so the
+			// precedence check below does not protect it: the restore
+			// precedes the normal content comparison.
+			restored := false
+			if existing.RetiredAt.Valid {
+				if err := q.RestoreFwToScfEdge(ctx, existing.ID); err != nil {
+					return Report{}, fmt.Errorf("crosswalk: restore edge %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
+				}
+				if _, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
+					EdgeID:     existing.ID,
+					ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
+					FromTier:   existing.MappingTier,
+					ToTier:     existing.MappingTier,
+					Note:       restoreNote(cw.Source),
+				}); err != nil {
+					return Report{}, fmt.Errorf("crosswalk: audit restore %s->%s: %w", m.RequirementCode, m.SCFAnchor, err)
+				}
+				report.EdgesRestored = append(report.EdgesRestored, CatalogEdge{
+					RequirementCode: m.RequirementCode,
+					SCFAnchor:       m.SCFAnchor,
+					Attribution:     string(existing.SourceAttribution),
+					Tier:            string(existing.MappingTier),
+					Source:          sourceLabel(existing.CrosswalkSource),
+				})
+				restored = true
+			}
+			if !restored && attributionRank(srcAttr) < attributionRank(existing.SourceAttribution) {
 				report.EdgesSkipped = append(report.EdgesSkipped, SkippedEdge{
 					RequirementCode:     m.RequirementCode,
 					SCFAnchor:           m.SCFAnchor,
@@ -511,30 +570,38 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		}
 	}
 
-	// 6. Prune the edges this crosswalk wrote and no longer lists (#1971),
+	// 6. Retire the edges this crosswalk wrote and no longer lists (#1971),
 	//    in the same transaction as the upsert so coverage never sees a
-	//    half-applied crosswalk.
-	listed := make(map[edgeKey]bool, len(cw.Mappings))
+	//    half-applied crosswalk. A retired edge keeps its row and its
+	//    append-only tier history; a transition row records the retirement.
 	owned := map[dbx.CrosswalkSourceAttribution]bool{dbx.CrosswalkSourceAttribution(cw.SourceAttribution): true}
 	for _, m := range cw.Mappings {
-		listed[edgeKey{m.RequirementCode, m.SCFAnchor}] = true
 		if m.SourceAttribution != "" {
 			owned[dbx.CrosswalkSourceAttribution(m.SourceAttribution)] = true
 		}
 	}
 	stored, err := q.ListFwToScfEdgesForVersionForUpdate(ctx, version.ID)
 	if err != nil {
-		return Report{}, fmt.Errorf("crosswalk: list edges for prune: %w", err)
+		return Report{}, fmt.Errorf("crosswalk: list edges to retire: %w", err)
 	}
-	prune, keep := staleEdges(stored, listed, cw.Source, owned)
-	for _, e := range prune {
-		if err := q.DeleteFwToScfEdge(ctx, e.ID); err != nil {
-			return Report{}, fmt.Errorf("crosswalk: prune edge %s->%s: %w", e.RequirementCode, e.ScfID, err)
+	retire, keep := staleEdges(stored, listed, cw.Source, owned)
+	for _, e := range retire {
+		if err := q.RetireFwToScfEdge(ctx, e.ID); err != nil {
+			return Report{}, fmt.Errorf("crosswalk: retire edge %s->%s: %w", e.RequirementCode, e.ScfID, err)
 		}
-		report.EdgesPruned = append(report.EdgesPruned, prunedEdge(e))
+		if _, err := q.InsertFwToScfEdgeTierTransition(ctx, dbx.InsertFwToScfEdgeTierTransitionParams{
+			EdgeID:     e.ID,
+			ReviewerID: pgtype.UUID{Bytes: SystemReviewerID, Valid: true},
+			FromTier:   e.MappingTier,
+			ToTier:     e.MappingTier,
+			Note:       retireNote(cw.Source),
+		}); err != nil {
+			return Report{}, fmt.Errorf("crosswalk: audit retire %s->%s: %w", e.RequirementCode, e.ScfID, err)
+		}
+		report.EdgesRetired = append(report.EdgesRetired, catalogEdge(e))
 	}
 	for _, e := range keep {
-		report.EdgesUnlisted = append(report.EdgesUnlisted, prunedEdge(e))
+		report.EdgesUnlisted = append(report.EdgesUnlisted, catalogEdge(e))
 	}
 
 	return report, nil

@@ -196,7 +196,7 @@ func loadWideSCFWorkbook(f *excelize.File, path string, opts SCFWorkbookOptions)
 }
 
 // wideWorkbookSource names a wide-workbook import by the columns it read,
-// with their prefixes, so a re-import of the same columns prunes its own
+// with their prefixes, so a re-import of the same columns retires its own
 // stale edges while a separate import of other columns into the same
 // framework version is a different source and is left alone (#1971).
 func wideWorkbookSource(headers []string, columns []workbookColumn) string {

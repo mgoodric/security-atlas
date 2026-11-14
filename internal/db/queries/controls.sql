@@ -321,6 +321,20 @@ SET description = $3,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 
+-- name: RebindControlAnchorInPlace :execrows
+-- Issue #1971: a re-upload whose manifest names its anchor by SCF code, and
+-- whose code now resolves to a different anchor row because a new SCF
+-- release was imported (#1768 mints new anchor rows per release), moves the
+-- active row to the current release's anchor in place. The manifest itself
+-- is unchanged, so superseding would orphan owners, evidence and links for
+-- nothing; coverage joins controls to edges by anchor row, so leaving the
+-- control on the legacy row would drop it out of coverage.
+UPDATE controls
+SET scf_anchor_id = $3,
+    scf_id = $4,
+    updated_at = now()
+WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
+
 -- NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
 -- from internal/db/queries/scf_anchors.sql (slice 006). The bundle parser
 -- in internal/control/parser.go calls them through the same dbx.Queries

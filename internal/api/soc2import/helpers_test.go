@@ -324,57 +324,63 @@ func TestAttributionRank_CoversEveryEnumValue(t *testing.T) {
 	}
 }
 
-// staleEdges deletes only unlisted edges whose provenance the crosswalk
-// writes (#1971); listed edges and other sources' edges are never pruned.
+// testID derives a distinct, stable row id for a pure-Go test.
+func testID(seed string) pgtype.UUID { return uuidFromString("test-" + seed) }
+
+// staleEdges retires only unlisted edges whose provenance the crosswalk
+// writes (#1971); listed edges and other sources' edges are left alone.
 func TestStaleEdges(t *testing.T) {
 	t.Parallel()
-	row := func(code, anchor string, attr dbx.CrosswalkSourceAttribution) dbx.ListFwToScfEdgesForVersionForUpdateRow {
+	row := func(code, anchor, anchorRow string, attr dbx.CrosswalkSourceAttribution) dbx.ListFwToScfEdgesForVersionForUpdateRow {
 		return dbx.ListFwToScfEdgesForVersionForUpdateRow{
-			RequirementCode:   code,
-			ScfID:             anchor,
-			SourceAttribution: attr,
-			MappingTier:       dbx.CrosswalkMappingTierDraft,
+			FrameworkRequirementID: testID(code),
+			ScfAnchorID:            testID(anchorRow),
+			RequirementCode:        code,
+			ScfID:                  anchor,
+			SourceAttribution:      attr,
+			MappingTier:            dbx.CrosswalkMappingTierDraft,
 		}
 	}
 	community := dbx.CrosswalkSourceAttributionCommunityDraft
 	official := dbx.CrosswalkSourceAttributionScfOfficial
 	stored := []dbx.ListFwToScfEdgesForVersionForUpdateRow{
-		row("R-1", "IAC-14", community), // listed: kept
-		row("R-1", "IAC-10", community), // remapped away: pruned
-		row("R-2", "IAC-37", official),  // unlisted, another source: kept, reported
-		row("R-3", "IAC-06", community), // requirement dropped: pruned
+		row("R-1", "IAC-14", "IAC-14@new", community), // listed: kept
+		row("R-1", "IAC-14", "IAC-14@old", community), // same code, older release row: retired
+		row("R-1", "IAC-10", "IAC-10@new", community), // remapped away: retired
+		row("R-2", "IAC-37", "IAC-37@new", official),  // unlisted, another source: kept, reported
+		row("R-3", "IAC-06", "IAC-06@old", community), // requirement dropped: retired
 	}
-	listed := map[edgeKey]bool{{"R-1", "IAC-14"}: true}
+	listed := map[edgeKey]bool{{testID("R-1").Bytes, testID("IAC-14@new").Bytes}: true}
 	owned := map[dbx.CrosswalkSourceAttribution]bool{community: true}
 
 	// No recorded source (pre-#1971 rows): a YAML import owns them.
-	prune, keep := staleEdges(stored, listed, "yaml:x.yaml", owned)
+	retire, keep := staleEdges(stored, listed, "yaml:x.yaml", owned)
 
 	var got []string
-	for _, e := range prune {
+	for _, e := range retire {
 		got = append(got, e.RequirementCode+"->"+e.ScfID)
 	}
-	if strings.Join(got, ",") != "R-1->IAC-10,R-3->IAC-06" {
-		t.Fatalf("prune = %v; want R-1->IAC-10, R-3->IAC-06", got)
+	if strings.Join(got, ",") != "R-1->IAC-14,R-1->IAC-10,R-3->IAC-06" {
+		t.Fatalf("retire = %v; want R-1->IAC-14 (old row), R-1->IAC-10, R-3->IAC-06", got)
 	}
 	if len(keep) != 1 || keep[0].ScfID != "IAC-37" {
 		t.Fatalf("keep = %+v; want only the scf_official R-2->IAC-37 edge", keep)
 	}
-	if p := prunedEdge(prune[0]); p.Attribution != "community_draft" || p.Tier != "draft" || p.SCFAnchor != "IAC-10" || p.Source != LegacySource {
-		t.Fatalf("prunedEdge = %+v", p)
+	if p := catalogEdge(retire[1]); p.Attribution != "community_draft" || p.Tier != "draft" || p.SCFAnchor != "IAC-10" || p.Source != LegacySource {
+		t.Fatalf("catalogEdge = %+v", p)
 	}
 }
 
-// Each source prunes only the edges it wrote; a workbook import never
-// prunes a pre-#1971 edge with no recorded source (#1971).
+// Each source retires only the edges it wrote; a workbook import never
+// retires a pre-#1971 edge with no recorded source (#1971).
 func TestStaleEdges_ScopedToSource(t *testing.T) {
 	t.Parallel()
 	src := func(s string) *string { return &s }
 	community := dbx.CrosswalkSourceAttributionCommunityDraft
 	stored := []dbx.ListFwToScfEdgesForVersionForUpdateRow{
-		{RequirementCode: "R-1", ScfID: "A-1", SourceAttribution: community, CrosswalkSource: src("yaml:x.yaml")},
-		{RequirementCode: "R-2", ScfID: "A-2", SourceAttribution: community, CrosswalkSource: src("scf-workbook:ISO 27001 2022")},
-		{RequirementCode: "R-3", ScfID: "A-3", SourceAttribution: community},
+		{ScfAnchorID: testID("A-1"), RequirementCode: "R-1", ScfID: "A-1", SourceAttribution: community, CrosswalkSource: src("yaml:x.yaml")},
+		{ScfAnchorID: testID("A-2"), RequirementCode: "R-2", ScfID: "A-2", SourceAttribution: community, CrosswalkSource: src("scf-workbook:ISO 27001 2022")},
+		{ScfAnchorID: testID("A-3"), RequirementCode: "R-3", ScfID: "A-3", SourceAttribution: community},
 	}
 	owned := map[dbx.CrosswalkSourceAttribution]bool{community: true}
 	cases := []struct {
@@ -388,26 +394,32 @@ func TestStaleEdges_ScopedToSource(t *testing.T) {
 		{"", "R-3"},
 	}
 	for _, c := range cases {
-		prune, keep := staleEdges(stored, map[edgeKey]bool{}, c.source, owned)
+		retire, keep := staleEdges(stored, map[edgeKey]bool{}, c.source, owned)
 		var got []string
-		for _, e := range prune {
+		for _, e := range retire {
 			got = append(got, e.RequirementCode)
 		}
 		if strings.Join(got, ",") != c.want {
-			t.Errorf("source %q pruned %v; want %q", c.source, got, c.want)
+			t.Errorf("source %q retired %v; want %q", c.source, got, c.want)
 		}
-		if len(prune)+len(keep) != len(stored) {
-			t.Errorf("source %q: prune+keep = %d; want %d", c.source, len(prune)+len(keep), len(stored))
+		if len(retire)+len(keep) != len(stored) {
+			t.Errorf("source %q: retire+keep = %d; want %d", c.source, len(retire)+len(keep), len(stored))
 		}
 	}
 }
 
-func TestPrunedBySourceAndSourceParam(t *testing.T) {
+func TestRetiredBySourceAndSourceParam(t *testing.T) {
 	t.Parallel()
-	r := Report{EdgesPruned: []PrunedEdge{{Source: "yaml:a"}, {Source: "yaml:a"}, {Source: LegacySource}}}
-	got := r.PrunedBySource()
+	r := Report{EdgesRetired: []CatalogEdge{{Source: "yaml:a"}, {Source: "yaml:a"}, {Source: LegacySource}}}
+	got := r.RetiredBySource()
 	if got["yaml:a"] != 2 || got[LegacySource] != 1 || len(got) != 2 {
-		t.Fatalf("PrunedBySource = %v", got)
+		t.Fatalf("RetiredBySource = %v", got)
+	}
+	if n := retireNote("yaml:a"); n != "retired: dropped by crosswalk yaml:a" {
+		t.Fatalf("retireNote = %q", n)
+	}
+	if n := restoreNote(""); n != "restored: listed again by crosswalk "+LegacySource {
+		t.Fatalf("restoreNote = %q", n)
 	}
 	if sourceParam("") != nil {
 		t.Fatal("an empty source must be stored as NULL")
@@ -419,9 +431,9 @@ func TestPrunedBySourceAndSourceParam(t *testing.T) {
 
 func TestStaleEdges_NothingStored(t *testing.T) {
 	t.Parallel()
-	prune, keep := staleEdges(nil, map[edgeKey]bool{}, "", map[dbx.CrosswalkSourceAttribution]bool{})
-	if len(prune) != 0 || len(keep) != 0 {
-		t.Fatalf("empty input gave prune=%v keep=%v", prune, keep)
+	retire, keep := staleEdges(nil, map[edgeKey]bool{}, "", map[dbx.CrosswalkSourceAttribution]bool{})
+	if len(retire) != 0 || len(keep) != 0 {
+		t.Fatalf("empty input gave retire=%v keep=%v", retire, keep)
 	}
 }
 

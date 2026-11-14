@@ -66,7 +66,7 @@ type Crosswalk struct {
 	Mappings          []Mapping     `yaml:"mappings"`
 	// Source names where this crosswalk came from, and is stamped on every
 	// edge the import writes (fw_to_scf_edges.crosswalk_source, #1971). The
-	// importer prunes only the edges its own source wrote, so a YAML
+	// importer retires only the edges its own source wrote, so a YAML
 	// crosswalk and a workbook import into the same framework version leave
 	// each other's edges alone. Set by the loaders, never read from the file:
 	// "yaml:<file name>", "scf-workbook:<columns>" or "scf-olir:<sheet>".

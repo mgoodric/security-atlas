@@ -168,20 +168,24 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 				fmt.Printf("requirement kept %s: incoming title or body differs, but framework version %s is frozen; ship a new version to change it\n",
 					code, report.FrameworkVersion)
 			}
-			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d pruned=%d\n",
-				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped), len(report.EdgesPruned))
-			for _, pr := range report.EdgesPruned {
-				fmt.Printf("edge pruned %s->%s: no longer in the crosswalk (source=%s source_attribution=%s mapping_tier=%s)\n",
-					pr.RequirementCode, pr.SCFAnchor, pr.Source, pr.Attribution, pr.Tier)
+			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d retired=%d restored=%d\n",
+				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped), len(report.EdgesRetired), len(report.EdgesRestored))
+			for _, re := range report.EdgesRetired {
+				fmt.Printf("edge retired %s->%s: no longer in the crosswalk (source=%s source_attribution=%s mapping_tier=%s)\n",
+					re.RequirementCode, re.SCFAnchor, re.Source, re.Attribution, re.Tier)
 			}
-			pruned := report.PrunedBySource()
-			sources := make([]string, 0, len(pruned))
-			for s := range pruned {
+			retired := report.RetiredBySource()
+			sources := make([]string, 0, len(retired))
+			for s := range retired {
 				sources = append(sources, s)
 			}
 			sort.Strings(sources)
 			for _, s := range sources {
-				fmt.Printf("edges pruned by source[%s]=%d\n", s, pruned[s])
+				fmt.Printf("edges retired by source[%s]=%d\n", s, retired[s])
+			}
+			for _, rs := range report.EdgesRestored {
+				fmt.Printf("edge restored %s->%s: listed again (mapping_tier=%s)\n",
+					rs.RequirementCode, rs.SCFAnchor, rs.Tier)
 			}
 			for _, un := range report.EdgesUnlisted {
 				fmt.Printf("edge kept %s->%s: not in the crosswalk, but written by another source (source=%s source_attribution=%s)\n",
