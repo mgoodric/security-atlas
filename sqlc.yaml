@@ -94,7 +94,7 @@ sql:
       - "migrations/sql/20260814000000_api_keys_purpose.sql"
       - "migrations/sql/20260815000000_framework_scope_workflow_log.sql"
       - "migrations/sql/20260816000000_risk_audit_log.sql"
-      - "migrations/sql/20260817000000_framework_scope_applicability.sql"
+      - "migrations/sql/20260822000000_framework_scope_applicability.sql"
     queries: "internal/db/queries"
     gen:
       go:
