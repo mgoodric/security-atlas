@@ -189,9 +189,10 @@ func TestTenantFlagHelp_SaysOptionalOnSingleTenant(t *testing.T) {
 // --token credential, against the real gRPC admin service.
 func TestCredentialsCommands_NoTenant_DefaultToCredentialTenant(t *testing.T) {
 	srv := api.New(api.Config{})
-	_, bearer, err := srv.IssueBootstrapCredential(soloTenant.ID.String())
+	// The admin RPCs need an admin key (#2167).
+	_, bearer, err := srv.IssueBootstrapAdminCredential(soloTenant.ID.String())
 	if err != nil {
-		t.Fatalf("issue bootstrap credential: %v", err)
+		t.Fatalf("issue bootstrap admin credential: %v", err)
 	}
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
