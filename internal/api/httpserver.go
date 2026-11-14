@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -288,8 +289,8 @@ type walkthroughArtifactAdapter struct {
 	store *artifact.Store
 }
 
-func (a *walkthroughArtifactAdapter) Put(ctx context.Context, in artifact.PutInput) (artifact.Artifact, error) {
-	return a.store.Put(ctx, in)
+func (a *walkthroughArtifactAdapter) PutReader(ctx context.Context, in artifact.PutInput, body io.ReadSeeker) (artifact.Artifact, error) {
+	return a.store.PutReader(ctx, in, body)
 }
 
 type storeArtifactAdapter struct {

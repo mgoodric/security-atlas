@@ -34,7 +34,8 @@
 //     instead until backend extension lands.
 //   - P0-A3: NO invented columns — every column derives from
 //     `policyWire` (title, version, status, owner_role, published_at,
-//     updated_at) + the joined PolicyAckRate cell when available.
+//     updated_at, imported, warnings) + the joined PolicyAckRate cell
+//     when available.
 //   - P0-A4: NO policy-create UI bundled. Slice 242 closes the
 //     forward-looking-UI claim by replacing the lying CTA
 //     ("Scaffold five foundational policies" → /admin/credentials)
@@ -347,6 +348,34 @@ function PoliciesPageInner() {
         >
           {row.title}
         </Link>
+      ),
+    },
+    {
+      // #1747 — flags. "No linked controls" mirrors the API's
+      // orphan_policy warning; "Imported" marks a policy brought in by
+      // the policy library import. Imported policies may be published
+      // without linked controls, so this is where that shows.
+      id: "flags",
+      header: "",
+      cell: (row) => (
+        <span className="inline-flex flex-wrap gap-1">
+          {row.imported ? (
+            <span
+              data-testid="policies-row-imported"
+              className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md border text-muted-foreground"
+            >
+              Imported
+            </span>
+          ) : null}
+          {row.warnings?.includes("orphan_policy") ? (
+            <span
+              data-testid="policies-row-no-linked-controls"
+              className="inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md bg-amber-50 text-amber-700"
+            >
+              No linked controls
+            </span>
+          ) : null}
+        </span>
       ),
     },
     {
