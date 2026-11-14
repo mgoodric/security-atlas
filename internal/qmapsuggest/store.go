@@ -77,9 +77,31 @@ func (s *Store) QuestionTextForMapping(ctx context.Context, questionID uuid.UUID
 
 const sqlLimit = 50
 
+// RetrieveCandidates returns anchors of the current SCF release matching any
+// keyword.
 func (s *Store) RetrieveCandidates(ctx context.Context, keywords []string) ([]Candidate, error) {
+	return s.retrieve(ctx, nil, keywords)
+}
+
+// RetrieveCandidatesInRelease is RetrieveCandidates pinned to one SCF
+// release, whether or not it is still current. The control importer pins its
+// keyword candidates to the release recorded on the batch (#2038), so they
+// come from the same release as its crosswalk candidates.
+func (s *Store) RetrieveCandidatesInRelease(ctx context.Context, scfVersionID string, keywords []string) ([]Candidate, error) {
+	id, err := uuid.Parse(scfVersionID)
+	if err != nil {
+		return nil, fmt.Errorf("qmapsuggest: SCF version id: %w", err)
+	}
+	return s.retrieve(ctx, &id, keywords)
+}
+
+func (s *Store) retrieve(ctx context.Context, scfVersionID *uuid.UUID, keywords []string) ([]Candidate, error) {
 	if len(keywords) == 0 {
 		return nil, nil
+	}
+	version := pgtype.UUID{}
+	if scfVersionID != nil {
+		version = pgUUID(*scfVersionID)
 	}
 	var out []Candidate
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ *dbx.Queries, _ uuid.UUID) error {
@@ -90,7 +112,7 @@ func (s *Store) RetrieveCandidates(ctx context.Context, keywords []string) ([]Ca
 			JOIN frameworks f ON f.id = fv.framework_id
 			WHERE f.slug = 'scf'
 			  AND f.tenant_id IS NULL
-			  AND fv.status = 'current'
+			  AND (CASE WHEN $3::uuid IS NULL THEN fv.status = 'current' ELSE fv.id = $3::uuid END)
 			  AND (
 				  a.scf_id ILIKE ANY($1)
 				  OR a.family ILIKE ANY($1)
@@ -99,7 +121,7 @@ func (s *Store) RetrieveCandidates(ctx context.Context, keywords []string) ([]Ca
 			  )
 			ORDER BY a.scf_id
 			LIMIT $2
-		`, ilikePatterns(keywords), sqlLimit)
+		`, ilikePatterns(keywords), sqlLimit, version)
 		if err != nil {
 			return fmt.Errorf("qmapsuggest: retrieve anchors: %w", err)
 		}

@@ -22,10 +22,12 @@ import {
   formatResidualScore,
   isDefault,
   residualClass,
+  residualSeverity,
   residualState,
   reviewDuePending,
   setFilter,
   severityBand,
+  severityBandLabel,
   severityClasses,
   uniqueOwners,
 } from "./filters";
@@ -384,11 +386,28 @@ describe("applyFilters — slice 244 additions", () => {
 });
 
 describe("formatResidualScore", () => {
-  test("formats a 5x5 score as a normalized 0..1 decimal", () => {
-    // likelihood=4 × impact=5 = 20 / 25 = 0.80
-    expect(formatResidualScore({ likelihood: 4, impact: 5 })).toBe("0.80");
-    // likelihood=2 × impact=3 = 6 / 25 = 0.24
-    expect(formatResidualScore({ likelihood: 2, impact: 3 })).toBe("0.24");
+  test("formats a 5x5 score on the 1..25 inherent scale (#2058)", () => {
+    expect(formatResidualScore({ likelihood: 4, impact: 5 })).toBe("20");
+    expect(formatResidualScore({ likelihood: 2, impact: 3 })).toBe("6");
+  });
+
+  test("formats a backend-derived {score, inherent_score, ...} residual (#2058)", () => {
+    // internal/risk/residual_store.go residualBlob: score = inherent ×
+    // (1 − effectiveness), already on 1..25.
+    expect(
+      formatResidualScore({
+        score: 12,
+        inherent_score: 20,
+        weighted_control_effectiveness: 0.4,
+        breakdown: [],
+      }),
+    ).toBe("12");
+    expect(formatResidualScore({ score: 7.2, inherent_score: 12 })).toBe("7.2");
+    expect(formatResidualScore({ severity: 16 })).toBe("16");
+  });
+
+  test("formats a deriver {score} on a FAIR risk as dollars", () => {
+    expect(formatResidualScore({ score: 60000 }, "fair")).toBe("$60,000");
   });
 
   test("renders '—' for null / undefined / non-object", () => {
@@ -409,12 +428,9 @@ describe("formatResidualScore", () => {
     expect(formatResidualScore({ likelihood: 3, impact: "four" })).toBe("—");
   });
 
-  test("clamps a score above the 5x5 ceiling", () => {
-    // The formatter doesn't clamp the value itself — it just normalizes
-    // by 25. A risk with L=6, I=6 normalizes to 1.44 (the operator's
-    // problem to spot, not the renderer's). Still finite, still
-    // formatted as a fixed-2.
-    expect(formatResidualScore({ likelihood: 6, impact: 6 })).toBe("1.44");
+  test("does not clamp a score above the 5x5 ceiling", () => {
+    // L=6, I=6 is the operator's problem to spot, not the renderer's.
+    expect(formatResidualScore({ likelihood: 6, impact: 6 })).toBe("36");
   });
 
   test("formats FAIR annualized loss exposure as dollars", () => {
@@ -429,6 +445,21 @@ describe("formatResidualScore", () => {
 
   test("renders '—' when the 5x5 product is not finite", () => {
     expect(formatResidualScore({ likelihood: Infinity, impact: 2 })).toBe("—");
+  });
+});
+
+describe("residualSeverity (#2058)", () => {
+  test("reads score, then severity, then likelihood × impact", () => {
+    expect(residualSeverity({ score: 12, severity: 3 })).toBe(12);
+    expect(residualSeverity({ severity: 16 })).toBe(16);
+    expect(residualSeverity({ likelihood: 3, impact: 4 })).toBe(12);
+  });
+
+  test("returns null when no shape carries a finite number", () => {
+    expect(residualSeverity({})).toBeNull();
+    expect(residualSeverity(null)).toBeNull();
+    expect(residualSeverity({ score: Number.NaN })).toBeNull();
+    expect(residualSeverity({ likelihood: 3 })).toBeNull();
   });
 });
 
@@ -482,11 +513,18 @@ describe("severityClasses + residualClass", () => {
     expect(severityClasses("none")).toContain("muted");
   });
 
-  test("residualClass maps formatted strings to the matching palette", () => {
-    expect(residualClass("0.80")).toContain("rose");
-    expect(residualClass("0.45")).toContain("amber");
-    expect(residualClass("0.15")).toContain("emerald");
+  test("residualClass bands a 1..25 residual like inherent severity (#2058)", () => {
+    expect(residualClass("20")).toBe(severityClasses("high"));
+    expect(residualClass("12")).toBe(severityClasses("medium"));
+    expect(residualClass("7.2")).toBe(severityClasses("low"));
     expect(residualClass("—")).toContain("muted");
+  });
+
+  test("severityBandLabel names every band", () => {
+    expect(severityBandLabel("high")).toBe("High");
+    expect(severityBandLabel("medium")).toBe("Medium");
+    expect(severityBandLabel("low")).toBe("Low");
+    expect(severityBandLabel("none")).toBe("None");
   });
 
   test("residualClass mutes a string that does not parse as a number", () => {
@@ -519,6 +557,21 @@ describe("residualState (slice 680 / ATLAS-029)", () => {
   test("a valid {likelihood, impact} residual is scored", () => {
     expect(residualState({ likelihood: 2, impact: 3 })).toBe("scored");
     expect(residualState({ likelihood: 4, impact: 5 })).toBe("scored");
+  });
+
+  test("a backend-derived {score, ...} residual is scored, not pending (#2058)", () => {
+    expect(
+      residualState({
+        score: 12,
+        inherent_score: 20,
+        weighted_control_effectiveness: 0.4,
+        breakdown: [],
+      }),
+    ).toBe("scored");
+    // A zero residual (fully effective controls) is a real residual.
+    expect(residualState({ score: 0, inherent_score: 9 })).toBe("scored");
+    expect(residualState({ severity: 16 })).toBe("scored");
+    expect(residualState({ score: "12" })).toBe("pending");
   });
 
   test("a FAIR residual is scored", () => {

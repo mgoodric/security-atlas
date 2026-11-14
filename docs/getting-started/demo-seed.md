@@ -1,5 +1,9 @@
 # Demo seed: populate a tenant for screenshots + live demos
 
+> Setting up your own program? Start with the
+> [Getting started guide](../../docs-site/docs/getting-started.md). This
+> page is only for loading a demo dataset.
+
 This page documents `atlas-cli demo seed` — the opt-in command that
 loads one polished demo dataset suitable for showing security-atlas
 publicly. The dataset covers every product primitive (controls, risks,

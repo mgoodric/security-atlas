@@ -1,6 +1,7 @@
 package controlimport
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -192,5 +193,141 @@ func TestListRowsFiltersAndValidatesStatus(t *testing.T) {
 	}
 	if _, _, err := s.ListRows(tenantCtx(t, batchTenant), b.ID, RowFilter{Status: "bogus"}); !errors.Is(err, ErrInvalidRowStatus) {
 		t.Errorf("bogus status err = %v", err)
+	}
+}
+
+func TestKeywordRetrievalIsPinnedToTheBatchRelease(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	b, err := NewStager(store).Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if len(store.keywordVersions) == 0 {
+		t.Fatal("no keyword retrieval ran")
+	}
+	for _, v := range store.keywordVersions {
+		if v != b.SCFRelease.VersionID {
+			t.Errorf("keyword retrieval pinned to %q, want the batch release %q", v, b.SCFRelease.VersionID)
+		}
+	}
+}
+
+func TestFailedReadySaveMarksTheBatchFailed(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	store.saveErr = func(status string) error {
+		if status == SuggestionsReady {
+			return errors.New("save boom")
+		}
+		return nil
+	}
+	b, err := NewStager(store).Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if b.SuggestionsStatus != SuggestionsFailed {
+		t.Errorf("returned status = %q, want failed", b.SuggestionsStatus)
+	}
+	if got := strings.Join(store.saveCalls, ","); got != SuggestionsReady+","+SuggestionsFailed {
+		t.Errorf("save calls = %s, want ready then failed", got)
+	}
+}
+
+// A batch the sweeper failed while its run waited for a slot is dropped:
+// nothing is computed and nothing is saved.
+func TestRunDropsABatchNoLongerPendingOnceItHasASlot(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	s := NewStager(store)
+	b, err := s.Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	store.status = SuggestionsFailed // the sweeper got there first
+	store.saveCalls, store.keywordVersions = nil, nil
+	b.SuggestionsStatus = SuggestionsPending
+	_, err = s.suggest(tenantCtx(t, batchTenant), b, false)
+	if !errors.Is(err, ErrSuggestionsNoLongerPending) {
+		t.Fatalf("suggest err = %v, want ErrSuggestionsNoLongerPending", err)
+	}
+	if len(store.keywordVersions) != 0 || len(store.saveCalls) != 0 || store.status != SuggestionsFailed {
+		t.Errorf("dropped run retrieved %d times, saved %v, status %q; want nothing and failed",
+			len(store.keywordVersions), store.saveCalls, store.status)
+	}
+}
+
+// A run that computed its candidates after the sweeper failed the batch
+// does not overwrite failed, and is not reported as a new failure.
+func TestLateReadySaveLeavesAFailedBatchFailed(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	s := NewStager(store)
+	b, err := s.Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	store.status = SuggestionsPending
+	store.saveCalls = nil
+	// The sweeper fails the batch between the slot re-check and the save.
+	sweepDuringCompute := &sweepingStore{fakeBatchStore: store}
+	s.store = sweepDuringCompute
+	_, err = s.suggest(tenantCtx(t, batchTenant), b, false)
+	if !errors.Is(err, ErrSuggestionsNoLongerPending) {
+		t.Fatalf("suggest err = %v, want ErrSuggestionsNoLongerPending", err)
+	}
+	if got := strings.Join(store.saveCalls, ","); got != SuggestionsReady {
+		t.Errorf("save calls = %q, want one refused ready save and no failed mark", got)
+	}
+	if store.status != SuggestionsFailed {
+		t.Errorf("status = %q, want failed", store.status)
+	}
+}
+
+// sweepingStore fails the batch, as the sweeper would, during the run's
+// crosswalk read.
+type sweepingStore struct{ *fakeBatchStore }
+
+func (s *sweepingStore) CrosswalkAnchors(ctx context.Context, v string, ids []string) ([]CrosswalkEdge, error) {
+	s.mu.Lock()
+	s.status = SuggestionsFailed
+	s.mu.Unlock()
+	return s.fakeBatchStore.CrosswalkAnchors(ctx, v, ids)
+}
+
+func TestSuggestionRunsShareOneConcurrencyCap(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	s := NewStager(store).WithRunLimit(1)
+	// Hold the only slot, as a long background run would.
+	s.runs <- struct{}{}
+	ctx, cancel := context.WithTimeout(tenantCtx(t, batchTenant), 50*time.Millisecond)
+	defer cancel()
+	b, err := s.Stage(ctx, StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if b.SuggestionsStatus != SuggestionsFailed || len(store.keywordVersions) != 0 {
+		t.Errorf("status %q after %d retrievals, want failed with none (no slot free)", b.SuggestionsStatus, len(store.keywordVersions))
+	}
+	if store.status != SuggestionsFailed {
+		t.Errorf("stored status = %q, want failed so the batch does not stay pending", store.status)
+	}
+	<-s.runs
+	b2, err := s.Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil || b2.SuggestionsStatus != SuggestionsReady {
+		t.Errorf("with the slot free: status %q err %v", b2.SuggestionsStatus, err)
 	}
 }
