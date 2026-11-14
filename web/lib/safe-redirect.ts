@@ -7,33 +7,45 @@
 // 2026-Q2 security audit (`docs/audits/2026-Q2-security-audit.md`).
 //
 // This helper is the single point of validation for any redirect target
-// pulled from user input. Three checks + fallback:
+// pulled from user input. Checks, any failure falling back to `/dashboard`:
 //
-//   1. Must start with `/`         (rejects fully-qualified URLs,
-//                                   `javascript:` URLs, data: URLs,
-//                                   bare strings, etc.)
-//   2. Must not start with `//`    (rejects protocol-relative URLs,
-//                                   which browsers resolve against the
-//                                   current scheme)
-//   3. Must not start with `/\`    (rejects backslash injection paths
-//                                   that some parsers normalize)
-//   4. Must not be exactly `/`     (the root path lands on a non-
+//   1. Must start with `/`, and not `//` or `/\`  (rejects absolute,
+//                                   protocol-relative, `javascript:`,
+//                                   data: and backslash-injection targets)
+//   2. No control characters        (#2196: browsers strip TAB, LF and CR
+//                                   from URLs, so `/\t/evil.com` in a
+//                                   Location header becomes `//evil.com`)
+//   3. Parsed against a fixed base, it stays on that origin and its path
+//      does not start with `//`     (catches whatever a URL parser
+//                                   resolves off-site that the prefix
+//                                   checks miss, e.g. `/.//evil.com`)
+//   4. Must not be exactly `/`      (the root path lands on a non-
 //                                   `/dashboard` route; should not
 //                                   bypass the explicit default)
 //
-// Anything else falls back to `/dashboard`, the established post-login
-// destination. The helper is intentionally short — a 30-line URL
-// sanitizer would invite edge-case regression; the test set
-// (web/lib/safe-redirect.test.ts) is the gate that keeps it short.
+// `/dashboard` is the established post-login destination. The test set
+// (web/lib/safe-redirect.test.ts) is the gate.
 //
 // Reviewer-discipline: all redirect targets sourced from user input
 // MUST flow through `safeRedirectTarget` before reaching `redirect()`
 // / `NextResponse.redirect()` / `router.push()`. See CONTRIBUTING.md
 // "Open-redirect prevention" for the convention.
+const FALLBACK = "/dashboard";
+const PARSE_BASE = "http://atlas.invalid";
+const CONTROL_CHARS = /[\u0000-\u001f\u007f]/;
+
 export function safeRedirectTarget(target: string): string {
-  if (!target.startsWith("/")) return "/dashboard";
-  if (target.startsWith("//")) return "/dashboard";
-  if (target.startsWith("/\\")) return "/dashboard";
-  if (target === "/") return "/dashboard";
+  if (!target.startsWith("/")) return FALLBACK;
+  if (target.startsWith("//") || target.startsWith("/\\")) return FALLBACK;
+  if (CONTROL_CHARS.test(target)) return FALLBACK;
+  if (target === "/") return FALLBACK;
+  let parsed: URL;
+  try {
+    parsed = new URL(target, PARSE_BASE);
+  } catch {
+    return FALLBACK;
+  }
+  if (parsed.origin !== PARSE_BASE) return FALLBACK;
+  if (parsed.pathname.startsWith("//")) return FALLBACK;
   return target;
 }
