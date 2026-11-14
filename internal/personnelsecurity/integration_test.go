@@ -16,8 +16,10 @@ import (
 
 	"github.com/mgoodric/security-atlas/connectors/hris/worker"
 	apicalendar "github.com/mgoodric/security-atlas/internal/api/calendar"
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/personnelsecurity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -57,7 +59,7 @@ func TestManualChecklistLifecycleGeneratesEvidence(t *testing.T) {
 	tenant := freshTenant(t, migrate)
 	controlID := seedAccessControl(t, migrate, tenant)
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
-	store := personnelsecurity.NewStore(app).WithClock(func() time.Time { return now })
+	store := newStore(t, migrate, app, now)
 
 	checklist, err := store.CreateManual(dbtest.WithTenantCtx(t, tenant), personnelsecurity.ManualInput{
 		Kind:             personnelsecurity.WorkflowOnboarding,
@@ -109,7 +111,7 @@ func TestHRISLeaverTriggerOverdueSurfacingAndCalendar(t *testing.T) {
 	tenant := freshTenant(t, migrate)
 	controlID := seedAccessControl(t, migrate, tenant)
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
-	store := personnelsecurity.NewStore(app).WithClock(func() time.Time { return now })
+	store := newStore(t, migrate, app, now)
 
 	w := worker.Worker{
 		SourceHRIS: worker.HRISRippling,
@@ -168,7 +170,7 @@ func TestRLSIsolation(t *testing.T) {
 	tenantA := freshTenant(t, migrate)
 	tenantB := freshTenant(t, migrate)
 	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
-	store := personnelsecurity.NewStore(app).WithClock(func() time.Time { return now })
+	store := newStore(t, migrate, app, now)
 
 	_, err := store.CreateManual(dbtest.WithTenantCtx(t, tenantA), personnelsecurity.ManualInput{
 		Kind:             personnelsecurity.WorkflowOffboarding,
@@ -259,4 +261,84 @@ func withTenantTx(t *testing.T, app *pgxpool.Pool, tenant string, fn func(contex
 
 func pgUUID(u uuid.UUID) pgtype.UUID {
 	return pgtype.UUID{Bytes: u, Valid: true}
+}
+
+// newStore builds the production wiring with a pinned clock: a personnel
+// security store writing completion evidence through an ingest.Service
+// over the app role, validated by the DB-backed schema registry seeded
+// with the bundled platform schemas. The store and ingest share the clock
+// so the observed_at skew check runs against the same "now".
+func newStore(t *testing.T, migrate, app *pgxpool.Pool, now time.Time) *personnelsecurity.Store {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	reg := schemaregistry.NewService(migrate)
+	if _, _, err := reg.ImportPlatformSchemas(ctx, schemaregistry.PlatformSchemasFS()); err != nil {
+		t.Fatalf("ImportPlatformSchemas: %v", err)
+	}
+	clock := func() time.Time { return now }
+	return personnelsecurity.NewStore(app).
+		WithClock(clock).
+		WithIngest(ingest.New(app, reg).WithClock(clock))
+}
+
+// #1830: completion evidence goes through ingest.Service.ProcessInTx. A
+// completion whose caller-supplied observed_at is outside the skew window
+// is refused with ErrObservedAtSkew, the item stays open, no ledger row
+// lands, and the refusal leaves an evidence_audit_log row.
+func TestCompleteItemBackdatedEvidenceRefusedAndAudited(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	migrate := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, migrate)
+	controlID := seedAccessControl(t, migrate, tenant)
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	store := newStore(t, migrate, app, now)
+	ctx := dbtest.WithTenantCtx(t, tenant)
+
+	checklist, err := store.CreateManual(ctx, personnelsecurity.ManualInput{
+		Kind:             personnelsecurity.WorkflowOffboarding,
+		PersonExternalID: "worker-backdated",
+		ControlID:        controlID,
+		CreatedBy:        "security-admin",
+	})
+	if err != nil {
+		t.Fatalf("CreateManual: %v", err)
+	}
+	item := checklist.Items[0]
+	_, err = store.CompleteItem(ctx, personnelsecurity.Completion{
+		ItemID:      item.ID,
+		CompletedBy: "security-admin",
+		ObservedAt:  now.Add(-ingest.MaxObservedAtSkew - time.Hour),
+	})
+	if !errors.Is(err, ingest.ErrObservedAtSkew) {
+		t.Fatalf("backdated CompleteItem: got %v, want ErrObservedAtSkew", err)
+	}
+	reloaded, err := store.Load(ctx, checklist.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	for _, it := range reloaded.Items {
+		if it.ID == item.ID && it.EvidenceRecordID != uuid.Nil {
+			t.Fatalf("refused completion still attached evidence %s", it.EvidenceRecordID)
+		}
+	}
+	var n int
+	if err := migrate.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+		t.Fatalf("count evidence: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("evidence rows after refusal = %d, want 0", n)
+	}
+	idem := "personnel-security:" + checklist.ID.String() + ":" + item.ID.String()
+	var decision, credential string
+	if err := migrate.QueryRow(context.Background(), `
+		SELECT decision, credential_id FROM evidence_audit_log
+		WHERE tenant_id = $1 AND idempotency_key = $2
+	`, tenant, idem).Scan(&decision, &credential); err != nil {
+		t.Fatalf("fetch audit row: %v", err)
+	}
+	if decision != "rejected_observed_at_skew" || credential != personnelsecurity.EvidenceCredentialID {
+		t.Fatalf("audit row = %q/%q, want rejected_observed_at_skew/%s", decision, credential, personnelsecurity.EvidenceCredentialID)
+	}
 }

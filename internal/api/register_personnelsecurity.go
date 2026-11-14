@@ -23,7 +23,7 @@ import (
 // /checklist-items/ subtree cannot shadow /checklists/{id} — distinct
 // segments — so declaration order within the group is free.
 func (s *Server) registerPersonnelSecurity(root *chi.Mux) {
-	store := personnelsecurity.NewStore(s.dbPool)
+	store := personnelsecurity.NewStore(s.dbPool).WithIngest(s.ingestService)
 	reader := personnelsecurityapi.NewReadStore(s.dbPool)
 	h := personnelsecurityapi.New(store, reader)
 	root.Get("/v1/personnel-security/checklists", h.ListChecklists)
