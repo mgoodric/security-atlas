@@ -32,8 +32,10 @@ func TestIssue_TTL(t *testing.T) {
 			t.Parallel()
 			store := credstore.New(time.Minute)
 			svc := New(store)
-			resp, err := svc.Issue(context.Background(), &adminv1.IssueRequest{
-				TenantId: "00000000-0000-0000-0000-000000000001",
+			const tenant = "00000000-0000-0000-0000-000000000001"
+			ctx := authctx.WithCredential(context.Background(), credstore.Credential{TenantID: tenant, IsAdmin: true})
+			resp, err := svc.Issue(ctx, &adminv1.IssueRequest{
+				TenantId: tenant,
 				Ttl:      tc.ttl,
 			})
 			if got := status.Code(err); got != tc.want {
@@ -52,25 +54,31 @@ func TestIssue_TTL(t *testing.T) {
 	}
 }
 
-// #1762: Issue and List without tenant_id act in the caller's own
-// credential tenant; an explicit tenant_id still wins, and a caller with
-// no tenant must name one.
-func TestIssueAndList_TenantDefaultsToCaller(t *testing.T) {
+// #1762, #2167: Issue and List act in the admin caller's own credential
+// tenant. Omitting tenant_id or naming the caller's own tenant works; naming
+// another tenant is refused; a caller in no tenant can act in none.
+func TestIssueAndList_TenantIsCallers(t *testing.T) {
 	t.Parallel()
 	callerTenant := uuid.NewString()
 	otherTenant := uuid.NewString()
+	admin := func(tenant string) *credstore.Credential {
+		return &credstore.Credential{TenantID: tenant, IsAdmin: true}
+	}
 
 	cases := []struct {
 		name      string
 		caller    *credstore.Credential
 		requested string
-		want      string
+		want      codes.Code
 	}{
-		{name: "omitted, caller's tenant", caller: &credstore.Credential{TenantID: callerTenant}, want: callerTenant},
-		{name: "explicit wins", caller: &credstore.Credential{TenantID: callerTenant}, requested: otherTenant, want: otherTenant},
-		{name: "omitted, caller in no tenant", caller: &credstore.Credential{TenantID: uuid.Nil.String()}},
-		{name: "omitted, caller tenant empty", caller: &credstore.Credential{}},
-		{name: "omitted, no caller"},
+		{name: "omitted, caller's tenant", caller: admin(callerTenant), want: codes.OK},
+		{name: "explicit, caller's tenant", caller: admin(callerTenant), requested: callerTenant, want: codes.OK},
+		{name: "explicit, other tenant", caller: admin(callerTenant), requested: otherTenant, want: codes.PermissionDenied},
+		{name: "omitted, caller in no tenant", caller: admin(uuid.Nil.String()), want: codes.InvalidArgument},
+		{name: "explicit, caller in no tenant", caller: admin(uuid.Nil.String()), requested: otherTenant, want: codes.PermissionDenied},
+		{name: "omitted, caller tenant empty", caller: admin(""), want: codes.InvalidArgument},
+		{name: "non-admin, caller's tenant", caller: &credstore.Credential{TenantID: callerTenant}, want: codes.PermissionDenied},
+		{name: "no caller", want: codes.Unauthenticated},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -83,23 +91,88 @@ func TestIssueAndList_TenantDefaultsToCaller(t *testing.T) {
 
 			issued, issueErr := svc.Issue(ctx, &adminv1.IssueRequest{TenantId: tc.requested})
 			listed, listErr := svc.List(ctx, &adminv1.ListRequest{TenantId: tc.requested})
-			if tc.want == "" {
-				for _, err := range []error{issueErr, listErr} {
-					if status.Code(err) != codes.InvalidArgument {
-						t.Fatalf("err = %v, want InvalidArgument (tenant_id is required)", err)
-					}
+			for rpc, err := range map[string]error{"Issue": issueErr, "List": listErr} {
+				if got := status.Code(err); got != tc.want {
+					t.Fatalf("%s code = %v, want %v (err=%v)", rpc, got, tc.want, err)
 				}
+			}
+			if tc.want != codes.OK {
 				return
 			}
-			if issueErr != nil || listErr != nil {
-				t.Fatalf("issue err = %v, list err = %v", issueErr, listErr)
+			if got := issued.GetHandle().GetTenantId(); got != callerTenant {
+				t.Errorf("issued tenant = %s, want %s", got, callerTenant)
 			}
-			if got := issued.GetHandle().GetTenantId(); got != tc.want {
-				t.Errorf("issued tenant = %s, want %s", got, tc.want)
-			}
-			if len(listed.GetHandles()) != 1 || listed.GetHandles()[0].GetTenantId() != tc.want {
-				t.Errorf("listed = %v, want the one key in tenant %s", listed.GetHandles(), tc.want)
+			if len(listed.GetHandles()) != 1 || listed.GetHandles()[0].GetTenantId() != callerTenant {
+				t.Errorf("listed = %v, want the one key in tenant %s", listed.GetHandles(), callerTenant)
 			}
 		})
+	}
+}
+
+// #2167: Rotate and Revoke need an admin caller, and act only on keys in
+// the caller's tenant. Another tenant's key reads as unknown, as on HTTP.
+func TestRotateAndRevoke_AdminInOwnTenant(t *testing.T) {
+	t.Parallel()
+	tenantA := uuid.NewString()
+	tenantB := uuid.NewString()
+
+	cases := []struct {
+		name   string
+		caller *credstore.Credential
+		want   codes.Code
+	}{
+		{name: "admin, same tenant", caller: &credstore.Credential{TenantID: tenantA, IsAdmin: true}, want: codes.OK},
+		{name: "admin, other tenant", caller: &credstore.Credential{TenantID: tenantB, IsAdmin: true}, want: codes.NotFound},
+		{name: "non-admin, same tenant", caller: &credstore.Credential{TenantID: tenantA}, want: codes.PermissionDenied},
+		{name: "approver, same tenant", caller: &credstore.Credential{TenantID: tenantA, IsApprover: true}, want: codes.PermissionDenied},
+		{name: "no caller", want: codes.Unauthenticated},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			store := credstore.New(time.Hour)
+			svc := New(store)
+			ctx := context.Background()
+			if tc.caller != nil {
+				ctx = authctx.WithCredential(ctx, *tc.caller)
+			}
+			toRotate, _, err := store.Issue(tenantA, "", nil, 0)
+			if err != nil {
+				t.Fatalf("Issue: %v", err)
+			}
+			toRevoke, toRevokeBearer, err := store.Issue(tenantA, "", nil, 0)
+			if err != nil {
+				t.Fatalf("Issue: %v", err)
+			}
+
+			_, rotErr := svc.Rotate(ctx, &adminv1.RotateRequest{Id: toRotate.ID})
+			_, revErr := svc.Revoke(ctx, &adminv1.RevokeRequest{Id: toRevoke.ID})
+			for rpc, err := range map[string]error{"Rotate": rotErr, "Revoke": revErr} {
+				if got := status.Code(err); got != tc.want {
+					t.Fatalf("%s code = %v, want %v (err=%v)", rpc, got, tc.want, err)
+				}
+			}
+			_, authErr := store.Authenticate(toRevokeBearer)
+			if revoked := authErr != nil; revoked != (tc.want == codes.OK) {
+				t.Errorf("key revoked = %v after Revoke returned %v", revoked, tc.want)
+			}
+		})
+	}
+}
+
+// #2167: an admin's Rotate or Revoke of an id that does not exist is
+// NotFound, and an empty id is still InvalidArgument.
+func TestRotateAndRevoke_UnknownAndEmptyID(t *testing.T) {
+	t.Parallel()
+	svc := New(credstore.New(time.Hour))
+	ctx := authctx.WithCredential(context.Background(), credstore.Credential{TenantID: uuid.NewString(), IsAdmin: true})
+	for id, want := range map[string]codes.Code{"key_nope": codes.NotFound, "": codes.InvalidArgument} {
+		_, rotErr := svc.Rotate(ctx, &adminv1.RotateRequest{Id: id})
+		_, revErr := svc.Revoke(ctx, &adminv1.RevokeRequest{Id: id})
+		for rpc, err := range map[string]error{"Rotate": rotErr, "Revoke": revErr} {
+			if got := status.Code(err); got != want {
+				t.Errorf("%s(%q) code = %v, want %v", rpc, id, got, want)
+			}
+		}
 	}
 }

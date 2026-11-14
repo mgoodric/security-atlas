@@ -153,6 +153,8 @@ just migrate-up
 just build
 ```
 
+Bringing your organisation's program in? The [Getting started guide](./docs-site/docs/getting-started.md) is the one path from install to a working program.
+
 Detailed local dev setup, prerequisites, and the full `just` recipe surface live in [`CONTRIBUTING.md`](./CONTRIBUTING.md). For a production self-host walkthrough (docker-compose, service roles, backups), see [`docs/SELF_HOSTING.md`](./docs/SELF_HOSTING.md). No container runtime? The [native install](./docs-site/docs/install-native.md) runs on Go, Postgres 16 and Node alone.
 
 ### Your first sign-in (self-host)
@@ -228,6 +230,7 @@ The same version also renders in the bottom-right of every page in the web UI; c
 
 ## Documentation
 
+- **Getting started (adopters):** [`docs-site/docs/getting-started.md`](./docs-site/docs/getting-started.md) — bring an existing program in, in order: install, sign-in and credentials, SCF catalog, frameworks, controls, evidence, risks and policies, first audit period.
 - **User guide (docs site):** [`docs-site/docs/`](./docs-site/docs/) — install, configuration, first audit, framework setup, connector authoring, OAuth/OIDC setup, board reporting, metrics, backups, and upgrades.
 - **Design canvas:** [`Plans/ARCHITECTURE_CANVAS.md`](./Plans/ARCHITECTURE_CANVAS.md) — vision, primitives, the control graph, evidence engine, scope, risk, metrics, audit workflow, tech stack, roadmap, open questions.
 - **Constitutional principles:** [`CLAUDE.md`](./CLAUDE.md) — the architecture invariants, anti-patterns we reject, the AI-assist boundary, and licensing constraints.

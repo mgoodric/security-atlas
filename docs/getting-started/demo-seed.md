@@ -1,5 +1,9 @@
 # Demo seed: populate a tenant for screenshots + live demos
 
+> Setting up your own program? Start with the
+> [Getting started guide](../../docs-site/docs/getting-started.md). This
+> page is only for loading a demo dataset.
+
 This page documents `atlas-cli demo seed` — the opt-in command that
 loads one polished demo dataset suitable for showing security-atlas
 publicly. The dataset covers every product primitive (controls, risks,
@@ -32,6 +36,29 @@ The bootstrap user, scope dimension and scope cell are stock too.
 If your organisation already holds real data, either opt in to multi-tenant
 (`ATLAS_ALLOW_MULTI_TENANT=true`, one-way) and seed a separate demo tenant,
 or try the demo on a separate install.
+
+The super-admin **Load demo data** button (`POST /v1/admin/demo/seed`) always
+creates the separate `demo` tenant, so it follows the same rule: beside an
+existing tenant it needs `ATLAS_ALLOW_MULTI_TENANT=true`, and without it the
+click is refused with 403 (#2043). To load the demo into your organisation,
+use `atlas-cli demo seed` with no `--tenant-slug`.
+
+### Demo data in your organisation is labelled
+
+When the demo loads into your organisation, every control and evidence record
+it added shows a **Demo** badge: on the controls list, the control page, the
+control's evidence stream, and the evidence ledger and its record view
+(#2043). The exports carry the same mark, so an auditor can't mistake demo
+evidence for real evidence:
+
+- the controls and evidence CSV / JSON / XLSX exports have a `demo` column
+  (`true` for a demo row);
+- the OSCAL SSP gives a demo control a `demo-seed` prop, and the assessment
+  results give each sampled demo record a
+  `population-<id>-sampled-<n>-demo-seed` prop.
+
+The badge reads the record the seed keeps of every row it added, so it
+disappears with `atlas-cli demo teardown`.
 
 ## When to use it
 

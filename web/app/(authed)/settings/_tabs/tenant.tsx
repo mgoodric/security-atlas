@@ -269,6 +269,7 @@ export function TenantSection() {
               </Alert>
             ) : null}
             <GatePolicyControl tenantId={currentTenant.id} noun={noun} />
+            <RiskReviewCadenceControl tenantId={currentTenant.id} noun={noun} />
           </>
         )}
       </CardContent>
@@ -381,6 +382,150 @@ function GatePolicyControl({
         <Alert variant="destructive">
           <AlertDescription data-testid="settings-tenant-gate-policy-error">
             {(mut.error as Error).message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
+    </div>
+  );
+}
+
+// #2059: the organisation risk review cadence. A risk created without a
+// review date is due this many days after creation; changing it affects new
+// risks only. Reads the current value from `GET /api/risks/review-cadence`
+// and writes through the same `PATCH /api/tenants/[id]` route as the name
+// and gate policy (admin or super_admin upstream).
+async function fetchRiskReviewCadence(): Promise<number> {
+  const res = await fetch("/api/risks/review-cadence", { cache: "no-store" });
+  if (!res.ok) throw new Error(`read risk review cadence: ${res.status}`);
+  const body = (await res.json()) as { risk_review_cadence_days?: unknown };
+  if (typeof body.risk_review_cadence_days !== "number") {
+    throw new Error("read risk review cadence: malformed response");
+  }
+  return body.risk_review_cadence_days;
+}
+
+async function patchRiskReviewCadence(
+  id: string,
+  risk_review_cadence_days: number,
+): Promise<number> {
+  const res = await fetch(`/api/tenants/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ risk_review_cadence_days }),
+  });
+  if (!res.ok) {
+    let parsed: { error?: string } = {};
+    try {
+      parsed = JSON.parse(await res.text()) as { error?: string };
+    } catch {
+      // body might be plaintext; fall through
+    }
+    throw new Error(parsed.error ?? `set risk review cadence: ${res.status}`);
+  }
+  const json = (await res.json()) as {
+    tenant?: { risk_review_cadence_days?: unknown };
+  };
+  const days = json.tenant?.risk_review_cadence_days;
+  return typeof days === "number" ? days : risk_review_cadence_days;
+}
+
+function RiskReviewCadenceControl({
+  tenantId,
+  noun,
+}: {
+  tenantId: string;
+  noun: string;
+}) {
+  const qc = useQueryClient();
+  const current = useQuery({
+    queryKey: ["risks", "review-cadence"],
+    queryFn: fetchRiskReviewCadence,
+  });
+  // null: the operator has not edited the field, so it shows the stored
+  // cadence.
+  const [edited, setEdited] = useState<string | null>(null);
+  const draft =
+    edited ?? (current.data === undefined ? "" : String(current.data));
+  const [saved, setSaved] = useState(false);
+
+  const mut = useMutation({
+    mutationFn: (days: number) => patchRiskReviewCadence(tenantId, days),
+    onSuccess: (days) => {
+      qc.setQueryData(["risks", "review-cadence"], days);
+      setEdited(null);
+      setSaved(true);
+    },
+  });
+
+  const days = Number(draft);
+  const valid = Number.isInteger(days) && days >= 1 && days <= 3650;
+  const dirty = current.data !== undefined && days !== current.data;
+
+  return (
+    <div
+      className="space-y-3 border-t border-border pt-4"
+      data-testid="settings-tenant-risk-review-cadence"
+    >
+      <div>
+        <div className="text-sm font-medium text-foreground">
+          Risk review cadence
+        </div>
+        <p className="text-xs text-muted-foreground">
+          A new risk in this {noun} is due for review this many days after it is
+          created, unless its creator picks another date. Changing the cadence
+          does not move the review dates of existing risks.
+        </p>
+      </div>
+      {current.isLoading ? (
+        <Skeleton className="h-8 w-32" />
+      ) : (
+        <div className="flex items-center gap-3">
+          <Input
+            type="number"
+            min={1}
+            max={3650}
+            className="w-28"
+            value={draft}
+            disabled={mut.isPending || current.isError}
+            onChange={(e) => {
+              setEdited(e.target.value);
+              setSaved(false);
+            }}
+            aria-label="Risk review cadence in days"
+            data-testid="settings-tenant-risk-review-cadence-input"
+          />
+          <span className="text-sm text-muted-foreground">days</span>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              setSaved(false);
+              mut.mutate(days);
+            }}
+            disabled={!valid || !dirty || mut.isPending}
+            data-testid="settings-tenant-risk-review-cadence-save"
+          >
+            {mut.isPending ? "Saving…" : "Save cadence"}
+          </Button>
+          {saved && !dirty ? (
+            <span
+              className="text-xs text-muted-foreground"
+              data-testid="settings-tenant-risk-review-cadence-saved"
+            >
+              New risks are due {current.data} days after creation.
+            </span>
+          ) : null}
+        </div>
+      )}
+      {!valid && draft !== "" ? (
+        <p className="text-xs text-destructive">
+          Enter a whole number of days from 1 to 3650.
+        </p>
+      ) : null}
+      {current.error || mut.error ? (
+        <Alert variant="destructive">
+          <AlertDescription data-testid="settings-tenant-risk-review-cadence-error">
+            {((mut.error ?? current.error) as Error).message}
           </AlertDescription>
         </Alert>
       ) : null}

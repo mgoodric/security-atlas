@@ -43,11 +43,14 @@ import {
   fairScore,
   formatDollars,
   patternNoLongerMet,
+  residualClass,
+  residualSeverity,
   residualState,
   reviewDuePending,
   severityBand,
   severityClasses,
 } from "../filters";
+import { SeverityPill } from "../severity-pill";
 
 function formatDate(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -117,17 +120,18 @@ export default function RiskDetailPage({
   const band = severityBand(risk.severity);
   const fairInherent =
     risk.methodology === "fair" ? fairScore(risk.inherent_score) : null;
-  const fairResidual =
-    risk.methodology === "fair" ? fairScore(risk.residual_score) : null;
+  const isFair = risk.methodology === "fair";
 
-  // Residual: prefer the live-derived magnitude when the BFF carried a
-  // deriver breakdown; otherwise fall back to the stored residual_score.
-  // A not-yet-evaluated residual renders as the same honest "Pending
-  // evaluation" affordance the list cell uses (slice 680).
+  // Residual: the stored residual_score in whichever shape the platform
+  // wrote it (#2058 — the deriver's `{score, ...}` included). A
+  // not-yet-evaluated residual renders as the same honest "Pending
+  // evaluation" affordance the list cell uses (slice 680). A 5x5
+  // residual shows on the inherent card's 1..25 scale and bands.
   const residualPending = residualState(risk.residual_score) !== "scored";
   const residualText = residualPending
     ? "Pending evaluation"
-    : formatResidualScore(risk.residual_score);
+    : formatResidualScore(risk.residual_score, risk.methodology);
+  const residualN = isFair ? null : residualSeverity(risk.residual_score);
 
   return (
     <div className="space-y-6" data-testid="risk-detail">
@@ -177,7 +181,7 @@ export default function RiskDetailPage({
               data-testid="risk-detail-review-due"
             >
               {reviewDuePending(risk.review_due_at)
-                ? "Pending evaluation"
+                ? "Not set"
                 : formatDate(risk.review_due_at)}
             </dd>
           </div>
@@ -220,22 +224,18 @@ export default function RiskDetailPage({
               <>
                 <div
                   className="text-[11px] uppercase tracking-wider text-muted-foreground"
-                  title="Inherent severity: likelihood × impact on the 5×5 grid, before any control mitigation."
+                  title="Inherent severity (1–25): likelihood × impact on the 5×5 grid, before any control mitigation."
                 >
                   Inherent severity
                 </div>
-                <div className="mt-1 flex items-center gap-2">
-                  <span
-                    className={`inline-flex items-center justify-center w-7 h-7 text-sm font-semibold rounded ${severityClasses(
-                      band,
-                    )}`}
-                    data-testid="risk-detail-severity"
-                  >
-                    {risk.severity}
-                  </span>
-                  <span className="text-xs text-muted-foreground capitalize">
-                    {band}
-                  </span>
+                <div className="mt-1">
+                  <SeverityPill
+                    value={String(risk.severity)}
+                    band={band}
+                    className={severityClasses(band)}
+                    testId="risk-detail-severity"
+                    size="md"
+                  />
                 </div>
               </>
             )}
@@ -279,18 +279,30 @@ export default function RiskDetailPage({
           <CardContent>
             <div
               className="text-[11px] uppercase tracking-wider text-muted-foreground"
-              title="Residual: inherent severity reduced by the linked controls' measured effectiveness (0..1)."
+              title="Residual (1–25): inherent severity reduced by the linked controls' measured effectiveness, on the same scale and bands as inherent."
             >
-              {fairResidual
+              {isFair
                 ? "Residual annualized exposure"
                 : "Residual (after controls)"}
             </div>
-            <div
-              className="mt-1 text-2xl font-semibold"
-              data-testid="risk-detail-residual"
-            >
-              {residualText}
-            </div>
+            {residualN != null ? (
+              <div className="mt-1">
+                <SeverityPill
+                  value={residualText}
+                  band={severityBand(residualN)}
+                  className={residualClass(residualText)}
+                  testId="risk-detail-residual"
+                  size="md"
+                />
+              </div>
+            ) : (
+              <div
+                className="mt-1 text-2xl font-semibold"
+                data-testid="risk-detail-residual"
+              >
+                {residualText}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

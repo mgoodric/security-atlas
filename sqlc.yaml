@@ -108,7 +108,9 @@ sql:
       - "migrations/sql/20260920000000_oidc_identity_link_audit.sql"
       - "migrations/sql/20260921000000_policy_draft_discard.sql"
       - "migrations/sql/20260923000000_risk_categories.sql"
+      - "migrations/sql/20260924000000_demo_seed_rows.sql"
       - "migrations/sql/20260926000000_scf_anchor_legacy_scf_id.sql"
+      - "migrations/sql/20261015000000_risk_review_cadence.sql"
       - "migrations/sql/20261018000000_vendor_initial_review_window.sql"
     queries: "internal/db/queries"
     gen:

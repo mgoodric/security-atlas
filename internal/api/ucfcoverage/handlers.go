@@ -318,6 +318,10 @@ type controlWire struct {
 	// ExternalRefs is the control.yaml external_refs[] list (#1737).
 	// Omitted when the control carries none.
 	ExternalRefs []externalRefWire `json:"external_refs,omitempty"`
+	// Demo is true when the in-place demo seed added this control to the
+	// organisation (#2043). Omitted otherwise, and on views that never set
+	// it.
+	Demo bool `json:"demo,omitempty"`
 }
 
 // externalRefWire is one controls.external_refs element. Kind is

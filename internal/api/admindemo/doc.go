@@ -38,6 +38,12 @@
 //     two-row forensic separation distinguishes WHO CLICKED THE
 //     BUTTON from WHAT THE SEEDER DID.
 //
+// MULTI-TENANT GATE (#2043): Seed goes through demoseed.Seeder.Seed, which
+// creates the `demo` tenant beside an existing tenant only when
+// ATLAS_ALLOW_MULTI_TENANT=true (#1763). Without the opt-in the click is
+// audited and then refused with 403, so the button never makes an install
+// multi-tenant. Re-seeding an existing demo tenant needs no opt-in.
+//
 // RATE LIMIT: per-IP token bucket, 1 invocation per 60 seconds for
 // Seed + Teardown (shared bucket per IP). Excess returns 429 with
 // `Retry-After: 60`. The Status probe is NOT rate-limited (operator
