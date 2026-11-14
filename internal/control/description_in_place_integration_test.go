@@ -10,13 +10,21 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"fmt"
 	"maps"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -209,5 +217,219 @@ func TestUpload_DescriptionOnlyChangeUpdatesInPlace(t *testing.T) {
 	}
 	if n := countRevisions(); n != 1 {
 		t.Fatalf("a superseding upload wrote a revision row: %d rows, want 1", n)
+	}
+}
+
+// Issue #1958: adding external_refs to a control that already has
+// evidence updates it in place, so the evidence stays attached and both
+// the control (by its new ref) and its evidence stay searchable.
+func TestUpload_ExternalRefsOnlyChangeUpdatesInPlace(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	_, code := seedSCFAnchor(t, admin, "IAC-1958", "IAC")
+	tenant := dbtest.SeedTenant(t, admin,
+		"control_manifest_revisions", "risk_control_links", "risks", "exceptions",
+		"control_owner_assignments", "evidence_records", "controls",
+	)
+	store := control.NewStore(app)
+	ctx, err := tenancy.WithTenant(context.Background(), tenant)
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+
+	v1 := manifestWith("refs_in_place", code, "Risk assessment", "Annual risk assessment.")
+	b1, err := control.FinalizeBundleForHTTP(v1)
+	if err != nil {
+		t.Fatalf("parse v1: %v", err)
+	}
+	res1, err := store.Upload(ctx, b1, "key_admin")
+	if err != nil {
+		t.Fatalf("first upload: %v", err)
+	}
+	seedControlLinks(t, admin, tenant, res1.ControlID)
+	want := map[string]int{"owner": 1, "evidence": 1, "exception": 1, "risk_link": 1}
+
+	withRefs := string(v1) + `external_refs:
+  - system: acme-audit
+    id: ZQRA-1958
+  - system: soc2
+    kind: tested_under
+    id: CC3.1
+    note: "quokkareport section 4"
+`
+	b2, err := control.FinalizeBundleForHTTP([]byte(withRefs))
+	if err != nil {
+		t.Fatalf("parse v1 with refs: %v", err)
+	}
+	res2, err := store.Upload(ctx, b2, "key_admin")
+	if err != nil {
+		t.Fatalf("refs-only upload: %v", err)
+	}
+	if !res2.UpdatedInPlace || res2.ControlID != res1.ControlID || res2.Version != 1 ||
+		res2.SupersededID != (uuid.UUID{}) {
+		t.Fatalf("refs-only upload should update in place; got %+v (prior id %s)", res2, res1.ControlID)
+	}
+	if got := linkCounts(t, admin, tenant, res1.ControlID); !maps.Equal(got, want) {
+		t.Fatalf("links after refs-only upload: got %v, want %v", got, want)
+	}
+
+	var refs, hash string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT external_refs::text, bundle_manifest_hash FROM controls
+		WHERE id = $1 AND superseded_by IS NULL
+	`, res1.ControlID).Scan(&refs, &hash); err != nil {
+		t.Fatalf("read active row: %v", err)
+	}
+	if !strings.Contains(refs, "ZQRA-1958") || !strings.Contains(refs, "tested_under") {
+		t.Fatalf("external_refs not updated: %s", refs)
+	}
+	if hash != b2.ManifestHashHex {
+		t.Fatalf("hash not updated: got %s, want %s", hash, b2.ManifestHashHex)
+	}
+	var revHash string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT bundle_manifest_hash FROM control_manifest_revisions
+		WHERE tenant_id = $1 AND control_id = $2
+	`, tenant, res1.ControlID).Scan(&revHash); err != nil {
+		t.Fatalf("read revision row: %v", err)
+	}
+	if revHash != b1.ManifestHashHex {
+		t.Fatalf("revision row should hold the v1 manifest; got %s, want %s", revHash, b1.ManifestHashHex)
+	}
+
+	srv := api.New(api.Config{})
+	srv.AttachDB(app)
+	bearer := srv.IssueTestJWT(t, testjwt.OwnerFor(uuid.MustParse(tenant), []string{"control_owner"}))
+	ts := httptest.NewServer(srv.HTTPHandlerForTests())
+	t.Cleanup(ts.Close)
+	search := func(q, types string) []string {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, ts.URL+"/v1/search?q="+q+"&types="+types, nil)
+		if err != nil {
+			t.Fatalf("new request: %v", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("search %s: %v", q, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("search %s: status %d", q, resp.StatusCode)
+		}
+		var body struct {
+			Hits []struct {
+				ID string `json:"id"`
+			} `json:"hits"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatalf("decode search: %v", err)
+		}
+		ids := make([]string, 0, len(body.Hits))
+		for _, h := range body.Hits {
+			ids = append(ids, h.ID)
+		}
+		return ids
+	}
+	for _, q := range []string{"zqra-1958", "quokkareport"} {
+		if ids := search(q, "controls"); len(ids) != 1 || ids[0] != res1.ControlID.String() {
+			t.Fatalf("q=%s: want exactly control %s, got %v", q, res1.ControlID, ids)
+		}
+	}
+	// seedControlLinks writes the evidence with control_ref = the control id.
+	if ids := search(res1.ControlID.String(), "evidence"); len(ids) != 1 {
+		t.Fatalf("the control's evidence should still be searchable; got %v", ids)
+	}
+}
+
+// Issue #1958: concurrent in-place uploads of one control serialise on the
+// active row, so every overwritten manifest lands in
+// control_manifest_revisions exactly once and none is lost.
+func TestUpload_ConcurrentInPlaceUploadsKeepEveryRevision(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	_, code := seedSCFAnchor(t, admin, "IAC-1958C", "IAC")
+	tenant := dbtest.SeedTenant(t, admin, "control_manifest_revisions", "controls")
+	store := control.NewStore(app)
+	ctx, err := tenancy.WithTenant(context.Background(), tenant)
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+
+	b1, err := control.FinalizeBundleForHTTP(manifestWith("concurrent", code, "Access review", "Original."))
+	if err != nil {
+		t.Fatalf("parse v1: %v", err)
+	}
+	res1, err := store.Upload(ctx, b1, "key_admin")
+	if err != nil {
+		t.Fatalf("first upload: %v", err)
+	}
+
+	const n = 8
+	hashes := map[string]bool{b1.ManifestHashHex: true}
+	bundles := make([]*control.Bundle, n)
+	for i := range bundles {
+		b, err := control.FinalizeBundleForHTTP(manifestWith("concurrent", code, "Access review", fmt.Sprintf("Edit %d.", i)))
+		if err != nil {
+			t.Fatalf("parse edit %d: %v", i, err)
+		}
+		bundles[i] = b
+		hashes[b.ManifestHashHex] = true
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	start := make(chan struct{})
+	for i, b := range bundles {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			res, err := store.Upload(ctx, b, "key_admin")
+			if err == nil && (!res.UpdatedInPlace || res.ControlID != res1.ControlID) {
+				err = fmt.Errorf("want an in-place update of %s, got %+v", res1.ControlID, res)
+			}
+			errs[i] = err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("upload %d: %v", i, err)
+		}
+	}
+
+	// The n revision rows plus the active row hold each of the n+1
+	// manifests exactly once.
+	seen := map[string]int{}
+	rows, err := admin.Query(context.Background(), `
+		SELECT bundle_manifest_hash FROM control_manifest_revisions
+		WHERE tenant_id = $1 AND control_id = $2
+		UNION ALL
+		SELECT bundle_manifest_hash FROM controls WHERE id = $2 AND superseded_by IS NULL
+	`, tenant, res1.ControlID)
+	if err != nil {
+		t.Fatalf("read manifests: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		seen[h]++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	if len(seen) != len(hashes) {
+		t.Fatalf("want %d distinct manifests across revisions + active row, got %d: %v", len(hashes), len(seen), seen)
+	}
+	for h, c := range seen {
+		if !hashes[h] || c != 1 {
+			t.Fatalf("manifest %s seen %d times (known=%v); all: %v", h, c, hashes[h], seen)
+		}
 	}
 }

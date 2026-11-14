@@ -318,24 +318,28 @@ func (q *Queries) ImportPublishedPolicy(ctx context.Context, arg ImportPublished
 const insertPolicyAuditLog = `-- name: InsertPolicyAuditLog :one
 INSERT INTO policy_audit_log (
     tenant_id, policy_id, action, actor, source_file,
-    historical_approver_name, historical_approved_at, source_url
+    historical_approver_name, historical_approved_at, source_url,
+    previous_next_review_at, new_next_review_at
 )
 VALUES (
     $1, $2, $3, $4, $5,
-    $6, $7, $8
+    $6, $7, $8,
+    $9, $10
 )
-RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at
+RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at
 `
 
 type InsertPolicyAuditLogParams struct {
-	TenantID               pgtype.UUID `json:"tenant_id"`
-	PolicyID               pgtype.UUID `json:"policy_id"`
-	Action                 string      `json:"action"`
-	Actor                  string      `json:"actor"`
-	SourceFile             string      `json:"source_file"`
-	HistoricalApproverName *string     `json:"historical_approver_name"`
-	HistoricalApprovedAt   pgtype.Date `json:"historical_approved_at"`
-	SourceUrl              *string     `json:"source_url"`
+	TenantID               pgtype.UUID        `json:"tenant_id"`
+	PolicyID               pgtype.UUID        `json:"policy_id"`
+	Action                 string             `json:"action"`
+	Actor                  string             `json:"actor"`
+	SourceFile             string             `json:"source_file"`
+	HistoricalApproverName *string            `json:"historical_approver_name"`
+	HistoricalApprovedAt   pgtype.Date        `json:"historical_approved_at"`
+	SourceUrl              *string            `json:"source_url"`
+	PreviousNextReviewAt   pgtype.Timestamptz `json:"previous_next_review_at"`
+	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
 }
 
 // #1747 — append one row to the policy audit log.
@@ -349,6 +353,8 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		arg.HistoricalApproverName,
 		arg.HistoricalApprovedAt,
 		arg.SourceUrl,
+		arg.PreviousNextReviewAt,
+		arg.NewNextReviewAt,
 	)
 	var i PolicyAuditLog
 	err := row.Scan(
@@ -363,6 +369,8 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		&i.SourceUrl,
 		&i.SubjectModule,
 		&i.CreatedAt,
+		&i.PreviousNextReviewAt,
+		&i.NewNextReviewAt,
 	)
 	return i, err
 }
@@ -618,7 +626,7 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 }
 
 const listPolicyAuditLog = `-- name: ListPolicyAuditLog :many
-SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at
+SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at
 FROM policy_audit_log
 WHERE tenant_id = $1 AND policy_id = $2
 ORDER BY created_at ASC, id ASC
@@ -651,6 +659,8 @@ func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLog
 			&i.SourceUrl,
 			&i.SubjectModule,
 			&i.CreatedAt,
+			&i.PreviousNextReviewAt,
+			&i.NewNextReviewAt,
 		); err != nil {
 			return nil, err
 		}
@@ -800,6 +810,7 @@ SET status = 'published',
     effective_date = $3,
     published_at = now(),
     published_by = $4,
+    next_review_at = $5,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
@@ -808,23 +819,26 @@ RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment
 `
 
 type PublishApprovedPolicyParams struct {
-	TenantID      pgtype.UUID `json:"tenant_id"`
-	ID            pgtype.UUID `json:"id"`
-	EffectiveDate pgtype.Date `json:"effective_date"`
-	PublishedBy   *string     `json:"published_by"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	ID            pgtype.UUID        `json:"id"`
+	EffectiveDate pgtype.Date        `json:"effective_date"`
+	PublishedBy   *string            `json:"published_by"`
+	NextReviewAt  pgtype.Timestamptz `json:"next_review_at"`
 }
 
 // Publishes an approved row in place. Sets status -> published, populates
 // effective_date, published_at, published_by. predecessor_id is never
 // changed: a first version keeps NULL, and a later version (a draft
 // created with predecessor_id set) keeps the link to the row that Part 1
-// just superseded (#1747).
+// just superseded (#1747). next_review_at is the review date the publisher
+// names (#1806); NULL when none is given.
 func (q *Queries) PublishApprovedPolicy(ctx context.Context, arg PublishApprovedPolicyParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, publishApprovedPolicy,
 		arg.TenantID,
 		arg.ID,
 		arg.EffectiveDate,
 		arg.PublishedBy,
+		arg.NextReviewAt,
 	)
 	var i Policy
 	err := row.Scan(
@@ -921,6 +935,9 @@ const supersedePolicyAtPublish = `-- name: SupersedePolicyAtPublish :one
 UPDATE policies
 SET status = 'superseded',
     superseded_at = now(),
+    -- #1806: the successor carries its own review date; the superseded
+    -- row no longer has one due.
+    next_review_at = NULL,
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2
@@ -942,6 +959,63 @@ type SupersedePolicyAtPublishParams struct {
 // draft).
 func (q *Queries) SupersedePolicyAtPublish(ctx context.Context, arg SupersedePolicyAtPublishParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, supersedePolicyAtPublish, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+	)
+	return i, err
+}
+
+const updatePolicyNextReviewAt = `-- name: UpdatePolicyNextReviewAt :one
+UPDATE policies
+SET next_review_at = $1,
+    updated_at = now()
+WHERE tenant_id = $2
+  AND id = $3
+  AND status = 'published'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at
+`
+
+type UpdatePolicyNextReviewAtParams struct {
+	NextReviewAt pgtype.Timestamptz `json:"next_review_at"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	ID           pgtype.UUID        `json:"id"`
+}
+
+// #1806 — change the review date of a published policy in place. It is not
+// a new version: the row keeps its id, version and approval. The caller
+// writes the policy_audit_log row in the same transaction. Only the
+// published chain tip has a review due, so other states do not match.
+func (q *Queries) UpdatePolicyNextReviewAt(ctx context.Context, arg UpdatePolicyNextReviewAtParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, updatePolicyNextReviewAt, arg.NextReviewAt, arg.TenantID, arg.ID)
 	var i Policy
 	err := row.Scan(
 		&i.ID,

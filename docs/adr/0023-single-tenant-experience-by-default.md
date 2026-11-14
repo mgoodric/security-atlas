@@ -36,7 +36,7 @@ Parts of this have already landed ahead of the ADR: OAuth clients are bound to a
 1. **The single-tenant install is the default experience.** With one tenant, every edge (sign-in, tokens, CLI, UI, demo data, docs) resolves to the **bootstrap tenant** implicitly. Nobody types or sees a tenant ID. User-facing copy calls the tenant "your organisation".
 2. **Tenant count, not a mode flag, drives the experience.** There is no tenancy-mode setting. The UI shows tenant chrome (switcher, Tenants page, Super-admins, tenant pickers) only when two or more tenants exist, and the CLI and sign-in require an explicit tenant only then.
 3. **The data model, row-level security and authorisation never branch on mode or tenant count.** `tenant_id` columns and RLS are unchanged. Database-enforced isolation stays on for a single-tenant install, as defence in depth.
-4. **Multi-tenant is opt-in.** Creating a second tenant requires a super-admin **and** the deployment setting `ATLAS_ALLOW_MULTI_TENANT=true` (gate not yet enforced; lands with the #1758 follow-on). Installs that already hold several tenants are unaffected.
+4. **Multi-tenant is opt-in.** Creating a second tenant requires a super-admin **and** the deployment setting `ATLAS_ALLOW_MULTI_TENANT=true` (enforced since #1763). Installs that already hold several tenants are unaffected.
 5. **The opt-in is one-way.** There is no path from multi-tenant back to single-tenant; tenants are not merged or collapsed.
 6. **Global catalog writes require super-admin.** Rows with no tenant (crosswalk edge tiers, global framework versions) are not organisation data and are not editable as such, even on a single-tenant install. On a single-tenant install the bootstrap admin holds super-admin, so this does not lock the operator out.
 7. **Writes from a credential carrying no tenant (the all-zeros tenant) are refused.** OAuth clients are bound to a tenant when they are created, defaulting to the bootstrap tenant.
@@ -53,6 +53,6 @@ Parts of this have already landed ahead of the ADR: OAuth clients are bound to a
 ## Consequences
 
 - Single-tenant operators never handle a tenant UUID; the follow-on tickets under #1758 own the sign-in, token, CLI, UI, demo-seed and docs changes.
-- Test fixtures that need a second tenant (RLS integration tests, tenant-switch e2e specs, the ISA tenant-isolation probe) create it with `ATLAS_ALLOW_MULTI_TENANT=true` (gate not yet enforced; lands with the #1758 follow-on).
+- Test fixtures that need a second tenant (RLS integration tests, tenant-switch e2e specs, the ISA tenant-isolation probe) create it with `ATLAS_ALLOW_MULTI_TENANT=true` (enforced since #1763).
 - Existing multi-tenant installs carry on unchanged, except that unbound OAuth clients there keep read access and have writes refused until bound to a tenant.
 - MCP tenant resolution is unchanged; it already uses the bearer credential's tenant.

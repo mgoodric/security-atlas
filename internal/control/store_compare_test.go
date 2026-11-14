@@ -5,9 +5,10 @@ import (
 	"testing"
 )
 
-// Issue #1908: only the top-level `description` may differ for an upload
-// to update the active control in place.
-func TestManifestsEqualIgnoringDescription(t *testing.T) {
+// Issues #1908, #1958: only the top-level `description` and
+// `external_refs` may differ for an upload to update the active control
+// in place.
+func TestManifestsEqualIgnoringMetadata(t *testing.T) {
 	t.Parallel()
 
 	const base = `bundle_schema_version: "1"
@@ -21,6 +22,9 @@ evidence_queries:
     language: rego
     expression: "allow"
     description: "query prose"
+external_refs:
+  - system: acme-audit
+    id: RA-03
 `
 	cases := []struct {
 		name string
@@ -36,11 +40,16 @@ evidence_queries:
 		{"implementation type changed", replace(base, "implementation_type: automated", "implementation_type: semi_automated"), false},
 		{"nested query description changed", replace(base, `description: "query prose"`, `description: "other prose"`), false},
 		{"field added", base + "owner_role: ciso\n", false},
+		{"external ref id changed", replace(base, "id: RA-03", "id: RA-04"), true},
+		{"external ref added", base + "  - system: soc2\n    kind: tested_under\n    id: CC3.1\n", true},
+		{"external refs removed", replace(base, "external_refs:\n  - system: acme-audit\n    id: RA-03\n", ""), true},
+		{"refs and description both changed", replace(replace(base, "id: RA-03", "id: RA-09"), `description: "Original prose."`, `description: "New."`), true},
+		{"refs changed alongside a title change", replace(replace(base, "id: RA-03", "id: RA-09"), `title: "Test control"`, `title: "Renamed"`), false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := manifestsEqualIgnoringDescription([]byte(base), []byte(tc.next))
+			got, err := manifestsEqualIgnoringMetadata([]byte(base), []byte(tc.next))
 			if err != nil {
 				t.Fatalf("compare: %v", err)
 			}
@@ -51,12 +60,12 @@ evidence_queries:
 	}
 }
 
-func TestManifestsEqualIgnoringDescription_MalformedYAML(t *testing.T) {
+func TestManifestsEqualIgnoringMetadata_MalformedYAML(t *testing.T) {
 	t.Parallel()
-	if _, err := manifestsEqualIgnoringDescription([]byte("a: [1"), []byte("a: 1")); err == nil {
+	if _, err := manifestsEqualIgnoringMetadata([]byte("a: [1"), []byte("a: 1")); err == nil {
 		t.Fatal("expected an error for malformed prior YAML")
 	}
-	if _, err := manifestsEqualIgnoringDescription([]byte("a: 1"), []byte("a: [1")); err == nil {
+	if _, err := manifestsEqualIgnoringMetadata([]byte("a: 1"), []byte("a: [1")); err == nil {
 		t.Fatal("expected an error for malformed new YAML")
 	}
 }
