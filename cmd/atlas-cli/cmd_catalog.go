@@ -168,7 +168,7 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL)")
 	cmd.Flags().StringArrayVar(&frameworkColumns, "framework-column", nil, "SCF workbook column header to import, as HEADER or HEADER=PREFIX to prefix its requirement codes; repeat to combine columns into one framework (required when an .xlsx has multiple framework columns)")
-	cmd.Flags().StringVar(&frameworkSlug, "framework-slug", "", "framework slug override for SCF workbook imports")
+	cmd.Flags().StringVar(&frameworkSlug, "framework-slug", "", "framework slug override for SCF workbook imports (required when the first framework column has no Focal Documents metadata)")
 	cmd.Flags().StringVar(&frameworkName, "framework-name", "", "framework name override for SCF workbook imports")
 	cmd.Flags().StringVar(&frameworkIssuer, "framework-issuer", "", "framework issuer override for SCF workbook imports")
 	cmd.Flags().StringVar(&frameworkVersion, "framework-version", "", "framework version override for SCF workbook imports")

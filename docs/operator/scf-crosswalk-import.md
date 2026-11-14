@@ -60,6 +60,14 @@ If the workbook has exactly one framework mapping column, the column is selected
 automatically. Real SCF full workbooks contain many framework columns, so
 `--framework-column` is normally required.
 
+The framework slug, name, issuer and version default to the column's row in the
+`Focal Documents` sheet. `--framework-slug` is required when that metadata is
+missing: the workbook has no `Focal Documents` sheet, the sheet has no
+`SCF Column Header` column, or it has no row for the selected column (the first
+one, when several are combined). Without it the slug would fall back to the
+column header and could duplicate a framework already imported under its FDI
+slug, so the import fails and names the cause.
+
 ### Combining columns (ISO 27001)
 
 Some frameworks span more than one workbook column. Repeat
