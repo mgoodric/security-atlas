@@ -169,6 +169,23 @@ WITH unified AS (
         (to_jsonb(w) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'walkthrough_id' - 'subject_module')::jsonb AS payload_json
     FROM walkthrough_audit_log w
+
+    UNION ALL
+
+    -- 10. framework_scope_workflow_log (issue #1786)
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'framework_scope'::text AS kind,
+        'framework_scope'::text AS target_type,
+        framework_scope_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(fs) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'framework_scope_id' - 'subject_module')::jsonb AS payload_json
+    FROM framework_scope_workflow_log fs
 )
 SELECT
     unified.occurred_at,
