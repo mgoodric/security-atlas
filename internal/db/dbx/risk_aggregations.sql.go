@@ -283,6 +283,22 @@ func (q *Queries) ListRiskParentLinks(ctx context.Context, arg ListRiskParentLin
 	return items, nil
 }
 
+const lockRiskHierarchy = `-- name: LockRiskHierarchy :exec
+SELECT pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || $1::uuid::text, 0))
+`
+
+// #1748: serialize every write that can add a hierarchy link in one tenant
+// (POST /v1/risks/{id}/children, the link_child_risks MCP applier, and the
+// aggregation engine), so two concurrent links cannot each pass the cycle
+// check on a snapshot that lacks the other. Transaction-scoped and
+// re-entrant within a session. Callers take it before any meta-risk key
+// lock (LockAggregationKey) so the two locks are always acquired in the
+// same order.
+func (q *Queries) LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, lockRiskHierarchy, tenantID)
+	return err
+}
+
 const riskAggregationReaches = `-- name: RiskAggregationReaches :one
 WITH RECURSIVE descendants(id) AS (
     SELECT ra.child_risk_id

@@ -2893,6 +2893,14 @@ type Querier interface {
 	// not conflict with the FOR KEY SHARE an aggregation evaluation takes when
 	// it links this risk as a child, so an evaluation is never blocked by it.
 	LockRiskByID(ctx context.Context, arg LockRiskByIDParams) (Risk, error)
+	// #1748: serialize every write that can add a hierarchy link in one tenant
+	// (POST /v1/risks/{id}/children, the link_child_risks MCP applier, and the
+	// aggregation engine), so two concurrent links cannot each pass the cycle
+	// check on a snapshot that lacks the other. Transaction-scoped and
+	// re-entrant within a session. Callers take it before any meta-risk key
+	// lock (LockAggregationKey) so the two locks are always acquired in the
+	// same order.
+	LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error
 	// Append a row to the access log. Action is enforced by CHECK
 	// ('upload' | 'download'). Caller passes tenant_id + artifact_id + actor.
 	LogArtifactAccess(ctx context.Context, arg LogArtifactAccessParams) error

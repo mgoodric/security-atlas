@@ -98,6 +98,10 @@ func (h *Handler) LinkChildren(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "child_risk_ids must contain at least one UUID")
 		return
 	}
+	if len(childIDs) > risk.MaxChildrenPerLink {
+		httpresp.WriteError(w, http.StatusBadRequest, risk.ErrTooManyChildren.Error())
+		return
+	}
 	if err := h.store.LinkChildren(ctx, id, childIDs); err != nil {
 		writeLinkError(w, r, err)
 		return

@@ -1,7 +1,11 @@
 package risk
 
 import (
+	"context"
+	"errors"
 	"testing"
+
+	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
@@ -140,5 +144,21 @@ func TestIsChildLinkValidation(t *testing.T) {
 		if IsChildLinkValidation(err) {
 			t.Errorf("IsChildLinkValidation(%v) = true, want false", err)
 		}
+	}
+}
+
+// The cap is checked before any query, so a nil *dbx.Queries is never
+// touched (#1748).
+func TestLinkChildrenTx_CapsChildren(t *testing.T) {
+	t.Parallel()
+	ids := make([]uuid.UUID, MaxChildrenPerLink+1)
+	for i := range ids {
+		ids[i] = uuid.New()
+	}
+	if _, err := LinkChildrenTx(context.Background(), nil, uuid.New(), uuid.New(), ids); !errors.Is(err, ErrTooManyChildren) {
+		t.Fatalf("err = %v, want ErrTooManyChildren", err)
+	}
+	if !IsChildLinkValidation(ErrTooManyChildren) {
+		t.Fatal("ErrTooManyChildren should be a 400-class validation error")
 	}
 }

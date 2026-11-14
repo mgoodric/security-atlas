@@ -339,6 +339,7 @@ const linkChildRisksInputSchema = `{
     "child_risk_ids": {
       "type": "array",
       "minItems": 1,
+      "maxItems": 100,
       "items": {"type": "string"},
       "description": "UUIDs of existing risks to attach. Each must sit at a lower level than the parent (team < org < company), be scored on the 5x5 grid, and not be the parent or one of its ancestors. A child already attached is left as it is."
     }

@@ -28,6 +28,11 @@
 // LinkChildrenTx and UnlinkChildTx take a *dbx.Queries so the MCP
 // write-proposal appliers can run the same validation inside their confirm
 // transaction.
+//
+// Every path that adds a link (this file, the MCP applier through it, and
+// the aggregation engine) first takes the tenant's hierarchy advisory lock
+// (LockRiskHierarchy), so two concurrent links cannot each pass the cycle
+// check on a snapshot that lacks the other.
 
 package risk
 
@@ -40,6 +45,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -57,13 +63,22 @@ var ErrAggregationCycle = errors.New("risk: link would create a cycle in the ris
 // parent.
 var ErrLinkNotFound = errors.New("risk: child risk is not linked to this parent")
 
+// MaxChildrenPerLink bounds one link request, so a single call cannot run
+// an unbounded number of cycle checks while holding the hierarchy lock.
+const MaxChildrenPerLink = 100
+
+// ErrTooManyChildren is returned when one link request names more than
+// MaxChildrenPerLink children.
+var ErrTooManyChildren = fmt.Errorf("risk: at most %d child risks per link request", MaxChildrenPerLink)
+
 // IsChildLinkValidation reports whether err is a caller error in a link
 // request that the HTTP layer renders as a 400. A cycle (409) and a missing
 // risk (404) are reported separately.
 func IsChildLinkValidation(err error) bool {
 	return errors.Is(err, ErrChildLevel) ||
 		errors.Is(err, ErrIncompatibleMethodology) ||
-		errors.Is(err, ErrEmptyChildren)
+		errors.Is(err, ErrEmptyChildren) ||
+		errors.Is(err, ErrTooManyChildren)
 }
 
 // LinkSource values name who made a link.
@@ -224,6 +239,13 @@ func LinkChildrenTx(ctx context.Context, q *dbx.Queries, tenantID, parentID uuid
 	if len(childIDs) == 0 {
 		return nil, ErrEmptyChildren
 	}
+	children := uniqueUUIDs(childIDs)
+	if len(children) > MaxChildrenPerLink {
+		return nil, ErrTooManyChildren
+	}
+	if err := q.LockRiskHierarchy(ctx, pgUUID(tenantID)); err != nil {
+		return nil, fmt.Errorf("lock risk hierarchy: %w", err)
+	}
 	parent, err := q.GetRiskByID(ctx, dbx.GetRiskByIDParams{TenantID: pgUUID(tenantID), ID: pgUUID(parentID)})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -232,7 +254,6 @@ func LinkChildrenTx(ctx context.Context, q *dbx.Queries, tenantID, parentID uuid
 		return nil, fmt.Errorf("read parent risk: %w", err)
 	}
 
-	children := uniqueUUIDs(childIDs)
 	rows, err := q.ListRisksByIDs(ctx, dbx.ListRisksByIDsParams{
 		TenantID: pgUUID(tenantID),
 		Column2:  uuidsToPg(children),
@@ -274,6 +295,12 @@ func LinkChildrenTx(ctx context.Context, q *dbx.Queries, tenantID, parentID uuid
 			RuleID:       pgtype.UUID{}, // NULL: made by hand
 			TenantID:     pgUUID(tenantID),
 		}); err != nil {
+			// A parent or child deleted after the reads above fails the
+			// composite FK: report it as missing, not as a 500.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				return nil, ErrChildrenNotFound
+			}
 			return nil, fmt.Errorf("link child %s: %w", id, err)
 		}
 	}

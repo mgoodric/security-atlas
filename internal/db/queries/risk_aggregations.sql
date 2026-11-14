@@ -76,3 +76,13 @@ SELECT child_risk_id, parent_risk_id
 FROM risk_aggregations
 WHERE tenant_id = $1
 ORDER BY child_risk_id ASC, created_at ASC, parent_risk_id ASC;
+
+-- name: LockRiskHierarchy :exec
+-- #1748: serialize every write that can add a hierarchy link in one tenant
+-- (POST /v1/risks/{id}/children, the link_child_risks MCP applier, and the
+-- aggregation engine), so two concurrent links cannot each pass the cycle
+-- check on a snapshot that lacks the other. Transaction-scoped and
+-- re-entrant within a session. Callers take it before any meta-risk key
+-- lock (LockAggregationKey) so the two locks are always acquired in the
+-- same order.
+SELECT pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || sqlc.arg(tenant_id)::uuid::text, 0));

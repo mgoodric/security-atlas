@@ -99,12 +99,28 @@ inside the confirm transaction. A refusal maps to the API's status with a code
 narrower CHECK as `NOT VALID`, so a rollback never deletes a filed proposal (the
 AI-assist audit trail).
 
-### D9: concurrent links are not serialized
+### D9: links are serialized per tenant by an advisory lock
 
 Two concurrent links could each pass the cycle check on a snapshot that lacks
-the other. With strict level ordering, two links can only form a cycle if the
-levels are already inconsistent with the existing links, so no advisory lock
-is taken. Revisit if levels become freely editable without re-checking links.
+the other. Strict level ordering alone does not rule that out:
+`PATCH /v1/risks/{id}` (#1749) already lets a risk change level after it is
+linked, so levels can disagree with existing links today, and rule-made links
+do not check levels at all. Every path that adds a link therefore takes
+`pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || tenant_id, 0))`
+(`LockRiskHierarchy`) before its cycle check: `LinkChildrenTx` (so the API
+and the `link_child_risks` applier) and the aggregation engine. The engine
+takes it at the start of `LockRules` and of `Evaluate`, before any meta-risk
+key lock, and only when at least one rule will be evaluated. Taking it just
+before `linkChildren` would put it between two rules' key locks and could
+deadlock against a transaction holding the second key. Unlinking takes no
+lock, since removing an edge cannot close a cycle.
+
+The cost is that links, and risk writes that trigger rule evaluation, are
+serialized within a tenant. A link request is capped at
+`risk.MaxChildrenPerLink` (100) children to bound how long one request holds
+the lock. A parent or child deleted between the reads and the insert fails the
+composite FK (23503), which is reported as the same non-enumerating 404 rather
+than a 500.
 
 ### D10: the export appends `parent_risk_ids`
 

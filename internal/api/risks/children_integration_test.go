@@ -17,11 +17,13 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/risk"
 )
 
 // seedLeveledRisk inserts a nist_800_30 risk at the given level with a
@@ -383,5 +385,70 @@ func TestChildren_GetRiskCarriesRollUp(t *testing.T) {
 	}
 	if rk["severity"].(float64) != 4 {
 		t.Fatalf("assessed severity = %v, want 4 (unchanged by the roll-up)", rk["severity"])
+	}
+}
+
+// Links are serialized per tenant: while another transaction holds the
+// tenant's hierarchy lock, a link waits, and it completes once the lock is
+// released (#1748). That is what stops two concurrent links from each
+// passing the cycle check on a snapshot that lacks the other.
+func TestChildren_LinkWaitsForHierarchyLock(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshChildrenTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	org := seedLeveledRisk(t, admin, tenant, "org", "org risk", 3, 3)
+	team := seedLeveledRisk(t, admin, tenant, "team", "team risk", 2, 3)
+
+	ctx := context.Background()
+	holder, err := admin.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin holder: %v", err)
+	}
+	defer func() { _ = holder.Rollback(ctx) }()
+	if _, err := holder.Exec(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('risk_hierarchy:' || $1::uuid::text, 0))`, tenant); err != nil {
+		t.Fatalf("take hierarchy lock: %v", err)
+	}
+
+	done := make(chan int, 1)
+	go func() {
+		resp, _ := linkChildren(t, env, org, team)
+		done <- resp.StatusCode
+	}()
+	select {
+	case status := <-done:
+		t.Fatalf("link finished (status %d) while the hierarchy lock was held", status)
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatalf("release hierarchy lock: %v", err)
+	}
+	select {
+	case status := <-done:
+		if status != http.StatusOK {
+			t.Fatalf("link after release: status %d, want 200", status)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("link did not finish after the hierarchy lock was released")
+	}
+}
+
+// One request may name at most risk.MaxChildrenPerLink children.
+func TestChildren_TooManyChildrenIs400(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshChildrenTenant(t, admin)
+	env := testServer(t, app, tenant)
+	org := seedLeveledRisk(t, admin, tenant, "org", "org risk", 3, 3)
+
+	ids := make([]uuid.UUID, risk.MaxChildrenPerLink+1)
+	for i := range ids {
+		ids[i] = uuid.New()
+	}
+	if resp, body := linkChildren(t, env, org, ids...); resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400: %v", resp.StatusCode, body)
 	}
 }
