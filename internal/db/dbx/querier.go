@@ -2131,6 +2131,16 @@ type Querier interface {
 	// evaluation engine (slice 020/012) intersects scope_cell_predicate with
 	// the cell under evaluation.
 	ListExceptionsByControl(ctx context.Context, arg ListExceptionsByControlParams) ([]Exception, error)
+	// ===== #1792: excluded requirements -> SSP not-applicable entries =====
+	// The requirements excluded in the framework-scope revision that was in
+	// force for a framework version at the audit period's frozen_at. The
+	// revision is chosen exactly as GetFrameworkScopeAsOf chooses it (the
+	// revision active at that time); decisions on an activated or superseded
+	// revision are frozen, so its rows are exactly what applied at the freeze.
+	// A requirement excluded only after the freeze lives on a later revision
+	// and is not returned. RLS scopes every table to the caller tenant; the
+	// leading tenant predicates are defense-in-depth.
+	ListExcludedRequirementsAsOfForExport(ctx context.Context, arg ListExcludedRequirementsAsOfForExportParams) ([]ListExcludedRequirementsAsOfForExportRow, error)
 	// AC-6 calendar surface. Returns active exceptions whose expires_at is
 	// within the supplied window. Window upper bound is computed in Go from
 	// the request param to keep the SQL static.
