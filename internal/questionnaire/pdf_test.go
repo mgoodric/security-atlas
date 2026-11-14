@@ -4,10 +4,10 @@
 //   - buildHTML — every branch of the per-item rendering ladder
 //     (needs-mapping vs anchor present, answer present vs unanswered,
 //     domain present vs blank, answer_value present vs narrative-only).
-//   - encodeForDataURL — every replacement pair in the replacer.
-//   - isChromeUnavailable — nil-error, "exec:" prefix, "executable file
-//     not found" prefix, "no chrome found" prefix, and unrelated errors
-//     (negative case).
+//
+// The data-URL encoder and the chrome-unavailable classifier moved to
+// internal/pdfrender with the shared render helper (#1847); their tests
+// live in internal/pdfrender/print_test.go.
 //
 // RenderPDF itself is exercised end-to-end by the existing
 // internal/api/questionnaires/integration_test.go (AC-A5) when Chrome is
@@ -17,8 +17,6 @@
 package questionnaire
 
 import (
-	"errors"
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -183,63 +181,6 @@ func TestBuildHTML_EmptyItemsRendersHeaderOnly(t *testing.T) {
 	}
 	if strings.Contains(got, `<div class="item">`) {
 		t.Fatal("must not render an item div when Items is empty")
-	}
-}
-
-func TestEncodeForDataURL_ReplacesEveryControlChar(t *testing.T) {
-	// One assertion per replacement pair in the replacer.
-	cases := []struct {
-		raw  string
-		want string
-	}{
-		{"%", "%25"},
-		{"#", "%23"},
-		{"&", "%26"},
-		{"?", "%3F"},
-		{"\n", "%0A"},
-		{"\r", ""},
-	}
-	for _, tc := range cases {
-		t.Run(fmt.Sprintf("%q", tc.raw), func(t *testing.T) {
-			got := encodeForDataURL(tc.raw)
-			if got != tc.want {
-				t.Fatalf("encodeForDataURL(%q) = %q; want %q", tc.raw, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestEncodeForDataURL_PreservesSafeChars(t *testing.T) {
-	in := "<!doctype html><html><body><div>plain text 123 ABC</div></body></html>"
-	got := encodeForDataURL(in)
-	// Angle brackets and ASCII alpha/numerics are untouched.
-	if !strings.Contains(got, "<!doctype html>") {
-		t.Fatalf("unexpected mangling of safe chars: %s", got)
-	}
-}
-
-func TestIsChromeUnavailable_NilErrorIsFalse(t *testing.T) {
-	if isChromeUnavailable(nil) {
-		t.Fatal("nil error must report false")
-	}
-}
-
-func TestIsChromeUnavailable_RecognizesPatterns(t *testing.T) {
-	patterns := []string{
-		"exec: \"chrome\": executable file not found in $PATH",
-		"chromedp: executable file not found",
-		"chromedp: no chrome found in standard locations",
-	}
-	for _, p := range patterns {
-		if !isChromeUnavailable(errors.New(p)) {
-			t.Fatalf("expected pattern %q to be recognized as Chrome-unavailable", p)
-		}
-	}
-}
-
-func TestIsChromeUnavailable_UnrelatedErrorIsFalse(t *testing.T) {
-	if isChromeUnavailable(errors.New("network: i/o timeout")) {
-		t.Fatal("unrelated error must report false")
 	}
 }
 

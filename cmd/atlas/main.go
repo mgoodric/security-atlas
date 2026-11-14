@@ -303,7 +303,7 @@ func main() {
 		personnelSubscriber = personnelsecurity.NewWorkerEventSubscriber(
 			streamConn.Stream(),
 			streamConn.Cfg().Subject,
-			personnelsecurity.NewStore(pool),
+			personnelsecurity.NewStore(pool).WithIngest(ingestSvc),
 			logger,
 		)
 		fmt.Fprintf(os.Stderr, "atlas: personnel security worker-event subscriber ready (OE-661)\n")
@@ -1041,7 +1041,7 @@ func main() {
 					fmt.Fprintf(os.Stderr, "atlas: ATLAS_PERSONNEL_OVERDUE_INTERVAL=%q invalid: %v\n", raw, perr)
 				}
 			}
-			psNotifier := personnelsecurity.NewOverdueNotifier(psPool, personnelsecurity.NewStore(pool), logger)
+			psNotifier := personnelsecurity.NewOverdueNotifier(psPool, personnelsecurity.NewStore(pool).WithIngest(ingestSvc), logger)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
