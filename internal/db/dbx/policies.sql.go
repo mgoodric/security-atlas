@@ -167,6 +167,61 @@ func (q *Queries) CreatePolicy(ctx context.Context, arg CreatePolicyParams) (Pol
 	return i, err
 }
 
+const deleteDraftPolicy = `-- name: DeleteDraftPolicy :one
+DELETE FROM policies
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = 'draft'
+RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at
+`
+
+type DeleteDraftPolicyParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// #1987 — discard a draft. Only a row still in 'draft' matches, so a policy
+// that has been submitted, approved, published or superseded is never
+// deleted here. Deleting a next-version draft frees its predecessor's
+// successor slot (policies_predecessor_unique_when_set). The caller writes
+// the policy_audit_log row in the same transaction.
+func (q *Queries) DeleteDraftPolicy(ctx context.Context, arg DeleteDraftPolicyParams) (Policy, error) {
+	row := q.db.QueryRow(ctx, deleteDraftPolicy, arg.TenantID, arg.ID)
+	var i Policy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Title,
+		&i.Version,
+		&i.EffectiveDate,
+		&i.BodyMd,
+		&i.AcknowledgmentRequiredRoles,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PredecessorID,
+		&i.OwnerRole,
+		&i.ApproverRole,
+		&i.LinkedControlIds,
+		&i.SourceAttribution,
+		&i.CreatedBy,
+		&i.SubmittedAt,
+		&i.SubmittedBy,
+		&i.ApprovedAt,
+		&i.ApprovedBy,
+		&i.PublishedAt,
+		&i.PublishedBy,
+		&i.SupersededAt,
+		&i.NextReviewAt,
+		&i.HistoricalApproverName,
+		&i.HistoricalApprovedAt,
+		&i.SourceUrl,
+		&i.ImportedBy,
+		&i.ImportedAt,
+	)
+	return i, err
+}
+
 const getPolicyByID = `-- name: GetPolicyByID :one
 SELECT id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at
 FROM policies
@@ -319,14 +374,16 @@ const insertPolicyAuditLog = `-- name: InsertPolicyAuditLog :one
 INSERT INTO policy_audit_log (
     tenant_id, policy_id, action, actor, source_file,
     historical_approver_name, historical_approved_at, source_url,
-    previous_next_review_at, new_next_review_at
+    previous_next_review_at, new_next_review_at,
+    policy_title, policy_version
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
-    $9, $10
+    $9, $10,
+    $11, $12
 )
-RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at
+RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version
 `
 
 type InsertPolicyAuditLogParams struct {
@@ -340,6 +397,8 @@ type InsertPolicyAuditLogParams struct {
 	SourceUrl              *string            `json:"source_url"`
 	PreviousNextReviewAt   pgtype.Timestamptz `json:"previous_next_review_at"`
 	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
+	PolicyTitle            *string            `json:"policy_title"`
+	PolicyVersion          *string            `json:"policy_version"`
 }
 
 // #1747 — append one row to the policy audit log.
@@ -355,6 +414,8 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		arg.SourceUrl,
 		arg.PreviousNextReviewAt,
 		arg.NewNextReviewAt,
+		arg.PolicyTitle,
+		arg.PolicyVersion,
 	)
 	var i PolicyAuditLog
 	err := row.Scan(
@@ -371,6 +432,8 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		&i.CreatedAt,
 		&i.PreviousNextReviewAt,
 		&i.NewNextReviewAt,
+		&i.PolicyTitle,
+		&i.PolicyVersion,
 	)
 	return i, err
 }
@@ -626,7 +689,7 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 }
 
 const listPolicyAuditLog = `-- name: ListPolicyAuditLog :many
-SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at
+SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version
 FROM policy_audit_log
 WHERE tenant_id = $1 AND policy_id = $2
 ORDER BY created_at ASC, id ASC
@@ -661,6 +724,8 @@ func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLog
 			&i.CreatedAt,
 			&i.PreviousNextReviewAt,
 			&i.NewNextReviewAt,
+			&i.PolicyTitle,
+			&i.PolicyVersion,
 		); err != nil {
 			return nil, err
 		}

@@ -57,23 +57,33 @@ func TestParseDecisionCSV_HeaderAndEmpty(t *testing.T) {
 
 func TestCheckImportRows(t *testing.T) {
 	t.Parallel()
-	a, b := uuid.New(), uuid.New()
-	codes := map[string]uuid.UUID{"A.1": a, "A.2": b}
+	a, b, c, d := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	codes := map[string]uuid.UUID{"A.1": a, "A.2": b, "A.3": c, "A.4": d}
 	apply, rejected := checkImportRows([]ImportRow{
 		{Line: 2, RequirementCode: "A.1", Decision: "excluded", Justification: "n/a here"},
 		{Line: 3, RequirementCode: "Z.9", Decision: "applicable"},
 		{Line: 4, RequirementCode: "A.2", Decision: "excluded"},
 		{Line: 5, RequirementCode: "A.2", Decision: "maybe"},
 		{Line: 6, RequirementCode: "A.1", Decision: "applicable"},
+		{Line: 7, RequirementCode: "A.3", Decision: "excluded", Justification: "same"},
+		{Line: 8, RequirementCode: "A.3", Decision: "excluded", Justification: "same"},
+		{Line: 9, RequirementCode: "A.4", Decision: "applicable"},
+		{Line: 10, RequirementCode: "A.4", Decision: "applicable", ImplementationRef: "https://wiki/A.4"},
 	}, codes)
-	if len(apply) != 1 || apply[0].RequirementID != a || apply[0].Justification != "n/a here" {
+	// A.1 and A.2 repeat with different decisions, and A.4 with a different
+	// implementation reference: every row for each is rejected. A.3's two
+	// rows are identical and apply once.
+	if len(apply) != 1 || apply[0].RequirementID != c || apply[0].Justification != "same" {
 		t.Fatalf("apply = %+v", apply)
 	}
 	want := []ImportRejection{
+		{Line: 2, RequirementCode: "A.1", Reason: ReasonConflictingDuplicate},
 		{Line: 3, RequirementCode: "Z.9", Reason: ReasonUnknownCode},
-		{Line: 4, RequirementCode: "A.2", Reason: ReasonJustificationRequired},
-		{Line: 5, RequirementCode: "A.2", Reason: ReasonDuplicateCode},
-		{Line: 6, RequirementCode: "A.1", Reason: ReasonDuplicateCode},
+		{Line: 4, RequirementCode: "A.2", Reason: ReasonConflictingDuplicate},
+		{Line: 5, RequirementCode: "A.2", Reason: ReasonConflictingDuplicate},
+		{Line: 6, RequirementCode: "A.1", Reason: ReasonConflictingDuplicate},
+		{Line: 9, RequirementCode: "A.4", Reason: ReasonConflictingDuplicate},
+		{Line: 10, RequirementCode: "A.4", Reason: ReasonConflictingDuplicate},
 	}
 	if len(rejected) != len(want) {
 		t.Fatalf("rejected = %+v, want %+v", rejected, want)
