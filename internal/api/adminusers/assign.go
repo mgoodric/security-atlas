@@ -80,7 +80,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/audit/unifiedlog"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -599,6 +601,12 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 			httperr.WriteInternal(w, r, "disable membership", uerr)
 			return
 		}
+		// A disabled membership loses its sessions and owned API keys in
+		// the same transaction (#1915).
+		if rerr := users.RevokeAccess(r.Context(), dbx.New(tx), destTenant, targetUserID); rerr != nil {
+			httperr.WriteInternal(w, r, "revoke access", rerr)
+			return
+		}
 	}
 
 	if aerr := h.writeAssignAudit(r.Context(), tx, auditAssignParams{
@@ -619,6 +627,9 @@ func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
 	if cerr := tx.Commit(r.Context()); cerr != nil {
 		httperr.WriteInternal(w, r, "commit", cerr)
 		return
+	}
+	if req.RemoveMembership && h.creds != nil {
+		h.creds.RevokeUserInMemory(destTenant.String(), targetUserID.String())
 	}
 
 	w.WriteHeader(http.StatusNoContent)

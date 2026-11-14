@@ -509,7 +509,32 @@ func (s *Store) VerifyLocalLogin(ctx context.Context, tenantID uuid.UUID, email,
 // revoke-membership sets status='disabled'; SCIM deprovision sets
 // active=false. Either one refuses (#1912).
 func (u User) CanSignIn() bool {
-	return u.Status == "active" && u.Active
+	return SignInAllowed(u.Status, u.Active)
+}
+
+// SignInAllowed is CanSignIn over the raw users columns, for auth paths that
+// hold a dbx row rather than a User (#1915).
+func SignInAllowed(status string, active bool) bool {
+	return status == "active" && active
+}
+
+// RevokeAccess revokes every live session and every API key the user owns
+// (api_keys.issued_by), inside the caller's transaction. Deactivation calls
+// it in the same transaction that disables the user (#1915). Keys with no
+// owner are untouched. The caller drops the keys from credstore memory after
+// commit.
+func RevokeAccess(ctx context.Context, q *dbx.Queries, tenantID, userID uuid.UUID) error {
+	tid := pgtype.UUID{Bytes: tenantID, Valid: true}
+	uid := pgtype.UUID{Bytes: userID, Valid: true}
+	if _, err := q.RevokeAllSCIMUserSessions(ctx, dbx.RevokeAllSCIMUserSessionsParams{
+		TenantID: tid, UserID: uid,
+	}); err != nil {
+		return fmt.Errorf("users: revoke sessions: %w", err)
+	}
+	if _, err := q.RevokeUserAPIKeys(ctx, dbx.RevokeUserAPIKeysParams{TenantID: tid, IssuedBy: uid}); err != nil {
+		return fmt.Errorf("users: revoke api keys: %w", err)
+	}
+	return nil
 }
 
 // GetByID returns the user under (tenant, id) or ErrNotFound.

@@ -30,6 +30,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -280,6 +281,16 @@ func (s *Store) Authenticate(ctx context.Context, token string) (credstore.Crede
 	if row.ExpiresAt.Valid && now.After(row.ExpiresAt.Time) {
 		return credstore.Credential{}, ErrUnknownKey
 	}
+	// A key owned by a user dies with the user's access (#1915).
+	if row.IssuedBy.Valid {
+		ok, uerr := userCanAuthenticate(ctx, q, row.TenantID, row.IssuedBy)
+		if uerr != nil {
+			return credstore.Credential{}, uerr
+		}
+		if !ok {
+			return credstore.Credential{}, ErrUnknownKey
+		}
+	}
 	// Best-effort last_used_at bump; never blocks.
 	go func() {
 		bctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -287,6 +298,42 @@ func (s *Store) Authenticate(ctx context.Context, token string) (credstore.Crede
 		_ = q.TouchAPIKeyLastUsed(bctx, hash)
 	}()
 	return credentialFromRow(row), nil
+}
+
+// userGateTimeout bounds the per-request owner-status lookup.
+const userGateTimeout = 2 * time.Second
+
+// UserCanAuthenticate implements credstore.UserGate (#1915): the owner of a
+// user-bound key must still be able to sign in (users.SignInAllowed). Runs
+// on the BYPASSRLS authPool, like the hash lookup, because it executes
+// before any tenant context exists; tenant_id is matched explicitly. No
+// cache: every user-bound key auth reads the row, so a deactivation is
+// seen on the next request.
+func (s *Store) UserCanAuthenticate(tenantID, userID string) (bool, error) {
+	tid, err := uuidToPg(tenantID)
+	if err != nil {
+		return false, nil
+	}
+	uid, err := uuidToPg(userID)
+	if err != nil {
+		return false, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), userGateTimeout)
+	defer cancel()
+	return userCanAuthenticate(ctx, dbx.New(s.authPool), tid, uid)
+}
+
+// userCanAuthenticate reports whether the users row (tenantID, userID)
+// exists and may sign in. A missing row refuses.
+func userCanAuthenticate(ctx context.Context, q *dbx.Queries, tenantID, userID pgtype.UUID) (bool, error) {
+	u, err := q.GetUserByID(ctx, dbx.GetUserByIDParams{TenantID: tenantID, ID: userID})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("apikeystore: owner status: %w", err)
+	}
+	return users.SignInAllowed(u.Status, u.Active), nil
 }
 
 // --- helpers ---

@@ -4799,6 +4799,25 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+    patch:
+      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?}
+      tags: [risks]
+      operationId: patch-v1-risks-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/risks/{id}/action-plans:
     get:
       summary: GET /v1/risks/{id}/action-plans
