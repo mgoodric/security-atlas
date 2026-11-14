@@ -4,9 +4,10 @@
 // Runs the standalone build (`npm run build:standalone`) the way
 // web.Dockerfile does, with the web/peer-chain.cjs preload, in front of a
 // stand-in atlas on :8080 that records the X-Forwarded-For it receives.
-// It drives both paths that reach atlas:
+// It drives every path that reaches atlas:
 //
 //   - the /v1/* rewrite (Next's proxy forwards headers verbatim);
+//   - a WebSocket upgrade on the same rewrite (httpxy `ws: true`);
 //   - the /login server action (signInLocal's server-side fetch).
 //
 // Port 8080 is the build-time rewrite destination (next.config.ts
@@ -42,6 +43,12 @@ const atlas = http.createServer((req, res) => {
   seen.push({ path: req.url, xff: req.headers["x-forwarded-for"] ?? null });
   res.writeHead(401, { "content-type": "application/json" });
   res.end("{}");
+});
+// WebSocket upgrades proxied by the rewrite arrive as "upgrade", not as
+// a request.
+atlas.on("upgrade", (req, socket) => {
+  seen.push({ path: req.url, xff: req.headers["x-forwarded-for"] ?? null });
+  socket.end("HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n");
 });
 // No host: dual-stack, so `localhost` reaches it as 127.0.0.1 or ::1.
 await new Promise((r) => atlas.listen(ATLAS_PORT, r));
@@ -120,6 +127,34 @@ async function viaRewrite(headers) {
   return seen.filter((s) => s.path === "/v1/me").map((s) => s.xff);
 }
 
+// viaUpgrade sends a raw WebSocket upgrade for /v1/me (fetch cannot set
+// Upgrade/Connection), which Next proxies to the rewrite target as an
+// upgrade.
+async function viaUpgrade(headers) {
+  seen.length = 0;
+  await new Promise((resolve) => {
+    const req = http.request(`${WEB}/v1/me`, {
+      headers: {
+        ...headers,
+        Connection: "Upgrade",
+        Upgrade: "websocket",
+        "Sec-WebSocket-Version": "13",
+        "Sec-WebSocket-Key": "dGhlIHNhbXBsZSBub25jZQ==",
+      },
+    });
+    const done = () => {
+      req.destroy();
+      resolve();
+    };
+    req.on("response", done);
+    req.on("upgrade", done);
+    req.on("error", done);
+    req.setTimeout(10_000, done);
+    req.end();
+  });
+  return seen.filter((s) => s.path === "/v1/me").map((s) => s.xff);
+}
+
 async function viaLogin(headers) {
   seen.length = 0;
   for (const id of await loginActionIDs()) {
@@ -149,7 +184,7 @@ const forged = {
 
 try {
   // 1. Browsers connect to web directly: a forged header is replaced by
-  //    the socket peer on both paths.
+  //    the socket peer on every path.
   let web = await launch({ WEB_TRUSTED_PROXY_CIDRS: "" });
   if (!(await waitReady(web)))
     throw new Error(`web did not start:\n${web.log()}`);
@@ -159,6 +194,11 @@ try {
   check("login, direct browser, forged XFF", await viaLogin(forged), [
     "127.0.0.1",
   ]);
+  check(
+    "websocket upgrade, direct browser, forged XFF",
+    await viaUpgrade(forged),
+    ["127.0.0.1"],
+  );
   await stopWeb(web);
 
   // 2. Loopback stands in for the operator's proxy in front of web: two

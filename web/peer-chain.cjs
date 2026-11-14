@@ -5,19 +5,21 @@
 //
 // Why a preload: Next.js 16 fills X-Forwarded-For with the socket peer
 // only when the header is absent (base-server.js: `??=`), and its
-// rewrite proxy (/v1/*, /health, /metrics) forwards the header verbatim.
+// rewrite proxy (/v1/*, /health, /metrics) forwards the header verbatim,
+// for plain requests and for WebSocket upgrades alike (httpxy `ws: true`).
 // A browser that sends its own X-Forwarded-For therefore both erases the
 // socket peer and reaches atlas unchanged, which atlas trusts because it
 // trusts web. App Router code never sees the socket, so the header has to
-// be fixed here, at the http.Server, before any request handler runs.
+// be fixed here, at the http.Server, before any handler runs.
 //
-// For every request this builds the chain a standards-following proxy
-// would ("<inbound X-Forwarded-For hops>, <socket peer>"), walks it
-// right-to-left against WEB_TRUSTED_PROXY_CIDRS the way atlas's
-// internal/api/auth/clientip.go does, and REPLACES X-Forwarded-For with
-// the single resolved client IP. When nothing can be resolved (no socket
-// peer) the header is deleted. Every path through web, the login server
-// action and the rewrites alike, then carries a vetted value or none.
+// For every "request" and "upgrade" event this builds the chain a
+// standards-following proxy would ("<inbound X-Forwarded-For hops>,
+// <socket peer>"), walks it right-to-left against WEB_TRUSTED_PROXY_CIDRS
+// the way atlas's internal/api/auth/clientip.go does, and REPLACES
+// X-Forwarded-For with the single resolved client IP. When nothing can be
+// resolved (no socket peer) the header is deleted. Every path through web
+// (the login server action, the rewrites, upgrades) then carries a vetted
+// value or none.
 //
 // A malformed WEB_TRUSTED_PROXY_CIDRS throws at boot rather than trusting
 // the wrong range per request.
@@ -30,8 +32,10 @@ const { BlockList, isIP } = require("node:net");
 const PEER_CHAIN_INSTALLED = Symbol.for("security-atlas.peer-chain");
 const WEB_TRUSTED_PROXY_CIDRS_ENV = "WEB_TRUSTED_PROXY_CIDRS";
 
-// Matches atlas's maxForwardedHops (clientip.go): bounds the walk
-// against a pathological header.
+// Matches atlas's maxForwardedHops (clientip.go): the most trusted-proxy
+// hops the walk steps over. Untrusted input cannot grow the walk: it stops
+// at the first untrusted address, so a direct client's junk hops are never
+// read.
 const MAX_FORWARDED_HOPS = 50;
 
 // normalizeIP returns the canonical text of an IP literal, unwrapping an
@@ -77,10 +81,13 @@ function parseTrustedProxies(raw) {
 }
 
 // resolveClientIP walks "hop, hop, ..., peer" right-to-left and returns
-// the first address not delivered by a trusted proxy, or null.
+// the first address not delivered by a trusted proxy, or null when the
+// chain is empty. An untrusted peer is the answer whatever precedes it.
+// After MAX_FORWARDED_HOPS trusted hops the walk stops at the last
+// trusted address, which only trusted proxies could have written.
 function resolveClientIP(hops, trusted) {
-  if (hops.length === 0 || hops.length > MAX_FORWARDED_HOPS + 1) return null;
   let candidate = null;
+  let trustedSteps = 0;
   for (let i = hops.length - 1; i >= 0; i--) {
     const ip = normalizeIP(hops[i]);
     if (!ip) {
@@ -89,6 +96,7 @@ function resolveClientIP(hops, trusted) {
     }
     candidate = ip;
     if (!trusted.check(ip, family(ip))) return candidate;
+    if (++trustedSteps > MAX_FORWARDED_HOPS) return candidate;
   }
   return candidate;
 }
@@ -123,7 +131,9 @@ function vetForwardedFor(req, trusted) {
 function wrapEmit(proto, trusted) {
   const emit = proto.emit;
   proto.emit = function (event, req, ...rest) {
-    if (event === "request" && req && req.headers) {
+    // "upgrade" too: Next proxies WebSocket upgrades to the rewrites
+    // with the request's headers.
+    if ((event === "request" || event === "upgrade") && req && req.headers) {
       vetForwardedFor(req, trusted);
     }
     return emit.call(this, event, req, ...rest);

@@ -3,7 +3,7 @@
 //
 // The walk is unit-tested here through the preload's exports. The
 // end-to-end proof (a forged header through the real standalone build, on
-// both the /v1 rewrite and the login action) is
+// the /v1 rewrite, a WebSocket upgrade and the login action) is
 // web/scripts/check-forwarded-for.mjs, run in CI's prod-build job.
 
 import { createRequire } from "node:module";
@@ -37,7 +37,7 @@ const pc = createRequire(import.meta.url)("../peer-chain.cjs") as PeerChain;
 const trusted = (cidrs: string) => pc.parseTrustedProxies(cidrs);
 
 function vetted(
-  xff: string | undefined,
+  xff: string | string[] | undefined,
   peer: string | undefined,
   cidrs: string,
 ): string | undefined {
@@ -85,9 +85,31 @@ describe("peer-chain.cjs vetForwardedFor", () => {
     expect(vetted("nonsense", "10.0.0.5", "10.0.0.0/8")).toBe("10.0.0.5");
   });
 
-  it("refuses an oversized chain", () => {
-    const long = Array.from({ length: 60 }, () => "10.0.0.1").join(", ");
-    expect(vetted(long, "10.0.0.1", "10.0.0.0/8")).toBeUndefined();
+  it("answers with an untrusted peer however many junk hops precede it", () => {
+    const junk = Array.from(
+      { length: 500 },
+      (_, i) => `6.6.${i >> 8}.${i & 255}`,
+    );
+    expect(vetted(junk.join(", "), "192.0.2.7", "10.0.0.0/8")).toBe(
+      "192.0.2.7",
+    );
+  });
+
+  it("caps the trusted hops it steps over", () => {
+    // 60 trusted hops between the client and web: the walk stops on a
+    // trusted address after 50 and never reaches the forgeable far end.
+    const chain = [
+      "198.51.100.1",
+      ...Array.from({ length: 60 }, () => "10.0.0.1"),
+    ];
+    expect(vetted(chain.join(", "), "10.0.0.2", "10.0.0.0/8")).toBe("10.0.0.1");
+  });
+
+  it("reads the array form of a repeated header in order", () => {
+    expect(vetted(["6.6.6.6", "198.51.100.1"], "10.0.0.5", "10.0.0.0/8")).toBe(
+      "198.51.100.1",
+    );
+    expect(vetted(["198.51.100.66"], "192.0.2.7", "")).toBe("192.0.2.7");
   });
 });
 

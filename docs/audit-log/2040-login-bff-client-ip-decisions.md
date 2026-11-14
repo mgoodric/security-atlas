@@ -31,9 +31,20 @@ The first version wrote the chain to a private header and left
 rewrite proxy for `/v1/*`, `/health` and `/metrics` forwards headers
 verbatim, so once atlas trusted web, a browser-forged `X-Forwarded-For`
 reached atlas through the rewrites. Overwriting the real header vets every
-path through web at once. `web/scripts/check-forwarded-for.mjs` proves it
-against the standalone build in CI. It fails without the preload: forged
-`198.51.100.66` reaches atlas on `/v1/me`.
+path through web at once. The delta review then found WebSocket upgrades:
+Next proxies them to the same rewrites (httpxy `ws: true`, which copies
+`req.headers`) through `server.on('upgrade')`, so the preload vets
+`"upgrade"` events as well as `"request"`.
+`web/scripts/check-forwarded-for.mjs` proves both against the standalone
+build in CI. It fails without the preload (forged `198.51.100.66` reaches
+atlas on `/v1/me`), and its upgrade case fails when only `"request"` is
+vetted.
+
+The hop cap counts only trusted hops stepped over. An untrusted socket
+peer is the answer however long the inbound header is, so a direct client
+cannot pad the header to get it deleted. After 50 trusted hops the walk
+stops on the last trusted address. Only trusted proxies could have written
+that address.
 
 A malformed `WEB_TRUSTED_PROXY_CIDRS` throws in the preload, so web does
 not start. That mirrors atlas's boot-time CIDR parse (slice 466 D6) and
