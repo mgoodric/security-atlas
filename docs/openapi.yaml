@@ -4397,7 +4397,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/approve:
     patch:
-      summary: PATCH /v1/policies/{id}/approve
+      summary: PATCH /v1/policies/{id}/approve — approve a policy under review; only a person may approve (an unbound API key, OAuth client or bootstrap credential gets 403, even with the approver role), never its submitter (403); a policy submitted under a pre-#1807 session id must be re-submitted first (409)
       tags: [policies]
       operationId: patch-v1-policies-id-approve
       security:
@@ -4477,7 +4477,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/policies/{id}/submit:
     patch:
-      summary: PATCH /v1/policies/{id}/submit
+      summary: PATCH /v1/policies/{id}/submit — submit a draft for review; also re-submits a policy under review whose submitter was recorded as a pre-#1807 session id
       tags: [policies]
       operationId: patch-v1-policies-id-submit
       security:
@@ -5638,7 +5638,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/search:
     get:
-      summary: GET /v1/search — unified lexical search across controls, risks, and evidence
+      summary: GET /v1/search — unified lexical search across controls, risks, policies, evidence, and SCF anchors
       tags: [search]
       operationId: get-v1-search
       security:
@@ -5657,7 +5657,7 @@ paths:
           description: Comma-separated result types. Omit for all supported types.
           schema:
             type: string
-            pattern: "^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$"
+            pattern: "^(controls|risks|policies|evidence|anchors)(,(controls|risks|policies|evidence|anchors))*$"
             examples: ["controls,risks,evidence"]
         - name: limit
           in: query
@@ -6131,26 +6131,44 @@ components:
         `POST /v1/policies/{id}/publish`).
     SearchResponse:
       type: object
-      required: [hits, count, partial_types]
+      required: [hits, count, groups, partial_types]
       properties:
         hits:
           type: array
           items:
             $ref: "#/components/schemas/SearchHit"
+          description: Hits grouped by type in the order controls, risks, policies, evidence, anchors; best match first within a group. The limit is shared across groups.
         count:
           type: integer
           minimum: 0
-          description: Number of hits returned after relevance sorting and the global limit.
+          description: Number of hits returned after grouping and the global limit.
+        groups:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchGroup"
+          description: One entry per admitted type, in group order, with that type's full match count.
         partial_types:
           type: array
           items:
             type: string
-            enum: [anchors, controls, risks, evidence]
+            enum: [controls, risks, policies, evidence, anchors]
           description: Requested types omitted because per-type authorization denied them.
       description: |
         Unified lexical search response for `GET /v1/search`. Controls,
-        risks, and evidence are tenant-confined by database RLS. Anchors are
-        bundled tenant-agnostic catalog rows.
+        risks, policies, and evidence are tenant-confined by database RLS.
+        Anchors are bundled tenant-agnostic catalog rows.
+    SearchGroup:
+      type: object
+      required: [type, count]
+      properties:
+        type:
+          type: string
+          enum: [controls, risks, policies, evidence, anchors]
+          description: Result type.
+        count:
+          type: integer
+          minimum: 0
+          description: Every row of this type matching the query that the caller can see, which may exceed the hits returned.
     ResetBootstrapRequest:
       type: object
       properties:
@@ -6220,7 +6238,7 @@ components:
           description: Stable identifier for the matched row or bundled anchor.
         type:
           type: string
-          enum: [anchors, controls, risks, evidence]
+          enum: [controls, risks, policies, evidence, anchors]
           description: Result discriminator used by clients for grouping and routing.
         title:
           type: string

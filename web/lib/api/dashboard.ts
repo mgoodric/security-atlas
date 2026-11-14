@@ -35,6 +35,11 @@ export type DriftRow = {
   current_result: string;
 };
 
+// GainRow mirrors `gainRowWire`: a control that started passing (#2063).
+export type GainRow = {
+  control_id: string;
+};
+
 // DriftReport mirrors the Drift handler's JSON envelope.
 export type DriftReport = {
   since: string;
@@ -42,6 +47,8 @@ export type DriftReport = {
   delta: number;
   flipped_out_count: number;
   flipped_out: DriftRow[];
+  started_passing_count: number;
+  started_passing: GainRow[];
 };
 
 // freshnessClassBucket mirrors `freshnessClassBucket` in the same handler.

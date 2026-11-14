@@ -391,9 +391,9 @@ func (h *Handler) CreateInput(w http.ResponseWriter, r *http.Request) {
 
 		return
 	}
-	enteredBy, err := uuid.Parse(cred.UserID)
-	if err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, "credential user id is not a UUID")
+	enteredBy, ok := credstore.CallerUserID(cred)
+	if !ok {
+		httpresp.WriteError(w, http.StatusBadRequest, "manual input requires a user credential")
 		return
 	}
 	tenantUUID, err := uuid.Parse(cred.TenantID)

@@ -253,7 +253,7 @@ func TestImportHTTP_NextVersionThroughWorkflow(t *testing.T) {
 	pub, _ := json.Marshal(map[string]any{"new_version": "2.0"})
 	s.do(t, http.MethodPost, "/v1/policies/"+id+"/publish", pub, s.adminBear, http.StatusConflict)
 	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/submit", nil, s.adminBear, http.StatusOK)
-	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/approve", nil, s.adminBear, http.StatusOK)
+	s.do(t, http.MethodPatch, "/v1/policies/"+id+"/approve", nil, s.approverBear, http.StatusOK)
 	s.do(t, http.MethodPost, "/v1/policies/"+id+"/publish", pub, s.adminBear, http.StatusCreated)
 
 	raw = s.do(t, http.MethodGet, "/v1/policies/"+importedID, nil, s.adminBear, http.StatusOK)
