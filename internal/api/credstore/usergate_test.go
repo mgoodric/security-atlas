@@ -7,16 +7,24 @@ import (
 )
 
 // fakeGate is a UserGate over a fixed set of users allowed to authenticate.
+// Keys named in revokedKeys are refused whatever their owner's status, the
+// way the production gate refuses a key whose api_keys row is revoked.
 type fakeGate struct {
-	allowed map[string]bool
-	err     error
-	calls   int
+	allowed     map[string]bool
+	revokedKeys map[string]bool
+	err         error
+	calls       int
+	keyIDs      []string
 }
 
-func (g *fakeGate) UserCanAuthenticate(_, userID string) (bool, error) {
+func (g *fakeGate) UserCanAuthenticate(_, userID, keyID string) (bool, error) {
 	g.calls++
+	g.keyIDs = append(g.keyIDs, keyID)
 	if g.err != nil {
 		return false, g.err
+	}
+	if g.revokedKeys[keyID] {
+		return false, nil
 	}
 	return g.allowed[userID], nil
 }
@@ -54,6 +62,42 @@ func TestAuthenticate_UserGateRefusesDeactivatedOwner(t *testing.T) {
 	gate.allowed[gateUser] = false
 	if _, err := s.Authenticate(token); !errors.Is(err, ErrUnknownKey) {
 		t.Fatalf("deactivated owner: Authenticate = %v; want ErrUnknownKey", err)
+	}
+}
+
+// #1947: the gate gets the key id of a persisted key, so a key revoked
+// durably by another replica is refused here even though this replica's
+// in-memory record is active and the owner is active again. A memory-only
+// key has no row to check and passes an empty key id.
+func TestAuthenticate_UserGateChecksPersistedKeyRevocation(t *testing.T) {
+	s := New(time.Hour)
+	_, memOnly := userKey(t, s)
+	if _, err := s.AttachPersistence(newFakePersister()); err != nil {
+		t.Fatalf("AttachPersistence: %v", err)
+	}
+	persisted, persistedTok := userKey(t, s)
+	gate := &fakeGate{allowed: map[string]bool{gateUser: true}, revokedKeys: map[string]bool{}}
+	s.SetUserGate(gate)
+
+	for name, tok := range map[string]string{"memory-only": memOnly, "persisted": persistedTok} {
+		if _, err := s.Authenticate(tok); err != nil {
+			t.Fatalf("%s key, live row: Authenticate = %v; want nil", name, err)
+		}
+	}
+	if len(gate.keyIDs) != 2 {
+		t.Fatalf("gate consulted %d times; want 2", len(gate.keyIDs))
+	}
+	got := map[string]bool{gate.keyIDs[0]: true, gate.keyIDs[1]: true}
+	if !got[""] || !got[persisted.ID] {
+		t.Fatalf("gate key ids = %q; want one empty and %q", gate.keyIDs, persisted.ID)
+	}
+
+	gate.revokedKeys[persisted.ID] = true
+	if _, err := s.Authenticate(persistedTok); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("persisted key, revoked row: Authenticate = %v; want ErrUnknownKey", err)
+	}
+	if _, err := s.Authenticate(memOnly); err != nil {
+		t.Fatalf("memory-only key: Authenticate = %v; want nil", err)
 	}
 }
 
@@ -123,6 +167,53 @@ func TestRevokeUserInMemory(t *testing.T) {
 	}
 	if n := s.RevokeUserInMemory(gateTenant, ""); n != 0 {
 		t.Fatalf("empty user id revoked %d; want 0", n)
+	}
+}
+
+func TestMinterUserID(t *testing.T) {
+	cases := map[string]struct {
+		c    Credential
+		want string
+	}{
+		"jwt user":     {Credential{ID: "jwt:x", UserID: "user:" + gateUser}, gateUser},
+		"user key":     {Credential{ID: "key_x", UserID: gateUser}, gateUser},
+		"machine key":  {Credential{ID: "key_x", UserID: "key_x"}, ""},
+		"uuid-form id": {Credential{ID: gateUser, UserID: gateUser}, ""},
+		"empty":        {Credential{ID: "key_x"}, ""},
+	}
+	for name, tc := range cases {
+		if got := MinterUserID(tc.c); got != tc.want {
+			t.Errorf("%s: MinterUserID = %q; want %q", name, got, tc.want)
+		}
+	}
+}
+
+// #1947: IssueMinted records the minter for attribution only. The key stays
+// a machine key, so the user gate never consults the minter's status.
+func TestIssueMinted_RecordsMinterWithoutOwnership(t *testing.T) {
+	s := New(time.Hour)
+	p := newFakePersister()
+	if _, err := s.AttachPersistence(p); err != nil {
+		t.Fatalf("AttachPersistence: %v", err)
+	}
+	gate := &fakeGate{allowed: map[string]bool{}}
+	s.SetUserGate(gate)
+
+	cred, token, err := s.IssueMinted(gateTenant, "", nil, 0, gateUser)
+	if err != nil {
+		t.Fatalf("IssueMinted: %v", err)
+	}
+	if cred.MintedBy != gateUser || cred.UserID != cred.ID {
+		t.Fatalf("cred MintedBy=%q UserID=%q; want minter %q and own id", cred.MintedBy, cred.UserID, gateUser)
+	}
+	if got := p.inserted[cred.ID].Cred.MintedBy; got != gateUser {
+		t.Fatalf("persisted MintedBy = %q; want %q", got, gateUser)
+	}
+	if _, err := s.Authenticate(token); err != nil {
+		t.Fatalf("Authenticate with minter disallowed = %v; want nil", err)
+	}
+	if gate.calls != 0 {
+		t.Fatalf("gate consulted %d times for a machine key; want 0", gate.calls)
 	}
 }
 

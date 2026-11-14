@@ -12,6 +12,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -26,6 +27,7 @@ import (
 	authapi "github.com/mgoodric/security-atlas/internal/api/auth"
 	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
+	"github.com/mgoodric/security-atlas/internal/artifact"
 	"github.com/mgoodric/security-atlas/internal/audit/auditor"
 	auditsink "github.com/mgoodric/security-atlas/internal/audit/sink"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
@@ -322,6 +324,7 @@ func main() {
 	if streamPub != nil {
 		cfg.EvidencePublisher = streamPub
 	}
+	cfg.ArtifactStore = buildArtifactStore(pool)
 	srv := api.New(cfg)
 
 	// Slice 121 (AC-15/16): wire the opt-in Prometheus `/metrics` fallback
@@ -1675,4 +1678,42 @@ func doKeyRotation(ctx context.Context, ks keyRotator, logger *slog.Logger) {
 		logger.Info("atlas: key-rotation: pruned keys past overlap window",
 			"count", len(removed), "pruned_kids", removed)
 	}
+}
+
+// buildArtifactStore wires the slice-036 artifact store from ARTIFACTS_*
+// (security-atlas#1928). Unset ARTIFACTS_BUCKET keeps the store off: the
+// /v1/artifacts routes stay unmounted and attachment uploads answer 503,
+// as before. A configured store that cannot reach its bucket exits the
+// process, the same fail-fast posture as an unreachable NATS_URL: an
+// operator who set the variables expects uploads to work, and finding out
+// at first upload is worse than a boot that names the cause. Credentials
+// come from the AWS SDK default chain and are never logged.
+func buildArtifactStore(pool *pgxpool.Pool) *artifact.Store {
+	cfg, ok, err := artifact.ConfigFromEnv(os.LookupEnv)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "atlas: artifact store: %v\n", err)
+		os.Exit(1)
+	}
+	if !ok {
+		fmt.Fprintf(os.Stderr, "atlas: artifact store off (%s unset); file uploads unavailable\n", artifact.EnvBucket)
+		return nil
+	}
+	if pool == nil {
+		fmt.Fprintf(os.Stderr, "atlas: artifact store off (no database); file uploads unavailable\n")
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	store, err := artifact.Build(ctx, pool, cfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "atlas: artifact store: %v\n", err)
+		os.Exit(1)
+	}
+	endpoint := cfg.Endpoint
+	if u, perr := url.Parse(endpoint); perr == nil {
+		endpoint = u.Redacted() // never print userinfo, if an operator put any there
+	}
+	fmt.Fprintf(os.Stderr, "atlas: artifact store ready (bucket=%s endpoint=%s path_style=%t)\n",
+		cfg.Bucket, endpoint, cfg.UsePathStyle)
+	return store
 }

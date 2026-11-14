@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
+	"github.com/mgoodric/security-atlas/internal/api/admin"
+	"github.com/mgoodric/security-atlas/internal/api/admincreds"
 	"github.com/mgoodric/security-atlas/internal/api/adminusers"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
@@ -219,6 +223,98 @@ func TestDeactivation_SCIMDeprovisionRevokesKeysAndSessions(t *testing.T) {
 		t.Fatalf("deprovision: %v", err)
 	}
 	f.requireRevoked(t)
+}
+
+// #1947: the deprovision runs on another replica, so this replica's
+// in-memory record of the key is never revoked. After a SCIM reprovision
+// re-activates the user, the durable revoked_at still refuses the key here.
+func TestDeactivation_RevokedKeyStaysDeadOnOtherReplicaAfterReprovision(t *testing.T) {
+	f := newDeactivationFixture(t)
+	otherReplica := credstore.New(0)
+	store := scim.NewStore(f.app).WithCredentialRevoker(otherReplica)
+	patch := func(active string) {
+		t.Helper()
+		if _, err := store.Patch(f.tenantCtx(t), uuid.New(), f.tenant.String(), f.user, []scim.PatchOperation{
+			{Op: "replace", Path: "active", Value: []byte(active)},
+		}); err != nil {
+			t.Fatalf("patch active=%s: %v", active, err)
+		}
+	}
+	patch(`false`)
+	patch(`true`)
+
+	var status string
+	var active bool
+	if err := f.admin.QueryRow(context.Background(),
+		`SELECT status, active FROM users WHERE id = $1`, f.user).Scan(&status, &active); err != nil {
+		t.Fatalf("read user: %v", err)
+	}
+	if status != "active" || !active {
+		t.Fatalf("precondition: user status=%q active=%v; want reprovisioned", status, active)
+	}
+	f.requireStatus(t, http.StatusUnauthorized, f.memToken, f.dbToken)
+	f.requireStatus(t, http.StatusOK, f.keylessToken)
+}
+
+// #1947: a key an admin mints through POST /v1/admin/credentials or gRPC
+// AdminCredentialsService.Issue is a machine key. The admin is recorded in
+// api_keys.minted_by for attribution only, and disabling that admin leaves
+// the key working; an operator revokes it deliberately.
+func TestDeactivation_AdminMintedKeysOutliveTheMinter(t *testing.T) {
+	f := newDeactivationFixture(t)
+	minter := credstore.Credential{ID: "jwt:test", TenantID: f.tenant.String(), UserID: "user:" + f.user.String(), IsAdmin: true}
+
+	hasher, err := bearer.NewHasher([]byte("test-bearer-hash-key-at-least-32-bytes-long!!"))
+	if err != nil {
+		t.Fatalf("hasher: %v", err)
+	}
+	keys := apikeystore.NewStore(f.app, f.admin, hasher, 0)
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			next.ServeHTTP(w, req.WithContext(authctx.WithCredential(req.Context(), minter)))
+		})
+	})
+	r.Use(tenancymw.Middleware)
+	r.Post("/v1/admin/credentials", admincreds.New(keys).Issue)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/admin/credentials", bytes.NewReader([]byte(`{}`))))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("HTTP issue status = %d; body %q", rec.Code, rec.Body.String())
+	}
+	var httpKey admincreds.IssueResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &httpKey); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+
+	grpcResp, err := admin.New(f.creds).Issue(authctx.WithCredential(context.Background(), minter),
+		&adminv1.IssueRequest{TenantId: f.tenant.String()})
+	if err != nil {
+		t.Fatalf("gRPC issue: %v", err)
+	}
+
+	for name, id := range map[string]string{"http": httpKey.ID, "grpc": grpcResp.GetHandle().GetId()} {
+		var mintedBy, issuedBy *uuid.UUID
+		if err := f.admin.QueryRow(context.Background(),
+			`SELECT minted_by, issued_by FROM api_keys WHERE id = $1`, strings.TrimPrefix(id, "key_")).Scan(&mintedBy, &issuedBy); err != nil {
+			t.Fatalf("%s key row: %v", name, err)
+		}
+		if mintedBy == nil || *mintedBy != f.user {
+			t.Errorf("%s key minted_by = %v; want %s", name, mintedBy, f.user)
+		}
+		if issuedBy != nil {
+			t.Errorf("%s key issued_by = %s; want NULL (machine key, not the minter's)", name, *issuedBy)
+		}
+	}
+
+	store := scim.NewStore(f.app).WithCredentialRevoker(f.creds)
+	if _, err := store.Patch(f.tenantCtx(t), uuid.New(), f.tenant.String(), f.user, []scim.PatchOperation{
+		{Op: "replace", Path: "active", Value: []byte(`false`)},
+	}); err != nil {
+		t.Fatalf("deprovision minter: %v", err)
+	}
+	f.requireStatus(t, http.StatusUnauthorized, f.memToken, f.dbToken)
+	f.requireStatus(t, http.StatusOK, httpKey.BearerToken, grpcResp.GetBearerToken())
 }
 
 func TestDeactivation_SCIMDeleteRevokesKeysAndSessions(t *testing.T) {

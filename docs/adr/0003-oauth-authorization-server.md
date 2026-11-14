@@ -372,6 +372,53 @@ revoked), and nothing recorded who minted it.
 and the sign-in would lose the id, and the next reset would silently stop
 revoking. The marker costs one nullable column.
 
+## Amendment (2026-11-13, #1947): admin-minted keys outlive their minter; revocation holds on every replica
+
+Two gaps were found in the #1915 review. First, a key an admin mints through
+`POST /v1/admin/credentials` or gRPC `AdminCredentialsService.Issue` had no
+link to that admin. `issued_by` is NULL on these keys, so they kept working
+after the admin was disabled, and nothing recorded that this was intended.
+Second, `RevokeUserInMemory` reaches only the replica that ran the
+deactivation. Other replicas relied on the per-request user gate. A SCIM
+reprovision reopens that gate, so a key revoked in `api_keys` authenticated
+again on those replicas until restart.
+
+**Decision.**
+
+- **Admin-minted keys are machine keys and outlive the admin who minted
+  them.** These keys belong to connectors and CI jobs. If disabling an
+  admin revoked every key they minted, offboarding them would silently stop
+  evidence ingestion, which is an audit-continuity failure. The keys keep
+  `issued_by` NULL and `UserID` equal to their own credential id, as the
+  recovery key does. Disabling, deprovisioning or deleting the minting
+  admin leaves them working.
+- **The minter is recorded, for attribution only.** Both issue paths now
+  write the calling user to `api_keys.minted_by`, the #1892 column, and to
+  `Credential.MintedBy` (`credstore.MinterUserID` reads the caller). A
+  rotated successor inherits it. Nothing authorizes on it. An API-key caller
+  with no user records no minter.
+- **Operators revoke these keys deliberately.** When an admin leaves, list
+  the keys they minted (`api_keys.minted_by`) and revoke the ones that
+  should not outlive them: `atlas-cli credentials revoke --id
+<credential_id>` or `POST /v1/admin/credentials/{id}/revoke`. A follow-up
+  ticket adds an admin-UI warning on the user-disable screen that lists that
+  user's still-live minted keys.
+- **A durable revocation holds on every replica.** For a user-owned key
+  with an `api_keys` row, the per-request user gate now also reads that row.
+  It refuses the key when `revoked_at` is set or the row is missing, before
+  checking the owner's status. Reprovisioning the user therefore cannot
+  bring a revoked key back on any replica. The cost is one primary-key read
+  per authentication of a user-owned key. Machine keys skip the gate as
+  before.
+
+**Rejected: revoke minted keys when the minter is disabled.** The model is
+simpler, but it turns staff offboarding into an ingestion outage, and the
+operator gets no chance to rotate the keys first.
+
+**Rejected: cross-replica revocation sync.** The gate already reads the
+database on every user-owned key authentication, so checking `revoked_at`
+in that read closes the gap without a new channel.
+
 ## References
 
 - [`Plans/canvas/11-open-questions.md`](../../Plans/canvas/11-open-questions.md) #21 — resolution block

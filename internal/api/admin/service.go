@@ -12,6 +12,7 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	adminv1 "github.com/mgoodric/security-atlas/gen/proto/admin/v1"
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 )
 
@@ -27,7 +28,9 @@ func New(store *credstore.Store) *Service {
 }
 
 // Issue creates a new API key and returns the bearer token exactly once.
-func (s *Service) Issue(_ context.Context, req *adminv1.IssueRequest) (*adminv1.IssueResponse, error) {
+// A user caller is recorded as the key's minter, for attribution only
+// (#1947): the key outlives that user's access.
+func (s *Service) Issue(ctx context.Context, req *adminv1.IssueRequest) (*adminv1.IssueResponse, error) {
 	if req.GetTenantId() == "" {
 		return nil, status.Error(codes.InvalidArgument, "tenant_id is required")
 	}
@@ -38,7 +41,11 @@ func (s *Service) Issue(_ context.Context, req *adminv1.IssueRequest) (*adminv1.
 	if ttl < 0 {
 		return nil, status.Error(codes.InvalidArgument, "ttl must not be negative")
 	}
-	cred, bearer, err := s.store.Issue(req.GetTenantId(), req.GetScopePredicate(), req.GetKinds(), ttl)
+	var minter string
+	if caller, ok := authctx.CredentialFromContext(ctx); ok {
+		minter = credstore.MinterUserID(caller)
+	}
+	cred, bearer, err := s.store.IssueMinted(req.GetTenantId(), req.GetScopePredicate(), req.GetKinds(), ttl, minter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "issue: %v", err)
 	}
