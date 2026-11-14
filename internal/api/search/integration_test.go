@@ -550,3 +550,44 @@ func TestSlice661_AnchorSearch_EmptyTenant(t *testing.T) {
 		t.Errorf("IST-8 encryption: expected CRY-08 (Encryption In Transit) anchor hit, titles=%v", anchorTitles)
 	}
 }
+
+// ===== #1737: controls match on external_refs =====
+
+// TestIssue1737_ControlSearchMatchesExternalRefs seeds a control whose
+// title and description say nothing about the auditor's number, then
+// searches by that number and by a tested_under entry's note. A query
+// for the JSON key name "system" must not match: the search reads
+// element values, not the JSONB text.
+func TestIssue1737_ControlSearchMatchesExternalRefs(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+
+	ctrl := seedControl(t, admin, tenant, "Annual risk assessment", "Merged from eight audited activities")
+	if _, err := admin.Exec(context.Background(), `
+		UPDATE controls SET external_refs = $2::jsonb WHERE id = $1
+	`, ctrl, `[{"system":"acme-audit","kind":"reference","id":"ZQRA-0317"},`+
+		`{"system":"soc2","kind":"tested_under","id":"CC3.1","note":"quokkareport section 4"}]`); err != nil {
+		t.Fatalf("set external_refs: %v", err)
+	}
+
+	env := testServer(t, app, tenant)
+	for _, q := range []string{"zqra-0317", "quokkareport"} {
+		resp, body := doGet(t, env, "/v1/search?q="+q+"&types=controls")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("q=%s: status %d", q, resp.StatusCode)
+		}
+		hits := hitsAsSlice(body)
+		if len(hits) != 1 || hits[0]["id"] != ctrl.String() {
+			t.Fatalf("q=%s: want exactly control %s, got %v", q, ctrl, hits)
+		}
+	}
+
+	resp, body := doGet(t, env, "/v1/search?q=system&types=controls")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("q=system: status %d", resp.StatusCode)
+	}
+	if hits := hitsAsSlice(body); len(hits) != 0 {
+		t.Fatalf("q=system: JSON key name must not match, got %v", hits)
+	}
+}

@@ -143,12 +143,17 @@ atlas-cli catalog import-crosswalk ./secure-controls-framework-scf-2026-3.xlsx \
   --framework-version 2022
 ```
 
-**Do not run this preset unchanged on a database that already holds
-`iso27001-2022.yaml`.** It targets the same framework slug and version
-(`iso27001` / `2022`). The workbook carries IDs only, so every requirement it
-writes has `title` set to its code and an empty body, and the import overwrites
-the curated Annex A titles and bodies from the YAML. To compare the two side by
-side, give the workbook import its own version, for example
+The Annex A codes take their titles and bodies from the bundled
+`iso27001-2022.yaml` (see [Requirement titles](#requirement-titles)). That
+file has no management-system clauses, so the clauses 4-10 have no title
+source: pass `--titles` with a file that names them, or `--allow-code-titles`
+to import them titled with their codes.
+
+The preset targets the same framework slug and version (`iso27001` / `2022`)
+as `iso27001-2022.yaml`. On a database that already holds the YAML import it
+adds the workbook's edges and leaves the stored requirements alone (see
+[Frozen versions](#frozen-versions)). To compare the two side by side, give
+the workbook import its own version, for example
 `--framework-version 2022-scf-2026.3`.
 
 For an SCF OLIR STRM workbook, no framework column is needed:
@@ -163,6 +168,73 @@ atlas-cli catalog import-crosswalk ./scf-olir-strm-nist-800-53-r5-1-1.xlsx \
 All XLSX imports land at `source_attribution=community_draft`. The database
 trust tier for new edges remains the catalog default draft tier; promotion to
 reviewed or verified is a human governance step.
+
+## Requirement titles
+
+SCF workbooks list requirement IDs only, with no title or body. A framework
+version is frozen the moment its import commits (see
+[Frozen versions](#frozen-versions)), so a requirement's title has to be right
+on first insert. Each workbook requirement takes its title from the first of
+these sources that has its code:
+
+1. **`--titles <yaml>`.** A file in the crosswalk YAML `requirements` format
+   (`code`, `title`, optional `body`). Any `mappings` in it are ignored, and so
+   is its `framework_slug`, so any bundled crosswalk can be passed as-is:
+
+   ```yaml
+   requirements:
+     - code: "4.1"
+       title: "Context of the organization"
+       body: "Determine the internal and external issues relevant to the ISMS."
+   ```
+
+2. **The bundled crosswalk for the same framework slug.** `data/crosswalks/*.yaml`
+   is built into `atlas-cli`, matched by `framework_slug`: `soc2`,
+   `iso27001`, `nist_csf`, `pcidss` and `hipaa_security_rule`. Its title and
+   body are used whatever its version. The match is on the slug the import
+   writes, so pass `--framework-slug soc2` to get the bundled SOC 2 titles
+   rather than the slug derived from the workbook's Focal Documents row.
+3. **The code itself**, but only with `--allow-code-titles`.
+
+A SOC 2 point of focus (`CC1.1-POF3`) takes its parent criterion's title and
+no body; it never has a title of its own.
+
+If any requirement is left with only its code as its title, the import fails
+before writing anything and lists the codes:
+
+```text
+crosswalk: 2 requirement(s) of nist-800-53 would be titled with their own code, and a framework version cannot be retitled once imported: AC-01, AC-02; pass --titles <yaml> with their titles, or --allow-code-titles to import them as codes
+```
+
+With `--allow-code-titles` it proceeds, and the summary reports the count:
+
+```text
+requirements titled with their own code=2
+```
+
+A version imported with code titles keeps them. To retitle it, import a new
+version.
+
+## Frozen versions
+
+A framework version is written as `current` by its first import, and a
+`current`, `legacy` or `withdrawn` version's requirements can't be updated
+(the `enforce_framework_requirement_immutability` trigger). There is no draft
+stage. A later import into the same slug and version therefore:
+
+- leaves every existing requirement's title and body untouched, even when the
+  incoming file differs;
+- still adds new requirements and new edges, and updates edges as described
+  under [Provenance Precedence](#provenance-precedence);
+- prints one line per requirement whose incoming title or body differed, and
+  does not fail for that reason:
+
+  ```text
+  requirement kept CC6.1: incoming title or body differs, but framework version 2017 is frozen; ship a new version to change it
+  ```
+
+To change a requirement's text, import it as a new version
+(`--framework-version`).
 
 ## SOC 2 Points of Focus
 
@@ -188,8 +260,9 @@ code of the form `<criterion>-POF<n>` is treated this way:
   `GET /v1/requirements/{id}/anchors` return it on the requirement; the
   field is omitted when there are none.
 - **A missing criterion is created.** If the column names a point of focus
-  but never its criterion, the criterion is created (titled by its code, like
-  every workbook requirement) and the import summary says so.
+  but never its criterion, the criterion is created (titled by the
+  [Requirement titles](#requirement-titles) rules) and the import summary
+  says so.
 
 The import summary reports the roll-up, for example:
 

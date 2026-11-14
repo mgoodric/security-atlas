@@ -107,6 +107,8 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	var frameworkIssuer string
 	var frameworkVersion string
 	var releaseDate string
+	var titlesPath string
+	var allowCodeTitles bool
 	cmd := &cobra.Command{
 		Use:     "import-crosswalk <path>",
 		Aliases: []string{"import-soc2"},
@@ -133,6 +135,8 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 					FrameworkIssuer:  frameworkIssuer,
 					FrameworkVersion: frameworkVersion,
 					ReleaseDate:      releaseDate,
+					TitlesPath:       titlesPath,
+					AllowCodeTitles:  allowCodeTitles,
 				})
 			} else {
 				cw, err = soc2import.Load(path)
@@ -155,8 +159,15 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			}
 			fmt.Printf("framework=%s:%s framework_version_id=%s new_version=%v\n",
 				report.FrameworkSlug, report.FrameworkVersion, report.FrameworkVersionID, report.IsNewVersion)
-			fmt.Printf("requirements created=%d updated=%d unchanged=%d\n",
-				report.RequirementsCreated, report.RequirementsUpdated, report.RequirementsUnchanged)
+			fmt.Printf("requirements created=%d updated=%d unchanged=%d differed=%d\n",
+				report.RequirementsCreated, report.RequirementsUpdated, report.RequirementsUnchanged, len(report.RequirementsDiffered))
+			if n := soc2import.CodeOnlyTitleCount(cw); n > 0 {
+				fmt.Printf("requirements titled with their own code=%d\n", n)
+			}
+			for _, code := range report.RequirementsDiffered {
+				fmt.Printf("requirement kept %s: incoming title or body differs, but framework version %s is frozen; ship a new version to change it\n",
+					code, report.FrameworkVersion)
+			}
 			for _, line := range cw.PointsOfFocusRollUp.Summary() {
 				fmt.Println(line)
 			}
@@ -192,5 +203,7 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	cmd.Flags().StringVar(&frameworkIssuer, "framework-issuer", "", "framework issuer override for SCF workbook imports")
 	cmd.Flags().StringVar(&frameworkVersion, "framework-version", "", "framework version override for SCF workbook imports")
 	cmd.Flags().StringVar(&releaseDate, "release-date", "", "framework release date override (YYYY-MM-DD) for SCF workbook imports")
+	cmd.Flags().StringVar(&titlesPath, "titles", "", "crosswalk-format YAML whose requirement titles and bodies override the bundled crosswalk's for SCF workbook imports (its mappings are ignored)")
+	cmd.Flags().BoolVar(&allowCodeTitles, "allow-code-titles", false, "let SCF workbook requirements that no title source covers import titled with their code")
 	return cmd
 }

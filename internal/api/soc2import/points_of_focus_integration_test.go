@@ -31,7 +31,7 @@ func TestImport_WorkbookPointsOfFocusRollUp(t *testing.T) {
 		"BCD-02": "CC1.1-POF1\nCC2.1-POF1",
 		"IAC-01": "CC1.1-POF2",
 	})
-	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{FrameworkSlug: pofTestSlug, FrameworkVersion: "2017"})
+	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{FrameworkSlug: pofTestSlug, FrameworkVersion: "2017", AllowCodeTitles: true})
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}

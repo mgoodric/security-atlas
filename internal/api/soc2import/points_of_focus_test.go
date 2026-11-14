@@ -127,8 +127,11 @@ func TestLoadSCFWorkbook_PointOfFocusCreatesMissingParent(t *testing.T) {
 	if got := strings.Join(codes, ","); got != "CC1.1,CC2.1" {
 		t.Fatalf("requirement codes = %s; want CC1.1,CC2.1", got)
 	}
-	if got := cw.Requirements[1]; got.Title != "CC2.1" || len(got.PointsOfFocus) != 1 {
-		t.Fatalf("created parent = %+v; want title CC2.1 and one point of focus", got)
+	// The created parent is titled like any workbook requirement (#1730):
+	// here from the bundled SOC 2 crosswalk.
+	want := requirementByCode(t, bundledSOC2(t), "CC2.1")
+	if got := cw.Requirements[1]; got.Title != want.Title || len(got.PointsOfFocus) != 1 {
+		t.Fatalf("created parent = %+v; want bundled title %q and one point of focus", got, want.Title)
 	}
 	if got := cw.PointsOfFocusRollUp.CreatedParents; !reflect.DeepEqual(got, []string{"CC2.1"}) {
 		t.Fatalf("created parents = %v; want [CC2.1]", got)
@@ -178,7 +181,7 @@ func TestLoadSCFWorkbook_PointOfFocusEdgePrecedence(t *testing.T) {
 // A crosswalk without points of focus is untouched by the roll-up.
 func TestLoadSCFWorkbook_NoPointsOfFocusNoRollUp(t *testing.T) {
 	t.Parallel()
-	cw, err := soc2import.LoadSCFWorkbook(writeWideSCFWorkbook(t), soc2import.SCFWorkbookOptions{})
+	cw, err := soc2import.LoadSCFWorkbook(writeWideSCFWorkbook(t), soc2import.SCFWorkbookOptions{AllowCodeTitles: true})
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}

@@ -199,6 +199,49 @@ func (q *Queries) DeleteFrameworkScope(ctx context.Context, arg DeleteFrameworkS
 	return err
 }
 
+const getActivatedExclusionForRequirement = `-- name: GetActivatedExclusionForRequirement :one
+SELECT fsa.framework_scope_id,
+       fsa.justification,
+       fsa.implementation_ref,
+       fsa.updated_at
+FROM framework_scope_applicability fsa
+JOIN framework_scopes fs
+  ON fs.id = fsa.framework_scope_id
+ AND fs.tenant_id = fsa.tenant_id
+WHERE fsa.tenant_id = $1
+  AND fsa.framework_requirement_id = $2
+  AND fsa.decision = 'excluded'
+  AND fs.state = 'activated'
+`
+
+type GetActivatedExclusionForRequirementParams struct {
+	TenantID               pgtype.UUID `json:"tenant_id"`
+	FrameworkRequirementID pgtype.UUID `json:"framework_requirement_id"`
+}
+
+type GetActivatedExclusionForRequirementRow struct {
+	FrameworkScopeID  pgtype.UUID        `json:"framework_scope_id"`
+	Justification     string             `json:"justification"`
+	ImplementationRef string             `json:"implementation_ref"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+// The exclusion, if any, the tenant's ACTIVATED scope revision records for a
+// requirement (#1788). Per-requirement coverage reads report such a
+// requirement as `excluded` instead of uncovered. No row means the
+// requirement is applicable or undecided, or no revision is activated.
+func (q *Queries) GetActivatedExclusionForRequirement(ctx context.Context, arg GetActivatedExclusionForRequirementParams) (GetActivatedExclusionForRequirementRow, error) {
+	row := q.db.QueryRow(ctx, getActivatedExclusionForRequirement, arg.TenantID, arg.FrameworkRequirementID)
+	var i GetActivatedExclusionForRequirementRow
+	err := row.Scan(
+		&i.FrameworkScopeID,
+		&i.Justification,
+		&i.ImplementationRef,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getActivatedFrameworkScope = `-- name: GetActivatedFrameworkScope :one
 SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
 FROM framework_scopes

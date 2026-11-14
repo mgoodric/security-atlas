@@ -59,6 +59,10 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 
+import {
+  formatExternalRef,
+  groupExternalRefs,
+} from "@/components/control/external-refs";
 import { ControlHeaderActions } from "@/components/control/header-actions";
 
 import { cn } from "@/lib/utils";
@@ -466,6 +470,34 @@ function ControlDetailPageInner() {
               </span>
             </span>
           </div>
+
+          {/* #1737 — control.yaml external_refs: auditor control numbers
+              and the framework requirements this control was tested
+              under. Rendered only when the control carries any. */}
+          {groupExternalRefs(control.external_refs).map((group) => (
+            <div
+              key={group.kind}
+              className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm"
+              data-testid={`control-external-refs-${group.kind}`}
+            >
+              <span className="text-muted-foreground">{group.label}</span>
+              {group.refs.map((ref) => (
+                <Badge
+                  key={`${ref.system}:${ref.id}`}
+                  variant="outline"
+                  className="font-normal"
+                >
+                  <span className="font-mono">{formatExternalRef(ref)}</span>
+                  {ref.note ? (
+                    <span className="text-muted-foreground">
+                      {" · "}
+                      {ref.note}
+                    </span>
+                  ) : null}
+                </Badge>
+              ))}
+            </div>
+          ))}
         </div>
 
         {/* Slice 255 — header actions well: Run query + Edit YAML +

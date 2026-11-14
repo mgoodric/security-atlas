@@ -37,6 +37,7 @@ func TestFrameworkPosture_PointsOfFocusNotInDenominator(t *testing.T) {
 	cw, err := soc2import.LoadSCFWorkbook(writePOFWorkbook(t), soc2import.SCFWorkbookOptions{
 		FrameworkSlug:    pofPostureSlug,
 		FrameworkVersion: "2017",
+		AllowCodeTitles:  true,
 	})
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
