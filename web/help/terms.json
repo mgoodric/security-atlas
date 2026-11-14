@@ -1,0 +1,135 @@
+{
+  "$comment": "User-facing term list (#2144). Plain-language definitions shown by <Term> tooltips in the app and published as the docs site's Terms page. A `glossary` link names the developer GLOSSARY.md entry by its heading anchor; the term's `name` must match that entry's heading or one of its bold terms. Checked by web/lib/help/terms.test.ts.",
+  "terms": [
+    {
+      "id": "residual-risk",
+      "name": "Residual risk",
+      "short": "How much risk is left once your controls are counted. It starts at the inherent severity and comes down as the linked controls prove effective, on the same 1–25 scale.",
+      "long": "Residual risk is the inherent severity multiplied by (1 − control effectiveness). Effectiveness comes from each linked control's recent evidence, not from how the control is described, so a control that keeps failing its checks lowers effectiveness and raises the residual. Two risks with the same inherent severity can have different residuals, because they have different controls. A new risk shows \"Pending evaluation\" until its controls have been evaluated."
+    },
+    {
+      "id": "inherent-severity",
+      "name": "Inherent severity",
+      "short": "How serious a risk is before any controls: likelihood times impact on a 5×5 grid, from 1 to 25.",
+      "long": "Inherent severity is the risk's raw exposure. Likelihood and impact are each scored 1–5, and their product falls into a band: Low (1–7), Medium (8–14) or High (15–25). It doesn't change when you link controls; the effect of controls shows up in the residual risk instead."
+    },
+    {
+      "id": "treatment",
+      "name": "Risk treatment",
+      "short": "The decision about what to do with a risk: mitigate, transfer, accept or avoid it. Until someone decides, it's untreated.",
+      "long": "Every new risk starts untreated. Mitigate means reducing the risk with controls or planned work, so it needs at least one linked control or action plan. Transfer means shifting it to a third party, such as an insurer, and needs a reference to the policy or contract. Accept means living with it, and needs an acceptance status. Avoid means stopping the activity that creates the risk.",
+      "glossary": "GLOSSARY.md#risk-treatment-1746"
+    },
+    {
+      "id": "acceptance",
+      "name": "Acceptance status",
+      "short": "Where a decision to accept a risk stands. A proposed acceptance is waiting for sign-off; an approved one names who accepted the risk and until when.",
+      "long": "Acceptance status applies only when a risk's treatment is accept. A proposed acceptance still counts as an open risk. Only an approved acceptance, with an accepter and an expiry date, stops the risk counting as open exposure, and only until that date.",
+      "glossary": "GLOSSARY.md#risk-treatment-1746"
+    },
+    {
+      "id": "anchor",
+      "name": "SCF anchor",
+      "short": "The control in the Secure Controls Framework (SCF) that one of your controls maps to. Framework credit flows through the anchor.",
+      "long": "Framework requirements are mapped to SCF controls, and each of your controls points at one SCF anchor. That's how a single control satisfies requirements in several frameworks at once, without being copied for each. A control's anchor fit says whether the anchor covers it exactly, partly, or not at all."
+    },
+    {
+      "id": "crosswalk",
+      "name": "Crosswalk",
+      "short": "The published mapping between a framework's requirements and SCF controls. It's how a SOC 2 or ISO 27001 requirement finds the controls that satisfy it.",
+      "long": "Crosswalk mappings come with the framework catalogs, not from your organisation. Each mapping says how a requirement relates to an SCF control (for example, equal to it, or a subset of it) and how strongly. Requirements always map to SCF controls, never directly to another framework's requirements."
+    },
+    {
+      "id": "org-mapping",
+      "name": "Org mapping",
+      "short": "A mapping your organisation makes itself, from a framework requirement to an SCF anchor, where the published crosswalk doesn't cover it.",
+      "long": "An org mapping is your organisation's own claim that a requirement is met through a particular SCF anchor. It sits alongside the published crosswalk rather than changing it, and is labelled as yours so an auditor can tell the two apart."
+    },
+    {
+      "id": "framework-scope",
+      "name": "Framework scope",
+      "short": "The part of your organisation a framework applies to, such as the systems in a PCI cardholder data environment. A control counts for a framework only where the two overlap.",
+      "long": "Each framework has its own scope: PCI, HIPAA and SOC 2 usually cover different systems. A control's effective scope for a framework is where the control applies and the framework's scope applies. A framework scope is kept as revisions; once a revision is activated it can't be edited, and any change makes a new revision. A framework with no activated scope shows \"Scope not set\" instead of a posture."
+    },
+    {
+      "id": "statement-of-applicability",
+      "name": "Statement of Applicability",
+      "short": "The list of a framework's requirements with a decision for each: applicable, or excluded with a reason. ISO 27001 requires one.",
+      "long": "The Statement of Applicability (SoA) is recorded on the framework scope. An excluded requirement doesn't count against that framework's posture. If a working control sits behind an exclusion, the SoA flags the contradiction so you can check the exclusion is right. You can export the SoA as CSV or xlsx."
+    },
+    {
+      "id": "excepted",
+      "name": "Excepted",
+      "short": "The result a control gets where an active exception covers it. Excepted is never shown or counted as a pass.",
+      "long": "An exception is an approved, time-limited waiver for a control in part of your scope, lasting at most 365 days and never renewed automatically. While it's active, the control is evaluated as excepted in the scope cells it covers. Framework posture counts an excepted control as covered and reports the share covered by exception separately. When the exception expires, the next evaluation returns to normal."
+    },
+    {
+      "id": "verified",
+      "name": "Verified",
+      "short": "The last step of an action plan: someone has checked that the completed work closed the gap. A verified plan is final.",
+      "long": "Action plans move from draft to in progress, possibly through blocked, to completed and then verified. Verification is a separate check after the work is marked complete. If it finds the gap isn't closed, the plan goes back to in progress rather than to verified. To restart a verified plan, create a new one."
+    },
+    {
+      "id": "completed",
+      "name": "Completed",
+      "short": "An action plan whose work is done but not yet checked. The next step is verifying that the work closed the gap.",
+      "long": "Completed means the plan's owner reports the work as finished. It isn't the end of the lifecycle: a completed plan is either verified, or reopened to in progress if verification shows the gap is still there."
+    },
+    {
+      "id": "self-approved",
+      "name": "Self-approved",
+      "short": "Marks a record that was approved by the same person who requested it. That's possible only when an admin has turned on Allow self-approval for the organisation.",
+      "long": "Approvals normally need a second person: the approver must be someone other than the requester. A small team can turn on Allow self-approval in the organisation settings; only an admin can change it, and the change is written to the audit log. A record approved by its own requester is marked Self-approved in the app, in exports and in the audit log, so the exception to the rule stays visible."
+    },
+    {
+      "id": "owner",
+      "name": "Owner",
+      "short": "The person accountable for a record, such as a risk's treatment owner or an action plan's owner. They're the one asked when it needs attention.",
+      "long": "An owner is a named person. Controls are different: they're owned by a role rather than a person (see owner role), so ownership survives people changing jobs."
+    },
+    {
+      "id": "owner-role",
+      "name": "Owner role",
+      "short": "The role that owns a control, such as it or security, rather than a named person. Your organisation's role assignments decide who that is.",
+      "long": "A control's owner role is set in its definition. The people who hold that role are the ones responsible for the control's evidence and attestations, and they change when your role assignments change, without editing the control."
+    },
+    {
+      "id": "attestation",
+      "name": "Attestation",
+      "short": "Evidence a person records by hand, stating that a control was carried out, for checks no tool can make automatically. It counts the same as automated evidence.",
+      "long": "A manual attestation goes into the same evidence record as automated evidence and follows the same freshness rules, so it has to be renewed before it goes stale. Acknowledging a policy is also an attestation: you confirm that you've read the current version, and you're asked again when a new version is published or after a year."
+    },
+    {
+      "id": "evidence-freshness",
+      "name": "Evidence freshness",
+      "short": "Whether a control's latest evidence is recent enough to rely on. Each control's freshness class sets how old its evidence can get before it's stale.",
+      "long": "Freshness is separate from the evidence result. A control whose last result was a pass, but whose evidence has gone stale, doesn't count as passing. Stale evidence is flagged, never deleted, so an audit can still look back at it. A control with no evidence in its window has no result yet, which isn't the same as failing.",
+      "glossary": "GLOSSARY.md#evidence-freshness--drift-slice-016"
+    },
+    {
+      "id": "posture",
+      "name": "Posture",
+      "short": "How well one framework is covered by your controls, with how fresh their evidence is and the 90-day trend. Each framework has its own posture.",
+      "long": "Posture is worked out separately for each framework version, so a strong SOC 2 posture says nothing about ISO 27001. Requirements excluded in the Statement of Applicability don't count. A framework with no activated framework scope shows \"Scope not set\" instead of a percentage."
+    },
+    {
+      "id": "roll-up",
+      "name": "Roll-up",
+      "short": "A risk that summarises other risks linked under it. Roll-ups are left out of register counts and top risks, so nothing is counted twice.",
+      "long": "A roll-up's severity is worked out from its children each time you look, and sits beside the severity it was given itself. When the children add up to more than that, the roll-up is flagged for review. The register can show roll-ups with \"Show roll-ups\"."
+    },
+    {
+      "id": "audit-period",
+      "name": "Audit period",
+      "short": "The window of time an auditor reviews for one framework, such as SOC 2 2026 Q2. Freezing it fixes which evidence the audit can draw on.",
+      "long": "Each audit period belongs to one framework version, so a SOC 2 and an ISO 27001 audit over the same quarter are separate. A period starts open. When it's frozen, samples are drawn only from evidence observed up to the moment of freezing.",
+      "glossary": "GLOSSARY.md#auditperiod-slice-028"
+    },
+    {
+      "id": "freeze",
+      "name": "Freeze",
+      "short": "Locking something so it can't change. A frozen audit period only uses evidence observed up to the freeze; an activated framework-scope revision can't be edited.",
+      "long": "Freezing an audit period is final: it can't be unfrozen or edited, and the app records a fingerprint of exactly what was frozen. Live work carries on as normal; only the audit's view stops moving. Framework scopes work the same way: once a revision is activated, changing it means making a new revision, so you can always see the scope that was in force at a given date."
+    }
+  ]
+}

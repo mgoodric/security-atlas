@@ -99,6 +99,8 @@ docs-site/site/
 ### Slice 140 — generated at docs build time by docs-site/hooks/openapi_pipeline.py
 ### from the canonical docs/openapi.yaml (the source of truth, committed).
 docs-site/docs/openapi.yaml
+### #2144 — generated at docs build time from web/help/terms.json.
+docs-site/docs/terms.md
 
 ### Slice 069 — Playwright runner artifacts
 web/playwright-report/

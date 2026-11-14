@@ -15,6 +15,7 @@
 // signal) and the WORST `freshness_status` (the weakest link) so a
 // single stale cell is never hidden behind a fresh average.
 
+import { Term } from "@/components/help/term";
 import type {
   ControlStateResponse,
   ControlStateEntry,
@@ -152,7 +153,7 @@ export function FreshnessClock({ state }: { state: ControlStateResponse }) {
             since latest evidence
           </div>
           <div className="mt-0.5 text-[11px] text-muted-foreground">
-            status{" "}
+            <Term id="evidence-freshness">status</Term>{" "}
             <span className="font-mono" data-testid="freshness-status">
               {status ?? "no evaluations"}
             </span>{" "}

@@ -901,6 +901,18 @@
       "functions": 98,
       "lines": 98
     },
+    "lib/help/term-checks.ts": {
+      "statements": 96,
+      "branches": 89,
+      "functions": 98,
+      "lines": 98
+    },
+    "lib/help/terms.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "lib/llm-routing/routing.ts": {
       "statements": 98,
       "branches": 98,
