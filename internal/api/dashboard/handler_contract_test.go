@@ -1,9 +1,10 @@
-// Slice 409 — contract-test-tier rollout (provider side: the three
-// dashboard panel routes served by this package).
+// Slice 409 — contract-test-tier rollout (provider side: the dashboard
+// panel routes served by this package).
 //
 //	GET /v1/frameworks/posture   -> framework-posture.golden.json
 //	GET /v1/activity             -> activity.golden.json
-//	GET /v1/upcoming             -> upcoming.golden.json
+//
+// (the upcoming rollup and its upcoming.golden.json were retired by #2130.)
 //
 // These pin the PROVIDER half of the BFF<->atlas wire contract for the
 // dashboard panels the /e2e/ suite traverses (the precondition slice 394
@@ -57,7 +58,6 @@ const (
 type stubReader struct {
 	posture  []dbx.FrameworkPostureRow
 	activity []dbx.ListEvidenceActivityRow
-	upcoming []dbx.ListUpcomingItemsRow
 }
 
 func (s stubReader) FrameworkPosture(_ context.Context, _ pgtype.Timestamptz) ([]dbx.FrameworkPostureRow, error) {
@@ -66,10 +66,6 @@ func (s stubReader) FrameworkPosture(_ context.Context, _ pgtype.Timestamptz) ([
 
 func (s stubReader) ActivityFeed(_ context.Context, _ keyset, _ int32) ([]dbx.ListEvidenceActivityRow, error) {
 	return s.activity, nil
-}
-
-func (s stubReader) UpcomingItems(_ context.Context, _ string, _ keyset, _ int32) ([]dbx.ListUpcomingItemsRow, error) {
-	return s.upcoming, nil
 }
 
 // contractRequest builds a GET with a program-read admin credential and a
@@ -176,39 +172,6 @@ func TestContract_Activity(t *testing.T) {
 		filepath.Clean("../../../web/lib/contracts/activity.golden.json"),
 		"Slice 409 contract-tier golden. PROVIDER: internal/api/dashboard/handler_contract_test.go (Activity, real handler over an injected fixed-row reader stub — Option A seam, no Postgres). Regenerate: `go test ./internal/api/dashboard/ -run TestContract_Activity -update`. CONSUMER: web/lib/contracts/activity.contract.test.ts asserts the BFF at web/app/api/dashboard/activity/route.ts.",
 		"GET /v1/activity",
-		recorded,
-	)
-}
-
-// ===== GET /v1/upcoming =====
-
-func TestContract_Upcoming(t *testing.T) {
-	populated := stubReader{upcoming: []dbx.ListUpcomingItemsRow{
-		{
-			DueDate:      pgTS("2026-06-01T00:00:00Z"),
-			Category:     "exception",
-			Title:        "Exception EX-409 expires",
-			ResourceType: "exception",
-			ResourceID:   contractControlA,
-		},
-		{
-			DueDate:      pgTS("2026-06-10T00:00:00Z"),
-			Category:     "policy_ack",
-			Title:        "Acceptable Use Policy acknowledgement due",
-			ResourceType: "policy",
-			ResourceID:   contractControlA,
-		},
-	}}
-	empty := stubReader{upcoming: []dbx.ListUpcomingItemsRow{}}
-
-	recorded := map[string]json.RawMessage{
-		"populated": recordVariant(t, newHandlerWithReader(populated).Upcoming, "/v1/upcoming"),
-		"empty":     recordVariant(t, newHandlerWithReader(empty).Upcoming, "/v1/upcoming"),
-	}
-	assertContractGolden(t,
-		filepath.Clean("../../../web/lib/contracts/upcoming.golden.json"),
-		"Slice 409 contract-tier golden. PROVIDER: internal/api/dashboard/handler_contract_test.go (Upcoming, real handler over an injected fixed-row reader stub — Option A seam, no Postgres). Regenerate: `go test ./internal/api/dashboard/ -run TestContract_Upcoming -update`. CONSUMER: web/lib/contracts/upcoming.contract.test.ts asserts the BFF at web/app/api/dashboard/upcoming/route.ts.",
-		"GET /v1/upcoming",
 		recorded,
 	)
 }

@@ -221,11 +221,12 @@ type FrameworkPostureRow struct {
 
 // Slice 066 — dashboard backend read endpoints.
 //
-// Three pure SELECT families that surface existing data behind the
+// Pure SELECT families that surface existing data behind the
 // dashboard-grained read paths slice 040's program dashboard view shipped
 // binding placeholders for. This slice adds NO migration and NO write
-// surface — it reads framework_versions + the UCF graph, the slice-062
-// admin_audit_log_v view, and four upcoming-item source tables.
+// surface — it reads framework_versions + the UCF graph and the slice-062
+// admin_audit_log_v view. (The upcoming rollup it once also served was
+// retired by #2130; the compliance calendar is the one list of what is due.)
 //
 // All tenant-scoped reads run inside the request's app.current_tenant GUC
 // (set by the slice-033 tenancy middleware); RLS is the defense-in-depth
@@ -234,7 +235,7 @@ type FrameworkPostureRow struct {
 // frameworks, framework_requirements, fw_to_scf_edges, scf_anchors) carry
 // no tenant_id and no RLS — they are global, platform-bundled.
 //
-// Cursor pagination over the activity feed and the upcoming rollup is
+// Cursor pagination over the activity feed is
 // keyset, not OFFSET: a (timestamp, id) keyset is stable under concurrent
 // appends. The keyset predicate is decomposed (ts < cursor_ts OR (ts =
 // cursor_ts AND id < cursor_id)) rather than a ROW(...) tuple comparison —
@@ -392,240 +393,6 @@ func (q *Queries) ListEvidenceActivity(ctx context.Context, arg ListEvidenceActi
 			&i.ResourceType,
 			&i.ResourceID,
 			&i.Summary,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listUpcomingItems = `-- name: ListUpcomingItems :many
-SELECT due_date, category, title, resource_type, resource_id
-FROM (
-    -- expiring exceptions: active waivers, ordered by when they lapse.
-    -- Slice 732: resolve the control UUID to its SCF code + control name so
-    -- the dashboard "Upcoming" panel reads "Exception on AAA-01 — <name>"
-    -- instead of "Exception on control <uuid>". Same fix + same resolution
-    -- as the calendar's exception branch (internal/db/queries/calendar.sql);
-    -- the two surfaces share the upcoming-event vocabulary (slice 675), so
-    -- the exception label must read identically on both. The SCF code is
-    -- COALESCEd from controls.scf_id then the global scf_anchors.scf_id via
-    -- the structured controls.scf_anchor_id FK (slice 009). The control JOIN
-    -- is on the tenant-scoped (tenant_id, control_id) FK target — no tenant
-    -- boundary crossed; scf_anchors is the global catalog (no RLS). When
-    -- neither code resolves, the title falls back to the control name; never
-    -- a bare UUID (AC-2).
-    SELECT
-        e.expires_at::timestamptz                 AS due_date,
-        'exception'::text                          AS category,
-        ('Exception on ' || CASE
-            WHEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) IS NOT NULL
-                THEN COALESCE(NULLIF(c.scf_id, ''), a.scf_id) || ' — ' || c.title
-            ELSE c.title
-        END)                                       AS title,
-        'exception'::text                          AS resource_type,
-        e.id::text                                 AS resource_id
-    FROM exceptions e
-    JOIN controls c
-      ON c.tenant_id = e.tenant_id
-     AND c.id = e.control_id
-    LEFT JOIN scf_anchors a
-      ON a.id = c.scf_anchor_id
-    WHERE e.tenant_id = $1
-      AND e.status = 'active'
-      AND ($2::text = '' OR $2::text = 'exception')
-      AND (
-            e.expires_at::timestamptz > $3::timestamptz
-            OR (e.expires_at::timestamptz = $3::timestamptz
-                AND e.id::text > $4::text)
-          )
-
-    UNION ALL
-
-    -- policy-ack expirations: the latest ack per (policy_version, user) plus
-    -- 365 days. DISTINCT ON picks the freshest ack; the +365d interval is
-    -- when that attestation falls due for renewal.
-    SELECT
-        (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz AS due_date,
-        'policy_ack'::text                         AS category,
-        ('Policy acknowledgment ' || latest_ack.policy_version_id::text) AS title,
-        'policy_acknowledgment'::text              AS resource_type,
-        latest_ack.id::text                        AS resource_id
-    FROM (
-        SELECT DISTINCT ON (pa.policy_version_id, pa.user_id)
-            pa.id, pa.policy_version_id, pa.user_id, pa.acknowledged_at
-        FROM policy_acknowledgments pa
-        WHERE pa.tenant_id = $1
-        ORDER BY pa.policy_version_id, pa.user_id, pa.acknowledged_at DESC
-    ) latest_ack
-    WHERE ($2::text = '' OR $2::text = 'policy_ack')
-      AND (
-            (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz > $3::timestamptz
-            OR ((latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz = $3::timestamptz
-                AND latest_ack.id::text > $4::text)
-          )
-
-    UNION ALL
-
-    -- vendor reviews: last_review_date + cadence interval. Vendors with no
-    -- last_review_date are excluded — there is no anchor to project from.
-    SELECT
-        (v.last_review_date + CASE v.review_cadence
-            WHEN 'monthly'   THEN INTERVAL '1 month'
-            WHEN 'quarterly' THEN INTERVAL '3 months'
-            WHEN 'biannual'  THEN INTERVAL '6 months'
-            WHEN 'annual'    THEN INTERVAL '12 months'
-         END)::timestamptz                         AS due_date,
-        'vendor_review'::text                      AS category,
-        ('Vendor review: ' || v.name)              AS title,
-        'vendor'::text                             AS resource_type,
-        v.id::text                                 AS resource_id
-    FROM vendors v
-    WHERE v.tenant_id = $1
-      AND v.last_review_date IS NOT NULL
-      AND ($2::text = '' OR $2::text = 'vendor_review')
-      AND (
-            (v.last_review_date + CASE v.review_cadence
-                WHEN 'monthly'   THEN INTERVAL '1 month'
-                WHEN 'quarterly' THEN INTERVAL '3 months'
-                WHEN 'biannual'  THEN INTERVAL '6 months'
-                WHEN 'annual'    THEN INTERVAL '12 months'
-             END)::timestamptz > $3::timestamptz
-            OR ((v.last_review_date + CASE v.review_cadence
-                WHEN 'monthly'   THEN INTERVAL '1 month'
-                WHEN 'quarterly' THEN INTERVAL '3 months'
-                WHEN 'biannual'  THEN INTERVAL '6 months'
-                WHEN 'annual'    THEN INTERVAL '12 months'
-             END)::timestamptz = $3::timestamptz
-                AND v.id::text > $4::text)
-          )
-
-    UNION ALL
-
-    -- vendor contract renewals: explicit renewal_date from the commercial
-    -- tooling register. This is intentionally separate from vendor reviews:
-    -- review cadence is risk work; renewal_date is commercial spend work.
-    SELECT
-        v.renewal_date::timestamptz                 AS due_date,
-        'vendor_renewal'::text                      AS category,
-        ('Vendor renewal: ' || v.name)              AS title,
-        'vendor'::text                              AS resource_type,
-        v.id::text                                  AS resource_id
-    FROM vendors v
-    WHERE v.tenant_id = $1
-      AND v.renewal_date IS NOT NULL
-      AND v.commercial_status <> 'churned'
-      AND ($2::text = '' OR $2::text = 'vendor_renewal')
-      AND (
-            v.renewal_date::timestamptz > $3::timestamptz
-            OR (v.renewal_date::timestamptz = $3::timestamptz
-                AND v.id::text > $4::text)
-          )
-
-    UNION ALL
-
-    -- audit-period milestones: open periods, ordered by when they close.
-    SELECT
-        ap.period_end::timestamptz                 AS due_date,
-        'audit_period'::text                       AS category,
-        ('Audit period closes: ' || ap.name)       AS title,
-        'audit_period'::text                       AS resource_type,
-        ap.id::text                                AS resource_id
-    FROM audit_periods ap
-    WHERE ap.tenant_id = $1
-      AND ap.status = 'open'
-      AND ($2::text = '' OR $2::text = 'audit_period')
-      AND (
-            ap.period_end::timestamptz > $3::timestamptz
-            OR (ap.period_end::timestamptz = $3::timestamptz
-                AND ap.id::text > $4::text)
-          )
-) rollup
-ORDER BY due_date ASC, resource_id ASC
-LIMIT $5
-`
-
-type ListUpcomingItemsParams struct {
-	TenantID       pgtype.UUID        `json:"tenant_id"`
-	CategoryFilter string             `json:"category_filter"`
-	CursorDate     pgtype.Timestamptz `json:"cursor_date"`
-	CursorID       string             `json:"cursor_id"`
-	RowLimit       int32              `json:"row_limit"`
-}
-
-type ListUpcomingItemsRow struct {
-	DueDate      pgtype.Timestamptz `json:"due_date"`
-	Category     string             `json:"category"`
-	Title        interface{}        `json:"title"`
-	ResourceType string             `json:"resource_type"`
-	ResourceID   string             `json:"resource_id"`
-}
-
-// AC-4: unified upcoming-items rollup. ONE UNION ALL across the four
-// sources — expiring exceptions (021), policy-ack expirations (023), vendor
-// reviews and contract renewals (024/OE-623), audit-period milestones (028) — projected to the AC-4 row
-// shape {due_date, category, title, resource_type, resource_id}. NOT four
-// round-trips (anti-criterion P0: no N+1).
-//
-// SHARED UPCOMING-EVENT VOCABULARY (slice 675, ADR-0015): this query and
-// the compliance calendar's `ListCalendarEvents`
-// (internal/db/queries/calendar.sql) both answer "what's coming up?" and
-// MUST source the same entity types. The vendor branch below is mirrored
-// by the calendar's vendor branch (same last_review_date + cadence math).
-// If you add or remove an event source here, make the matching change in
-// calendar.sql (or note why the two intentionally differ) so the dashboard
-// and the calendar cannot silently drift again.
-//
-// due_date semantics per source:
-//
-//	exception        — expires_at (the waiver lapses)
-//	policy_ack       — latest ack's acknowledged_at + 365d (the annual
-//	                   re-ack falls due); only the freshest ack per
-//	                   (policy_version, user) is considered
-//	vendor_review    — last_review_date + the cadence interval (next review
-//	                   falls due)
-//	vendor_renewal   — renewal_date (contract renewal falls due)
-//	audit_period     — period_end (the audit period closes)
-//
-// All four are tenant-scoped; RLS fires on each underlying SELECT and the
-// explicit tenant_id predicates are the primary guarantee.
-//
-// Keyset paginated date-sorted ascending over (due_date, resource_id). The
-// decomposed keyset predicate + the optional category filter are pushed
-// INTO each UNION branch: sqlc v1.31's analyzer cannot resolve column names
-// in an outer WHERE over a UNION-ALL CTE whose columns are all expressions
-// (it has no base-column lineage to bind to). Pushing the predicates into
-// each branch lets sqlc analyze each against real tables. The named args
-// (cursor_date, cursor_id, category_filter, row_limit) are deduplicated by
-// sqlc — each appears once in the generated Params struct. This is still
-// ONE statement / ONE UNION ALL — no N+1 (anti-criterion P0). A sentinel
-// cursor (cursor_date = '-infinity', cursor_id = ”) selects the first
-// page; the empty category filter (” = all) narrows to one source.
-func (q *Queries) ListUpcomingItems(ctx context.Context, arg ListUpcomingItemsParams) ([]ListUpcomingItemsRow, error) {
-	rows, err := q.db.Query(ctx, listUpcomingItems,
-		arg.TenantID,
-		arg.CategoryFilter,
-		arg.CursorDate,
-		arg.CursorID,
-		arg.RowLimit,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListUpcomingItemsRow
-	for rows.Next() {
-		var i ListUpcomingItemsRow
-		if err := rows.Scan(
-			&i.DueDate,
-			&i.Category,
-			&i.Title,
-			&i.ResourceType,
-			&i.ResourceID,
 		); err != nil {
 			return nil, err
 		}

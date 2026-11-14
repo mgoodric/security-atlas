@@ -38,6 +38,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/calendar"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/dashboard"
 	"github.com/mgoodric/security-atlas/internal/api/dashboardexport"
@@ -64,7 +65,7 @@ func newExportRouter(t *testing.T, tenantID uuid.UUID, isAdmin, isApprover bool)
 	freshStore := freshness.NewStore(app)
 	driftStore := drift.NewStore(app)
 
-	src := dashboardexport.NewLivePanelSource(dashStore, riskStore, freshStore, driftStore)
+	src := dashboardexport.NewLivePanelSource(dashStore, riskStore, freshStore, driftStore, calendar.NewStore(app))
 	h := dashboardexport.NewHandler(app, src)
 
 	r := chi.NewRouter()
