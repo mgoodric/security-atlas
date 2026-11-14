@@ -2436,6 +2436,36 @@ type FwToScfEdgeTierTransition struct {
 	CreatedAt  pgtype.Timestamptz   `json:"created_at"`
 }
 
+type FwToScfOverlayEdge struct {
+	ID                     pgtype.UUID          `json:"id"`
+	TenantID               pgtype.UUID          `json:"tenant_id"`
+	FrameworkRequirementID pgtype.UUID          `json:"framework_requirement_id"`
+	ScfAnchorID            pgtype.UUID          `json:"scf_anchor_id"`
+	RelationshipType       StrmRelationshipType `json:"relationship_type"`
+	Strength               float64              `json:"strength"`
+	Rationale              string               `json:"rationale"`
+	SourceRef              string               `json:"source_ref"`
+	Status                 string               `json:"status"`
+	RetirementReason       *string              `json:"retirement_reason"`
+	CreatedBy              string               `json:"created_by"`
+	CreatedAt              pgtype.Timestamptz   `json:"created_at"`
+	RetiredBy              *string              `json:"retired_by"`
+	RetiredAt              pgtype.Timestamptz   `json:"retired_at"`
+	UpdatedAt              pgtype.Timestamptz   `json:"updated_at"`
+}
+
+type FwToScfOverlayEdgeAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	OverlayEdgeID pgtype.UUID        `json:"overlay_edge_id"`
+	Action        string             `json:"action"`
+	Before        []byte             `json:"before"`
+	After         []byte             `json:"after"`
+	Actor         string             `json:"actor"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
 type GroupRoleAuditLog struct {
 	ID              pgtype.UUID        `json:"id"`
 	TenantID        pgtype.UUID        `json:"tenant_id"`
