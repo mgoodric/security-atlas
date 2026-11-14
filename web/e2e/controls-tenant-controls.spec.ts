@@ -160,8 +160,15 @@ test.describe("/controls lists the tenant's controls (issue #1741)", () => {
     await expect(page.getByTestId("sidebar-controls-count")).toHaveText("2");
 
     // The list came from the per-control read, not the anchor catalog.
+    // Parsed, so the check does not depend on query-parameter order.
     expect(
-      seen.some((u) => u.includes("/api/controls-list?include=state")),
+      seen.some((u) => {
+        const url = new URL(u, "http://localhost");
+        return (
+          url.pathname === "/api/controls-list" &&
+          url.searchParams.get("include") === "state"
+        );
+      }),
     ).toBe(true);
 
     await table.getByTestId("controls-row-scf-id").first().click();

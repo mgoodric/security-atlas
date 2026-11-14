@@ -145,6 +145,22 @@ def _oscal_token(raw: str) -> str:
     return cleaned
 
 
+def _requirement_token(framework: str, code: str) -> str:
+    """Namespace a framework requirement code as an OSCAL control-id token.
+
+    The spec's ``iso27001-2022:A.8.25`` can't be used as written: an OSCAL
+    token admits no colon. The namespace and code are joined with ``_``
+    instead (``iso27001-2022_A.8.25``). Case is kept, since requirement codes
+    are case-significant identifiers, and any other character outside the
+    token alphabet becomes ``-``.
+    """
+    raw = f"{framework}_{code}"
+    cleaned = "".join(ch if (ch.isalnum() or ch in "-_.") else "-" for ch in raw)
+    if not (cleaned[0].isalpha() or cleaned[0] == "_"):
+        cleaned = f"fw-{cleaned}"
+    return cleaned
+
+
 # Leading honesty label for vendor-attested control-implementation statements
 # (slice 619). An accepted vendor claim surfaces in the SSP as a by-component
 # statement, but it is a vendor ASSERTION the operator chose to credit — NOT
@@ -349,6 +365,29 @@ def serialize_ssp(pb_input) -> bytes:
                     _prop("claim-id", vai.claim_id),
                 ],
                 statements=[statement],
+            )
+        )
+
+    # #1792: requirements excluded in the framework-scope revision active at
+    # the freeze (the Statement of Applicability). One implemented-requirement
+    # each, with the OSCAL core `implementation-status: not-applicable` prop and
+    # the operator's justification as remarks. These are scope decisions, not
+    # control implementations, so they carry no evaluation-result and never
+    # merge into a per-control entry.
+    for er in getattr(pb_input, "excluded_requirements", None) or []:
+        props = [
+            Property(name="implementation-status", value="not-applicable"),
+            _prop("framework", er.framework),
+            _prop("requirement-code", er.requirement_code),
+        ]
+        if er.framework_scope_id:
+            props.append(_prop("framework-scope-id", er.framework_scope_id))
+        implemented.append(
+            ImplementedRequirement(
+                uuid=str(uuid.uuid4()),
+                control_id=_requirement_token(er.framework, er.requirement_code),
+                props=props,
+                remarks=er.justification,
             )
         )
 

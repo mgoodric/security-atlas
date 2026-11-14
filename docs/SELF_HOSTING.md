@@ -168,11 +168,21 @@ into this shape (the contract is `internal/api/scfimport/catalog.go`;
       "scf_id": "IAC-37",
       "family": "IAC",
       "title": "Multi-Factor Authentication (MFA)",
-      "description": "Mechanisms exist to ..."
+      "description": "Mechanisms exist to ...",
+      "legacy_scf_id": "IAC-06"
     }
   ]
 }
 ```
+
+`legacy_scf_id` is optional: the control's code in the previous SCF
+release, as the workbook's `Legacy SCF #` column gives it. Leave it out
+when the control is new or you don't have it. Anchors store it, and the
+anchor API returns it (`GET /v1/anchors`, `GET /v1/anchors/{id}`). An
+imported release is frozen, with one exception: re-importing the same
+`release_version` with `legacy_scf_id` filled in sets it on anchors stored
+without one. A re-import that gives a different value from the stored one
+is refused.
 
 Then, **before the first `just self-host-up`**:
 

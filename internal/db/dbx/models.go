@@ -3018,6 +3018,7 @@ type ScfAnchor struct {
 	Subtopics          []byte             `json:"subtopics"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	LegacyScfID        *string            `json:"legacy_scf_id"`
 }
 
 type ScimAuditLog struct {
