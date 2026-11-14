@@ -18,7 +18,7 @@ INSERT INTO oidc_idp_configs (
 VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8
 )
-RETURNING id, tenant_id, name, issuer_url, client_id, client_secret_enc, redirect_url, allowed_email_domains, created_at, updated_at
+RETURNING id, tenant_id, name, issuer_url, client_id, client_secret_enc, redirect_url, allowed_email_domains, created_at, updated_at, trust_unverified_email_for_link
 `
 
 type CreateOidcIdpConfigParams struct {
@@ -55,12 +55,13 @@ func (q *Queries) CreateOidcIdpConfig(ctx context.Context, arg CreateOidcIdpConf
 		&i.AllowedEmailDomains,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TrustUnverifiedEmailForLink,
 	)
 	return i, err
 }
 
 const getOidcIdpConfigByName = `-- name: GetOidcIdpConfigByName :one
-SELECT id, tenant_id, name, issuer_url, client_id, client_secret_enc, redirect_url, allowed_email_domains, created_at, updated_at
+SELECT id, tenant_id, name, issuer_url, client_id, client_secret_enc, redirect_url, allowed_email_domains, created_at, updated_at, trust_unverified_email_for_link
 FROM oidc_idp_configs
 WHERE tenant_id = $1 AND name = $2
 `
@@ -84,12 +85,13 @@ func (q *Queries) GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConf
 		&i.AllowedEmailDomains,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TrustUnverifiedEmailForLink,
 	)
 	return i, err
 }
 
 const listOidcIdpConfigsByTenant = `-- name: ListOidcIdpConfigsByTenant :many
-SELECT id, tenant_id, name, issuer_url, client_id, client_secret_enc, redirect_url, allowed_email_domains, created_at, updated_at
+SELECT id, tenant_id, name, issuer_url, client_id, client_secret_enc, redirect_url, allowed_email_domains, created_at, updated_at, trust_unverified_email_for_link
 FROM oidc_idp_configs
 WHERE tenant_id = $1
 ORDER BY name ASC
@@ -115,6 +117,7 @@ func (q *Queries) ListOidcIdpConfigsByTenant(ctx context.Context, tenantID pgtyp
 			&i.AllowedEmailDomains,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TrustUnverifiedEmailForLink,
 		); err != nil {
 			return nil, err
 		}

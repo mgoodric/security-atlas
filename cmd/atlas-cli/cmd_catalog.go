@@ -168,6 +168,9 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 				fmt.Printf("requirement kept %s: incoming title or body differs, but framework version %s is frozen; ship a new version to change it\n",
 					code, report.FrameworkVersion)
 			}
+			for _, line := range cw.PointsOfFocusRollUp.Summary() {
+				fmt.Println(line)
+			}
 			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d\n",
 				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped))
 			for _, sk := range report.EdgesSkipped {

@@ -34,6 +34,9 @@ func (s *Server) registerFrameworkScope(root *chi.Mux) {
 	root.Get("/v1/framework-scopes/applicability", fwH.ApplicabilityAsOf)
 	root.Get("/v1/framework-scopes/{id}/applicability", fwH.ListApplicability)
 	root.Put("/v1/framework-scopes/{id}/applicability/{requirement_id}", fwH.SetApplicability)
+	// Issue #1790: bulk-set and CSV import of decisions.
+	root.Post("/v1/framework-scopes/{id}/applicability/bulk", fwH.BulkSetApplicability)
+	root.Post("/v1/framework-scopes/{id}/applicability/import", fwH.ImportApplicability)
 	// Sub-resource transitions are PATCH, distinct from the generic PATCH
 	// on /v1/framework-scopes/{id} (which edits predicate). chi resolves
 	// the literal-segment routes first within the same method.
