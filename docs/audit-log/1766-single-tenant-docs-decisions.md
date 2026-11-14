@@ -37,12 +37,12 @@ faults that had nothing to do with tenants. Both are fixed in place:
   `--token "$ATLAS_BOOTSTRAP_TOKEN"` with `--reset-bootstrap --force`. It
   returns `401` from the HTTP endpoint with or without `--tenant`. The HTTP
   API takes JWTs, not API keys, so the bootstrap token is refused. With a
-  super-admin JWT, the command works without `--tenant`. Reported for its
-  own ticket. The page still names the token, as before; only the tenant
-  flag was removed.
+  super-admin JWT, the command works without `--tenant`. Tracked in
+  #2121; the page carries a known-issue warning above the commands.
 - `/auth/oidc/login?idp=primary` resolves the tenant on a single-tenant
   install, then answers `400 unknown IdP` even after `PATCH /v1/admin/sso`.
-  The server wires the no-op `localModeIdpResolver`. Tracked in #2034.
+  The server wires the no-op `localModeIdpResolver`. Tracked in #2034; OIDC
+  setup Step 4 carries a known-issue warning.
 - `demo seed` in place accepted an organisation holding imported OSCAL
   catalogs. The documented rule names evidence, risks, tenant-private
   framework versions, and non-stock controls and policies; imported

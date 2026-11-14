@@ -41,8 +41,9 @@ gets `403` either way.
 <!-- prettier-ignore-start -->
 !!! warning "Multi-tenant is one-way"
 
-    There is no path back from several tenants to one: tenants cannot be
-    merged, and the install keeps behaving as multi-tenant. Turning
+    There is no supported path back from several tenants to one: tenants
+    are not merged, and the install keeps behaving as multi-tenant while
+    several exist. Turning
     `ATLAS_ALLOW_MULTI_TENANT` off later only stops further tenants from
     being created. If you only want to try the demo dataset, seed it into
     your organisation on a fresh install, or use a separate install

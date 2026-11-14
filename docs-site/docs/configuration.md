@@ -277,7 +277,8 @@ turns an install multi-tenant on its own:
   are never mixed. Use a separate install, or opt in to multi-tenant.
 - **Separate demo tenant** (`--tenant-slug`): needs
   `ATLAS_ALLOW_MULTI_TENANT=true` once any tenant exists, which makes the
-  install multi-tenant for good. Teardown deletes that tenant.
+  install multi-tenant. Teardown deletes that tenant; beyond that there is
+  no supported path back to one tenant (tenants are not merged).
 
 The full rules and refusal messages are in
 [demo seed](https://github.com/mgoodric/security-atlas/blob/main/docs/getting-started/demo-seed.md).

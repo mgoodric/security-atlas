@@ -239,7 +239,8 @@ DATABASE_URL=postgres://atlas_migrate:...@localhost:5432/atlas \
 only by a super-admin, and only while `ATLAS_ALLOW_MULTI_TENANT=true` is set
 on the `atlas` service (in `deploy/docker/.env` for the compose bundle). Once
 a second tenant exists the tenant chrome appears, sign-in and the CLI ask
-which tenant you mean, and there is no path back to one tenant. Existing
+which tenant you mean, and there is no supported path back to one tenant
+(tenants are not merged). Existing
 multi-tenant installs keep working without the setting; it gates only the
 creation of tenants. See
 [Tenant membership](../docs-site/docs/tenant-membership.md#opting-in-to-multi-tenant).

@@ -284,6 +284,15 @@ With a primary IdP configured, the relying-party flow runs at:
 /auth/oidc/login?idp=primary
 ```
 
+<!-- prettier-ignore-start -->
+!!! warning "Known issue: sign-in answers `unknown IdP`"
+
+    The shipped server does not yet read the configuration saved in Step 3,
+    so this link currently answers `400 {"error":"OIDC begin: oidc: unknown IdP"}`
+    even after a successful save. Use local sign-in until
+    [#2034](https://github.com/mgoodric/security-atlas/issues/2034) is fixed.
+<!-- prettier-ignore-end -->
+
 On a single-tenant install that link needs no tenant: it uses your
 organisation's identity provider. On a multi-tenant install add the tenant,
 `/auth/oidc/login?tenant_id=<tenant uuid>&idp=primary`; without it the

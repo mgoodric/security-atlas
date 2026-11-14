@@ -42,7 +42,19 @@ The file was deleted (someone called `/v1/install/mark-first-signin` — typical
 
 Use the recovery flag on `atlas-cli credentials issue`:
 
-**Verified on docker-compose:**
+<!-- prettier-ignore-start -->
+!!! warning "Known issue: the bootstrap token is refused"
+
+    The reset is an HTTP call, and the HTTP API currently accepts only
+    JWTs. `--token "$ATLAS_BOOTSTRAP_TOKEN"`, as shown below, and admin API
+    keys both get `401 authorization must be Bearer <token>`. A super-admin
+    JWT works: on a single-tenant install, sign in with the default user's
+    email and password through `POST /auth/local/login` and pass the
+    `token` it returns as `--token`. Tracked in
+    [#2121](https://github.com/mgoodric/security-atlas/issues/2121).
+<!-- prettier-ignore-end -->
+
+**On docker-compose** (affected by the known issue above):
 
 ```sh
 # From inside the atlas-cli container (sees the same network):
@@ -61,7 +73,7 @@ The `--force` flag is the foot-gun gate: without it the CLI refuses because re-i
 4. Revokes any recovery key an earlier reset minted.
 5. Returns the new bearer plaintext, its `credential_id` and its `expires_at` to stdout.
 
-`--token` must be a super_admin JWT, or an admin API key on an install with one tenant. `--scope` and `--kinds` are refused with `--reset-bootstrap`.
+`--token` must be a super_admin JWT (admin API keys are currently refused; see the known issue above). `--scope` and `--kinds` are refused with `--reset-bootstrap`.
 
 **The recovery key expires.** It lasts 24h by default. Pass `--ttl` to change that, up to `168h` (7 days). The key cannot be made non-expiring.
 
@@ -71,7 +83,7 @@ The `--force` flag is the foot-gun gate: without it the CLI refuses because re-i
 atlas-cli credentials revoke --id <credential_id> --endpoint atlas:50051 --token <your admin token>
 ```
 
-**Verified on Helm:**
+**On Helm** (affected by the known issue above):
 
 ```sh
 kubectl exec -it deploy/atlas -- \
