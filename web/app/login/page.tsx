@@ -12,38 +12,32 @@ import { VersionFooter } from "@/components/version-footer";
 import { FirstInstallCard } from "@/components/first-install-card";
 import { ThemeAwareLogo } from "@/components/shell/theme-aware-logo";
 
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
+
 import { signIn, signInLocal } from "./actions";
-import { apiBaseURL } from "@/lib/api/base";
-import { type InstallState, loginTenantMode } from "@/lib/auth/login-tenant";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import {
+  devTokenFlagEnabled,
+  devTokenSignInAllowed,
+  signedInRedirectTarget,
+} from "@/lib/auth/dev-token-signin";
+import { loginTenantMode } from "@/lib/auth/login-tenant";
+import { fetchInstallState, hasValidSession } from "@/lib/auth/login.server";
+import { safeRedirectTarget } from "@/lib/safe-redirect";
 
 type SearchParams = Promise<{ from?: string; error?: string }>;
 
-// Server-side install-state fetch. #1756: it decides how the
-// email/password form names the tenant (see loginTenantMode); the form
-// itself always renders. null means install-state could not be read.
+// Server-side install-state fetch (lib/auth/login.server.ts). #1756: it
+// decides how the email/password form names the tenant (see
+// loginTenantMode); #2062: it also decides whether the developer token
+// card renders (see devTokenSignInAllowed). null means install-state could
+// not be read.
 //
 // Known limitation: this is a server-component fetch, so Playwright's
 // page.route() (which only sees browser-originated requests) can't mock
-// it. The slice-073 BFF-relay pattern (web/app/api/install-state/route.ts +
-// FirstInstallCard) exists for the test-mockable surface; this card's
-// Playwright e2e (AC-14) will need a similar client-island promotion when
-// the test commit lands.
-async function fetchInstallState(): Promise<InstallState | null> {
-  try {
-    const response = await fetch(`${apiBaseURL()}/v1/install-state`, {
-      // #1756: no-store, like the /api/install-state BFF. A cached
-      // first-install answer could post a stale tenant id, or hide the
-      // tenant field after a second tenant was added.
-      cache: "no-store",
-      // Bound the wait so a wedged backend doesn't stall /login forever.
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!response.ok) return null;
-    return (await response.json()) as InstallState;
-  } catch {
-    return null;
-  }
-}
+// it. The first-install branch of devTokenSignInAllowed is covered in
+// vitest (lib/auth/dev-token-signin.test.ts) for that reason.
 
 // Slice 123 — the first-install guidance is rendered by the
 // FirstInstallCard client island, which fetches /api/install-state
@@ -61,9 +55,24 @@ export default async function LoginPage({
   searchParams: SearchParams;
 }) {
   const { from, error } = await searchParams;
+
+  // #2062 — a visitor with a live session has nothing to do here. Only a
+  // session /v1/me accepts counts, so a stale cookie cannot loop.
+  const session = (await cookies()).get(ATLAS_JWT_COOKIE)?.value;
+  if (session && (await hasValidSession(session))) {
+    redirect(signedInRedirectTarget(safeRedirectTarget(from ?? "/dashboard")));
+  }
+
   // #1756 — the email/password form always renders; install-state only
   // decides whether it sends a hidden tenant, none, or asks for one.
-  const tenantMode = loginTenantMode(await fetchInstallState());
+  const installState = await fetchInstallState();
+  const tenantMode = loginTenantMode(installState);
+  // #2062 — the token card is for the bootstrap/recovery token and for
+  // deployments that opt in; the signIn action re-checks the same rule.
+  const showDevTokenSignIn = devTokenSignInAllowed(
+    devTokenFlagEnabled(process.env),
+    installState,
+  );
 
   // Slice 363 — form-error association. aria-describedby on every input
   // points at the Alert's id when the Alert is mounted. See
@@ -177,38 +186,40 @@ export default async function LoginPage({
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Developer sign-in</CardTitle>
-            <CardDescription>
-              Paste a bearer token issued by{" "}
-              <code>atlas-cli credentials issue</code> or printed to stderr at
-              server startup.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form action={signIn} className="space-y-4">
-              <input type="hidden" name="from" value={from ?? "/dashboard"} />
-              <div className="space-y-2">
-                <label htmlFor="token" className="text-sm font-medium">
-                  Bearer token
-                </label>
-                <Input
-                  id="token"
-                  name="token"
-                  type="password"
-                  placeholder="long opaque string"
-                  required
-                  autoComplete="off"
-                  aria-describedby={signinLocalErrorId}
-                />
-              </div>
-              <Button type="submit" className="w-full">
-                Sign in
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
+        {showDevTokenSignIn ? (
+          <Card data-testid="dev-token-signin-card">
+            <CardHeader>
+              <CardTitle>Developer sign-in</CardTitle>
+              <CardDescription>
+                Paste a bearer token issued by{" "}
+                <code>atlas-cli credentials issue</code> or printed to stderr at
+                server startup.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form action={signIn} className="space-y-4">
+                <input type="hidden" name="from" value={from ?? "/dashboard"} />
+                <div className="space-y-2">
+                  <label htmlFor="token" className="text-sm font-medium">
+                    Bearer token
+                  </label>
+                  <Input
+                    id="token"
+                    name="token"
+                    type="password"
+                    placeholder="long opaque string"
+                    required
+                    autoComplete="off"
+                    aria-describedby={signinLocalErrorId}
+                  />
+                </div>
+                <Button type="submit" className="w-full">
+                  Sign in
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
       {/* Slice 072: VersionFooter renders fixed-bottom-right and does
         not affect the centered Card layout. Lets self-hosted operators
