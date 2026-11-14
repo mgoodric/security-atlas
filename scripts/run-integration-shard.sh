@@ -74,3 +74,4 @@ go test -tags=integration -p 1 -v \
   -coverpkg=./... \
   ${GO_TEST_EXTRA:-} \
   "${PKGS[@]}"
+# #2099 throwaway demo: shared-path change
