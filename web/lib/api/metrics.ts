@@ -478,3 +478,29 @@ export function neutralBadgeLabel(
     target.target_value !== "";
   return hasTargetValue ? "no data" : "no target";
 }
+
+// noDataReason reads the evaluators' empty marker (#2064): an observation
+// whose `dimensions.sample` is "empty" was computed with no inputs, so its
+// numeric_value is a placeholder, not a measurement. Returns the one-line
+// reason to show in place of the value, or null for a real measurement.
+// Callers render "No data" with no percentage and no pass/fail colour.
+export const DEFAULT_NO_DATA_REASON = "No inputs recorded for this metric";
+
+export function noDataReason(
+  observation: Pick<Observation, "dimensions"> | undefined | null,
+): string | null {
+  const dims = observation?.dimensions;
+  if (!dims || dims.sample !== "empty") return null;
+  const reason = dims.no_data_reason;
+  return typeof reason === "string" && reason.trim() !== ""
+    ? reason
+    : DEFAULT_NO_DATA_REASON;
+}
+
+// measuredObservations drops empty-marked points so charts never plot a
+// placeholder value as if it were measured.
+export function measuredObservations<T extends Pick<Observation, "dimensions">>(
+  observations: T[],
+): T[] {
+  return observations.filter((o) => noDataReason(o) === null);
+}
