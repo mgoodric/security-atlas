@@ -188,6 +188,19 @@ artifacts:
   # -- External S3 endpoint URL. Required when minio.enabled is false;
   #    ignored when minio.enabled is true.
   s3Endpoint: ""
+  # -- Endpoint baked into presigned download URLs. Browsers follow those
+  #    links, so it must be reachable from them: with the bundled MinIO the
+  #    server-side endpoint is the in-cluster Service DNS
+  #    (http://<release>-minio:9000), which a browser cannot resolve. Set
+  #    this to the MinIO address users reach (an Ingress or LoadBalancer).
+  #    Empty falls back to the server-side endpoint, which suits external
+  #    S3 where one endpoint serves both.
+  s3PublicEndpoint: ""
+  # -- Path-style addressing (bucket in the path, not the host). Empty lets
+  #    the server decide: on when an endpoint is set, which is always the
+  #    case in this chart, so MinIO works out of the box. Set "false" for
+  #    AWS S3 virtual-hosted addressing, "true" to force path-style.
+  forcePathStyle: ""
   # -- AWS region label sent to the S3 client.
   region: us-east-1
 

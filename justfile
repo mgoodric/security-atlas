@@ -273,6 +273,11 @@ check-integration-shard-coverage:
 check-coverage-excludes:
     bash scripts/check-coverage-excludes.sh
 
+# Render the Helm ConfigMap under several value sets and assert the artifact
+# store keys (public endpoint, path-style). Needs helm. #1939.
+test-helm-artifacts:
+    bash scripts/test-helm-artifacts.sh
+
 # Refuse a migration whose timestamp prefix another migration already uses;
 # the prefixes that collided before the check are grandfathered. #1880.
 # Self-test: scripts/check-migration-timestamps_test.sh
