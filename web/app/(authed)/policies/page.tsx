@@ -94,6 +94,8 @@ import {
   clearFilters,
   DEFAULT_FILTERS,
   isDefault,
+  REVIEW_DUE_SOON,
+  REVIEW_OVERDUE,
   setFilter,
   uniqueOwners,
   type PolicyFilters,
@@ -114,6 +116,7 @@ const FILTER_KEYS: (keyof PolicyFilters)[] = [
   "status",
   "owner_role",
   "ack_status",
+  "review",
 ];
 
 // Slice 240 — page-size default per AC-3.
@@ -157,6 +160,29 @@ const ACK_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: ACK_STATUS_LT_95, label: "< 95% acknowledged" },
   { value: ACK_STATUS_LT_50, label: "< 50% acknowledged" },
 ];
+
+// #1806 — review pill. Values equal the API's `review_status`, so
+// `?review=overdue` on this page names the same set as the API filter.
+const REVIEW_OPTIONS: { value: string; label: string }[] = [
+  { value: ALL, label: "All review dates" },
+  { value: REVIEW_OVERDUE, label: "Review overdue" },
+  { value: REVIEW_DUE_SOON, label: "Review due within 30 days" },
+];
+
+// #1806 — marker next to the review date. `upcoming` and undated rows get
+// no marker; the date alone says enough.
+function reviewMarker(
+  status: Policy["review_status"],
+): { label: string; className: string } | null {
+  switch (status) {
+    case "overdue":
+      return { label: "Overdue", className: "bg-red-50 text-red-700" };
+    case "due-soon":
+      return { label: "Due soon", className: "bg-amber-50 text-amber-700" };
+    default:
+      return null;
+  }
+}
 
 function statusPillClass(status: string): string {
   switch (status) {
@@ -307,6 +333,12 @@ function PoliciesPageInner() {
       value: filters.ack_status,
       options: ACK_STATUS_OPTIONS,
     },
+    {
+      id: "review",
+      label: "Review",
+      value: filters.review,
+      options: REVIEW_OPTIONS,
+    },
   ];
 
   const meta = (
@@ -418,6 +450,47 @@ function PoliciesPageInner() {
         ) : (
           <span className="text-xs text-muted-foreground italic">—</span>
         ),
+    },
+    {
+      // #1806 — next review date with an overdue / due-soon marker. Only
+      // published policies have a review due (the API omits
+      // review_status otherwise), so a draft's date shows without one.
+      id: "next_review_at",
+      header: "Next review",
+      cell: (row) => {
+        if (!row.next_review_at) {
+          return (
+            <span
+              className="text-xs text-muted-foreground italic"
+              data-testid="policies-row-next-review-missing"
+            >
+              —
+            </span>
+          );
+        }
+        const marker = reviewMarker(row.review_status);
+        return (
+          <span className="inline-flex items-center gap-2">
+            <span
+              className="font-mono text-xs text-muted-foreground"
+              data-testid="policies-row-next-review"
+            >
+              {formatDate(row.next_review_at)}
+            </span>
+            {marker ? (
+              <span
+                data-testid="policies-row-review-marker"
+                className={
+                  "inline-flex items-center px-2 py-0.5 text-[11px] font-medium rounded-md " +
+                  marker.className
+                }
+              >
+                {marker.label}
+              </span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       id: "ack_rate",
@@ -598,7 +671,7 @@ function PoliciesPageInner() {
       {POLICIES_SCAFFOLD_FUTURE_BODY}
     </span>
   ) : (
-    "Try widening the status, owner-role, or ack-status filters."
+    "Try widening the status, owner-role, ack-status, or review filters."
   );
   const emptyState = (
     <EmptyState

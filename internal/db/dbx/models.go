@@ -2816,6 +2816,8 @@ type PolicyAuditLog struct {
 	SourceUrl              *string            `json:"source_url"`
 	SubjectModule          string             `json:"subject_module"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	PreviousNextReviewAt   pgtype.Timestamptz `json:"previous_next_review_at"`
+	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
 }
 
 type Population struct {

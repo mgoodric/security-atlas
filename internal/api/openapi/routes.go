@@ -224,6 +224,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "PATCH", Path: "/v1/org_units/{id}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "PATCH /v1/org_units/{id}"},
 	{Method: "PATCH", Path: "/v1/risks/{id}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?}"},
 	{Method: "PATCH", Path: "/v1/policies/{id}/approve", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/approve"},
+	{Method: "PATCH", Path: "/v1/policies/{id}/review-date", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/review-date — change a published policy's next_review_at, audit-logged (#1806)"},
 	{Method: "PATCH", Path: "/v1/policies/{id}/submit", Tag: "policies", Tier: "bearer", Internal: false, Summary: "PATCH /v1/policies/{id}/submit"},
 	{Method: "PATCH", Path: "/v1/questionnaires/{id}/answers/{qid}", Tag: "questionnaires", Tier: "bearer", Internal: false, Summary: "PATCH /v1/questionnaires/{id}/answers/{qid}"},
 	{Method: "PATCH", Path: "/v1/tenants/{id}", Tag: "tenants", Tier: "bearer", Internal: false, Summary: "PATCH /v1/tenants/{id} — rename a tenant and/or set its control-bundle gate policy (per-tenant admin or super_admin)"},

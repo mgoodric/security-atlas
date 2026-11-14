@@ -313,12 +313,13 @@ func TestHandlers_NoAuthContext_Return401(t *testing.T) {
 	t.Parallel()
 	h := New(nil)
 	handlers := map[string]http.HandlerFunc{
-		"CreatePolicy": h.CreatePolicy,
-		"ListPolicies": h.ListPolicies,
-		"GetPolicy":    h.GetPolicy,
-		"Submit":       h.Submit,
-		"Approve":      h.Approve,
-		"Publish":      h.Publish,
+		"CreatePolicy":  h.CreatePolicy,
+		"ListPolicies":  h.ListPolicies,
+		"GetPolicy":     h.GetPolicy,
+		"Submit":        h.Submit,
+		"Approve":       h.Approve,
+		"Publish":       h.Publish,
+		"SetReviewDate": h.SetReviewDate,
 	}
 	for name, hf := range handlers {
 		name, hf := name, hf
@@ -356,7 +357,7 @@ func TestApprovePublish_NonApprover_Return403(t *testing.T) {
 		ctx = context.WithValue(ctx, chi.RouteCtxKey, rctx)
 		return base.WithContext(ctx)
 	}
-	for name, hf := range map[string]http.HandlerFunc{"Approve": h.Approve, "Publish": h.Publish} {
+	for name, hf := range map[string]http.HandlerFunc{"Approve": h.Approve, "Publish": h.Publish, "SetReviewDate": h.SetReviewDate} {
 		name, hf := name, hf
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()

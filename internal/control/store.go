@@ -107,9 +107,14 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 			return err
 		}
 
-		// 3. Look up the active predecessor for this bundle_id.
-		var prior dbx.GetActiveControlByBundleIDRow
-		prior, err = q.GetActiveControlByBundleID(ctx, dbx.GetActiveControlByBundleIDParams{
+		// 3. Look up the active predecessor for this bundle_id, locking it
+		//    (FOR UPDATE) so a concurrent upload of the same bundle waits
+		//    here and then decides against what this one commits. Without
+		//    the lock two in-place updates could both copy the same
+		//    manifest into control_manifest_revisions, and the first
+		//    one's text would appear nowhere (issue #1958).
+		var prior dbx.LockActiveControlByBundleIDRow
+		prior, err = q.LockActiveControlByBundleID(ctx, dbx.LockActiveControlByBundleIDParams{
 			TenantID: pgUUID(tenantID),
 			BundleID: b.Manifest.BundleID,
 		})
@@ -154,20 +159,23 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		}
 
 		// 3b. A manifest that differs from the active version's ONLY in
-		//     `description` (prose edit, reflow, whitespace) updates the
-		//     active row in place. Superseding would mint a new control id
-		//     and orphan everything keyed on the old one: owners, evidence,
-		//     evaluations, exceptions, risk and other links (issue #1908).
-		//     Any other difference still versions, as below. Decision:
-		//     docs/audit-log/1908-control-description-in-place-decisions.md.
+		//     `description` (prose edit, reflow, whitespace) and/or
+		//     `external_refs` (backfilling or correcting trace ids)
+		//     updates the active row in place. Superseding would mint a
+		//     new control id and orphan everything keyed on the old one:
+		//     owners, evidence, evaluations, exceptions, risk and other
+		//     links (issues #1908, #1958). Any other difference still
+		//     versions, as below. Decisions:
+		//     docs/audit-log/1908-control-description-in-place-decisions.md,
+		//     docs/audit-log/1958-control-external-refs-in-place-decisions.md.
 		if !isNew {
-			same, cmpErr := manifestsEqualIgnoringDescription([]byte(prior.BundleManifestYaml), b.ManifestYAMLRaw)
+			same, cmpErr := manifestsEqualIgnoringMetadata([]byte(prior.BundleManifestYaml), b.ManifestYAMLRaw)
 			if cmpErr != nil {
 				return cmpErr
 			}
 			if same {
-				// Keep the manifest being overwritten: the prose history
-				// lives append-only in control_manifest_revisions.
+				// Keep the manifest being overwritten: the prose and refs
+				// history lives append-only in control_manifest_revisions.
 				n, err := q.InsertControlManifestRevision(ctx, dbx.InsertControlManifestRevisionParams{
 					TenantID:  pgUUID(tenantID),
 					ControlID: prior.ID,
@@ -178,16 +186,17 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 				if n != 1 {
 					return ErrControlChangedConcurrently
 				}
-				n, err = q.UpdateControlDescriptionInPlace(ctx, dbx.UpdateControlDescriptionInPlaceParams{
+				n, err = q.UpdateControlMetadataInPlace(ctx, dbx.UpdateControlMetadataInPlaceParams{
 					TenantID:           pgUUID(tenantID),
 					ID:                 prior.ID,
 					Description:        b.Manifest.Description,
+					ExternalRefs:       refsJSON,
 					BundleManifestYaml: string(b.ManifestYAMLRaw),
 					BundleManifestHash: b.ManifestHashHex,
 					BundleUploadedBy:   uploader,
 				})
 				if err != nil {
-					return fmt.Errorf("update control description in place: %w", err)
+					return fmt.Errorf("update control metadata in place: %w", err)
 				}
 				if n != 1 {
 					return ErrControlChangedConcurrently
@@ -407,12 +416,17 @@ func resolveSCFAnchor(ctx context.Context, q *dbx.Queries, ref string) (uuid.UUI
 	return uuid.UUID(row.ID.Bytes), nil
 }
 
-// manifestsEqualIgnoringDescription reports whether two control.yaml
-// documents are equal once the top-level `description` key is removed from
-// each. Both sides decode to generic maps, so key order, comments and
-// formatting do not count as differences; any other field change, including
-// a nested evidence_queries[].description, does (issue #1908).
-func manifestsEqualIgnoringDescription(priorYAML, nextYAML []byte) (bool, error) {
+// inPlaceManifestKeys are the top-level control.yaml keys an upload may
+// change without versioning the control: prose (issue #1908) and the
+// trace to outside identifiers (issue #1958). Neither feeds evaluation.
+var inPlaceManifestKeys = []string{"description", "external_refs"}
+
+// manifestsEqualIgnoringMetadata reports whether two control.yaml
+// documents are equal once the inPlaceManifestKeys are removed from each.
+// Both sides decode to generic maps, so key order, comments and formatting
+// do not count as differences; any other field change, including a nested
+// evidence_queries[].description, does.
+func manifestsEqualIgnoringMetadata(priorYAML, nextYAML []byte) (bool, error) {
 	var prior, next map[string]any
 	if err := yaml.Unmarshal(priorYAML, &prior); err != nil {
 		return false, fmt.Errorf("parse prior control manifest: %w", err)
@@ -420,8 +434,10 @@ func manifestsEqualIgnoringDescription(priorYAML, nextYAML []byte) (bool, error)
 	if err := yaml.Unmarshal(nextYAML, &next); err != nil {
 		return false, fmt.Errorf("parse control manifest: %w", err)
 	}
-	delete(prior, "description")
-	delete(next, "description")
+	for _, k := range inPlaceManifestKeys {
+		delete(prior, k)
+		delete(next, k)
+	}
 	return reflect.DeepEqual(prior, next), nil
 }
 
