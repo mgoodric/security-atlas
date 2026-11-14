@@ -2707,6 +2707,18 @@ type OidcIdpGroupMapping struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 }
 
+type OrgRiskCategory struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	Slug        string             `json:"slug"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Archived    bool               `json:"archived"`
+	IsDefault   bool               `json:"is_default"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type OrgTheme struct {
 	ID          pgtype.UUID        `json:"id"`
 	TenantID    pgtype.UUID        `json:"tenant_id"`
@@ -2904,6 +2916,7 @@ type Risk struct {
 	OrgUnitID           pgtype.UUID           `json:"org_unit_id"`
 	Themes              []string              `json:"themes"`
 	AcceptanceStatus    *RiskAcceptanceStatus `json:"acceptance_status"`
+	CategoryID          pgtype.UUID           `json:"category_id"`
 }
 
 type RiskAggregation struct {

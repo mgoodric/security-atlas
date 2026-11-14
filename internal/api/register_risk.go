@@ -44,6 +44,10 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// alongside /v1/risks/heatmap, before the generic /v1/risks/{id}, so
 	// chi's declaration-order match keeps it ahead of the UUID-id route.
 	root.Get("/v1/risks/theme-heatmap", risksH.ThemeHeatmap)
+	// #1809: the tenant's own risk categories (read-only expand step of
+	// #1745). Literal-segment route declared before the generic
+	// /v1/risks/{id}.
+	root.Get("/v1/risks/categories", risksH.ListCategories)
 	// Slice 136: risk register data export (CSV / JSON / XLSX). Reuses
 	// the slice 135 data-export library + slice 145 concurrency cap.
 	// Literal-segment route declared before the generic /v1/risks/{id}
