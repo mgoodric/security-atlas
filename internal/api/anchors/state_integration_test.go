@@ -304,6 +304,46 @@ func TestListAnchors_IncludeStateRollsUpWorstStatePerAnchor_TenantIsolated(t *te
 	}
 }
 
+// #2112 — an excepted control is never rolled up as a pass. One excepted
+// and one passing control under the same anchor roll up `excepted`.
+func TestListAnchors_IncludeStateExceptedOutranksPass(t *testing.T) {
+	ts, bearer := setupHTTPServer(t)
+	admin := dbtest.NewMigratePool(t)
+
+	anchorUUID := anchorIDBySCFID(t, admin, "IAC-06")
+	cleanupTenantState(t, admin, tenantA)
+	t.Cleanup(func() { cleanupTenantState(t, admin, tenantA) })
+	seedAnchorState(t, admin, tenantA, anchorUUID, "excepted", "fresh", time.Now().Add(-2*time.Hour))
+	seedAnchorState(t, admin, tenantA, anchorUUID, "pass", "fresh", time.Now().Add(-1*time.Hour))
+
+	resp, body := get(t, ts, "/v1/anchors?include=state", bearer)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", resp.StatusCode, body)
+	}
+	var got struct {
+		Anchors []struct {
+			SCFID string          `json:"scf_id"`
+			State *map[string]any `json:"state"`
+		} `json:"anchors"`
+	}
+	if err := json.Unmarshal(body, &got); err != nil {
+		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
+	}
+	for _, a := range got.Anchors {
+		if a.SCFID != "IAC-06" {
+			continue
+		}
+		if a.State == nil {
+			t.Fatal("IAC-06 state should be populated")
+		}
+		if r := (*a.State)["result"]; r != "excepted" {
+			t.Fatalf("IAC-06 rolled-up result = %v; want excepted", r)
+		}
+		return
+	}
+	t.Fatal("IAC-06 not present in response")
+}
+
 // AC-1 + AC-2 — the wire shape MUST include the slice 098 design-doc-
 // pinned columns when state is populated (result + freshness_status +
 // last_observed_at). This is the contract slice 098's filters.ts +

@@ -107,8 +107,10 @@ States (canvas §6.3):
 - `requested` — initial state. Set by `POST /v1/exceptions`.
 - `approved` — governance approval recorded. `approved_by` populated. **Approval is not the same as activation** — the effect doesn't take hold until `active`.
 - `denied` — terminal. To revisit, file a new exception.
-- `active` — the effect is in force. A control × scope cell with an active exception evaluates as `excepted` (not `fail`) in downstream dashboards (slice 020 consumer).
-- `expired` — terminal. Set by daily auto-expiry job when `expires_at < now()` for a row in `active`. Reverts control evaluation to normal.
+- `active` — the effect is in force from `effective_from` until `expires_at`. The evaluation engine records the result `excepted` for every control × scope cell the predicate covers, whatever the evidence says (#2112). The whole-tenant evaluation (a control that resolves to no scope cells) is covered only by a predicate that matches every cell.
+- `expired` — terminal. Set by daily auto-expiry job when `expires_at < now()` for a row in `active`. The engine stops honouring an exception at `expires_at` without waiting for the job, so the next evaluation is the normal result.
+
+**`excepted`** is a control evaluation result beside `pass`, `fail`, `na` and `inconclusive`. It is never a pass: it is not displayed as one (the controls list reads "Excepted") and it is not counted as one in drift, effectiveness, residual risk or any pass count. In a worst-state rollup across cells or controls it ranks below `fail` and `inconclusive` and above `pass`. Evidence can never carry it (`evidence_records_result_not_excepted`).
 
 Allowed transitions:
 

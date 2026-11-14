@@ -740,14 +740,18 @@ worst_per_control AS (
     SELECT
         le.control_id,
         CASE MAX(CASE le.result
-                    WHEN 'fail'         THEN 4
-                    WHEN 'inconclusive' THEN 3
+                    WHEN 'fail'         THEN 5
+                    WHEN 'inconclusive' THEN 4
+                    -- #2112: excepted is never a pass. A control with one
+                    -- excepted cell and the rest passing rolls up excepted.
+                    WHEN 'excepted'     THEN 3
                     WHEN 'pass'         THEN 2
                     WHEN 'na'           THEN 1
                     ELSE 0
                  END)
-            WHEN 4 THEN 'fail'
-            WHEN 3 THEN 'inconclusive'
+            WHEN 5 THEN 'fail'
+            WHEN 4 THEN 'inconclusive'
+            WHEN 3 THEN 'excepted'
             WHEN 2 THEN 'pass'
             WHEN 1 THEN 'na'
         END::evidence_result AS result,
