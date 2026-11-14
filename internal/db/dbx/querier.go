@@ -3325,7 +3325,8 @@ type Querier interface {
 	// (app-layer now(), no trigger — matches the repo convention).
 	UpsertTenantLLMRouting(ctx context.Context, arg UpsertTenantLLMRoutingParams) (TenantLlmRouting, error)
 	// Used by the OIDC callback: provision-on-first-sign-in by (idp_issuer, idp_subject).
-	// The composite UNIQUE index on (idp_issuer, idp_subject) WHERE both non-empty
+	// The per-tenant UNIQUE index users_idp_principal_unique on (tenant_id,
+	// idp_issuer, idp_subject) WHERE both non-empty
 	// is the conflict target. On conflict we update display_name + email (the IdP
 	// is canonical) and updated_at.
 	UpsertUserByIdpSubject(ctx context.Context, arg UpsertUserByIdpSubjectParams) (User, error)

@@ -473,6 +473,11 @@ jobs:
       MINIO_SECRET_KEY: minioadmin
       # Slice 015 — NATS JetStream endpoint reachable from the runner.
       NATS_URL: nats://localhost:4222
+      # #1847: ubuntu-latest ships Google Chrome, so the PDF handler tests
+      # (board brief, board pack, questionnaire, walkthrough) must get a real
+      # 200 %PDF- body here; a 503 fails them instead of passing as
+      # graceful degradation. See pdfrender.RequireRealPDF.
+      ATLAS_REQUIRE_PDF: "1"
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
