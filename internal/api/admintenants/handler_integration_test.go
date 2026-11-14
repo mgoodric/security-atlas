@@ -39,6 +39,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -50,9 +51,11 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/admintenants"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
+	meapi "github.com/mgoodric/security-atlas/internal/api/me"
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
+	"github.com/mgoodric/security-atlas/internal/platform"
 )
 
 var (
@@ -192,7 +195,21 @@ func resetSuperAdminAuditLog(t *testing.T) {
 // claims carry the super_admin bit.
 func newRouter(t *testing.T, tenantID, userID uuid.UUID, superAdmin bool, limit int) http.Handler {
 	t.Helper()
-	h := admintenants.New(appPool, adminPool)
+	// The fixture opts in to multi-tenant (#1763): every test here runs
+	// with a session tenant already present, so a create is a second
+	// tenant. The gate itself is tested through newGatedRouter.
+	return routerFor(admintenants.New(appPool, adminPool).
+		WithAllowMultiTenant(func() bool { return true }), tenantID, userID, superAdmin, limit)
+}
+
+// newGatedRouter is newRouter with the multi-tenant opt-in read from
+// ATLAS_ALLOW_MULTI_TENANT, as in production.
+func newGatedRouter(t *testing.T, tenantID, userID uuid.UUID, superAdmin bool) http.Handler {
+	t.Helper()
+	return routerFor(admintenants.New(appPool, adminPool), tenantID, userID, superAdmin, 0)
+}
+
+func routerFor(h *admintenants.Handler, tenantID, userID uuid.UUID, superAdmin bool, limit int) http.Handler {
 	if limit > 0 {
 		h = h.WithLimit(limit)
 	}
@@ -678,6 +695,117 @@ func TestList_ReturnsAllTenants(t *testing.T) {
 	}
 	if !foundCreated {
 		t.Errorf("created tenant absent from list")
+	}
+}
+
+// #1763: a second tenant needs a super_admin AND
+// ATLAS_ALLOW_MULTI_TENANT=true. The session tenant seeded below is the
+// first, so every create here is a second tenant.
+func TestCreate_MultiTenantOptIn(t *testing.T) {
+	resetSuperAdminAuditLog(t)
+	sessionTenantID := seedTenant(t, "Issue 1763 opt-in session")
+	actorID := uuid.New()
+	seedActorUser(t, sessionTenantID, actorID, "test-1763@example.invalid", "Opt-in Creator")
+	seedSuperAdmin(t, actorID)
+	cleanupCreatedTenants(t, actorID)
+	body := map[string]any{"name": "Issue 1763 Second", "slug": "test-1763-second"}
+
+	// Super_admin without the setting: refused, and nothing written.
+	t.Setenv(admintenants.AllowMultiTenantEnvVar, "")
+	res, out := doRequest(t, newGatedRouter(t, sessionTenantID, actorID, true), http.MethodPost, "/v1/admin/tenants", body)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("super_admin without opt-in: expected 403, got %d body=%v", res.StatusCode, out)
+	}
+	if msg, _ := out["error"].(string); !strings.Contains(msg, admintenants.AllowMultiTenantEnvVar) {
+		t.Errorf("403 body should name %s, got %v", admintenants.AllowMultiTenantEnvVar, out)
+	}
+	assertNoTenantWithSlug(t, "test-1763-second")
+
+	// The setting without super_admin: refused.
+	t.Setenv(admintenants.AllowMultiTenantEnvVar, "true")
+	res, out = doRequest(t, newGatedRouter(t, sessionTenantID, actorID, false), http.MethodPost, "/v1/admin/tenants", body)
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("opt-in without super_admin: expected 403, got %d body=%v", res.StatusCode, out)
+	}
+	assertNoTenantWithSlug(t, "test-1763-second")
+
+	// Both: created.
+	res, out = doRequest(t, newGatedRouter(t, sessionTenantID, actorID, true), http.MethodPost, "/v1/admin/tenants", body)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("super_admin with opt-in: expected 200, got %d body=%v", res.StatusCode, out)
+	}
+	var n int
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM tenants WHERE slug = 'test-1763-second'`).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("created tenant rows = %d, %v; want 1", n, err)
+	}
+}
+
+// #1763: an install that already holds two tenants keeps serving without
+// ATLAS_ALLOW_MULTI_TENANT. The setting gates creation only: List works,
+// the tenancy signal reports multi-tenant, and only a further create is
+// refused.
+func TestExistingMultiTenant_ServesWithoutOptIn(t *testing.T) {
+	t.Setenv(admintenants.AllowMultiTenantEnvVar, "")
+	tenantA := seedTenant(t, "Issue 1763 existing A")
+	tenantB := seedTenant(t, "Issue 1763 existing B")
+	actorID := uuid.New()
+	seedActorUser(t, tenantA, actorID, "test-1763-existing@example.invalid", "Existing Admin")
+	seedSuperAdmin(t, actorID)
+	cleanupCreatedTenants(t, actorID)
+	h := newGatedRouter(t, tenantA, actorID, true)
+
+	res, body := doRequest(t, h, http.MethodGet, "/v1/admin/tenants", nil)
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("list without opt-in: expected 200, got %d", res.StatusCode)
+	}
+	seen := map[string]bool{}
+	items, _ := body["items"].([]any)
+	for _, raw := range items {
+		row, _ := raw.(map[string]any)
+		id, _ := row["id"].(string)
+		seen[id] = true
+	}
+	if !seen[tenantA.String()] || !seen[tenantB.String()] {
+		t.Fatalf("list missing a seeded tenant: A=%v B=%v", seen[tenantA.String()], seen[tenantB.String()])
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/me/tenancy", nil)
+	req = req.WithContext(authctx.WithCredential(req.Context(),
+		credstore.Credential{ID: "jwt:test", TenantID: tenantB.String(), UserID: actorID.String()}))
+	rec := httptest.NewRecorder()
+	meapi.NewTenancy(platform.NewStatus(appPool, adminPool)).Get(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("tenancy: expected 200, got %d", rec.Code)
+	}
+	var tenancy struct {
+		TenantCount int  `json:"tenant_count"`
+		MultiTenant bool `json:"multi_tenant"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&tenancy); err != nil {
+		t.Fatalf("decode tenancy: %v", err)
+	}
+	if tenancy.TenantCount < 2 || !tenancy.MultiTenant {
+		t.Fatalf("tenancy = %+v; want tenant_count >= 2, multi_tenant true", tenancy)
+	}
+
+	res, _ = doRequest(t, h, http.MethodPost, "/v1/admin/tenants", map[string]any{
+		"name": "Issue 1763 Third", "slug": "test-1763-third",
+	})
+	if res.StatusCode != http.StatusForbidden {
+		t.Fatalf("create without opt-in on a multi-tenant install: expected 403, got %d", res.StatusCode)
+	}
+}
+
+func assertNoTenantWithSlug(t *testing.T, slug string) {
+	t.Helper()
+	var n int
+	if err := adminPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM tenants WHERE slug = $1`, slug).Scan(&n); err != nil {
+		t.Fatalf("count tenants by slug: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("tenant with slug %q exists (%d rows); the refused create wrote it", slug, n)
 	}
 }
 

@@ -71,3 +71,18 @@ allow if {
     input.resource.type == "saved-views"
     count(input.user.roles) > 0
 }
+
+# #1763 — the install's tenant count (`GET /v1/me/tenancy`).
+#
+# The web app reads it to decide whether to show tenant chrome (ADR 0023
+# decision 2), so every signed-in role must be able to read it, including
+# viewer and control_owner, which no rule admits to `me` reads otherwise.
+# Pinned to this one path so the other `/v1/me/*` endpoints keep their
+# role rules. The response names no tenant, only a count. Default-deny
+# still applies to a roleless credential.
+allow if {
+    is_read
+    input.resource.type == "me"
+    input.request.path == "/v1/me/tenancy"
+    count(input.user.roles) > 0
+}
