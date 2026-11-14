@@ -86,6 +86,9 @@ artifacts:
   # endpoint (AWS S3 leaves this empty for the default global endpoint;
   # MinIO/Ceph/GCS-interop deployments set it explicitly).
   s3Endpoint: https://s3.us-east-1.amazonaws.com
+  # AWS S3 uses virtual-hosted addressing. Leave empty (path-style, the
+  # default whenever an endpoint is set) for MinIO / Ceph.
+  forcePathStyle: false
   region: us-east-1
 
 # --- 4. Real OIDC IdP. ---
