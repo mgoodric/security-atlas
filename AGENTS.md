@@ -64,6 +64,19 @@ just lint               # lint-go (golangci-lint, pinned) + errleak + duphelper 
 just ci                 # lint + test + build
 ```
 
+### Toolchain pins
+
+Local and CI read the same pin files, so they cannot drift:
+
+| Tool | Pinned in                                     | CI reads it via                                        |
+| ---- | --------------------------------------------- | ------------------------------------------------------ |
+| Node | `.nvmrc` (root; `web/` inherits it)           | `actions/setup-node` `node-version-file: .nvmrc`       |
+| uv   | `pyproject.toml` `[tool.uv] required-version` | `astral-sh/setup-uv` (reads the root `pyproject.toml`) |
+
+Run `nvm use` at the repo root (or anywhere below it — nvm searches upward)
+before any `npm`/`node` command. To change a version, edit the pin file only;
+never re-add a literal `node-version:` or setup-uv `version:` to a workflow.
+
 ### The integration harness (not a mocked DB)
 
 Integration tests run against a **real Postgres with RLS enforced** — never a
