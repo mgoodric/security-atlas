@@ -100,3 +100,35 @@ demonstrating itself.
 The controls list renders the raw result enum as its State pill. `excepted`
 alone gets a display label, "Excepted", and the `info` badge hue, never the
 pass hue. It is also a State filter option.
+
+### D10 — Posture counts excepted as covered, now and 90 days ago
+
+`FrameworkPosture` (as #2190 left it) counts a requirement as covered now when
+a defined covering control exists, so an excepted control is already covered
+in `covered_now` with no change. `covered_then` required the latest
+evaluation at or before the 90-day cutoff to be `pass`; it now accepts `pass`
+or `excepted`. The engine writes `excepted` only while an exception is in
+force (D4), so an excepted row at the cutoff means the exception was active
+then. Without this, an exception that started before the window and is still
+running would show as fresh coverage growth over 90 days.
+
+`trend_history` is unchanged: any evaluation on or before the cutoff,
+excepted included, is a baseline.
+
+### D11 — "Covered by exception" is requirements whose every covering control rests on an exception
+
+`covered_by_exception_pct` = requirements covered today only by controls that
+rest on an exception / all in-scope requirements, 0-100. It uses the same
+denominator as `coverage_pct` and is a subset of it, so a reader can subtract
+it to get the demonstrated share. A control rests on an exception when the
+latest evaluation of at least one of its scope cells is `excepted`. A
+requirement with even one covering control that is not excepted does not
+depend on a waiver and is not counted.
+
+It is reported on every posture surface: `GET /v1/frameworks/posture`
+(`covered_by_exception_pct`, golden regenerated), the dashboard tile
+("N% covered by exception", shown only when non-zero), the dashboard export
+(new CSV/XLSX column), MCP `list_framework_posture` (passthrough; the tool
+description names it), and the board pack posture section (narrative clause
+and PDF card line, both only when non-zero; the JSON field is `omitempty`, so
+packs generated before #2112 decode unchanged).

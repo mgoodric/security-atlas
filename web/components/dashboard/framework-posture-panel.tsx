@@ -76,6 +76,14 @@ function PostureTile({ row }: { row: FrameworkPostureRow }) {
       >
         freshness {row.freshness_composite.toFixed(1)}%
       </div>
+      {row.covered_by_exception_pct > 0 ? (
+        <div
+          className="mt-1 text-xs text-muted-foreground"
+          data-testid="framework-tile-exception"
+        >
+          {row.covered_by_exception_pct.toFixed(1)}% covered by exception
+        </div>
+      ) : null}
     </div>
   );
 }

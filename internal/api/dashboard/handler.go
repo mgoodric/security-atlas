@@ -60,11 +60,14 @@ func newHandlerWithReader(r reader) *Handler { return &Handler{store: r} }
 
 // postureWire is the AC-1 row shape: one framework version's posture.
 type postureWire struct {
-	FrameworkID        string  `json:"framework_id"`
-	FrameworkVersion   string  `json:"framework_version"`
-	CoveragePct        float64 `json:"coverage_pct"`
-	FreshnessComposite float64 `json:"freshness_composite"`
-	TrendDelta90d      float64 `json:"trend_delta_90d"`
+	FrameworkID      string  `json:"framework_id"`
+	FrameworkVersion string  `json:"framework_version"`
+	CoveragePct      float64 `json:"coverage_pct"`
+	// CoveredByExceptionPct is the part of CoveragePct that rests only on
+	// active exceptions (#2112), 0-100.
+	CoveredByExceptionPct float64 `json:"covered_by_exception_pct"`
+	FreshnessComposite    float64 `json:"freshness_composite"`
+	TrendDelta90d         float64 `json:"trend_delta_90d"`
 }
 
 // activityWire is the AC-2 row shape: one evidence-ingest activity event.
@@ -112,11 +115,12 @@ func (h *Handler) FrameworkPosture(w http.ResponseWriter, r *http.Request) {
 	out := make([]postureWire, len(rows))
 	for i, p := range rows {
 		out[i] = postureWire{
-			FrameworkID:        uuidString(p.FrameworkID),
-			FrameworkVersion:   p.FrameworkVersion,
-			CoveragePct:        p.CoveragePct,
-			FreshnessComposite: p.FreshnessComposite,
-			TrendDelta90d:      p.TrendDelta90d,
+			FrameworkID:           uuidString(p.FrameworkID),
+			FrameworkVersion:      p.FrameworkVersion,
+			CoveragePct:           p.CoveragePct,
+			CoveredByExceptionPct: p.CoveredByExceptionPct,
+			FreshnessComposite:    p.FreshnessComposite,
+			TrendDelta90d:         p.TrendDelta90d,
 		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{

@@ -215,7 +215,7 @@
     },
     {
       "name": "list_framework_posture",
-      "description": "List the bearer tenant's per-framework posture (coverage percentage, freshness composite, and 90-day trend delta — one row per active framework version). Returns canonical posture rows.",
+      "description": "List the bearer tenant's per-framework posture (coverage percentage, the share of requirements covered only by exception, freshness composite, and 90-day trend delta — one row per active framework version; excepted controls count as covered and are never a pass). Returns canonical posture rows.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

@@ -121,10 +121,13 @@ export type ExpiringExceptionsResponse = {
 // internal/api/dashboard/handler.go. One row per active framework version.
 // `coverage_pct` and `freshness_composite` are 0-100; `trend_delta_90d`
 // is signed (current coverage minus coverage 90 days ago, in points).
+// `covered_by_exception_pct` (#2112) is the part of `coverage_pct` that
+// rests only on active exceptions, 0-100.
 export type FrameworkPostureRow = {
   framework_id: string;
   framework_version: string;
   coverage_pct: number;
+  covered_by_exception_pct: number;
   freshness_composite: number;
   trend_delta_90d: number;
 };
