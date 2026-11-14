@@ -281,6 +281,8 @@ POST /v1/exceptions 8
 POST /v1/incidents 8
 POST /v1/incidents/{id}/close 8
 POST /v1/framework-scopes 8
+POST /v1/framework-scopes/{id}/applicability/bulk 8
+POST /v1/framework-scopes/{id}/applicability/import 8
 POST /v1/install/mark-first-signin 8
 POST /v1/mcp/write-proposals 8
 POST /v1/mcp/write-proposals/{id}/confirm 8
