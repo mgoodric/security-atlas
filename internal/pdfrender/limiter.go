@@ -63,7 +63,18 @@ const (
 	envRenderTimeout  = "ATLAS_PDF_RENDER_TIMEOUT"
 	envMaxConcurrency = "ATLAS_PDF_RENDER_MAX_CONCURRENCY"
 	envQueueWait      = "ATLAS_PDF_RENDER_QUEUE_WAIT"
+	envRequirePDF     = "ATLAS_REQUIRE_PDF"
 )
+
+// RequireRealPDF reports whether ATLAS_REQUIRE_PDF is set to a true value.
+// The CI integration job sets it because its runner has Chrome: there, a
+// PDF handler test under the default limiter must get a 200 `%PDF-` body,
+// and a 503 is a failure rather than graceful degradation. Without it (a
+// developer machine with no Chrome) the tests accept 503 and log it.
+func RequireRealPDF() bool {
+	ok, _ := strconv.ParseBool(os.Getenv(envRequirePDF))
+	return ok
+}
 
 var (
 	// ErrRenderDeadline signals the bounded render deadline elapsed before the
