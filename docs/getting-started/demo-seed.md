@@ -195,6 +195,47 @@ one `me_audit_log` row with action `demo_seed_teardown`. Your forensic
 trail retains the teardown event even though the demo rows themselves
 are about to vanish.
 
+### A `demo` tenant the admin button created before #2043
+
+Before #2043, the **Load demo data** button on `/admin` wrote its forensic
+mark into the clicking admin's organisation instead of the `demo` tenant it
+created. Since #2043, `demo teardown` and the button read only a tenant's
+own mark, so they both refuse such a tenant. Remove it with:
+
+```bash
+ATLAS_ENABLE_DEMO_SEED=true \
+DATABASE_URL='...' \
+  atlas-cli demo teardown-legacy --super-admin-email=you@example.com --dry-run
+```
+
+`--dry-run` runs every check and the delete, prints the rows it would remove
+per table, and rolls back. Run it first, read the counts, then run again
+without `--dry-run`.
+
+`--tenant-slug` defaults to `demo`, the slug the button always used. The
+email must name exactly one active super admin, who is recorded as the actor
+on the `demo_seed_teardown` audit rows (the `super_admin_audit_log` row
+carries `legacy_button_tenant: true`).
+
+The command deletes nothing unless every check holds:
+
+- another tenant holds a pre-#2043 button mark naming the slug, written no
+  earlier than this tenant was created, and no demo teardown has named the
+  slug since. A slug match alone would also accept a later tenant that
+  reused the slug;
+- the tenant carries no mark of its own and was not seeded in place (use
+  `demo teardown` for those);
+- the tenant has at least one user, and every user is a demo user;
+- no OAuth client is bound to the tenant;
+- no table the demo seed does not write holds a row for the tenant. The
+  evaluator's derived rows (`control_evaluations`, `evidence_freshness`)
+  count as demo, since they are computed from demo controls and evidence.
+
+A refusal names the check that failed, and for the last one, the tables
+holding the rows. Rows added by someone exploring the demo as a demo user
+are treated as demo: there is no record of which rows the button wrote, and
+no real user's account exists in the tenant to have written anything else.
+
 ## Forensic filter convention
 
 Every audit-log row written by the demo seeder carries

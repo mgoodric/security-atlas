@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
+	auditnotesapi "github.com/mgoodric/security-atlas/internal/api/auditnotes"
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/authzmw"
 	controlsapi "github.com/mgoodric/security-atlas/internal/api/controls"
@@ -23,6 +24,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	walkthroughsapi "github.com/mgoodric/security-atlas/internal/api/walkthroughs"
 	"github.com/mgoodric/security-atlas/internal/artifact"
+	auditperiod "github.com/mgoodric/security-atlas/internal/audit/period"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/grouprole"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -194,7 +196,15 @@ func (s *Server) buildRouter() *chi.Mux {
 		// (mounted only when ATLAS_TEST_MODE=1) — same rationale as the
 		// bearer-exempt above: the endpoint mints the first JWT, so it
 		// cannot be gated by OPA on a credential it has not yet produced.
-		root.Use(authzmw.Middleware(s.authzEngine, s.authzAudit, "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
+		// #2193: POST /v1/audit-notes carries its audit_period_id in the
+		// body; the hydrator puts it on input.resource.attrs (after checking
+		// the period is in the caller's tenant) for the auditor.rego write
+		// rule.
+		var resourceAttrs authzmw.ResourceAttrsFunc
+		if s.dbPool != nil {
+			resourceAttrs = auditnotesapi.PeriodResourceAttrs(auditperiod.NewStore(s.dbPool))
+		}
+		root.Use(authzmw.MiddlewareWithResourceAttrs(s.authzEngine, s.authzAudit, resourceAttrs, "/auth/", "/health", "/ready", "/metrics", "/v1/version", "/v1/install-state", "/v1/calendar.ics", "/.well-known/", "/oauth/", "/v1/test/issue-jwt", "/scim/"))
 	}
 	// Slice 059: per-request feature-flag cache. Attached AFTER auth /
 	// tenancy / authz so the cache lives inside the same request-context

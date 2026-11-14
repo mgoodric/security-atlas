@@ -88,4 +88,54 @@ describe("safeRedirectTarget", () => {
       "/login?from=https://evil.com",
     );
   });
+
+  // #2196 — control characters. Browsers strip TAB, LF and CR from URLs,
+  // so `/\t/evil.com` in a Location header becomes `//evil.com`, an open
+  // redirect. `?from=/%09/evil.com` arrives here already decoded.
+  test.each([
+    ["TAB", "/\t/evil.example.com"],
+    ["LF", "/\n/evil.example.com"],
+    ["CR", "/\r/evil.example.com"],
+    ["NUL", "/\u0000/evil.example.com"],
+    ["DEL", "/\u007f/evil.example.com"],
+    ["TAB before a backslash", "/\t\\evil.example.com"],
+    ["control character mid-path", "/risks\t/x"],
+  ])("rejects a %s control character", (_name, target) => {
+    expect(safeRedirectTarget(target)).toBe("/dashboard");
+  });
+
+  test.each([
+    ["slash then backslash", "/\\/evil.example.com"],
+    ["backslash then slash", "\\/evil.example.com"],
+    ["double backslash", "/\\\\evil.example.com"],
+    ["triple slash", "///evil.example.com"],
+  ])("rejects mixed slashes and backslashes: %s", (_name, target) => {
+    expect(safeRedirectTarget(target)).toBe("/dashboard");
+  });
+
+  // A percent-escape that is still encoded stays inside the path, so the
+  // URL parser resolves it same-origin and it passes unchanged. The decoded
+  // forms above are the ones that must not.
+  test.each([
+    ["%09", "/%09/evil.example.com"],
+    ["%0a", "/%0a/evil.example.com"],
+    ["%0d", "/%0d/evil.example.com"],
+    ["%00", "/%00/evil.example.com"],
+    ["%2F%2F", "/%2F%2Fevil.example.com"],
+    ["%5C", "/%5Cevil.example.com"],
+  ])("keeps a still-encoded %s inside the path", (_name, target) => {
+    expect(safeRedirectTarget(target)).toBe(target);
+  });
+
+  test("keeps the query string and fragment of a safe path", () => {
+    expect(safeRedirectTarget("/risks?status=open#top")).toBe(
+      "/risks?status=open#top",
+    );
+  });
+
+  // A dot segment that collapses to a protocol-relative path once a URL
+  // parser removes it.
+  test("rejects a dot segment that resolves to //host", () => {
+    expect(safeRedirectTarget("/.//evil.example.com")).toBe("/dashboard");
+  });
 });

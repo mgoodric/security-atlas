@@ -53,6 +53,12 @@ const pgErrForeignKeyViolation = "23503"
 // RetainedLedger is the reason given for an append-only ledger table.
 const RetainedLedger = "append-only ledger (ADR-0012, tombstone only)"
 
+// RetainedNoAppRole is the reason given for every table when the database
+// has no atlas_app role. Two of the three ledger signals ask what atlas_app
+// may delete, so without the role no table can be told apart from a ledger,
+// and a purge keeps them all.
+const RetainedNoAppRole = "no atlas_app role: cannot classify, keeping all"
+
 // UnboundTableCount is one tenant-scoped table and how many of its rows
 // carry the all-zeros tenant. Retained is empty when a purge deletes the
 // rows, and otherwise says why it keeps them.
@@ -206,13 +212,18 @@ func PurgeUnboundRows(ctx context.Context, tx pgx.Tx, confirmRows int64, osUser 
 	if err != nil {
 		return PurgeResult{}, err
 	}
-	ledgerBefore, err := ledgerTotals(ctx, tx)
-	if err != nil {
-		return PurgeResult{}, err
-	}
-	if total := PurgeableRows(before); total != confirmRows {
+	total := PurgeableRows(before)
+	if total != confirmRows {
 		return PurgeResult{}, fmt.Errorf("%w: %d purgeable row(s) in the all-zeros tenant, %d confirmed",
 			ErrPurgeNotConfirmed, total, confirmRows)
+	}
+	// With nothing to delete there is no cascade to guard against, so the
+	// ledgers are not counted.
+	var ledgerBefore map[string]int64
+	if total > 0 {
+		if ledgerBefore, err = ledgerTotals(ctx, tx); err != nil {
+			return PurgeResult{}, err
+		}
 	}
 
 	var pending []tableRef
@@ -251,14 +262,9 @@ func PurgeUnboundRows(ctx context.Context, tx pgx.Tx, confirmRows int64, osUser 
 	if err != nil {
 		return PurgeResult{}, err
 	}
-	ledgerAfter, err := ledgerTotals(ctx, tx)
-	if err != nil {
-		return PurgeResult{}, err
-	}
-	for table, n := range ledgerBefore {
-		if ledgerAfter[table] != n {
-			return PurgeResult{}, fmt.Errorf("oauthclient: purge changed ledger table %s (%d rows across all tenants, now %d)",
-				table, n, ledgerAfter[table])
+	if total > 0 {
+		if err := checkLedgersUnchanged(ctx, tx, ledgerBefore); err != nil {
+			return PurgeResult{}, err
 		}
 	}
 	result.AuditID, err = recordPurge(ctx, tx, result, osUser)
@@ -266,6 +272,28 @@ func PurgeUnboundRows(ctx context.Context, tx pgx.Tx, confirmRows int64, osUser 
 		return PurgeResult{}, err
 	}
 	return result, nil
+}
+
+// checkLedgersUnchanged fails when any ledger table's row count, across
+// all tenants, differs from before.
+func checkLedgersUnchanged(ctx context.Context, tx pgx.Tx, before map[string]int64) error {
+	after, err := ledgerTotals(ctx, tx)
+	if err != nil {
+		return err
+	}
+	return compareLedgerTotals(before, after)
+}
+
+// compareLedgerTotals fails when any table in before has a different row
+// count in after.
+func compareLedgerTotals(before, after map[string]int64) error {
+	for table, n := range before {
+		if after[table] != n {
+			return fmt.Errorf("oauthclient: purge changed ledger table %s (%d rows across all tenants, now %d)",
+				table, n, after[table])
+		}
+	}
+	return nil
 }
 
 // ledgerTotals counts every row, in every tenant, of each ledger table, so
@@ -347,9 +375,19 @@ func listUnbound(ctx context.Context, tx pgx.Tx) ([]UnboundTableCount, []tableRe
 	if err != nil {
 		return nil, nil, err
 	}
-	retained, err := retainedTables(ctx, tx, ledger)
+	hasAppRole, err := appRoleExists(ctx, tx)
 	if err != nil {
 		return nil, nil, err
+	}
+	retained := map[tableRef]string{}
+	if hasAppRole {
+		if retained, err = retainedTables(ctx, tx, ledger); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		for _, table := range tables {
+			retained[table] = RetainedNoAppRole
+		}
 	}
 	var (
 		out  []UnboundTableCount
@@ -366,6 +404,15 @@ func listUnbound(ctx context.Context, tx pgx.Tx) ([]UnboundTableCount, []tableRe
 		}
 	}
 	return out, refs, nil
+}
+
+// appRoleExists reports whether the database has an atlas_app role.
+func appRoleExists(ctx context.Context, tx pgx.Tx) (bool, error) {
+	var ok bool
+	if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'atlas_app')").Scan(&ok); err != nil {
+		return false, fmt.Errorf("oauthclient: look up atlas_app role: %w", err)
+	}
+	return ok, nil
 }
 
 func tenantTables(ctx context.Context, tx pgx.Tx) ([]tableRef, map[tableRef]bool, error) {

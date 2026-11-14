@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	llmroutingapi "github.com/mgoodric/security-atlas/internal/api/llmrouting"
+	"github.com/mgoodric/security-atlas/internal/controlimport"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/llm/cloud"
 )
@@ -67,6 +68,13 @@ func (s *Server) cloudLLMOptedIn(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	return cfg.IsCloud, nil
+}
+
+// importRerankAllowed is the control importer's rerank gate: a cloud-routed
+// tenant, or one whose import settings opt in to reranking on local Ollama
+// (#2079).
+func (s *Server) importRerankAllowed(settings *controlimport.Store) controlimport.RerankGate {
+	return controlimport.OptInGate(s.cloudLLMOptedIn, settings.GetSettings)
 }
 
 // registerLLMRouting mounts the tenant-admin routing-config endpoint. The

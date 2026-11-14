@@ -182,6 +182,9 @@ type Risk struct {
 	Level     dbx.RiskLevel
 	OrgUnitID *uuid.UUID
 	Themes    []string
+	// ChildCount is how many child risks roll up into this one (#2060).
+	// Non-zero marks a roll-up. Only List sets it; other reads leave it 0.
+	ChildCount int
 }
 
 // CreateInput is the API-shape for POST /v1/risks. The store re-validates
@@ -402,6 +405,10 @@ type ListFilter struct {
 	// org_unit. Slice 067 (AC-4): additive — the other half of the
 	// heatmap-cell-click filter (a cell is a (theme, org_unit) pair).
 	OrgUnitID *uuid.UUID
+	// IncludeRollUps keeps roll-up parents (risks with at least one child
+	// linked) in the result (#2060). Left false, List drops them so a
+	// parent is never counted beside the children it summarises.
+	IncludeRollUps bool
 }
 
 // List returns all risks for the active tenant, optionally filtered and
@@ -415,8 +422,20 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 		if err != nil {
 			return fmt.Errorf("list risks: %w", err)
 		}
+		counts, err := q.ListRiskChildCountsForTenant(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("list risk child counts: %w", err)
+		}
+		childCount := make(map[uuid.UUID]int, len(counts))
+		for _, c := range counts {
+			childCount[uuid.UUID(c.ParentRiskID.Bytes)] = int(c.ChildCount)
+		}
 		out = make([]Risk, 0, len(rows))
 		for _, r := range rows {
+			n := childCount[uuid.UUID(r.ID.Bytes)]
+			if n > 0 && !filter.IncludeRollUps {
+				continue
+			}
 			if filter.Treatment != "" && r.Treatment != filter.Treatment {
 				continue
 			}
@@ -440,7 +459,9 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Risk, error) {
 					continue
 				}
 			}
-			out = append(out, riskFromRow(r))
+			rk := riskFromRow(r)
+			rk.ChildCount = n
+			out = append(out, rk)
 		}
 		if filter.Sort == SortResidualAge {
 			sortByResidualThenAge(out)

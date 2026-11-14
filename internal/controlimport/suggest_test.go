@@ -253,7 +253,7 @@ func TestRunDropsABatchNoLongerPendingOnceItHasASlot(t *testing.T) {
 	store.status = SuggestionsFailed // the sweeper got there first
 	store.saveCalls, store.keywordVersions = nil, nil
 	b.SuggestionsStatus = SuggestionsPending
-	_, err = s.suggest(tenantCtx(t, batchTenant), b, false)
+	_, err = s.suggest(tenantCtx(t, batchTenant), b, 0)
 	if !errors.Is(err, ErrSuggestionsNoLongerPending) {
 		t.Fatalf("suggest err = %v, want ErrSuggestionsNoLongerPending", err)
 	}
@@ -280,7 +280,7 @@ func TestLateReadySaveLeavesAFailedBatchFailed(t *testing.T) {
 	// The sweeper fails the batch between the slot re-check and the save.
 	sweepDuringCompute := &sweepingStore{fakeBatchStore: store}
 	s.store = sweepDuringCompute
-	_, err = s.suggest(tenantCtx(t, batchTenant), b, false)
+	_, err = s.suggest(tenantCtx(t, batchTenant), b, 0)
 	if !errors.Is(err, ErrSuggestionsNoLongerPending) {
 		t.Fatalf("suggest err = %v, want ErrSuggestionsNoLongerPending", err)
 	}

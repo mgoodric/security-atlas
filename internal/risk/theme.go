@@ -4,9 +4,8 @@
 // frontend's theme picker.
 //
 // The default vocabulary is seeded into `org_themes` (tenant_id IS NULL) by
-// migration 20260511000015 (10 canvas §6.5 themes). Tenant-private themes
-// are created via a separate (future) endpoint — slice 053 does not ship a
-// "create theme" endpoint; it consumes the vocabulary.
+// migration 20260511000015 (10 canvas §6.5 themes). Organisation themes are
+// created, renamed and deleted in theme_admin.go (#1811).
 
 package risk
 
@@ -189,6 +188,12 @@ func (s *Store) GetRiskThemes(ctx context.Context, riskID uuid.UUID) ([]string, 
 func validateThemesAgainstVocab(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, themes []string) error {
 	if len(themes) == 0 {
 		return nil
+	}
+	// #1811: hold the vocabulary against a concurrent rename or delete
+	// until this write commits, so it cannot store a name that no longer
+	// exists.
+	if err := q.LockThemeVocabularyShared(ctx, pgUUID(tenantID)); err != nil {
+		return fmt.Errorf("lock theme vocabulary: %w", err)
 	}
 	rows, err := q.ListAllVisibleThemes(ctx, pgUUID(tenantID))
 	if err != nil {
