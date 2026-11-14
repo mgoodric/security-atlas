@@ -144,7 +144,7 @@ kubectl exec -it deploy/postgres -- psql -U atlas_migrate atlas \
   -c "SELECT id, name FROM tenants;"
 ```
 
-One row means a single-tenant install. With several, pass the bootstrap tenant's ID as `--tenant` to the recovery `--reset-bootstrap --force` command if you need to name it.
+One row means a single-tenant install. With several, the recovery `--reset-bootstrap --force` command refuses an admin API key such as `ATLAS_BOOTSTRAP_TOKEN`: pass a super_admin JWT as `--token`, with `--http-endpoint http://atlas:8080`, and the bootstrap tenant's ID as `--tenant` if you need to name it.
 
 ---
 

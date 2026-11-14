@@ -45,8 +45,8 @@ func (s *Service) SetBootstrapResetter(r BootstrapResetter) {
 }
 
 // ResetBootstrap re-arms first login for an operator locked out of it
-// (#2121). The resetter authorizes the caller: an admin key on a
-// single-tenant install.
+// (#2121). The resetter authorizes the caller: RequireAdmin, then the
+// install must have exactly one tenant.
 func (s *Service) ResetBootstrap(ctx context.Context, req *adminv1.ResetBootstrapRequest) (*adminv1.ResetBootstrapResponse, error) {
 	if s.resetter == nil {
 		return nil, status.Error(codes.Unavailable, "bootstrap reset not configured")
