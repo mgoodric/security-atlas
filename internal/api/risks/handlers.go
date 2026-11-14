@@ -20,6 +20,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -109,10 +110,15 @@ type createReq struct {
 }
 
 type riskWire struct {
-	ID            string          `json:"id"`
-	Title         string          `json:"title"`
-	Description   string          `json:"description"`
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	// Category is the slug of the organisation category the risk
+	// references (#1812); CategoryName is its display name. Seeded slugs
+	// equal the old enum values, so existing clients read the same value.
 	Category      string          `json:"category"`
+	CategoryID    string          `json:"category_id,omitempty"`
+	CategoryName  string          `json:"category_name,omitempty"`
 	Methodology   string          `json:"methodology"`
 	InherentScore json.RawMessage `json:"inherent_score"`
 	Treatment     string          `json:"treatment"`
@@ -277,7 +283,7 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 	}
 	filter := risk.ListFilter{
 		Treatment:   dbx.RiskTreatment(r.URL.Query().Get("treatment")),
-		Category:    dbx.RiskCategory(r.URL.Query().Get("category")),
+		Categories:  categoryRefs(r.URL.Query()["category"]),
 		Methodology: dbx.RiskMethodology(r.URL.Query().Get("methodology")),
 		Sort:        sortOrder,
 		Theme:       r.URL.Query().Get("theme"),
@@ -302,6 +308,10 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 	}
 	risks, err := h.lister.List(ctx, filter)
 	if err != nil {
+		if risk.IsUnknownCategory(err) {
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		httperr.WriteInternal(w, r, "list risks", err)
 		return
 	}
@@ -310,6 +320,22 @@ func (h *Handler) ListRisks(w http.ResponseWriter, r *http.Request) {
 		out[i] = riskWireFrom(rk)
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"risks": out, "count": len(out)})
+}
+
+// categoryRefs flattens ?category= values into category refs (#1812). The
+// filter takes several categories as repeated parameters
+// (?category=a&category=b), comma-separated (?category=a,b), or both.
+// Empty items are dropped.
+func categoryRefs(values []string) []string {
+	var out []string
+	for _, v := range values {
+		for _, ref := range strings.Split(v, ",") {
+			if ref = strings.TrimSpace(ref); ref != "" {
+				out = append(out, ref)
+			}
+		}
+	}
+	return out
 }
 
 // ThemeHeatmap handles GET /v1/risks/theme-heatmap (slice 067, AC-3) —
@@ -419,13 +445,18 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 type patchReq struct {
 	Level     *string         `json:"level"`
 	OrgUnitID json.RawMessage `json:"org_unit_id"`
+	// Category moves the risk onto another of the tenant's categories, by
+	// slug or id (#1812).
+	Category *string `json:"category"`
 }
 
 // PatchRisk handles PATCH /v1/risks/{id} (#1749): move a risk between
-// hierarchy levels and org units. Only `level` and `org_unit_id` are
-// accepted; any other field is a 400, so a caller never mistakes this for a
-// general update. Each change writes one risk_audit_log row naming the
-// caller. A level that differs from the target unit's level is a 400.
+// hierarchy levels and org units, and (#1812) onto another category. Only
+// `level`, `org_unit_id` and `category` are accepted; any other field is a
+// 400, so a caller never mistakes this for a general update. Each change
+// writes one risk_audit_log row naming the caller. A level that differs
+// from the target unit's level is a 400, as is an unknown or archived
+// category; a risk already on an archived category can be moved off it.
 func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
@@ -448,7 +479,7 @@ func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, risk.ErrNotFound):
 			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
-		case risk.IsPlacementValidation(err):
+		case risk.IsPlacementValidation(err), risk.IsCategoryRefusal(err):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "update risk placement", err)
@@ -465,7 +496,7 @@ func decodePatch(r *http.Request) (risk.PlacementInput, string) {
 	dec := json.NewDecoder(r.Body)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
-		return risk.PlacementInput{}, "invalid JSON body: only level and org_unit_id can be changed"
+		return risk.PlacementInput{}, "invalid JSON body: only level, org_unit_id and category can be changed"
 	}
 	var in risk.PlacementInput
 	if req.Level != nil {
@@ -488,8 +519,14 @@ func decodePatch(r *http.Request) (risk.PlacementInput, string) {
 			in.OrgUnitID = &ouID
 		}
 	}
-	if req.Level == nil && !in.OrgUnitSet {
-		return risk.PlacementInput{}, "body must set level and/or org_unit_id"
+	if req.Category != nil {
+		if *req.Category == "" {
+			return risk.PlacementInput{}, "category must be a category slug or id"
+		}
+		in.CategoryRef = *req.Category
+	}
+	if req.Level == nil && !in.OrgUnitSet && req.Category == nil {
+		return risk.PlacementInput{}, "body must set level, org_unit_id and/or category"
 	}
 	return in, ""
 }
@@ -597,7 +634,8 @@ func riskWireFrom(r risk.Risk) riskWire {
 		ID:                  r.ID.String(),
 		Title:               r.Title,
 		Description:         r.Description,
-		Category:            string(r.Category),
+		Category:            r.CategorySlug,
+		CategoryName:        r.CategoryName,
 		Methodology:         string(r.Methodology),
 		InherentScore:       jsonRaw(r.InherentScore),
 		Treatment:           string(r.Treatment),
@@ -608,6 +646,14 @@ func riskWireFrom(r risk.Risk) riskWire {
 		InstrumentReference: r.InstrumentReference,
 		CreatedAt:           r.CreatedAt,
 		UpdatedAt:           r.UpdatedAt,
+	}
+	if w.Category == "" {
+		// A Risk built outside the Store (a test fake) has no category
+		// names; fall back to the dual-written enum.
+		w.Category = string(r.Category)
+	}
+	if r.CategoryID != uuid.Nil {
+		w.CategoryID = r.CategoryID.String()
 	}
 	if r.ReviewDueAt != nil {
 		t := *r.ReviewDueAt

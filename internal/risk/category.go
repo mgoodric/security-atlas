@@ -179,3 +179,73 @@ func categoryFromRow(r dbx.OrgRiskCategory) Category {
 	}
 	return c
 }
+
+// categoriesByID returns the tenant's categories, archived included, keyed
+// by id. A risk's category slug and name are read from here (#1812): the
+// reference is the source of truth, the enum only a dual-written copy.
+func categoriesByID(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (map[uuid.UUID]Category, error) {
+	rows, err := q.ListRiskCategories(ctx, pgUUID(tenantID))
+	if err != nil {
+		return nil, fmt.Errorf("list risk categories: %w", err)
+	}
+	out := make(map[uuid.UUID]Category, len(rows))
+	for _, r := range rows {
+		c := categoryFromRow(r)
+		out[c.ID] = c
+	}
+	return out, nil
+}
+
+// setCategoryNames fills r's category slug and name from byID.
+func setCategoryNames(byID map[uuid.UUID]Category, r *Risk) {
+	c := byID[r.CategoryID]
+	r.CategorySlug, r.CategoryName = c.Slug, c.Name
+}
+
+// withCategoryNames fills the category slug and name of each risk from the
+// category it references.
+func withCategoryNames(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, risks ...*Risk) error {
+	byID, err := categoriesByID(ctx, q, tenantID)
+	if err != nil {
+		return err
+	}
+	for _, r := range risks {
+		setCategoryNames(byID, r)
+	}
+	return nil
+}
+
+// categoryFilter resolves a list filter's category refs (slugs or ids)
+// against the tenant's categories, archived included: an archived category
+// stays filterable. It returns nil when refs is empty (no filter), and an
+// UnknownCategoryError naming every slug the tenant has when a ref matches
+// none of them.
+func categoryFilter(byID map[uuid.UUID]Category, refs []string) (map[uuid.UUID]bool, error) {
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	want := make(map[uuid.UUID]bool, len(refs))
+	for _, ref := range refs {
+		id, ok := matchCategory(byID, ref)
+		if !ok {
+			valid := make([]string, 0, len(byID))
+			for _, c := range byID {
+				valid = append(valid, c.Slug)
+			}
+			slices.Sort(valid)
+			return nil, &UnknownCategoryError{Ref: ref, Valid: valid}
+		}
+		want[id] = true
+	}
+	return want, nil
+}
+
+// matchCategory finds the category ref names, by slug or by id.
+func matchCategory(byID map[uuid.UUID]Category, ref string) (uuid.UUID, bool) {
+	for id, c := range byID {
+		if c.Slug == ref || id.String() == ref {
+			return id, true
+		}
+	}
+	return uuid.Nil, false
+}
