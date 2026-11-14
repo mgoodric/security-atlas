@@ -20,21 +20,23 @@ export function InvestmentPanel({
       className="grid grid-cols-1 gap-5 md:grid-cols-2"
       data-testid="investment-panel"
     >
-      <div className="rounded-lg border border-slate-200 p-5">
-        <div className="mb-2 text-xs text-slate-500">Quarter program spend</div>
+      <div className="rounded-lg border border-border p-5">
+        <div className="mb-2 text-xs text-muted-foreground">
+          Quarter program spend
+        </div>
         <div
           className="mb-3 text-2xl font-semibold"
           data-testid="spend-display"
         >
           {formatUSD(spendUSD)}
         </div>
-        <p className="text-xs text-slate-500">
+        <p className="text-xs text-muted-foreground">
           Operator-entered. v1 has no automated spend connector — type the
           quarter total in the section editor below and save.
         </p>
       </div>
-      <div className="rounded-lg border border-slate-200 p-5">
-        <div className="mb-2 text-xs text-slate-500">
+      <div className="rounded-lg border border-border p-5">
+        <div className="mb-2 text-xs text-muted-foreground">
           Coverage delta this quarter
         </div>
         <div
@@ -48,15 +50,15 @@ export function InvestmentPanel({
               : coverageDelta}
           {coverageDelta !== 0 ? " pts" : ""}
         </div>
-        <p className="text-sm text-slate-600">
+        <p className="text-sm text-muted-foreground">
           Current coverage minus the operator-entered baseline.
         </p>
-        <div className="mt-3 border-t border-slate-200 pt-3 text-sm">
-          <div className="mb-1 text-xs text-slate-500">
+        <div className="mt-3 border-t border-border pt-3 text-sm">
+          <div className="mb-1 text-xs text-muted-foreground">
             Implied cost per coverage point
           </div>
           <div
-            className="text-lg font-semibold text-slate-900"
+            className="text-lg font-semibold text-foreground"
             data-testid="cost-per-coverage-point"
           >
             {costPerCoveragePoint > 0
