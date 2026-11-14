@@ -83,7 +83,12 @@ test.describe("/risks roll-ups toggle (#2060)", () => {
     await page.goto("/risks");
     const count = page.getByTestId("risks-count-label");
     await expect(count).toHaveText("3 risks", { timeout: 30_000 });
-    await expect(page.getByTestId("risks-row-rollup")).toHaveCount(0);
+    // ListTable renders the desktop table and the hidden mobile card stack,
+    // so the marker exists twice; count only the one on screen.
+    const marker = page
+      .getByTestId("risks-row-rollup")
+      .filter({ visible: true });
+    await expect(marker).toHaveCount(0);
 
     const toggle = page.getByTestId("risks-show-rollups");
     await expect(toggle).not.toBeChecked();
@@ -94,7 +99,6 @@ test.describe("/risks roll-ups toggle (#2060)", () => {
     await expect(page).toHaveURL(/[?&]rollups=1/);
     await expect(toggle).toBeChecked();
     await expect(count).toHaveText("4 risks");
-    const marker = page.getByTestId("risks-row-rollup");
     await expect(marker).toHaveCount(1);
     await expect(marker).toHaveText("Roll-up · 2 children");
     await expect(marker).toHaveAttribute(
@@ -106,6 +110,6 @@ test.describe("/risks roll-ups toggle (#2060)", () => {
     await expect(page).not.toHaveURL(/rollups=1/);
     await expect(toggle).not.toBeChecked();
     await expect(count).toHaveText("3 risks");
-    await expect(page.getByTestId("risks-row-rollup")).toHaveCount(0);
+    await expect(marker).toHaveCount(0);
   });
 });
