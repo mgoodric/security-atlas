@@ -137,8 +137,9 @@ func (p PoolImplicitTenantResolver) ImplicitTenant(ctx context.Context) (uuid.UU
 	return ref.ID, nil
 }
 
-// AttachImplicitTenantResolver lets POST /auth/local/login omit tenant_id
-// on a single-tenant install. Without it, tenant_id stays required.
+// AttachImplicitTenantResolver lets POST /auth/local/login and the
+// /auth/oidc/login + callback routes omit tenant_id on a single-tenant
+// install. Without it, tenant_id stays required.
 func (h *Handler) AttachImplicitTenantResolver(r ImplicitTenantResolver) { h.implicitTenant = r }
 
 // ErrMsgTenantIDRequired is the 400 body for a login without tenant_id when
@@ -146,7 +147,7 @@ func (h *Handler) AttachImplicitTenantResolver(r ImplicitTenantResolver) { h.imp
 // several, and names none: the caller is unauthenticated.
 const ErrMsgTenantIDRequired = "tenant_id is required"
 
-// loginTenant picks the tenant for a local login. An explicit tenant_id
+// loginTenant picks the tenant for a local or OIDC login. An explicit tenant_id
 // wins; the all-zeros id is never accepted. An empty tenant_id falls back
 // to the implicit tenant. On failure it returns the HTTP status and message
 // to answer with.
@@ -169,7 +170,7 @@ func loginTenant(ctx context.Context, raw string, resolver ImplicitTenantResolve
 	case err == nil, errors.Is(err, tenancy.ErrNoTenants), errors.As(err, &ambiguous):
 		return uuid.Nil, http.StatusBadRequest, ErrMsgTenantIDRequired
 	default:
-		slog.ErrorContext(ctx, "local login: resolve implicit tenant", "err", err)
+		slog.ErrorContext(ctx, "login: resolve implicit tenant", "err", err)
 		return uuid.Nil, http.StatusInternalServerError, "login failed"
 	}
 }
@@ -260,17 +261,18 @@ func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
 
 // OIDCLogin handles GET /auth/oidc/login?tenant_id=...&idp=...
 // It generates state + PKCE, looks up the IdP, and 302-redirects to the
-// IdP's authorize endpoint.
+// IdP's authorize endpoint. tenant_id may be omitted on a single-tenant
+// install, where the sole tenant's IdP config is used (#1761); on a
+// multi-tenant install its absence is a 400 naming tenant_id.
 func (h *Handler) OIDCLogin(w http.ResponseWriter, r *http.Request) {
-	tenantIDStr := r.URL.Query().Get("tenant_id")
 	idpName := r.URL.Query().Get("idp")
-	if tenantIDStr == "" || idpName == "" {
-		writeAuthError(w, http.StatusBadRequest, "tenant_id and idp query parameters are required")
+	if idpName == "" {
+		writeAuthError(w, http.StatusBadRequest, "idp query parameter is required")
 		return
 	}
-	tenantID, err := uuid.Parse(tenantIDStr)
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, "invalid tenant_id")
+	tenantID, code, msg := loginTenant(r.Context(), r.URL.Query().Get("tenant_id"), h.implicitTenant)
+	if code != 0 {
+		writeAuthError(w, code, msg)
 		return
 	}
 	ctx, err := tenancy.WithTenant(r.Context(), tenantID.String())
@@ -323,11 +325,11 @@ const ErrMsgBootstrapAmbiguousTenant = "several organisations exist and no user 
 // returns Bootstrapped=false and the handler falls through to the
 // existing UpsertOIDC + session-create path unchanged.
 func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
-	// Tenant is recovered from the flow cookies by the resolver.
-	tenantIDStr := r.URL.Query().Get("tenant_id")
-	tenantID, err := uuid.Parse(tenantIDStr)
-	if err != nil {
-		writeAuthError(w, http.StatusBadRequest, "invalid or missing tenant_id")
+	// tenant_id may be omitted on a single-tenant install, as at
+	// /auth/oidc/login (#1761).
+	tenantID, code, msg := loginTenant(r.Context(), r.URL.Query().Get("tenant_id"), h.implicitTenant)
+	if code != 0 {
+		writeAuthError(w, code, msg)
 		return
 	}
 	ctx, err := tenancy.WithTenant(r.Context(), tenantID.String())
