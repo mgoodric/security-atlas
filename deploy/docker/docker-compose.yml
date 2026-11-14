@@ -435,7 +435,14 @@ services:
       # while the connecting peer is inside one of these CIDRs. SECURITY:
       # list only your own proxy addresses; 0.0.0.0/0 reopens the spoofing
       # vector. See .env.example for the full warning.
-      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-}
+      #
+      # #2040: the default trusts exactly one address, the web container's
+      # fixed IP on `bffnet` (below), so the login BFF's X-Forwarded-For
+      # gives each browser its own per-IP login bucket. Nothing else can
+      # connect from that address: a browser on the host-published :8080
+      # arrives from a gateway or LAN address, which stays untrusted. If you
+      # set TRUSTED_PROXY_CIDRS for your own proxy, keep 10.125.0.2/32 in it.
+      TRUSTED_PROXY_CIDRS: ${TRUSTED_PROXY_CIDRS:-10.125.0.2/32}
       # OE-553: demo-seed opt-in gate (slices 205 + 278). The server's
       # admindemo handler and the atlas-cli `demo` commands both read this
       # ONE variable and admit only the exact lowercase string "true"
@@ -487,6 +494,10 @@ services:
       OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-}
       ATLAS_DEPLOYMENT_ENVIRONMENT: ${ATLAS_DEPLOYMENT_ENVIRONMENT:-}
       ATLAS_METRICS_FALLBACK_ENABLE: ${ATLAS_METRICS_FALLBACK_ENABLE:-false}
+    # #2040: `default` for the backing services, `bffnet` for web.
+    networks:
+      - default
+      - bffnet
     ports:
       - "${ATLAS_HTTP_PORT:-8080}:8080"
       - "${ATLAS_GRPC_PORT:-50051}:50051"
@@ -541,9 +552,28 @@ services:
       # one hostname. Override only when the browser must reach atlas at
       # a different origin than the web frontend.
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+      # #2040: reverse proxies in front of web whose X-Forwarded-For the
+      # login BFF trusts when it works out the browser's IP. Empty: browsers
+      # connect to web directly and the socket peer is the client.
+      WEB_TRUSTED_PROXY_CIDRS: ${WEB_TRUSTED_PROXY_CIDRS:-}
+    # #2040: web sits only on bffnet at a fixed address, the one atlas's
+    # default TRUSTED_PROXY_CIDRS names, so atlas trusts web's forwarded
+    # client IP and no other container's.
+    networks:
+      bffnet:
+        ipv4_address: 10.125.0.2
     ports:
       - "${WEB_PORT:-3000}:3000"
     restart: unless-stopped
+
+networks:
+  # #2040: web <-> atlas only. Fixed so the web address is known ahead of
+  # time; a /29 leaves the gateway, web and atlas a few spare addresses.
+  bffnet:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.125.0.0/29
 
 volumes:
   pg-data:

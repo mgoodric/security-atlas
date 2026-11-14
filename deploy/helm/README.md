@@ -163,6 +163,23 @@ TLS is opt-in, two ways:
 
 With neither, the Ingress is plain HTTP (dev only).
 
+## Client IPs and login throttling
+
+`/auth/local/login` throttles per client IP. Browser logins reach it
+through the web pod's login BFF, so two settings make that bucket per
+browser rather than one bucket for the whole web Deployment (#2040):
+
+- `web.trustedProxyCIDRs` — where the Ingress controller pods connect
+  from. The BFF walks `X-Forwarded-For` through these to the browser's IP
+  and forwards only that address; a header a browser forges is never
+  passed on.
+- `atlas.trustedProxyCIDRs` — where the web pods connect from. atlas
+  honours `X-Forwarded-For` only from these addresses.
+
+On most clusters both are the pod CIDR (for example `10.244.0.0/16`).
+Leaving them empty is safe but shares one bucket across all UI logins.
+Never use `0.0.0.0/0`: it lets any client choose its own IP.
+
 ## Production
 
 [`values-production.yaml`](./values-production.yaml) is an annotated

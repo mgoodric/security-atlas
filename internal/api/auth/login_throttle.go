@@ -13,9 +13,10 @@
 // unknown email is throttled exactly like a known one and a 429 says
 // nothing about whether the account exists.
 //
-// Known limit (decisions log 1913): browser logins reach this endpoint
-// through the web BFF, which does not forward the client IP yet (#2040),
-// so they all share the BFF's per-IP bucket.
+// Browser logins reach this endpoint through the web BFF, which forwards
+// the browser's IP in X-Forwarded-For (#2040, web/lib/client-ip.ts). That
+// header counts only when the BFF's address is in TRUSTED_PROXY_CIDRS;
+// otherwise every UI login shares the BFF's per-IP bucket.
 package auth
 
 import (

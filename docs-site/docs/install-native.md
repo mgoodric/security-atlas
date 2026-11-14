@@ -136,6 +136,7 @@ export ATLAS_ISSUER_URL=http://localhost:8080      # turns on the OAuth token en
 export ATLAS_DATA_DIR="$HOME/.local/share/security-atlas"
 export ATLAS_KEYSTORE_PATH="$ATLAS_DATA_DIR/keys"  # default is /var/lib/security-atlas/keys/
 export ATLAS_OAUTH_TOKEN_RATE_PER_MIN=600          # headroom for the bootstrap's control upload
+export TRUSTED_PROXY_CIDRS=127.0.0.1/32,::1/128    # the web app's login calls; see Step 7
 
 # --- First-boot bootstrap -------------------------------------------------
 export REPO_ROOT="$PWD"                            # the scripts default to /repo
@@ -232,6 +233,18 @@ PORT=3000 npm run start
 The app reads `ATLAS_HTTP_URL` (sourced from `atlas.env`) for its
 server-side calls to the API; it defaults to `http://localhost:8080`.
 Leave `NEXT_PUBLIC_API_BASE_URL` unset.
+
+Sign-in is throttled per client IP. Browser logins reach the API through
+the web app, which forwards the browser's address in `X-Forwarded-For`.
+`npm run start` loads `web/peer-chain.cjs` so the app takes that address
+from its own connection, never from a header the browser sends. The
+`TRUSTED_PROXY_CIDRS` loopback entries from Step 3 make the API honour
+the header from the web app, which connects from this host. That also
+trusts any other local process, which is acceptable here because the API
+listens on `127.0.0.1` only. Without them every browser shares one login
+bucket. If a reverse proxy fronts the web app, set
+`WEB_TRUSTED_PROXY_CIDRS` to its address so the app looks past it to the
+browser.
 
 ## Step 8 — sign in
 

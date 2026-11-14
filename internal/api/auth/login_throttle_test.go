@@ -139,3 +139,48 @@ func TestLocalLogin_PerAccountThrottle429BeforeVerify(t *testing.T) {
 		t.Fatalf("body %q", rec.Body.String())
 	}
 }
+
+func postLoginVia(h *Handler, remote, xff string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(http.MethodPost, "/auth/local/login", strings.NewReader("{"))
+	req.RemoteAddr = remote
+	if xff != "" {
+		req.Header.Set("X-Forwarded-For", xff)
+	}
+	rec := httptest.NewRecorder()
+	h.LocalLogin(rec, req)
+	return rec
+}
+
+// #2040: browser logins arrive from the web BFF, which forwards the
+// browser's IP. With the BFF's address in TRUSTED_PROXY_CIDRS (the compose
+// default), two browsers get two buckets; a browser that connects directly
+// and forges X-Forwarded-For is keyed on its own peer, not the forged value.
+func TestLocalLogin_PerIPThrottleKeysOnBFFForwardedIP(t *testing.T) {
+	withTrustedProxies(t, "10.125.0.2/32")
+	h := throttledHandler(newFakeClock())
+	const bff = "10.125.0.2:40000"
+
+	for i := range loginIPBurst {
+		if rec := postLoginVia(h, bff, "198.51.100.1"); rec.Code != http.StatusBadRequest {
+			t.Fatalf("client A attempt %d: status %d, want 400", i+1, rec.Code)
+		}
+	}
+	if rec := postLoginVia(h, bff, "198.51.100.1"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("client A over burst: status %d, want 429", rec.Code)
+	}
+	if rec := postLoginVia(h, bff, "203.0.113.2"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("client B through the same BFF: status %d, want 400 (own bucket)", rec.Code)
+	}
+
+	// A direct client forging X-Forwarded-For cannot pick a fresh bucket
+	// per attempt: it is keyed on its own peer.
+	const direct = "192.0.2.50:5555"
+	for i := range loginIPBurst {
+		if rec := postLoginVia(h, direct, fmt.Sprintf("198.51.100.%d", 100+i)); rec.Code != http.StatusBadRequest {
+			t.Fatalf("forging client attempt %d: status %d, want 400", i+1, rec.Code)
+		}
+	}
+	if rec := postLoginVia(h, direct, "203.0.113.99"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("forging client rotating X-Forwarded-For: status %d, want 429 on its own peer bucket", rec.Code)
+	}
+}

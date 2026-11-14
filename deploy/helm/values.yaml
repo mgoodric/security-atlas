@@ -61,6 +61,14 @@ atlas:
   # -- Set the session cookie Secure flag. Leave false for plain-HTTP dev;
   #    set true once the deployment is behind TLS (Ingress).
   secureCookies: false
+  # -- TRUSTED_PROXY_CIDRS: comma-separated CIDRs whose X-Forwarded-For the
+  #    server honours (right-to-left walk, slice 466). Set it to the range the
+  #    web pods connect from (usually the cluster pod CIDR, e.g.
+  #    "10.244.0.0/16") so the login BFF's forwarded client IP gives each
+  #    browser its own per-IP login bucket (#2040). Empty trusts no proxy and
+  #    every UI login shares the web pod's bucket. List only in-cluster
+  #    ranges; 0.0.0.0/0 lets any client forge its IP.
+  trustedProxyCIDRs: ""
   # -- Node scheduling controls.
   nodeSelector: {}
   tolerations: []
@@ -92,6 +100,12 @@ web:
   #    absolute URL only when the browser must reach atlas at a different
   #    origin than the frontend.
   publicApiBaseUrl: ""
+  # -- WEB_TRUSTED_PROXY_CIDRS: comma-separated CIDRs of the proxies in front
+  #    of web (the Ingress controller pods, usually the cluster pod CIDR). The
+  #    login BFF walks X-Forwarded-For through these to find the browser's IP
+  #    and forwards only that to atlas (#2040). Empty: web takes its direct
+  #    peer as the client, which behind an Ingress is the controller.
+  trustedProxyCIDRs: ""
   nodeSelector: {}
   tolerations: []
   affinity: {}
