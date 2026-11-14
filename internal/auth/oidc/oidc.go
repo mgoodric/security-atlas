@@ -72,6 +72,11 @@ type IdpConfig struct {
 	ClientSecret        string
 	RedirectURL         string
 	AllowedEmailDomains []string
+	// TrustUnverifiedEmailForLink is oidc_idp_configs.trust_unverified_email_for_link
+	// (#1944 D3). When true, a sign-in whose ID token omits email_verified
+	// may link to a SCIM-provisioned user by email; false (the default)
+	// links only on email_verified=true.
+	TrustUnverifiedEmailForLink bool
 }
 
 // IdpResolver is the per-request lookup the Authenticator needs: given a
@@ -211,6 +216,9 @@ type CallbackResult struct {
 	// omits it. It gates linking a sign-in to an existing user by email
 	// (#1944).
 	EmailVerified *bool
+	// TrustUnverifiedEmailForLink is the IdP config's opt-out letting an
+	// absent EmailVerified link (#1944 D3).
+	TrustUnverifiedEmailForLink bool
 	// IDPConfigID is the id of the oidc_idp_configs row this login flowed
 	// through (slice 733). It scopes the slice-509 group-to-role derivation so a
 	// tenant with multiple IdP configs maps each IdP's groups independently
@@ -352,6 +360,8 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 		EmailVerified: parseEmailVerified(claims.EmailVerified),
 		IDPConfigID:   cfg.ID,
 		Groups:        claims.Groups,
+
+		TrustUnverifiedEmailForLink: cfg.TrustUnverifiedEmailForLink,
 	}, nil
 }
 

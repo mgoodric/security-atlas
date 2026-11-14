@@ -402,6 +402,8 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 			Subject:       result.Subject,
 			EmailVerified: result.EmailVerified,
 			IDPConfigID:   result.IDPConfigID,
+
+			TrustUnverifiedEmail: result.TrustUnverifiedEmailForLink,
 		})
 		if errors.Is(err, users.ErrIdentityConflict) {
 			// #1944: the email is held by a user this sign-in may not link

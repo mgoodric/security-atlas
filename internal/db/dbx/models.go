@@ -2679,16 +2679,17 @@ type Notification struct {
 }
 
 type OidcIdpConfig struct {
-	ID                  pgtype.UUID        `json:"id"`
-	TenantID            pgtype.UUID        `json:"tenant_id"`
-	Name                string             `json:"name"`
-	IssuerUrl           string             `json:"issuer_url"`
-	ClientID            string             `json:"client_id"`
-	ClientSecretEnc     []byte             `json:"client_secret_enc"`
-	RedirectUrl         string             `json:"redirect_url"`
-	AllowedEmailDomains []string           `json:"allowed_email_domains"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                          pgtype.UUID        `json:"id"`
+	TenantID                    pgtype.UUID        `json:"tenant_id"`
+	Name                        string             `json:"name"`
+	IssuerUrl                   string             `json:"issuer_url"`
+	ClientID                    string             `json:"client_id"`
+	ClientSecretEnc             []byte             `json:"client_secret_enc"`
+	RedirectUrl                 string             `json:"redirect_url"`
+	AllowedEmailDomains         []string           `json:"allowed_email_domains"`
+	CreatedAt                   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `json:"updated_at"`
+	TrustUnverifiedEmailForLink bool               `json:"trust_unverified_email_for_link"`
 }
 
 type OidcIdpGroupMapping struct {

@@ -203,7 +203,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/walkthroughs/{id}/export", Tag: "walkthroughs", Tier: "bearer", Internal: false, Summary: "GET /v1/walkthroughs/{id}/export"},
 	{Method: "PATCH", Path: "/v1/action-plans/{id}", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "PATCH /v1/action-plans/{id}"},
 	{Method: "PATCH", Path: "/v1/admin/features/{key}", Tag: "admin-feature-flags", Tier: "adminBearer", Internal: false, Summary: "PATCH /v1/admin/features/{key}"},
-	{Method: "PATCH", Path: "/v1/admin/sso", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "PATCH /v1/admin/sso"},
+	{Method: "PATCH", Path: "/v1/admin/sso", Tag: "admin-sso", Tier: "adminBearer", Internal: false, Summary: "PATCH /v1/admin/sso — upsert the primary IdP config, incl. trust_unverified_email_for_link (strict default false; #1944)"},
 	{Method: "PATCH", Path: "/v1/admin/users/{id}/roles", Tag: "admin-users", Tier: "adminBearer", Internal: false, Summary: "PATCH /v1/admin/users/{id}/roles"},
 	{Method: "PATCH", Path: "/v1/aggregation-rules/{id}/activate", Tag: "risks", Tier: "bearer", Internal: false, Summary: "PATCH /v1/aggregation-rules/{id}/activate"},
 	{Method: "PATCH", Path: "/v1/aggregation-rules/{id}/deactivate", Tag: "risks", Tier: "bearer", Internal: false, Summary: "PATCH /v1/aggregation-rules/{id}/deactivate"},

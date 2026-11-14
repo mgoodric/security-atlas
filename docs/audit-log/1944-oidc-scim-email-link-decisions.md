@@ -51,30 +51,35 @@ from the link when a concurrent sign-in bound the same principal first. Each
 would otherwise be a 500. Principals that already have a row are never refused by
 this check, so returning users behave as before.
 
-### D3 — Unverified email: refuse only on an explicit `email_verified=false`. **Confidence: MEDIUM.**
+### D3 — Unverified email: strict by default, with a per-IdP opt-out. **Decided by Matt, 2026-11-13.**
 
-| `email_verified` claim | Link?                       |
-| ---------------------- | --------------------------- |
-| `true` / `"true"`      | yes                         |
-| absent / unparseable   | yes                         |
-| `false` / `"false"`    | no, so the sign-in is a 401 |
+| `email_verified` claim | `trust_unverified_email_for_link` off (default) | on           |
+| ---------------------- | ----------------------------------------------- | ------------ |
+| `true` / `"true"`      | links                                           | links        |
+| absent / unparseable   | no link: 401                                    | links        |
+| `false` / `"false"`    | no link: 401                                    | no link: 401 |
 
-The safe-looking rule is "link only when the claim is `true`". It would break
-the main SCIM pairing: Microsoft Entra ID omits `email_verified` from ID tokens
-by default, and Entra is the most common SCIM provisioner. The IdP is the
-tenant's own, admin-configured `oidc_idp_configs` row, already trusted for
-authentication and limited by `AllowedEmailDomains`. An IdP that explicitly
-reports the email as unverified is refused, because linking on that email would
-let whoever controls the IdP account take over the provisioned user. Some IdPs
-send the claim as a string, so the string forms are accepted.
+A sign-in links to a SCIM row by email only when the IdP asserts
+`email_verified=true`. `oidc_idp_configs.trust_unverified_email_for_link`
+(boolean, default `false`, migration `20260910000000`) is a per-IdP opt-out:
+when it is on, an absent claim also links. An explicit `false` is refused
+either way. The flag is set through `PATCH /v1/admin/sso` and the admin SSO
+form. `oidc-setup.md` tells Entra ID operators who use SCIM to turn it on,
+because Entra never sends the claim. Some IdPs send the claim as a string, so
+the string forms are accepted.
 
-**Open with Matt (#2007 review, B2).** The review recommends the reverse:
-strict by default, with a per-IdP opt-out for Entra. Entra's `email` claim is
-unverified, the nOAuth pattern, and an explicit-false check only stops IdPs that
-report it honestly. Until he decides, the policy is `users.UnverifiedEmailPolicy`.
-Its zero value, `LinkUnlessUnverified`, is the rule above, and
-`LinkOnlyIfVerified` is the strict rule. A per-IdP column only has to set the
-field on `UpsertOIDCInput`.
+**How it was decided.** The first version of this PR linked on an absent claim
+by default, to avoid breaking Entra, the most common SCIM provisioner. The
+#2007 review (B2) pointed out that Entra's `email` claim is unverified (the
+nOAuth pattern), and that an explicit-false check only stops IdPs that report
+the claim honestly. It recommended strict by default with a per-IdP opt-out.
+Matt chose that on 2026-11-13. The cost is that an Entra tenant using SCIM
+must turn the flag on, or those users' first sign-in is refused.
+
+In code, `users.UpsertOIDCInput.TrustUnverifiedEmail` carries the flag, and its
+zero value is strict, so a caller that never sets it fails closed. The flag
+travels `oidc.IdpConfig.TrustUnverifiedEmailForLink` →
+`oidc.CallbackResult` → the callback.
 
 ### D4 — Linking does not change status or active. **Confidence: HIGH.**
 
@@ -102,3 +107,13 @@ sign-in with that email. The D1 exclusions still apply, and the
 `oidc_identity_link` audit row records which config made the claim. The fix is
 to scope the link by IdP config once SCIM tokens are IdP-bound, which needs that
 binding first. Until then, a tenant that runs SCIM should configure one OIDC IdP.
+
+### D7 — Known gap: no production resolver reads `oidc_idp_configs` yet. **Confidence: HIGH.**
+
+`cmd/atlas` wires `localModeIdpResolver`, which reports every IdP as unknown,
+so a config saved through `PATCH /v1/admin/sso` does not yet reach
+`/auth/oidc/callback` in a running binary. Whichever resolver later maps
+`oidc_idp_configs` rows onto `oidc.IdpConfig` must copy
+`trust_unverified_email_for_link` into `TrustUnverifiedEmailForLink`. If it
+does not, the field stays false and linking is strict, which fails closed. This
+PR does not build that resolver; that is outside #1944.

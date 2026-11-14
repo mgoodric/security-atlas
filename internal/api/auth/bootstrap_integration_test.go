@@ -51,6 +51,9 @@ type fakeIdP struct {
 	nonce  string
 	// emailVerified, when non-nil, is sent as the email_verified claim.
 	emailVerified any
+	// trustUnverifiedEmail is the IdP config's
+	// trust_unverified_email_for_link as callbackVia hands it to the RP.
+	trustUnverifiedEmail bool
 }
 
 func newFakeIdP(t *testing.T) *fakeIdP {
@@ -208,6 +211,8 @@ func (h harness) callbackVia(t *testing.T, idp *fakeIdP, urlTenant uuid.UUID) *h
 		ClientID:     fakeClientID,
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
+
+		TrustUnverifiedEmailForLink: idp.trustUnverifiedEmail,
 	}})
 	login, err := authn.BeginLogin(context.Background(), oidc.LoginInput{TenantID: urlTenant, IdpName: "primary"}, false)
 	if err != nil {

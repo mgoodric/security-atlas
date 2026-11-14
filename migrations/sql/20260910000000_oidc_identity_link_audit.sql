@@ -1,4 +1,5 @@
--- #1944: audit the OIDC email link.
+-- #1944: audit the OIDC email link, and add the per-IdP
+-- trust_unverified_email_for_link opt-out (at the end of this file).
 --
 -- A SCIM-provisioned user's first OIDC sign-in binds the IdP principal
 -- (idp_issuer, idp_subject) to the SCIM row by email. That binding decides
@@ -46,3 +47,10 @@ ALTER TABLE me_audit_log
         -- #1944 (OIDC sign-in linked to a SCIM-provisioned user by email):
         'oidc_identity_link'
     ));
+
+-- #1944 D3 (Matt, 2026-11-13): an OIDC sign-in links to a SCIM row by email
+-- only when the IdP asserts email_verified=true. This per-IdP opt-out lets
+-- an absent claim link too (Microsoft Entra ID omits it); an explicit
+-- email_verified=false is refused either way. Default false: strict.
+ALTER TABLE oidc_idp_configs
+    ADD COLUMN IF NOT EXISTS trust_unverified_email_for_link BOOLEAN NOT NULL DEFAULT false;

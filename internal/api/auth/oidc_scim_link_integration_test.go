@@ -112,10 +112,12 @@ func TestOIDCCallback_SCIMUser_LinksByEmail(t *testing.T) {
 	cases := []struct {
 		name     string
 		verified any
+		trust    bool // the IdP config's trust_unverified_email_for_link
 	}{
-		{name: "claim absent", verified: nil},
 		{name: "verified true", verified: true},
 		{name: "verified string", verified: "true"},
+		// D3: an absent claim links only when the IdP config opts in.
+		{name: "claim absent, IdP trusts unverified", verified: nil, trust: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,6 +127,7 @@ func TestOIDCCallback_SCIMUser_LinksByEmail(t *testing.T) {
 			userID := h.insertUser(t, tenant, seedUser{})
 			idp := newFakeIdP(t)
 			idp.emailVerified = tc.verified
+			idp.trustUnverifiedEmail = tc.trust
 
 			for i := range 2 {
 				rec := h.callbackVia(t, idp, tenant)
@@ -173,19 +176,24 @@ func TestOIDCCallback_SCIMUser_Refusals(t *testing.T) {
 		name       string
 		seed       seedUser
 		verified   any
+		trust      bool // the IdP config's trust_unverified_email_for_link
 		wantLinked bool
 	}{
 		// SCIM deprovisioned: the row links, then the deactivation check refuses.
-		{name: "deprovisioned", seed: seedUser{inactive: true}, wantLinked: true},
+		{name: "deprovisioned", seed: seedUser{inactive: true}, verified: true, wantLinked: true},
 		// Bound to another principal: never re-linked.
-		{name: "different idp tuple", seed: seedUser{issuer: "https://other-idp.example", subject: "someone-else"}},
-		// The IdP says the email is unverified: no link.
-		{name: "email unverified", verified: false},
+		{name: "different idp tuple", seed: seedUser{issuer: "https://other-idp.example", subject: "someone-else"}, verified: true},
+		// D3 (Matt, 2026-11-13): strict by default. An absent claim does not
+		// link unless the IdP config trusts unverified email, and an explicit
+		// false is refused either way.
+		{name: "claim absent, strict IdP", verified: nil},
+		{name: "email unverified, strict IdP", verified: false},
+		{name: "email unverified, IdP trusts unverified", verified: false, trust: true},
 		// B1 (#2007 review): local accounts are never claimed by email.
-		{name: "local password user", seed: seedUser{notSCIM: true, password: true}},
-		{name: "local super_admin", seed: seedUser{notSCIM: true, password: true, superAdmin: true}},
-		{name: "SCIM user with a local password", seed: seedUser{password: true}},
-		{name: "SCIM user granted super_admin", seed: seedUser{superAdmin: true}},
+		{name: "local password user", seed: seedUser{notSCIM: true, password: true}, verified: true},
+		{name: "local super_admin", seed: seedUser{notSCIM: true, password: true, superAdmin: true}, verified: true},
+		{name: "SCIM user with a local password", seed: seedUser{password: true}, verified: true},
+		{name: "SCIM user granted super_admin", seed: seedUser{superAdmin: true}, verified: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -195,6 +203,7 @@ func TestOIDCCallback_SCIMUser_Refusals(t *testing.T) {
 			userID := h.insertUser(t, tenant, tc.seed)
 			idp := newFakeIdP(t)
 			idp.emailVerified = tc.verified
+			idp.trustUnverifiedEmail = tc.trust
 
 			rec := h.callbackVia(t, idp, tenant)
 			if rec.Code != http.StatusUnauthorized {

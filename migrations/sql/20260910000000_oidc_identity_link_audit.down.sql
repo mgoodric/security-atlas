@@ -42,3 +42,6 @@ ALTER TABLE me_audit_log
         'user_tenant_revoke',
         'tenant_gate_policy_update'
     ));
+
+ALTER TABLE oidc_idp_configs
+    DROP COLUMN IF EXISTS trust_unverified_email_for_link;

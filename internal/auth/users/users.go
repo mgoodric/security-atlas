@@ -176,38 +176,27 @@ type UpsertOIDCInput struct {
 	Issuer      string
 	Subject     string
 	// EmailVerified is the ID token's email_verified claim; nil when the IdP
-	// omits it. UnverifiedEmail decides what it means for the email link
-	// (#1944).
+	// omits it (#1944).
 	EmailVerified *bool
-	// UnverifiedEmail is the IdP's policy for linking on an email the IdP has
-	// not marked verified. The zero value is the D3 default.
-	UnverifiedEmail UnverifiedEmailPolicy
+	// TrustUnverifiedEmail is the IdP config's
+	// trust_unverified_email_for_link: when true, an absent EmailVerified
+	// may still link by email. False, the zero value, is strict (D3).
+	TrustUnverifiedEmail bool
 	// IDPConfigID is the oidc_idp_configs row the sign-in came through, kept
 	// in the link audit row. uuid.Nil when the resolver supplied none.
 	IDPConfigID uuid.UUID
 }
 
-// UnverifiedEmailPolicy says whether an OIDC sign-in may claim an existing
-// SCIM row by email when the IdP has not marked the email verified (#1944).
-// It is a per-IdP setting in waiting: today every IdP uses the zero value.
-type UnverifiedEmailPolicy int
-
-const (
-	// LinkUnlessUnverified links when email_verified is true or absent and
-	// refuses only an explicit false. Absent links because some IdPs (Entra
-	// ID) never send the claim (decisions log D3).
-	LinkUnlessUnverified UnverifiedEmailPolicy = iota
-	// LinkOnlyIfVerified links only when email_verified is true.
-	LinkOnlyIfVerified
-)
-
-// allowsLink reports whether the policy lets a sign-in with this
-// email_verified claim (nil = absent) link by email.
-func (p UnverifiedEmailPolicy) allowsLink(verified *bool) bool {
+// emailLinkAllowed reports whether a sign-in may claim an existing SCIM row
+// by email (#1944 D3, Matt's decision of 2026-11-13). email_verified=true
+// links and an explicit false never does. An absent claim links only when
+// the IdP config opts in with trust_unverified_email_for_link, which is for
+// IdPs such as Microsoft Entra ID that never send the claim.
+func emailLinkAllowed(verified *bool, trustUnverified bool) bool {
 	if verified != nil {
 		return *verified
 	}
-	return p == LinkUnlessUnverified
+	return trustUnverified
 }
 
 // ErrIdentityConflict is returned by UpsertOIDC when the sign-in's email
@@ -257,7 +246,7 @@ func (s *Store) UpsertOIDC(ctx context.Context, in UpsertOIDCInput) (User, error
 
 	id := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 	tIDU := pgtype.UUID{Bytes: in.TenantID, Valid: true}
-	if in.UnverifiedEmail.allowsLink(in.EmailVerified) {
+	if emailLinkAllowed(in.EmailVerified, in.TrustUnverifiedEmail) {
 		linked, err := linkByEmail(ctx, q, in, tIDU)
 		switch {
 		case err == nil:
