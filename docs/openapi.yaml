@@ -4974,11 +4974,123 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/risks/categories:
     get:
-      summary: GET /v1/risks/categories
+      summary: GET /v1/risks/categories — the organisation's risk categories with usage counts; ?include_archived=true lists archived ones
       tags: [risks]
       operationId: get-v1-risks-categories
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/risks/categories — add an organisation risk category; body {slug, name, description?}
+      tags: [risks]
+      operationId: post-v1-risks-categories
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/categories/{ref}:
+    delete:
+      summary: DELETE /v1/risks/categories/{ref} — delete an unused category (409 with risk and rule counts while in use); ref is slug or id
+      tags: [risks]
+      operationId: delete-v1-risks-categories-ref
+      security:
+        - bearer: []
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    patch:
+      summary: PATCH /v1/risks/categories/{ref} — rename a category; body {name?, description?}; the slug never changes
+      tags: [risks]
+      operationId: patch-v1-risks-categories-ref
+      security:
+        - bearer: []
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/categories/{ref}/archive:
+    post:
+      summary: POST /v1/risks/categories/{ref}/archive — hide a category from the default list and new assignments
+      tags: [risks]
+      operationId: post-v1-risks-categories-ref-archive
+      security:
+        - bearer: []
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/categories/{ref}/set-default:
+    post:
+      summary: POST /v1/risks/categories/{ref}/set-default — make a category the organisation default
+      tags: [risks]
+      operationId: post-v1-risks-categories-ref-set-default
+      security:
+        - bearer: []
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/risks/categories/{ref}/unarchive:
+    post:
+      summary: POST /v1/risks/categories/{ref}/unarchive — restore an archived category
+      tags: [risks]
+      operationId: post-v1-risks-categories-ref-unarchive
+      security:
+        - bearer: []
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.
