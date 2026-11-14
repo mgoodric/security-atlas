@@ -44,6 +44,48 @@ contains `Focal Document Element`, `Relationship`, `Reference Document Element`,
 and `Strength of Relationship` columns. When this shape is supplied, the
 importer uses the workbook's explicit relationship and strength values.
 
+## What Each Source Carries
+
+A crosswalk edge has two parts: which SCF anchor a requirement maps to, and the
+NIST IR 8477 STRM detail of that mapping (relationship type and strength). The
+sources differ in how much of that detail they publish, so the same pair can
+arrive with different detail depending on the file you import.
+
+| Source                                     | Anchor IDs | Relationship type  | Strength  | `source_attribution` on import |
+| ------------------------------------------ | ---------- | ------------------ | --------- | ------------------------------ |
+| Full SCF workbook (`SCF <version>` sheet)  | Yes        | No, defaulted      | No, `0.5` | `community_draft`              |
+| SCF OLIR STRM workbook                     | Yes        | Yes, from the file | Yes       | `community_draft`              |
+| Project YAML crosswalk (`data/crosswalks`) | Yes        | Yes, per mapping   | Yes       | As declared in the file        |
+
+What this means in practice:
+
+- **Full workbook edges are placeholders for the STRM detail.** The workbook
+  lists only requirement IDs per SCF control, so every edge from it lands as
+  `intersects_with` with strength `0.5`. These values are not SCF's
+  assessment; they are the importer's conservative default. The edge's
+  rationale names the sheet, row and column it came from and says it is
+  pending STRM review.
+- **The OLIR STRM workbook is the source of real relationship detail.** SCF
+  publishes its STRM relationship types and strengths in separate STRM files,
+  not in the main workbook. At the time of writing those are free as PDFs or
+  as a paid Excel bundle; only the Excel (`.xlsx`) shape is importable. When
+  you have one, import it (see [Import](#import)) and its explicit
+  `Relationship` and `Strength of Relationship` values replace the
+  workbook's defaults for the same (requirement, anchor) pairs, because both
+  imports are `community_draft` and a same-source import updates the edge.
+- **"Official" is provenance, not trust.** No XLSX import is written as
+  `scf_official`, including the OLIR STRM workbook: the importer cannot verify
+  that a local file is an unmodified SCF publication. `scf_official` is only
+  set by a YAML crosswalk that declares it, and none of the bundled
+  `data/crosswalks/*.yaml` files does today. Separately from provenance, every
+  imported edge starts at the draft trust tier; promoting it to reviewed or
+  verified is a human step (ADR 0018).
+
+If you need STRM-accurate relationships for audit work, import the OLIR STRM
+workbook for that framework, or review and edit the workbook-derived edges
+before promoting them. Do not read a workbook edge's `intersects_with` /
+`0.5` as SCF's judgement of that mapping.
+
 ## Import
 
 For the full SCF workbook, pass the local `.xlsx` file and the framework column
