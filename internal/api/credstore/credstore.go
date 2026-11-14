@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // ErrUnknownKey indicates a lookup or operation referenced a key that
@@ -194,6 +196,46 @@ type Store struct {
 	byTokenHash   map[string]*record
 	rotationGrace time.Duration
 	persist       Persister
+	gate          UserGate
+}
+
+// UserGate reports whether the user a credential belongs to may still use
+// it (#1915). Authenticate consults it for every credential owned by a user,
+// including ones served from memory, so a deactivated user's key is refused
+// even if its in-memory record outlived the revocation. Credentials with no
+// user (UserID is their own "key_..." id: the env bootstrap key, recovery
+// keys, admin-issued push keys) skip it.
+type UserGate interface {
+	UserCanAuthenticate(tenantID, userID string) (bool, error)
+}
+
+// SetUserGate wires the user-status check. Nil disables it.
+func (s *Store) SetUserGate(g UserGate) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gate = g
+}
+
+// RevokeUserInMemory marks every in-memory credential owned by userID in
+// tenantID revoked, WITHOUT writing through to the Persister. It is the
+// after-commit step of deactivation (#1915): the durable revocation already
+// committed in the transaction that disabled the user. Returns the number of
+// records revoked.
+func (s *Store) RevokeUserInMemory(tenantID, userID string) int {
+	if userID == "" {
+		return 0
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := 0
+	for _, r := range s.byID {
+		if r.state != stateActive || r.cred.TenantID != tenantID || r.cred.UserID != userID {
+			continue
+		}
+		r.state = stateRevoked
+		n++
+	}
+	return n
 }
 
 // New returns a Store. rotationGrace controls how long a rotated-out
@@ -541,21 +583,52 @@ func (s *Store) RebindUserIDForTests(token, userID string) error {
 // Authenticate resolves a plaintext bearer to its credential. Updates
 // LastUsedAt on success (in-memory only — the durable last_used_at column
 // is a cosmetic mirror the auth hot path deliberately does not touch).
+//
+// A credential owned by a user is also checked against the UserGate, outside
+// the lock so a slow DB never stalls other lookups. A deactivated owner
+// refuses with ErrUnknownKey; a gate error fails closed.
 func (s *Store) Authenticate(token string) (Credential, error) {
+	cred, gate, err := s.authenticateLocked(token)
+	if err != nil {
+		return Credential{}, err
+	}
+	if gate != nil && OwnedByUser(cred) {
+		ok, gerr := gate.UserCanAuthenticate(cred.TenantID, cred.UserID)
+		if gerr != nil {
+			return Credential{}, fmt.Errorf("credstore: user gate: %w", gerr)
+		}
+		if !ok {
+			return Credential{}, ErrUnknownKey
+		}
+	}
+	return cred, nil
+}
+
+func (s *Store) authenticateLocked(token string) (Credential, UserGate, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.lookupTokenLocked(token)
 	if !ok || r.state == stateRevoked {
-		return Credential{}, ErrUnknownKey
+		return Credential{}, nil, ErrUnknownKey
 	}
 	if !r.retiresAt.IsZero() && time.Now().UTC().After(r.retiresAt) {
-		return Credential{}, ErrUnknownKey
+		return Credential{}, nil, ErrUnknownKey
 	}
 	if r.cred.expired(time.Now().UTC()) {
-		return Credential{}, ErrUnknownKey
+		return Credential{}, nil, ErrUnknownKey
 	}
 	r.cred.LastUsedAt = time.Now().UTC()
-	return r.cred, nil
+	return r.cred, s.gate, nil
+}
+
+// OwnedByUser reports whether c belongs to a user: its UserID is a users(id)
+// uuid rather than its own "key_..." credential id.
+func OwnedByUser(c Credential) bool {
+	if c.UserID == "" || c.UserID == c.ID {
+		return false
+	}
+	_, err := uuid.Parse(c.UserID)
+	return err == nil
 }
 
 // issueLocked inserts a new credential, writing through to the Persister

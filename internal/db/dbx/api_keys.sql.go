@@ -284,6 +284,41 @@ func (q *Queries) RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) erro
 	return err
 }
 
+const revokeUserAPIKeys = `-- name: RevokeUserAPIKeys :many
+UPDATE api_keys
+SET revoked_at = now()
+WHERE tenant_id = $1 AND issued_by = $2 AND revoked_at IS NULL
+RETURNING id
+`
+
+type RevokeUserAPIKeysParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	IssuedBy pgtype.UUID `json:"issued_by"`
+}
+
+// Deactivation (#1915): revoke every live key owned by the user (issued_by).
+// Keys with no owner (issued_by IS NULL: the env bootstrap key, recovery
+// keys, admin-issued push keys) never match. Returns the revoked ids.
+func (q *Queries) RevokeUserAPIKeys(ctx context.Context, arg RevokeUserAPIKeysParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, revokeUserAPIKeys, arg.TenantID, arg.IssuedBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setAPIKeyRetiresAt = `-- name: SetAPIKeyRetiresAt :exec
 UPDATE api_keys
 SET retires_at = $3

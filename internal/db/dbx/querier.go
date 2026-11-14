@@ -2989,6 +2989,10 @@ type Querier interface {
 	// the existence-oracle on cross-user ids. Idempotent: re-revoking an already-revoked
 	// row is a no-op but still returns 1 row affected (the row still matches the WHERE).
 	RevokeSessionForUser(ctx context.Context, arg RevokeSessionForUserParams) (int64, error)
+	// Deactivation (#1915): revoke every live key owned by the user (issued_by).
+	// Keys with no owner (issued_by IS NULL: the env bootstrap key, recovery
+	// keys, admin-issued push keys) never match. Returns the revoked ids.
+	RevokeUserAPIKeys(ctx context.Context, arg RevokeUserAPIKeysParams) ([]pgtype.UUID, error)
 	// Slice 067: risk-hierarchy backend read endpoints. Two read-only
 	// aggregation queries that fill the placeholders slice 056 (hierarchical
 	// risk dashboard) shipped binding empty-state affordances for. No
