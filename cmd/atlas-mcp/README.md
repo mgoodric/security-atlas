@@ -60,6 +60,8 @@ Defaults: every list tool returns up to 100 results; pass `limit=N`
 | `update_control_state`  | `POST /v1/mcp/write-proposals`              | Files a draft control-state override (synthesised as evidence)        |
 | `push_evidence`         | `POST /v1/mcp/write-proposals`              | Files a draft evidence record append                                  |
 | `update_risk_treatment` | `POST /v1/mcp/write-proposals`              | Files a draft treatment + owner change                                |
+| `link_child_risks`      | `POST /v1/mcp/write-proposals`              | Files a draft attach of existing risks under an existing parent risk  |
+| `unlink_child_risk`     | `POST /v1/mcp/write-proposals`              | Files a draft detach of one child risk from its parent                |
 | `confirm_write`         | `POST /v1/mcp/write-proposals/{id}/confirm` | Approver-only: flips state to `applied`; the Applier writes canonical |
 
 **HITL flow.** Write tools NEVER commit to the canonical tables directly.

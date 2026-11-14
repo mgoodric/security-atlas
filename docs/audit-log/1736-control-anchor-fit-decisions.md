@@ -72,13 +72,13 @@ content change. Changing only `anchor_fit_note` is prose, like
 `description`, and should update the active row in place (issue #1908)
 rather than mint a new control id.
 
-**Status: follow-up.** On `main` when this merged, the in-place path
-compares manifests with only the top-level `description` removed
-(`manifestsEqualIgnoringDescription`), so a note-only edit still
-supersedes. #2013 (for #1958) generalises that to an
-`inPlaceManifestKeys` set holding `description` and `external_refs`, and
-it had not landed. Once it does, add `anchor_fit_note` to that set, extend
-the in-place UPDATE to write the note column, and add an integration test
+**Status: follow-up, filed as
+[#2023](https://github.com/mgoodric/security-atlas/issues/2023).**
+[#2013](https://github.com/mgoodric/security-atlas/pull/2013) (for #1958)
+landed the `inPlaceManifestKeys` set in `internal/control/store.go`, holding
+`description` and `external_refs`. This PR does not add `anchor_fit_note`
+to it, so a note-only edit still supersedes. #2023 owns adding the key,
+having the in-place UPDATE write the note column, and the integration test
 that a note-only re-upload keeps the control id and version while an
 `anchor_fit` change bumps the version.
 

@@ -52,6 +52,13 @@ export type Policy = {
   superseded_at?: string | null;
   next_review_at?: string | null;
   /**
+   * #1806 — where a published policy stands against `next_review_at`,
+   * computed by the API at response time: `overdue` once the date has
+   * passed, `due-soon` within 30 days, else `upcoming`. Absent when the
+   * policy has no review date or is not published.
+   */
+  review_status?: "overdue" | "due-soon" | "upcoming" | null;
+  /**
    * #1747 — true when the policy was brought in by the policy library
    * import with its historical lifecycle. The historical approver is a
    * free-text name (not a credential); `source_url` is an absolute

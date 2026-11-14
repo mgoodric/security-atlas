@@ -3,11 +3,12 @@
 // internal/api/httpserver.go):
 //
 //	POST   /v1/policies                            create draft (AC-1)
-//	GET    /v1/policies                            list (optional ?status= filter)
+//	GET    /v1/policies                            list (optional ?status= and ?review= filters)
 //	GET    /v1/policies/{id}                       get one (optional ?versions=true for chain)
 //	PATCH  /v1/policies/{id}/submit                draft -> under_review
 //	PATCH  /v1/policies/{id}/approve               under_review -> approved (AC-4)
 //	POST   /v1/policies/{id}/publish               approved -> published (AC-1 versioned row + AC-7 orphan block)
+//	PATCH  /v1/policies/{id}/review-date           change a published policy's next_review_at (#1806)
 //	GET    /v1/policies/{id}/pdf                   PDF render via chromedp (AC-5)
 //	POST   /v1/admin/policies/import               import a policy library with its history (#1747, import.go)
 //
@@ -15,9 +16,9 @@
 // 033 tenancy.Middleware). The store opens its own transaction per call
 // and applies the tenant GUC.
 //
-// Approver-role gate: PATCH approve + POST publish both require
-// cred.IsApprover || cred.IsAdmin. Publish is gated because it creates an
-// audit-binding artifact; defense in depth.
+// Approver-role gate: PATCH approve, POST publish and PATCH review-date
+// require cred.IsApprover || cred.IsAdmin. Publish is gated because it
+// creates an audit-binding artifact; defense in depth.
 package policies
 
 import (
@@ -110,6 +111,15 @@ type createReq struct {
 type publishReq struct {
 	NewVersion    string  `json:"new_version"`
 	EffectiveDate *string `json:"effective_date,omitempty"` // YYYY-MM-DD
+	// NextReviewAt is the published version's review date (#1806):
+	// YYYY-MM-DD or RFC 3339. Omitted publishes with none.
+	NextReviewAt *string `json:"next_review_at,omitempty"`
+}
+
+// reviewDateReq is the PATCH /v1/policies/{id}/review-date body. The key
+// is required; null clears the review date.
+type reviewDateReq struct {
+	NextReviewAt json.RawMessage `json:"next_review_at"`
 }
 
 // policyAckRateCellWire is the per-policy ack-rate rollup the
@@ -153,6 +163,9 @@ type policyWire struct {
 	PublishedBy                 *string    `json:"published_by,omitempty"`
 	SupersededAt                *time.Time `json:"superseded_at,omitempty"`
 	NextReviewAt                *time.Time `json:"next_review_at,omitempty"`
+	// ReviewStatus is overdue / due-soon / upcoming for a published
+	// policy with a review date, computed at response time (#1806).
+	ReviewStatus string `json:"review_status,omitempty"`
 	// Import fields (#1747): set only when source_attribution is
 	// "imported". historical_approver_name is free text, never a
 	// credential id; approved_by stays empty on imported rows.
@@ -238,11 +251,22 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	statusFilter := strings.TrimSpace(r.URL.Query().Get("status"))
+	reviewFilter := strings.TrimSpace(r.URL.Query().Get("review"))
+	if !validReviewFilter(reviewFilter) {
+		httpresp.WriteError(w, http.StatusBadRequest, "review must be one of overdue, due-soon, upcoming")
+		return
+	}
 	if includesAckRate(r) {
-		out, err := h.listPoliciesWithAckRate(ctx, statusFilter)
+		rows, err := h.listPoliciesWithAckRate(ctx, statusFilter)
 		if err != nil {
 			httperr.WriteInternal(w, r, "list policies (with ack_rate)", err)
 			return
+		}
+		out := make([]policyWithAckRateWire, 0, len(rows))
+		for _, p := range rows {
+			if reviewFilter == "" || p.ReviewStatus == reviewFilter {
+				out = append(out, p)
+			}
 		}
 		httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
 		return
@@ -253,9 +277,12 @@ func (h *Handler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "list policies", err)
 		return
 	}
-	out := make([]policyWire, len(rows))
-	for i, p := range rows {
-		out[i] = wireFromPolicy(p)
+	out := make([]policyWire, 0, len(rows))
+	for _, p := range rows {
+		wire := wireFromPolicy(p)
+		if reviewFilter == "" || wire.ReviewStatus == reviewFilter {
+			out = append(out, wire)
+		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policies": out, "count": len(out)})
 }
@@ -306,6 +333,31 @@ func (h *Handler) listPoliciesWithAckRate(ctx context.Context, statusFilter stri
 		out = append(out, wireFromAckRateRow(r))
 	}
 	return out, nil
+}
+
+// validReviewFilter reports whether v is an accepted ?review= value. Empty
+// means no filter. Unlike ?status=, an unknown value is refused: silently
+// returning every policy for a mistyped "overdue" would read as "none are
+// overdue".
+func validReviewFilter(v string) bool {
+	switch v {
+	case "", policy.ReviewOverdue, policy.ReviewDueSoon, policy.ReviewUpcoming:
+		return true
+	}
+	return false
+}
+
+// parseReviewDate accepts a review date as YYYY-MM-DD (midnight UTC) or
+// RFC 3339.
+func parseReviewDate(s string) (time.Time, error) {
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, errors.New("next_review_at must be YYYY-MM-DD or RFC 3339")
+	}
+	return t.UTC(), nil
 }
 
 // includesAckRate returns true when the request asked for the joined
@@ -381,6 +433,7 @@ func wireFromAckRateBaseColumns(r dbx.ListPoliciesWithAckRateRow) policyWire {
 		PublishedBy:                 r.PublishedBy,
 		SupersededAt:                timestamptzPtr(r.SupersededAt),
 		NextReviewAt:                timestamptzPtr(r.NextReviewAt),
+		ReviewStatus:                policy.ReviewStatusOf(r.Status, timestamptzPtr(r.NextReviewAt), time.Now()),
 		Imported:                    r.SourceAttribution == policy.SourceImported,
 		HistoricalApproverName:      r.HistoricalApproverName,
 		SourceURL:                   r.SourceUrl,
@@ -551,16 +604,90 @@ func (h *Handler) Publish(w http.ResponseWriter, r *http.Request) {
 		}
 		effective = &t
 	}
+	var nextReview *time.Time
+	if req.NextReviewAt != nil && *req.NextReviewAt != "" {
+		t, err := parseReviewDate(*req.NextReviewAt)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		nextReview = &t
+	}
 	published, err := h.store.Publish(ctx, id, policy.PublishInput{
 		NewVersion:    req.NewVersion,
 		EffectiveDate: effective,
 		PublishedBy:   cred.ID,
+		NextReviewAt:  nextReview,
 	})
 	if err != nil {
 		h.writePublishErr(w, r, err)
 		return
 	}
 	httpresp.WriteJSON(w, http.StatusCreated, map[string]any{"policy": wireFromPolicy(published)})
+}
+
+// SetReviewDate handles PATCH /v1/policies/{id}/review-date (#1806). It
+// changes a published policy's next_review_at in place, without a new
+// version, and the store appends a policy_audit_log row naming the caller
+// and the before and after dates. Body: {"next_review_at": "YYYY-MM-DD" |
+// RFC 3339 | null}; null clears the date. Approver or admin only.
+func (h *Handler) SetReviewDate(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required to change a policy review date")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	var req reviewDateReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if len(req.NextReviewAt) == 0 {
+		httpresp.WriteError(w, http.StatusBadRequest, "next_review_at is required (null clears it)")
+		return
+	}
+	var next *time.Time
+	if string(req.NextReviewAt) != "null" {
+		var raw string
+		if err := json.Unmarshal(req.NextReviewAt, &raw); err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, "next_review_at must be a string or null")
+			return
+		}
+		t, err := parseReviewDate(raw)
+		if err != nil {
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		next = &t
+	}
+	// The actor is the user behind the credential when there is one, else
+	// the credential id: the rule the import and export audits use.
+	actor := cred.UserID
+	if actor == "" {
+		actor = cred.ID
+	}
+	updated, err := h.store.SetNextReviewAt(ctx, id, next, actor)
+	if err != nil {
+		switch {
+		case errors.Is(err, policy.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "policy not found")
+		case errors.Is(err, policy.ErrWrongState):
+			httpresp.WriteError(w, http.StatusConflict, "only a published policy has a review date to change")
+		default:
+			httperr.WriteInternal(w, r, "set policy review date", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"policy": wireFromPolicy(updated)})
 }
 
 // PDF handles GET /v1/policies/{id}/pdf (AC-5). Returns
@@ -693,6 +820,7 @@ func wireFromPolicy(p policy.Policy) policyWire {
 		PublishedBy:                 p.PublishedBy,
 		SupersededAt:                p.SupersededAt,
 		NextReviewAt:                p.NextReviewAt,
+		ReviewStatus:                p.ReviewStatus(time.Now()),
 		Imported:                    p.IsImported(),
 		HistoricalApproverName:      p.HistoricalApproverName,
 		SourceURL:                   p.SourceURL,

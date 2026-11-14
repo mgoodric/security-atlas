@@ -352,5 +352,8 @@ var CanonicalToolOrder = []string{
 	"update_control_state",
 	"push_evidence",
 	"update_risk_treatment",
+	// #1748 — risk hierarchy link writes (HITL approval)
+	"link_child_risks",
+	"unlink_child_risk",
 	"confirm_write",
 }

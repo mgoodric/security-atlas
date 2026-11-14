@@ -38,9 +38,8 @@ After `just install-hooks`, commits with malformed Go (or unformatted YAML / JSO
 | --------------------------- | -------------------------------------------------------------------------- |
 | `just`                      | List all recipes                                                           |
 | `just db-up`                | Start a local Postgres 16 in Docker                                        |
-| `just db-down`              | Tear down the local Postgres                                               |
+| `just db-down`              | Tear down the local Postgres; with `db-up`, the reset (no `migrate-down`)  |
 | `just migrate-up`           | Apply unapplied migrations via `migrate.sh` ledger (needs `$DATABASE_URL`) |
-| `just migrate-down`         | Apply the latest reverse migration                                         |
 | `just sqlc-generate`        | Run `sqlc generate` against the schema                                     |
 | `just test-integration`     | Run integration tests (requires `$DATABASE_URL_APP`)                       |
 | `just build`                | Build all components (Go + frontend)                                       |

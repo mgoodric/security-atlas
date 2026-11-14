@@ -71,3 +71,38 @@ allow if {
     input.resource.type == "saved-views"
     count(input.user.roles) > 0
 }
+
+# #1763 / #2015 — the caller's own `/v1/me/*` reads.
+#
+# Every signed-in role needs these to render the app shell and its own
+# settings: the profile (`/v1/me`), tenant chrome and the switcher
+# (`tenancy`, `tenants`; ADR 0023 decision 2), preferences, the
+# notification bell, pending policy acknowledgments, the sessions list and
+# the three channel opt-in toggles. viewer and control_owner have no other
+# rule that admits `me` reads. Each handler is scoped to the caller: it
+# reads the verified credential or JWT claims and pins the user to it, so
+# no one reads another user's row. `tenancy` names no tenant, only a count.
+#
+# Exact paths, not a `/v1/me/` prefix, so an endpoint added under
+# `/v1/me/` stays denied until someone lists it here or in a role file.
+# `/v1/me/audit-period(s)` stay auditor-only (auditor.rego). Writes are
+# not admitted here. Default-deny still applies to a roleless credential.
+allow if {
+    is_read
+    input.resource.type == "me"
+    me_self_read_paths[input.request.path]
+    count(input.user.roles) > 0
+}
+
+me_self_read_paths := {
+    "/v1/me",
+    "/v1/me/tenancy",
+    "/v1/me/tenants",
+    "/v1/me/preferences",
+    "/v1/me/notifications",
+    "/v1/me/acknowledgments",
+    "/v1/me/sessions",
+    "/v1/me/email-channel",
+    "/v1/me/slack-channel",
+    "/v1/me/webhook-channel",
+}

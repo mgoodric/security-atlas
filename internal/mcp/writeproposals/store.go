@@ -60,6 +60,9 @@ const (
 	ToolUpdateControlState  = "update_control_state"
 	ToolPushEvidence        = "push_evidence"
 	ToolUpdateRiskTreatment = "update_risk_treatment"
+	// #1748: hierarchy links between existing risks.
+	ToolLinkChildRisks  = "link_child_risks"
+	ToolUnlinkChildRisk = "unlink_child_risk"
 )
 
 // AllowedTools is the canonical set of MCP write tools allowed to file a
@@ -71,6 +74,8 @@ var AllowedTools = map[string]bool{
 	ToolUpdateControlState:  true,
 	ToolPushEvidence:        true,
 	ToolUpdateRiskTreatment: true,
+	ToolLinkChildRisks:      true,
+	ToolUnlinkChildRisk:     true,
 }
 
 // Anti-criterion P0-A5: per-(tenant, user) cap on pending proposals.

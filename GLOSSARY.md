@@ -54,6 +54,15 @@ How well a control's SCF anchor covers what the control does. Stored on the cont
 
 A non-exact fit requires **`anchor_fit_note`**, which says what the anchor misses. The fit is a label, not a coverage input: framework credit still flows only through the anchor (see Coverage above), so an unanchored `none` control satisfies no framework requirement until tenant overlay edges (#1735) exist. The user-guide handling is in `docs-site/docs/framework-setup.md` ("Controls with no SCF equivalent").
 
+## Active control (two definitions, on purpose)
+
+Two queries count a tenant control as "active", and they differ deliberately (#1789 D3). Neither is a bug to fix to match the other.
+
+- **For coverage** (`FrameworkPosture`, `internal/db/queries/dashboard.sql`) — any control with `superseded_by IS NULL`, whatever its `lifecycle_state`. Posture measures coverage by any defined control.
+- **For SoA contradictions** (`ListFrameworkScopeContradictions`, `internal/db/queries/framework_scopes.sql`) — `lifecycle_state = 'active' AND superseded_by IS NULL`. A contradiction claims a working control sits behind an exclusion, so a draft or retired control does not count.
+
+**Contradictions are evaluated against current evaluations.** On `GET /v1/framework-scopes/applicability?as_of=…` the decisions are those in force at `as_of`, but `contradiction` answers "would this exclusion be contradicted now". Both applicability GETs say so with `contradictions_evaluated_against: "current"` (#1789 D6).
+
 ## Risk treatment (#1746)
 
 How the program has decided to handle a risk. `risks.treatment` is the `risk_treatment` enum, NOT NULL, and every create path (REST, MCP, web form, DB column default, generated aggregate parents) defaults it to `untreated`. No path ever defaults to a real decision.
@@ -72,6 +81,16 @@ How the program has decided to handle a risk. `risks.treatment` is the `risk_tre
 - `approved` — signed off. Requires `accepter` and `accepted_until`, enforced by `ValidateTreatment` (`internal/risk/treatment.go`) and the `risks_accept_fields_required` CHECK.
 
 **Open exposure** — a risk counts as open unless it is an `approved` acceptance. `untreated` risks and `proposed` acceptances stay open (`risk.IsOpenTreatment`, the `open_risk_financial_exposure` metric). `untreated` is never grouped with `avoid`.
+
+## Risk hierarchy links (#1748)
+
+Risks roll up through the `risk_aggregations` join table (parent → child, many-to-many). A risk can have several parents and several children.
+
+**Parent risk** — a risk that other risks roll up to, such as an enterprise risk that team findings evidence. Any existing risk at `org` or `company` level can be a parent: children are attached through `POST /v1/risks/{id}/children` (or the `link_child_risks` MCP proposal), or created with it by `POST /v1/risks/aggregate` and by an aggregation rule's meta-risk.
+
+**Child risk** — a risk linked under a parent. Its level must be strictly below the parent's (`team` < `org` < `company`), it must be scored on the 5x5 grid, and it can be neither the parent nor any of the parent's ancestors (a cycle is refused with 409). Org units are not compared: a child may come from any team. A link is `manual` (attached by hand, `rule_id` NULL) or `rule` (made by an aggregation rule). Detaching a child (`DELETE /v1/risks/{id}/children/{child_id}`) deletes neither risk.
+
+**Roll-up severity** — the parent's severity computed from its children with a severity function (`max`, `weighted_max`, `sum`): the one stored on the parent's `inherent_score`, else `max`. It is computed on read and never stored. It sits beside the parent's **assessed severity**, the score the parent was given itself (`inherent_score`), which linking and unlinking never change. When the roll-up is higher than the assessed severity, the API sets `exceeds_assessed` and the risk detail page flags the parent for review. Children without a 5x5 score do not count toward the roll-up.
 
 ## Exception (slice 021)
 
