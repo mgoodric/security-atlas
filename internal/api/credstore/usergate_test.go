@@ -170,6 +170,53 @@ func TestRevokeUserInMemory(t *testing.T) {
 	}
 }
 
+func TestMinterUserID(t *testing.T) {
+	cases := map[string]struct {
+		c    Credential
+		want string
+	}{
+		"jwt user":     {Credential{ID: "jwt:x", UserID: "user:" + gateUser}, gateUser},
+		"user key":     {Credential{ID: "key_x", UserID: gateUser}, gateUser},
+		"machine key":  {Credential{ID: "key_x", UserID: "key_x"}, ""},
+		"uuid-form id": {Credential{ID: gateUser, UserID: gateUser}, ""},
+		"empty":        {Credential{ID: "key_x"}, ""},
+	}
+	for name, tc := range cases {
+		if got := MinterUserID(tc.c); got != tc.want {
+			t.Errorf("%s: MinterUserID = %q; want %q", name, got, tc.want)
+		}
+	}
+}
+
+// #1947: IssueMinted records the minter for attribution only. The key stays
+// a machine key, so the user gate never consults the minter's status.
+func TestIssueMinted_RecordsMinterWithoutOwnership(t *testing.T) {
+	s := New(time.Hour)
+	p := newFakePersister()
+	if _, err := s.AttachPersistence(p); err != nil {
+		t.Fatalf("AttachPersistence: %v", err)
+	}
+	gate := &fakeGate{allowed: map[string]bool{}}
+	s.SetUserGate(gate)
+
+	cred, token, err := s.IssueMinted(gateTenant, "", nil, 0, gateUser)
+	if err != nil {
+		t.Fatalf("IssueMinted: %v", err)
+	}
+	if cred.MintedBy != gateUser || cred.UserID != cred.ID {
+		t.Fatalf("cred MintedBy=%q UserID=%q; want minter %q and own id", cred.MintedBy, cred.UserID, gateUser)
+	}
+	if got := p.inserted[cred.ID].Cred.MintedBy; got != gateUser {
+		t.Fatalf("persisted MintedBy = %q; want %q", got, gateUser)
+	}
+	if _, err := s.Authenticate(token); err != nil {
+		t.Fatalf("Authenticate with minter disallowed = %v; want nil", err)
+	}
+	if gate.calls != 0 {
+		t.Fatalf("gate consulted %d times for a machine key; want 0", gate.calls)
+	}
+}
+
 func TestOwnedByUser(t *testing.T) {
 	cases := map[string]struct {
 		c    Credential

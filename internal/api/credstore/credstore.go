@@ -19,6 +19,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -338,6 +339,26 @@ func (s *Store) Issue(tenantID, scope string, kinds []string, ttl time.Duration)
 	return s.issueLocked(tenantID, scope, kinds, ttl, "", false, false, nil)
 }
 
+// IssueMinted is Issue with the minting admin recorded in MintedBy, the
+// gRPC AdminCredentialsService.Issue path (#1947). mintedBy is a users(id)
+// uuid or empty, and is attribution only: the key stays a machine key whose
+// UserID is its own id, so it never acts as the minter and keeps working
+// after the minter is disabled. Operators revoke such keys deliberately.
+func (s *Store) IssueMinted(tenantID, scope string, kinds []string, ttl time.Duration, mintedBy string) (Credential, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cred, token, r, err := s.buildLocked(tenantID, scope, kinds, ttl, "", false, false, nil)
+	if err != nil {
+		return Credential{}, "", err
+	}
+	cred.MintedBy = mintedBy
+	r.cred = cred
+	if err := s.commitLocked(cred, r); err != nil {
+		return Credential{}, "", err
+	}
+	return cred, token, nil
+}
+
 // IssueAdmin mints an admin-flagged credential for tenantID. Admin
 // credentials are still tenant-scoped — they unlock admin-only actions
 // (e.g. POST /v1/schemas) for THIS tenant only. There is no global admin
@@ -634,6 +655,22 @@ func (s *Store) authenticateLocked(token string) (Credential, UserGate, bool, er
 	}
 	r.cred.LastUsedAt = time.Now().UTC()
 	return r.cred, s.gate, r.persisted, nil
+}
+
+// MinterUserID returns the users(id) uuid behind the caller c, for
+// api_keys.minted_by (attribution only, never the new key's identity), or
+// "" when the caller is not a user. A JWT carries "user:<uuid>"; a key
+// issued by a user carries the bare uuid; a bootstrap or machine
+// credential carries neither and records no minter.
+func MinterUserID(c Credential) string {
+	id := strings.TrimPrefix(c.UserID, "user:")
+	if id == c.ID {
+		return ""
+	}
+	if _, err := uuid.Parse(id); err != nil {
+		return ""
+	}
+	return id
 }
 
 // OwnedByUser reports whether c belongs to a user: its UserID is a users(id)

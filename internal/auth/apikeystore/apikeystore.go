@@ -110,6 +110,11 @@ type IssueInput struct {
 	IsApprover     bool
 	OwnerRoles     []string
 	IssuedBy       *uuid.UUID
+	// MintedBy is the users(id) of the admin who minted the key, recorded
+	// in api_keys.minted_by for attribution only (#1947). It is not the
+	// key's owner (IssuedBy is) and nothing authorizes on it: an
+	// admin-minted machine key outlives the admin who minted it.
+	MintedBy *uuid.UUID
 }
 
 // Issue creates a new api_keys row and returns the bearer plaintext exactly
@@ -174,6 +179,11 @@ func (s *Store) Rotate(ctx context.Context, tenantID string, predecessorID uuid.
 		IsAdmin:        pred.IsAdmin,
 		IsApprover:     pred.IsApprover,
 		OwnerRoles:     pred.OwnerRoles,
+	}
+	if pred.MintedBy.Valid {
+		if u, uerr := uuidFromPg(pred.MintedBy); uerr == nil {
+			in.MintedBy = &u
+		}
 	}
 	predUU, _ := uuidFromPg(pred.ID)
 	plain, err := bearer.Generate(s.prefix)
@@ -392,6 +402,10 @@ func (s *Store) insert(ctx context.Context, q *dbx.Queries, tenantID, plain stri
 	if in.IssuedBy != nil {
 		issuedBy = pgtype.UUID{Bytes: *in.IssuedBy, Valid: true}
 	}
+	var mintedBy pgtype.UUID
+	if in.MintedBy != nil {
+		mintedBy = pgtype.UUID{Bytes: *in.MintedBy, Valid: true}
+	}
 	row, err := q.InsertAPIKey(ctx, dbx.InsertAPIKeyParams{
 		ID:             id,
 		TenantID:       tIDU,
@@ -406,6 +420,7 @@ func (s *Store) insert(ctx context.Context, q *dbx.Queries, tenantID, plain stri
 		OwnerRoles:     roles,
 		Last4:          bearer.Last4(plain),
 		TtlSeconds:     int64(in.TTL.Seconds()),
+		MintedBy:       mintedBy,
 	})
 	return row, err
 }
