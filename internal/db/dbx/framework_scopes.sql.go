@@ -847,6 +847,48 @@ func (q *Queries) ListFrameworkVersionLinkedControls(ctx context.Context, arg Li
 	return items, nil
 }
 
+const listFrameworkVersionMigrationsInto = `-- name: ListFrameworkVersionMigrationsInto :many
+SELECT id, framework_id, from_version_id, to_version_id, from_requirement_id, to_requirement_id, requirement_code, match_kind, status, reviewer_id, note, created_at, decided_at FROM framework_version_migrations
+WHERE to_version_id = $1
+ORDER BY from_version_id, match_kind, requirement_code
+`
+
+// Every version-migration queue row (ADR 0019) whose target is one framework
+// version, for the applicability carry-over (#1793). Catalog rows: no tenant.
+func (q *Queries) ListFrameworkVersionMigrationsInto(ctx context.Context, toVersionID pgtype.UUID) ([]FrameworkVersionMigration, error) {
+	rows, err := q.db.Query(ctx, listFrameworkVersionMigrationsInto, toVersionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FrameworkVersionMigration
+	for rows.Next() {
+		var i FrameworkVersionMigration
+		if err := rows.Scan(
+			&i.ID,
+			&i.FrameworkID,
+			&i.FromVersionID,
+			&i.ToVersionID,
+			&i.FromRequirementID,
+			&i.ToRequirementID,
+			&i.RequirementCode,
+			&i.MatchKind,
+			&i.Status,
+			&i.ReviewerID,
+			&i.Note,
+			&i.CreatedAt,
+			&i.DecidedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const submitFrameworkScope = `-- name: SubmitFrameworkScope :one
 UPDATE framework_scopes
 SET state = 'review',

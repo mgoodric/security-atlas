@@ -287,6 +287,7 @@ POST /v1/incidents/{id}/close
 POST /v1/framework-scopes
 POST /v1/framework-scopes/{id}/applicability/bulk
 POST /v1/framework-scopes/{id}/applicability/import
+POST /v1/framework-scopes/{id}/applicability:carry-over
 POST /v1/install/mark-first-signin
 POST /v1/mcp/write-proposals
 POST /v1/mcp/write-proposals/{id}/confirm
