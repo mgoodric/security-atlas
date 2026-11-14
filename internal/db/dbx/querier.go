@@ -106,6 +106,11 @@ type Querier interface {
 	// attachment; if the period is still open, frozen_at remains NULL and the
 	// slice-026 query path keeps the population live until the period freezes.
 	AttachPopulationToPeriod(ctx context.Context, arg AttachPopulationToPeriodParams) error
+	// #1769: fill legacy_scf_id on an anchor imported without one. Only a
+	// NULL is filled, so a stored value is never rewritten; the importer
+	// refuses a re-import whose legacy_scf_id differs from a stored one.
+	// legacy_scf_id is outside trg_scf_anchor_immutability's guarded columns.
+	BackfillSCFAnchorLegacySCFID(ctx context.Context, arg BackfillSCFAnchorLegacySCFIDParams) (int64, error)
 	// Slice 751 — the DETERMINISTIC exception-status aggregate the board brief
 	// freezes into `content.exceptions` and the AI-drafted exception-status
 	// narrative section grounds every numeric claim on.
