@@ -3109,6 +3109,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/applicability/export:
+    get:
+      summary: GET /v1/framework-scopes/applicability/export — export the Statement of Applicability as CSV or xlsx
+      tags: [framework-scopes]
+      operationId: get-v1-framework-scopes-applicability-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}:
     get:
       summary: GET /v1/framework-scopes/{id}

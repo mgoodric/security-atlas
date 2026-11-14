@@ -48,8 +48,18 @@ type soaFixture struct {
 
 func seedSoAFixture(t *testing.T, admin *pgxpool.Pool, tenant string) soaFixture {
 	t.Helper()
+	return seedSoAFixtureAs(t, admin, tenant, "", "SoA test framework (#1787)")
+}
+
+// seedSoAFixtureAs seeds the fixture under the given framework slug and
+// name; an empty slug gets a unique one.
+func seedSoAFixtureAs(t *testing.T, admin *pgxpool.Pool, tenant, slug, name string) soaFixture {
+	t.Helper()
 	ctx := context.Background()
 	uniq := uuid.NewString()[:8]
+	if slug == "" {
+		slug = "soa-1787-" + uniq
+	}
 	fwID, scfFVID, fvID := uuid.New(), uuid.New(), uuid.New()
 	exec := func(what, sql string, args ...any) {
 		t.Helper()
@@ -58,7 +68,7 @@ func seedSoAFixture(t *testing.T, admin *pgxpool.Pool, tenant string) soaFixture
 		}
 	}
 	exec("framework", `INSERT INTO frameworks (id, tenant_id, slug, name, issuer)
-		VALUES ($1, NULL, $2, 'SoA test framework (#1787)', 'tester')`, fwID, "soa-1787-"+uniq)
+		VALUES ($1, NULL, $2, $3, 'tester')`, fwID, slug, name)
 	exec("scf version", `INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
 		VALUES ($1, NULL, $2, 'scf-1787', 'legacy')`, scfFVID, fwID)
 	exec("framework version", `INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)

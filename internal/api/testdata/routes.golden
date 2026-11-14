@@ -120,6 +120,7 @@ GET /v1/incidents/{id}
 GET /v1/features/enabled
 GET /v1/framework-scopes
 GET /v1/framework-scopes/applicability
+GET /v1/framework-scopes/applicability/export
 GET /v1/framework-scopes/{id}
 GET /v1/framework-scopes/{id}/applicability
 GET /v1/frameworks
