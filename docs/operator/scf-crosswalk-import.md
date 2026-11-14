@@ -44,6 +44,57 @@ contains `Focal Document Element`, `Relationship`, `Reference Document Element`,
 and `Strength of Relationship` columns. When this shape is supplied, the
 importer uses the workbook's explicit relationship and strength values.
 
+## What Each Source Carries
+
+A crosswalk edge has two parts: which SCF anchor a requirement maps to, and the
+NIST IR 8477 STRM detail of that mapping (relationship type and strength). The
+sources differ in how much of that detail they publish, so the same pair can
+arrive with different detail depending on the file you import.
+
+| Source                                     | Anchor IDs | Relationship type  | Strength  | `source_attribution` on import |
+| ------------------------------------------ | ---------- | ------------------ | --------- | ------------------------------ |
+| Full SCF workbook (`SCF <version>` sheet)  | Yes        | No, defaulted      | No, `0.5` | `community_draft`              |
+| SCF OLIR STRM workbook                     | Yes        | Yes, from the file | Yes       | `community_draft`              |
+| Project YAML crosswalk (`data/crosswalks`) | Yes        | Yes, per mapping   | Yes       | As declared in the file        |
+
+What this means in practice:
+
+- **Full workbook edges are placeholders for the STRM detail.** The workbook
+  lists only requirement IDs per SCF control, so every edge from it lands as
+  `intersects_with` with strength `0.5`. These values are not SCF's
+  assessment; they are the importer's conservative default. The edge's
+  rationale names the sheet, row and column it came from and says it is
+  pending STRM review.
+- **The OLIR STRM workbook is the source of real relationship detail.** SCF
+  publishes its STRM relationship types and strengths in separate STRM files,
+  not in the main workbook. At the time of writing those are free as PDFs or
+  as a paid Excel bundle; only the Excel (`.xlsx`) shape is importable. When
+  you have one, import it (see [Import](#import)) and its explicit
+  `Relationship` and `Strength of Relationship` values replace the
+  workbook's defaults for the same (requirement, anchor) pairs, because both
+  imports are `community_draft` and a same-source import updates the edge.
+  Any edge whose content that import changes has its trust tier re-seeded
+  (#1849), so an edge already promoted to reviewed or verified drops back to
+  draft and needs review again. Each one is printed:
+
+  ```text
+  edge tier re-seeded CC6.1->IAC-01: content changed; mapping_tier verified -> draft
+  ```
+
+- **What "official" means.** No XLSX import is written as `scf_official`,
+  including the OLIR STRM workbook: the importer cannot verify that a local
+  file is an unmodified SCF publication. `scf_official` is only set by a YAML
+  crosswalk that declares it, and none of the bundled
+  `data/crosswalks/*.yaml` files does today. Every XLSX import, and every YAML
+  mapping that isn't `scf_official`, starts at the draft trust tier, and
+  promoting it is a human step. A YAML mapping declared `scf_official` is
+  seeded at verified (ADR 0018 §2).
+
+If you need STRM-accurate relationships for audit work, import the OLIR STRM
+workbook for that framework before promoting its edges, or review and edit the
+workbook-derived edges before promoting them. Do not read a workbook edge's `intersects_with` /
+`0.5` as SCF's judgement of that mapping.
+
 ## Import
 
 For the full SCF workbook, pass the local `.xlsx` file and the framework column
@@ -86,10 +137,17 @@ already has an `scf_official` edge. Each skip is printed:
 edge skipped CC6.1->IAC-01: existing source_attribution=scf_official outranks incoming community_draft
 ```
 
-A same-source or stronger-source row updates the edge as before, but never its
-trust tier. If a stronger source lands on an edge whose tier is `rejected`, the
-edge stays out of coverage, and the import prints one line per edge so a
-reviewer can act on it:
+A same-source or stronger-source row updates the edge. If that changes the
+edge's content (relationship, strength, attribution or rationale), its trust
+tier is re-seeded to the incoming source's seed tier: verified for
+`scf_official`, draft for everything else. The reviewer's earlier judgement
+applied to content that no longer exists. Each re-seed is printed and recorded
+as a tier transition. An unchanged row leaves the tier alone.
+
+A `rejected` edge is never re-seeded: rejection is a human call and only a
+reviewer reopens it. If a stronger source lands on a `rejected` edge, the edge
+stays out of coverage, and the import prints one line per edge so a reviewer
+can act on it:
 
 ```text
 edge upgraded onto rejected tier CC6.1->IAC-01: source_attribution community_draft -> scf_official; mapping_tier stays rejected
