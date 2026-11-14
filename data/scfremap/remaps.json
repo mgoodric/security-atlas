@@ -1,0 +1,54 @@
+{
+  "$comment": "Concept remaps between releases of the bundled SCF sample (migrations/fixtures/scf-sample.json), from the D5 table in docs/audit-log/1717-scf-pin-ratchet-decisions.md. A control left on an anchor of from_release that the upgrade could not re-bind is reported as needing re-anchoring, with this note (#1971). basis: legacy = SCF lists the old code as the target's legacy ID; concept = the old code pointed at an unrelated control and the target was chosen by meaning. Each SCF family group (#1717) appends its rows.",
+  "remaps": [
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-06",
+      "to": "IAC-37",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-07",
+      "to": "IAC-04",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-10",
+      "to": "IAC-14",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-15",
+      "to": "IAC-12",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-21",
+      "to": "IAC-10",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-24",
+      "to": "IAC-11",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "IAC-25",
+      "to": "CFG-04.5",
+      "basis": "legacy"
+    }
+  ]
+}

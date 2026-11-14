@@ -12,10 +12,12 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
 
@@ -171,6 +173,15 @@ func TestSCFRemapUpgrade_RetiresEdgesLeftOnTheOldRelease(t *testing.T) {
 		t.Fatalf("pre-#1971 Password Management anchors = %v; want [IAC-10@%s]", got, preRemapRelease)
 	}
 
+	// A tenant's controls on the pre-#1971 release: IAC-01 keeps its code
+	// and title, IAC-10 keeps its code but changes meaning (Authenticator
+	// Management -> PAM), IAC-21 is gone from the new release.
+	tenant := dbtest.SeedTenant(t, pool, "controls")
+	tenantControls := map[string]uuid.UUID{}
+	for _, code := range []string{"IAC-01", "IAC-10", "IAC-21"} {
+		tenantControls[code] = insertTenantControl(t, pool, tenant, code)
+	}
+
 	// The upgraded bootstrap: the current sample (a new release label, so a
 	// new framework version), then the current crosswalk.
 	cur := loadSCFSample(t)
@@ -183,6 +194,7 @@ func TestSCFRemapUpgrade_RetiresEdgesLeftOnTheOldRelease(t *testing.T) {
 		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.version = $1 AND fv.status = 'legacy'`, preRemapRelease); got != 1 {
 		t.Fatalf("the %s release is not legacy after the upgrade import", preRemapRelease)
 	}
+	assertTenantControlsAfterUpgrade(t, pool, tenant, tenantControls, cur.ReleaseVersion)
 	cw := loadHIPAACrosswalk(t)
 	report, err := soc2import.Import(ctx, pool, cw)
 	if err != nil {
@@ -230,6 +242,101 @@ func TestSCFRemapUpgrade_RetiresEdgesLeftOnTheOldRelease(t *testing.T) {
 	if len(again.EdgesRetired) != 0 || len(again.EdgesRestored) != 0 || again.EdgesUnchanged != len(cw.Mappings) {
 		t.Fatalf("re-import retired=%d restored=%d unchanged=%d; want 0, 0 and %d",
 			len(again.EdgesRetired), len(again.EdgesRestored), again.EdgesUnchanged, len(cw.Mappings))
+	}
+}
+
+// insertTenantControl binds an active control for tenant to the current SCF
+// release's anchor for code, and returns its id.
+func insertTenantControl(t *testing.T, pool *pgxpool.Pool, tenant, code string) uuid.UUID {
+	t.Helper()
+	id := uuid.New()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO controls
+			(id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
+			 title, description, control_family, implementation_type, owner_role,
+			 lifecycle_state, applicability_expr, evidence_queries,
+			 manual_evidence_schema, linked_policy_ids, freshness_class,
+			 bundle_manifest_yaml, bundle_manifest_hash, bundle_uploaded_at, bundle_uploaded_by)
+		SELECT $1, $2, 'tenant-' || lower($3), 1, NULL, a.scf_id, a.id,
+			'Tenant control on ' || $3, '', 'IAC', 'automated', '',
+			'active', '{"true": true}', '{}'::jsonb,
+			'{}'::jsonb, '{}', NULL,
+			'', 'hash-' || $3, now(), 'test-1971'
+		FROM scf_anchors a
+		JOIN framework_versions fv ON fv.id = a.framework_version_id AND fv.status = 'current'
+		JOIN frameworks f ON f.id = fv.framework_id AND f.slug = 'scf' AND f.tenant_id IS NULL
+		WHERE a.scf_id = $3`, id, tenant, code); err != nil {
+		t.Fatalf("insert tenant control on %s: %v", code, err)
+	}
+	return id
+}
+
+// assertTenantControlsAfterUpgrade checks Matt's #1971 D3 rule after the new
+// SCF release is imported: the control whose anchor kept its code and title
+// moves to the new release's anchor; the others stay put and are listed as
+// needing re-anchoring, with the remap note from data/scfremap.
+func assertTenantControlsAfterUpgrade(t *testing.T, pool *pgxpool.Pool, tenant string, controls map[string]uuid.UUID, release string) {
+	t.Helper()
+	ctx := context.Background()
+	rr, err := scfimport.RebindControls(ctx, pool)
+	if err != nil {
+		t.Fatalf("RebindControls: %v", err)
+	}
+	if len(rr.Rebound) != 1 || rr.Rebound[0].ControlID != controls["IAC-01"] {
+		t.Fatalf("Rebound = %+v; want only the IAC-01 control", rr.Rebound)
+	}
+	notes := map[uuid.UUID]string{}
+	for _, f := range rr.NeedsReanchoring {
+		notes[f.ControlID] = f.Note
+	}
+	wantNotes := map[uuid.UUID]string{
+		controls["IAC-10"]: "IAC-10 -> IAC-14 in " + release + " (legacy)",
+		controls["IAC-21"]: "IAC-21 -> IAC-10 in " + release + " (concept)",
+	}
+	if len(notes) != len(wantNotes) {
+		t.Fatalf("NeedsReanchoring = %+v; want the IAC-10 and IAC-21 controls", rr.NeedsReanchoring)
+	}
+	for id, want := range wantNotes {
+		if notes[id] != want {
+			t.Errorf("note for control %s = %q; want %q", id, notes[id], want)
+		}
+	}
+	bound := func(id uuid.UUID) string {
+		t.Helper()
+		return queryStrings(t, pool, `
+			SELECT a.scf_id || '@' || fv.version FROM controls c
+			JOIN scf_anchors a ON a.id = c.scf_anchor_id
+			JOIN framework_versions fv ON fv.id = a.framework_version_id
+			WHERE c.id = $1`, id)[0]
+	}
+	if got := bound(controls["IAC-01"]); got != "IAC-01@"+release {
+		t.Errorf("IAC-01 control bound to %s; want IAC-01@%s", got, release)
+	}
+	if got := bound(controls["IAC-10"]); got != "IAC-10@"+preRemapRelease {
+		t.Errorf("IAC-10 control bound to %s; want it left on IAC-10@%s, not moved to the new IAC-10 (PAM)", got, preRemapRelease)
+	}
+
+	// The per-tenant list the warning surface reads holds exactly the two.
+	rows, err := dbx.New(pool).ListControlsOnLegacySCFAnchors(ctx, pgtype.UUID{Bytes: uuid.MustParse(tenant), Valid: true})
+	if err != nil {
+		t.Fatalf("ListControlsOnLegacySCFAnchors: %v", err)
+	}
+	var listed []string
+	for _, r := range rows {
+		listed = append(listed, r.LegacyScfID)
+	}
+	slices.Sort(listed)
+	if !slices.Equal(listed, []string{"IAC-10", "IAC-21"}) {
+		t.Fatalf("controls needing re-anchoring for the tenant = %v; want [IAC-10 IAC-21]", listed)
+	}
+
+	// Idempotent: a second boot moves nothing more and still flags both.
+	again, err := scfimport.RebindControls(ctx, pool)
+	if err != nil {
+		t.Fatalf("second RebindControls: %v", err)
+	}
+	if len(again.Rebound) != 0 || len(again.NeedsReanchoring) != 2 {
+		t.Fatalf("second RebindControls = %d rebound, %d flagged; want 0 and 2", len(again.Rebound), len(again.NeedsReanchoring))
 	}
 }
 

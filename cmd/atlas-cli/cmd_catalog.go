@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -78,6 +79,14 @@ func newCatalogImportSCFCmd() *cobra.Command {
 				report.ReleaseVersion, report.FrameworkVersionID, report.IsNewVersion)
 			fmt.Printf("created=%d updated=%d unchanged=%d\n",
 				report.Created, report.Updated, report.Unchanged)
+
+			// #1971 D3: after a new release, move controls whose anchor kept
+			// its code and title; list the rest for re-anchoring.
+			rebind, err := scfimport.RebindControls(ctx, pool)
+			if err != nil {
+				return err
+			}
+			printRebindReport(os.Stdout, rebind)
 			return nil
 		},
 	}
@@ -227,4 +236,15 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	cmd.Flags().StringVar(&titlesPath, "titles", "", "crosswalk-format YAML whose requirement titles and bodies override the bundled crosswalk's for SCF workbook imports (its mappings are ignored)")
 	cmd.Flags().BoolVar(&allowCodeTitles, "allow-code-titles", false, "let SCF workbook requirements that no title source covers import titled with their code")
 	return cmd
+}
+
+// printRebindReport writes the control re-binding outcome of an SCF import
+// (#1971 D3): a count, then one line per control left needing re-anchoring,
+// so the bootstrap log names every control that lost framework coverage.
+func printRebindReport(w io.Writer, r scfimport.RebindReport) {
+	_, _ = fmt.Fprintf(w, "controls rebound=%d needs_reanchoring=%d\n", len(r.Rebound), len(r.NeedsReanchoring))
+	for _, c := range r.NeedsReanchoring {
+		_, _ = fmt.Fprintf(w, "control needs re-anchoring tenant=%s bundle=%s anchor=%s@%s: %s\n",
+			c.TenantID, c.BundleID, c.LegacySCFID, c.LegacyRelease, c.Note)
+	}
 }

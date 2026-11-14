@@ -18,13 +18,27 @@ Matt's call (2026-11-14, on #1999 and #1717). Since #2011 an imported release is
 - **The legacy rows are kept, not orphaned.** The old IDs (`IAC-06`, `IAC-21` and the rest) are simply the legacy release's rows. Superseded control versions still reference them (`controls.scf_anchor_id` is `ON DELETE RESTRICT`), and audit replay can read them.
 - **A pin keeps the label honest.** `internal/api/scfseed/fixturepin_test.go` pins a sha256 of the sample's anchor content (`scf_id`, `family`, `title`, `description`, `subtopics`, in file order) to its `release_version`. Editing a row without a new label fails in CI, and the failure prints the hash to pin. Entries are never edited, only added.
 
-## D3 — Stock controls move to the new release's anchor in place
+## D3 — Controls on a legacy release: re-bind only what kept its meaning, flag the rest
 
-Coverage joins controls to crosswalk edges by anchor row (`dashboard.sql`, `covering_control`). After a new release, a control left on a legacy row matches no live edge. The bootstrap re-uploads every stock bundle on each boot, and an unchanged bundle hits the byte-identical no-op (or, after a description edit, the in-place metadata path), neither of which touched `scf_anchor_id`.
+**Matt's decision (2026-11-14, relayed by the dispatcher): flag for re-anchoring.**
 
-`control.Store.Upload` now re-binds in both paths: when the manifest's SCF code resolves to a different anchor row than the active row's, the row moves to it in place (`RebindControlAnchorInPlace`), keeping its id, version, owners and evidence. That condition can only mean a new release re-minted the code's row. A manifest that names a UUID resolves to itself, and a changed code is a manifest change that supersedes as before. The five stock controls whose code this PR changes still supersede, which the CHANGELOG states.
+The problem: coverage joins controls to crosswalk edges by anchor row (`dashboard.sql`, `covering_control`), so after a new release a control left on a legacy row matches no live edge and earns no framework credit. Re-binding every such control by code would silently re-point a control whose code changed meaning: a tenant control on the old `IAC-10` (Authenticator Management) would become a PAM control.
 
-Re-binding by code is right for stock bundles, because their codes are maintained against the current catalog. For a tenant bundle it inherits any meaning change, `IAC-10` being the case here, and the CHANGELOG tells operators to re-point. Tenant controls that are never re-uploaded stay on legacy rows and drop out of coverage. A general re-bind of every control on a legacy row would apply the same meaning-change hazard silently, so it is left for a follow-up decision.
+The rule. A control moves to the current release's anchor only when that anchor has the same SCF code **and the same title**. Every other active control on a legacy anchor stays put and is reported as needing re-anchoring. The rule is applied in two places:
+
+- **`scfimport.RebindControls`**, run by `atlas-cli catalog import-scf` right after the import, so on every bootstrap. It works across every tenant through the migrate role. It reads `ListControlsOnLegacySCFAnchors`, re-binds the rows that pass (`RebindControlAnchorInPlace`), and prints one `control needs re-anchoring` line per remaining control.
+- **`control.Store.Upload`**, for an unchanged re-uploaded bundle (byte-identical, or in-place metadata only). It moves the control on the same test, and otherwise leaves it in place and reports `NeedsReanchoring`. A re-upload therefore never silently changes what a control means either.
+
+The note says where the concept went, most specific source first:
+
+1. `data/scfremap/remaps.json`, a machine-readable copy of the D5 table, embedded in the binary. The `concept` rows (`IAC-15`, `IAC-21`, `IAC-24`) cannot come from #2032's `legacy_scf_id`, which records SCF's official legacy number, so this table is the only source for them. Later family groups append their rows.
+2. SCF's own legacy ID: the current anchor whose `legacy_scf_id` is the old code.
+3. The code's new title.
+4. "Not in the current release".
+
+Every row of `ListControlsOnLegacySCFAnchors` with a tenant id is a control needing re-anchoring, because the upgrade has already re-bound the rest. The tenant-facing API endpoint and dashboard warning that read it are #2176, split out of this PR at the dispatcher's call.
+
+The five stock controls whose code this PR changes still supersede on the re-upload (their manifest changed). Until that re-upload runs, the boot-time SCF import lists them as needing re-anchoring, so the bootstrap log can show a stock bundle that the next phase supersedes.
 
 ## D4 — The crosswalk import retires the edges it no longer lists
 

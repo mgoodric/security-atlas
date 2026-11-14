@@ -341,6 +341,44 @@ SET scf_anchor_id = $3,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 
+-- name: ListControlsOnLegacySCFAnchors :many
+-- Issue #1971 (D3): active controls still bound to an anchor of an SCF
+-- release that is no longer current. Coverage joins controls to crosswalk
+-- edges by anchor row, so these controls earn no framework credit until they
+-- move. For each one: the legacy anchor; the current release's anchor with
+-- the same code, if any (current_anchor_id is NULL when the code is gone);
+-- and the current anchor that SCF lists the legacy code as the legacy ID of
+-- (#1769), if any. The upgrade re-binds a control only when the current
+-- anchor has the same code AND the same title; every other row is reported
+-- as needing re-anchoring. tenant_id NULL lists every tenant (the migrate
+-- role, at upgrade); a tenant id lists that tenant's controls.
+SELECT
+    c.id                  AS control_id,
+    c.tenant_id,
+    c.bundle_id,
+    c.title               AS control_title,
+    la.id                 AS legacy_anchor_id,
+    la.scf_id             AS legacy_scf_id,
+    la.title              AS legacy_anchor_title,
+    lfv.version           AS legacy_release,
+    cfv.version           AS current_release,
+    ca.id                 AS current_anchor_id,
+    ca.title              AS current_anchor_title,
+    -- '' when SCF lists no current anchor with this legacy code.
+    COALESCE((SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id
+FROM controls c
+JOIN scf_anchors la            ON la.id = c.scf_anchor_id
+JOIN framework_versions lfv    ON lfv.id = la.framework_version_id
+JOIN frameworks f              ON f.id = lfv.framework_id AND f.slug = 'scf' AND f.tenant_id IS NULL
+JOIN framework_versions cfv    ON cfv.framework_id = f.id AND cfv.status = 'current'
+LEFT JOIN scf_anchors ca       ON ca.framework_version_id = cfv.id AND ca.scf_id = la.scf_id
+WHERE c.superseded_by IS NULL
+  AND lfv.id <> cfv.id
+  AND (sqlc.narg(tenant_id)::uuid IS NULL OR c.tenant_id = sqlc.narg(tenant_id)::uuid)
+ORDER BY c.tenant_id, c.bundle_id, c.id;
+
 -- NOTE: SCF anchor lookups reuse GetSCFAnchorByID and GetSCFAnchorBySCFID
 -- from internal/db/queries/scf_anchors.sql (slice 006). The bundle parser
 -- in internal/control/parser.go calls them through the same dbx.Queries

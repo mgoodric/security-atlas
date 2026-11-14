@@ -1068,6 +1068,93 @@ func (q *Queries) ListControlsHistoryForExport(ctx context.Context, arg ListCont
 	return items, nil
 }
 
+const listControlsOnLegacySCFAnchors = `-- name: ListControlsOnLegacySCFAnchors :many
+SELECT
+    c.id                  AS control_id,
+    c.tenant_id,
+    c.bundle_id,
+    c.title               AS control_title,
+    la.id                 AS legacy_anchor_id,
+    la.scf_id             AS legacy_scf_id,
+    la.title              AS legacy_anchor_title,
+    lfv.version           AS legacy_release,
+    cfv.version           AS current_release,
+    ca.id                 AS current_anchor_id,
+    ca.title              AS current_anchor_title,
+    -- '' when SCF lists no current anchor with this legacy code.
+    COALESCE((SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id
+FROM controls c
+JOIN scf_anchors la            ON la.id = c.scf_anchor_id
+JOIN framework_versions lfv    ON lfv.id = la.framework_version_id
+JOIN frameworks f              ON f.id = lfv.framework_id AND f.slug = 'scf' AND f.tenant_id IS NULL
+JOIN framework_versions cfv    ON cfv.framework_id = f.id AND cfv.status = 'current'
+LEFT JOIN scf_anchors ca       ON ca.framework_version_id = cfv.id AND ca.scf_id = la.scf_id
+WHERE c.superseded_by IS NULL
+  AND lfv.id <> cfv.id
+  AND ($1::uuid IS NULL OR c.tenant_id = $1::uuid)
+ORDER BY c.tenant_id, c.bundle_id, c.id
+`
+
+type ListControlsOnLegacySCFAnchorsRow struct {
+	ControlID          pgtype.UUID `json:"control_id"`
+	TenantID           pgtype.UUID `json:"tenant_id"`
+	BundleID           string      `json:"bundle_id"`
+	ControlTitle       string      `json:"control_title"`
+	LegacyAnchorID     pgtype.UUID `json:"legacy_anchor_id"`
+	LegacyScfID        string      `json:"legacy_scf_id"`
+	LegacyAnchorTitle  string      `json:"legacy_anchor_title"`
+	LegacyRelease      string      `json:"legacy_release"`
+	CurrentRelease     string      `json:"current_release"`
+	CurrentAnchorID    pgtype.UUID `json:"current_anchor_id"`
+	CurrentAnchorTitle *string     `json:"current_anchor_title"`
+	SuccessorScfID     string      `json:"successor_scf_id"`
+}
+
+// Issue #1971 (D3): active controls still bound to an anchor of an SCF
+// release that is no longer current. Coverage joins controls to crosswalk
+// edges by anchor row, so these controls earn no framework credit until they
+// move. For each one: the legacy anchor; the current release's anchor with
+// the same code, if any (current_anchor_id is NULL when the code is gone);
+// and the current anchor that SCF lists the legacy code as the legacy ID of
+// (#1769), if any. The upgrade re-binds a control only when the current
+// anchor has the same code AND the same title; every other row is reported
+// as needing re-anchoring. tenant_id NULL lists every tenant (the migrate
+// role, at upgrade); a tenant id lists that tenant's controls.
+func (q *Queries) ListControlsOnLegacySCFAnchors(ctx context.Context, tenantID pgtype.UUID) ([]ListControlsOnLegacySCFAnchorsRow, error) {
+	rows, err := q.db.Query(ctx, listControlsOnLegacySCFAnchors, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListControlsOnLegacySCFAnchorsRow
+	for rows.Next() {
+		var i ListControlsOnLegacySCFAnchorsRow
+		if err := rows.Scan(
+			&i.ControlID,
+			&i.TenantID,
+			&i.BundleID,
+			&i.ControlTitle,
+			&i.LegacyAnchorID,
+			&i.LegacyScfID,
+			&i.LegacyAnchorTitle,
+			&i.LegacyRelease,
+			&i.CurrentRelease,
+			&i.CurrentAnchorID,
+			&i.CurrentAnchorTitle,
+			&i.SuccessorScfID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockActiveControlByBundleID = `-- name: LockActiveControlByBundleID :one
 SELECT id, tenant_id, bundle_id, version, superseded_by, scf_id, scf_anchor_id,
        title, description, control_family, implementation_type,

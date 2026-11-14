@@ -18,9 +18,18 @@ see the corresponding `docs/issues/<NNN>-*.md` and the PR body.
   **The sample is a new SCF release, `test-2026.3`** (it was `test-2026.1`). An imported SCF release is frozen (#1768), so changed anchor content has to ship under a new label. On the next boot the SCF import creates a new framework version with new anchor rows and leaves `test-2026.1` as a legacy version, rows and titles unchanged. A new unit test pins a hash of the sample's anchor content to its `release_version`, so a future edit without a label bump fails in CI instead of failing every upgraded install's bootstrap.
 
   Coverage joins controls to crosswalk edges by anchor row, so after the new release everything has to move to the current rows:
-  - **Stock controls:** the bootstrap re-uploads every bundle. An unchanged bundle whose SCF code now resolves to the new release's anchor is moved to it in place, keeping its control id, version, owners and evidence. The upload result reports `AnchorRebound`.
-  - **Tenant-authored controls** that are not re-uploaded stay on the legacy rows and drop out of framework coverage until they are re-uploaded or re-anchored.
-  - **Meaning changes:** a code whose meaning changed between releases now resolves to the new meaning. `IAC-10` was Authenticator Management and is now Privileged Account Management (PAM). Re-point anything that meant authenticator management to `IAC-14`, including a connector run with an explicit `--*-control scf:IAC-10` flag, evidence recorded against `scf:IAC-10`, and a tenant bundle anchored on `IAC-10`. A connector flag still naming one of the other old IDs (for example `scf:IAC-21`) keeps sending that ID; update it.
+  - **The rule:** a control is moved to the new release's anchor only when that anchor has the same SCF code **and the same title**, so its meaning did not change. It keeps its control id, version, owners and evidence. Nothing is re-pointed silently.
+  - **Where it runs:** `atlas-cli catalog import-scf` runs this across every tenant right after the import, so the bootstrap does it on every boot. A bundle re-upload applies the same rule; the upload result reports `AnchorRebound` or `NeedsReanchoring`.
+  - **Controls needing re-anchoring:** every other active control left on a legacy anchor stays where it is and earns no framework credit until someone re-anchors it. That covers a code that is gone (`IAC-21`) and a code whose title changed (`IAC-10`). The SCF import prints a count and one line per control, with a note on where the concept went:
+
+    ```text
+    controls rebound=41 needs_reanchoring=2
+    control needs re-anchoring tenant=<id> bundle=my-pam-control anchor=IAC-21@test-2026.1: IAC-21 -> IAC-10 in test-2026.3 (concept)
+    control needs re-anchoring tenant=<id> bundle=my-mfa-secrets anchor=IAC-10@test-2026.1: IAC-10 -> IAC-14 in test-2026.3 (legacy)
+    ```
+
+    The note comes from the bundled remap table (`data/scfremap/remaps.json`, the D5 table of #1717). If the table has no row, it falls back to SCF's own legacy ID (#1769), then to the code's new title, then to "not in the current release". An API endpoint and a dashboard warning for this list are #2176.
+  - **Meaning changes outside controls:** `IAC-10` was Authenticator Management and is now Privileged Account Management (PAM). A control on the old `IAC-10` is flagged, as above. Re-point the rest yourself: a connector run with an explicit `--*-control scf:IAC-10` flag, and evidence recorded against `scf:IAC-10`, now mean PAM; use `IAC-14` for authenticator management. A connector flag still naming one of the other old IDs (for example `scf:IAC-21`) keeps sending that ID; update it.
 
   **The crosswalk import now retires the edges it no longer lists.** This happens in the same transaction as the upsert. Edges are matched by requirement row and anchor row, so after a new SCF release every edge to the legacy release's rows is retired and the current mapping is written to the new rows. Without this, an upgraded install kept HIPAA Password Management mapped to the old Authenticator Management row.
   - **What retirement keeps:** a retired edge keeps its row and its append-only tier history. The importer adds a `fw_to_scf_edge_tier_transitions` row by the system reviewer, with the note `retired: dropped by crosswalk <source>`.

@@ -126,6 +126,12 @@ with `internal/api/scfimport/catalog.go` as the contract. Each control may
 carry an optional `legacy_scf_id`, its code in the previous SCF release;
 the anchor API returns it as `legacy_scf_id`.
 
+After importing a new release, `import-scf` re-binds controls that are
+still on the previous release's anchors. A control moves only when the new
+anchor has the same code and the same title. Every other control is printed
+as `control needs re-anchoring`, with a note saying where its concept went
+(see the [upgrade guide](upgrade.md#4-verify-the-upgrade)).
+
 `import-scf` also reads SCF's published Excel workbook directly, with no
 conversion step. Download it from the
 [SCF website](https://securecontrolsframework.com/) or the

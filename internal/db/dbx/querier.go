@@ -1944,6 +1944,17 @@ type Querier interface {
 	// is belt-and-suspenders alongside the GUC-driven RLS policy; the
 	// tenancy.ApplyTenant call upstream pins the GUC.
 	ListControlsHistoryForExport(ctx context.Context, arg ListControlsHistoryForExportParams) ([]ListControlsHistoryForExportRow, error)
+	// Issue #1971 (D3): active controls still bound to an anchor of an SCF
+	// release that is no longer current. Coverage joins controls to crosswalk
+	// edges by anchor row, so these controls earn no framework credit until they
+	// move. For each one: the legacy anchor; the current release's anchor with
+	// the same code, if any (current_anchor_id is NULL when the code is gone);
+	// and the current anchor that SCF lists the legacy code as the legacy ID of
+	// (#1769), if any. The upgrade re-binds a control only when the current
+	// anchor has the same code AND the same title; every other row is reported
+	// as needing re-anchoring. tenant_id NULL lists every tenant (the migrate
+	// role, at upgrade); a tenant id lists that tenant's controls.
+	ListControlsOnLegacySCFAnchors(ctx context.Context, tenantID pgtype.UUID) ([]ListControlsOnLegacySCFAnchorsRow, error)
 	// Slice 016 — evidence freshness read-model + control drift snapshot queries.
 	//
 	// `evidence_freshness` is a materialized current-state read model (one row per

@@ -3,9 +3,11 @@
 // Issue #1971: a new SCF release mints new anchor rows under the same codes
 // (#1768 freezes each release). Coverage joins controls to edges by anchor
 // row, so a control left on the previous release's row drops out of
-// coverage. The bootstrap re-uploads every stock bundle on each boot; an
-// unchanged bundle must then move to the current release's anchor in place,
-// keeping its control id and version.
+// coverage. The bootstrap re-uploads every stock bundle on each boot. Matt's
+// call (D3): an unchanged bundle moves to the current release's anchor in
+// place only when that anchor has the same code AND the same title; when the
+// title changed (the code now means something else) the control stays on its
+// legacy anchor and is flagged for re-anchoring.
 
 package control_test
 
@@ -20,15 +22,16 @@ import (
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
-func TestUpload_UnchangedBundleRebindsToNewReleaseAnchor(t *testing.T) {
+func TestUpload_UnchangedBundleRebindsOnlyWhenTheAnchorMeansTheSame(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	ctx := context.Background()
 
-	const code = "TST-1971"
-	oldAnchor, _ := seedSCFAnchor(t, admin, code, "TST")
+	const same, changed = "TST-1971", "TST-1972"
+	oldSame, _ := seedSCFAnchor(t, admin, same, "TST")
+	oldChanged, _ := seedSCFAnchor(t, admin, changed, "TST")
 	var oldVersion uuid.UUID
-	if err := admin.QueryRow(ctx, `SELECT framework_version_id FROM scf_anchors WHERE id = $1`, oldAnchor).Scan(&oldVersion); err != nil {
+	if err := admin.QueryRow(ctx, `SELECT framework_version_id FROM scf_anchors WHERE id = $1`, oldSame).Scan(&oldVersion); err != nil {
 		t.Fatalf("read anchor version: %v", err)
 	}
 
@@ -50,15 +53,15 @@ func TestUpload_UnchangedBundleRebindsToNewReleaseAnchor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WithTenant: %v", err)
 	}
-	upload := func() control.UploadResult {
+	upload := func(bundleID, code string) control.UploadResult {
 		t.Helper()
-		b, err := control.FinalizeBundleForHTTP([]byte(yamlFor("rebind_1971", code, "automated")))
+		b, err := control.FinalizeBundleForHTTP([]byte(yamlFor(bundleID, code, "automated")))
 		if err != nil {
 			t.Fatalf("FinalizeBundleForHTTP: %v", err)
 		}
 		res, err := store.Upload(tctx, b, "key_admin")
 		if err != nil {
-			t.Fatalf("Upload: %v", err)
+			t.Fatalf("Upload %s: %v", bundleID, err)
 		}
 		return res
 	}
@@ -71,14 +74,15 @@ func TestUpload_UnchangedBundleRebindsToNewReleaseAnchor(t *testing.T) {
 		return a
 	}
 
-	first := upload()
-	if boundTo(first.ControlID) != oldAnchor {
-		t.Fatal("initial upload is not bound to the current release's anchor")
+	firstSame := upload("rebind_1971_same", same)
+	firstChanged := upload("rebind_1971_changed", changed)
+	if boundTo(firstSame.ControlID) != oldSame || boundTo(firstChanged.ControlID) != oldChanged {
+		t.Fatal("initial uploads are not bound to the current release's anchors")
 	}
 
-	// A new SCF release: the old version goes legacy, a new current version
-	// carries a new anchor row under the same code (what scfimport does for
-	// a new release_version).
+	// A new SCF release: the old version goes legacy; the new current
+	// version carries both codes, one with the same title (seedSCFAnchor's
+	// "Test anchor <code>") and one whose title changed.
 	var frameworkID uuid.UUID
 	if err := admin.QueryRow(ctx, `SELECT framework_id FROM framework_versions WHERE id = $1`, oldVersion).Scan(&frameworkID); err != nil {
 		t.Fatalf("read framework: %v", err)
@@ -91,28 +95,36 @@ func TestUpload_UnchangedBundleRebindsToNewReleaseAnchor(t *testing.T) {
 		VALUES ($1, NULL, $2, 'test-rebind-1971', 'current')`, newVersion, frameworkID); err != nil {
 		t.Fatalf("insert new release: %v", err)
 	}
-	newAnchor := uuid.New()
+	newSame, newChanged := uuid.New(), uuid.New()
 	if _, err := admin.Exec(ctx, `
 		INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title)
-		VALUES ($1, $2, $3, 'TST', 'Test anchor TST-1971, new release')`, newAnchor, newVersion, code); err != nil {
-		t.Fatalf("insert new anchor: %v", err)
+		VALUES ($1, $3, $4, 'TST', 'Test anchor '||$4), ($2, $3, $5, 'TST', 'A different control')`,
+		newSame, newChanged, newVersion, same, changed); err != nil {
+		t.Fatalf("insert new anchors: %v", err)
 	}
 
-	// The boot-time re-upload of the unchanged bundle.
-	second := upload()
-	if second.ControlID != first.ControlID || second.Version != first.Version {
-		t.Fatalf("re-upload changed the control: id %s v%d -> id %s v%d; want it kept in place",
-			first.ControlID, first.Version, second.ControlID, second.Version)
+	// The boot-time re-upload of the unchanged bundles.
+	second := upload("rebind_1971_same", same)
+	if second.ControlID != firstSame.ControlID || second.Version != firstSame.Version || !second.AnchorRebound || second.NeedsReanchoring {
+		t.Fatalf("same-meaning re-upload = %+v; want the control kept and rebound in place", second)
 	}
-	if !second.AnchorRebound {
-		t.Fatal("re-upload did not report the anchor rebind")
+	if got := boundTo(firstSame.ControlID); got != newSame {
+		t.Fatalf("same-meaning control bound to %s; want the new release's anchor %s", got, newSame)
 	}
-	if got := boundTo(first.ControlID); got != newAnchor {
-		t.Fatalf("control bound to %s after re-upload; want the new release's anchor %s", got, newAnchor)
+	flagged := upload("rebind_1971_changed", changed)
+	if flagged.ControlID != firstChanged.ControlID || flagged.AnchorRebound || !flagged.NeedsReanchoring {
+		t.Fatalf("changed-meaning re-upload = %+v; want the control kept, not rebound, and flagged", flagged)
+	}
+	if got := boundTo(firstChanged.ControlID); got != oldChanged {
+		t.Fatalf("changed-meaning control moved to %s; want it left on its legacy anchor %s", got, oldChanged)
 	}
 
-	// Idempotent: the next boot finds it already on the current anchor.
-	if third := upload(); third.AnchorRebound || third.ControlID != first.ControlID {
-		t.Fatalf("third upload = %+v; want a no-op on the same control", third)
+	// Idempotent: the next boot finds the first already on the current
+	// anchor and flags the second again.
+	if third := upload("rebind_1971_same", same); third.AnchorRebound || third.NeedsReanchoring {
+		t.Fatalf("third same-meaning upload = %+v; want a no-op", third)
+	}
+	if again := upload("rebind_1971_changed", changed); !again.NeedsReanchoring || boundTo(again.ControlID) != oldChanged {
+		t.Fatalf("second changed-meaning upload = %+v; want it still flagged on its legacy anchor", again)
 	}
 }

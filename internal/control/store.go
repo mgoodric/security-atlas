@@ -47,40 +47,68 @@ type UploadResult struct {
 	// are the existing row's; SupersededID is zero.
 	UpdatedInPlace bool
 	// AnchorRebound is true when the manifest's SCF code now resolves to a
-	// different anchor row (a newer SCF release was imported, #1768) and the
-	// active row was moved to it in place rather than superseded (#1971).
+	// different anchor row (a newer SCF release was imported, #1768) with
+	// the same title, and the active row was moved to it in place rather
+	// than superseded (#1971).
 	AnchorRebound bool
+	// NeedsReanchoring is true when the manifest's SCF code now resolves to
+	// a newer release's row whose title differs: the code changed meaning,
+	// so the control was left on its legacy anchor (#1971 D3). It earns no
+	// framework credit until it is re-anchored.
+	NeedsReanchoring bool
 }
 
-// rebindAnchor moves the active control row to the anchor its manifest's
-// SCF code resolves to today, when that differs from the row it is bound
-// to. Only reached when the manifest is otherwise unchanged (byte-identical,
-// or differing only in in-place metadata), so the manifest still names the
-// same code: the change is a new SCF release minting a new anchor row for
-// it, not an edit to the control (#1971).
-func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior dbx.LockActiveControlByBundleIDRow, anchorID uuid.UUID) (bool, error) {
-	if prior.ScfAnchorID.Valid && uuid.UUID(prior.ScfAnchorID.Bytes) == anchorID {
-		return false, nil
+// rebindOutcome is what rebindAnchor did with an unchanged manifest whose
+// SCF code now resolves to a different anchor row.
+type rebindOutcome int
+
+const (
+	rebindNone          rebindOutcome = iota // already on the resolved anchor
+	rebindMoved                              // moved to the new row: same code, same title
+	rebindNeedsReanchor                      // left in place: the code's meaning changed
+)
+
+// rebindAnchor handles an unchanged manifest (byte-identical, or differing
+// only in in-place metadata) whose SCF code now resolves to a different
+// anchor row than the active row's: a new SCF release minted a new row for
+// the code (#1768). Matt's call (#1971 D3): move the control only when the
+// new row has the same code AND the same title as the old one, i.e. the
+// meaning did not change. Otherwise the control stays where it is and is
+// reported as needing re-anchoring, never silently re-pointed.
+func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior dbx.LockActiveControlByBundleIDRow, anchorID uuid.UUID) (rebindOutcome, error) {
+	if !prior.ScfAnchorID.Valid || uuid.UUID(prior.ScfAnchorID.Bytes) == anchorID {
+		return rebindNone, nil
 	}
-	var scfID *string
-	if row, err := lookupAnchorRow(ctx, q, anchorID); err == nil {
-		scfID = &row.ScfID
-	} else {
-		scfID = prior.ScfID
+	oldRow, err := lookupAnchorRow(ctx, q, uuid.UUID(prior.ScfAnchorID.Bytes))
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: read bound anchor: %w", err)
+	}
+	newRow, err := lookupAnchorRow(ctx, q, anchorID)
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: read resolved anchor: %w", err)
+	}
+	if oldRow.ScfID != newRow.ScfID || oldRow.Title != newRow.Title {
+		return rebindNeedsReanchor, nil
 	}
 	n, err := q.RebindControlAnchorInPlace(ctx, dbx.RebindControlAnchorInPlaceParams{
 		TenantID:    pgUUID(tenantID),
 		ID:          prior.ID,
 		ScfAnchorID: pgUUID(anchorID),
-		ScfID:       scfID,
+		ScfID:       &newRow.ScfID,
 	})
 	if err != nil {
-		return false, fmt.Errorf("rebind control anchor: %w", err)
+		return rebindNone, fmt.Errorf("rebind control anchor: %w", err)
 	}
 	if n != 1 {
-		return false, ErrControlChangedConcurrently
+		return rebindNone, ErrControlChangedConcurrently
 	}
-	return true, nil
+	return rebindMoved, nil
+}
+
+// apply records a rebind outcome on the upload result.
+func (o rebindOutcome) apply(r *UploadResult) {
+	r.AnchorRebound = o == rebindMoved
+	r.NeedsReanchoring = o == rebindNeedsReanchor
 }
 
 // Store persists parsed bundles to the controls table under RLS.
@@ -188,11 +216,11 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		//     v2, v3, ... on every boot — the slice-065 idempotency
 		//     assertion (AC-7) exists precisely to catch that.
 		if !isNew && prior.BundleManifestHash == b.ManifestHashHex {
-			rebound, err := rebindAnchor(ctx, q, tenantID, prior, anchorID)
+			outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID)
 			if err != nil {
 				return err
 			}
-			result.AnchorRebound = rebound
+			outcome.apply(&result)
 			result.ControlID = uuid.UUID(prior.ID.Bytes)
 			result.BundleID = b.Manifest.BundleID
 			result.Version = prior.Version
@@ -251,11 +279,11 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 				if n != 1 {
 					return ErrControlChangedConcurrently
 				}
-				rebound, err := rebindAnchor(ctx, q, tenantID, prior, anchorID)
+				outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID)
 				if err != nil {
 					return err
 				}
-				result.AnchorRebound = rebound
+				outcome.apply(&result)
 				result.ControlID = uuid.UUID(prior.ID.Bytes)
 				result.BundleID = b.Manifest.BundleID
 				result.Version = prior.Version
