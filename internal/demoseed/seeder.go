@@ -55,6 +55,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/auth/password"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // DemoSeedVersion is the slice-205 version stamp written into every
@@ -125,6 +126,12 @@ type Seeder struct {
 
 	// scale is the row-count multiplier. >= MinScale, <= MaxScale.
 	scale float64
+
+	// resolveTenant answers "which tenant does a slug-less seed or
+	// teardown mean?" (#1765). Defaults to tenancy.ResolveImplicitTenant
+	// over authPool; test-overridable because the shared integration
+	// database always holds several tenants.
+	resolveTenant func(ctx context.Context) (tenancy.TenantRef, error)
 }
 
 // NewSeeder constructs a Seeder over the BYPASSRLS auth pool. authPool
@@ -141,6 +148,9 @@ func NewSeeder(authPool *pgxpool.Pool, scale float64) (*Seeder, error) {
 		authPool: authPool,
 		clock:    time.Now,
 		scale:    scale,
+		resolveTenant: func(ctx context.Context) (tenancy.TenantRef, error) {
+			return tenancy.ResolveImplicitTenant(ctx, authPool)
+		},
 	}, nil
 }
 
@@ -183,6 +193,8 @@ type Result struct {
 	ControlsAnchored  int      // slice 682 / ATLAS-037 (controls carrying scf_anchor_id)
 	EvidenceKindsUsed []string // for D3 surface — which kinds got rows
 	Idempotent        bool     // true if no rows were INSERTed (already-seeded path)
+	InPlace           bool     // #1765: seeded into an existing tenant, not a new demo tenant
+	RecordedRows      int      // #1765: rows recorded in demo_seed_rows for teardown (in place only)
 }
 
 // ApplyInput carries the per-invocation knobs for Apply.
@@ -299,12 +311,37 @@ func (s *Seeder) Apply(ctx context.Context, in ApplyInput) (Result, error) {
 	if err := writeScopeDimensionAndCell(ctx, tx, fixtures); err != nil {
 		return Result{}, err
 	}
+	res, err := s.writeDataset(ctx, tx, fixtures, in, passwordHash, plaintext)
+	if err != nil {
+		return Result{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Result{}, fmt.Errorf("demoseed: commit: %w", err)
+	}
+	return res, nil
+}
+
+// writeDataset writes the demo user, the demo_seed_apply forensic mark and
+// every domain row into fixtures.tenant inside tx. The tenant row and its
+// scope dimension + cell must already exist. Shared by Apply (fresh demo
+// tenant) and ApplyInPlace (the sole tenant, #1765).
+func (s *Seeder) writeDataset(ctx context.Context, tx pgx.Tx, fixtures *fixtureSet,
+	in ApplyInput, passwordHash, plaintext string,
+) (Result, error) {
+	ctx = withTenant(ctx, fixtures.tenant.ID)
 	if err := writeUserAndCreds(ctx, tx, fixtures.user, passwordHash); err != nil {
 		return Result{}, err
 	}
+	mark := map[string]any{"slug": fixtures.tenant.Slug, "demo_seed_v": DemoSeedVersion}
+	if fixtures.inPlace {
+		// assertFreshDemoTenant recognises the in-place seed by this
+		// shape (#1765); the tenant may have no slug to match on.
+		mark["in_place"] = true
+		mark["tenant_id"] = fixtures.tenant.ID.String()
+	}
 	if err := writeAuditLogRow(ctx, tx, "demo_seed_apply",
-		in.ActorUserID, in.ActorTenantID, fixtures.tenant.ID,
-		map[string]any{"slug": fixtures.tenant.Slug, "demo_seed_v": DemoSeedVersion},
+		in.ActorUserID, in.ActorTenantID, fixtures.tenant.ID, mark,
 	); err != nil {
 		return Result{}, err
 	}
@@ -392,10 +429,6 @@ func (s *Seeder) Apply(ctx context.Context, in ApplyInput) (Result, error) {
 		return Result{}, err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
-		return Result{}, fmt.Errorf("demoseed: commit: %w", err)
-	}
-
 	return Result{
 		TenantID:          fixtures.tenant.ID,
 		TenantSlug:        fixtures.tenant.Slug,
@@ -451,12 +484,48 @@ func (s *Seeder) Teardown(ctx context.Context, slug string, actorUserID uuid.UUI
 	if tenantID == nil {
 		return fmt.Errorf("demoseed: teardown: tenant %q not found", slug)
 	}
-	seeded, err := s.tenantWasSeeded(ctx, *tenantID)
+	return s.teardownTenant(ctx, *tenantID, slug, actorUserID, actorTenantID)
+}
+
+// TeardownTenant is Teardown addressed by tenant id, for a tenant that may
+// have no slug (the bootstrap tenant). A tenant demo-seeded in place loses
+// exactly the rows the seed recorded and is kept; a demo tenant is deleted
+// with every row anchored to it.
+func (s *Seeder) TeardownTenant(ctx context.Context, tenantID uuid.UUID, actorUserID uuid.UUID, actorTenantID uuid.UUID) error {
+	var slug string
+	err := s.authPool.QueryRow(ctx,
+		`SELECT COALESCE(slug, '') FROM tenants WHERE id = $1`, tenantID,
+	).Scan(&slug)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("demoseed: teardown: tenant %s not found", tenantID)
+	}
+	if err != nil {
+		return fmt.Errorf("demoseed: teardown lookup: %w", err)
+	}
+	return s.teardownTenant(ctx, tenantID, slug, actorUserID, actorTenantID)
+}
+
+// teardownTenant dispatches between the in-place teardown and deleting a
+// whole demo tenant. The in-place check comes first: a tenant seeded in
+// place also carries the demo_seed_apply mark, and must never be dropped.
+func (s *Seeder) teardownTenant(ctx context.Context, tenantID uuid.UUID, slug string, actorUserID uuid.UUID, actorTenantID uuid.UUID) error {
+	inPlace, err := s.tenantSeededInPlace(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("demoseed: teardown probe: %w", err)
+	}
+	if inPlace {
+		return s.teardownInPlace(ctx, tenantID, slug, actorUserID, actorTenantID)
+	}
+	label := slug
+	if label == "" {
+		label = tenantID.String()
+	}
+	seeded, err := s.tenantWasSeeded(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("demoseed: teardown probe: %w", err)
 	}
 	if !seeded {
-		return fmt.Errorf("demoseed: teardown: tenant %q does not carry the slice-205 forensic mark; refusing to delete", slug)
+		return fmt.Errorf("demoseed: teardown: tenant %q does not carry the slice-205 forensic mark; refusing to delete", label)
 	}
 
 	tx, err := s.authPool.BeginTx(ctx, pgx.TxOptions{})
@@ -467,83 +536,19 @@ func (s *Seeder) Teardown(ctx context.Context, slug string, actorUserID uuid.UUI
 
 	// Write the teardown meta-audit row FIRST (before deleting).
 	if err := writeAuditLogRow(ctx, tx, "demo_seed_teardown",
-		actorUserID, actorTenantID, *tenantID,
+		actorUserID, actorTenantID, tenantID,
 		map[string]any{"slug": slug, "demo_seed_v": DemoSeedVersion},
 	); err != nil {
 		return err
 	}
 
-	// Now cascade-delete. The dependency order is bottom-up.
-	stmts := []string{
-		`DELETE FROM sample_annotations WHERE tenant_id = $1`,
-		`DELETE FROM sample_evidence    WHERE tenant_id = $1`,
-		`DELETE FROM samples            WHERE tenant_id = $1`,
-		`DELETE FROM populations        WHERE tenant_id = $1`,
-		`DELETE FROM walkthrough_audit_log WHERE tenant_id = $1`,
-		`DELETE FROM walkthrough_attachments WHERE tenant_id = $1`,
-		`DELETE FROM walkthroughs       WHERE tenant_id = $1`,
-		`DELETE FROM exception_audit_log WHERE tenant_id = $1`,
-		`DELETE FROM exceptions         WHERE tenant_id = $1`,
-		`DELETE FROM audit_period_audit_log WHERE tenant_id = $1`,
-		`DELETE FROM audit_periods      WHERE tenant_id = $1`,
-		`DELETE FROM evidence_audit_log WHERE tenant_id = $1`,
-		`DELETE FROM evidence_records   WHERE tenant_id = $1`,
-		// Slice 678 demo-breadth rows. decision link tables BEFORE
-		// decisions (FK CASCADE handles it, but explicit keeps the sweep
-		// deterministic); decisions BEFORE risks is NOT required
-		// (decision_risks → risks is ON DELETE CASCADE), but risks'
-		// org_unit_id → org_units is ON DELETE SET NULL, so org_units may
-		// be swept any time after risks. questionnaire children CASCADE
-		// from the parent, swept explicitly for determinism.
-		`DELETE FROM decision_risks      WHERE tenant_id = $1`,
-		`DELETE FROM decision_controls   WHERE tenant_id = $1`,
-		`DELETE FROM decision_exceptions WHERE tenant_id = $1`,
-		`DELETE FROM decision_scope_predicates WHERE tenant_id = $1`,
-		`DELETE FROM decisions           WHERE tenant_id = $1`,
-		`DELETE FROM questionnaire_answers   WHERE tenant_id = $1`,
-		`DELETE FROM questionnaire_questions  WHERE tenant_id = $1`,
-		`DELETE FROM questionnaires           WHERE tenant_id = $1`,
-		`DELETE FROM risk_control_links WHERE tenant_id = $1`,
-		`DELETE FROM risks              WHERE tenant_id = $1`,
-		`DELETE FROM org_units          WHERE tenant_id = $1`,
-		`DELETE FROM policy_acknowledgments WHERE tenant_id = $1`,
-		`DELETE FROM policies           WHERE tenant_id = $1`,
-		`DELETE FROM controls           WHERE tenant_id = $1`,
-		`DELETE FROM framework_scopes   WHERE tenant_id = $1`,
-		// Tenant-scoped demo framework rows: Apply writes a fallback
-		// `frameworks` + `framework_versions` pair ONLY when the global
-		// SCF catalog (tenant_id IS NULL) is absent (writers.go
-		// writeAuditPeriodsAndSamples). When the catalog IS present Apply
-		// adopts it and writes neither — so these deletes are 0-row no-ops
-		// in that case. The `WHERE tenant_id = $1` predicate can never
-		// match the global catalog rows (their tenant_id IS NULL), so the
-		// catalog is safe by construction (AC-4 / canvas invariant #6).
-		// framework_versions deletes BEFORE frameworks: framework_scopes +
-		// audit_periods (both ON DELETE RESTRICT into framework_versions)
-		// are already swept above; frameworks.latest_version_id is
-		// ON DELETE SET NULL so the version delete does not block on the
-		// parent (AC-3).
-		`DELETE FROM framework_versions WHERE tenant_id = $1`,
-		`DELETE FROM frameworks         WHERE tenant_id = $1`,
-		`DELETE FROM vendor_scope_cells WHERE tenant_id = $1`,
-		`DELETE FROM vendors            WHERE tenant_id = $1`,
-		`DELETE FROM board_briefs       WHERE tenant_id = $1`,
-		`DELETE FROM board_packs        WHERE tenant_id = $1`,
-		`DELETE FROM me_audit_log       WHERE tenant_id = $1`,
-		`DELETE FROM user_roles         WHERE tenant_id = $1`,
-		// api_keys carry the role-holder users' roster roles (slice 678).
-		// No FK ordering constraint vs users (issued_by is FK-less), but
-		// sweep before users for a clean dependency order.
-		`DELETE FROM api_keys           WHERE tenant_id = $1`,
-		`DELETE FROM local_credentials  WHERE tenant_id = $1`,
-		`DELETE FROM sessions           WHERE tenant_id = $1`,
-		`DELETE FROM users              WHERE tenant_id = $1`,
-		`DELETE FROM scope_cells        WHERE tenant_id = $1`,
-		`DELETE FROM scope_dimensions   WHERE tenant_id = $1`,
-		`DELETE FROM tenants            WHERE id = $1`,
-	}
-	for _, stmt := range stmts {
-		if _, err := tx.Exec(ctx, stmt, *tenantID); err != nil {
+	// Now cascade-delete, bottom-up, then the tenant row itself.
+	for _, table := range append(teardownTables, "tenants") {
+		stmt := fmt.Sprintf(`DELETE FROM %s WHERE tenant_id = $1`, pgx.Identifier{table}.Sanitize())
+		if table == "tenants" {
+			stmt = `DELETE FROM tenants WHERE id = $1`
+		}
+		if _, err := tx.Exec(ctx, stmt, tenantID); err != nil {
 			// Ignore unknown-table errors — older / missing tables
 			// won't have any rows for this tenant anyway; the
 			// teardown is meant to be best-effort. Fail loudly on
@@ -551,7 +556,7 @@ func (s *Seeder) Teardown(ctx context.Context, slug string, actorUserID uuid.UUI
 			if pgIsUndefinedTable(err) {
 				continue
 			}
-			return fmt.Errorf("demoseed: teardown exec %s: %w", strings.SplitN(stmt, " ", 4)[2], err)
+			return fmt.Errorf("demoseed: teardown exec %s: %w", table, err)
 		}
 	}
 
@@ -559,6 +564,78 @@ func (s *Seeder) Teardown(ctx context.Context, slug string, actorUserID uuid.UUI
 		return fmt.Errorf("demoseed: teardown commit: %w", err)
 	}
 	return nil
+}
+
+// teardownTables lists every tenant-scoped table the demo seed writes, in
+// bottom-up dependency order. Teardown deletes the tenant's rows from each,
+// then the tenant row; the in-place teardown (#1765) tries the same order
+// first.
+var teardownTables = []string{
+	"sample_annotations",
+	"sample_evidence",
+	"samples",
+	"populations",
+	"walkthrough_audit_log",
+	"walkthrough_attachments",
+	"walkthroughs",
+	"exception_audit_log",
+	"exceptions",
+	"audit_period_audit_log",
+	"audit_periods",
+	"evidence_audit_log",
+	"evidence_records",
+	// Slice 678 demo-breadth rows. decision link tables BEFORE
+	// decisions (FK CASCADE handles it, but explicit keeps the sweep
+	// deterministic); decisions BEFORE risks is NOT required
+	// (decision_risks → risks is ON DELETE CASCADE), but risks'
+	// org_unit_id → org_units is ON DELETE SET NULL, so org_units may
+	// be swept any time after risks. questionnaire children CASCADE
+	// from the parent, swept explicitly for determinism.
+	"decision_risks",
+	"decision_controls",
+	"decision_exceptions",
+	"decision_scope_predicates",
+	"decisions",
+	"questionnaire_answers",
+	"questionnaire_questions",
+	"questionnaires",
+	"risk_control_links",
+	"risks",
+	"org_units",
+	"policy_acknowledgments",
+	"policies",
+	"controls",
+	"framework_scopes",
+	// Tenant-scoped demo framework rows: Apply writes a fallback
+	// `frameworks` + `framework_versions` pair ONLY when the global
+	// SCF catalog (tenant_id IS NULL) is absent (writers.go
+	// writeAuditPeriodsAndSamples). When the catalog IS present Apply
+	// adopts it and writes neither — so these deletes are 0-row no-ops
+	// in that case. The `WHERE tenant_id = $1` predicate can never
+	// match the global catalog rows (their tenant_id IS NULL), so the
+	// catalog is safe by construction (AC-4 / canvas invariant #6).
+	// framework_versions deletes BEFORE frameworks: framework_scopes +
+	// audit_periods (both ON DELETE RESTRICT into framework_versions)
+	// are already swept above; frameworks.latest_version_id is
+	// ON DELETE SET NULL so the version delete does not block on the
+	// parent (AC-3).
+	"framework_versions",
+	"frameworks",
+	"vendor_scope_cells",
+	"vendors",
+	"board_briefs",
+	"board_packs",
+	"me_audit_log",
+	"user_roles",
+	// api_keys carry the role-holder users' roster roles (slice 678).
+	// No FK ordering constraint vs users (issued_by is FK-less), but
+	// sweep before users for a clean dependency order.
+	"api_keys",
+	"local_credentials",
+	"sessions",
+	"users",
+	"scope_cells",
+	"scope_dimensions",
 }
 
 // ----- internals -----

@@ -1,7 +1,7 @@
 # Demo seed: populate a tenant for screenshots + live demos
 
 This page documents `atlas-cli demo seed` — the opt-in command that
-creates one polished demo tenant suitable for showing security-atlas
+loads one polished demo dataset suitable for showing security-atlas
 publicly. The dataset covers every product primitive (controls, risks,
 evidence, policies, audit periods, walkthroughs, exceptions, vendors,
 board reports, audit log) and produces a meaningful render across every
@@ -10,6 +10,28 @@ backend-backed UI surface.
 The command is **opt-in only**. A fresh `docker compose up` does NOT
 receive demo data. A production install does NOT receive demo data
 unless the operator explicitly runs the command.
+
+## Where the demo data goes
+
+Seeding never turns an install multi-tenant on its own (#1765).
+
+| Install                                      | Command                                       | Result                                                                                           |
+| -------------------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Single tenant, only the stock bootstrap seed | `atlas-cli demo seed`                         | Loads into your organisation. Every added row is recorded; `demo teardown` removes exactly them. |
+| Single tenant holding real data              | `atlas-cli demo seed`                         | Refused. Demo and real data are never mixed.                                                     |
+| Any, with `ATLAS_ALLOW_MULTI_TENANT=true`    | `atlas-cli demo seed --tenant-slug=demo-acme` | Creates a separate demo tenant (the original behaviour).                                         |
+| Has a tenant, no multi-tenant opt-in         | `atlas-cli demo seed --tenant-slug=...`       | Refused: a second tenant would make the install multi-tenant.                                    |
+| Several tenants                              | `atlas-cli demo seed`                         | Refused: pass `--tenant-slug` (with the opt-in).                                                 |
+
+"Only the stock bootstrap seed" means no evidence, no risks, no
+tenant-private framework versions, and no controls or policies other than
+the stock ones: the SOC 2 bundles `bootstrap.sh` uploads from
+`controls/soc2/`, and the policies `atlas-cli policies seed-stock` creates.
+The bootstrap user, scope dimension and scope cell are stock too.
+
+If your organisation already holds real data, either opt in to multi-tenant
+(`ATLAS_ALLOW_MULTI_TENANT=true`, one-way) and seed a separate demo tenant,
+or try the demo on a separate install.
 
 ## When to use it
 
@@ -22,11 +44,11 @@ unless the operator explicitly runs the command.
 
 ## When NOT to use it
 
-- **A production install.** The seeder writes ~600 rows under a
-  dedicated tenant; you do not want any of those rows in production.
+- **A production install.** The seeder writes ~600 rows; you do not
+  want any of those rows in production.
 - **A pre-existing customer tenant.** The seeder refuses to write into
-  any tenant that already has > 10 rows in controls / risks /
-  evidence_records — defense-in-depth against the slug-typo case.
+  a tenant that holds real data: in place, anything beyond the stock
+  bootstrap seed; by slug, any tenant it did not create.
 - **A long-lived demo environment.** The seeder generates a fresh
   password per invocation that prints once and is not recoverable.
   For long-lived deployments, rotate the password to one managed by
@@ -37,20 +59,30 @@ unless the operator explicitly runs the command.
 - `atlas-cli` binary built from this repo (`go build -o atlas-cli ./cmd/atlas-cli/`).
 - BYPASSRLS DSN available — typically the same `DATABASE_URL` the
   docker-compose stack hands the atlas-bootstrap container. The seeder
-  writes across tenant boundaries (it creates the demo tenant) so it
-  needs the BYPASSRLS pool, not the application pool.
+  works before any tenant context exists (it may create the demo
+  tenant) so it needs the BYPASSRLS pool, not the application pool.
 - The `ATLAS_ENABLE_DEMO_SEED=true` env var set — without it, the
   command refuses to run.
 
 ## Invocation
 
+Into your organisation, on a fresh single-tenant install:
+
 ```bash
 ATLAS_ENABLE_DEMO_SEED=true \
+DATABASE_URL='postgres://atlas_migrate:...@localhost:5432/security_atlas?sslmode=disable' \
+  atlas-cli demo seed
+```
+
+Into a separate demo tenant, on a multi-tenant install:
+
+```bash
+ATLAS_ENABLE_DEMO_SEED=true ATLAS_ALLOW_MULTI_TENANT=true \
 DATABASE_URL='postgres://atlas_migrate:...@localhost:5432/security_atlas?sslmode=disable' \
   atlas-cli demo seed --tenant-slug=demo-acme
 ```
 
-The command prints to stdout exactly once:
+The command prints to stdout exactly once (shown for `--tenant-slug`):
 
 ```
 === Slice 205 demo seed complete ===
@@ -83,15 +115,15 @@ via `/v1/admin/users` (slice 142 super_admin management surface).
 
 ## Flags
 
-| Flag             | Default         | Notes                                                                                                                                                                         |
-| ---------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--tenant-slug`  | (required)      | Lower-case alphanumeric + hyphen, 1-63 chars. Use a `demo-` prefix so the slug is obviously a demo tenant in any UI.                                                          |
-| `--scale`        | `1.0`           | Row-count multiplier. `0.5` halves every per-primitive floor (still at least 1 row per primitive); `2.0` doubles them. Useful for stress-testing the UI or for compact demos. |
-| `--database-url` | `$DATABASE_URL` | Override the BYPASSRLS DSN. Convenient when you have multiple Atlas deployments.                                                                                              |
+| Flag             | Default         | Notes                                                                                                                                                                                                         |
+| ---------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--tenant-slug`  | (none)          | Omit to seed your organisation in place. Set to create a separate demo tenant (needs `ATLAS_ALLOW_MULTI_TENANT=true` if a tenant exists). Lower-case alphanumeric + hyphen, 1-63 chars; use a `demo-` prefix. |
+| `--scale`        | `1.0`           | Row-count multiplier. `0.5` halves every per-primitive floor (still at least 1 row per primitive); `2.0` doubles them. Useful for stress-testing the UI or for compact demos.                                 |
+| `--database-url` | `$DATABASE_URL` | Override the BYPASSRLS DSN. Convenient when you have multiple Atlas deployments.                                                                                                                              |
 
 ## Idempotency
 
-Re-running with the same `--tenant-slug` is a no-op:
+Re-running against an already-seeded tenant is a no-op:
 
 ```bash
 $ atlas-cli demo seed --tenant-slug=demo-acme
@@ -102,13 +134,28 @@ If you want fresh demo state, use `demo teardown` first (see below).
 
 ## Teardown
 
-When the demo is done, drop the tenant + every row anchored to it:
+When the demo is done:
 
 ```bash
 ATLAS_ENABLE_DEMO_SEED=true \
 DATABASE_URL='...' \
-  atlas-cli demo teardown --tenant-slug=demo-acme
+  atlas-cli demo teardown                          # your organisation, seeded in place
+  atlas-cli demo teardown --tenant-slug=demo-acme  # a separate demo tenant
 ```
+
+**Seeded in place:** teardown deletes exactly the rows the seed recorded
+(in `demo_seed_rows`) and keeps the tenant, so your organisation is left as
+it was before the seed. Rows you add later that hang off a demo row follow
+the schema's own delete rule: those tied by `ON DELETE CASCADE` (an owner
+assigned to a demo control, say) go with it; those tied by `ON DELETE
+RESTRICT` (an exception filed against a demo control) make teardown refuse
+and name the table, so you can decide. Only a `super_admin_audit_log` row
+records an in-place teardown. Derived evaluation rows the post-seed
+evaluation pass wrote for your stock controls are left in place; the
+evaluator recomputes them on its next run.
+
+**Separate demo tenant:** teardown drops the tenant + every row anchored to
+it.
 
 The teardown command refuses to operate on a tenant that does not carry
 the slice-205 forensic mark (i.e., a tenant the seeder did NOT create).
@@ -168,7 +215,10 @@ The seeder errors (non-zero exit) when:
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `ATLAS_ENABLE_DEMO_SEED` is unset                               | `ATLAS_ENABLE_DEMO_SEED=true is required to run demo seed (P0-A1 — opt-in only). See docs/getting-started/demo-seed.md`              |
 | `--database-url` and `DATABASE_URL` both unset                  | `--database-url or DATABASE_URL is required (BYPASSRLS DSN for the demo seed)`                                                       |
-| `--tenant-slug` not supplied                                    | (Cobra `required flag not provided`)                                                                                                 |
+| No `--tenant-slug`, tenant holds real data                      | `refusing to seed: tenant "..." holds organisation data beyond the stock bootstrap seed (...)`, with the two ways forward            |
+| No `--tenant-slug`, several tenants                             | `demo seed: this is a multi-tenant install, so demo data lives in its own tenant; pass --tenant-slug ...`                            |
+| No `--tenant-slug`, no tenant yet                               | `demo seed: no tenant exists yet; run the install bootstrap first, or pass --tenant-slug ...`                                        |
+| New `--tenant-slug`, another tenant exists, no opt-in           | `refusing to create demo tenant "...": it would make this install multi-tenant ...`                                                  |
 | Slug has uppercase / leading hyphen / disallowed chars          | `demoseed: --tenant-slug must start with [a-z0-9]` or `demoseed: --tenant-slug has invalid char ...`                                 |
 | Target tenant exists + carries the slice-205 mark               | (success — idempotent re-run, no changes)                                                                                            |
 | Target tenant exists + has > 10 rows + lacks the slice-205 mark | `demoseed: refusing to seed: tenant "..." already has > 10 rows in controls/risks/evidence_records; pick a fresh --tenant-slug`      |

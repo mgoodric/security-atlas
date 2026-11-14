@@ -77,4 +77,58 @@ func TestAssertFreshDemoTenant(t *testing.T) {
 			t.Fatalf("got %v, want ErrNotDemoSeedContext", err)
 		}
 	})
+
+	// #1765: the in-place seed marks the existing tenant by id.
+	markInPlace := func(tx pgx.Tx, tenantID uuid.UUID) {
+		t.Helper()
+		if err := writeAuditLogRow(ctx, tx, "demo_seed_apply", uuid.Nil, uuid.Nil, tenantID,
+			map[string]any{"slug": "", "demo_seed_v": DemoSeedVersion, "in_place": true, "tenant_id": tenantID.String()}); err != nil {
+			t.Fatalf("writeAuditLogRow: %v", err)
+		}
+	}
+
+	t.Run("evidence-free existing tenant marked in place in this tx passes", func(t *testing.T) {
+		existing := uuid.MustParse(dbtest.SeedTenant(t, admin))
+		err := inTx(func(tx pgx.Tx) error {
+			markInPlace(tx, existing)
+			return assertFreshDemoTenant(ctx, tx, existing)
+		})
+		if err != nil {
+			t.Fatalf("assertFreshDemoTenant: %v", err)
+		}
+	})
+
+	t.Run("in-place mark for another tenant is refused", func(t *testing.T) {
+		existing := uuid.MustParse(dbtest.SeedTenant(t, admin))
+		err := inTx(func(tx pgx.Tx) error {
+			markInPlace(tx, uuid.New())
+			return assertFreshDemoTenant(ctx, tx, existing)
+		})
+		if !errors.Is(err, ErrNotDemoSeedContext) {
+			t.Fatalf("got %v, want ErrNotDemoSeedContext", err)
+		}
+	})
+
+	t.Run("in-place mark on a tenant holding earlier evidence is refused", func(t *testing.T) {
+		s, err := NewSeeder(admin, MinScale)
+		if err != nil {
+			t.Fatalf("NewSeeder: %v", err)
+		}
+		slug := "guard-ev-" + uuid.NewString()[:8]
+		res, err := s.Apply(ctx, ApplyInput{Slug: slug})
+		if err != nil {
+			t.Fatalf("Apply: %v", err)
+		}
+		t.Cleanup(func() { _ = s.Teardown(ctx, slug, uuid.Nil, uuid.Nil) })
+		if res.Evidence == 0 {
+			t.Fatal("Apply wrote no evidence; the check would prove nothing")
+		}
+		err = inTx(func(tx pgx.Tx) error {
+			markInPlace(tx, res.TenantID)
+			return assertFreshDemoTenant(ctx, tx, res.TenantID)
+		})
+		if !errors.Is(err, ErrNotDemoSeedContext) {
+			t.Fatalf("got %v, want ErrNotDemoSeedContext", err)
+		}
+	})
 }
