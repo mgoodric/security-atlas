@@ -310,8 +310,9 @@ FROM controls c
 WHERE c.tenant_id = @tenant_id AND c.id = @control_id AND c.superseded_by IS NULL;
 
 -- name: UpdateControlMetadataInPlace :execrows
--- Issues #1908, #1958: a re-upload whose manifest differs from the active
--- row's only in `description` and/or `external_refs` updates that row in
+-- Issues #1908, #1958, #2023: a re-upload whose manifest differs from the
+-- active row's only in `description`, `external_refs` and/or
+-- `anchor_fit_note` updates that row in
 -- place instead of versioning, so every control-keyed row (owners,
 -- evidence, exceptions, links) stays attached. The hash moves with the
 -- YAML so a repeat upload is a no-op.
@@ -322,6 +323,7 @@ SET description = $3,
     bundle_manifest_hash = $6,
     bundle_uploaded_at = now(),
     bundle_uploaded_by = $7,
+    anchor_fit_note = $8,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL;
 

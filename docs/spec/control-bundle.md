@@ -50,20 +50,20 @@ When uploaded as a tarball, the archive **MUST**:
 
 ### 2.2 Optional fields
 
-| Field                    | Type        | Notes                                                                                                                                                                              |
-| ------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `description`            | string      | Longer-form narrative. If `description.md` is present in the bundle, its body is appended.                                                                                         |
-| `control_family`         | string      | SCF taxonomy family (AAA, AST, BCD, ...). Inferred from the SCF anchor if omitted.                                                                                                 |
-| `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                                                                              |
-| `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                                                                               |
-| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI.                                                                       |
-| `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.                                                               |
-| `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.                                                                       |
-| `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                                                                                    |
-| `manual_evidence_schema` | JSON Schema | When `implementation_type` is `manual_*`, the schema of the attestation form. Authoritative for the manual upload UI.                                                              |
-| `anchor_fit`             | enum        | How well `scf_anchor_id` fits the control: `exact` (default when omitted), `partial`, or `none` (no SCF control fits; the anchor is the nearest catch-all or absent). Issue #1736. |
-| `anchor_fit_note`        | string      | Why the fit is not exact. Required when `anchor_fit` is `partial` or `none`.                                                                                                       |
-| `external_refs`          | object[]    | Identifiers outside the platform that this control traces to. See §2.5.                                                                                                            |
+| Field                    | Type        | Notes                                                                                                                                                                                     |
+| ------------------------ | ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `description`            | string      | Longer-form narrative. If `description.md` is present in the bundle, its body is appended.                                                                                                |
+| `control_family`         | string      | SCF taxonomy family (AAA, AST, BCD, ...). Inferred from the SCF anchor if omitted.                                                                                                        |
+| `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                                                                                     |
+| `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                                                                                      |
+| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI.                                                                              |
+| `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.                                                                      |
+| `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.                                                                              |
+| `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                                                                                           |
+| `manual_evidence_schema` | JSON Schema | When `implementation_type` is `manual_*`, the schema of the attestation form. Authoritative for the manual upload UI.                                                                     |
+| `anchor_fit`             | enum        | How well `scf_anchor_id` fits the control: `exact` (default when omitted), `partial`, or `none` (no SCF control fits; the anchor is the nearest catch-all or absent). Issue #1736.        |
+| `anchor_fit_note`        | string      | Why the fit is not exact. Required when `anchor_fit` is `partial` or `none`. Editing only the note updates the control in place; changing `anchor_fit` creates a new version (#2023, §4). |
+| `external_refs`          | object[]    | Identifiers outside the platform that this control traces to. See §2.5.                                                                                                                   |
 
 ### 2.3 Evidence queries
 
@@ -108,7 +108,7 @@ AC-5: a bundle whose `applicability_expr` references an undeclared scope dimensi
 
 A bundle may carry at most 100 entries, and no two may share the same `system` + `kind` + `id`. Length caps count characters, not bytes. The refs are stored per control version, shown in the control detail header, and matched by `/v1/search` (system, id and note).
 
-**Adding or editing refs updates the control in place (#1958).** Refs are trace metadata and do not feed evaluation, so a re-upload whose `control.yaml` differs from the active version only in `external_refs` and/or `description` keeps the control id and version. Owners, evidence, exceptions and links stay attached, and the prior manifest is kept in `control_manifest_revisions`. A refs change made together with any other field change still creates a new version. See §4 "Versioning + supersession".
+**Adding or editing refs updates the control in place (#1958).** Refs are trace metadata and do not feed evaluation, so a re-upload whose `control.yaml` differs from the active version only in `external_refs`, `description` and/or `anchor_fit_note` keeps the control id and version. Owners, evidence, exceptions and links stay attached, and the prior manifest is kept in `control_manifest_revisions`. A refs change made together with any other field change still creates a new version. See §4 "Versioning + supersession".
 
 ```yaml
 external_refs:
@@ -249,7 +249,7 @@ A successful response carries `anchor_warning` when the `scf_anchor_id` reaches 
 
 - Re-upload with the same `bundle_id` creates a **new row** and sets the prior row's `superseded_by` to the new row's id in the same transaction (AC-6). Two exceptions:
   - A byte-identical `control.yaml` is a no-op: the active row is returned unchanged (slice 068).
-  - A `control.yaml` that differs from the active version's **only in the top-level `description` and/or `external_refs`** (rewording, reflow, adding, editing or removing either) updates the active row in place. The control id and version stay the same, so owners, evidence, exceptions and links stay attached. The response is `200` with the existing `control_id` and `version` and no `superseded_id`. Any other change, including `title` or a nested `evidence_queries[].description`, still creates a new version. See `docs/audit-log/1908-control-description-in-place-decisions.md` and `docs/audit-log/1958-control-external-refs-in-place-decisions.md`.
+  - A `control.yaml` that differs from the active version's **only in the top-level `description`, `external_refs` and/or `anchor_fit_note`** (rewording, reflow, adding, editing or removing any of them) updates the active row in place. The control id and version stay the same, so owners, evidence, exceptions and links stay attached. The response is `200` with the existing `control_id` and `version` and no `superseded_id`. Any other change, including `title`, `anchor_fit` (a fit change alters what the SCF mapping means, #2023) or a nested `evidence_queries[].description`, still creates a new version. See `docs/audit-log/1908-control-description-in-place-decisions.md` and `docs/audit-log/1958-control-external-refs-in-place-decisions.md`.
 - The partial unique index `controls_one_active_version_per_bundle` guarantees only one active version per `(tenant_id, bundle_id)`.
 - The full manifest YAML is stored verbatim on every version (`bundle_manifest_yaml`) plus its sha256 hex (`bundle_manifest_hash`) so auditors can prove byte-exact reproducibility. An in-place update overwrites both on the active row, so the prior manifest, its hash, uploader and upload time are first copied, in the same transaction, to the append-only `control_manifest_revisions` table. That table is where a control's prose and refs history lives. An upload locks the active row (`SELECT … FOR UPDATE`) before deciding, so concurrent uploads of one bundle run one after another and each in-place update records the manifest the previous one wrote. A concurrent upload that supersedes the row mid-update returns `409`.
 

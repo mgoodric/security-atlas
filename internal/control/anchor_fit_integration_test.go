@@ -9,6 +9,7 @@ package control_test
 
 import (
 	"context"
+	"maps"
 	"testing"
 
 	"github.com/google/uuid"
@@ -110,5 +111,104 @@ implementation_type: manual_attested
 				t.Errorf("ListWithState(%q): control %s missing", tc.fit, id)
 			}
 		}
+	}
+}
+
+// Issue #2023: a re-upload that only rewords anchor_fit_note updates the
+// active control in place and keeps the overwritten manifest as a
+// revision; changing anchor_fit itself supersedes.
+func TestUpload_AnchorFitNoteOnlyChangeUpdatesInPlace(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+
+	_, code := seedSCFAnchor(t, admin, "IAC-2023", "IAC")
+	tenant := dbtest.SeedTenant(t, admin,
+		"control_manifest_revisions", "risk_control_links", "risks", "exceptions",
+		"control_owner_assignments", "evidence_records", "controls",
+	)
+	store := control.NewStore(app)
+	ctx, err := tenancy.WithTenant(context.Background(), tenant)
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+
+	manifest := func(fit, note string) []byte {
+		return []byte(`bundle_schema_version: "1"
+bundle_id: fit_note_in_place
+title: "MFA for administrators"
+scf_anchor_id: ` + code + `
+anchor_fit: ` + fit + `
+anchor_fit_note: "` + note + `"
+implementation_type: manual_attested
+`)
+	}
+	upload := func(t *testing.T, yaml []byte) (control.UploadResult, *control.Bundle) {
+		t.Helper()
+		b, err := control.FinalizeBundleForHTTP(yaml)
+		if err != nil {
+			t.Fatalf("FinalizeBundleForHTTP: %v", err)
+		}
+		res, err := store.Upload(ctx, b, "key_admin")
+		if err != nil {
+			t.Fatalf("Upload: %v", err)
+		}
+		return res, b
+	}
+
+	res1, b1 := upload(t, manifest("partial", "Covers MFA only."))
+	seedControlLinks(t, admin, tenant, res1.ControlID)
+	want := map[string]int{"owner": 1, "evidence": 1, "exception": 1, "risk_link": 1}
+
+	// Note-only edit: same id, same version, note column updated, one revision.
+	res2, b2 := upload(t, manifest("partial", "Covers MFA; SSO enforcement is a separate control."))
+	if !res2.UpdatedInPlace || res2.ControlID != res1.ControlID || res2.Version != 1 ||
+		res2.SupersededID != (uuid.UUID{}) {
+		t.Fatalf("note-only upload should update in place; got %+v (prior id %s)", res2, res1.ControlID)
+	}
+	var fit, note, hash string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT anchor_fit, anchor_fit_note, bundle_manifest_hash FROM controls
+		WHERE id = $1 AND superseded_by IS NULL
+	`, res1.ControlID).Scan(&fit, &note, &hash); err != nil {
+		t.Fatalf("read active row: %v", err)
+	}
+	if fit != "partial" || note != "Covers MFA; SSO enforcement is a separate control." {
+		t.Fatalf("after note-only upload: fit=%q note=%q", fit, note)
+	}
+	if hash != b2.ManifestHashHex {
+		t.Fatalf("hash not updated: got %s, want %s", hash, b2.ManifestHashHex)
+	}
+	if got := linkCounts(t, admin, tenant, res1.ControlID); !maps.Equal(got, want) {
+		t.Fatalf("links after note-only upload: got %v, want %v", got, want)
+	}
+	countRevisions := func(t *testing.T) int {
+		t.Helper()
+		var n int
+		if err := admin.QueryRow(context.Background(), `
+			SELECT count(*) FROM control_manifest_revisions WHERE tenant_id = $1 AND control_id = $2
+		`, tenant, res1.ControlID).Scan(&n); err != nil {
+			t.Fatalf("count revisions: %v", err)
+		}
+		return n
+	}
+	var revHash string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT bundle_manifest_hash FROM control_manifest_revisions
+		WHERE tenant_id = $1 AND control_id = $2
+	`, tenant, res1.ControlID).Scan(&revHash); err != nil {
+		t.Fatalf("read revision row: %v", err)
+	}
+	if revHash != b1.ManifestHashHex {
+		t.Fatalf("revision row should hold the v1 manifest; got %s, want %s", revHash, b1.ManifestHashHex)
+	}
+
+	// A fit change supersedes, even with the note unchanged.
+	res3, _ := upload(t, manifest("none", "Covers MFA; SSO enforcement is a separate control."))
+	if res3.UpdatedInPlace || res3.Version != 2 || res3.SupersededID != res1.ControlID ||
+		res3.ControlID == res1.ControlID {
+		t.Fatalf("anchor_fit change should supersede; got %+v", res3)
+	}
+	if n := countRevisions(t); n != 1 {
+		t.Fatalf("a superseding upload wrote a revision row: %d rows, want 1", n)
 	}
 }

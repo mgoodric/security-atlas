@@ -207,9 +207,10 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		}
 
 		// 3b. A manifest that differs from the active version's ONLY in
-		//     `description` (prose edit, reflow, whitespace) and/or
-		//     `external_refs` (backfilling or correcting trace ids)
-		//     updates the active row in place. Superseding would mint a
+		//     `description` (prose edit, reflow, whitespace),
+		//     `external_refs` (backfilling or correcting trace ids) and/or
+		//     `anchor_fit_note` (rewording why the fit is what it is,
+		//     issue #2023) updates the active row in place. Superseding would mint a
 		//     new control id and orphan everything keyed on the old one:
 		//     owners, evidence, evaluations, exceptions, risk and other
 		//     links (issues #1908, #1958). Any other difference still
@@ -242,6 +243,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 					BundleManifestYaml: string(b.ManifestYAMLRaw),
 					BundleManifestHash: b.ManifestHashHex,
 					BundleUploadedBy:   uploader,
+					AnchorFitNote:      b.Manifest.AnchorFitNotePtr(),
 				})
 				if err != nil {
 					return fmt.Errorf("update control metadata in place: %w", err)
@@ -493,9 +495,11 @@ func resolveSCFAnchor(ctx context.Context, q *dbx.Queries, ref string) (uuid.UUI
 }
 
 // inPlaceManifestKeys are the top-level control.yaml keys an upload may
-// change without versioning the control: prose (issue #1908) and the
-// trace to outside identifiers (issue #1958). Neither feeds evaluation.
-var inPlaceManifestKeys = []string{"description", "external_refs"}
+// change without versioning the control: prose (issue #1908), the trace
+// to outside identifiers (issue #1958) and the anchor-fit note (issue
+// #2023). None feeds evaluation. `anchor_fit` itself is not here: a fit
+// change alters what the SCF mapping means, so it supersedes.
+var inPlaceManifestKeys = []string{"description", "external_refs", "anchor_fit_note"}
 
 // manifestsEqualIgnoringMetadata reports whether two control.yaml
 // documents are equal once the inPlaceManifestKeys are removed from each.

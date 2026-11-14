@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// Issues #1908, #1958: only the top-level `description` and
-// `external_refs` may differ for an upload to update the active control
-// in place.
+// Issues #1908, #1958, #2023: only the top-level `description`,
+// `external_refs` and `anchor_fit_note` may differ for an upload to
+// update the active control in place.
 func TestManifestsEqualIgnoringMetadata(t *testing.T) {
 	t.Parallel()
 
@@ -17,6 +17,8 @@ title: "Test control"
 description: "Original prose."
 scf_anchor_id: IAC-37
 implementation_type: automated
+anchor_fit: partial
+anchor_fit_note: "Covers MFA only."
 evidence_queries:
   - id: q1
     language: rego
@@ -44,6 +46,9 @@ external_refs:
 		{"external ref added", base + "  - system: soc2\n    kind: tested_under\n    id: CC3.1\n", true},
 		{"external refs removed", replace(base, "external_refs:\n  - system: acme-audit\n    id: RA-03\n", ""), true},
 		{"refs and description both changed", replace(replace(base, "id: RA-03", "id: RA-09"), `description: "Original prose."`, `description: "New."`), true},
+		{"anchor fit note reworded", replace(base, `anchor_fit_note: "Covers MFA only."`, `anchor_fit_note: "Covers MFA, not SSO."`), true},
+		{"anchor fit changed", replace(base, "anchor_fit: partial", "anchor_fit: none"), false},
+		{"anchor fit and note both changed", replace(replace(base, "anchor_fit: partial", "anchor_fit: none"), `anchor_fit_note: "Covers MFA only."`, `anchor_fit_note: "No fit."`), false},
 		{"refs changed alongside a title change", replace(replace(base, "id: RA-03", "id: RA-09"), `title: "Test control"`, `title: "Renamed"`), false},
 	}
 	for _, tc := range cases {

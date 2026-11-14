@@ -314,6 +314,7 @@ type questionnaireFixture struct {
 // reads the available framework_versions from the catalog.
 type fixtureSet struct {
 	tenant       tenantRow
+	inPlace      bool // #1765: tenant existed before this seed (ApplyInPlace)
 	scope        scopeRow
 	user         userRow
 	controls     []controlFixture
@@ -364,18 +365,28 @@ type fixtureSet struct {
 // values live near each other so a reader can see the dataset shape
 // at a glance.
 func (s *Seeder) buildFixtures(slug string) *fixtureSet {
-	now := s.clock().UTC()
-	fs := &fixtureSet{
-		tenant: tenantRow{
+	return s.buildFixturesFor(
+		tenantRow{
 			ID:                uuid.New(),
 			Name:              capitalize(slug) + " " + fictionalCompanyName,
 			Slug:              slug,
 			IsBootstrapTenant: false,
 		},
-		scope: scopeRow{
+		scopeRow{
 			DimensionID: uuid.New(),
 			CellID:      uuid.New(),
 		},
+	)
+}
+
+// buildFixturesFor builds the fixture set for a given tenant + scope. The
+// in-place seed (#1765) passes the existing tenant and its existing scope
+// cell; buildFixtures passes a fresh tenant.
+func (s *Seeder) buildFixturesFor(tenant tenantRow, scope scopeRow) *fixtureSet {
+	now := s.clock().UTC()
+	fs := &fixtureSet{
+		tenant: tenant,
+		scope:  scope,
 		user: userRow{
 			ID:    uuid.New(),
 			Email: "admin@" + personEmailDomain,

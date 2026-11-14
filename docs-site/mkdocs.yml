@@ -92,6 +92,7 @@ nav:
   - Tenant membership and switching: tenant-membership.md
   - Configuration reference: configuration.md
   - Framework setup: framework-setup.md
+  - Push a first manual attestation: first-manual-attestation.md
   - First audit: first-audit.md
   - Board reporting: board-reporting.md
   - Implementation checklist (AI-assisted): checklist.md
