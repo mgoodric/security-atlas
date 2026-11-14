@@ -7,16 +7,24 @@ import (
 )
 
 // fakeGate is a UserGate over a fixed set of users allowed to authenticate.
+// Keys named in revokedKeys are refused whatever their owner's status, the
+// way the production gate refuses a key whose api_keys row is revoked.
 type fakeGate struct {
-	allowed map[string]bool
-	err     error
-	calls   int
+	allowed     map[string]bool
+	revokedKeys map[string]bool
+	err         error
+	calls       int
+	keyIDs      []string
 }
 
-func (g *fakeGate) UserCanAuthenticate(_, userID string) (bool, error) {
+func (g *fakeGate) UserCanAuthenticate(_, userID, keyID string) (bool, error) {
 	g.calls++
+	g.keyIDs = append(g.keyIDs, keyID)
 	if g.err != nil {
 		return false, g.err
+	}
+	if g.revokedKeys[keyID] {
+		return false, nil
 	}
 	return g.allowed[userID], nil
 }
@@ -54,6 +62,42 @@ func TestAuthenticate_UserGateRefusesDeactivatedOwner(t *testing.T) {
 	gate.allowed[gateUser] = false
 	if _, err := s.Authenticate(token); !errors.Is(err, ErrUnknownKey) {
 		t.Fatalf("deactivated owner: Authenticate = %v; want ErrUnknownKey", err)
+	}
+}
+
+// #1947: the gate gets the key id of a persisted key, so a key revoked
+// durably by another replica is refused here even though this replica's
+// in-memory record is active and the owner is active again. A memory-only
+// key has no row to check and passes an empty key id.
+func TestAuthenticate_UserGateChecksPersistedKeyRevocation(t *testing.T) {
+	s := New(time.Hour)
+	_, memOnly := userKey(t, s)
+	if _, err := s.AttachPersistence(newFakePersister()); err != nil {
+		t.Fatalf("AttachPersistence: %v", err)
+	}
+	persisted, persistedTok := userKey(t, s)
+	gate := &fakeGate{allowed: map[string]bool{gateUser: true}, revokedKeys: map[string]bool{}}
+	s.SetUserGate(gate)
+
+	for name, tok := range map[string]string{"memory-only": memOnly, "persisted": persistedTok} {
+		if _, err := s.Authenticate(tok); err != nil {
+			t.Fatalf("%s key, live row: Authenticate = %v; want nil", name, err)
+		}
+	}
+	if len(gate.keyIDs) != 2 {
+		t.Fatalf("gate consulted %d times; want 2", len(gate.keyIDs))
+	}
+	got := map[string]bool{gate.keyIDs[0]: true, gate.keyIDs[1]: true}
+	if !got[""] || !got[persisted.ID] {
+		t.Fatalf("gate key ids = %q; want one empty and %q", gate.keyIDs, persisted.ID)
+	}
+
+	gate.revokedKeys[persisted.ID] = true
+	if _, err := s.Authenticate(persistedTok); !errors.Is(err, ErrUnknownKey) {
+		t.Fatalf("persisted key, revoked row: Authenticate = %v; want ErrUnknownKey", err)
+	}
+	if _, err := s.Authenticate(memOnly); err != nil {
+		t.Fatalf("memory-only key: Authenticate = %v; want nil", err)
 	}
 }
 

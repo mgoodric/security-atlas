@@ -210,8 +210,14 @@ type Store struct {
 // even if its in-memory record outlived the revocation. Credentials with no
 // user (UserID is their own "key_..." id: the env bootstrap key, recovery
 // keys, admin-issued push keys) skip it.
+//
+// keyID is the credential's id when the store holds an api_keys row for it,
+// and empty for a memory-only credential. With a keyID the gate also refuses
+// a key whose row is revoked (#1947): RevokeUserInMemory reaches only the
+// replica that ran the deactivation, so on every other replica the durable
+// revoked_at is what keeps the key dead once the user is re-activated.
 type UserGate interface {
-	UserCanAuthenticate(tenantID, userID string) (bool, error)
+	UserCanAuthenticate(tenantID, userID, keyID string) (bool, error)
 }
 
 // SetUserGate wires the user-status check. Nil disables it.
@@ -593,12 +599,16 @@ func (s *Store) RebindUserIDForTests(token, userID string) error {
 // the lock so a slow DB never stalls other lookups. A deactivated owner
 // refuses with ErrUnknownKey; a gate error fails closed.
 func (s *Store) Authenticate(token string) (Credential, error) {
-	cred, gate, err := s.authenticateLocked(token)
+	cred, gate, persisted, err := s.authenticateLocked(token)
 	if err != nil {
 		return Credential{}, err
 	}
 	if gate != nil && OwnedByUser(cred) {
-		ok, gerr := gate.UserCanAuthenticate(cred.TenantID, cred.UserID)
+		keyID := ""
+		if persisted {
+			keyID = cred.ID
+		}
+		ok, gerr := gate.UserCanAuthenticate(cred.TenantID, cred.UserID, keyID)
 		if gerr != nil {
 			return Credential{}, fmt.Errorf("credstore: user gate: %w", gerr)
 		}
@@ -609,21 +619,21 @@ func (s *Store) Authenticate(token string) (Credential, error) {
 	return cred, nil
 }
 
-func (s *Store) authenticateLocked(token string) (Credential, UserGate, error) {
+func (s *Store) authenticateLocked(token string) (Credential, UserGate, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r, ok := s.lookupTokenLocked(token)
 	if !ok || r.state == stateRevoked {
-		return Credential{}, nil, ErrUnknownKey
+		return Credential{}, nil, false, ErrUnknownKey
 	}
 	if !r.retiresAt.IsZero() && time.Now().UTC().After(r.retiresAt) {
-		return Credential{}, nil, ErrUnknownKey
+		return Credential{}, nil, false, ErrUnknownKey
 	}
 	if r.cred.expired(time.Now().UTC()) {
-		return Credential{}, nil, ErrUnknownKey
+		return Credential{}, nil, false, ErrUnknownKey
 	}
 	r.cred.LastUsedAt = time.Now().UTC()
-	return r.cred, s.gate, nil
+	return r.cred, s.gate, r.persisted, nil
 }
 
 // OwnedByUser reports whether c belongs to a user: its UserID is a users(id)

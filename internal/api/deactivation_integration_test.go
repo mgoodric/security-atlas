@@ -221,6 +221,37 @@ func TestDeactivation_SCIMDeprovisionRevokesKeysAndSessions(t *testing.T) {
 	f.requireRevoked(t)
 }
 
+// #1947: the deprovision runs on another replica, so this replica's
+// in-memory record of the key is never revoked. After a SCIM reprovision
+// re-activates the user, the durable revoked_at still refuses the key here.
+func TestDeactivation_RevokedKeyStaysDeadOnOtherReplicaAfterReprovision(t *testing.T) {
+	f := newDeactivationFixture(t)
+	otherReplica := credstore.New(0)
+	store := scim.NewStore(f.app).WithCredentialRevoker(otherReplica)
+	patch := func(active string) {
+		t.Helper()
+		if _, err := store.Patch(f.tenantCtx(t), uuid.New(), f.tenant.String(), f.user, []scim.PatchOperation{
+			{Op: "replace", Path: "active", Value: []byte(active)},
+		}); err != nil {
+			t.Fatalf("patch active=%s: %v", active, err)
+		}
+	}
+	patch(`false`)
+	patch(`true`)
+
+	var status string
+	var active bool
+	if err := f.admin.QueryRow(context.Background(),
+		`SELECT status, active FROM users WHERE id = $1`, f.user).Scan(&status, &active); err != nil {
+		t.Fatalf("read user: %v", err)
+	}
+	if status != "active" || !active {
+		t.Fatalf("precondition: user status=%q active=%v; want reprovisioned", status, active)
+	}
+	f.requireStatus(t, http.StatusUnauthorized, f.memToken, f.dbToken)
+	f.requireStatus(t, http.StatusOK, f.keylessToken)
+}
+
 func TestDeactivation_SCIMDeleteRevokesKeysAndSessions(t *testing.T) {
 	f := newDeactivationFixture(t)
 	store := scim.NewStore(f.app).WithCredentialRevoker(f.creds)

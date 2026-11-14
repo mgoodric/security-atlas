@@ -309,7 +309,13 @@ const userGateTimeout = 2 * time.Second
 // before any tenant context exists; tenant_id is matched explicitly. No
 // cache: every user-bound key auth reads the row, so a deactivation is
 // seen on the next request.
-func (s *Store) UserCanAuthenticate(tenantID, userID string) (bool, error) {
+//
+// A non-empty keyID names the key's api_keys row, which must exist and not
+// be revoked (#1947). Deactivation revokes the row durably but the
+// credstore's in-memory record only on the replica that ran it; without
+// this read, re-activating the user (a SCIM reprovision) would reopen the
+// key on every other replica until restart.
+func (s *Store) UserCanAuthenticate(tenantID, userID, keyID string) (bool, error) {
 	tid, err := uuidToPg(tenantID)
 	if err != nil {
 		return false, nil
@@ -320,7 +326,24 @@ func (s *Store) UserCanAuthenticate(tenantID, userID string) (bool, error) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), userGateTimeout)
 	defer cancel()
-	return userCanAuthenticate(ctx, dbx.New(s.authPool), tid, uid)
+	q := dbx.New(s.authPool)
+	if keyID != "" {
+		kid, kerr := keyIDToPg(keyID)
+		if kerr != nil {
+			return false, nil
+		}
+		row, kerr := q.GetAPIKeyByID(ctx, dbx.GetAPIKeyByIDParams{TenantID: tid, ID: kid})
+		if kerr != nil {
+			if errors.Is(kerr, pgx.ErrNoRows) {
+				return false, nil
+			}
+			return false, fmt.Errorf("apikeystore: key status: %w", kerr)
+		}
+		if row.RevokedAt.Valid {
+			return false, nil
+		}
+	}
+	return userCanAuthenticate(ctx, q, tid, uid)
 }
 
 // userCanAuthenticate reports whether the users row (tenantID, userID)
