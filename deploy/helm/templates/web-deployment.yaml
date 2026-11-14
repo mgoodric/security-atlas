@@ -57,6 +57,12 @@ spec:
                 configMapKeyRef:
                   name: {{ include "security-atlas.configMapName" . }}
                   key: NEXT_PUBLIC_API_BASE_URL
+            # #2040: proxies whose X-Forwarded-For the login BFF trusts.
+            - name: WEB_TRUSTED_PROXY_CIDRS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "security-atlas.configMapName" . }}
+                  key: WEB_TRUSTED_PROXY_CIDRS
             {{- with .Values.web.extraEnv }}
             {{- toYaml . | nindent 12 }}
             {{- end }}
