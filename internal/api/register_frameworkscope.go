@@ -35,6 +35,8 @@ func (s *Server) registerFrameworkScope(root *chi.Mux) {
 	// Issue #1791: SoA export as CSV or xlsx.
 	root.Get("/v1/framework-scopes/applicability/export", fwH.ExportApplicability)
 	root.Get("/v1/framework-scopes/{id}/applicability", fwH.ListApplicability)
+	// Issue #1795: what changed against the activated revision.
+	root.Get("/v1/framework-scopes/{id}/applicability/diff", fwH.DiffApplicability)
 	root.Put("/v1/framework-scopes/{id}/applicability/{requirement_id}", fwH.SetApplicability)
 	// Issue #1790: bulk-set and CSV import of decisions.
 	root.Post("/v1/framework-scopes/{id}/applicability/bulk", fwH.BulkSetApplicability)

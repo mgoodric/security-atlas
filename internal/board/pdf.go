@@ -101,7 +101,8 @@ th { background: #f5f5f5; font-weight: 600; }
 		stateClass := "state-" + strings.ReplaceAll(fp.State, " ", "-")
 		fmt.Fprintf(&w,
 			`<div class="card"><div class="label">%s</div><div class="pct">%d%%</div>`+
-				`<div class="meta">%s %s pts · freshness %d%%</div>`+
+				`<div class="meta">evidence freshness rate (tenant-wide)</div>`+
+				`<div class="meta">%s %s pts · controls fresh %d%%</div>`+
 				`<div class="meta %s">%s</div></div>`,
 			html.EscapeString(fp.Name), fp.CoveragePct,
 			html.EscapeString(arrowGlyph(fp.TrendArrow)), html.EscapeString(signedInt(fp.Delta)),

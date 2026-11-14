@@ -51,8 +51,8 @@ func (s *Server) registerBoard(root *chi.Mux, featureFlagStore *featureflag.Stor
 		// into the full board-meeting artifact — a multi-section report
 		// (posture, top risks, coverage trend, open findings, operational
 		// metrics, investment-vs-coverage, asks of the board) with a
-		// draft -> publish lifecycle. The PackGenerator reuses the same
-		// slice-016 freshness + drift read models plus the board-pack-owned
+		// draft -> publish lifecycle. The PackGenerator reads the dashboard's
+		// per-framework posture query (#2056) plus the board-pack-owned
 		// failing-evaluations read (control_evaluations as of period_end —
 		// decision D4). The narrative is TEMPLATED — no LLM (P0 anti-criterion).
 		// Publish is gated on every section being human-approved (decision D6).
@@ -67,7 +67,7 @@ func (s *Server) registerBoard(root *chi.Mux, featureFlagStore *featureflag.Stor
 		// Pinned to criticality=high per slice 273 D2 — the board concern is
 		// overdue reviews on the vendors that matter.
 		boardPackGen := board.NewPackGenerator(
-			boardPackStore, freshnessStore, driftStore,
+			boardPackStore,
 			vendorBurndownAdapter{store: vendorStore},
 		)
 		boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)

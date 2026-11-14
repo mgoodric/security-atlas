@@ -64,6 +64,11 @@ type BatchControl struct {
 	// failed: the candidates are then the deterministic list, without
 	// rationales (#1781).
 	LLMRerank string `json:"llm_rerank"`
+	// LLMProvider names where an applied rerank was generated
+	// (ai_generations.model_provider, e.g. "anthropic" or "ollama-local"),
+	// so a reviewer sees which provider the row's text was routed to. It is
+	// empty unless LLMRerank is applied (#2079).
+	LLMProvider string `json:"llm_provider,omitempty"`
 }
 
 // Batch is one upload: its counts, staged rows and rejected rows. Every
@@ -276,10 +281,10 @@ func (s *Stager) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	}
 	rerank := s.reranker.allowed(ctx)
 	if created.StagedCount > s.asyncThreshold || rerank && created.StagedCount > rerankAsyncThreshold {
-		go s.suggestInBackground(context.WithoutCancel(ctx), created, rerank)
+		go s.suggestInBackground(context.WithoutCancel(ctx), created, rerankBudget(rerank, rerankBackgroundBudget))
 		return created, nil
 	}
-	rows, err := s.suggest(ctx, created, rerank)
+	rows, err := s.suggest(ctx, created, rerankBudget(rerank, rerankInlineBudget))
 	if err != nil {
 		// The batch and its rows are committed; only the candidates failed.
 		slog.ErrorContext(ctx, "controlimport: suggest candidates", "batch_id", created.ID, "error", err)
@@ -291,8 +296,17 @@ func (s *Stager) Stage(ctx context.Context, in StageInput) (Batch, error) {
 	return created, nil
 }
 
-func (s *Stager) suggestInBackground(ctx context.Context, b Batch, rerank bool) {
-	_, err := s.suggest(ctx, b, rerank)
+// rerankBudget is the wall-clock budget of a run's rerank, zero when the
+// batch is not reranked.
+func rerankBudget(rerank bool, budget time.Duration) time.Duration {
+	if !rerank {
+		return 0
+	}
+	return budget
+}
+
+func (s *Stager) suggestInBackground(ctx context.Context, b Batch, budget time.Duration) {
+	_, err := s.suggest(ctx, b, budget)
 	switch {
 	case errors.Is(err, ErrSuggestionsNoLongerPending):
 		slog.InfoContext(ctx, "controlimport: background suggestions dropped; batch no longer pending", "batch_id", b.ID)
@@ -314,6 +328,7 @@ func applySuggestions(staged []BatchControl, rows []RowSuggestions) {
 		staged[i].Candidates = nonNilCandidates(r.Candidates)
 		staged[i].NoCandidateReaches = r.NoCandidateReaches
 		staged[i].LLMRerank = r.LLMRerank
+		staged[i].LLMProvider = r.LLMProvider
 	}
 }
 
