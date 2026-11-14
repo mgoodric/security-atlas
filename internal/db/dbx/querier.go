@@ -956,6 +956,8 @@ type Querier interface {
 	GetOidcIdpConfigByName(ctx context.Context, arg GetOidcIdpConfigByNameParams) (OidcIdpConfig, error)
 	GetOrgThemeByID(ctx context.Context, id pgtype.UUID) (OrgTheme, error)
 	GetOrgUnitByID(ctx context.Context, arg GetOrgUnitByIDParams) (OrgUnit, error)
+	// One overlay edge with the same joined codes ListOverlayEdges returns.
+	GetOverlayEdgeView(ctx context.Context, arg GetOverlayEdgeViewParams) (GetOverlayEdgeViewRow, error)
 	GetPersonnelChecklist(ctx context.Context, arg GetPersonnelChecklistParams) (PersonnelSecurityChecklist, error)
 	GetPersonnelChecklistBySourceEvent(ctx context.Context, arg GetPersonnelChecklistBySourceEventParams) (PersonnelSecurityChecklist, error)
 	GetPersonnelChecklistItem(ctx context.Context, arg GetPersonnelChecklistItemParams) (PersonnelSecurityChecklistItem, error)
@@ -1362,6 +1364,11 @@ type Querier interface {
 	// (atlas_app pool + tenancy GUC). The source string distinguishes
 	// 'evaluator:<name>' from 'manual:<user-uuid>' provenance.
 	InsertMetricObservation(ctx context.Context, arg InsertMetricObservationParams) (MetricObservation, error)
+	// #1797: tenant overlay edges (create, list, retire). Every query runs under
+	// the caller's tenant (RLS); tenant_id is also passed explicitly as a second
+	// leg, the house style for tenant tables.
+	InsertOverlayEdge(ctx context.Context, arg InsertOverlayEdgeParams) (FwToScfOverlayEdge, error)
+	InsertOverlayEdgeAuditLog(ctx context.Context, arg InsertOverlayEdgeAuditLogParams) error
 	// Append one repudiation-ledger row (threat-model R / P0-448-4). is_bulk
 	// distinguishes a bulk event (control_ids carries the whole applied set)
 	// from a single-item event (one id). Append-only by RLS construction.
@@ -2412,6 +2419,10 @@ type Querier interface {
 	// DATE so the caller controls "now" (testability) and timezone semantics
 	// (vendor reviews are date-granular, not timestamp-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
+	ListOverlayEdgeAuditLog(ctx context.Context, arg ListOverlayEdgeAuditLogParams) ([]FwToScfOverlayEdgeAuditLog, error)
+	// The tenant's overlay edges with the codes they were named by. Each filter
+	// is optional: framework slug, requirement code, anchor SCF code, status.
+	ListOverlayEdges(ctx context.Context, arg ListOverlayEdgesParams) ([]ListOverlayEdgesRow, error)
 	// Read the assignment audit ledger for the tenant, newest first. Used by
 	// the integration tests (and a future "who reassigned these?" surface).
 	ListOwnerAssignmentAudit(ctx context.Context, arg ListOwnerAssignmentAuditParams) ([]ControlOwnerAssignmentAuditLog, error)
@@ -3062,6 +3073,7 @@ type Querier interface {
 	// committed meta-risk. hashtextextended maps the hex key to the BIGINT
 	// lock space; a hash collision only over-serializes, never under-.
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	LockOverlayEdge(ctx context.Context, arg LockOverlayEdgeParams) (FwToScfOverlayEdge, error)
 	// #1867: read a risk and hold its row against concurrent theme writes and
 	// deletes until the transaction ends, so a theme write or delete sees the
 	// themes it actually replaces. FOR NO KEY UPDATE, not FOR UPDATE: it does
@@ -3213,6 +3225,7 @@ type Querier interface {
 	// (P0-509-1 fail-closed). Returns the triggering group alongside the role so
 	// the audit row can record WHICH group granted it (AC-7).
 	ResolveRolesForGroups(ctx context.Context, arg ResolveRolesForGroupsParams) ([]ResolveRolesForGroupsRow, error)
+	RetireOverlayEdge(ctx context.Context, arg RetireOverlayEdgeParams) (FwToScfOverlayEdge, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	// Deprovision (AC-4): revoke EVERY valid session for the user so the
 	// deprovisioned account loses all access immediately. No keep-id — unlike the
