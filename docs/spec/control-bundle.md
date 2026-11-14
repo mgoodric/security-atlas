@@ -40,27 +40,29 @@ When uploaded as a tarball, the archive **MUST**:
 
 ### 2.1 Required fields
 
-| Field                   | Type   | Notes                                                                                                                                                     |
-| ----------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `bundle_schema_version` | string | Exactly `"1"` in this slice. Future v2 will gate breaking changes.                                                                                        |
-| `bundle_id`             | string | Stable natural key. Re-uploading the same `bundle_id` is a version bump. Format: `^[a-z][a-z0-9_.-]{2,63}$` (lowercase).                                  |
-| `title`                 | string | Human-readable, 1-200 chars.                                                                                                                              |
-| `scf_anchor_id`         | string | SCF code (e.g., `IAC-06`) **or** the UUID of an `scf_anchors` row. Must resolve to a row in `scf_anchors` or the upload is rejected (canvas invariant 7). |
-| `implementation_type`   | enum   | `automated` \| `semi_automated` \| `manual_attested` \| `manual_periodic`.                                                                                |
+| Field                   | Type   | Notes                                                                                                                                                                                                         |
+| ----------------------- | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bundle_schema_version` | string | Exactly `"1"` in this slice. Future v2 will gate breaking changes.                                                                                                                                            |
+| `bundle_id`             | string | Stable natural key. Re-uploading the same `bundle_id` is a version bump. Format: `^[a-z][a-z0-9_.-]{2,63}$` (lowercase).                                                                                      |
+| `title`                 | string | Human-readable, 1-200 chars.                                                                                                                                                                                  |
+| `scf_anchor_id`         | string | SCF code (e.g., `IAC-06`) **or** the UUID of an `scf_anchors` row. Must resolve to a row in `scf_anchors` or the upload is rejected (canvas invariant 7). May be omitted only with `anchor_fit: none` (§2.2). |
+| `implementation_type`   | enum   | `automated` \| `semi_automated` \| `manual_attested` \| `manual_periodic`.                                                                                                                                    |
 
 ### 2.2 Optional fields
 
-| Field                    | Type        | Notes                                                                                                                 |
-| ------------------------ | ----------- | --------------------------------------------------------------------------------------------------------------------- |
-| `description`            | string      | Longer-form narrative. If `description.md` is present in the bundle, its body is appended.                            |
-| `control_family`         | string      | SCF taxonomy family (AAA, AST, BCD, ...). Inferred from the SCF anchor if omitted.                                    |
-| `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                 |
-| `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                  |
-| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI.          |
-| `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.  |
-| `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.          |
-| `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                       |
-| `manual_evidence_schema` | JSON Schema | When `implementation_type` is `manual_*`, the schema of the attestation form. Authoritative for the manual upload UI. |
+| Field                    | Type        | Notes                                                                                                                                                                              |
+| ------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `description`            | string      | Longer-form narrative. If `description.md` is present in the bundle, its body is appended.                                                                                         |
+| `control_family`         | string      | SCF taxonomy family (AAA, AST, BCD, ...). Inferred from the SCF anchor if omitted.                                                                                                 |
+| `owner_role`             | string      | RACI role responsible (e.g., `security-engineering`).                                                                                                                              |
+| `lifecycle_state`        | enum        | Defaults to `draft`. One of: `draft`, `proposed`, `active`, `deprecated`, `retired`.                                                                                               |
+| `freshness_class`        | enum        | `realtime`, `hourly`, `daily`, `weekly`, `monthly`, `quarterly`, `annual`. Drives the evidence-staleness UI.                                                                       |
+| `applicability_expr`     | JSON object | Boolean AST over scope dimensions (slice 017). Omitted = matches every cell. Same shape as `internal/scope/expr.go`.                                                               |
+| `linked_policy_ids`      | string[]    | Free-form policy identifiers. v1 stores them verbatim; slice 022 will validate against the `policies` table.                                                                       |
+| `evidence_queries`       | object[]    | Zero or more queries. See §2.3.                                                                                                                                                    |
+| `manual_evidence_schema` | JSON Schema | When `implementation_type` is `manual_*`, the schema of the attestation form. Authoritative for the manual upload UI.                                                              |
+| `anchor_fit`             | enum        | How well `scf_anchor_id` fits the control: `exact` (default when omitted), `partial`, or `none` (no SCF control fits; the anchor is the nearest catch-all or absent). Issue #1736. |
+| `anchor_fit_note`        | string      | Why the fit is not exact. Required when `anchor_fit` is `partial` or `none`.                                                                                                       |
 
 ### 2.3 Evidence queries
 
@@ -325,16 +327,18 @@ bundle: aws_iam_mfa_prod
 
 ## 5. Anti-criteria (rejected at upload, never stored)
 
-| Reject                                                                  | Reason                                                        |
-| ----------------------------------------------------------------------- | ------------------------------------------------------------- |
-| `scf_anchor_id` absent or unresolvable                                  | Canvas invariant 7 — SCF anchoring is non-negotiable.         |
-| `applicability_expr` malformed or references an unknown operator        | Slice 017 validator rejects up front.                         |
-| `evidence_queries[*].evidence_kind` not in the schema registry          | Slice 014 contract — every kind must be registered.           |
-| Tarball entry with `..` segment or absolute path                        | Tar slip protection (security review P0).                     |
-| Tarball over 5 MB compressed, 20 MB uncompressed, or 500 entries        | Decompression bomb protection.                                |
-| OSCAL `component-definition` files                                      | v2 extension; slice 009 is canonical-controls only.           |
-| Evidence-query execution payload                                        | Slice 009 stores only; execution is slice 012.                |
-| Bundle without `bundle_schema_version` or with a value other than `"1"` | Forward compatibility — unknown schema versions are rejected. |
+| Reject                                                                  | Reason                                                                                        |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `scf_anchor_id` absent (unless `anchor_fit: none`) or unresolvable      | Canvas invariant 7 — SCF anchoring is non-negotiable; `none` is ADR 0013's honest "unmapped". |
+| `anchor_fit` not one of `exact`, `partial`, `none`                      | Unknown fit values would read as a fit nobody defined.                                        |
+| `anchor_fit` `partial` or `none` without `anchor_fit_note`              | A non-exact fit must say what the anchor misses.                                              |
+| `applicability_expr` malformed or references an unknown operator        | Slice 017 validator rejects up front.                                                         |
+| `evidence_queries[*].evidence_kind` not in the schema registry          | Slice 014 contract — every kind must be registered.                                           |
+| Tarball entry with `..` segment or absolute path                        | Tar slip protection (security review P0).                                                     |
+| Tarball over 5 MB compressed, 20 MB uncompressed, or 500 entries        | Decompression bomb protection.                                                                |
+| OSCAL `component-definition` files                                      | v2 extension; slice 009 is canonical-controls only.                                           |
+| Evidence-query execution payload                                        | Slice 009 stores only; execution is slice 012.                                                |
+| Bundle without `bundle_schema_version` or with a value other than `"1"` | Forward compatibility — unknown schema versions are rejected.                                 |
 
 ---
 

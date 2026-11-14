@@ -11,6 +11,8 @@ import { describe, expect, test } from "vitest";
 
 import {
   ALL,
+  anchorFitLabel,
+  anchorFitMarker,
   applyFilters,
   clearFilters,
   DEFAULT_FILTERS,
@@ -56,6 +58,8 @@ describe("DEFAULT_FILTERS / isDefault / clearFilters", () => {
     expect(DEFAULT_FILTERS.freshness).toBe(ALL);
     // Slice 224 — scope is the 5th filter; defaults to ALL like the others.
     expect(DEFAULT_FILTERS.scope).toBe(ALL);
+    // Issue #1736 — anchor fit.
+    expect(DEFAULT_FILTERS.anchor_fit).toBe(ALL);
   });
 
   test("isDefault is true for the default set", () => {
@@ -245,5 +249,60 @@ describe("formatFrameworksCell", () => {
     // Pin the separator so a future refactor doesn't quietly flip
     // to ", " or " | " and break visual parity with the mockup.
     expect(FRAMEWORKS_JOIN_SEPARATOR).toBe(" · ");
+  });
+});
+
+// Issue #1736 — anchor fit filter, marker and label.
+describe("anchor fit", () => {
+  const withFit = (
+    suffix: string,
+    anchorFit: AnchorRow["anchorFit"],
+    anchorFitNote: string | null = null,
+  ): AnchorRow => ({
+    ...row("IAC", null, suffix),
+    anchorFit,
+    anchorFitNote,
+  });
+  const exact = withFit("01", "exact");
+  const partial = withFit("02", "partial", "covers cadence, not independence");
+  const none = withFit("03", "none", "no SCF control covers retention");
+  const catalog = row("IAC", null, "04"); // catalog anchor: no fit
+
+  test("filters by fit; a catalog row never matches a fit", () => {
+    const all = [exact, partial, none, catalog];
+    const by = (v: string) =>
+      applyFilters(all, setFilter(DEFAULT_FILTERS, "anchor_fit", v)).map(
+        (r) => r.key,
+      );
+    expect(by(ALL)).toHaveLength(4);
+    expect(by("exact")).toEqual([exact.key]);
+    expect(by("partial")).toEqual([partial.key]);
+    expect(by("none")).toEqual([none.key]);
+  });
+
+  test("a fit filter is not the default filter set", () => {
+    expect(isDefault(setFilter(DEFAULT_FILTERS, "anchor_fit", "none"))).toBe(
+      false,
+    );
+  });
+
+  test("only non-exact rows carry a marker, titled with the note", () => {
+    expect(anchorFitMarker(exact)).toBeNull();
+    expect(anchorFitMarker(catalog)).toBeNull();
+    expect(anchorFitMarker(partial)).toEqual({
+      label: "Partial fit",
+      title: "covers cadence, not independence",
+    });
+    expect(anchorFitMarker(none)).toEqual({
+      label: "No SCF fit",
+      title: "no SCF control covers retention",
+    });
+  });
+
+  test("labels each fit; absent reads as exact", () => {
+    expect(anchorFitLabel(undefined)).toBe("Exact");
+    expect(anchorFitLabel("exact")).toBe("Exact");
+    expect(anchorFitLabel("partial")).toBe("Partial");
+    expect(anchorFitLabel("none")).toBe("No SCF fit");
   });
 });

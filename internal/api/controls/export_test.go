@@ -58,6 +58,8 @@ func TestSlice137_ControlsToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		BundleManifestHash: "sha256:abcdef0123456789",
 		CreatedAt:          now,
 		UpdatedAt:          now,
+		AnchorFit:          "none",
+		AnchorFitNote:      "no SCF control covers audit committee independence",
 	}
 
 	it := controlsToRowIter([]controlExportRow{row})
@@ -85,6 +87,8 @@ func TestSlice137_ControlsToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		"applicability_expr":   "BU=eng AND env=prod",
 		"freshness_class":      "fresh",
 		"bundle_manifest_hash": "sha256:abcdef0123456789",
+		"anchor_fit":           "none",
+		"anchor_fit_note":      "no SCF control covers audit committee independence",
 	}
 	for col, want := range checks {
 		idx := -1
@@ -142,6 +146,8 @@ func TestSlice137_ControlsExportHeader_StableOrder(t *testing.T) {
 		"bundle_manifest_hash",
 		"created_at",
 		"updated_at",
+		"anchor_fit",
+		"anchor_fit_note",
 	}
 	got := controlsExportHeader()
 	if len(got) != len(want) {

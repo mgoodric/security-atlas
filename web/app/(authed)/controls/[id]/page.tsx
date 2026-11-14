@@ -84,6 +84,7 @@ import { type AnchorDetail } from "@/lib/api/anchors";
 import { APIError } from "@/lib/api/base";
 
 import { classifyControlDetailError } from "../error-classifier";
+import { anchorFitLabel } from "../filters";
 import { CONTROL_TABS, formatTabCount, isTabKey, type TabKey } from "./tabs";
 
 import {
@@ -465,7 +466,25 @@ function ControlDetailPageInner() {
                 {control.freshness_class ?? "—"}
               </span>
             </span>
+            <span
+              className="text-muted-foreground"
+              data-testid="control-anchor-fit"
+              data-anchor-fit={control.anchor_fit ?? "exact"}
+            >
+              Anchor fit{" "}
+              <span className="text-foreground">
+                {anchorFitLabel(control.anchor_fit)}
+              </span>
+            </span>
           </div>
+          {control.anchor_fit_note ? (
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="control-anchor-fit-note"
+            >
+              {control.anchor_fit_note}
+            </p>
+          ) : null}
         </div>
 
         {/* Slice 255 — header actions well: Run query + Edit YAML +

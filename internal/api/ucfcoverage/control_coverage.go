@@ -304,12 +304,16 @@ func controlWireFromControlRow(c dbx.GetControlByIDRow) controlWire {
 		ImplementationType: string(c.ImplementationType),
 		OwnerRole:          c.OwnerRole,
 		LifecycleState:     string(c.LifecycleState),
+		AnchorFit:          c.AnchorFit,
 	}
 	if c.ScfID != nil {
 		w.SCFID = *c.ScfID
 	}
 	if c.FreshnessClass != nil {
 		w.FreshnessClass = *c.FreshnessClass
+	}
+	if c.AnchorFitNote != nil {
+		w.AnchorFitNote = *c.AnchorFitNote
 	}
 	return w
 }

@@ -171,7 +171,8 @@ type Querier interface {
 	CountActionPlanControls(ctx context.Context, arg CountActionPlanControlsParams) (int64, error)
 	CountActionPlanRisks(ctx context.Context, arg CountActionPlanRisksParams) (int64, error)
 	// Issue #1741 — total for the paged ListActiveControlsWithState read.
-	CountActiveControls(ctx context.Context, tenantID pgtype.UUID) (int64, error)
+	// The optional anchor_fit filter matches the list's (issue #1736).
+	CountActiveControls(ctx context.Context, arg CountActiveControlsParams) (int64, error)
 	// Count of all checklist sections visible to the caller's tenant. Used by the
 	// cross-tenant isolation integration test to prove tenant B sees zero of
 	// tenant A's rows (AC-8).
@@ -1123,6 +1124,8 @@ type Querier interface {
 	InsertControlManifestRevision(ctx context.Context, arg InsertControlManifestRevisionParams) (int64, error)
 	// Insert a new control row (initial upload or supersession). Caller is
 	// responsible for UPDATE-ing the predecessor's superseded_by in the same tx.
+	// anchor_fit / anchor_fit_note are issue #1736; the caller passes the
+	// manifest's value with 'exact' filled in for an omitted one.
 	InsertControlVersion(ctx context.Context, arg InsertControlVersionParams) (Control, error)
 	// ===== csf_assessment_audit =====
 	InsertCsfAssessmentAudit(ctx context.Context, arg InsertCsfAssessmentAuditParams) (CsfAssessmentAudit, error)

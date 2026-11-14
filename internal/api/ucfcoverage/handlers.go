@@ -294,6 +294,11 @@ type controlWire struct {
 	OwnerRole          string `json:"owner_role"`
 	LifecycleState     string `json:"lifecycle_state"`
 	FreshnessClass     string `json:"freshness_class,omitempty"`
+	// AnchorFit is exact|partial|none; AnchorFitNote explains a non-exact
+	// fit (issue #1736). Empty AnchorFit means the row did not carry one
+	// (an anchor-side view), so it is omitted.
+	AnchorFit     string `json:"anchor_fit,omitempty"`
+	AnchorFitNote string `json:"anchor_fit_note,omitempty"`
 }
 
 // requirementForAnchorWire is the shape of one row in

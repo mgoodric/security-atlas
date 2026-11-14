@@ -1944,6 +1944,8 @@ type Control struct {
 	FreshnessClass       *string                   `json:"freshness_class"`
 	BundleUploadedAt     pgtype.Timestamptz        `json:"bundle_uploaded_at"`
 	BundleUploadedBy     *string                   `json:"bundle_uploaded_by"`
+	AnchorFit            string                    `json:"anchor_fit"`
+	AnchorFitNote        *string                   `json:"anchor_fit_note"`
 }
 
 type ControlDriftSnapshot struct {

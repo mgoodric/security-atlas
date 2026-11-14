@@ -43,6 +43,10 @@ export type ControlWire = {
   lifecycle_state: string;
   owner_role: string;
   freshness_class?: string;
+  // Issue #1736 — how well the SCF anchor fits the control, and why a
+  // non-exact fit is not exact. Absent means exact.
+  anchor_fit?: "exact" | "partial" | "none";
+  anchor_fit_note?: string;
 };
 
 // anchorWire mirrors `anchorWire` in the same handler (bare anchor form).

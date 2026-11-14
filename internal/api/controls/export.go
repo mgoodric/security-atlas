@@ -143,6 +143,8 @@ type controlExportRow struct {
 	BundleManifestHash string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	AnchorFit          string
+	AnchorFitNote      string
 }
 
 // NewExportHandler constructs the slice 137 export handler. The pool
@@ -391,6 +393,8 @@ func parseControlsExportFormat(r *http.Request) (export.Format, error) {
 //	tenant data: applicability_expr     (slice 017 DSL; RLS guards)
 //	integrity:   freshness_class, bundle_manifest_hash
 //	audit:       created_at, updated_at
+//	anchor fit:  anchor_fit, anchor_fit_note (issue #1736; appended so
+//	             every earlier column keeps its position)
 func controlsExportHeader() []string {
 	return []string{
 		"id",
@@ -408,6 +412,8 @@ func controlsExportHeader() []string {
 		"bundle_manifest_hash",
 		"created_at",
 		"updated_at",
+		"anchor_fit",
+		"anchor_fit_note",
 	}
 }
 
@@ -438,6 +444,8 @@ func controlsToRowIter(rows []controlExportRow) iter.Seq[[]string] {
 				r.BundleManifestHash,
 				r.CreatedAt.UTC().Format(time.RFC3339),
 				r.UpdatedAt.UTC().Format(time.RFC3339),
+				r.AnchorFit,
+				r.AnchorFitNote,
 			}
 			if !yield(row) {
 				return
@@ -530,6 +538,10 @@ func (h *ExportHandler) listControlsDirect(ctx context.Context, limit int) ([]co
 			ApplicabilityExpr:  r.ApplicabilityExpr,
 			FreshnessClass:     freshness,
 			BundleManifestHash: r.BundleManifestHash,
+			AnchorFit:          r.AnchorFit,
+		}
+		if r.AnchorFitNote != nil {
+			out[i].AnchorFitNote = *r.AnchorFitNote
 		}
 		if r.CreatedAt.Valid {
 			out[i].CreatedAt = r.CreatedAt.Time
