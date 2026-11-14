@@ -290,6 +290,9 @@ func TestStore_Presign_TTLBound(t *testing.T) {
 	if cd := resp.Header.Get("Content-Disposition"); cd != artifact.DownloadContentDisposition {
 		t.Fatalf("Content-Disposition = %q, want %q", cd, artifact.DownloadContentDisposition)
 	}
+	if ct := resp.Header.Get("Content-Type"); ct != artifact.DownloadContentType {
+		t.Fatalf("Content-Type = %q, want %q", ct, artifact.DownloadContentType)
+	}
 }
 
 // ISC-22 + ISC-23 + ISC-A3 — every upload + every presign records an

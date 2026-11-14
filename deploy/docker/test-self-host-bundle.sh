@@ -687,8 +687,10 @@ if [ "${MODE}" = "bundled" ]; then
     cmp -s "${ART_FILE}" "${ART_DL}" || fail "artifact read back from MinIO differs from the upload"
     grep -qi '^content-disposition: *attachment' "${ART_HDRS}" \
         || fail "presigned download is not served as an attachment; headers: $(tr -d '\r' < "${ART_HDRS}")"
+    grep -qi '^content-type: *application/octet-stream' "${ART_HDRS}" \
+        || fail "presigned download is not served as application/octet-stream; headers: $(tr -d '\r' < "${ART_HDRS}")"
     rm -f "${ART_FILE}" "${ART_RESP}" "${ART_DL}" "${ART_HDRS}"
-    log "artifact ${ART_ID} uploaded and read back byte-identical from MinIO, as an attachment"
+    log "artifact ${ART_ID} uploaded and read back byte-identical from MinIO, as an octet-stream attachment"
 fi
 
 # ---------------------------------------------------------------------

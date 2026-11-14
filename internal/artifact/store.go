@@ -346,6 +346,10 @@ func pgUUID(u uuid.UUID) pgtype.UUID {
 // presigned download, so a browser never renders an artifact inline.
 const DownloadContentDisposition = "attachment"
 
+// DownloadContentType is the response content type signed into every
+// presigned download, whatever type the uploader declared.
+const DownloadContentType = "application/octet-stream"
+
 // S3Presigner adapts *s3.PresignClient to the Presigner interface.
 type S3Presigner struct {
 	Bucket string
@@ -360,6 +364,9 @@ func (p *S3Presigner) PresignGetObject(ctx context.Context, key string, ttl time
 		// Signed into the URL, so it also covers objects written before
 		// Put set ContentDisposition, and the holder cannot strip it.
 		ResponseContentDisposition: aws.String(DownloadContentDisposition),
+		// The stored content_type stays API metadata; the bytes are
+		// always served as opaque so no browser sniffs or renders them.
+		ResponseContentType: aws.String(DownloadContentType),
 	}, s3.WithPresignExpires(ttl))
 	if err != nil {
 		return "", err

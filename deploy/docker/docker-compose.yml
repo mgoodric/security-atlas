@@ -321,6 +321,10 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      # security-atlas#1928: atlas probes the artifacts bucket at boot and
+      # exits if it is missing, so wait for the one-shot that creates it.
+      minio-mc:
+        condition: service_completed_successfully
       # Slice 473 — FAIL-CLOSED migrate gate (P0-473-1, load-bearing).
       #
       # atlas does NOT start serving until atlas-migrate has exited 0

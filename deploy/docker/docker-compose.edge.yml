@@ -288,6 +288,10 @@ services:
         condition: service_healthy
       minio-edge:
         condition: service_healthy
+      # security-atlas#1928: atlas probes the artifacts bucket at boot and
+      # exits if it is missing, so wait for the one-shot that creates it.
+      minio-mc-edge:
+        condition: service_completed_successfully
       # Slice 473 — FAIL-CLOSED migrate gate (P0-473-1, load-bearing).
       # atlas-edge does NOT serve until atlas-migrate-edge has exited 0.
       # On a Watchtower binary update both advance together; the binary

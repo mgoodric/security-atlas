@@ -156,6 +156,9 @@ func TestBuild_ProbesBucketAndPresignsAttachmentOnPublicEndpoint(t *testing.T) {
 	if got := u.Query().Get("response-content-disposition"); got != artifact.DownloadContentDisposition {
 		t.Fatalf("response-content-disposition = %q, want %q", got, artifact.DownloadContentDisposition)
 	}
+	if got := u.Query().Get("response-content-type"); got != artifact.DownloadContentType {
+		t.Fatalf("response-content-type = %q, want %q", got, artifact.DownloadContentType)
+	}
 }
 
 func TestBuild_UnreachableBucketFails(t *testing.T) {
