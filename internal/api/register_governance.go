@@ -99,6 +99,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 	root.Patch("/v1/policies/{id}/submit", policiesH.Submit)
 	root.Patch("/v1/policies/{id}/approve", policiesH.Approve)
 	root.Post("/v1/policies/{id}/publish", policiesH.Publish)
+	root.Patch("/v1/policies/{id}/review-date", policiesH.SetReviewDate)
 	root.Get("/v1/policies/{id}/pdf", policiesH.PDF)
 	root.Get("/v1/policies/{id}", policiesH.GetPolicy)
 	// Slice 023: policy acknowledgment workflow. Three routes appended
