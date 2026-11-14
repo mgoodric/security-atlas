@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -56,11 +57,25 @@ type DomainUser struct {
 // app.current_tenant RLS (invariant #6 / P0-508-4) — the tenant comes from the
 // authenticated SCIM credential, never from the request body.
 type Store struct {
-	pool *pgxpool.Pool
+	pool  *pgxpool.Pool
+	creds CredentialRevoker
+}
+
+// CredentialRevoker drops a user's API keys from the in-memory credstore.
+// Deprovisioning revokes the keys durably in its transaction and calls this
+// after commit (#1915). *credstore.Store satisfies it.
+type CredentialRevoker interface {
+	RevokeUserInMemory(tenantID, userID string) int
 }
 
 // NewStore constructs a Store bound to the RLS app pool.
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+// WithCredentialRevoker wires the after-commit in-memory key revocation.
+func (s *Store) WithCredentialRevoker(c CredentialRevoker) *Store {
+	s.creds = c
+	return s
+}
 
 // ProvisionInput is the attribute allow-list for a SCIM Create. NOTE there is
 // no Roles field by design (P0-508-3): SCIM provisions identity + active only.
@@ -236,6 +251,7 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 		return DomainUser{}, err
 	}
 	var out DomainUser
+	deprovisioned := false
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		prev, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
@@ -259,9 +275,10 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 		out = domainUserFromRow(row)
 		action := ActionReplace
 		if prev.Active && !in.Active {
-			if rErr := s.revokeSessions(ctx, q, tIDU, id); rErr != nil {
+			if rErr := s.revokeAccess(ctx, q, tIDU, id); rErr != nil {
 				return rErr
 			}
+			deprovisioned = true
 			action = ActionDeprovision
 		} else if !prev.Active && in.Active {
 			action = ActionReprovision
@@ -272,6 +289,9 @@ func (s *Store) Replace(ctx context.Context, actorCredentialID uuid.UUID, tenant
 	})
 	if err != nil {
 		return DomainUser{}, err
+	}
+	if deprovisioned {
+		s.forgetCredentials(tenantID, id)
 	}
 	return out, nil
 }
@@ -291,6 +311,7 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 		return DomainUser{}, perr
 	}
 	var out DomainUser
+	deprovisioned := false
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		prev, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
@@ -319,9 +340,10 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 				return fmt.Errorf("scim: patch active: %w", gErr)
 			}
 			if prev.Active && !intent.active {
-				if rErr := s.revokeSessions(ctx, q, tIDU, id); rErr != nil {
+				if rErr := s.revokeAccess(ctx, q, tIDU, id); rErr != nil {
 					return rErr
 				}
+				deprovisioned = true
 				action = ActionDeprovision
 			} else if !prev.Active && intent.active {
 				action = ActionReprovision
@@ -337,6 +359,9 @@ func (s *Store) Patch(ctx context.Context, actorCredentialID uuid.UUID, tenantID
 	if err != nil {
 		return DomainUser{}, err
 	}
+	if deprovisioned {
+		s.forgetCredentials(tenantID, id)
+	}
 	return out, nil
 }
 
@@ -349,7 +374,7 @@ func (s *Store) Delete(ctx context.Context, actorCredentialID uuid.UUID, tenantI
 	if err != nil {
 		return err
 	}
-	return s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
 		if _, gErr := q.GetUserByID(ctx, dbx.GetUserByIDParams{
 			TenantID: tIDU, ID: pgtype.UUID{Bytes: id, Valid: true},
 		}); gErr != nil {
@@ -363,13 +388,18 @@ func (s *Store) Delete(ctx context.Context, actorCredentialID uuid.UUID, tenantI
 		}); sErr != nil {
 			return fmt.Errorf("scim: delete (disable): %w", sErr)
 		}
-		if rErr := s.revokeSessions(ctx, q, tIDU, id); rErr != nil {
+		if rErr := s.revokeAccess(ctx, q, tIDU, id); rErr != nil {
 			return rErr
 		}
 		return s.writeAudit(ctx, q, tIDU, actorCredentialID, id, ActionDelete, map[string]any{
 			"soft_disabled": true,
 		})
 	})
+	if err != nil {
+		return err
+	}
+	s.forgetCredentials(tenantID, id)
+	return nil
 }
 
 // --- internals ---
@@ -445,14 +475,21 @@ func planPatch(ops []PatchOperation) (patchIntent, error) {
 	return intent, nil
 }
 
-func (s *Store) revokeSessions(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, userID uuid.UUID) error {
-	if _, err := q.RevokeAllSCIMUserSessions(ctx, dbx.RevokeAllSCIMUserSessionsParams{
-		TenantID: tenantID,
-		UserID:   pgtype.UUID{Bytes: userID, Valid: true},
-	}); err != nil {
-		return fmt.Errorf("scim: revoke sessions: %w", err)
+// revokeAccess revokes the user's sessions and API keys inside the
+// deprovision transaction (AC-4, #1915).
+func (s *Store) revokeAccess(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, userID uuid.UUID) error {
+	if err := users.RevokeAccess(ctx, q, uuid.UUID(tenantID.Bytes), userID); err != nil {
+		return fmt.Errorf("scim: %w", err)
 	}
 	return nil
+}
+
+// forgetCredentials is the after-commit half of revokeAccess: drop the
+// user's keys from credstore memory.
+func (s *Store) forgetCredentials(tenantID string, userID uuid.UUID) {
+	if s.creds != nil {
+		s.creds.RevokeUserInMemory(tenantID, userID.String())
+	}
 }
 
 func (s *Store) writeAudit(ctx context.Context, q *dbx.Queries, tenantID pgtype.UUID, actorCredentialID uuid.UUID, targetUserID uuid.UUID, action string, detail map[string]any) error {

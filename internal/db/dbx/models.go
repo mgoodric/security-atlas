@@ -2861,6 +2861,18 @@ type RiskAggregation struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type RiskAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	RiskID        pgtype.UUID        `json:"risk_id"`
+	Actor         string             `json:"actor"`
+	ActionType    string             `json:"action_type"`
+	BeforeState   []byte             `json:"before_state"`
+	AfterState    []byte             `json:"after_state"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
 type RiskControlLink struct {
 	RiskID          pgtype.UUID        `json:"risk_id"`
 	ControlID       pgtype.UUID        `json:"control_id"`

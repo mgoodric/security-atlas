@@ -382,9 +382,13 @@ func (s *Server) AttachArtifactStore(store *artifact.Store) {
 // the in-memory credstore; the admin-credential HTTP routes
 // (POST/GET/rotate/revoke under /v1/admin/credentials) only mount when
 // this is set. cmd/atlas wires it once at startup with a BEARER_HASH_KEY-
-// backed bearer.Hasher.
+// backed bearer.Hasher. It also becomes the in-memory credstore's user
+// gate, so a key owned by a deactivated user is refused (#1915).
 func (s *Server) AttachAPIKeyStore(store *apikeystore.Store) {
 	s.apikeyStore = store
+	if store != nil && s.credStore != nil {
+		s.credStore.SetUserGate(store)
+	}
 }
 
 // AttachCredstorePersistence wires a durability backend into the
