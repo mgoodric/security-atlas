@@ -104,9 +104,9 @@ type BatchStore interface {
 	// CrosswalkAnchors returns every mapping from the given requirements to
 	// an anchor of the SCF release.
 	CrosswalkAnchors(ctx context.Context, scfVersionID string, requirementIDs []string) ([]CrosswalkEdge, error)
-	// KeywordAnchors retrieves current-release SCF anchors matching any
+	// KeywordAnchors retrieves anchors of one SCF release matching any
 	// keyword (the question-mapping catalog retrieval).
-	KeywordAnchors(ctx context.Context, keywords []string) ([]AnchorCandidate, error)
+	KeywordAnchors(ctx context.Context, scfVersionID string, keywords []string) ([]AnchorCandidate, error)
 	// SaveSuggestions stores each row's candidates and flag, and sets the
 	// batch's suggestions status.
 	SaveSuggestions(ctx context.Context, batchID string, rows []RowSuggestions, status string) error
@@ -159,10 +159,32 @@ type Stager struct {
 	// background receives the error of each background suggestion run;
 	// nil discards it after logging. Tests set it to observe completion.
 	background func(batchID string, err error)
+	// runs caps concurrent suggestion runs, inline and background alike
+	// (#2038). A run takes a slot for its whole computation, LLM rerank
+	// included, so anything bounding import LLM calls shares this cap.
+	runs chan struct{}
 }
 
+// MaxConcurrentSuggestionRuns is the default cap on suggestion runs in
+// flight in one process.
+const MaxConcurrentSuggestionRuns = 4
+
 func NewStager(store BatchStore) *Stager {
-	return &Stager{store: store, asyncThreshold: AsyncSuggestThreshold}
+	return &Stager{
+		store:          store,
+		asyncThreshold: AsyncSuggestThreshold,
+		runs:           make(chan struct{}, MaxConcurrentSuggestionRuns),
+	}
+}
+
+// WithRunLimit replaces the cap on concurrent suggestion runs. Call it
+// before the stager is used.
+func (s *Stager) WithRunLimit(n int) *Stager {
+	if n < 1 {
+		n = 1
+	}
+	s.runs = make(chan struct{}, n)
+	return s
 }
 
 // Stage parses the upload, resolves each row's tested-under codes against the

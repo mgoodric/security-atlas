@@ -126,9 +126,11 @@ func (s *Store) CrosswalkAnchors(ctx context.Context, scfVersionID string, requi
 	return out, err
 }
 
-// KeywordAnchors runs the question-mapping catalog keyword retrieval.
-func (s *Store) KeywordAnchors(ctx context.Context, keywords []string) ([]AnchorCandidate, error) {
-	cands, err := s.keyword.RetrieveCandidates(ctx, keywords)
+// KeywordAnchors runs the question-mapping catalog keyword retrieval against
+// one SCF release, the batch's, so keyword and crosswalk candidates come
+// from the same release.
+func (s *Store) KeywordAnchors(ctx context.Context, scfVersionID string, keywords []string) ([]AnchorCandidate, error) {
+	cands, err := s.keyword.RetrieveCandidatesInRelease(ctx, scfVersionID, keywords)
 	if err != nil {
 		return nil, err
 	}

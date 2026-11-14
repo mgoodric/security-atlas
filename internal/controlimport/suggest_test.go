@@ -1,6 +1,7 @@
 package controlimport
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -192,5 +193,76 @@ func TestListRowsFiltersAndValidatesStatus(t *testing.T) {
 	}
 	if _, _, err := s.ListRows(tenantCtx(t, batchTenant), b.ID, RowFilter{Status: "bogus"}); !errors.Is(err, ErrInvalidRowStatus) {
 		t.Errorf("bogus status err = %v", err)
+	}
+}
+
+func TestKeywordRetrievalIsPinnedToTheBatchRelease(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	b, err := NewStager(store).Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if len(store.keywordVersions) == 0 {
+		t.Fatal("no keyword retrieval ran")
+	}
+	for _, v := range store.keywordVersions {
+		if v != b.SCFRelease.VersionID {
+			t.Errorf("keyword retrieval pinned to %q, want the batch release %q", v, b.SCFRelease.VersionID)
+		}
+	}
+}
+
+func TestFailedReadySaveMarksTheBatchFailed(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	store.saveErr = func(status string) error {
+		if status == SuggestionsReady {
+			return errors.New("save boom")
+		}
+		return nil
+	}
+	b, err := NewStager(store).Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if b.SuggestionsStatus != SuggestionsFailed {
+		t.Errorf("returned status = %q, want failed", b.SuggestionsStatus)
+	}
+	if got := strings.Join(store.saveCalls, ","); got != SuggestionsReady+","+SuggestionsFailed {
+		t.Errorf("save calls = %s, want ready then failed", got)
+	}
+}
+
+func TestSuggestionRunsShareOneConcurrencyCap(t *testing.T) {
+	t.Parallel()
+	store := suggestStore()
+	s := NewStager(store).WithRunLimit(1)
+	// Hold the only slot, as a long background run would.
+	s.runs <- struct{}{}
+	ctx, cancel := context.WithTimeout(tenantCtx(t, batchTenant), 50*time.Millisecond)
+	defer cancel()
+	b, err := s.Stage(ctx, StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil {
+		t.Fatalf("Stage: %v", err)
+	}
+	if b.SuggestionsStatus != SuggestionsFailed || len(store.keywordVersions) != 0 {
+		t.Errorf("status %q after %d retrievals, want failed with none (no slot free)", b.SuggestionsStatus, len(store.keywordVersions))
+	}
+	if store.status != SuggestionsFailed {
+		t.Errorf("stored status = %q, want failed so the batch does not stay pending", store.status)
+	}
+	<-s.runs
+	b2, err := s.Stage(tenantCtx(t, batchTenant), StageInput{
+		Filename: "c.csv", Raw: []byte(suggestSheet), FrameworkSlug: "soc2",
+	})
+	if err != nil || b2.SuggestionsStatus != SuggestionsReady {
+		t.Errorf("with the slot free: status %q err %v", b2.SuggestionsStatus, err)
 	}
 }
