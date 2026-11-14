@@ -448,7 +448,7 @@ jobs:
   # (`Go · build + test`) when the PR touches no code. Mutually exclusive
   # with `build-go` above via inverted `if:`.
   build-go-stub:
-    name: Go · build + test
+    name: Go · build + test (stub)
     needs: changes
     if: needs.changes.outputs.go != 'true'
     runs-on: ubuntu-latest
