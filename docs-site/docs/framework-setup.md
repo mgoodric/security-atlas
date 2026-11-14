@@ -139,9 +139,9 @@ Recommended handling:
 2. Set `anchor_fit: none` and write an `anchor_fit_note`.
 3. Expect framework credit only through the anchor. An anchored control
    satisfies whatever requirements map to its anchor; an unanchored
-   control satisfies none. Tenant overlay edges
-   ([#1735](https://github.com/mgoodric/security-atlas/issues/1735)),
-   when they land, will let you attest the requirement directly.
+   control satisfies none. For an anchored control, a tenant overlay
+   edge (`atlas-cli mappings overlay add`) maps a requirement its anchor
+   misses to that anchor for your organisation, and coverage counts it.
 
 ```yaml
 bundle_schema_version: "1"

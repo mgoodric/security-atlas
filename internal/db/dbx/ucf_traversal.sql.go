@@ -56,6 +56,7 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
     a.scf_id,
     a.family,
@@ -76,6 +77,7 @@ type ListAnchorsForRequirementWithEdgesRow struct {
 	Strength          float64                    `json:"strength"`
 	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier       CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin            string                     `json:"origin"`
 	Rationale         string                     `json:"rationale"`
 	ScfID             string                     `json:"scf_id"`
 	Family            string                     `json:"family"`
@@ -123,6 +125,7 @@ func (q *Queries) ListAnchorsForRequirementWithEdges(ctx context.Context, framew
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
 			&i.ScfID,
 			&i.Family,
@@ -147,6 +150,7 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
     a.scf_id,
     a.family,
@@ -173,6 +177,7 @@ type ListAnchorsForRequirementWithEdgesByFrameworkVersionRow struct {
 	Strength          float64                    `json:"strength"`
 	SourceAttribution CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier       CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin            string                     `json:"origin"`
 	Rationale         string                     `json:"rationale"`
 	ScfID             string                     `json:"scf_id"`
 	Family            string                     `json:"family"`
@@ -201,6 +206,7 @@ func (q *Queries) ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx conte
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
 			&i.ScfID,
 			&i.Family,
@@ -306,6 +312,7 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
     r.code,
     r.title            AS requirement_title,
@@ -332,6 +339,7 @@ type ListRequirementsForAnchorRow struct {
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin                 string                     `json:"origin"`
 	Rationale              string                     `json:"rationale"`
 	Code                   string                     `json:"code"`
 	RequirementTitle       string                     `json:"requirement_title"`
@@ -364,6 +372,7 @@ func (q *Queries) ListRequirementsForAnchor(ctx context.Context, scfAnchorID pgt
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
 			&i.Code,
 			&i.RequirementTitle,
@@ -392,6 +401,7 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
     r.code,
     r.title            AS requirement_title,
@@ -424,6 +434,7 @@ type ListRequirementsForAnchorByFrameworkVersionRow struct {
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin                 string                     `json:"origin"`
 	Rationale              string                     `json:"rationale"`
 	Code                   string                     `json:"code"`
 	RequirementTitle       string                     `json:"requirement_title"`
@@ -454,6 +465,7 @@ func (q *Queries) ListRequirementsForAnchorByFrameworkVersion(ctx context.Contex
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
 			&i.Code,
 			&i.RequirementTitle,
@@ -482,6 +494,7 @@ SELECT
     e.strength,
     e.source_attribution,
     e.mapping_tier,
+    e.origin,
     e.rationale,
     r.code,
     r.title            AS requirement_title,
@@ -509,6 +522,7 @@ type ListRequirementsForAnchorCurrentVersionsRow struct {
 	Strength               float64                    `json:"strength"`
 	SourceAttribution      CrosswalkSourceAttribution `json:"source_attribution"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin                 string                     `json:"origin"`
 	Rationale              string                     `json:"rationale"`
 	Code                   string                     `json:"code"`
 	RequirementTitle       string                     `json:"requirement_title"`
@@ -544,6 +558,7 @@ func (q *Queries) ListRequirementsForAnchorCurrentVersions(ctx context.Context, 
 			&i.Strength,
 			&i.SourceAttribution,
 			&i.MappingTier,
+			&i.Origin,
 			&i.Rationale,
 			&i.Code,
 			&i.RequirementTitle,
