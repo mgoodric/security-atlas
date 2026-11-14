@@ -42,6 +42,8 @@ import (
 func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	t.Helper()
 	return dbtest.SeedTenant(t, admin,
+		"framework_scope_workflow_log",
+		"me_audit_log",
 		"framework_scopes",
 		"evidence_records",
 		"scope_cells",
@@ -165,7 +167,7 @@ func TestCreateAndLifecycle(t *testing.T) {
 	}
 
 	// AC-6: draft -> review.
-	reviewed, err := store.Submit(ctx, created.ID)
+	reviewed, err := store.Submit(ctx, created.ID, "key_test")
 	if err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -194,7 +196,7 @@ func TestCreateAndLifecycle(t *testing.T) {
 
 	// AC-8: approved -> activated.
 	effective := time.Now().UTC().Truncate(time.Second)
-	activated, err := store.Activate(ctx, approved.ID, effective)
+	activated, err := store.Activate(ctx, approved.ID, "key_test", effective)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
@@ -257,13 +259,13 @@ func mustActivate(t *testing.T, ctx context.Context, store *frameworkscope.Store
 	if err != nil {
 		t.Fatalf("Create %s: %v", name, err)
 	}
-	if _, err := store.Submit(ctx, d.ID); err != nil {
+	if _, err := store.Submit(ctx, d.ID, "key_test"); err != nil {
 		t.Fatalf("Submit %s: %v", name, err)
 	}
 	if _, err := store.Approve(ctx, frameworkscope.ApproveRequest{ID: d.ID, ApproverUserID: uuid.NewString()}); err != nil {
 		t.Fatalf("Approve %s: %v", name, err)
 	}
-	a, err := store.Activate(ctx, d.ID, time.Now().UTC())
+	a, err := store.Activate(ctx, d.ID, "key_test", time.Now().UTC())
 	if err != nil {
 		t.Fatalf("Activate %s: %v", name, err)
 	}
@@ -288,7 +290,7 @@ func TestPredicateEditBouncesApproved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if _, err := store.Submit(ctx, d.ID); err != nil {
+	if _, err := store.Submit(ctx, d.ID, "key_test"); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
 	approverID := uuid.NewString()
@@ -304,7 +306,7 @@ func TestPredicateEditBouncesApproved(t *testing.T) {
 	}
 
 	// Patch the predicate. The trigger should bounce back to draft.
-	patched, invalidated, err := store.UpdatePredicate(ctx, d.ID, []byte(`{"op":"eq","dim":"environment","value":"prod"}`))
+	patched, invalidated, err := store.UpdatePredicate(ctx, d.ID, []byte(`{"op":"eq","dim":"environment","value":"prod"}`), "key_test")
 	if err != nil {
 		t.Fatalf("UpdatePredicate: %v", err)
 	}
@@ -337,7 +339,7 @@ func TestPredicateEditOnDraftDoesNotBounce(t *testing.T) {
 	d, _ := store.Create(ctx, frameworkscope.CreateRequest{
 		FrameworkVersionID: fvID, Name: "x", Predicate: []byte(`{"op":"true"}`),
 	})
-	patched, invalidated, err := store.UpdatePredicate(ctx, d.ID, []byte(`{"op":"eq","dim":"environment","value":"prod"}`))
+	patched, invalidated, err := store.UpdatePredicate(ctx, d.ID, []byte(`{"op":"eq","dim":"environment","value":"prod"}`), "key_test")
 	if err != nil {
 		t.Fatalf("UpdatePredicate: %v", err)
 	}

@@ -49,10 +49,10 @@ func TestJoinKinds_Multiple(t *testing.T) {
 	}
 }
 
-func TestJoinKinds_PreservesAllNine(t *testing.T) {
+func TestJoinKinds_PreservesAllKinds(t *testing.T) {
 	t.Parallel()
 	got := joinKinds(AllKinds)
-	want := "decision,evidence,exception,sample,audit_period,aggregation_rule,feature_flag,me,walkthrough"
+	want := "decision,evidence,exception,sample,audit_period,aggregation_rule,feature_flag,me,walkthrough,framework_scope"
 	if got != want {
 		t.Errorf("joinKinds(AllKinds) = %q; want %q", got, want)
 	}
@@ -75,6 +75,7 @@ func TestAllKinds_DeclarationOrderIsContractual(t *testing.T) {
 		KindFeatureFlag,
 		KindMe,
 		KindWalkthrough,
+		KindFrameworkScope,
 	}
 	if !reflect.DeepEqual(AllKinds, want) {
 		t.Errorf("AllKinds = %v; want %v", AllKinds, want)
