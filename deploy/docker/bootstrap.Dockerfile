@@ -6,7 +6,7 @@
 # Unlike atlas.Dockerfile / atlas-cli.Dockerfile (distroless — no shell,
 # no psql), the bootstrap container needs a POSIX shell and the `psql`
 # client to apply migrations and run the seed script. It is built on
-# postgres:16-alpine (which already ships psql + sh + wget) with the
+# postgres:18-alpine (which already ships psql + sh + wget) with the
 # statically-linked atlas-cli binary copied in.
 #
 # This image carries TWO entrypoint scripts and is used by TWO compose
@@ -52,7 +52,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # ----- Stage 2: runtime -----
 FROM postgres:18-alpine
 
-# postgres:16-alpine ships psql, sh, and wget. No extra packages needed.
+# postgres:18-alpine ships psql, sh, and wget. No extra packages needed.
 COPY --from=builder /out/atlas-cli /usr/local/bin/atlas-cli
 
 # bootstrap.sh + migrate.sh + seed.sql land in /bootstrap. migrations/,
