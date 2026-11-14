@@ -628,6 +628,14 @@ type Querier interface {
 	// latest evaluation on/before the cutoff had result='pass'. The delta is in
 	// percentage points (e.g. +12.5 means coverage rose 12.5 points).
 	//
+	// Statement of Applicability (#1788): a requirement the tenant's ACTIVATED
+	// framework-scope revision for the version marks `excluded` leaves the
+	// requirement set entirely, so it drops out of the coverage numerator and
+	// denominator, the freshness composite, and both halves of the trend. The
+	// trend uses today's exclusions for the 90-day-ago half too, so excluding a
+	// requirement never shows up as a jump. Exclusions on draft, review or
+	// approved revisions have no effect; undecided requirements stay in.
+	//
 	// The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
 	// $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
 	FrameworkPosture(ctx context.Context, arg FrameworkPostureParams) ([]FrameworkPostureRow, error)
@@ -650,6 +658,11 @@ type Querier interface {
 	// Live (non-tombstoned) plan by id. A tombstoned plan reads as absent
 	// (AC-14: subsequent GET returns 404).
 	GetActionPlanByID(ctx context.Context, arg GetActionPlanByIDParams) (ActionPlan, error)
+	// The exclusion, if any, the tenant's ACTIVATED scope revision records for a
+	// requirement (#1788). Per-requirement coverage reads report such a
+	// requirement as `excluded` instead of uncovered. No row means the
+	// requirement is applicable or undecided, or no revision is activated.
+	GetActivatedExclusionForRequirement(ctx context.Context, arg GetActivatedExclusionForRequirementParams) (GetActivatedExclusionForRequirementRow, error)
 	// Returns the currently-active framework scope for a given framework version,
 	// i.e. the (at most one) row in state `activated` for that (tenant, fv) pair.
 	// AC-3: a partial UNIQUE index guarantees at most one row matches.
@@ -1737,6 +1750,7 @@ type Querier interface {
 	//   1. audit_periods           — period_end is the audit's "report due" date
 	//   2. exceptions              — expires_at is the waiver-lapse date
 	//   3. policies                — next_review_at is the next review date
+	//                                 (published only; overdue / due-soon, #1806)
 	//   4. vendors                 — last_review_date + review_cadence interval is
 	//      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
 	//      vendor branch so the two surfaces cannot drift (slice 675).
@@ -2983,7 +2997,8 @@ type Querier interface {
 	// effective_date, published_at, published_by. predecessor_id is never
 	// changed: a first version keeps NULL, and a later version (a draft
 	// created with predecessor_id set) keeps the link to the row that Part 1
-	// just superseded (#1747).
+	// just superseded (#1747). next_review_at is the review date the publisher
+	// names (#1806); NULL when none is given.
 	PublishApprovedPolicy(ctx context.Context, arg PublishApprovedPolicyParams) (Policy, error)
 	// Flip a DRAFT pack to PUBLISHED, stamping the publish metadata. The
 	// `status = 'draft'` predicate makes this idempotent-safe: a second publish
@@ -3228,6 +3243,11 @@ type Querier interface {
 	// parent lifecycle).
 	UpdateMetaRiskInherentScore(ctx context.Context, arg UpdateMetaRiskInherentScoreParams) (Risk, error)
 	UpdateOrgUnit(ctx context.Context, arg UpdateOrgUnitParams) (OrgUnit, error)
+	// #1806 — change the review date of a published policy in place. It is not
+	// a new version: the row keeps its id, version and approval. The caller
+	// writes the policy_audit_log row in the same transaction. Only the
+	// published chain tip has a review due, so other states do not match.
+	UpdatePolicyNextReviewAt(ctx context.Context, arg UpdatePolicyNextReviewAtParams) (Policy, error)
 	// Resolve a `needs_mapping` question by assigning it an SCF anchor.
 	UpdateQuestionAnchor(ctx context.Context, arg UpdateQuestionAnchorParams) (QuestionnaireQuestion, error)
 	// Full-update path (PATCH handler reads existing, mutates fields, writes).

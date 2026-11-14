@@ -357,6 +357,9 @@ type PublishInput struct {
 	NewVersion    string
 	EffectiveDate *time.Time
 	PublishedBy   string
+	// NextReviewAt is the published version's review date (#1806). Nil
+	// publishes with none; the predecessor's date is never inherited.
+	NextReviewAt *time.Time
 }
 
 // Publish transitions approved -> published. For a row created as the
@@ -415,6 +418,7 @@ func (s *Store) Publish(ctx context.Context, approvedID uuid.UUID, in PublishInp
 				ID:            pgUUID(approvedID),
 				EffectiveDate: pgDate(effective),
 				PublishedBy:   stringPtr(in.PublishedBy),
+				NextReviewAt:  pgTimestamptz(in.NextReviewAt),
 			})
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
@@ -450,12 +454,69 @@ func (s *Store) Publish(ctx context.Context, approvedID uuid.UUID, in PublishInp
 			ID:            pgUUID(approvedID),
 			EffectiveDate: pgDate(effective),
 			PublishedBy:   stringPtr(in.PublishedBy),
+			NextReviewAt:  pgTimestamptz(in.NextReviewAt),
 		})
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrWrongState
 			}
 			return fmt.Errorf("publish (subsequent): %w", err)
+		}
+		out = policyFromRow(row)
+		return nil
+	})
+	return out, err
+}
+
+// auditActionReviewDateUpdated is the policy_audit_log action for a
+// review-date change (#1806).
+const auditActionReviewDateUpdated = "review_date_updated"
+
+// SetNextReviewAt changes the review date of a published policy in place
+// and appends a policy_audit_log row naming the actor and the before and
+// after values, in one transaction (#1806). It does not create a new
+// version. next nil clears the date. The handler checks the approver role
+// before calling. ErrNotFound when the id does not resolve; ErrWrongState
+// when the policy is not published.
+func (s *Store) SetNextReviewAt(ctx context.Context, id uuid.UUID, next *time.Time, actor string) (Policy, error) {
+	if actor == "" {
+		return Policy{}, ErrCreatedByRequired
+	}
+	var out Policy
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		prior, err := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(id),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return fmt.Errorf("get policy: %w", err)
+		}
+		if prior.Status != StatePublished {
+			return ErrWrongState
+		}
+		row, err := q.UpdatePolicyNextReviewAt(ctx, dbx.UpdatePolicyNextReviewAtParams{
+			TenantID:     pgUUID(tenantID),
+			ID:           pgUUID(id),
+			NextReviewAt: pgTimestamptz(next),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrWrongState
+			}
+			return fmt.Errorf("update next_review_at: %w", err)
+		}
+		if _, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
+			TenantID:             pgUUID(tenantID),
+			PolicyID:             row.ID,
+			Action:               auditActionReviewDateUpdated,
+			Actor:                actor,
+			PreviousNextReviewAt: prior.NextReviewAt,
+			NewNextReviewAt:      row.NextReviewAt,
+		}); err != nil {
+			return fmt.Errorf("review date: audit log: %w", err)
 		}
 		out = policyFromRow(row)
 		return nil
@@ -717,6 +778,14 @@ func pgUUID(u uuid.UUID) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return pgtype.UUID{Bytes: u, Valid: true}
+}
+
+// pgTimestamptz maps an optional time to a nullable timestamptz.
+func pgTimestamptz(t *time.Time) pgtype.Timestamptz {
+	if t == nil {
+		return pgtype.Timestamptz{}
+	}
+	return pgtype.Timestamptz{Time: t.UTC(), Valid: true}
 }
 
 func pgDate(t time.Time) pgtype.Date {

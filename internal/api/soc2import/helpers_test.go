@@ -323,3 +323,28 @@ func TestAttributionRank_CoversEveryEnumValue(t *testing.T) {
 		}
 	}
 }
+
+// isFrozenVersionStatus mirrors enforce_framework_requirement_immutability,
+// which freezes current, legacy and withdrawn versions (#1730). Adding an
+// enum value (a draft stage, say) fails here until it is classified.
+func TestIsFrozenVersionStatus(t *testing.T) {
+	t.Parallel()
+	frozen := map[dbx.FrameworkVersionStatus]bool{
+		dbx.FrameworkVersionStatusCurrent:   true,
+		dbx.FrameworkVersionStatusLegacy:    true,
+		dbx.FrameworkVersionStatusWithdrawn: true,
+	}
+	for _, s := range dbx.AllFrameworkVersionStatusValues() {
+		want, known := frozen[s]
+		if !known {
+			t.Errorf("framework_version_status %q is not classified as frozen or not", s)
+			continue
+		}
+		if got := isFrozenVersionStatus(s); got != want {
+			t.Errorf("isFrozenVersionStatus(%q) = %v; want %v", s, got, want)
+		}
+	}
+	if isFrozenVersionStatus(dbx.FrameworkVersionStatus("draft")) {
+		t.Error("an unfrozen status must not read as frozen")
+	}
+}

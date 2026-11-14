@@ -458,6 +458,9 @@ services:
       # BEFORE the seeder runs. Leave it unset on any deployment holding real
       # program data. See .env.example for the full warning.
       ATLAS_ENABLE_DEMO_SEED: ${ATLAS_ENABLE_DEMO_SEED:-}
+      # ADR 0023 (#1763): multi-tenant is opt-in. Unset, a super-admin
+      # cannot create a second tenant; existing tenants are unaffected.
+      ATLAS_ALLOW_MULTI_TENANT: ${ATLAS_ALLOW_MULTI_TENANT:-}
       # Slice 036: artifact store wiring.
       ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-atlas-artifacts}
       ARTIFACTS_S3_ENDPOINT: http://minio:9000

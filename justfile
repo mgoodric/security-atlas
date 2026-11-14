@@ -160,9 +160,11 @@ tidy:
 migrate-up:
     REPO_ROOT="$PWD" sh deploy/docker/bootstrap/migrate.sh
 
-# Roll back: apply the latest .down.sql in reverse-timestamp order.
-migrate-down:
-    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/sql/20260511000000_init.down.sql
+# There is no `migrate-down`. The ledger is forward-only (as is the compose
+# `atlas-migrate` service), and the `.down.sql` files do not cover every
+# forward migration, so a rollback could not keep `schema_migrations` in step
+# with the schema. For a clean local reset, recreate the database:
+# `just db-down && just db-up && just migrate-up`.
 
 # Start a local Postgres 16 in Docker for development
 db-up:
