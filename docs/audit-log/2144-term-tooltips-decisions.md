@@ -35,10 +35,11 @@ heading (less a trailing `(…)` provenance note) nor one of its bold terms
 matches "Audit period" and `evidence_freshness` matches "Evidence freshness".
 Bold text in fenced code is ignored.
 
-Only four terms link, because only four have a glossary entry under the same
-name: risk treatment, acceptance status, evidence freshness and audit period.
-The other terms either have no developer entry yet (verified, completed, org
-mapping, self-approved; #2101 adds Self-approval) or use a different name there.
+Only five terms link, because only five have a glossary entry under the same
+name: risk treatment, acceptance status, evidence freshness, audit period and
+self-approved (in #2101's "Self-approval" entry, which merged while this PR was
+open). The other terms either have no developer entry yet (verified, completed,
+org mapping) or use a different name there.
 Linking those under a mismatched name would make the check meaningless. A term
 gains a link when the glossary gains a matching entry.
 
@@ -50,8 +51,8 @@ The dispatcher asked that definitions match current behaviour:
   posture counts it as covered and reports the share covered by exception
   separately. The developer glossary's Exception entry still says otherwise
   until #2112 corrects it. That's one reason this term has no glossary link yet.
-- **Self-approved** follows #2101 (in flight): an org-level, admin-only,
-  audit-logged opt-in, and a visible marker.
+- **Self-approved** follows #2101 (merged during review): an org-level,
+  admin-only, audit-logged opt-in, and a visible marker.
 - **Posture** is per framework version, with "Scope not set" when no scope
   revision is activated (#2190).
 - **Roll-up** (added as a 21st term, since the dispatcher named it) follows
@@ -60,7 +61,7 @@ The dispatcher asked that definitions match current behaviour:
   enforced by #1965 for the predicate): activated revisions are immutable, and a
   change makes a new revision.
 
-If #2112 or #2101 lands differently, its PR should update `web/help/terms.json`.
+If #2112 lands differently, its PR should update `web/help/terms.json`.
 
 ## D4 — the adoption points
 

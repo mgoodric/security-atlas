@@ -79,7 +79,8 @@
       "id": "self-approved",
       "name": "Self-approved",
       "short": "Marks a record that was approved by the same person who requested it. That's possible only when an admin has turned on Allow self-approval for the organisation.",
-      "long": "Approvals normally need a second person: the approver must be someone other than the requester. A small team can turn on Allow self-approval in the organisation settings; only an admin can change it, and the change is written to the audit log. A record approved by its own requester is marked Self-approved in the app, in exports and in the audit log, so the exception to the rule stays visible."
+      "long": "Approvals normally need a second person: the approver must be someone other than the requester. A small team can turn on Allow self-approval in the organisation settings; only an admin can change it, and the change is written to the audit log. A record approved by its own requester is marked Self-approved in the app, in exports and in the audit log, so the exception to the rule stays visible.",
+      "glossary": "GLOSSARY.md#self-approval-2101"
     },
     {
       "id": "owner",
