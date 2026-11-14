@@ -536,11 +536,28 @@ func (s *Seeder) teardownTenant(ctx context.Context, tenantID uuid.UUID, slug st
 		return fmt.Errorf("demoseed: teardown begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := deleteDemoTenant(ctx, tx, tenantID, slug, actorUserID, actorTenantID, nil); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("demoseed: teardown commit: %w", err)
+	}
+	return nil
+}
 
+// deleteDemoTenant writes the demo_seed_teardown audit rows, then deletes
+// the tenant's rows from every teardownTables table, then the tenant row.
+// extra is merged into the audit payload. The caller owns tx and commits it.
+func deleteDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string,
+	actorUserID uuid.UUID, actorTenantID uuid.UUID, extra map[string]any,
+) error {
+	payload := map[string]any{"slug": slug, "demo_seed_v": DemoSeedVersion}
+	for k, v := range extra {
+		payload[k] = v
+	}
 	// Write the teardown meta-audit row FIRST (before deleting).
 	if err := writeAuditLogRow(ctx, tx, "demo_seed_teardown",
-		actorUserID, actorTenantID, tenantID,
-		map[string]any{"slug": slug, "demo_seed_v": DemoSeedVersion},
+		actorUserID, actorTenantID, tenantID, payload,
 	); err != nil {
 		return err
 	}
@@ -561,10 +578,6 @@ func (s *Seeder) teardownTenant(ctx context.Context, tenantID uuid.UUID, slug st
 			}
 			return fmt.Errorf("demoseed: teardown exec %s: %w", table, err)
 		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("demoseed: teardown commit: %w", err)
 	}
 	return nil
 }
@@ -604,6 +617,11 @@ var teardownTables = []string{
 	"questionnaires",
 	"risk_control_links",
 	"risks",
+	// risks_category_sync_trg seeds the tenant's risk categories when the
+	// first risk lands, so the seed writes them. After risks: risks'
+	// (tenant_id, category_id) references them. #2153: without this a
+	// whole-tenant teardown left them behind.
+	"org_risk_categories",
 	"org_units",
 	"policy_acknowledgments",
 	"policies",
