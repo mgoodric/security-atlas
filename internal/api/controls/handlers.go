@@ -90,6 +90,13 @@ type uploadResp struct {
 	// credit (issue #1738). It suggests the parent anchor when that one is
 	// mapped. Non-fatal: the control is persisted either way.
 	AnchorWarning string `json:"anchor_warning,omitempty"`
+	// SCFRelease is the SCF release scf_anchor_id was bound in (#1770):
+	// the bundle's declared scf_release, or the current release when it
+	// declares none. Empty for an unanchored control.
+	SCFRelease string `json:"scf_release,omitempty"`
+	// Warnings are non-fatal notes on the upload, such as the deprecation
+	// of a control.yaml with no scf_release (#1770).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // gateRejectionResp is the 400 body returned when the slice-574 upload test-
@@ -228,6 +235,10 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 			// Canvas invariant 7 — refuse to persist a control without an
 			// anchor. 404 communicates "the thing you referenced isn't there".
 			httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, control.ErrSCFReleaseUnknown), errors.Is(err, control.ErrSCFCodeNotInRelease):
+			// #1770 — the declared scf_release is not loaded, or lacks the
+			// code. The messages name which.
+			httpresp.WriteError(w, http.StatusNotFound, err.Error())
 		case errors.Is(err, control.ErrControlChangedConcurrently):
 			// Issue #1908 — a concurrent upload superseded the version a
 			// description-only edit was updating in place.
@@ -249,10 +260,18 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 		IsNewBundle:    result.IsNewBundle,
 		GateWarning:    verdict.warning,
 		GateTestReport: verdict.advisoryReport,
+		SCFRelease:     result.SCFRelease,
+		Warnings:       result.Warnings,
 	}
 	// Issue #1738: warn when the anchor earns no framework credit. The control
-	// is already persisted, so a failed lookup is logged, not returned.
-	anchorWarning, aerr := h.store.AnchorCoverageWarning(ctx, bundle.Manifest.SCFAnchorID)
+	// is already persisted, so a failed lookup is logged, not returned. The
+	// bound anchor's uuid is passed when there is one, so the check reads
+	// the anchor in the bundle's declared release (#1770).
+	anchorRef := bundle.Manifest.SCFAnchorID
+	if result.AnchorID != (uuid.UUID{}) {
+		anchorRef = result.AnchorID.String()
+	}
+	anchorWarning, aerr := h.store.AnchorCoverageWarning(ctx, anchorRef)
 	if aerr != nil {
 		slog.WarnContext(ctx, "control bundle anchor coverage check failed", "bundle_id", result.BundleID, "error", aerr)
 	}
