@@ -52,9 +52,22 @@ with every safety check left to the reader, so the CLI path was chosen:
   it), and the tenant must have no mark of its own and no in-place rows.
   Those last two belong to `demo teardown` and are refused with a pointer to
   it.
+- **The mark belongs to this tenant (review B1).** A slug match alone would
+  accept a later tenant that took the slug after the legacy tenant was
+  gone. The button created the tenant and wrote the mark in one
+  transaction, so the mark's `occurred_at` is never earlier than
+  `tenants.created_at`; a mark that is earlier refuses. A
+  `demo_seed_teardown` naming the slug (in `me_audit_log` or
+  `super_admin_audit_log`) since the tenant's creation also refuses: the
+  slug has changed hands since.
 - **No non-demo data.** There is no per-row record of what the button
   wrote, so "non-demo" is defined by what a real organisation would hold:
-  - any user without `demo_only` refuses;
+  - any user without `demo_only` refuses, and so does a tenant with no
+    users at all (the seed always writes demo users; a machine-fed tenant
+    needs none, review B1);
+  - an `oauth_clients` row bound to the tenant refuses. That table carries
+    `bound_tenant_id`, not `tenant_id`, so the table scan below cannot see
+    it;
   - any row in a tenant-scoped table outside `teardownTables` refuses,
     naming the tables. Audit trails are excepted, as everywhere in
     `demoseed`.
@@ -64,9 +77,15 @@ with every safety check left to the reader, so the CLI path was chosen:
     controls and evidence.
   - Rows a visitor added while signed in as a demo user count as demo. No
     real account exists in the tenant to have written anything else.
-- **One transaction.** The tenant row is locked `FOR UPDATE`, and the
-  checks and the delete share one transaction, so nothing written between
-  check and delete is swept up.
+- **One SERIALIZABLE transaction.** The checks and the delete share one
+  transaction at `SERIALIZABLE`. The tenant row's `FOR UPDATE` lock alone
+  would block only writers to tables with an FK to `tenants`; under
+  `SERIALIZABLE`, a concurrent write to anything the checks read makes one
+  side fail with a serialization error instead of committing, so nothing
+  written between check and delete is swept up. A failure is safe: rerun.
+- **`--dry-run`.** Runs every check and the delete, prints the rows each
+  DELETE removed per table (FK cascades are not counted), and rolls back.
+  The teardown audit rows roll back with it.
 
 The delete reuses the whole-tenant path (`deleteDemoTenant`, extracted from
 `teardownTenant`), so both deletions sweep the same tables.

@@ -17,12 +17,19 @@ package demoseed
 //   - the tenant must carry no mark of its own and must not have been seeded
 //     in place (Teardown handles both);
 //   - another tenant's me_audit_log must hold the legacy demo_seed_apply
-//     mark naming this tenant's slug;
-//   - the tenant must hold no non-demo data: every user is a demo_only user,
-//     and no table outside teardownTables holds a row for it.
+//     mark naming this tenant's slug, written no earlier than this tenant
+//     was created, with no demo_seed_teardown naming the slug since then. A
+//     slug match alone would also accept a later tenant that reused the slug
+//     after the legacy demo tenant was gone;
+//   - the tenant must hold demo data and nothing else: at least one user,
+//     every user demo_only, no OAuth client bound to it, and no row in a
+//     table outside teardownTables.
 //
-// The checks and the delete run in one transaction, so data written between
-// the check and the delete cannot be swept up.
+// The checks and the delete run in one SERIALIZABLE transaction, so data
+// written between the check and the delete cannot be swept up: a concurrent
+// write to any table the checks read makes one side fail with a
+// serialization error rather than commit. (The tenants row lock alone would
+// cover only writers to tables with an FK to tenants.)
 
 import (
 	"context"
@@ -39,47 +46,60 @@ import (
 // so a caller can tell a refusal from a database failure.
 var ErrLegacyTeardownRefused = errors.New("demoseed: legacy demo tenant teardown refused")
 
+// LegacyTeardownResult reports what a legacy teardown deleted, or with
+// DryRun what it would have deleted: rows per table, tenants included.
+type LegacyTeardownResult struct {
+	TenantID uuid.UUID
+	DryRun   bool
+	Deleted  map[string]int64
+}
+
 // TeardownLegacyButtonTenant deletes the demo tenant named by slug, which the
 // super-admin demo button created before #2043, acting as the super admin
 // whose email is superAdminEmail. See the file comment for every condition
-// it refuses on.
-func (s *Seeder) TeardownLegacyButtonTenant(ctx context.Context, slug, superAdminEmail string) error {
+// it refuses on. With dryRun it runs every check and the delete, reports the
+// counts, and rolls back.
+func (s *Seeder) TeardownLegacyButtonTenant(ctx context.Context, slug, superAdminEmail string, dryRun bool) (LegacyTeardownResult, error) {
+	res := LegacyTeardownResult{DryRun: dryRun}
 	if err := validateSlug(slug); err != nil {
-		return err
+		return res, err
 	}
-	tx, err := s.authPool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.authPool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
 	if err != nil {
-		return fmt.Errorf("demoseed: legacy teardown begin tx: %w", err)
+		return res, fmt.Errorf("demoseed: legacy teardown begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	actorUserID, actorTenantID, err := resolveSuperAdmin(ctx, tx, superAdminEmail)
 	if err != nil {
-		return err
+		return res, err
 	}
-	var tenantID uuid.UUID
-	err = tx.QueryRow(ctx, `SELECT id FROM tenants WHERE slug = $1 FOR UPDATE`, slug).Scan(&tenantID)
+	err = tx.QueryRow(ctx, `SELECT id FROM tenants WHERE slug = $1 FOR UPDATE`, slug).Scan(&res.TenantID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("%w: tenant %q not found", ErrLegacyTeardownRefused, slug)
+		return res, fmt.Errorf("%w: tenant %q not found", ErrLegacyTeardownRefused, slug)
 	}
 	if err != nil {
-		return fmt.Errorf("demoseed: legacy teardown lookup: %w", err)
+		return res, fmt.Errorf("demoseed: legacy teardown lookup: %w", err)
 	}
-	if err := assertLegacyButtonTenant(ctx, tx, tenantID, slug); err != nil {
-		return err
+	if err := assertLegacyButtonTenant(ctx, tx, res.TenantID, slug); err != nil {
+		return res, err
 	}
-	if err := assertOnlyDemoData(ctx, tx, tenantID, slug); err != nil {
-		return err
+	if err := assertOnlyDemoData(ctx, tx, res.TenantID, slug); err != nil {
+		return res, err
 	}
-	if err := deleteDemoTenant(ctx, tx, tenantID, slug, actorUserID, actorTenantID,
+	res.Deleted, err = deleteDemoTenant(ctx, tx, res.TenantID, slug, actorUserID, actorTenantID,
 		map[string]any{"legacy_button_tenant": true},
-	); err != nil {
-		return err
+	)
+	if err != nil {
+		return res, err
+	}
+	if dryRun {
+		return res, nil // the deferred Rollback undoes the delete
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("demoseed: legacy teardown commit: %w", err)
+		return res, fmt.Errorf("demoseed: legacy teardown commit: %w", err)
 	}
-	return nil
+	return res, nil
 }
 
 // resolveSuperAdmin returns the user id and tenant of the one active user
@@ -119,8 +139,13 @@ func resolveSuperAdmin(ctx context.Context, tx pgx.Tx, email string) (uuid.UUID,
 // tenant: no in-place rows, no mark of its own, and a legacy mark naming its
 // slug in another tenant.
 func assertLegacyButtonTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string) error {
-	var inPlace, ownMark, legacyMark bool
+	// The mark is tied to this tenant by time: the button created the tenant
+	// and wrote the mark in one transaction, so the mark is never older than
+	// the tenant row. A teardown naming the slug since then means the slug
+	// has changed hands, and the mark may belong to a tenant already gone.
+	var inPlace, ownMark, legacyMark, laterTeardown bool
 	err := tx.QueryRow(ctx, `
+		WITH t AS (SELECT created_at FROM tenants WHERE id = $1)
 		SELECT
 			EXISTS (SELECT 1 FROM demo_seed_rows WHERE tenant_id = $1),
 			EXISTS (
@@ -130,13 +155,25 @@ func assertLegacyButtonTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID
 				  AND after->>'slug' = $2
 			),
 			EXISTS (
-				SELECT 1 FROM me_audit_log
-				WHERE tenant_id <> $1
-				  AND action = 'demo_seed_apply'
-				  AND after->>'slug' = $2
-				  AND COALESCE(after->>'in_place', '') <> 'true'
+				SELECT 1 FROM me_audit_log m, t
+				WHERE m.tenant_id <> $1
+				  AND m.action = 'demo_seed_apply'
+				  AND m.after->>'slug' = $2
+				  AND COALESCE(m.after->>'in_place', '') <> 'true'
+				  AND m.occurred_at >= t.created_at
+			),
+			EXISTS (
+				SELECT 1 FROM me_audit_log m, t
+				WHERE m.action = 'demo_seed_teardown'
+				  AND m.after->>'slug' = $2
+				  AND m.occurred_at >= t.created_at
+			) OR EXISTS (
+				SELECT 1 FROM super_admin_audit_log a, t
+				WHERE a.action = 'demo_seed_teardown'
+				  AND a.payload_json->>'slug' = $2
+				  AND a.occurred_at >= t.created_at
 			)
-	`, tenantID, slug).Scan(&inPlace, &ownMark, &legacyMark)
+	`, tenantID, slug).Scan(&inPlace, &ownMark, &legacyMark, &laterTeardown)
 	if err != nil {
 		return fmt.Errorf("demoseed: legacy teardown probe: %w", err)
 	}
@@ -147,7 +184,11 @@ func assertLegacyButtonTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID
 		return fmt.Errorf("%w: tenant %q carries its own demo seed mark; use `demo teardown --tenant-slug=%s`",
 			ErrLegacyTeardownRefused, slug, slug)
 	case !legacyMark:
-		return fmt.Errorf("%w: no pre-#2043 demo button mark names tenant %q", ErrLegacyTeardownRefused, slug)
+		return fmt.Errorf("%w: no pre-#2043 demo button mark names tenant %q at or after its creation",
+			ErrLegacyTeardownRefused, slug)
+	case laterTeardown:
+		return fmt.Errorf("%w: a demo teardown has named slug %q since tenant creation; the mark may belong to an earlier tenant",
+			ErrLegacyTeardownRefused, slug)
 	}
 	return nil
 }
@@ -158,21 +199,37 @@ func assertLegacyButtonTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID
 // tenant whose controls and evidence are all demo they are demo too.
 var postSeedDerivedTables = []string{"control_evaluations", "evidence_freshness"}
 
-// assertOnlyDemoData refuses when the tenant holds anything the demo seed
-// did not write: a user that is not demo_only, or a row in a tenant-scoped
-// table outside teardownTables and postSeedDerivedTables (audit trails
-// excepted, as everywhere in this package). A demo tenant holds no real person's account, so every row in a
+// assertOnlyDemoData refuses unless the tenant looks like the seed's output
+// and nothing more:
+//   - at least one user, and every user demo_only (the seed always writes
+//     demo users; a tenant with none is not a demo tenant);
+//   - no OAuth client bound to it (oauth_clients carries bound_tenant_id,
+//     not tenant_id, so the table scan below cannot see it; a machine-fed
+//     tenant needs no human user);
+//   - no row in a tenant-scoped table outside teardownTables and
+//     postSeedDerivedTables (audit trails excepted, as everywhere in this
+//     package).
+//
+// A demo tenant holds no real person's account, so every row in a
 // teardownTables table was written by the seed or by someone exploring the
 // demo as a demo user.
 func assertOnlyDemoData(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string) error {
-	var realUsers int
-	if err := tx.QueryRow(ctx,
-		`SELECT count(*) FROM users WHERE tenant_id = $1 AND demo_only IS NOT TRUE`, tenantID,
-	).Scan(&realUsers); err != nil {
+	var demoUsers, realUsers, boundClients int
+	if err := tx.QueryRow(ctx, `
+		SELECT
+			(SELECT count(*) FROM users WHERE tenant_id = $1 AND demo_only IS TRUE),
+			(SELECT count(*) FROM users WHERE tenant_id = $1 AND demo_only IS NOT TRUE),
+			(SELECT count(*) FROM oauth_clients WHERE bound_tenant_id = $1)
+	`, tenantID).Scan(&demoUsers, &realUsers, &boundClients); err != nil {
 		return fmt.Errorf("demoseed: legacy teardown count users: %w", err)
 	}
-	if realUsers > 0 {
+	switch {
+	case realUsers > 0:
 		return fmt.Errorf("%w: tenant %q has %d users that are not demo users", ErrLegacyTeardownRefused, slug, realUsers)
+	case demoUsers == 0:
+		return fmt.Errorf("%w: tenant %q has no demo users; the demo seed always writes them", ErrLegacyTeardownRefused, slug)
+	case boundClients > 0:
+		return fmt.Errorf("%w: tenant %q has %d OAuth clients bound to it", ErrLegacyTeardownRefused, slug, boundClients)
 	}
 
 	tables, err := tenantScopedTables(ctx, tx)

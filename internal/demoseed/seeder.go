@@ -536,7 +536,7 @@ func (s *Seeder) teardownTenant(ctx context.Context, tenantID uuid.UUID, slug st
 		return fmt.Errorf("demoseed: teardown begin tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
-	if err := deleteDemoTenant(ctx, tx, tenantID, slug, actorUserID, actorTenantID, nil); err != nil {
+	if _, err := deleteDemoTenant(ctx, tx, tenantID, slug, actorUserID, actorTenantID, nil); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -546,11 +546,12 @@ func (s *Seeder) teardownTenant(ctx context.Context, tenantID uuid.UUID, slug st
 }
 
 // deleteDemoTenant writes the demo_seed_teardown audit rows, then deletes
-// the tenant's rows from every teardownTables table, then the tenant row.
+// the tenant's rows from every teardownTables table, then the tenant row,
+// and returns the rows each DELETE removed (FK cascades not counted).
 // extra is merged into the audit payload. The caller owns tx and commits it.
 func deleteDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug string,
 	actorUserID uuid.UUID, actorTenantID uuid.UUID, extra map[string]any,
-) error {
+) (map[string]int64, error) {
 	payload := map[string]any{"slug": slug, "demo_seed_v": DemoSeedVersion}
 	for k, v := range extra {
 		payload[k] = v
@@ -559,16 +560,18 @@ func deleteDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug s
 	if err := writeAuditLogRow(ctx, tx, "demo_seed_teardown",
 		actorUserID, actorTenantID, tenantID, payload,
 	); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Now cascade-delete, bottom-up, then the tenant row itself.
+	deleted := make(map[string]int64, len(teardownTables)+1)
 	for _, table := range append(teardownTables, "tenants") {
 		stmt := fmt.Sprintf(`DELETE FROM %s WHERE tenant_id = $1`, pgx.Identifier{table}.Sanitize())
 		if table == "tenants" {
 			stmt = `DELETE FROM tenants WHERE id = $1`
 		}
-		if _, err := tx.Exec(ctx, stmt, tenantID); err != nil {
+		tag, err := tx.Exec(ctx, stmt, tenantID)
+		if err != nil {
 			// Ignore unknown-table errors — older / missing tables
 			// won't have any rows for this tenant anyway; the
 			// teardown is meant to be best-effort. Fail loudly on
@@ -576,10 +579,13 @@ func deleteDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, slug s
 			if pgIsUndefinedTable(err) {
 				continue
 			}
-			return fmt.Errorf("demoseed: teardown exec %s: %w", table, err)
+			return nil, fmt.Errorf("demoseed: teardown exec %s: %w", table, err)
+		}
+		if n := tag.RowsAffected(); n > 0 {
+			deleted[table] = n
 		}
 	}
-	return nil
+	return deleted, nil
 }
 
 // teardownTables lists every tenant-scoped table the demo seed writes, in

@@ -205,8 +205,12 @@ own mark, so they both refuse such a tenant. Remove it with:
 ```bash
 ATLAS_ENABLE_DEMO_SEED=true \
 DATABASE_URL='...' \
-  atlas-cli demo teardown-legacy --super-admin-email=you@example.com
+  atlas-cli demo teardown-legacy --super-admin-email=you@example.com --dry-run
 ```
+
+`--dry-run` runs every check and the delete, prints the rows it would remove
+per table, and rolls back. Run it first, read the counts, then run again
+without `--dry-run`.
 
 `--tenant-slug` defaults to `demo`, the slug the button always used. The
 email must name exactly one active super admin, who is recorded as the actor
@@ -215,10 +219,14 @@ carries `legacy_button_tenant: true`).
 
 The command deletes nothing unless every check holds:
 
-- another tenant holds a pre-#2043 button mark naming the slug;
+- another tenant holds a pre-#2043 button mark naming the slug, written no
+  earlier than this tenant was created, and no demo teardown has named the
+  slug since. A slug match alone would also accept a later tenant that
+  reused the slug;
 - the tenant carries no mark of its own and was not seeded in place (use
   `demo teardown` for those);
-- every user in the tenant is a demo user;
+- the tenant has at least one user, and every user is a demo user;
+- no OAuth client is bound to the tenant;
 - no table the demo seed does not write holds a row for the tenant. The
   evaluator's derived rows (`control_evaluations`, `evidence_freshness`)
   count as demo, since they are computed from demo controls and evidence.

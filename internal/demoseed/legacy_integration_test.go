@@ -114,13 +114,54 @@ func assertRefused(t *testing.T, err error, want string) {
 	}
 }
 
+// legacyTeardown runs a real (not dry-run) legacy teardown and returns its
+// error.
+func legacyTeardown(t *testing.T, slug, email string) error {
+	t.Helper()
+	_, err := newSeeder(t).TeardownLegacyButtonTenant(context.Background(), slug, email, false)
+	return err
+}
+
+// countTeardownAudits counts super_admin_audit_log teardown rows naming slug.
+func countTeardownAudits(t *testing.T, slug string) int {
+	t.Helper()
+	var n int
+	if err := adminPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM super_admin_audit_log
+		WHERE action = 'demo_seed_teardown' AND payload_json->>'slug' = $1
+	`, slug).Scan(&n); err != nil {
+		t.Fatalf("count teardown audit rows: %v", err)
+	}
+	return n
+}
+
 func TestTeardownLegacyButtonTenant_DeletesTheDemoTenantAndRecordsTheSuperAdmin(t *testing.T) {
 	ctx := context.Background()
 	f := newLegacyFixture(t)
 	orgControls := rowCount(t, "controls", f.orgID)
 
-	if err := newSeeder(t).TeardownLegacyButtonTenant(ctx, f.demoSlug, strings.ToUpper(f.adminEmail)); err != nil {
+	// Dry run first: every check and the delete run, then roll back.
+	controls := rowCount(t, "controls", f.demoID)
+	dry, err := newSeeder(t).TeardownLegacyButtonTenant(ctx, f.demoSlug, f.adminEmail, true)
+	if err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	if !dry.DryRun || dry.TenantID != f.demoID || dry.Deleted["tenants"] != 1 || dry.Deleted["controls"] != int64(controls) {
+		t.Errorf("dry run result = %+v, want tenant %s, tenants=1, controls=%d", dry, f.demoID, controls)
+	}
+	if !tenantExists(t, f.demoID) || rowCount(t, "controls", f.demoID) != controls {
+		t.Fatal("the dry run deleted rows")
+	}
+	if n := countTeardownAudits(t, f.demoSlug); n != 0 {
+		t.Errorf("the dry run left %d teardown audit rows, want 0", n)
+	}
+
+	res, err := newSeeder(t).TeardownLegacyButtonTenant(ctx, f.demoSlug, strings.ToUpper(f.adminEmail), false)
+	if err != nil {
 		t.Fatalf("TeardownLegacyButtonTenant: %v", err)
+	}
+	if res.DryRun || res.Deleted["tenants"] != 1 {
+		t.Errorf("result = %+v, want a real delete of 1 tenant", res)
 	}
 	if tenantExists(t, f.demoID) {
 		t.Error("legacy demo tenant survived its teardown")
@@ -132,7 +173,7 @@ func TestTeardownLegacyButtonTenant_DeletesTheDemoTenantAndRecordsTheSuperAdmin(
 		t.Error("the organisation lost its tenant row or controls")
 	}
 	var actor, actorTenant uuid.UUID
-	err := adminPool.QueryRow(ctx, `
+	err = adminPool.QueryRow(ctx, `
 		SELECT actor_user_id, actor_tenant_id FROM super_admin_audit_log
 		WHERE action = 'demo_seed_teardown' AND payload_json->>'slug' = $1
 		  AND payload_json->>'legacy_button_tenant' = 'true'
@@ -148,15 +189,14 @@ func TestTeardownLegacyButtonTenant_DeletesTheDemoTenantAndRecordsTheSuperAdmin(
 func TestTeardownLegacyButtonTenant_RefusesANonSuperAdmin(t *testing.T) {
 	ctx := context.Background()
 	f := newLegacyFixture(t)
-	s := newSeeder(t)
 
 	// admin@solo.example is the organisation's admin, not a super admin.
-	assertRefused(t, s.TeardownLegacyButtonTenant(ctx, f.demoSlug, "admin@solo.example"), "active super admins")
-	assertRefused(t, s.TeardownLegacyButtonTenant(ctx, f.demoSlug, "  "), "super admin email is required")
+	assertRefused(t, legacyTeardown(t, f.demoSlug, "admin@solo.example"), "active super admins")
+	assertRefused(t, legacyTeardown(t, f.demoSlug, "  "), "super admin email is required")
 	if _, err := adminPool.Exec(ctx, `UPDATE users SET status = 'disabled' WHERE id = $1`, f.adminID); err != nil {
 		t.Fatalf("disable super admin: %v", err)
 	}
-	assertRefused(t, s.TeardownLegacyButtonTenant(ctx, f.demoSlug, f.adminEmail), "active super admins")
+	assertRefused(t, legacyTeardown(t, f.demoSlug, f.adminEmail), "active super admins")
 	if !tenantExists(t, f.demoID) {
 		t.Error("a refused teardown deleted the tenant")
 	}
@@ -173,7 +213,7 @@ func TestTeardownLegacyButtonTenant_RefusesNonDemoData(t *testing.T) {
 		); err != nil {
 			t.Fatalf("insert real user: %v", err)
 		}
-		assertRefused(t, newSeeder(t).TeardownLegacyButtonTenant(ctx, f.demoSlug, f.adminEmail), "not demo users")
+		assertRefused(t, legacyTeardown(t, f.demoSlug, f.adminEmail), "not demo users")
 		if !tenantExists(t, f.demoID) {
 			t.Error("a refused teardown deleted the tenant")
 		}
@@ -187,7 +227,44 @@ func TestTeardownLegacyButtonTenant_RefusesNonDemoData(t *testing.T) {
 		); err != nil {
 			t.Fatalf("insert training person: %v", err)
 		}
-		assertRefused(t, newSeeder(t).TeardownLegacyButtonTenant(ctx, f.demoSlug, f.adminEmail), "security_training_people")
+		assertRefused(t, legacyTeardown(t, f.demoSlug, f.adminEmail), "security_training_people")
+		if !tenantExists(t, f.demoID) {
+			t.Error("a refused teardown deleted the tenant")
+		}
+	})
+
+	// A machine-fed tenant needs no human user, so no users at all is not
+	// demo either: the seed always writes its demo users.
+	t.Run("no users at all", func(t *testing.T) {
+		f := newLegacyFixture(t)
+		for _, table := range []string{"sessions", "local_credentials", "user_roles", "users"} {
+			if _, err := adminPool.Exec(ctx,
+				`DELETE FROM `+table+` WHERE tenant_id = $1`, f.demoID,
+			); err != nil {
+				t.Fatalf("delete %s: %v", table, err)
+			}
+		}
+		assertRefused(t, legacyTeardown(t, f.demoSlug, f.adminEmail), "no demo users")
+		if !tenantExists(t, f.demoID) {
+			t.Error("a refused teardown deleted the tenant")
+		}
+	})
+
+	// oauth_clients scopes by bound_tenant_id, not tenant_id, so the
+	// table scan cannot see it; it is checked by name.
+	t.Run("an OAuth client bound to the tenant", func(t *testing.T) {
+		f := newLegacyFixture(t)
+		clientID := "legacy-test-" + uuid.NewString()[:8]
+		if _, err := adminPool.Exec(ctx, `
+			INSERT INTO oauth_clients (client_id, client_secret_hash, name, bound_tenant_id)
+			VALUES ($1, 'not-a-real-hash-but-long-enough', 'feeder', $2)
+		`, clientID, f.demoID); err != nil {
+			t.Fatalf("insert oauth client: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = adminPool.Exec(context.Background(), `DELETE FROM oauth_clients WHERE client_id = $1`, clientID)
+		})
+		assertRefused(t, legacyTeardown(t, f.demoSlug, f.adminEmail), "OAuth clients bound to it")
 		if !tenantExists(t, f.demoID) {
 			t.Error("a refused teardown deleted the tenant")
 		}
@@ -200,7 +277,7 @@ func TestTeardownLegacyButtonTenant_RefusesTenantsTheOrdinaryTeardownOwns(t *tes
 	t.Run("an organisation with no legacy mark", func(t *testing.T) {
 		org := freshInstallTenant(t)
 		_, email := grantSuperAdmin(t, org.ID)
-		assertRefused(t, newSeeder(t).TeardownLegacyButtonTenant(ctx, org.Slug, email), "no pre-#2043 demo button mark")
+		assertRefused(t, legacyTeardown(t, org.Slug, email), "no pre-#2043 demo button mark")
 		if !tenantExists(t, org.ID) {
 			t.Error("a refused teardown deleted the organisation")
 		}
@@ -212,9 +289,39 @@ func TestTeardownLegacyButtonTenant_RefusesTenantsTheOrdinaryTeardownOwns(t *tes
 		if err := adminPool.QueryRow(ctx, `SELECT slug FROM tenants WHERE id = $1`, f.orgID).Scan(&orgSlug); err != nil {
 			t.Fatalf("read org slug: %v", err)
 		}
-		assertRefused(t, newSeeder(t).TeardownLegacyButtonTenant(ctx, orgSlug, f.adminEmail), "no pre-#2043 demo button mark")
+		assertRefused(t, legacyTeardown(t, orgSlug, f.adminEmail), "no pre-#2043 demo button mark")
 		if !tenantExists(t, f.orgID) {
 			t.Error("a refused teardown deleted the organisation")
+		}
+	})
+
+	// The slug-reuse case: the legacy mark predates the tenant now at the
+	// slug, so it belongs to an earlier tenant.
+	t.Run("a legacy mark older than the tenant", func(t *testing.T) {
+		f := newLegacyFixture(t)
+		if _, err := adminPool.Exec(ctx, `
+			UPDATE me_audit_log SET occurred_at = occurred_at - interval '1 day'
+			WHERE tenant_id = $1 AND action = 'demo_seed_apply' AND after->>'slug' = $2
+		`, f.orgID, f.demoSlug); err != nil {
+			t.Fatalf("age the legacy mark: %v", err)
+		}
+		assertRefused(t, legacyTeardown(t, f.demoSlug, f.adminEmail), "at or after its creation")
+		if !tenantExists(t, f.demoID) {
+			t.Error("a refused teardown deleted the tenant")
+		}
+	})
+
+	t.Run("a teardown naming the slug since the tenant was created", func(t *testing.T) {
+		f := newLegacyFixture(t)
+		if _, err := adminPool.Exec(ctx, `
+			INSERT INTO super_admin_audit_log (action, target_user_id, actor_user_id, actor_tenant_id, payload_json)
+			VALUES ('demo_seed_teardown', $1, $1, $2, jsonb_build_object('slug', $3::text))
+		`, f.adminID, f.orgID, f.demoSlug); err != nil {
+			t.Fatalf("insert teardown audit row: %v", err)
+		}
+		assertRefused(t, legacyTeardown(t, f.demoSlug, f.adminEmail), "since tenant creation")
+		if !tenantExists(t, f.demoID) {
+			t.Error("a refused teardown deleted the tenant")
 		}
 	})
 
@@ -225,7 +332,7 @@ func TestTeardownLegacyButtonTenant_RefusesTenantsTheOrdinaryTeardownOwns(t *tes
 		if _, err := newSeeder(t).Apply(ctx, demoseed.ApplyInput{Slug: slug, ActorUserID: f.adminID, ActorTenantID: f.orgID}); err != nil {
 			t.Fatalf("Apply: %v", err)
 		}
-		assertRefused(t, newSeeder(t).TeardownLegacyButtonTenant(ctx, slug, f.adminEmail), "carries its own demo seed mark")
+		assertRefused(t, legacyTeardown(t, slug, f.adminEmail), "carries its own demo seed mark")
 	})
 
 	t.Run("a tenant seeded in place", func(t *testing.T) {
@@ -234,7 +341,7 @@ func TestTeardownLegacyButtonTenant_RefusesTenantsTheOrdinaryTeardownOwns(t *tes
 			t.Fatalf("Seed in place: %v", err)
 		}
 		_, email := grantSuperAdmin(t, ref.ID)
-		assertRefused(t, newSeeder(t).TeardownLegacyButtonTenant(ctx, ref.Slug, email), "seeded in place")
+		assertRefused(t, legacyTeardown(t, ref.Slug, email), "seeded in place")
 		if !tenantExists(t, ref.ID) {
 			t.Error("a refused teardown deleted the organisation")
 		}
@@ -242,6 +349,6 @@ func TestTeardownLegacyButtonTenant_RefusesTenantsTheOrdinaryTeardownOwns(t *tes
 
 	t.Run("an unknown slug", func(t *testing.T) {
 		f := newLegacyFixture(t)
-		assertRefused(t, newSeeder(t).TeardownLegacyButtonTenant(ctx, "no-such-"+uuid.NewString()[:8], f.adminEmail), "not found")
+		assertRefused(t, legacyTeardown(t, "no-such-"+uuid.NewString()[:8], f.adminEmail), "not found")
 	})
 }
