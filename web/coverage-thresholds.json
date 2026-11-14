@@ -667,6 +667,12 @@
       "functions": 98,
       "lines": 98
     },
+    "components/dashboard/treatment-badge.ts": {
+      "statements": 98,
+      "branches": 98,
+      "functions": 98,
+      "lines": 98
+    },
     "components/dashboards-metrics/format.ts": {
       "statements": 0,
       "branches": 0,
