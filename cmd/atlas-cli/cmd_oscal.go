@@ -58,7 +58,7 @@ Requires a running oscal-bridge (see oscal-bridge/README.md):
 	}
 
 	cmd.Flags().String("dsn", "", "Postgres DSN (atlas_app role); env DATABASE_URL_APP")
-	cmd.Flags().String("tenant-id", "", "tenant UUID the audit period belongs to (required)")
+	cmd.Flags().String("tenant-id", "", "audit period's "+tenantFlagHelp)
 	cmd.Flags().String("period-id", "", "frozen audit period UUID to export (required)")
 	cmd.Flags().String("bridge-addr", "127.0.0.1:50070", "oscal-bridge gRPC address")
 	cmd.Flags().String("out", "", "output directory for the bundle (required)")
@@ -78,13 +78,7 @@ func runOscalExport(cmd *cobra.Command, _ []string) error {
 	if dsn == "" {
 		return fmt.Errorf("--dsn or DATABASE_URL_APP is required (use the atlas_app role)")
 	}
-	tenantStr, _ := cmd.Flags().GetString("tenant-id")
-	if tenantStr == "" {
-		return fmt.Errorf("--tenant-id is required")
-	}
-	if _, err := uuid.Parse(tenantStr); err != nil {
-		return fmt.Errorf("--tenant-id must be a UUID: %w", err)
-	}
+	tenantFlag, _ := cmd.Flags().GetString("tenant-id")
 	periodStr, _ := cmd.Flags().GetString("period-id")
 	if periodStr == "" {
 		return fmt.Errorf("--period-id is required")
@@ -111,6 +105,12 @@ func runOscalExport(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("pgxpool: %w", err)
 	}
 	defer pool.Close()
+
+	tenant, err := chooseTenant(ctx, cmd.ErrOrStderr(), "--tenant-id", tenantFlag, newTenantResolver(pool))
+	if err != nil {
+		return err
+	}
+	tenantStr := tenant.String()
 
 	bridge, err := oscal.DialBridge(bridgeAddr)
 	if err != nil {
