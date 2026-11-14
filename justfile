@@ -277,6 +277,11 @@ check-coverage-excludes:
 check-migration-timestamps:
     bash scripts/check-migration-timestamps.sh
 
+# Fail when a ci.yml job with no `if:` is missing from merge-gate's needs
+# (#1887). Self-test: scripts/check-merge-gate-needs_test.sh
+check-merge-gate-needs:
+    bash scripts/check-merge-gate-needs.sh
+
 # Count assertions per Go test file and warn where assertion density is below
 # threshold (cheap mutation-testing proxy). Slice 333 Q-6; slice 353. ADVISORY
 # only — never fails. Self-test: scripts/assertion-density_test.sh

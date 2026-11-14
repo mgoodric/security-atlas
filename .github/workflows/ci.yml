@@ -3121,9 +3121,8 @@ jobs:
   # / slice 140 openapi-drift-check / slice 345 integration-enrolment-check.
   #
   # Required-check status: ships NON-REQUIRED this slice (NOT added to
-  # .github/branch-protection.json). Promote to a required check in a
-  # follow-up once it has a few green runs — see the slice 458 PR body's
-  # required-check analysis.
+  # .github/branch-protection.json). Since #1887 it is in merge-gate's
+  # `needs:`, so a red run blocks the merge through the gate.
   #
   # Local repro: `bash scripts/check-staged-cache-paths.sh --all-tracked`
   #   pre-commit:  `pre-commit run cache-path-guard --all-files`
@@ -3415,6 +3414,39 @@ jobs:
         run: bash scripts/check-migration-timestamps.sh
 
   # ====================================================================
+  # #1887 — merge-gate needs-completeness (HARD FAIL).
+  #
+  # Refuses a job that runs on every PR (no job-level `if:`) but is not in
+  # merge-gate's `needs:`. Such a job reports red and blocks nothing:
+  # coverage-excludes-check, cache-path-guard and integration-enrolment-
+  # check all sat outside the gate until #1887. A job that must run on
+  # every PR without blocking goes on the script's ALLOWLIST with its
+  # reason; a stale entry fails too. Fast, no network; unconditional, so
+  # merge-gate needs it.
+  #
+  # Local repro: `bash scripts/check-merge-gate-needs.sh`
+  #   self-test: `bash scripts/check-merge-gate-needs_test.sh`
+  # ====================================================================
+  merge-gate-needs-check:
+    name: merge-gate-needs-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@1d88384fd173af6ecb012dfd0264a306b711241a # v2.22.4
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Run check-merge-gate-needs self-test
+        run: bash scripts/check-merge-gate-needs_test.sh
+
+      - name: Run check-merge-gate-needs.sh
+        run: bash scripts/check-merge-gate-needs.sh
+
+  # ====================================================================
   # Slice 393 (Q-6) — assertion-density advisory (INFORMATIONAL).
   #
   # Wires scripts/assertion-density.sh (shipped by slice 353) into CI as
@@ -3692,8 +3724,9 @@ jobs:
   #     `!= 'true'` branch and PASSED the gate — the path-filter oracle
   #     failing must fail the gate closed, not open it.
   #   * The unconditional legs (`precommit`, `actions-pin-check`,
-  #     `openapi-drift-check`, and since #1690 `isa-probes`) are asserted
-  #     on docs-only PRs too. Only a
+  #     `openapi-drift-check`, since #1690 `isa-probes`, and every other
+  #     job with no `if:`, which merge-gate-needs-check enforces since
+  #     #1887) are asserted on docs-only PRs too. Only a
   #     `skipped` result is forgiven when `code != 'true'`; those jobs
   #     have no `if:` so they never skip, and a RED one now reddens the
   #     gate instead of being short-circuited past.
@@ -3730,6 +3763,10 @@ jobs:
       - openapi-drift-check # openapi-drift-check
       - isa-probes # ISA · probes (unconditional; red only on a closed claim's regression)
       - migration-timestamps-check # migration-timestamps-check (unconditional, #1880)
+      - coverage-excludes-check # coverage-excludes-check (unconditional, #1887)
+      - cache-path-guard # cache-path-guard (unconditional, #1887)
+      - integration-enrolment-check # integration-enrolment-check (unconditional, #1887)
+      - merge-gate-needs-check # merge-gate-needs-check (unconditional, #1887)
       # --- no required context of its own; covered here so the slice-701
       #     stub collapse cannot drop them on the floor (slice 701 §AC-1) ---
       - tests-integration-shard # Go · integration (shard A/B1/B2/B3/B4) — matrix aggregate
@@ -3794,7 +3831,8 @@ jobs:
             echo "code='${CODE:-}' (no Go-affecting changes) — path-filtered legs may legitimately"
             echo "be 'skipped' (their slice-061 stub-twins post the green named checks)."
             echo "Unconditional legs (precommit, actions-pin-check, openapi-drift-check, isa-probes,"
-            echo "migration-timestamps-check) still"
+            echo "migration-timestamps-check, coverage-excludes-check, cache-path-guard,"
+            echo "integration-enrolment-check, merge-gate-needs-check) still"
             echo "MUST be 'success'. 'skipped' is the ONLY forgiven non-success result, and only here."
           fi
           echo "Asserting ${leg_count} legs derived from toJSON(needs)."
@@ -3825,6 +3863,10 @@ jobs:
               govulncheck)                    echo "Go · govulncheck" ;;
               isa-probes)                     echo "ISA · probes" ;;
               migration-timestamps-check)     echo "migration-timestamps-check" ;;
+              coverage-excludes-check)        echo "coverage-excludes-check" ;;
+              cache-path-guard)               echo "cache-path-guard" ;;
+              integration-enrolment-check)    echo "integration-enrolment-check" ;;
+              merge-gate-needs-check)         echo "merge-gate-needs-check" ;;
               *)                              echo "$1" ;;
             esac
           }
