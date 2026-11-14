@@ -30,14 +30,10 @@ func TestTenancy1763_EveryRoleReads(t *testing.T) {
 	}
 }
 
-// #1763: the admit is pinned to the one path and needs a role. A viewer
-// still cannot read other /v1/me endpoints, and a roleless credential is
-// denied.
+// #1763: the admit needs a role. #2015 widened the path list; its tests
+// pin which /v1/me paths stay denied.
 func TestTenancy1763_NarrowAdmit(t *testing.T) {
 	t.Parallel()
-	if d := decide(t, meReadInput([]authz.Role{authz.RoleViewer}, "/v1/me/tenants")); d.Allow {
-		t.Error("viewer admitted to GET /v1/me/tenants; the #1763 rule must not widen other /v1/me paths")
-	}
 	if d := decide(t, meReadInput(nil, "/v1/me/tenancy")); d.Allow {
 		t.Error("roleless credential admitted to GET /v1/me/tenancy")
 	}
