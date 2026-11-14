@@ -30,8 +30,8 @@ func TestSectionTemplates_CoverEverySectionKey(t *testing.T) {
 // same string every time (no clock, no randomness, no LLM).
 func TestRenderSectionNarrative_Deterministic(t *testing.T) {
 	sec := newSection(SectionPosture, SectionData{
-		Frameworks: []FrameworkPosture{
-			{Slug: "soc2", Name: "SOC 2", CoveragePct: 94, TrendArrow: TrendUp, Delta: 2, State: "audit-ready"},
+		Frameworks: []PackFrameworkPosture{
+			{Slug: "soc2", Name: "SOC 2", CoveragePct: 94, BaselinePct: 92, TrendArrow: TrendUp, Delta: 2, State: "audit-ready"},
 		},
 	})
 	first, err := renderSectionNarrative(sec, "2026-03-31")

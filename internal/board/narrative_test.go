@@ -48,14 +48,14 @@ func TestRenderNarrative_InterpolatesFrameworkPosture(t *testing.T) {
 		t.Fatalf("RenderNarrative: %v", err)
 	}
 	// AC-3 worked example: "We are in audit-ready state for SOC 2 (94% ..."
-	want := "We are in audit-ready state for SOC 2 (94% coverage, up +2 pts over 30 days)"
+	want := "We are in audit-ready state for SOC 2 (94% evidence freshness rate (tenant-wide), up +2 pts over 30 days)"
 	if !strings.Contains(md, want) {
 		t.Errorf("AC-3: narrative missing SOC 2 posture line\nwant substring: %q\ngot:\n%s", want, md)
 	}
-	if !strings.Contains(md, "We are in in-progress state for ISO 27001 (78% coverage, flat 0 pts over 30 days)") {
+	if !strings.Contains(md, "We are in in-progress state for ISO 27001 (78% evidence freshness rate (tenant-wide), flat 0 pts over 30 days)") {
 		t.Errorf("AC-3: narrative missing ISO 27001 posture line\ngot:\n%s", md)
 	}
-	if !strings.Contains(md, "Evidence freshness 88%") {
+	if !strings.Contains(md, "Controls with fresh evidence 88% (tenant-wide)") {
 		t.Errorf("AC-3: narrative missing SOC 2 freshness\ngot:\n%s", md)
 	}
 }
