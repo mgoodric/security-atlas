@@ -931,3 +931,170 @@ func TestEvaluateAll_StopsOnCancelledContext(t *testing.T) {
 		t.Fatalf("EvaluateAll kept evaluating after cancellation (%d controls in the error): %v", named, err)
 	}
 }
+
+// ===== #2112: an active exception yields `excepted` in the cells it covers =====
+
+// seedScopeCellEnv is seedScopeCell with a chosen environment dimension, so
+// an exception predicate can select one cell and miss another.
+func seedScopeCellEnv(t *testing.T, admin *pgxpool.Pool, tenant, label, env string) uuid.UUID {
+	t.Helper()
+	cellID := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO scope_cells (id, tenant_id, label, dimensions, dimensions_hash)
+		VALUES ($1, $2, $3, jsonb_build_object('environment', $4::text), $5)
+	`, cellID, tenant, label, env, "hash-cell-"+cellID.String()[:8]); err != nil {
+		t.Fatalf("seed scope cell: %v", err)
+	}
+	return cellID
+}
+
+// seedException inserts an exception row directly in the given status with
+// an [effective_from, expires_at) window. The lifecycle API is exercised by
+// internal/exception; here only the engine's read of it matters. Its cleanup
+// is registered after freshTenant's, so it runs first: exceptions FK the
+// control ON DELETE RESTRICT.
+func seedException(t *testing.T, admin *pgxpool.Pool, tenant string, ctrlID uuid.UUID, predicate, status string, effectiveFrom, expiresAt time.Time) {
+	t.Helper()
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM exceptions WHERE tenant_id = $1`, tenant)
+	})
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO exceptions (
+			id, tenant_id, control_id, scope_cell_predicate, justification,
+			requested_by, requested_at, approved_by, approved_at,
+			activated_by, activated_at, effective_from, expires_at, status
+		)
+		VALUES ($1, $2, $3, $4::jsonb, 'test waiver',
+		        'requester', $5, 'approver', $5,
+		        'approver', $5, $5, $6, $7)
+	`, uuid.New(), tenant, ctrlID, predicate, effectiveFrom, expiresAt, status); err != nil {
+		t.Fatalf("seed exception: %v", err)
+	}
+}
+
+func resultsByCell(ctx context.Context, t *testing.T, eng *eval.Engine, ctrlID uuid.UUID) map[uuid.UUID]string {
+	t.Helper()
+	states, err := eng.ControlState(ctx, ctrlID, "", eval.FarFuture)
+	if err != nil {
+		t.Fatalf("ControlState: %v", err)
+	}
+	out := map[uuid.UUID]string{}
+	for _, st := range states {
+		if st.ScopeCellID == nil {
+			t.Fatalf("expected per-cell state, got NULL cell")
+		}
+		out[*st.ScopeCellID] = st.Result
+	}
+	return out
+}
+
+func TestEvaluateControl_ActiveExceptionYieldsExceptedInItsCellOnly(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	prod := seedScopeCellEnv(t, admin, tenant, "prod", "prod")
+	staging := seedScopeCellEnv(t, admin, tenant, "staging", "staging")
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", "")
+	// Failing evidence: the exception holds whatever the evidence says.
+	seedEvidence(t, admin, tenant, ctrlID, "fail", time.Now().UTC().Add(-24*time.Hour))
+
+	now := time.Now().UTC()
+	seedException(t, admin, tenant, ctrlID,
+		`{"op":"eq","dim":"environment","value":"prod"}`, "active",
+		now.Add(-time.Hour), now.Add(30*24*time.Hour))
+
+	eng := newEngine(app)
+	if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl: %v", err)
+	}
+	got := resultsByCell(ctx, t, eng, ctrlID)
+	if got[prod] != eval.ResultExcepted {
+		t.Fatalf("inside the exception's cell: result = %q, want excepted", got[prod])
+	}
+	if got[staging] != eval.ResultFail {
+		t.Fatalf("outside the exception's cell: result = %q, want fail", got[staging])
+	}
+}
+
+func TestEvaluateControl_ExpiredExceptionIsIgnored(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	prod := seedScopeCellEnv(t, admin, tenant, "prod", "prod")
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", "")
+	seedEvidence(t, admin, tenant, ctrlID, "pass", time.Now().UTC().Add(-24*time.Hour))
+
+	now := time.Now().UTC()
+	// Status still 'active' (the expiry cron has not run yet) but expires_at
+	// is past: the engine must not honour it.
+	seedException(t, admin, tenant, ctrlID, `{}`, "active",
+		now.Add(-10*24*time.Hour), now.Add(-time.Minute))
+	// And one the cron already expired.
+	seedException(t, admin, tenant, ctrlID, `{}`, "expired",
+		now.Add(-10*24*time.Hour), now.Add(-2*24*time.Hour))
+
+	eng := newEngine(app)
+	if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl: %v", err)
+	}
+	if got := resultsByCell(ctx, t, eng, ctrlID)[prod]; got != eval.ResultPass {
+		t.Fatalf("after expiry: result = %q, want pass", got)
+	}
+}
+
+func TestEvaluateControl_ExceptedThenExpiryReturnsToNormal(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctx := ctxFor(t, tenant)
+
+	prod := seedScopeCellEnv(t, admin, tenant, "prod", "prod")
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", "")
+	// No evidence at all: excepted must still be writable alongside
+	// no_evidence (the widened coherence CHECK).
+	now := time.Now().UTC()
+	seedException(t, admin, tenant, ctrlID, `{"op":"true"}`, "active",
+		now.Add(-time.Hour), now.Add(24*time.Hour))
+
+	eng := newEngine(app)
+	if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl (in force): %v", err)
+	}
+	if got := resultsByCell(ctx, t, eng, ctrlID)[prod]; got != eval.ResultExcepted {
+		t.Fatalf("in force: result = %q, want excepted", got)
+	}
+
+	// The expiry cron flips the row; the next evaluation is normal again.
+	if _, err := admin.Exec(context.Background(),
+		`UPDATE exceptions SET status = 'expired', expired_at = now() WHERE tenant_id = $1`, tenant); err != nil {
+		t.Fatalf("expire exception: %v", err)
+	}
+	if _, err := eng.EvaluateControl(ctx, ctrlID, eval.TriggerManual, eval.FarFuture); err != nil {
+		t.Fatalf("EvaluateControl (expired): %v", err)
+	}
+	if got := resultsByCell(ctx, t, eng, ctrlID)[prod]; got != eval.ResultInconclusive {
+		t.Fatalf("after expiry: result = %q, want inconclusive", got)
+	}
+}
+
+// A connector can never push `excepted`: it is a property of an evaluation,
+// not of evidence.
+func TestEvidenceLedger_RejectsExceptedResult(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ctrlID := seedControl(t, admin, tenant, "automated", "monthly", "")
+	_, err := admin.Exec(context.Background(), `
+		INSERT INTO evidence_records (
+			id, tenant_id, control_id, observed_at, ingested_at,
+			provenance, result, payload, hash, control_ref
+		)
+		VALUES ($1, $2, $3, now(), now(), '{}'::jsonb, 'excepted', '{}'::jsonb, 'hash-2112', $4)
+	`, uuid.New(), tenant, ctrlID, ctrlID.String())
+	if err == nil || !strings.Contains(err.Error(), "evidence_records_result_not_excepted") {
+		t.Fatalf("want the not-excepted CHECK to reject the row, got %v", err)
+	}
+}

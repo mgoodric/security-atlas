@@ -442,6 +442,7 @@ const (
 	EvidenceResultFail         EvidenceResult = "fail"
 	EvidenceResultNa           EvidenceResult = "na"
 	EvidenceResultInconclusive EvidenceResult = "inconclusive"
+	EvidenceResultExcepted     EvidenceResult = "excepted"
 )
 
 func (e *EvidenceResult) Scan(src interface{}) error {
@@ -485,6 +486,7 @@ func AllEvidenceResultValues() []EvidenceResult {
 		EvidenceResultFail,
 		EvidenceResultNa,
 		EvidenceResultInconclusive,
+		EvidenceResultExcepted,
 	}
 }
 
