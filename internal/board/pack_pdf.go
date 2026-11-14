@@ -21,13 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"os"
 	"strings"
-
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/chromedp/remote"
 
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
@@ -43,61 +37,12 @@ func RenderPackPDF(ctx context.Context, sp StoredPack) ([]byte, error) {
 	}
 	htmlDoc := buildPackHTML(sp)
 	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
-		return renderPackBytes(ctx, htmlDoc)
-	})
-}
-
-// renderPackBytes performs the chromedp render under the deadline the limiter
-// has already applied to ctx.
-func renderPackBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
-	var browserCtx context.Context
-	var cancelAlloc context.CancelFunc
-	var cancelBrowser context.CancelFunc
-	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	} else {
-		opts := append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoSandbox,
-			chromedp.DisableGPU,
-			chromedp.Headless,
-			chromedp.Flag("hide-scrollbars", true),
-		)
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	}
-	defer cancelBrowser()
-	defer cancelAlloc()
-
-	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
-	var buf []byte
-	err := chromedp.Do(browserCtx,
-		chromedp.Navigate(dataURL),
-		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
-			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
-				PrintBackground: new(true),
-				MarginTop:       new(0.4),
-				MarginBottom:    new(0.4),
-				MarginLeft:      new(0.4),
-				MarginRight:     new(0.4),
-			})
-			buf = res.Data
-			return err
-		}),
-	)
-	if err != nil {
-		if isChromeUnavailable(err) {
-			return nil, fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
+		buf, err := pdfrender.PrintHTML(ctx, htmlDoc)
+		if err != nil {
+			return nil, fmt.Errorf("board/pack-pdf: %w", err)
 		}
-		return nil, fmt.Errorf("board/pack-pdf: chromedp run: %w", err)
-	}
-	if len(buf) < 5 || string(buf[:5]) != "%PDF-" {
-		return nil, fmt.Errorf("board/pack-pdf: invalid PDF output (len=%d)", len(buf))
-	}
-	return buf, nil
+		return buf, nil
+	})
 }
 
 // buildPackHTML renders the quarterly pack as a print-friendly HTML document

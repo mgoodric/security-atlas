@@ -404,6 +404,14 @@ func (h *Handler) OIDCCallback(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// #1912: the IdP still authenticates a user whose membership an admin
+	// revoked (status='disabled') or whom SCIM deprovisioned (active=false).
+	// Refuse before any role derivation or session, with the local-login 401.
+	if !usr.CanSignIn() {
+		oidc.ClearFlowCookies(w, h.secureCookies)
+		writeAuthError(w, http.StatusUnauthorized, "invalid credentials")
+		return
+	}
 	// Slice 733 AC-1: reconcile the user's group-derived roles from the
 	// VALIDATED OIDC groups claim BEFORE minting the session, so the session
 	// reflects current group membership. This runs strictly after the ID token
