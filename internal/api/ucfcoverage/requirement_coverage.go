@@ -15,7 +15,17 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/frameworkscope"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
+
+// releaseLabel is the `scf_release` a coverage read echoes: the pinned
+// release's label, or "" when nothing was pinned (no current release).
+func releaseLabel(r *scfrelease.Release) string {
+	if r == nil {
+		return ""
+	}
+	return r.Version
+}
 
 // ===== /v1/requirements/{id}/coverage =====
 
@@ -35,8 +45,9 @@ import (
 //   - ?as-of=<RFC3339> — accepted no-op; slice 012 will wire evidence
 //     filtering. Caller-friendly so dashboards can start sending the
 //     param ahead of slice 012's eval engine.
-//   - ?scf_release=<version> — accepted no-op until multiple SCF
-//     releases are importable in the same DB.
+//   - ?scf_release=<version> — pin the anchors to one SCF release
+//     (#1770). Absent, the current release. `scf_release` in the
+//     response names the release used; an unknown label is 404.
 //
 // Returns:
 //   - 200 { requirement, anchors[], controls[] } on success
@@ -61,8 +72,16 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	scfFV := h.resolveSCFRelease(ctx, r)
-	anchors, err := h.listAnchorsForRequirement(ctx, req.ID, scfFV)
+	scfRel, err := h.resolveSCFRelease(ctx, r)
+	if errors.Is(err, scfrelease.ErrUnknownRelease) {
+		httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		return
+	}
+	if err != nil {
+		httperr.WriteInternal(w, r, "resolve scf release", err)
+		return
+	}
+	anchors, err := h.listAnchorsForRequirement(ctx, req.ID, scfRel)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list anchors for requirement", err)
 		return
@@ -116,6 +135,7 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 		"coverage_strength": score,
 		"confidence_band":   string(band),
 		"exclusion":         exclusion,
+		"scf_release":       releaseLabel(scfRel),
 	})
 
 }
@@ -302,7 +322,7 @@ type anchorEdge struct {
 
 // listAnchorsForRequirement runs either the unpinned or pinned variant
 // based on whether an SCF framework_version filter was supplied.
-func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UUID, scfFV *dbx.FrameworkVersion) ([]anchorEdge, error) {
+func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UUID, scfFV *scfrelease.Release) ([]anchorEdge, error) {
 	if scfFV == nil {
 		rows, err := h.q.ListAnchorsForRequirementWithEdges(ctx, reqID)
 		if err != nil {
@@ -373,23 +393,20 @@ func (h *Handler) listControlsForAnchors(ctx context.Context, anchorIDs []pgtype
 	return out, nil
 }
 
-// resolveSCFRelease parses ?scf_release=<version> into a framework_version
-// row for the SCF framework. Returns nil on absence (no filter) or
-// when the version doesn't resolve. Distinct from
-// resolveFrameworkVersion because the slug is fixed to "scf".
-func (h *Handler) resolveSCFRelease(ctx context.Context, r *http.Request) *dbx.FrameworkVersion {
-	v := r.URL.Query().Get("scf_release")
-	if v == "" {
-		return nil
+// resolveSCFRelease resolves ?scf_release=<label> to the SCF release the
+// coverage read is pinned to (#1770). Absent, it is the current release.
+// It returns a nil pin (no filter, the pre-#1770 read) only when no
+// release was named and none is current. An unknown label is
+// scfrelease.ErrUnknownRelease.
+func (h *Handler) resolveSCFRelease(ctx context.Context, r *http.Request) (*scfrelease.Release, error) {
+	rel, err := scfrelease.Lookup(ctx, h.q, r.URL.Query().Get("scf_release"))
+	if errors.Is(err, scfrelease.ErrNoCurrentRelease) {
+		return nil, nil
 	}
-	row, err := h.q.GetFrameworkVersionBySlugAndVersion(ctx, dbx.GetFrameworkVersionBySlugAndVersionParams{
-		Slug:    "scf",
-		Version: v,
-	})
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return &row
+	return &rel, nil
 }
 
 // anchorWiresFromAnchors maps the internal anchorEdge slice to the
