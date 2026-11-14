@@ -15,19 +15,39 @@
 // renders only on the posture section because it lives inside this
 // component, which is only mounted on key === "posture".
 
+import Link from "next/link";
+
 import { cn } from "@/lib/utils";
 
-import { POSTURE_COVERAGE_CAPTION } from "./posture-coverage-caption";
+import {
+  NO_BASELINE_TEXT,
+  POSTURE_COVERAGE_CAPTION,
+} from "./posture-coverage-caption";
 
+// #2056: one row per framework version, carrying the dashboard's own
+// per-framework posture (GET /v1/frameworks/posture). `delta` is the 90-day
+// trend in percentage points. `scope_not_set` rows have no activated
+// framework scope and carry no percentage.
 export type FrameworkPostureRow = {
+  framework_id?: string;
+  framework_version_id?: string;
   slug: string;
   name: string;
+  version?: string;
+  scope_not_set?: boolean;
   coverage_pct: number;
   freshness_pct: number;
+  baseline_pct?: number;
+  no_trend_history?: boolean;
   trend_arrow: string;
   delta: number;
   state: string;
 };
+
+// One decimal, as the dashboard's framework posture tile shows it.
+function pct(n: number): string {
+  return Number(n.toFixed(1)).toString();
+}
 
 export function PostureTiles({
   frameworks,
@@ -59,7 +79,10 @@ export function PostureTiles({
         data-testid="posture-tiles"
       >
         {frameworks.map((fw) => (
-          <PostureTile key={fw.slug} fw={fw} />
+          <PostureTile
+            key={fw.framework_version_id ?? fw.framework_id ?? fw.slug}
+            fw={fw}
+          />
         ))}
       </div>
       <p
@@ -73,6 +96,36 @@ export function PostureTiles({
 }
 
 function PostureTile({ fw }: { fw: FrameworkPostureRow }) {
+  const label = fw.version ? `${fw.name} ${fw.version}` : fw.name;
+  if (fw.scope_not_set) {
+    return (
+      <div
+        className="rounded-lg border border-border p-4"
+        data-testid="posture-tile"
+      >
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
+          {label}
+        </div>
+        <div
+          className="mt-1.5 text-lg font-semibold"
+          data-testid="posture-scope-not-set"
+        >
+          Scope not set
+        </div>
+        {fw.framework_version_id ? (
+          <Link
+            href={`/framework-scopes/${encodeURIComponent(
+              fw.framework_version_id,
+            )}`}
+            className="mt-2 inline-block text-xs underline"
+          >
+            Set the framework scope
+          </Link>
+        ) : null}
+      </div>
+    );
+  }
+  const delta = pct(fw.delta);
   const deltaTone =
     fw.delta > 0
       ? "text-pass"
@@ -91,19 +144,29 @@ function PostureTile({ fw }: { fw: FrameworkPostureRow }) {
       data-testid="posture-tile"
     >
       <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-        {fw.name}
+        {label}
       </div>
       <div className="mt-1.5 flex items-baseline gap-1.5">
-        <span className="text-2xl font-semibold">{fw.coverage_pct}</span>
+        <span className="text-2xl font-semibold">{pct(fw.coverage_pct)}</span>
         <span className="text-lg font-normal text-muted-foreground">%</span>
-        <span className={cn("text-xs font-medium", deltaTone)}>
-          {fw.trend_arrow}{" "}
-          {fw.delta > 0 ? `+${fw.delta}` : fw.delta === 0 ? "flat" : fw.delta}
-        </span>
+        {fw.no_trend_history ? null : (
+          <span className={cn("text-xs font-medium", deltaTone)}>
+            {fw.trend_arrow}{" "}
+            {fw.delta > 0 ? `+${delta}` : fw.delta === 0 ? "flat" : delta}
+          </span>
+        )}
       </div>
       <div className={cn("mt-1 text-xs", stateTone)}>{fw.state}</div>
+      {fw.no_trend_history ? (
+        <div
+          className="mt-1 text-[11px] text-muted-foreground"
+          data-testid="posture-no-baseline"
+        >
+          {NO_BASELINE_TEXT}
+        </div>
+      ) : null}
       <div className="mt-2 text-[11px] text-muted-foreground">
-        evidence freshness {fw.freshness_pct}%
+        evidence freshness {pct(fw.freshness_pct)}%
       </div>
     </div>
   );

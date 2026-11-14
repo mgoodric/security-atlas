@@ -520,7 +520,7 @@ func TestList_Filters(t *testing.T) {
 		t.Fatalf("methodology filter expected [B], got %v", titles(got))
 	}
 
-	got, err = store.List(ctx, risk.ListFilter{Category: dbx.RiskCategoryAvailability})
+	got, err = store.List(ctx, risk.ListFilter{Categories: []string{"availability"}})
 	if err != nil {
 		t.Fatalf("List category=availability: %v", err)
 	}
