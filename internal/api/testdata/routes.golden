@@ -185,6 +185,9 @@ GET /v1/scopes/cells
 GET /v1/scopes/dimensions
 GET /v1/search
 GET /v1/themes
+DELETE /v1/themes/{ref}
+PATCH /v1/themes/{ref}
+POST /v1/themes
 GET /v1/upcoming
 GET /v1/vendors
 GET /v1/vendors/burndown
