@@ -216,9 +216,11 @@ Responses:
 
 ### Versioning + supersession
 
-- Re-upload with the same `bundle_id` creates a **new row** and sets the prior row's `superseded_by` to the new row's id in the same transaction (AC-6).
+- Re-upload with the same `bundle_id` creates a **new row** and sets the prior row's `superseded_by` to the new row's id in the same transaction (AC-6). Two exceptions:
+  - A byte-identical `control.yaml` is a no-op: the active row is returned unchanged (slice 068).
+  - A `control.yaml` that differs from the active version's **only in the top-level `description`** (rewording, reflow, adding or removing it) updates the active row in place. The control id and version stay the same, so owners, evidence, exceptions and links stay attached. The response is `200` with the existing `control_id` and `version` and no `superseded_id`. Any other change, including `title` or a nested `evidence_queries[].description`, still creates a new version. See `docs/audit-log/1908-control-description-in-place-decisions.md`.
 - The partial unique index `controls_one_active_version_per_bundle` guarantees only one active version per `(tenant_id, bundle_id)`.
-- The full manifest YAML is stored verbatim on every version (`bundle_manifest_yaml`) plus its sha256 hex (`bundle_manifest_hash`) so auditors can prove byte-exact reproducibility.
+- The full manifest YAML is stored verbatim on every version (`bundle_manifest_yaml`) plus its sha256 hex (`bundle_manifest_hash`) so auditors can prove byte-exact reproducibility. A description-only update overwrites both on the active row, so the prior manifest, its hash, uploader and upload time are first copied, in the same transaction, to the append-only `control_manifest_revisions` table. That table is where a control's prose history lives. A concurrent upload that supersedes the row mid-update returns `409`.
 
 ---
 

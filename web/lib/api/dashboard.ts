@@ -71,6 +71,8 @@ export type DashboardRisk = {
   methodology: string;
   inherent_score: unknown;
   treatment: string;
+  // #1746: proposed | approved when treatment is accept; absent otherwise.
+  acceptance_status?: "proposed" | "approved";
   treatment_owner: string;
   residual_score: unknown;
   review_due_at?: string;

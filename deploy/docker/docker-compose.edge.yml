@@ -288,6 +288,10 @@ services:
         condition: service_healthy
       minio-edge:
         condition: service_healthy
+      # security-atlas#1928: atlas probes the artifacts bucket at boot and
+      # exits if it is missing, so wait for the one-shot that creates it.
+      minio-mc-edge:
+        condition: service_completed_successfully
       # Slice 473 — FAIL-CLOSED migrate gate (P0-473-1, load-bearing).
       # atlas-edge does NOT serve until atlas-migrate-edge has exited 0.
       # On a Watchtower binary update both advance together; the binary
@@ -332,6 +336,11 @@ services:
       ATLAS_SECURE_COOKIES: ${ATLAS_SECURE_COOKIES:-true}
       ARTIFACTS_BUCKET: ${ARTIFACTS_BUCKET:-atlas-artifacts}
       ARTIFACTS_S3_ENDPOINT: http://minio-edge:9000
+      # security-atlas#1928: the endpoint baked into presigned download
+      # URLs. http://minio-edge:9000 only resolves inside the compose network, so
+      # browsers need the host-published MinIO address here (e.g.
+      # http://<host>:9000). Empty falls back to ARTIFACTS_S3_ENDPOINT.
+      ARTIFACTS_S3_PUBLIC_ENDPOINT: ${ARTIFACTS_S3_PUBLIC_ENDPOINT:-}
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:?}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:?}
       AWS_REGION: ${AWS_REGION:-us-east-1}

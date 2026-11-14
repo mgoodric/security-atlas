@@ -222,6 +222,10 @@ func (h *Handler) UploadBundle(w http.ResponseWriter, r *http.Request) {
 			// Canvas invariant 7 — refuse to persist a control without an
 			// anchor. 404 communicates "the thing you referenced isn't there".
 			httpresp.WriteError(w, http.StatusNotFound, err.Error())
+		case errors.Is(err, control.ErrControlChangedConcurrently):
+			// Issue #1908 — a concurrent upload superseded the version a
+			// description-only edit was updating in place.
+			httpresp.WriteError(w, http.StatusConflict, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "persist", err)
 		}
