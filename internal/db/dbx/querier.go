@@ -799,6 +799,13 @@ type Querier interface {
 	// Created/Updated/Unchanged and by the traversal handler for the
 	// code-form path (e.g., resolve "CC6.6" against the current SOC 2 version).
 	GetFrameworkRequirementByVersionAndCode(ctx context.Context, arg GetFrameworkRequirementByVersionAndCodeParams) (FrameworkRequirement, error)
+	// ===== framework_scope_applicability (issue #1787) =====
+	//
+	// Statement of Applicability decisions on a framework-scope revision. The
+	// guard + reset triggers on the table enforce the workflow; these queries
+	// only read and upsert.
+	GetFrameworkRequirementInVersion(ctx context.Context, arg GetFrameworkRequirementInVersionParams) (GetFrameworkRequirementInVersionRow, error)
+	GetFrameworkScopeApplicability(ctx context.Context, arg GetFrameworkScopeApplicabilityParams) (FrameworkScopeApplicability, error)
 	// AC-13: historical query — return the row that was the active scope at the
 	// supplied timestamp. The row whose effective_from <= as_of AND (the row was
 	// not yet superseded at as_of OR was never superseded).
@@ -2111,6 +2118,10 @@ type Querier interface {
 	// shape includes never-toggled flags too.
 	ListFeatureFlags(ctx context.Context, tenantID pgtype.UUID) ([]FeatureFlag, error)
 	ListFrameworkRequirementsForVersion(ctx context.Context, frameworkVersionID pgtype.UUID) ([]FrameworkRequirement, error)
+	// Every requirement of the framework version, with the revision's decision
+	// when one exists. A NULL framework_scope_id (no revision in force) returns
+	// every requirement undecided.
+	ListFrameworkScopeApplicability(ctx context.Context, arg ListFrameworkScopeApplicabilityParams) ([]ListFrameworkScopeApplicabilityRow, error)
 	ListFrameworkScopeWorkflowLog(ctx context.Context, arg ListFrameworkScopeWorkflowLogParams) ([]FrameworkScopeWorkflowLog, error)
 	// Newest first. Caller filters by framework_version + state in the
 	// application layer because sqlc-static optional WHERE is noisy; the row
@@ -3326,6 +3337,7 @@ type Querier interface {
 	// points_of_focus (#1731) is the JSON array of SOC 2 points of focus rolled up
 	// onto this criterion; '[]' for a requirement with none.
 	UpsertFrameworkRequirement(ctx context.Context, arg UpsertFrameworkRequirementParams) (FrameworkRequirement, error)
+	UpsertFrameworkScopeApplicability(ctx context.Context, arg UpsertFrameworkScopeApplicabilityParams) (FrameworkScopeApplicability, error)
 	// Insert or update a framework_versions row. Same deterministic-id pattern
 	// as UpsertFramework above (avoids the NULLs-distinct gotcha on natural-key
 	// ON CONFLICT targets).

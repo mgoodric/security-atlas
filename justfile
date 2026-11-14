@@ -151,17 +151,14 @@ tidy:
 # Integration tests use it.
 # ATLAS_DEV_URL is a separate ephemeral Postgres for `atlas migrate diff`.
 
-# Apply bootstrap roles, then the versioned SQL migrations in order.
-# Plain psql for slice 002 — one migration doesn't justify a versioning tool.
-# A real migration runner lands when slice N adds the second migration.
+# Apply bootstrap roles, then every forward SQL migration not yet recorded in
+# the `schema_migrations` ledger. This is the same script the compose
+# `atlas-migrate` service runs, so it is safe to re-run: files already in the
+# ledger are skipped, and a failing file exits non-zero with no ledger row.
+# A database migrated before this recipe used the ledger has no
+# `schema_migrations` rows; drop and recreate it (`just db-down && just db-up`).
 migrate-up:
-    psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
-    for f in migrations/sql/*.sql; do \
-        case "$f" in *.down.sql) ;; *) \
-            echo "applying $f"; \
-            psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; \
-        ;; esac; \
-    done
+    REPO_ROOT="$PWD" sh deploy/docker/bootstrap/migrate.sh
 
 # Roll back: apply the latest .down.sql in reverse-timestamp order.
 migrate-down:

@@ -34,7 +34,7 @@ import (
 //     transaction — never a superuser connection.
 //
 // Exit codes (AC-1): 0 = clean (zero mismatches), 1 = mismatches found,
-// 2 = operational error (no DSN, connect failure, missing --tenant, etc.).
+// 2 = operational error (no DSN, connect failure, no implied tenant, etc.).
 
 const (
 	verifyExitClean      = 0
@@ -63,14 +63,16 @@ longer matches — a silently-corrupted or tampered record. Read-only.
 
 Run tenant-scoped (--tenant <uuid>, as atlas_app under RLS) or, as a
 super-admin, across all tenants (--all-tenants, via the documented
-atlas_service_account role). Exits non-zero if any mismatch is found.`,
+atlas_service_account role). With neither flag, it verifies the install's
+only tenant; when several tenants exist it lists them and asks for
+--tenant. Exits non-zero if any mismatch is found.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runEvidenceVerify(cmd, &f)
 		},
 	}
 
-	cmd.Flags().StringVar(&f.tenant, "tenant", "", "tenant UUID to verify (RLS-scoped walk as atlas_app)")
+	cmd.Flags().StringVar(&f.tenant, "tenant", "", tenantFlagHelp+" (RLS-scoped walk as atlas_app)")
 	cmd.Flags().BoolVar(&f.allTenants, "all-tenants", false, "verify every tenant (super-admin; uses atlas_service_account)")
 	cmd.Flags().Int32Var(&f.pageSize, "page-size", verifyDefaultPage, "rows per keyset page (streaming walk)")
 	cmd.Flags().StringVar(&f.dsn, "dsn", "", "Postgres DSN (env: DATABASE_URL_APP, then DATABASE_URL)")
@@ -91,9 +93,6 @@ func runEvidenceVerify(cmd *cobra.Command, f *evidenceVerifyFlags) error {
 		return nil
 	}
 
-	if f.tenant == "" && !f.allTenants {
-		return operError("one of --tenant <uuid> or --all-tenants is required")
-	}
 	if f.tenant != "" && f.allTenants {
 		return operError("--tenant and --all-tenants are mutually exclusive")
 	}
@@ -124,6 +123,14 @@ func runEvidenceVerify(cmd *cobra.Command, f *evidenceVerifyFlags) error {
 		return operError("connect: %v", err)
 	}
 	defer pool.Close()
+
+	if f.tenant == "" && !f.allTenants {
+		tenant, err := chooseTenant(ctx, errOut, "--tenant", "", newTenantResolver(pool))
+		if err != nil {
+			return operError("%v", err)
+		}
+		f.tenant = tenant.String()
+	}
 
 	res, err := verifyLedger(context.Background(), pool, f)
 	if err != nil {

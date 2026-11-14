@@ -429,9 +429,10 @@ func main() {
 			// #1850: one live super_admins re-check, on the same
 			// BYPASSRLS pool the resolver uses to set the claim, for
 			// every path that would otherwise carry a stale claim:
-			// token exchange, device-code approval, and the JWT
-			// middleware (which drops the claim from a demoted user's
-			// live tokens). A nil pool fails closed.
+			// token exchange, device-code approval, /oauth/introspect
+			// (#1870), and the JWT middleware (which drops the claim
+			// from a demoted user's live tokens). A nil pool fails
+			// closed.
 			superAdmins := superadmin.NewDBChecker(resolverAuthPool)
 			ep.AttachSuperAdminChecker(superAdmins)
 			srv.AttachSuperAdminChecker(superAdmins)
@@ -478,7 +479,8 @@ func main() {
 				Issuer: issuer,
 			})
 			introspectEP := oauthapi.NewIntrospectionEndpoint(signer, revokedStore, clients, oauthapi.IntrospectionEndpointConfig{
-				Issuer: issuer,
+				Issuer:      issuer,
+				SuperAdmins: superAdmins,
 			})
 			oauthHandler.AttachRevocationEndpoint(revokeEP)
 			oauthHandler.AttachIntrospectionEndpoint(introspectEP)
