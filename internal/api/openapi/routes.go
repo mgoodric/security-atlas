@@ -101,7 +101,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/controls/drift", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/drift"},
 	{Method: "GET", Path: "/v1/controls/export", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/export"},
 	{Method: "GET", Path: "/v1/controls/history/export", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/history/export"},
-	{Method: "GET", Path: "/v1/controls/imports/settings", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/imports/settings — the tenant's control import settings: the local-Ollama rerank opt-in (tenant-admin; #2079)"},
+	{Method: "GET", Path: "/v1/controls/imports/settings", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/imports/settings — the tenant's control import settings, including the local-Ollama rerank opt-in (tenant-admin; #2079)"},
 	{Method: "GET", Path: "/v1/controls/imports/{id}", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/imports/{id} — an import batch with its counts, staged rows and rejected rows (#1779)"},
 	{Method: "GET", Path: "/v1/controls/imports/{id}/rows", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/imports/{id}/rows — staged rows with ranked SCF anchor candidates, filterable by status and no_candidate_reaches (#1780)"},
 	{Method: "GET", Path: "/v1/controls/checklist/{generationID}", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/checklist/{generationID}"},

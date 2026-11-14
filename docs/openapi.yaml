@@ -2197,7 +2197,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/controls/imports/settings:
     get:
-      summary: "GET /v1/controls/imports/settings — the tenant's control import settings: the local-Ollama rerank opt-in (tenant-admin; #2079)"
+      summary: GET /v1/controls/imports/settings — the tenant's control import settings, including the local-Ollama rerank opt-in (tenant-admin; #2079)
       tags: [controls]
       operationId: get-v1-controls-imports-settings
       security:
