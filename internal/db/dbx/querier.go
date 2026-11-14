@@ -1747,6 +1747,7 @@ type Querier interface {
 	//   1. audit_periods           — period_end is the audit's "report due" date
 	//   2. exceptions              — expires_at is the waiver-lapse date
 	//   3. policies                — next_review_at is the next review date
+	//                                 (published only; overdue / due-soon, #1806)
 	//   4. vendors                 — last_review_date + review_cadence interval is
 	//      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
 	//      vendor branch so the two surfaces cannot drift (slice 675).
@@ -2135,6 +2136,17 @@ type Querier interface {
 	// when one exists. A NULL framework_scope_id (no revision in force) returns
 	// every requirement undecided.
 	ListFrameworkScopeApplicability(ctx context.Context, arg ListFrameworkScopeApplicabilityParams) ([]ListFrameworkScopeApplicabilityRow, error)
+	// Requirements a scope revision excludes that still have passing controls
+	// behind them (#1789). A requirement is in contradiction when it is excluded
+	// on this revision and at least one active tenant control reaches it through
+	// the crosswalk with a passing latest evaluation. Computed on read.
+	//
+	// The crosswalk is read through effective_fw_to_scf_edges, the one place
+	// edge eligibility is decided (#1796). Tenant overlay edges (#1735) join
+	// that view, so they count as a path here with no change to this query.
+	// "Latest evaluation" is per control across scope cells, as in
+	// FrameworkPosture.
+	ListFrameworkScopeContradictions(ctx context.Context, arg ListFrameworkScopeContradictionsParams) ([]pgtype.UUID, error)
 	ListFrameworkScopeWorkflowLog(ctx context.Context, arg ListFrameworkScopeWorkflowLogParams) ([]FrameworkScopeWorkflowLog, error)
 	// Newest first. Caller filters by framework_version + state in the
 	// application layer because sqlc-static optional WHERE is noisy; the row
@@ -2977,7 +2989,8 @@ type Querier interface {
 	// effective_date, published_at, published_by. predecessor_id is never
 	// changed: a first version keeps NULL, and a later version (a draft
 	// created with predecessor_id set) keeps the link to the row that Part 1
-	// just superseded (#1747).
+	// just superseded (#1747). next_review_at is the review date the publisher
+	// names (#1806); NULL when none is given.
 	PublishApprovedPolicy(ctx context.Context, arg PublishApprovedPolicyParams) (Policy, error)
 	// Flip a DRAFT pack to PUBLISHED, stamping the publish metadata. The
 	// `status = 'draft'` predicate makes this idempotent-safe: a second publish
@@ -3217,6 +3230,11 @@ type Querier interface {
 	// parent lifecycle).
 	UpdateMetaRiskInherentScore(ctx context.Context, arg UpdateMetaRiskInherentScoreParams) (Risk, error)
 	UpdateOrgUnit(ctx context.Context, arg UpdateOrgUnitParams) (OrgUnit, error)
+	// #1806 — change the review date of a published policy in place. It is not
+	// a new version: the row keeps its id, version and approval. The caller
+	// writes the policy_audit_log row in the same transaction. Only the
+	// published chain tip has a review due, so other states do not match.
+	UpdatePolicyNextReviewAt(ctx context.Context, arg UpdatePolicyNextReviewAtParams) (Policy, error)
 	// Resolve a `needs_mapping` question by assigning it an SCF anchor.
 	UpdateQuestionAnchor(ctx context.Context, arg UpdateQuestionAnchorParams) (QuestionnaireQuestion, error)
 	// Full-update path (PATCH handler reads existing, mutates fields, writes).

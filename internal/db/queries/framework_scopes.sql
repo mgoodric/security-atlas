@@ -229,3 +229,37 @@ WHERE fsa.tenant_id = @tenant_id
   AND fsa.framework_requirement_id = @framework_requirement_id
   AND fsa.decision = 'excluded'
   AND fs.state = 'activated';
+
+-- name: ListFrameworkScopeContradictions :many
+-- Requirements a scope revision excludes that still have passing controls
+-- behind them (#1789). A requirement is in contradiction when it is excluded
+-- on this revision and at least one active tenant control reaches it through
+-- the crosswalk with a passing latest evaluation. Computed on read.
+--
+-- The crosswalk is read through effective_fw_to_scf_edges, the one place
+-- edge eligibility is decided (#1796). Tenant overlay edges (#1735) join
+-- that view, so they count as a path here with no change to this query.
+-- "Latest evaluation" is per control across scope cells, as in
+-- FrameworkPosture.
+SELECT DISTINCT fsa.framework_requirement_id
+FROM framework_scope_applicability fsa
+JOIN effective_fw_to_scf_edges e
+  ON e.framework_requirement_id = fsa.framework_requirement_id
+ AND e.relationship_type <> 'no_relationship'
+ AND e.mapping_tier <> 'rejected'
+JOIN controls c
+  ON c.scf_anchor_id = e.scf_anchor_id
+ AND c.tenant_id = @tenant_id
+ AND c.lifecycle_state = 'active'
+ AND c.superseded_by IS NULL
+JOIN LATERAL (
+    SELECT ce.result
+    FROM control_evaluations ce
+    WHERE ce.tenant_id = @tenant_id
+      AND ce.control_id = c.id
+    ORDER BY ce.evaluated_at DESC, ce.id DESC
+    LIMIT 1
+) latest ON latest.result = 'pass'
+WHERE fsa.tenant_id = @tenant_id
+  AND fsa.framework_scope_id = @framework_scope_id
+  AND fsa.decision = 'excluded';

@@ -99,6 +99,7 @@ sql:
       - "migrations/sql/20260821000000_effective_fw_to_scf_edges.sql"
       - "migrations/sql/20260822000000_framework_scope_applicability.sql"
       - "migrations/sql/20260825000000_controls_external_refs.sql"
+      - "migrations/sql/20260903000000_policy_review_dates.sql"
       - "migrations/sql/20260906000000_framework_requirement_points_of_focus.sql"
     queries: "internal/db/queries"
     gen:

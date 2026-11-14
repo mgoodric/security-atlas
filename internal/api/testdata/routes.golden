@@ -134,6 +134,7 @@ GET /v1/me/notifications
 GET /v1/me/preferences
 GET /v1/me/sessions
 GET /v1/me/slack-channel
+GET /v1/me/tenancy
 GET /v1/me/tenants
 GET /v1/me/webhook-channel
 GET /v1/metrics
@@ -206,6 +207,7 @@ PATCH /v1/me/preferences
 PATCH /v1/org_units/{id}
 PATCH /v1/oscal/component-claims/{id}/scf-anchor
 PATCH /v1/policies/{id}/approve
+PATCH /v1/policies/{id}/review-date
 PATCH /v1/policies/{id}/submit
 PATCH /v1/questionnaires/{id}/answers/{qid}
 PATCH /v1/risks/{id}

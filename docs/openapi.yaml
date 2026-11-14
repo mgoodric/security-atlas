@@ -3693,6 +3693,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/me/tenancy:
+    get:
+      summary: GET /v1/me/tenancy
+      tags: [me]
+      operationId: get-v1-me-tenancy
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/me/tenants:
     get:
       summary: GET /v1/me/tenants
@@ -4279,6 +4293,26 @@ paths:
       summary: POST /v1/policies/{id}/publish
       tags: [policies]
       operationId: post-v1-policies-id-publish
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/policies/{id}/review-date:
+    patch:
+      summary: PATCH /v1/policies/{id}/review-date — change a published policy's next_review_at, audit-logged (#1806)
+      tags: [policies]
+      operationId: patch-v1-policies-id-review-date
       security:
         - bearer: []
       parameters:
