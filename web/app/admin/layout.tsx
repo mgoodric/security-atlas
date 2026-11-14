@@ -1,8 +1,9 @@
 // Slice 060 — admin section shell + RBAC gate.
 //
-// AC-7: all /admin/* routes are gated by slice 035's `admin` role (which
-// for the purposes of slice 060 binds to slice 034's `cred.IsAdmin` flag
-// — the user-role grant table is not yet wired into the admin section).
+// AC-7: all /admin/* routes are gated on `is_admin`, which the JWT
+// middleware maps from `atlas:super_admin` only. A tenant `admin` role
+// grant does not open this section: /admin is super-admin only (#2216,
+// Matt 2026-11-14; docs/audit-log/2216-admin-gate-decisions.md).
 // Non-admin signed-in users see a 403 explanation page, NOT a 404, so
 // they can tell "this exists, I just can't reach it." Per the slice spec.
 //
@@ -117,11 +118,12 @@ function ForbiddenPanel() {
       <Alert variant="destructive">
         <AlertTitle>This section is admin-only</AlertTitle>
         <AlertDescription>
-          Your account is signed in but does not carry the{" "}
+          Your account is signed in but is not a platform super-admin, which
+          this section requires; a tenant{" "}
           <code className="rounded bg-muted px-1 py-0.5 text-xs">admin</code>{" "}
-          role. Contact your tenant admin to request access. The admin section
-          covers SSO setup, user role assignment, API key lifecycle, feature
-          flag toggles, and the unified audit log.
+          role is not enough. Contact your platform operator to request access.
+          The admin section covers SSO setup, user role assignment, API key
+          lifecycle, feature flag toggles, and the unified audit log.
         </AlertDescription>
       </Alert>
       <Card>
