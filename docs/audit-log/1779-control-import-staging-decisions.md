@@ -145,9 +145,12 @@ highest cell index, so a single cell in column XFD yields 16,384 entries.
 Each row is trimmed to its last non-blank cell and copied, and a row with a
 value past column 200 is refused with 400 (`ErrTooManyColumns`).
 
-These match #1960's questionnaire fix, but the code is not shared:
-`internal/questionnaire`'s `checkDecompressedSize` is unexported and still
-uses the plain running sum.
+All three bounds now come from the shared `internal/xlsxbound` package
+(#1983). The importer passes its own `Limits` (64 MiB decompressed, 16 MiB
+per XML part, 5,000 rows, 200 columns) and maps xlsxbound's errors to its
+own sentinels, so the API's statuses and messages are unchanged. A first
+version of this fix carried its own copy of the pre-check and row reader;
+it was removed once the shared package landed.
 
 `detection_tier_actual = manual_review` (PR review) ·
 `detection_tier_target = unit` (a parser test with a compressible workbook).

@@ -244,10 +244,10 @@ func TestParseXLSXRefusesDecompressionBomb(t *testing.T) {
 	}
 }
 
-// TestCheckUnzipSizeDoesNotWrap: a 10 MiB entry followed by one declaring
+// TestParseXLSXUnzipSumDoesNotWrap: a 10 MiB entry followed by one declaring
 // 2^64 - 5 MiB sums to 5 MiB in uint64, under the cap, if the check adds
 // before comparing.
-func TestCheckUnzipSizeDoesNotWrap(t *testing.T) {
+func TestParseXLSXUnzipSumDoesNotWrap(t *testing.T) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for _, size := range []uint64{10 << 20, ^uint64(0) - (5 << 20) + 1} {
@@ -263,7 +263,7 @@ func TestCheckUnzipSizeDoesNotWrap(t *testing.T) {
 	if err := zw.Close(); err != nil {
 		t.Fatalf("close zip: %v", err)
 	}
-	if err := checkUnzipSize(buf.Bytes()); !errors.Is(err, ErrWorkbookTooLarge) {
+	if _, err := ParseXLSX(buf.Bytes()); !errors.Is(err, ErrWorkbookTooLarge) {
 		t.Fatalf("wrapping sizes err = %v, want ErrWorkbookTooLarge", err)
 	}
 }
