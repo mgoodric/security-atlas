@@ -93,6 +93,11 @@ func resolveCategory(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, re
 	if err != nil {
 		return Category{}, "", fmt.Errorf("resolve risk category: %w", err)
 	}
+	if row.Archived {
+		// #1810: archived categories stay on the risks that have them but
+		// take no new assignments.
+		return Category{}, "", &ArchivedCategoryError{Slug: row.Slug}
+	}
 	enum := dbx.RiskCategory(row.Slug)
 	if !slices.Contains(dbx.AllRiskCategoryValues(), enum) {
 		// Only the seeded slugs exist until the management API lands with

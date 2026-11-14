@@ -241,6 +241,23 @@ WITH unified AS (
         (to_jsonb(fs) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'framework_scope_id' - 'subject_module')::jsonb AS payload_json
     FROM framework_scope_workflow_log fs
+
+    UNION ALL
+
+    -- 11. taxonomy_audit_log (#1810)
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'taxonomy'::text AS kind,
+        subject_kind   AS target_type,
+        subject_id::text AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(tx) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'subject_id' - 'subject_kind' - 'subject_module')::jsonb AS payload_json
+    FROM taxonomy_audit_log tx
 )
 -- Slice 129 — LEFT JOIN onto users to resolve human-readable actor_name.
 --

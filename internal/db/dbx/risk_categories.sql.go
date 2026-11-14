@@ -11,6 +11,111 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const clearRiskCategoryDefault = `-- name: ClearRiskCategoryDefault :exec
+UPDATE org_risk_categories
+SET is_default = false
+WHERE tenant_id = $1 AND is_default AND id <> $2
+`
+
+type ClearRiskCategoryDefaultParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// First half of moving the default: the partial unique index allows one
+// default per tenant, so the old one is cleared before the new one is set.
+func (q *Queries) ClearRiskCategoryDefault(ctx context.Context, arg ClearRiskCategoryDefaultParams) error {
+	_, err := q.db.Exec(ctx, clearRiskCategoryDefault, arg.TenantID, arg.ID)
+	return err
+}
+
+const createRiskCategory = `-- name: CreateRiskCategory :one
+INSERT INTO org_risk_categories (tenant_id, slug, name, description)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
+`
+
+type CreateRiskCategoryParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	Slug        string      `json:"slug"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+}
+
+func (q *Queries) CreateRiskCategory(ctx context.Context, arg CreateRiskCategoryParams) (OrgRiskCategory, error) {
+	row := q.db.QueryRow(ctx, createRiskCategory,
+		arg.TenantID,
+		arg.Slug,
+		arg.Name,
+		arg.Description,
+	)
+	var i OrgRiskCategory
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.Archived,
+		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteRiskCategory = `-- name: DeleteRiskCategory :exec
+DELETE FROM org_risk_categories
+WHERE tenant_id = $1 AND id = $2
+`
+
+type DeleteRiskCategoryParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) DeleteRiskCategory(ctx context.Context, arg DeleteRiskCategoryParams) error {
+	_, err := q.db.Exec(ctx, deleteRiskCategory, arg.TenantID, arg.ID)
+	return err
+}
+
+const insertTaxonomyAuditLog = `-- name: InsertTaxonomyAuditLog :exec
+
+INSERT INTO taxonomy_audit_log (
+    tenant_id, subject_kind, subject_id, subject_slug, action, before, after, actor
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+`
+
+type InsertTaxonomyAuditLogParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	SubjectKind string      `json:"subject_kind"`
+	SubjectID   pgtype.UUID `json:"subject_id"`
+	SubjectSlug string      `json:"subject_slug"`
+	Action      string      `json:"action"`
+	Before      []byte      `json:"before"`
+	After       []byte      `json:"after"`
+	Actor       string      `json:"actor"`
+}
+
+// ===== taxonomy_audit_log (#1810) =====
+//
+// Append-only. Written in the same transaction as the change it records.
+func (q *Queries) InsertTaxonomyAuditLog(ctx context.Context, arg InsertTaxonomyAuditLogParams) error {
+	_, err := q.db.Exec(ctx, insertTaxonomyAuditLog,
+		arg.TenantID,
+		arg.SubjectKind,
+		arg.SubjectID,
+		arg.SubjectSlug,
+		arg.Action,
+		arg.Before,
+		arg.After,
+		arg.Actor,
+	)
+	return err
+}
+
 const listRiskCategories = `-- name: ListRiskCategories :many
 SELECT id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
 FROM org_risk_categories
@@ -49,6 +154,110 @@ func (q *Queries) ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) 
 	return items, nil
 }
 
+const listRiskCategoriesWithUsage = `-- name: ListRiskCategoriesWithUsage :many
+
+SELECT
+    c.id, c.tenant_id, c.slug, c.name, c.description, c.archived, c.is_default, c.created_at, c.updated_at,
+    (SELECT count(*) FROM risks r
+        WHERE r.tenant_id = c.tenant_id AND r.category_id = c.id)::bigint AS risk_count,
+    (SELECT count(DISTINCT ra.rule_id) FROM risk_aggregations ra
+        JOIN risks p ON p.tenant_id = ra.tenant_id AND p.id = ra.parent_risk_id
+        WHERE ra.tenant_id = c.tenant_id AND ra.rule_id IS NOT NULL
+          AND p.category_id = c.id)::bigint AS rule_count
+FROM org_risk_categories c
+WHERE c.tenant_id = $1
+  AND ($2::boolean OR NOT c.archived)
+ORDER BY lower(c.name), c.slug
+`
+
+type ListRiskCategoriesWithUsageParams struct {
+	TenantID        pgtype.UUID `json:"tenant_id"`
+	IncludeArchived bool        `json:"include_archived"`
+}
+
+type ListRiskCategoriesWithUsageRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	TenantID    pgtype.UUID        `json:"tenant_id"`
+	Slug        string             `json:"slug"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Archived    bool               `json:"archived"`
+	IsDefault   bool               `json:"is_default"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	RiskCount   int64              `json:"risk_count"`
+	RuleCount   int64              `json:"rule_count"`
+}
+
+// ===== #1810: category management =====
+// The tenant's categories with how many risks reference each and how many
+// aggregation rules have produced a meta-risk in it. Archived categories
+// are included only when include_archived is true.
+func (q *Queries) ListRiskCategoriesWithUsage(ctx context.Context, arg ListRiskCategoriesWithUsageParams) ([]ListRiskCategoriesWithUsageRow, error) {
+	rows, err := q.db.Query(ctx, listRiskCategoriesWithUsage, arg.TenantID, arg.IncludeArchived)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRiskCategoriesWithUsageRow
+	for rows.Next() {
+		var i ListRiskCategoriesWithUsageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Slug,
+			&i.Name,
+			&i.Description,
+			&i.Archived,
+			&i.IsDefault,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.RiskCount,
+			&i.RuleCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockRiskCategory = `-- name: LockRiskCategory :one
+SELECT id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
+FROM org_risk_categories
+WHERE tenant_id = $1
+  AND (slug = $2::text OR id::text = $2::text)
+LIMIT 1
+FOR UPDATE
+`
+
+type LockRiskCategoryParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Ref      string      `json:"ref"`
+}
+
+// Resolve a category by slug or id and lock it for the rest of the
+// transaction, so a management write sees the row it changes.
+func (q *Queries) LockRiskCategory(ctx context.Context, arg LockRiskCategoryParams) (OrgRiskCategory, error) {
+	row := q.db.QueryRow(ctx, lockRiskCategory, arg.TenantID, arg.Ref)
+	var i OrgRiskCategory
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.Archived,
+		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const resolveRiskCategory = `-- name: ResolveRiskCategory :one
 SELECT id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
 FROM org_risk_categories
@@ -82,6 +291,35 @@ func (q *Queries) ResolveRiskCategory(ctx context.Context, arg ResolveRiskCatego
 	return i, err
 }
 
+const riskCategoryUsage = `-- name: RiskCategoryUsage :one
+SELECT
+    (SELECT count(*) FROM risks r
+        WHERE r.tenant_id = $1 AND r.category_id = $2)::bigint AS risk_count,
+    (SELECT count(DISTINCT ra.rule_id) FROM risk_aggregations ra
+        JOIN risks p ON p.tenant_id = ra.tenant_id AND p.id = ra.parent_risk_id
+        WHERE ra.tenant_id = $1 AND ra.rule_id IS NOT NULL
+          AND p.category_id = $2)::bigint AS rule_count
+`
+
+type RiskCategoryUsageParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+type RiskCategoryUsageRow struct {
+	RiskCount int64 `json:"risk_count"`
+	RuleCount int64 `json:"rule_count"`
+}
+
+// The usage counts for one category, as ListRiskCategoriesWithUsage
+// computes them. Delete reads this after locking the row.
+func (q *Queries) RiskCategoryUsage(ctx context.Context, arg RiskCategoryUsageParams) (RiskCategoryUsageRow, error) {
+	row := q.db.QueryRow(ctx, riskCategoryUsage, arg.TenantID, arg.ID)
+	var i RiskCategoryUsageRow
+	err := row.Scan(&i.RiskCount, &i.RuleCount)
+	return i, err
+}
+
 const seedRiskCategories = `-- name: SeedRiskCategories :exec
 
 SELECT seed_risk_categories($1::uuid)
@@ -99,4 +337,100 @@ SELECT seed_risk_categories($1::uuid)
 func (q *Queries) SeedRiskCategories(ctx context.Context, tenantID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, seedRiskCategories, tenantID)
 	return err
+}
+
+const setRiskCategoryArchived = `-- name: SetRiskCategoryArchived :one
+UPDATE org_risk_categories
+SET archived = $3
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
+`
+
+type SetRiskCategoryArchivedParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+	Archived bool        `json:"archived"`
+}
+
+func (q *Queries) SetRiskCategoryArchived(ctx context.Context, arg SetRiskCategoryArchivedParams) (OrgRiskCategory, error) {
+	row := q.db.QueryRow(ctx, setRiskCategoryArchived, arg.TenantID, arg.ID, arg.Archived)
+	var i OrgRiskCategory
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.Archived,
+		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setRiskCategoryDefault = `-- name: SetRiskCategoryDefault :one
+UPDATE org_risk_categories
+SET is_default = true
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
+`
+
+type SetRiskCategoryDefaultParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) SetRiskCategoryDefault(ctx context.Context, arg SetRiskCategoryDefaultParams) (OrgRiskCategory, error) {
+	row := q.db.QueryRow(ctx, setRiskCategoryDefault, arg.TenantID, arg.ID)
+	var i OrgRiskCategory
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.Archived,
+		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateRiskCategoryText = `-- name: UpdateRiskCategoryText :one
+UPDATE org_risk_categories
+SET name = $3, description = $4
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
+`
+
+type UpdateRiskCategoryTextParams struct {
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	ID          pgtype.UUID `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+}
+
+// Rename: name and description only. The slug is immutable (trigger).
+func (q *Queries) UpdateRiskCategoryText(ctx context.Context, arg UpdateRiskCategoryTextParams) (OrgRiskCategory, error) {
+	row := q.db.QueryRow(ctx, updateRiskCategoryText,
+		arg.TenantID,
+		arg.ID,
+		arg.Name,
+		arg.Description,
+	)
+	var i OrgRiskCategory
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.Archived,
+		&i.IsDefault,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

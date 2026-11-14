@@ -48,6 +48,14 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	// #1745). Literal-segment route declared before the generic
 	// /v1/risks/{id}.
 	root.Get("/v1/risks/categories", risksH.ListCategories)
+	// #1810: category management. Literal segments, so chi matches them
+	// ahead of the generic /v1/risks/{id} routes.
+	root.Post("/v1/risks/categories", risksH.CreateCategory)
+	root.Patch("/v1/risks/categories/{ref}", risksH.RenameCategory)
+	root.Delete("/v1/risks/categories/{ref}", risksH.DeleteCategory)
+	root.Post("/v1/risks/categories/{ref}/archive", risksH.ArchiveCategory)
+	root.Post("/v1/risks/categories/{ref}/unarchive", risksH.UnarchiveCategory)
+	root.Post("/v1/risks/categories/{ref}/set-default", risksH.SetDefaultCategory)
 	// Slice 136: risk register data export (CSV / JSON / XLSX). Reuses
 	// the slice 135 data-export library + slice 145 concurrency cap.
 	// Literal-segment route declared before the generic /v1/risks/{id}
