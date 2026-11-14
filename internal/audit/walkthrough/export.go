@@ -17,14 +17,8 @@ import (
 	"errors"
 	"fmt"
 	"html"
-	"os"
 	"strings"
 	"time"
-
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/page"
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/chromedp/remote"
 
 	"github.com/mgoodric/security-atlas/internal/pdfrender"
 )
@@ -41,8 +35,9 @@ const PDFTimeout = pdfrender.DefaultRenderTimeout
 
 // ErrChromeUnavailable is returned when chromedp could not launch a
 // browser. Handlers map this to 503 so operators can run the platform
-// without Chrome (PDF endpoint disabled) until they install it.
-var ErrChromeUnavailable = errors.New("walkthrough: chrome browser unavailable")
+// without Chrome (PDF endpoint disabled) until they install it. It is the
+// shared pdfrender sentinel.
+var ErrChromeUnavailable = pdfrender.ErrChromeUnavailable
 
 // ExportJSON is the slice-027 export wire shape -- intentionally a
 // superset of what slice 030 (OSCAL assessment-results) will consume so a
@@ -142,61 +137,12 @@ func RenderPDF(ctx context.Context, w Walkthrough) ([]byte, error) {
 	}
 	htmlDoc := buildPDFHTML(w)
 	return pdfrender.Default().Do(ctx, func(ctx context.Context) ([]byte, error) {
-		return renderWalkthroughBytes(ctx, htmlDoc)
-	})
-}
-
-// renderWalkthroughBytes performs the actual chromedp render under the deadline
-// the limiter has already applied to ctx.
-func renderWalkthroughBytes(ctx context.Context, htmlDoc string) ([]byte, error) {
-	var browserCtx context.Context
-	var cancelAlloc context.CancelFunc
-	var cancelBrowser context.CancelFunc
-	if debugURL := os.Getenv("CHROME_DEBUG_URL"); debugURL != "" {
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = remote.NewAllocator(ctx, debugURL)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	} else {
-		opts := append(
-			chromedp.DefaultExecAllocatorOptions[:],
-			chromedp.NoSandbox,
-			chromedp.DisableGPU,
-			chromedp.Headless,
-			chromedp.Flag("hide-scrollbars", true),
-		)
-		var allocCtx context.Context
-		allocCtx, cancelAlloc = chromedp.NewExecAllocator(ctx, opts...)
-		browserCtx, cancelBrowser = chromedp.NewContext(allocCtx)
-	}
-	defer cancelBrowser()
-	defer cancelAlloc()
-
-	dataURL := "data:text/html;charset=utf-8," + encodeForDataURL(htmlDoc)
-	var buf []byte
-	err := chromedp.Do(browserCtx,
-		chromedp.Navigate(dataURL),
-		chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
-			res, err := cdp.Call(ctx, t, page.PrintToPDF, page.PrintToPDFParams{
-				PrintBackground: new(true),
-				MarginTop:       new(0.4),
-				MarginBottom:    new(0.4),
-				MarginLeft:      new(0.4),
-				MarginRight:     new(0.4),
-			})
-			buf = res.Data
-			return err
-		}),
-	)
-	if err != nil {
-		if isChromeUnavailable(err) {
-			return nil, fmt.Errorf("%w: %v", ErrChromeUnavailable, err)
+		buf, err := pdfrender.PrintHTML(ctx, htmlDoc)
+		if err != nil {
+			return nil, fmt.Errorf("walkthrough: %w", err)
 		}
-		return nil, fmt.Errorf("walkthrough: chromedp run: %w", err)
-	}
-	if len(buf) < 5 || string(buf[:5]) != "%PDF-" {
-		return nil, fmt.Errorf("walkthrough: invalid PDF output (len=%d, prefix=%q)", len(buf), safePrefix(buf))
-	}
-	return buf, nil
+		return buf, nil
+	})
 }
 
 // buildPDFHTML renders the walkthrough as a minimal HTML document.
@@ -379,35 +325,6 @@ func renderInline(s string) string {
 		i++
 	}
 	return b.String()
-}
-
-func encodeForDataURL(s string) string {
-	r := strings.NewReplacer(
-		"%", "%25",
-		"#", "%23",
-		"&", "%26",
-		"?", "%3F",
-		"\n", "%0A",
-		"\r", "",
-	)
-	return r.Replace(s)
-}
-
-func isChromeUnavailable(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := err.Error()
-	return strings.Contains(msg, "exec:") ||
-		strings.Contains(msg, "executable file not found") ||
-		strings.Contains(msg, "no chrome found")
-}
-
-func safePrefix(b []byte) string {
-	if len(b) > 16 {
-		return string(b[:16])
-	}
-	return string(b)
 }
 
 // ----- visibility helpers (kept here to live next to the export shape) -----

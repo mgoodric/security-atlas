@@ -143,3 +143,33 @@ func TestLocalLogin_AllZerosTenantRefused(t *testing.T) {
 		t.Errorf("explicit all-zeros: got %d %s, want 400", rec.Code, rec.Body.String())
 	}
 }
+
+// #1912: a deactivated user with the right password gets the same 401 as a
+// wrong password. Admin revoke-membership sets status='disabled'; SCIM
+// deprovision sets active=false (and status in lockstep). Either flag alone
+// refuses the login, and no session is minted.
+func TestLocalLogin_DeactivatedUserRefused(t *testing.T) {
+	for name, deactivate := range map[string]string{
+		"status disabled": `UPDATE users SET status = 'disabled' WHERE tenant_id = $1 AND email = $2`,
+		"scim inactive":   `UPDATE users SET active = false WHERE tenant_id = $1 AND email = $2`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			only := uuid.New()
+			h.insertTenant(t, only, "Solo Org", "solo-org", true)
+			h.createLocalUser(t, only)
+			if _, err := h.admin.Exec(context.Background(), deactivate, only, loginEmail); err != nil {
+				t.Fatalf("deactivate: %v", err)
+			}
+
+			rec := postLogin(h.localLoginHandler(), `{"email":"`+loginEmail+`","password":"`+loginPassword+`"}`)
+
+			if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "invalid credentials") {
+				t.Errorf("got %d %s, want 401 invalid credentials", rec.Code, rec.Body.String())
+			}
+			if n := h.count(t, `SELECT COUNT(*) FROM sessions`); n != 0 {
+				t.Errorf("sessions = %d, want 0", n)
+			}
+		})
+	}
+}

@@ -190,7 +190,15 @@ func ForDomainWriter(svc *Service) *Service {
 // fixed system id, the tenant, and the only evidence kinds it may write,
 // so the credential kind-scope check bounds it like a connector key.
 func SystemCredential(id, tenantID string, kinds ...string) credstore.Credential {
-	return credstore.Credential{ID: id, TenantID: tenantID, Kinds: kinds}
+	return credstore.Credential{ID: id, TenantID: tenantID, Kinds: kinds, System: true}
+}
+
+// credentialType is the provenance credential_type for cred.
+func credentialType(cred credstore.Credential) string {
+	if cred.System {
+		return "system"
+	}
+	return "api_key" // OIDC/mTLS land in v2
 }
 
 // PayloadStruct converts a JSON-encodable value (typically a
@@ -446,7 +454,17 @@ type LedgerOptions struct {
 //     an audit row);
 //   - an accepted or deduplicated record is audited inside tx, so the
 //     audit row and the ledger row commit or roll back together. A failed
-//     audit insert fails the call.
+//     audit insert fails the call. Its external audit-sink event waits in
+//     the AuditOutbox ctx carries (WithAuditOutbox) until the caller
+//     flushes it after Commit; ctx without one fails with ErrNoAuditOutbox.
+//
+// Connections: the accepted path does all its database work on tx. The
+// domain-writer kinds are platform schemas, which the schema registry
+// serves from memory, so registration, validation and redaction lookups
+// take no second connection. A refusal does take one, for the audit row
+// that must outlive the caller's rollback; auditWriteTimeout bounds that
+// wait, so a pool exhausted by callers each holding a transaction delays
+// the refusal (and may drop its audit row) but cannot deadlock it.
 //
 // Domain stores must not call dbx.InsertEvidenceRecord or raw-insert into
 // evidence_records; TestNoDirectEvidenceLedgerWrites enforces that.
@@ -458,6 +476,10 @@ func (s *Service) ProcessInTx(ctx context.Context, tx pgx.Tx, rec *evidencev1.Ev
 	}
 	if tx == nil {
 		return Receipt{}, DecisionRejectedInternalError, errors.New("ingest: ProcessInTx needs a transaction")
+	}
+	outbox := auditOutboxFrom(ctx)
+	if outbox == nil {
+		return Receipt{}, DecisionRejectedInternalError, ErrNoAuditOutbox
 	}
 	if tenant, terr := tenancy.TenantFromContext(ctx); terr != nil || !strings.EqualFold(tenant, cred.TenantID) {
 		return Receipt{}, DecisionRejectedUnauthenticated, errors.New("ingest: context tenant does not match credential tenant")
@@ -474,9 +496,11 @@ func (s *Service) ProcessInTx(ctx context.Context, tx pgx.Tx, rec *evidencev1.Ev
 	if deduped {
 		decision = DecisionDeduplicated
 	}
-	if err := s.insertAudit(ctx, dbx.New(tx), cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID); err != nil {
+	entry, err := insertAudit(ctx, dbx.New(tx), cred, rec.IdempotencyKey, rec.EvidenceKind, decision, "", newRecord.ID)
+	if err != nil {
 		return Receipt{}, DecisionRejectedInternalError, fmt.Errorf("ingest: audit row: %w", err)
 	}
+	outbox.add(entry)
 	return receiptFor(cred, newRecord, deduped), decision, nil
 }
 
@@ -693,7 +717,7 @@ func (s *Service) prepare(ctx context.Context, rec *evidencev1.EvidenceRecord, c
 	provenance := map[string]any{
 		"ingestion_path":   s.path,
 		"credential_id":    cred.ID,
-		"credential_type":  "api_key", // OIDC/mTLS land in v2
+		"credential_type":  credentialType(cred),
 		"received_at":      receivedAt.Format(time.RFC3339Nano),
 		"endpoint_version": "v1",
 		"schema_version":   rec.SchemaVersion,
@@ -883,18 +907,25 @@ func (s *Service) writeAudit(ctx context.Context, cred credstore.Credential, ide
 	}
 	tenantCtx, cancel := context.WithTimeout(tenantCtx, auditWriteTimeout)
 	defer cancel()
-	_ = pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
+	var entry unifiedlog.Entry
+	err := pgx.BeginTxFunc(tenantCtx, s.pool, pgx.TxOptions{}, func(tx pgx.Tx) error {
 		if terr := tenancy.ApplyTenant(tenantCtx, tx); terr != nil {
 			return terr
 		}
-		return s.insertAudit(tenantCtx, dbx.New(tx), cred, idem, kind, decision, reason, recordID)
+		var ierr error
+		entry, ierr = insertAudit(tenantCtx, dbx.New(tx), cred, idem, kind, decision, reason, recordID)
+		return ierr
 	})
+	if err == nil {
+		sink.EmitDefault(tenantCtx, entry)
+	}
 }
 
-// insertAudit inserts one evidence_audit_log row through q and, once the
-// row is in, fans it out to the external audit sink. writeAudit calls it
-// in its own transaction; ProcessInTx calls it inside the caller's.
-func (s *Service) insertAudit(ctx context.Context, q *dbx.Queries, cred credstore.Credential, idem, kind string, decision Decision, reason string, recordID pgtype.UUID) error {
+// insertAudit inserts one evidence_audit_log row through q and returns
+// the external audit-sink event for it. The caller emits that event once
+// the row's transaction commits: writeAudit after its own transaction,
+// ProcessInTx through the caller's AuditOutbox (#1933).
+func insertAudit(ctx context.Context, q *dbx.Queries, cred credstore.Credential, idem, kind string, decision Decision, reason string, recordID pgtype.UUID) (unifiedlog.Entry, error) {
 	var idemPtr, kindPtr *string
 	if idem != "" {
 		idemPtr = &idem
@@ -913,12 +944,12 @@ func (s *Service) insertAudit(ctx context.Context, q *dbx.Queries, cred credstor
 		EvidenceKind:   kindPtr,
 		RecordID:       recordID,
 	}); err != nil {
-		return err
+		return unifiedlog.Entry{}, err
 	}
-	// Slice 126: fan out the audit row to the external sink. The
-	// canonical Entry shape mirrors slice 124's unifiedlog.Entry;
-	// payload fields not present on the per-domain table land in
-	// PayloadJSON. Non-blocking: this never fails the ingest path.
+	// Slice 126: the audit row's external-sink event. The canonical
+	// Entry shape mirrors slice 124's unifiedlog.Entry; payload fields
+	// not present on the per-domain table land in PayloadJSON. Emitting
+	// is non-blocking and never fails the ingest path.
 	tenantUUID, _ := uuid.Parse(cred.TenantID)
 	recordIDStr := ""
 	if recordID.Valid {
@@ -930,7 +961,7 @@ func (s *Service) insertAudit(ctx context.Context, q *dbx.Queries, cred credstor
 		"evidence_kind":   kind,
 		"reason_code":     truncate(reason, 1024),
 	})
-	sink.EmitDefault(ctx, unifiedlog.Entry{
+	return unifiedlog.Entry{
 		OccurredAt:    time.Now().UTC(),
 		ActorID:       cred.ID,
 		TenantID:      tenantUUID,
@@ -941,8 +972,7 @@ func (s *Service) insertAudit(ctx context.Context, q *dbx.Queries, cred credstor
 		RowID:         auditID,
 		SubjectModule: unifiedlog.SubjectModuleCore,
 		PayloadJSON:   payload,
-	})
-	return nil
+	}, nil
 }
 
 // missingField mirrors slice 003's check; duplicating it here keeps the
