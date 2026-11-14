@@ -2473,6 +2473,8 @@ type Querier interface {
 	// meta-risk and a team-level meta-risk).
 	ListRiskAggregationParents(ctx context.Context, arg ListRiskAggregationParentsParams) ([]ListRiskAggregationParentsRow, error)
 	ListRiskAuditLog(ctx context.Context, arg ListRiskAuditLogParams) ([]RiskAuditLog, error)
+	// The tenant's categories, active and archived, by display name.
+	ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) ([]OrgRiskCategory, error)
 	// The children of a parent risk with the fields the hierarchy views show
 	// (#1748). rule_id NULL means the link was made by hand.
 	ListRiskChildLinks(ctx context.Context, arg ListRiskChildLinksParams) ([]ListRiskChildLinksRow, error)
@@ -3044,6 +3046,10 @@ type Querier interface {
 	// Citation-resolution gate: does this id name a tenant-owned policy? Used when
 	// a generated item cites a linked policy id. Cross-tenant ids are RLS-invisible.
 	ResolveChecklistPolicy(ctx context.Context, arg ResolveChecklistPolicyParams) (pgtype.UUID, error)
+	// Find one of the tenant's categories by slug or by id (its text form).
+	// Slugs cannot be UUID-shaped strings that collide with another row's id
+	// in practice, and the tenant predicate keeps both arms tenant-local.
+	ResolveRiskCategory(ctx context.Context, arg ResolveRiskCategoryParams) (OrgRiskCategory, error)
 	// The resolver's core lookup: the DISTINCT set of roles a tenant's mappings
 	// grant for a given source (idp_config_id) and group-set. idp_config_id is
 	// matched with IS NOT DISTINCT FROM so NULL (SCIM) only matches NULL mappings
@@ -3126,6 +3132,16 @@ type Querier interface {
 	// aggregate_severity is MAX(per-risk severity) across the cell's risks —
 	// the canvas §6.6 default `max` severity function, conservative.
 	RiskThemeOrgUnitGrid(ctx context.Context, tenantID pgtype.UUID) ([]RiskThemeOrgUnitGridRow, error)
+	// #1809: organisation-owned risk categories (expand step of #1745).
+	//
+	// Every query runs under `tenancy.ApplyTenant` as `atlas_app`; the
+	// four-policy RLS on org_risk_categories scopes rows to the caller's tenant.
+	// The explicit tenant_id predicates keep the plans on the
+	// (tenant_id, slug) unique index.
+	// Idempotently give the tenant the seven seeded categories (slugs equal
+	// the old risk_category enum values, `operational` the default). A no-op
+	// for a tenant that already has them.
+	SeedRiskCategories(ctx context.Context, tenantID pgtype.UUID) error
 	// Set the predecessor's retirement deadline on rotation. After retires_at the
 	// predecessor's bearer no longer authenticates (credstore.Authenticate enforces).
 	SetAPIKeyRetiresAt(ctx context.Context, arg SetAPIKeyRetiresAtParams) error

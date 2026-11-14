@@ -162,6 +162,7 @@ GET /v1/questionnaires/{id}/suggestions 8
 GET /v1/requirements/{id}/anchors 8
 GET /v1/requirements/{id}/coverage 8
 GET /v1/risks 8
+GET /v1/risks/categories 8
 GET /v1/risks/export 8
 GET /v1/risks/heatmap 8
 GET /v1/risks/theme-heatmap 8

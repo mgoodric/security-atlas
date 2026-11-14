@@ -541,6 +541,15 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 2b. The tenant's seven seeded risk categories (#1809): slugs equal
+	//     the old risk_category enum values, `operational` the default.
+	if _, err := tx.Exec(r.Context(),
+		`SELECT seed_risk_categories($1)`, tenantID,
+	); err != nil {
+		httperr.WriteInternal(w, r, "seed risk categories", err)
+		return
+	}
+
 	// 3. INSERT scope_dimensions: one builtin `environment` dimension.
 	//    Mirrors deploy/docker/bootstrap/seed.sql. The dimension is
 	//    required so the seed scope_cell below has a dimension to
