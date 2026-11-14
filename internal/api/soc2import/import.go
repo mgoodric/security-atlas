@@ -2,8 +2,10 @@ package soc2import
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -225,6 +227,10 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	reqIDByCode := make(map[string]pgtype.UUID, len(cw.Requirements))
 	for _, r := range cw.Requirements {
 		reqID := uuidFromString("req-" + cw.FrameworkSlug + "-" + cw.FrameworkVersion + "-" + r.Code)
+		pofJSON, err := marshalPointsOfFocus(r.PointsOfFocus)
+		if err != nil {
+			return Report{}, fmt.Errorf("crosswalk: encode points of focus for %s: %w", r.Code, err)
+		}
 
 		existing, lookupErr := q.GetFrameworkRequirementByVersionAndCode(ctx, dbx.GetFrameworkRequirementByVersionAndCodeParams{
 			FrameworkVersionID: version.ID,
@@ -233,7 +239,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 		switch {
 		case lookupErr == nil:
 			reqIDByCode[r.Code] = existing.ID
-			if existing.Title == r.Title && existing.Body == r.Body {
+			if existing.Title == r.Title && existing.Body == r.Body && pointsOfFocusEqual(existing.PointsOfFocus, r.PointsOfFocus) {
 				report.RequirementsUnchanged++
 				continue
 			}
@@ -243,6 +249,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				Code:               r.Code,
 				Title:              r.Title,
 				Body:               r.Body,
+				PointsOfFocus:      pofJSON,
 			}); err != nil {
 				return Report{}, fmt.Errorf("crosswalk: update requirement %s: %w", r.Code, err)
 			}
@@ -254,6 +261,7 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				Code:               r.Code,
 				Title:              r.Title,
 				Body:               r.Body,
+				PointsOfFocus:      pofJSON,
 			})
 			if err != nil {
 				return Report{}, fmt.Errorf("crosswalk: insert requirement %s: %w", r.Code, err)
@@ -394,6 +402,36 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	}
 
 	return report, nil
+}
+
+// marshalPointsOfFocus encodes a requirement's points of focus for the
+// framework_requirements.points_of_focus JSONB column; none encodes as [].
+func marshalPointsOfFocus(pofs []PointOfFocus) ([]byte, error) {
+	if len(pofs) == 0 {
+		return []byte("[]"), nil
+	}
+	return json.Marshal(pofs)
+}
+
+// pointsOfFocusEqual compares a stored points_of_focus column with incoming
+// points of focus. It decodes rather than comparing bytes because Postgres
+// re-renders JSONB; an undecodable stored value counts as different.
+func pointsOfFocusEqual(stored []byte, incoming []PointOfFocus) bool {
+	var got []PointOfFocus
+	if len(stored) > 0 {
+		if err := json.Unmarshal(stored, &got); err != nil {
+			return false
+		}
+	}
+	if len(got) != len(incoming) {
+		return false
+	}
+	for i := range got {
+		if got[i].Code != incoming[i].Code || !slices.Equal(got[i].SCFAnchors, incoming[i].SCFAnchors) {
+			return false
+		}
+	}
+	return true
 }
 
 func edgeContentEqual(row dbx.FwToScfEdge, relType dbx.StrmRelationshipType, strength float64, srcAttr dbx.CrosswalkSourceAttribution, rationale string) bool {

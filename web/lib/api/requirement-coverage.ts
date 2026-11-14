@@ -27,6 +27,13 @@ export type RequirementAnchorWire = {
   rationale?: string;
 };
 
+// RequirementPointOfFocusWire mirrors soc2import.PointOfFocus: one SOC 2
+// point of focus and the SCF anchors the source mapped it to.
+export type RequirementPointOfFocusWire = {
+  code: string;
+  scf_anchors: string[];
+};
+
 // RequirementControlWire mirrors `controlWire` (the RLS-scoped controls[]
 // rows) in the same handler.
 export type RequirementControlWire = {
@@ -64,6 +71,9 @@ export type RequirementCoverage = {
     code: string;
     title: string;
     body?: string;
+    // SOC 2 points of focus rolled up onto this criterion (#1731). Omitted
+    // when there are none; metadata only, never counted as requirements.
+    points_of_focus?: RequirementPointOfFocusWire[];
   };
   anchors: RequirementAnchorWire[];
   controls: RequirementControlWire[];

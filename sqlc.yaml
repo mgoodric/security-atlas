@@ -97,6 +97,7 @@ sql:
       - "migrations/sql/20260819000000_policy_import.sql"
       - "migrations/sql/20260820000000_control_manifest_revisions.sql"
       - "migrations/sql/20260821000000_effective_fw_to_scf_edges.sql"
+      - "migrations/sql/20260906000000_framework_requirement_points_of_focus.sql"
     queries: "internal/db/queries"
     gen:
       go:

@@ -2306,6 +2306,7 @@ type FrameworkRequirement struct {
 	Body               string             `json:"body"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	PointsOfFocus      []byte             `json:"points_of_focus"`
 }
 
 type FrameworkScope struct {

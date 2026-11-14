@@ -157,6 +157,9 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 				report.FrameworkSlug, report.FrameworkVersion, report.FrameworkVersionID, report.IsNewVersion)
 			fmt.Printf("requirements created=%d updated=%d unchanged=%d\n",
 				report.RequirementsCreated, report.RequirementsUpdated, report.RequirementsUnchanged)
+			for _, line := range cw.PointsOfFocusRollUp.Summary() {
+				fmt.Println(line)
+			}
 			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d\n",
 				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped))
 			for _, sk := range report.EdgesSkipped {

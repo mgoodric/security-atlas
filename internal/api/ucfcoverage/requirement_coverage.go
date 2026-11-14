@@ -94,6 +94,8 @@ func (h *Handler) RequirementCoverage(w http.ResponseWriter, r *http.Request) {
 			Code:  req.Code,
 			Title: req.Title,
 			Body:  req.Body,
+
+			PointsOfFocus: pointsOfFocusWire(req.PointsOfFocus),
 		},
 		"anchors":           anchorWiresFromAnchors(anchors),
 		"controls":          controlWiresFromRows(controls),

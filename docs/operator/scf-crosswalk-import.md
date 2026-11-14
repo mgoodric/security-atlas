@@ -164,6 +164,57 @@ All XLSX imports land at `source_attribution=community_draft`. The database
 trust tier for new edges remains the catalog default draft tier; promotion to
 reviewed or verified is a human governance step.
 
+## SOC 2 Points of Focus
+
+SCF's SOC 2 column lists the Trust Services Criteria (`CC1.1`) and, mixed in
+with them, their points of focus (`CC1.1-POF1`). An auditor tests against the
+criteria; the points of focus are guidance on what a criterion covers. Imported
+one-for-one, SOC 2 would carry several hundred "requirements" and coverage
+would count every point of focus in both the numerator and the denominator.
+
+XLSX imports therefore roll each point of focus up into its criterion. Any
+code of the form `<criterion>-POF<n>` is treated this way:
+
+- **It never becomes a requirement.** It is not in `requirement_count`, in
+  coverage or posture, or in requirement lists.
+- **Its mapping becomes an edge from the criterion.** If the criterion already
+  has its own edge to the same SCF anchor, that edge wins. If only points of
+  focus map the anchor, the strongest of their edges is used (the first one on
+  a tie). The criterion never gets two edges to one anchor. A rolled-up edge's
+  rationale starts with `Rolled up from SOC 2 point of focus <code>.`
+- **The criterion records it as metadata.** Each requirement's
+  `points_of_focus` holds the code of each point of focus and the SCF anchors
+  it mapped to. `GET /v1/requirements/{id}/coverage` and
+  `GET /v1/requirements/{id}/anchors` return it on the requirement; the
+  field is omitted when there are none.
+- **A missing criterion is created.** If the column names a point of focus
+  but never its criterion, the criterion is created (titled by its code, like
+  every workbook requirement) and the import summary says so.
+
+The import summary reports the roll-up, for example:
+
+```text
+points of focus rolled up=3 into criteria=2
+criterion CC2.1 created from its points of focus (the column has no bare CC2.1)
+```
+
+The metadata is written when a requirement is first inserted, because a
+frozen version's requirements can't be updated afterwards. SOC 2 versions
+imported before this roll-up existed are not rewritten; import the workbook
+into a new version to get the rolled-up shape.
+
+YAML crosswalks are not rolled up. A YAML requirement may list its points of
+focus explicitly, but none of the bundled files does:
+
+```yaml
+requirements:
+  - code: CC1.1
+    title: COSO Principle 1
+    points_of_focus:
+      - code: CC1.1-POF1
+        scf_anchors: [GOV-01]
+```
+
 ## Provenance Precedence
 
 An import never lowers an existing edge's provenance. Precedence is

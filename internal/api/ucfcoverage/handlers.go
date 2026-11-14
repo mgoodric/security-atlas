@@ -47,6 +47,7 @@ package ucfcoverage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -255,6 +256,21 @@ type requirementWire struct {
 	Code  string `json:"code"`
 	Title string `json:"title"`
 	Body  string `json:"body,omitempty"`
+	// PointsOfFocus is the requirement's rolled-up SOC 2 points of focus
+	// (#1731): [{code, scf_anchors[]}]. Omitted when there are none, so the
+	// requirement object keeps its all-string shape for every other
+	// framework. Metadata only; points of focus are never requirements.
+	PointsOfFocus json.RawMessage `json:"points_of_focus,omitempty"`
+}
+
+// pointsOfFocusWire passes the stored points_of_focus JSONB through, or nil
+// (omitted) when the requirement has none.
+func pointsOfFocusWire(stored []byte) json.RawMessage {
+	var pofs []json.RawMessage
+	if err := json.Unmarshal(stored, &pofs); err != nil || len(pofs) == 0 {
+		return nil
+	}
+	return json.RawMessage(stored)
 }
 
 // anchorWire is the shape of an SCF anchor in slice-008 responses.
