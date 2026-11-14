@@ -130,6 +130,7 @@ func newRootCmd() *cobra.Command {
 	root.AddCommand(newOscalSignCmd())
 	root.AddCommand(newFeaturesCmd())
 	root.AddCommand(newTaxonomyCmd())
+	root.AddCommand(newMappingsCmd())
 	root.AddCommand(newBootstrapCmd())
 	root.AddCommand(newOAuthCmd())
 	root.AddCommand(newKeysCmd())
