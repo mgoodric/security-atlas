@@ -474,6 +474,11 @@ LIMIT $1;
 -- omission. The slice 008 traversal views filter no_relationship
 -- out for coverage UI; the export does NOT.
 --
+-- Issue #1826: mapping_tier is projected so a reviewer-rejected edge
+-- appears in the export marked `rejected` rather than looking like a
+-- live mapping. Rejected edges are NOT filtered out — the export is
+-- the full catalog record, tier included.
+--
 -- Sorted by anchor_scf_id then framework_slug + framework_version
 -- + requirement_code so the rows group by anchor (matches the
 -- visual ordering of the JSON projection's nested array).
@@ -489,7 +494,8 @@ SELECT
     e.relationship_type,
     e.strength,
     e.source_attribution,
-    e.rationale
+    e.rationale,
+    e.mapping_tier
 FROM fw_to_scf_edges e
 JOIN scf_anchors a                ON a.id = e.scf_anchor_id
 JOIN framework_versions afv       ON afv.id = a.framework_version_id

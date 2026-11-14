@@ -12,6 +12,7 @@ DELETE /v1/decisions/{id}/links/{kind}/{targetID} 8
 DELETE /v1/me/sessions 8
 DELETE /v1/me/sessions/{id} 8
 DELETE /v1/org_units/{id} 8
+DELETE /v1/policies/{id} 8
 DELETE /v1/risks/{id} 8
 DELETE /v1/risks/{id}/children/{child_id} 8
 DELETE /v1/risks/{id}/themes/{theme} 8
@@ -121,6 +122,7 @@ GET /v1/incidents/{id} 8
 GET /v1/features/enabled 8
 GET /v1/framework-scopes 8
 GET /v1/framework-scopes/applicability 8
+GET /v1/framework-scopes/applicability/export 8
 GET /v1/framework-scopes/{id} 8
 GET /v1/framework-scopes/{id}/applicability 8
 GET /v1/frameworks 8

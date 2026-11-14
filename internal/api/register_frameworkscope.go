@@ -32,6 +32,8 @@ func (s *Server) registerFrameworkScope(root *chi.Mux) {
 	// Issue #1787: Statement of Applicability decisions on a revision. The
 	// literal /applicability segment resolves before /{id}.
 	root.Get("/v1/framework-scopes/applicability", fwH.ApplicabilityAsOf)
+	// Issue #1791: SoA export as CSV or xlsx.
+	root.Get("/v1/framework-scopes/applicability/export", fwH.ExportApplicability)
 	root.Get("/v1/framework-scopes/{id}/applicability", fwH.ListApplicability)
 	root.Put("/v1/framework-scopes/{id}/applicability/{requirement_id}", fwH.SetApplicability)
 	// Issue #1790: bulk-set and CSV import of decisions.

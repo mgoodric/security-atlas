@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 )
@@ -187,6 +188,67 @@ func TestHTTP_Applicability_ImportCSV(t *testing.T) {
 	}
 	if got := applicabilityUpdates(t, tenant, scopeID) - before; got != 2 {
 		t.Fatalf("import wrote %d history entries, want 2", got)
+	}
+}
+
+// An activated revision's decisions are frozen: bulk and import both
+// return 409 and write no history.
+func TestHTTP_Applicability_BulkImportFrozen(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := soaTenant(t, admin)
+	f := seedSoAFixture(t, admin, tenant)
+	ts, bearer, approver := setupHTTPServer(t, tenant)
+	c := soaClient{t: t, base: ts.URL, bearer: bearer}
+	scopeID := c.createScope(f.FrameworkVersionID, "ISMS")
+	applyFixtureDecisions(c, f, scopeID)
+	c.transition(scopeID, "submit", bearer, "")
+	c.transition(scopeID, "approve", approver, "")
+	c.transition(scopeID, "activate", bearer, fmt.Sprintf(`{"effective_from":%q}`, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)))
+	listBefore := c.mustList(scopeID)
+	logBefore := applicabilityUpdates(t, tenant, scopeID)
+
+	body := fmt.Sprintf(`{"requirement_ids":[%q],"decision":"applicable"}`, f.Req["R-03"])
+	resp, payload := doJSON(t, http.MethodPost, ts.URL+"/v1/framework-scopes/"+scopeID+"/applicability/bulk", bearer, body)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("bulk on activated revision: status %d, want 409; body %s", resp.StatusCode, payload)
+	}
+	if code, _, payload := c.importCSV(scopeID, "requirement_code,decision\nR-03,applicable\n"); code != http.StatusConflict {
+		t.Fatalf("import on activated revision: status %d, want 409; body %s", code, payload)
+	}
+
+	if after := c.mustList(scopeID); after.Counts != listBefore.Counts || after.FrameworkScope.State != "activated" {
+		t.Fatalf("after refused writes: state %s counts %+v, want activated %+v", after.FrameworkScope.State, after.Counts, listBefore.Counts)
+	}
+	if got := applicabilityUpdates(t, tenant, scopeID); got != logBefore {
+		t.Fatalf("history entries %d -> %d, want unchanged", logBefore, got)
+	}
+}
+
+// Bulk case-folds its decision, as the import does, and refuses a body over
+// 1 MiB with 413.
+func TestHTTP_Applicability_BulkDecisionCaseAndBodyCap(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := soaTenant(t, admin)
+	f := seedSoAFixture(t, admin, tenant)
+	ts, bearer, _ := setupHTTPServer(t, tenant)
+	c := soaClient{t: t, base: ts.URL, bearer: bearer}
+	scopeID := c.createScope(f.FrameworkVersionID, "ISMS")
+	url := ts.URL + "/v1/framework-scopes/" + scopeID + "/applicability/bulk"
+
+	body := fmt.Sprintf(`{"requirement_ids":[%q],"decision":" Excluded ","justification":"No premises"}`, f.Req["R-03"])
+	if resp, payload := doJSON(t, http.MethodPost, url, bearer, body); resp.StatusCode != http.StatusOK {
+		t.Fatalf("bulk with `Excluded`: status %d, want 200; body %s", resp.StatusCode, payload)
+	}
+	for _, r := range c.mustList(scopeID).Requirements {
+		if r.Code == "R-03" && (r.Decision == nil || *r.Decision != "excluded") {
+			t.Fatalf("R-03 = %v, want excluded", r.Decision)
+		}
+	}
+
+	big := fmt.Sprintf(`{"requirement_ids":[%q],"decision":"excluded","justification":%q}`,
+		f.Req["R-04"], strings.Repeat("x", 1<<20))
+	if resp, payload := doJSON(t, http.MethodPost, url, bearer, big); resp.StatusCode != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized bulk: status %d, want 413; body %.200s", resp.StatusCode, payload)
 	}
 }
 

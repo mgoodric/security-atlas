@@ -8,6 +8,10 @@
 //
 //	draft        -> under_review -> approved -> published -> superseded   (happy path)
 //
+// A draft can also be discarded (DiscardDraft, #1987): the row is deleted
+// and the discard is recorded in policy_audit_log. No other state is
+// deletable.
+//
 // Each version is its own row. A later version starts as a draft created
 // with predecessor_id naming the published chain tip; publishing it
 // transitions the prior row to 'superseded' and the draft row to
@@ -98,10 +102,10 @@ var (
 	// predecessor that is not the published chain tip. HTTP 409.
 	ErrPredecessorNotPublished = errors.New("policy: predecessor must be a published policy")
 	// ErrPredecessorTaken is returned when the predecessor already has a
-	// successor (version chains are linear). HTTP 409. There is no API to
-	// discard a draft, so the message points the caller at the existing
-	// successor rather than a discard step.
-	ErrPredecessorTaken = errors.New("policy: predecessor already has a successor version; continue that version (submit, approve, publish) instead of creating another, since drafts cannot be discarded through the API")
+	// successor (version chains are linear). HTTP 409. The message points
+	// the caller at both ways forward: continue the existing successor, or
+	// discard it while it is still a draft (DELETE /v1/policies/{id}, #1987).
+	ErrPredecessorTaken = errors.New("policy: predecessor already has a successor version; continue that version (submit, approve, publish), or if it is still a draft discard it with DELETE /v1/policies/{id} and create the new version again")
 	// ErrInvalidSourceAttribution is returned when Create is given a
 	// source_attribution outside the accepted set, or 'imported' (which
 	// only Import sets). HTTP 400.
@@ -517,6 +521,60 @@ func (s *Store) SetNextReviewAt(ctx context.Context, id uuid.UUID, next *time.Ti
 			NewNextReviewAt:      row.NextReviewAt,
 		}); err != nil {
 			return fmt.Errorf("review date: audit log: %w", err)
+		}
+		out = policyFromRow(row)
+		return nil
+	})
+	return out, err
+}
+
+// auditActionDraftDiscarded is the policy_audit_log action for a discarded
+// draft (#1987).
+const auditActionDraftDiscarded = "draft_discarded"
+
+// DiscardDraft deletes a policy that is still a draft and appends a
+// policy_audit_log row naming the actor and the discarded title and
+// version, in one transaction (#1987). Deleting a next-version draft frees
+// its predecessor's successor slot, so a new version can be created.
+// ErrNotFound when the id does not resolve; ErrWrongState when the policy
+// has left draft (submitted, approved, published or superseded rows are
+// never deleted). Returns the row as it was before the delete.
+func (s *Store) DiscardDraft(ctx context.Context, id uuid.UUID, actor string) (Policy, error) {
+	if actor == "" {
+		return Policy{}, ErrCreatedByRequired
+	}
+	var out Policy
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		row, err := q.DeleteDraftPolicy(ctx, dbx.DeleteDraftPolicyParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(id),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				// Either missing row or not a draft. Probe to disambiguate.
+				_, gErr := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+					TenantID: pgUUID(tenantID),
+					ID:       pgUUID(id),
+				})
+				if errors.Is(gErr, pgx.ErrNoRows) {
+					return ErrNotFound
+				}
+				if gErr != nil {
+					return fmt.Errorf("discard draft: get policy: %w", gErr)
+				}
+				return ErrWrongState
+			}
+			return fmt.Errorf("discard draft: %w", err)
+		}
+		if _, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
+			TenantID:      pgUUID(tenantID),
+			PolicyID:      row.ID,
+			Action:        auditActionDraftDiscarded,
+			Actor:         actor,
+			PolicyTitle:   stringPtr(row.Title),
+			PolicyVersion: stringPtr(row.Version),
+		}); err != nil {
+			return fmt.Errorf("discard draft: audit log: %w", err)
 		}
 		out = policyFromRow(row)
 		return nil

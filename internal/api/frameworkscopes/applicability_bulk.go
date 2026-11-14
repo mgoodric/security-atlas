@@ -15,6 +15,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 
@@ -25,6 +26,10 @@ import (
 
 // maxImportBytes bounds the CSV body. An SoA is hundreds of rows at most.
 const maxImportBytes = 4 << 20
+
+// maxBulkBytes bounds the bulk JSON body: a list of requirement ids plus one
+// justification. 1 MiB is thousands of ids.
+const maxBulkBytes = 1 << 20
 
 type bulkDecisionReq struct {
 	RequirementIDs    []string `json:"requirement_ids"`
@@ -71,12 +76,19 @@ func (h *Handler) BulkSetApplicability(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req bulkDecisionReq
-	dec := json.NewDecoder(r.Body)
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBulkBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, "bulk body exceeds 1 MiB")
+			return
+		}
 		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body: "+err.Error())
 		return
 	}
+	// Case-folded and trimmed, as the CSV import treats its decision cell.
+	req.Decision = strings.ToLower(strings.TrimSpace(req.Decision))
 	if len(req.RequirementIDs) == 0 {
 		httpresp.WriteError(w, http.StatusBadRequest, "requirement_ids must list at least one requirement")
 		return
