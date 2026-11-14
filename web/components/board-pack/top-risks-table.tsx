@@ -5,6 +5,8 @@
 
 import { cn } from "@/lib/utils";
 
+import { TONE_CHIP } from "./tone";
+
 export type RiskAgingRow = {
   id: string;
   title: string;
@@ -17,18 +19,18 @@ export type RiskAgingRow = {
 // Keyed on the bare treatment: the board label carries an acceptance
 // status suffix ("accept (proposed)", #1746), stripped before lookup.
 const treatmentTone: Record<string, string> = {
-  untreated: "bg-slate-100 text-slate-700",
-  mitigate: "bg-rose-50 text-rose-700",
-  accept: "bg-sky-50 text-sky-700",
-  transfer: "bg-violet-50 text-violet-700",
-  avoid: "bg-amber-50 text-amber-700",
+  untreated: TONE_CHIP.neutral,
+  mitigate: TONE_CHIP.critical,
+  accept: TONE_CHIP.info,
+  transfer: TONE_CHIP.progress,
+  avoid: TONE_CHIP.warning,
 };
 
 export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
   if (!risks || risks.length === 0) {
     return (
       <p
-        className="rounded-md border border-dashed border-slate-200 p-4 text-sm text-slate-500"
+        className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground"
         data-testid="top-risks-empty"
       >
         No top risks aging in this period.
@@ -37,7 +39,7 @@ export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
   }
   return (
     <table className="w-full text-sm" data-testid="top-risks-table">
-      <thead className="border-b border-slate-200 text-[11px] uppercase tracking-wider text-slate-500">
+      <thead className="border-b border-border text-[11px] uppercase tracking-wider text-muted-foreground">
         <tr>
           <th className="pb-2 pr-3 text-left font-medium">Risk</th>
           <th className="pb-2 pr-3 text-left font-medium">Treatment</th>
@@ -45,12 +47,12 @@ export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
           <th className="pb-2 text-right font-medium">Open</th>
         </tr>
       </thead>
-      <tbody className="divide-y divide-slate-100">
+      <tbody className="divide-y divide-border">
         {risks.map((risk) => (
           <tr key={risk.id}>
             <td className="py-3 pr-3">
-              <div className="font-medium text-slate-900">{risk.title}</div>
-              <div className="font-mono text-[11px] text-slate-400">
+              <div className="font-medium text-foreground">{risk.title}</div>
+              <div className="font-mono text-[11px] text-muted-foreground">
                 {risk.id}
                 {risk.category ? ` · ${risk.category}` : ""}
               </div>
@@ -58,18 +60,18 @@ export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
             <td className="py-3 pr-3">
               <span
                 className={cn(
-                  "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
+                  "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium",
                   treatmentTone[risk.treatment.split(" ")[0]] ??
-                    "bg-slate-100 text-slate-700",
+                    TONE_CHIP.neutral,
                 )}
               >
                 {risk.treatment}
               </span>
             </td>
-            <td className="py-3 pr-3 text-right font-mono text-slate-700">
+            <td className="py-3 pr-3 text-right font-mono text-foreground">
               {risk.residual_severity.toFixed(2)}
             </td>
-            <td className="py-3 text-right font-mono text-slate-600">
+            <td className="py-3 text-right font-mono text-muted-foreground">
               {risk.age_days} d
             </td>
           </tr>
