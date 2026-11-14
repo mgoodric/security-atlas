@@ -124,17 +124,14 @@ type ImplicitTenantResolver interface {
 }
 
 // PoolImplicitTenantResolver resolves the implicit tenant with
-// tenancy.ResolveImplicitTenant. Q must be a BYPASSRLS connection: the
-// question is asked before any tenant context exists.
+// tenancy.ResolveImplicitTenantID, the bounded id-only query (#1913). Q must
+// be a BYPASSRLS connection: the question is asked before any tenant
+// context exists.
 type PoolImplicitTenantResolver struct{ Q tenancy.Querier }
 
 // ImplicitTenant implements ImplicitTenantResolver.
 func (p PoolImplicitTenantResolver) ImplicitTenant(ctx context.Context) (uuid.UUID, error) {
-	ref, err := tenancy.ResolveImplicitTenant(ctx, p.Q)
-	if err != nil {
-		return uuid.Nil, err
-	}
-	return ref.ID, nil
+	return tenancy.ResolveImplicitTenantID(ctx, p.Q)
 }
 
 // AttachImplicitTenantResolver lets POST /auth/local/login and the
