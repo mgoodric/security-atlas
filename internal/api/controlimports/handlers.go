@@ -125,6 +125,9 @@ func writeStageError(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, controlimport.ErrUploadTooLarge):
 		httpresp.WriteError(w, http.StatusRequestEntityTooLarge, sizeCapMessage())
+	case errors.Is(err, controlimport.ErrWorkbookTooLarge):
+		httpresp.WriteError(w, http.StatusRequestEntityTooLarge,
+			fmt.Sprintf("workbook expands past the %d MiB uncompressed cap; split it into smaller files", controlimport.MaxUnzipBytes>>20))
 	case errors.Is(err, controlimport.ErrTooManyRows):
 		httpresp.WriteError(w, http.StatusBadRequest,
 			fmt.Sprintf("control file exceeds the %d-row cap; split it into smaller files", controlimport.MaxRows))

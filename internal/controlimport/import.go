@@ -11,6 +11,7 @@
 package controlimport
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/csv"
 	"errors"
@@ -26,10 +27,15 @@ import (
 const (
 	MaxUploadBytes = 5 * 1024 * 1024
 	MaxRows        = 5000
+	// MaxUnzipBytes caps an XLSX's total uncompressed size, and
+	// MaxUnzipXMLBytes the part of it excelize holds in memory per sheet.
+	MaxUnzipBytes    = 64 << 20
+	MaxUnzipXMLBytes = 16 << 20
 )
 
 var (
 	ErrUploadTooLarge     = errors.New("controlimport: upload exceeds size cap")
+	ErrWorkbookTooLarge   = errors.New("controlimport: workbook exceeds uncompressed size cap")
 	ErrEmptyFile          = errors.New("controlimport: empty control file")
 	ErrNoHeaderRow        = errors.New("controlimport: no recognizable header row")
 	ErrTooManyRows        = errors.New("controlimport: control file exceeds row cap")
@@ -160,6 +166,13 @@ func ParseCSVWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
 }
 
 // ParseXLSXWith parses the first sheet of a workbook with explicit options.
+//
+// An XLSX is a zip, so a 5 MiB upload can inflate to gigabytes. The workbook
+// is refused before excelize opens it when its entries declare more than
+// MaxUnzipBytes in total (archive/zip refuses an entry that inflates past its
+// declared size, so the declaration is binding). excelize gets the same
+// limits as a second layer, and rows are streamed and counted so the row cap
+// stops the read instead of following a full load.
 func ParseXLSXWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
 	if len(raw) == 0 {
 		return nil, ErrEmptyFile
@@ -167,7 +180,13 @@ func ParseXLSXWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
 	if len(raw) > MaxUploadBytes {
 		return nil, ErrUploadTooLarge
 	}
-	f, err := excelize.OpenReader(bytes.NewReader(raw))
+	if err := checkUnzipSize(raw); err != nil {
+		return nil, err
+	}
+	f, err := excelize.OpenReader(bytes.NewReader(raw), excelize.Options{
+		UnzipSizeLimit:    MaxUnzipBytes,
+		UnzipXMLSizeLimit: MaxUnzipXMLBytes,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("controlimport: open xlsx: %w", err)
 	}
@@ -177,11 +196,53 @@ func ParseXLSXWith(raw []byte, opts ParseOptions) (*ParseResult, error) {
 	if len(sheets) == 0 {
 		return nil, ErrEmptyFile
 	}
-	rows, err := f.GetRows(sheets[0])
+	rows, err := readSheetRows(f, sheets[0])
+	if err != nil {
+		return nil, err
+	}
+	return parseRows(rows, "xlsx", opts)
+}
+
+// checkUnzipSize refuses a workbook whose zip entries declare more than
+// MaxUnzipBytes uncompressed in total.
+func checkUnzipSize(raw []byte) error {
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		return fmt.Errorf("controlimport: open xlsx: %w", err)
+	}
+	var total uint64
+	for _, zf := range zr.File {
+		total += zf.UncompressedSize64
+		if total > MaxUnzipBytes {
+			return ErrWorkbookTooLarge
+		}
+	}
+	return nil
+}
+
+// readSheetRows streams a sheet's rows, stopping with ErrTooManyRows at the
+// first row past MaxRows.
+func readSheetRows(f *excelize.File, sheet string) ([][]string, error) {
+	it, err := f.Rows(sheet)
 	if err != nil {
 		return nil, fmt.Errorf("controlimport: read xlsx rows: %w", err)
 	}
-	return parseRows(rows, "xlsx", opts)
+	defer func() { _ = it.Close() }()
+	var rows [][]string
+	for it.Next() {
+		if len(rows) == MaxRows {
+			return nil, ErrTooManyRows
+		}
+		cols, err := it.Columns()
+		if err != nil {
+			return nil, fmt.Errorf("controlimport: read xlsx row: %w", err)
+		}
+		rows = append(rows, cols)
+	}
+	if err := it.Error(); err != nil {
+		return nil, fmt.Errorf("controlimport: read xlsx rows: %w", err)
+	}
+	return rows, nil
 }
 
 // FieldNames lists the canonical field names in a stable order.

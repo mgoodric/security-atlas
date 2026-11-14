@@ -126,6 +126,30 @@ func TestControlsImport_PrintsSummaryFromAPI(t *testing.T) {
 	}
 }
 
+func TestControlsImport_StripsControlCharacters(t *testing.T) {
+	resetControlsAuth(t)
+	api := &fakeImportAPI{}
+	srv := api.server(t, http.StatusCreated, controlimport.Batch{
+		ID: "batch-1", SourceFilename: "c.csv", TotalRows: 1, RejectedCount: 1,
+		Rejected: []controlimport.RejectedRow{{
+			RowNumber: 2, ExternalID: "AC-1\x1b[2J", Reason: controlimport.RejectMissingField,
+			Detail: "missing title\r\nrow 9  FAKE  ok: all good\x1b]0;pwned\x07",
+		}},
+	})
+	sheet := writeSheet(t, "c.csv", "Control ID,Title,Description\n")
+
+	out, err := runImportCmd(t, "--endpoint", srv.URL, "--token", "tok", "controls", "import", sheet, "--framework", "soc2")
+	if err != nil {
+		t.Fatalf("controls import: %v", err)
+	}
+	if strings.ContainsAny(out, "\x1b\r\x07") {
+		t.Errorf("output carries control characters: %q", out)
+	}
+	if strings.Count(out, "\n  row ") != 1 {
+		t.Errorf("a cell forged an extra rejected-row line:\n%s", out)
+	}
+}
+
 func TestControlsImport_SurfacesAPIError(t *testing.T) {
 	resetControlsAuth(t)
 	api := &fakeImportAPI{}

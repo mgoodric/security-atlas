@@ -1,8 +1,10 @@
 package controlimport
 
 import (
+	"archive/zip"
 	"bytes"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -168,6 +170,90 @@ func TestParseRequiresMinimumColumns(t *testing.T) {
 	_, err := ParseCSV([]byte("ID,Title\nAC-1,MFA\n"))
 	if !errors.Is(err, ErrNoHeaderRow) {
 		t.Fatalf("want ErrNoHeaderRow, got %v", err)
+	}
+}
+
+// padXLSX re-zips a workbook with an extra entry of n zero bytes. Zeros
+// deflate about 1000:1, so the result stays small on the wire while its
+// declared uncompressed size is n.
+func padXLSX(t *testing.T, raw []byte, n int) []byte {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		t.Fatalf("read xlsx zip: %v", err)
+	}
+	var out bytes.Buffer
+	zw := zip.NewWriter(&out)
+	for _, f := range zr.File {
+		if err := zw.Copy(f); err != nil {
+			t.Fatalf("copy %s: %v", f.Name, err)
+		}
+	}
+	w, err := zw.Create("xl/media/pad.bin")
+	if err != nil {
+		t.Fatalf("create pad: %v", err)
+	}
+	chunk := make([]byte, 1<<20)
+	for written := 0; written < n; written += len(chunk) {
+		if _, err := w.Write(chunk[:min(len(chunk), n-written)]); err != nil {
+			t.Fatalf("write pad: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return out.Bytes()
+}
+
+// rowsXLSX streams a workbook with a header and n data rows.
+func rowsXLSX(t *testing.T, n int) []byte {
+	t.Helper()
+	f := excelize.NewFile()
+	defer f.Close()
+	sw, err := f.NewStreamWriter(f.GetSheetName(0))
+	if err != nil {
+		t.Fatalf("stream writer: %v", err)
+	}
+	_ = sw.SetRow("A1", []any{"Control ID", "Title", "Description"})
+	for i := 0; i < n; i++ {
+		cell, _ := excelize.CoordinatesToCellName(1, i+2)
+		_ = sw.SetRow(cell, []any{fmt.Sprintf("C-%d", i), "T", "D"})
+	}
+	if err := sw.Flush(); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := f.Write(&buf); err != nil {
+		t.Fatalf("write xlsx: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func TestParseXLSXRefusesDecompressionBomb(t *testing.T) {
+	clean := makeControlXLSX(t, [][]string{{"ID", "Title", "Description"}, {"A", "B", "C"}})
+	bomb := padXLSX(t, clean, MaxUnzipBytes+1)
+	if len(bomb) > MaxUploadBytes/10 {
+		t.Fatalf("bomb is %d bytes on the wire; want it well under the upload cap", len(bomb))
+	}
+	if _, err := ParseXLSX(bomb); !errors.Is(err, ErrWorkbookTooLarge) {
+		t.Fatalf("bomb err = %v, want ErrWorkbookTooLarge", err)
+	}
+	// Padding that stays under the cap still parses.
+	if got, err := ParseXLSX(padXLSX(t, clean, 1<<20)); err != nil || len(got.Controls) != 1 {
+		t.Fatalf("padded-under-cap = %+v, %v", got, err)
+	}
+}
+
+func TestParseXLSXRowCapStopsTheRead(t *testing.T) {
+	if _, err := ParseXLSX(rowsXLSX(t, MaxRows)); !errors.Is(err, ErrTooManyRows) {
+		t.Fatalf("header + %d rows err = %v, want ErrTooManyRows", MaxRows, err)
+	}
+	got, err := ParseXLSX(rowsXLSX(t, MaxRows-1))
+	if err != nil {
+		t.Fatalf("header + %d rows: %v", MaxRows-1, err)
+	}
+	if len(got.Controls) != MaxRows-1 {
+		t.Fatalf("controls = %d, want %d", len(got.Controls), MaxRows-1)
 	}
 }
 

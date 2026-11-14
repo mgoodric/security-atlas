@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/spf13/cobra"
 
@@ -133,15 +134,17 @@ func uploadControlImport(path, framework string, columnMap []string) (controlimp
 	return batch, rspBody, nil
 }
 
-// renderImportSummary prints the batch counts and every rejected row.
+// renderImportSummary prints the batch counts and every rejected row. Text
+// that came from the uploaded sheet is printed through printable, so a cell
+// can't carry terminal escape sequences or fake extra lines.
 func renderImportSummary(out io.Writer, b controlimport.Batch) {
 	_, _ = fmt.Fprintf(out, "import batch %s (%s, framework %s %s)\n",
-		b.ID, b.SourceFilename, b.Framework.Slug, b.Framework.Version)
+		printable(b.ID), printable(b.SourceFilename), printable(b.Framework.Slug), printable(b.Framework.Version))
 	_, _ = fmt.Fprintf(out, "  rows:     %d\n", b.TotalRows)
 	_, _ = fmt.Fprintf(out, "  staged:   %d\n", b.StagedCount)
 	_, _ = fmt.Fprintf(out, "  rejected: %d\n", b.RejectedCount)
 	if len(b.UnmappedColumns) > 0 {
-		_, _ = fmt.Fprintf(out, "  ignored columns: %s\n", strings.Join(b.UnmappedColumns, ", "))
+		_, _ = fmt.Fprintf(out, "  ignored columns: %s\n", printable(strings.Join(b.UnmappedColumns, ", ")))
 	}
 	if len(b.Rejected) == 0 {
 		return
@@ -152,6 +155,17 @@ func renderImportSummary(out io.Writer, b controlimport.Batch) {
 		if id == "" {
 			id = "-"
 		}
-		_, _ = fmt.Fprintf(out, "  row %d  %s  %s: %s\n", r.RowNumber, id, r.Reason, r.Detail)
+		_, _ = fmt.Fprintf(out, "  row %d  %s  %s: %s\n", r.RowNumber, printable(id), printable(r.Reason), printable(r.Detail))
 	}
+}
+
+// printable replaces control characters (ESC, CR, LF, tabs, C1 controls)
+// with a space.
+func printable(s string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
 }

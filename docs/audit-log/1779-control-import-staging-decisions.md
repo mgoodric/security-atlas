@@ -7,9 +7,9 @@ ticket under the bring-your-own-controls spec
 uploads a CSV/XLSX of existing controls and gets a staged import batch back,
 every row staged or rejected with a reason.
 
-`detection_tier_actual = none` · `detection_tier_target = none` (no product
-bug surfaced; the one failure during the work was a malformed CSV literal in a
-new unit test).
+`detection_tier_actual = manual_review` · `detection_tier_target = unit` (PR
+review found the unbounded XLSX decompression, D11; a parser test with a
+compressible workbook would have caught it).
 
 ## D1 — A `BatchStore` interface beside `MappingStore`
 
@@ -116,6 +116,36 @@ actor.
 **Why.** The OAuth client-credential flags belong to `controls upload`'s
 bootstrap path; an operator importing a sheet holds a token. Tenancy comes
 from the credential either way (#1739).
+
+## D11 — XLSX decompression is bounded before excelize opens the file
+
+**Decision.** An XLSX is refused with 413 when its zip entries declare more
+than 64 MiB uncompressed in total. The check runs on the raw zip before
+excelize opens it. excelize is then opened with `UnzipSizeLimit` 64 MiB and
+`UnzipXMLSizeLimit` 16 MiB, and the sheet is read by streaming (`f.Rows`)
+with the row cap checked as each row arrives.
+
+**Why.** The 5 MiB upload cap bounds bytes on the wire, not what they
+inflate to. excelize defaults to a 16 GB unzip limit and `GetRows` loads the
+whole sheet, so a small zip bomb could fill memory or the temp directory
+before the row cap ran (review finding on #1929). The pre-check returns a
+typed error instead of matching excelize's error text. excelize's
+`ErrOptionsUnzipSizeLimit` was not usable for this: it only reports a
+misconfigured pair of limits. The declared sizes are binding because
+`archive/zip` fails an entry that inflates past its declared size. The
+questionnaire XLSX parser has the same gap and is tracked separately.
+
+`detection_tier_actual = manual_review` (PR review) ·
+`detection_tier_target = unit` (a parser test with a compressible workbook).
+
+## D12 — CLI output strips control characters
+
+**Decision.** `controls import` prints sheet-derived text (IDs, details,
+column names, filename) with control characters replaced by spaces.
+
+**Why.** Rejected-row details echo cell content. Without this, a cell could
+carry terminal escape sequences or a CR/LF that forges an extra "row … ok"
+line in the summary.
 
 ## Coverage floors
 

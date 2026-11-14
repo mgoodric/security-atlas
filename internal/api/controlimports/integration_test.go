@@ -20,6 +20,7 @@
 package controlimports_test
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/csv"
@@ -223,6 +224,37 @@ func makeXLSX(t *testing.T, rows [][]string) []byte {
 	return buf.Bytes()
 }
 
+// padXLSX re-zips a workbook with an extra entry of n zero bytes: small on
+// the wire, n bytes declared uncompressed.
+func padXLSX(t *testing.T, raw []byte, n int) []byte {
+	t.Helper()
+	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		t.Fatalf("read xlsx zip: %v", err)
+	}
+	var out bytes.Buffer
+	zw := zip.NewWriter(&out)
+	for _, f := range zr.File {
+		if err := zw.Copy(f); err != nil {
+			t.Fatalf("copy %s: %v", f.Name, err)
+		}
+	}
+	w, err := zw.Create("xl/media/pad.bin")
+	if err != nil {
+		t.Fatalf("create pad: %v", err)
+	}
+	chunk := make([]byte, 1<<20)
+	for written := 0; written < n; written += len(chunk) {
+		if _, err := w.Write(chunk[:min(len(chunk), n-written)]); err != nil {
+			t.Fatalf("write pad: %v", err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	return out.Bytes()
+}
+
 // ----- expected outcome of testdata/controls.csv -----
 
 type wantStaged struct {
@@ -418,6 +450,23 @@ func TestUploadCaps(t *testing.T) {
 		status, raw := doUpload(t, env, upload{filename: "many.csv", payload: []byte(b.String()), framework: framework})
 		if status != http.StatusBadRequest || !strings.Contains(string(raw), "row cap") {
 			t.Errorf("over row cap = %d %s, want 400 naming the row cap", status, raw)
+		}
+	})
+	t.Run("xlsx decompression bomb", func(t *testing.T) {
+		bomb := padXLSX(t, fixtureXLSX(t), controlimport.MaxUnzipBytes+1)
+		status, raw := doUpload(t, env, upload{filename: "bomb.xlsx", payload: bomb, framework: framework})
+		if status != http.StatusRequestEntityTooLarge || !strings.Contains(string(raw), "uncompressed cap") {
+			t.Errorf("bomb (%d bytes on the wire) = %d %s, want 413 naming the uncompressed cap", len(bomb), status, raw)
+		}
+	})
+	t.Run("xlsx over row cap", func(t *testing.T) {
+		rows := [][]string{{"Control ID", "Title", "Description"}}
+		for i := 0; i < controlimport.MaxRows; i++ {
+			rows = append(rows, []string{fmt.Sprintf("C-%d", i), "T", "D"})
+		}
+		status, raw := doUpload(t, env, upload{filename: "many.xlsx", payload: makeXLSX(t, rows), framework: framework})
+		if status != http.StatusBadRequest || !strings.Contains(string(raw), "row cap") {
+			t.Errorf("xlsx over row cap = %d %s, want 400 naming the row cap", status, raw)
 		}
 	})
 	t.Run("unknown framework", func(t *testing.T) {
