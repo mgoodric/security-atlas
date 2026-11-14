@@ -625,6 +625,14 @@ type Querier interface {
 	// latest evaluation on/before the cutoff had result='pass'. The delta is in
 	// percentage points (e.g. +12.5 means coverage rose 12.5 points).
 	//
+	// Statement of Applicability (#1788): a requirement the tenant's ACTIVATED
+	// framework-scope revision for the version marks `excluded` leaves the
+	// requirement set entirely, so it drops out of the coverage numerator and
+	// denominator, the freshness composite, and both halves of the trend. The
+	// trend uses today's exclusions for the 90-day-ago half too, so excluding a
+	// requirement never shows up as a jump. Exclusions on draft, review or
+	// approved revisions have no effect; undecided requirements stay in.
+	//
 	// The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
 	// $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
 	FrameworkPosture(ctx context.Context, arg FrameworkPostureParams) ([]FrameworkPostureRow, error)
@@ -647,6 +655,11 @@ type Querier interface {
 	// Live (non-tombstoned) plan by id. A tombstoned plan reads as absent
 	// (AC-14: subsequent GET returns 404).
 	GetActionPlanByID(ctx context.Context, arg GetActionPlanByIDParams) (ActionPlan, error)
+	// The exclusion, if any, the tenant's ACTIVATED scope revision records for a
+	// requirement (#1788). Per-requirement coverage reads report such a
+	// requirement as `excluded` instead of uncovered. No row means the
+	// requirement is applicable or undecided, or no revision is activated.
+	GetActivatedExclusionForRequirement(ctx context.Context, arg GetActivatedExclusionForRequirementParams) (GetActivatedExclusionForRequirementRow, error)
 	// Returns the currently-active framework scope for a given framework version,
 	// i.e. the (at most one) row in state `activated` for that (tenant, fv) pair.
 	// AC-3: a partial UNIQUE index guarantees at most one row matches.
