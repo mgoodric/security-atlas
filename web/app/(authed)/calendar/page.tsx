@@ -56,6 +56,7 @@ const ALL_TYPES = [
   "risk",
   "action_plan",
   "policy_ack",
+  "offboarding",
 ] as const;
 type AllowedType = (typeof ALL_TYPES)[number];
 
@@ -163,8 +164,8 @@ function CalendarPageInner() {
           <h1 className="text-2xl font-semibold">Compliance calendar</h1>
           <p className="text-sm text-muted-foreground">
             Upcoming audits, exception expirations, policy reviews, vendor
-            reviews, periodic control reviews, risk reviews and action-plan due
-            dates — one place for the whole team.
+            reviews, periodic control reviews, risk reviews, action-plan due
+            dates and offboarding deadlines — one place for the whole team.
           </p>
         </div>
         <div className="flex flex-col items-end gap-2">
