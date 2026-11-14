@@ -68,7 +68,6 @@ persisted.
 ```bash
 atlas-oscal import-catalog <file> \
   --dsn "$DATABASE_URL_APP" \
-  --tenant-id <tenant-uuid> \
   --bridge-addr 127.0.0.1:50070 \
   --source-label "NIST SP 800-53 rev5" \
   --imported-by "alice@example.com" \
@@ -76,7 +75,13 @@ atlas-oscal import-catalog <file> \
 ```
 
 `--dsn` defaults to `$DATABASE_URL_APP` (use the `atlas_app` role). Add `--json`
-to emit a machine-readable report instead of text. The command requires a
+to emit a machine-readable report instead of text.
+
+On a single-tenant install the catalog is imported into your organisation,
+and the command names it on stderr. On a multi-tenant install pass
+`--tenant-id <tenant uuid>`; without it the command stops and lists every
+tenant's ID, slug and name. `import-profile` and
+`import-component-definition` follow the same rule. The command requires a
 running `oscal-bridge` sidecar (see the bridge README).
 
 Text output reports the catalog id, title, OSCAL version, source label, source

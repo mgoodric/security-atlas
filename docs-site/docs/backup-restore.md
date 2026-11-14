@@ -356,7 +356,8 @@ checked against the signature — both kinds of damage a row count would miss.
     Per-record sha256 integrity is computed and stored at ingest.
     `atlas evidence verify` re-walks the ledger on demand and reports any
     record whose stored hash no longer matches a recomputed canonical hash
-    — a tenant-scoped walk (`--tenant <uuid>`, as `atlas_app` under RLS) or
+    — a tenant-scoped walk (as `atlas_app` under RLS; `--tenant <uuid>` is
+    needed only on a multi-tenant install) or
     a cross-tenant walk (`--all-tenants`, as `atlas_service_account`). The
     signed-OSCAL-export verify above is the complementary cryptographic,
     end-to-end check. Run both in a restore drill.

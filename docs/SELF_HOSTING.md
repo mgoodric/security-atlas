@@ -108,8 +108,8 @@ just self-host-wipe                                # tear down + delete volumes
 
 ### Signing in from a script
 
-`POST /auth/local/login` takes a JSON body of `tenant_id`, `email` and
-`password`, and answers with the session cookie and, when the in-app
+`POST /auth/local/login` takes a JSON body of `email`, `password` and, on a
+multi-tenant install only, `tenant_id`. It answers with the session cookie and, when the in-app
 authorization server is configured, an `atlas_jwt` in `token`:
 
 ```sh
@@ -212,6 +212,44 @@ Things to know:
   repo and no bind mount, so it does not take them.
 
 ---
+
+## One organisation by default
+
+A fresh install is a **single-tenant install**: one tenant, the bootstrap
+tenant (`ATLAS_BOOTSTRAP_TENANT`), which the UI calls your organisation. No
+sign-in form, CLI command, OAuth client or doc step asks you for a tenant ID;
+each resolves to that tenant on its own. Row-level security still isolates
+the tenant at the database layer
+([ADR 0023](adr/0023-single-tenant-experience-by-default.md)).
+
+**OAuth clients are bound to a tenant.** A `client_credentials` client's
+tokens act in the tenant it is bound to, and its writes land there.
+`bootstrap.sh` issues its upload client bound to your organisation, and
+`atlas-cli oauth issue-client <name>` does the same by default. A token from
+an unbound client can read but every write is refused with
+`403 tenant_unbound`. Upgrading binds existing clients for you on a
+single-tenant install. On a multi-tenant install, bind each one:
+
+```sh
+DATABASE_URL=postgres://atlas_migrate:...@localhost:5432/atlas \
+  atlas-cli oauth bind-client <client_id> --tenant <tenant id>
+```
+
+**Multi-tenant is an opt-in, and one-way.** A second tenant can be created
+only by a super-admin, and only while `ATLAS_ALLOW_MULTI_TENANT=true` is set
+on the `atlas` service (in `deploy/docker/.env` for the compose bundle). Once
+a second tenant exists the tenant chrome appears, sign-in and the CLI ask
+which tenant you mean, and there is no path back to one tenant. Existing
+multi-tenant installs keep working without the setting; it gates only the
+creation of tenants. See
+[Tenant membership](../docs-site/docs/tenant-membership.md#opting-in-to-multi-tenant).
+
+**Demo data respects the same line.** On a fresh single-tenant install,
+`atlas-cli demo seed` loads into your organisation and `demo teardown`
+removes exactly what it added. Once the organisation holds its own
+evidence, risks, framework versions, controls or policies, the seed refuses, rather than mix demo and real data; a separate demo tenant
+needs the multi-tenant opt-in. See
+[demo seed](getting-started/demo-seed.md).
 
 ## Quick start — the Watchtower auto-update example (server-only)
 

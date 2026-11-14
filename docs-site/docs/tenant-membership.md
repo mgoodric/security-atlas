@@ -1,17 +1,72 @@
 # Tenant membership and switching
 
-security-atlas supports operators who belong to multiple tenants —
+Most installs serve one organisation, and that is the default: a
+**single-tenant install**. It has exactly one tenant, the bootstrap
+tenant seeded from `ATLAS_BOOTSTRAP_TENANT`, and nobody types or sees a
+tenant ID. Sign-in, the CLI, OAuth clients and the demo seed all resolve
+to that tenant on their own, and the UI calls it "your organisation".
+Nothing on the rest of this page applies until you opt in to
+multi-tenant ([ADR 0023](https://github.com/mgoodric/security-atlas/blob/main/docs/adr/0023-single-tenant-experience-by-default.md)).
+
+security-atlas also supports operators who belong to multiple tenants —
 the canonical example is a vCISO consultant who hosts the platform
 for several client tenants and needs to switch between client
 contexts without signing out and back in.
 
 This page describes:
 
+- How to opt in to multi-tenant, and what changes when you do.
 - How tenant membership is represented in atlas.
 - How an operator switches tenants from the UI.
 - What happens when an admin removes an operator from a tenant
   (the "eventual eviction" contract).
 - How admins force-evict a removed operator immediately.
+
+## Opting in to multi-tenant
+
+An install becomes multi-tenant when a second tenant is created. That
+takes two things together:
+
+1. The deployment setting `ATLAS_ALLOW_MULTI_TENANT=true` on the `atlas`
+   service (the exact lowercase string; restart after setting it). See the
+   [configuration reference](configuration.md).
+2. A super-admin creating the tenant, through `POST /v1/admin/tenants` or
+   the admin Tenants page at `/admin/tenants`. On a single-tenant install
+   the bootstrap admin is the super-admin.
+
+Without the setting, `POST /v1/admin/tenants` answers `403` and the
+install stays single-tenant. A tenant admin who is not a super-admin
+gets `403` either way.
+
+<!-- prettier-ignore-start -->
+!!! warning "Multi-tenant is one-way"
+
+    There is no path back from several tenants to one: tenants cannot be
+    merged, and the install keeps behaving as multi-tenant. Turning
+    `ATLAS_ALLOW_MULTI_TENANT` off later only stops further tenants from
+    being created. If you only want to try the demo dataset, seed it into
+    your organisation on a fresh install, or use a separate install
+    (`docs/getting-started/demo-seed.md`).
+<!-- prettier-ignore-end -->
+
+Once a second tenant exists:
+
+- The UI shows the tenant chrome: the tenant switcher, the Tenants and
+  Super admins admin pages, and a tenant picker when assigning users.
+- `/login` asks which tenant to sign in to, and
+  `POST /auth/local/login` requires `tenant_id` (`400` without it).
+- An OIDC sign-in link needs `tenant_id`
+  ([OIDC setup](oidc-setup.md#step-4-sign-in-through-the-idp)).
+- CLI commands that connect straight to Postgres need their tenant flag;
+  without it they list every tenant and stop ([CLI](cli.md#tenant-flags)).
+- New OAuth clients need `--tenant`, and clients issued before the
+  upgrade that bound clients are not bound for you; bind each with
+  `atlas-cli oauth bind-client` ([CLI](cli.md#oauth)).
+- The demo seed creates its own tenant with `--tenant-slug` instead of
+  loading into your organisation.
+
+Row-level security is the same in both: every tenant's data is isolated
+at the database layer whether one tenant exists or many.
 
 ## How membership is represented
 
@@ -40,7 +95,9 @@ If the operator's account is in **only one tenant**, the
 switcher chrome is hidden — there's nothing to switch to. The UI
 operates against the single tenant directly. (Canvas §11 item 13
 documents this commitment: build multi-tenant from day one, but
-hide the chrome when there's only one tenant.)
+hide the chrome when there's only one tenant. ADR 0023 completes it:
+the install's tenant count, not a mode flag, decides which chrome
+shows.)
 
 If the operator's account is in **two or more tenants**, the
 header includes a persistent dropdown showing the current

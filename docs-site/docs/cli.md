@@ -25,6 +25,22 @@ Commands that write directly to Postgres (`catalog`, `policy seed-stock`,
 `DATABASE_URL` or `DATABASE_URL_APP` from the environment. The import
 commands need the `atlas_migrate` role; the read/verify paths use `atlas_app`.
 
+## Tenant flags
+
+On a single-tenant install (the default) no command needs a tenant ID. The
+tenant flags (`--tenant` on `credentials`, `evidence verify` and the `oauth`
+client commands; `--tenant-id` on `policy seed-stock` and `oscal-export`) are
+optional there:
+
+- Commands that call the API default to the tenant of the `--token`
+  credential.
+- Commands that connect straight to Postgres use the install's only tenant
+  and print its name on stderr.
+
+On a multi-tenant install, leaving the flag off is an error that lists every
+tenant's ID, slug and name, so you never act on the wrong one by accident.
+See [Tenant membership](tenant-membership.md) for opting in to multi-tenant.
+
 ## Command tree
 
 | Command                                  | What it does                                                     |
@@ -82,8 +98,8 @@ Optional: `--schema-version` (default `1.0.0`), `--actor-type` (default
 `evidence verify` re-hashes the ledger and reports mismatches:
 
 ```sh
-security-atlas-cli evidence verify --tenant <tenant uuid>   # RLS-scoped, as atlas_app
-security-atlas-cli evidence verify --all-tenants            # super-admin walk
+security-atlas-cli evidence verify                 # RLS-scoped, as atlas_app
+security-atlas-cli evidence verify --all-tenants   # super-admin walk
 ```
 
 Add `--page-size` to tune the keyset page size (default 1000).
@@ -91,15 +107,16 @@ Add `--page-size` to tune the keyset page size (default 1000).
 ## credentials
 
 ```sh
-security-atlas-cli credentials issue --tenant <tenant id> \
-  --scope '{"environment":"prod"}' --kinds sast.scan_result.v1 --ttl 30d
-security-atlas-cli credentials list   --tenant <tenant id>
+security-atlas-cli credentials issue \
+  --scope '{"environment":"prod"}' --kinds sast.scan_result.v1 --ttl 720h
+security-atlas-cli credentials list
 security-atlas-cli credentials rotate --id <credential id>
 security-atlas-cli credentials revoke --id <credential id>
 ```
 
 The bearer is printed exactly once, at issue time. `--kinds` empty means all
-evidence kinds; `--ttl 0` (the default) means no expiry.
+evidence kinds; `--ttl` is a Go duration in hours, minutes or seconds
+(`720h` is 30 days), and `--ttl 0` (the default) means no expiry.
 
 `credentials issue --reset-bootstrap --force` is the first-login recovery
 path — see [First-time login](troubleshooting/first-login.md). It mints a tenant admin key that expires (24h by default, `--ttl` up to `168h`) and refuses `--scope` and `--kinds`; revoke the key once you have signed in another way.
@@ -162,6 +179,33 @@ These talk to the platform over HTTP, not gRPC — set `--http-endpoint` or
 `ATLAS_HTTP_ENDPOINT` (default `http://localhost:8080`). `--reason` is
 recorded in the feature-flag audit log.
 
+## oauth
+
+`oauth issue-client` and `oauth bind-client` connect straight to Postgres
+through `DATABASE_URL`. Leave out `--tenant` and they read every tenant, so
+use the BYPASSRLS `atlas_migrate` connection.
+
+```sh
+security-atlas-cli oauth issue-client ci-pipeline          # bound to your organisation
+security-atlas-cli oauth issue-client cli-public --unbound # public device-flow client
+security-atlas-cli oauth bind-client <client_id>           # bind an existing client
+```
+
+An OAuth `client_credentials` client is **bound to a tenant**: its tokens act
+in that tenant and its writes land there. `issue-client` binds the new client
+to the install's only tenant unless you pass `--tenant`. A token from an
+unbound client can still read, but every write is refused with
+`403 tenant_unbound`, which names `bind-client` as the fix. Use `--unbound`
+only for a public client used by the device-code or authorization-code flow,
+where the token carries the signed-in user's tenant.
+
+Upgrading binds every existing unbound client on a single-tenant install. On
+a multi-tenant install nothing is bound for you; bind each client with
+`security-atlas-cli oauth bind-client <client_id> --tenant <tenant id>`. A
+client already bound to another tenant is refused: issue a new one. See
+[Migrating from API keys to OAuth](migration/oauth.md) for auditing public clients after
+the upgrade.
+
 ## keys
 
 JWT signing-key lifecycle against the keystore directory (`--keystore`, env
@@ -189,7 +233,6 @@ period that has not been frozen and needs the `oscal-bridge` sidecar:
 
 ```sh
 security-atlas-cli oscal-export \
-  --tenant-id <tenant uuid> \
   --period-id <frozen period uuid> \
   --out ./oscal-bundle/ \
   --bridge-addr 127.0.0.1:50070

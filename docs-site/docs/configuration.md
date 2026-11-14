@@ -96,9 +96,11 @@ a deployment vulnerability, not a convenience.
       commented out). Prefer `TRUSTED_PROXY_CIDRS`.
     - **`ATLAS_ENABLE_DEMO_SEED`** — when set to exactly `true`, exposes
       the admin demo-seed surface (`POST /v1/admin/demo/{seed,teardown}`
-      and the `/admin/demo` page). Teardown **drops a whole tenant and
-      every row anchored to it**. **Off by default** (shipped commented
-      out). Do not enable it on a deployment holding real program data.
+      and the `/admin/demo` page). Teardown **deletes demo data**: the
+      rows a seed added to your organisation, or a whole separate demo
+      tenant and every row anchored to it. **Off by default** (shipped
+      commented out). Do not enable it on a deployment holding real
+      program data.
 <!-- prettier-ignore-end -->
 
 ## Required
@@ -256,18 +258,37 @@ logged.
 
 ## Demo seed
 
-Populates one dedicated demo tenant with a realistic dataset (~50
-controls, 20 risks, 200 evidence records, 3 audit periods, plus policies,
-vendors, and board packs) for screenshots, recorded walkthroughs, or
-handing an auditor a populated instance to explore. The same variable
-gates both the `/admin/demo` page and the `atlas-cli demo` commands.
+Populates a realistic dataset (~50 controls, 20 risks, 200 evidence
+records, 3 audit periods, plus policies, vendors, and board packs) for
+screenshots, recorded walkthroughs, or handing an auditor a populated
+instance to explore. The same variable gates both the `/admin/demo` page
+and the `atlas-cli demo` commands.
+
+Where the data goes follows the install's tenant count, and seeding never
+turns an install multi-tenant on its own:
+
+- **Single-tenant install, fresh:** `atlas-cli demo seed` loads into your
+  organisation while it holds no organisation data beyond the stock
+  bootstrap seed: no evidence, no risks, no tenant-private framework
+  versions, and no controls or policies other than the stock ones. Each
+  added row is recorded, and `atlas-cli demo teardown` removes exactly those
+  rows and nothing else.
+- **Single-tenant install holding real data:** refused. Demo and real data
+  are never mixed. Use a separate install, or opt in to multi-tenant.
+- **Separate demo tenant** (`--tenant-slug`): needs
+  `ATLAS_ALLOW_MULTI_TENANT=true` once any tenant exists, which makes the
+  install multi-tenant for good. Teardown deletes that tenant.
+
+The full rules and refusal messages are in
+[demo seed](https://github.com/mgoodric/security-atlas/blob/main/docs/getting-started/demo-seed.md).
 
 <!-- prettier-ignore-start -->
-!!! danger "Demo teardown drops a whole tenant — leave this off in production"
+!!! danger "Demo teardown deletes data — leave this off in production"
 
     `ATLAS_ENABLE_DEMO_SEED=true` exposes `POST /v1/admin/demo/seed` and
-    `POST /v1/admin/demo/teardown`. Teardown deletes the demo tenant and
-    every row anchored to it. When enabled, the surface stays admin-role
+    `POST /v1/admin/demo/teardown`. Teardown deletes demo data: the rows a
+    seed recorded in your organisation, or a whole demo tenant and every
+    row anchored to it. When enabled, the surface stays admin-role
     gated (OPA `admin.rego`), rate-limited to one seed/teardown per client
     IP per 60 seconds, and writes an audit row **before** the seeder runs —
     but none of that substitutes for leaving it off on a deployment holding

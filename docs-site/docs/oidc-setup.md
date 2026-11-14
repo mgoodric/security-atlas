@@ -281,10 +281,15 @@ substitute your own):
 With a primary IdP configured, the relying-party flow runs at:
 
 ```text
-/auth/oidc/login?tenant_id=<tenant-id>&idp=primary
+/auth/oidc/login?idp=primary
 ```
 
-which redirects the user to your IdP and returns them to
+On a single-tenant install that link needs no tenant: it uses your
+organisation's identity provider. On a multi-tenant install add the tenant,
+`/auth/oidc/login?tenant_id=<tenant uuid>&idp=primary`; without it the
+request is refused with `400`.
+
+The link redirects the user to your IdP and returns them to
 `/auth/oidc/callback`. The flow uses **state** (CSRF defense), **PKCE**
 (code-interception defense), and a per-flow **nonce** (ID-token-replay
 defense) — all enforced by the relying party. A user whose email is outside

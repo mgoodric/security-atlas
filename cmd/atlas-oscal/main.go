@@ -93,7 +93,8 @@ Commands:
                   provenance-labeled imported set mapped to SCF anchors.
                   Flags:
                     --dsn         Postgres DSN (atlas_app role); env DATABASE_URL_APP
-                    --tenant-id   tenant UUID to import under (required)
+                    --tenant-id   tenant UUID to import under (default: the install's
+                                  only tenant; required with several)
                     --bridge-addr oscal-bridge gRPC address (default %s)
                     --source-label declared framework label (e.g. "NIST 800-53 rev5")
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
@@ -117,7 +118,8 @@ Commands:
                     --profile     intermediate profile JSON the chain may
                                   import (repeatable; slice 578)
                     --dsn         Postgres DSN (atlas_app role); env DATABASE_URL_APP
-                    --tenant-id   tenant UUID to import under (required)
+                    --tenant-id   tenant UUID to import under (default: the install's
+                                  only tenant; required with several)
                     --bridge-addr oscal-bridge gRPC address (default %s)
                     --source-label declared baseline label (e.g. "FedRAMP Moderate")
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
@@ -133,7 +135,8 @@ Commands:
                   control — operator review (existing) is required to act on it.
                   Flags:
                     --dsn         Postgres DSN (atlas_app role); env DATABASE_URL_APP
-                    --tenant-id   tenant UUID to import under (required)
+                    --tenant-id   tenant UUID to import under (default: the install's
+                                  only tenant; required with several)
                     --bridge-addr oscal-bridge gRPC address (default %s)
                     --source-label declared vendor / product label (e.g. "Acme Cloud")
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
@@ -188,7 +191,7 @@ func containsEquals(s string) bool {
 func runImportCatalog(args []string) error {
 	fs := flag.NewFlagSet("import-catalog", flag.ContinueOnError)
 	dsn := fs.String("dsn", "", "Postgres DSN (atlas_app role); env DATABASE_URL_APP")
-	tenantID := fs.String("tenant-id", "", "tenant UUID to import under (required)")
+	tenantID := fs.String("tenant-id", "", tenantIDFlagHelp)
 	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
 	sourceLabel := fs.String("source-label", "", "declared framework label")
 	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
@@ -215,9 +218,6 @@ func runImportCatalog(args []string) error {
 	if *dsn == "" {
 		return errors.New("--dsn or DATABASE_URL_APP is required (use the atlas_app role)")
 	}
-	if *tenantID == "" {
-		return errors.New("--tenant-id is required")
-	}
 
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -239,7 +239,11 @@ func runImportCatalog(args []string) error {
 	}
 	defer func() { _ = bridge.Close() }()
 
-	tenantCtx, err := tenancy.WithTenant(ctx, *tenantID)
+	tenant, err := importTenant(ctx, os.Stderr, *tenantID, poolTenantResolver(pool))
+	if err != nil {
+		return err
+	}
+	tenantCtx, err := tenancy.WithTenant(ctx, tenant)
 	if err != nil {
 		return fmt.Errorf("tenancy context: %w", err)
 	}
@@ -311,7 +315,7 @@ func runImportProfile(args []string) error {
 	var profiles stringSlice
 	fs.Var(&profiles, "profile", "intermediate profile JSON the chain may import (repeatable; slice 578)")
 	dsn := fs.String("dsn", "", "Postgres DSN (atlas_app role); env DATABASE_URL_APP")
-	tenantID := fs.String("tenant-id", "", "tenant UUID to import under (required)")
+	tenantID := fs.String("tenant-id", "", tenantIDFlagHelp)
 	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
 	sourceLabel := fs.String("source-label", "", "declared baseline label")
 	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
@@ -338,9 +342,6 @@ func runImportProfile(args []string) error {
 	}
 	if *dsn == "" {
 		return errors.New("--dsn or DATABASE_URL_APP is required (use the atlas_app role)")
-	}
-	if *tenantID == "" {
-		return errors.New("--tenant-id is required")
 	}
 	if len(catalogs) == 0 {
 		return errors.New("at least one --catalog <file> is required (the catalog the profile resolves against)")
@@ -382,7 +383,11 @@ func runImportProfile(args []string) error {
 	}
 	defer func() { _ = bridge.Close() }()
 
-	tenantCtx, err := tenancy.WithTenant(ctx, *tenantID)
+	tenant, err := importTenant(ctx, os.Stderr, *tenantID, poolTenantResolver(pool))
+	if err != nil {
+		return err
+	}
+	tenantCtx, err := tenancy.WithTenant(ctx, tenant)
 	if err != nil {
 		return fmt.Errorf("tenancy context: %w", err)
 	}
@@ -444,7 +449,7 @@ func runImportProfile(args []string) error {
 func runImportComponentDefinition(args []string) error {
 	fs := flag.NewFlagSet("import-component-definition", flag.ContinueOnError)
 	dsn := fs.String("dsn", "", "Postgres DSN (atlas_app role); env DATABASE_URL_APP")
-	tenantID := fs.String("tenant-id", "", "tenant UUID to import under (required)")
+	tenantID := fs.String("tenant-id", "", tenantIDFlagHelp)
 	bridgeAddr := fs.String("bridge-addr", defaultBridgeAddr, "oscal-bridge gRPC address")
 	sourceLabel := fs.String("source-label", "", "declared vendor / product label")
 	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
@@ -468,9 +473,6 @@ func runImportComponentDefinition(args []string) error {
 	if *dsn == "" {
 		return errors.New("--dsn or DATABASE_URL_APP is required (use the atlas_app role)")
 	}
-	if *tenantID == "" {
-		return errors.New("--tenant-id is required")
-	}
 
 	data, err := os.ReadFile(file)
 	if err != nil {
@@ -492,7 +494,11 @@ func runImportComponentDefinition(args []string) error {
 	}
 	defer func() { _ = bridge.Close() }()
 
-	tenantCtx, err := tenancy.WithTenant(ctx, *tenantID)
+	tenant, err := importTenant(ctx, os.Stderr, *tenantID, poolTenantResolver(pool))
+	if err != nil {
+		return err
+	}
+	tenantCtx, err := tenancy.WithTenant(ctx, tenant)
 	if err != nil {
 		return fmt.Errorf("tenancy context: %w", err)
 	}
