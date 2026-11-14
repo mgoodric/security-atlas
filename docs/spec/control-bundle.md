@@ -104,7 +104,9 @@ AC-5: a bundle whose `applicability_expr` references an undeclared scope dimensi
 | `id`     | string | Required, at most 200 characters. The identifier as the other system writes it (`RA-03`, `CC3.1`).                                           |
 | `note`   | string | Optional, at most 500 characters. E.g. `"FY25 report, section 4"`.                                                                           |
 
-No two entries may share the same `system` + `kind` + `id`. The refs are stored per control version, shown in the control detail header, and matched by `/v1/search` (system, id and note).
+A bundle may carry at most 100 entries, and no two may share the same `system` + `kind` + `id`. Length caps count characters, not bytes. The refs are stored per control version, shown in the control detail header, and matched by `/v1/search` (system, id and note).
+
+**Adding or editing refs creates a new control version.** The manifest hash changes, so re-uploading an existing bundle with new `external_refs` supersedes the active row (§4 "Versioning + supersession") like any other manifest change.
 
 ```yaml
 external_refs:

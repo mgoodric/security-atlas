@@ -22,8 +22,9 @@ keeps a single parser, column, search path and UI row. A separate
 ## D2 — `tested_under` is not validated against the framework catalog
 
 **Decision.** The parser checks shape only (`system` pattern, non-empty `id`,
-lengths, no duplicate `system`+`kind`+`id`). It does not check that `soc2` is
-a known slug or that `CC3.1` exists in it.
+at most 100 entries, id/note length caps counted in runes, no duplicate
+`system`+`kind`+`id`). It does not check that `soc2` is a known slug or that
+`CC3.1` exists in it.
 
 **Why.** Adopters record refs from reports against framework versions the
 platform may not have loaded, and rejecting the upload for that would push

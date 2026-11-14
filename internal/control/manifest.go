@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 )
 
 // BundleSchemaVersion is the only accepted manifest schema version in slice
@@ -135,7 +136,9 @@ var (
 	refSystemPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{0,63}$`)
 )
 
+// Caps on external_refs. Lengths count characters (runes), not bytes.
 const (
+	maxExternalRefs       = 100
 	maxExternalRefIDLen   = 200
 	maxExternalRefNoteLen = 500
 )
@@ -227,6 +230,9 @@ func (m *Manifest) ValidateStructural() error {
 // omitted kind to "reference", so the stored JSON is the same whether the
 // author wrote the default or left it out.
 func (m *Manifest) validateExternalRefs() error {
+	if len(m.ExternalRefs) > maxExternalRefs {
+		return fmt.Errorf("control bundle: external_refs has %d entries; at most %d are allowed", len(m.ExternalRefs), maxExternalRefs)
+	}
 	seen := make(map[[3]string]struct{}, len(m.ExternalRefs))
 	for i := range m.ExternalRefs {
 		r := &m.ExternalRefs[i]
@@ -245,10 +251,10 @@ func (m *Manifest) validateExternalRefs() error {
 		if strings.TrimSpace(r.ID) == "" {
 			return fmt.Errorf("control bundle: external_refs[%d].id is required and must be non-empty", i)
 		}
-		if len(r.ID) > maxExternalRefIDLen {
+		if utf8.RuneCountInString(r.ID) > maxExternalRefIDLen {
 			return fmt.Errorf("control bundle: external_refs[%d].id exceeds %d characters", i, maxExternalRefIDLen)
 		}
-		if len(r.Note) > maxExternalRefNoteLen {
+		if utf8.RuneCountInString(r.Note) > maxExternalRefNoteLen {
 			return fmt.Errorf("control bundle: external_refs[%d].note exceeds %d characters", i, maxExternalRefNoteLen)
 		}
 		key := [3]string{r.System, r.Kind, r.ID}

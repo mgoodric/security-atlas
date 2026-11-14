@@ -1,6 +1,7 @@
 package control
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -102,6 +103,52 @@ func TestValidateStructural_RejectsBadExternalRefs(t *testing.T) {
 				t.Fatalf("error %q does not contain %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func refsManifest(refs []ExternalRef) Manifest {
+	return Manifest{
+		BundleSchemaVersion: "1",
+		BundleID:            "refs_control",
+		Title:               "Refs",
+		SCFAnchorID:         "IAC-06",
+		ImplementationType:  "automated",
+		ExternalRefs:        refs,
+	}
+}
+
+func TestValidateStructural_ExternalRefsCountCap(t *testing.T) {
+	t.Parallel()
+	refs := make([]ExternalRef, maxExternalRefs+1)
+	for i := range refs {
+		refs[i] = ExternalRef{System: "acme", ID: fmt.Sprintf("RA-%d", i)}
+	}
+	m := refsManifest(refs[:maxExternalRefs])
+	if err := m.ValidateStructural(); err != nil {
+		t.Fatalf("%d refs: expected ok, got %v", maxExternalRefs, err)
+	}
+	m = refsManifest(refs)
+	err := m.ValidateStructural()
+	if err == nil || !strings.Contains(err.Error(), "at most 100") {
+		t.Fatalf("%d refs: expected count error, got %v", len(refs), err)
+	}
+}
+
+// Caps count characters, so a 200-character id in a multi-byte script
+// is accepted even though it is longer than 200 bytes.
+func TestValidateStructural_ExternalRefLengthsCountRunes(t *testing.T) {
+	t.Parallel()
+	m := refsManifest([]ExternalRef{{
+		System: "acme",
+		ID:     strings.Repeat("é", maxExternalRefIDLen),
+		Note:   strings.Repeat("监", maxExternalRefNoteLen),
+	}})
+	if err := m.ValidateStructural(); err != nil {
+		t.Fatalf("expected ok at the rune cap, got %v", err)
+	}
+	m = refsManifest([]ExternalRef{{System: "acme", ID: strings.Repeat("é", maxExternalRefIDLen+1)}})
+	if err := m.ValidateStructural(); err == nil {
+		t.Fatal("expected error one rune over the id cap, got nil")
 	}
 }
 
