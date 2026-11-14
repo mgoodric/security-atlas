@@ -210,7 +210,7 @@ Rules:
 1. Use only the scf_id values in the candidate list. Do not invent SCF ids.
 2. Order the candidates from best to worst fit for the imported control.
 3. Each rationale is one factual sentence naming why the anchor fits or does not.
-4. Return only compact JSON: {"ranking":[{"scf_id":"IAC-06","rationale":"..."}]}.
+4. Return only compact JSON: {"ranking":[{"scf_id":"IAC-37","rationale":"..."}]}.
 
 Imported control:
 `)

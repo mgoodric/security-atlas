@@ -13,7 +13,7 @@
 //   - a PENDING risk: residual_score = {} (the new-risk shape), no
 //     review_due_at — both cells must read "Pending evaluation", not "—".
 //   - a SCORED risk: a real {likelihood, impact} residual + a review_due
-//     date — the residual renders its 0..1 magnitude and the review-due
+//     date — the residual renders its 1..25 severity and the review-due
 //     renders the date, NOT the pending affordance.
 
 import { expect, test } from "./fixtures";
@@ -61,7 +61,51 @@ function mockRisks() {
       themes: [],
       severity: 20,
     },
+    {
+      // #2058 — a backend-derived residual: the shape the residual
+      // deriver writes (internal/risk/residual_store.go residualBlob),
+      // score = inherent × (1 − effectiveness) on the 1..25 scale.
+      id: "00000000-0000-4000-8000-000000000003",
+      title: "Test risk derived",
+      description: "Neutral derived risk",
+      category: "operational",
+      methodology: "nist_800_30",
+      inherent_score: { likelihood: 4, impact: 4 },
+      treatment: "mitigate",
+      treatment_owner: "owner-c",
+      residual_score: {
+        score: 12,
+        inherent_score: 16,
+        weighted_control_effectiveness: 0.25,
+        breakdown: [],
+      },
+      review_due_at: "2026-10-31T00:00:00Z",
+      accepter: "",
+      instrument_reference: "",
+      linked_control_ids: [],
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      themes: [],
+      severity: 16,
+    },
   ];
+}
+
+async function mockListRoutes(page: import("@playwright/test").Page) {
+  await page.route("**/api/risks-hierarchy/org-units**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ org_units: [] }),
+    });
+  });
+  await page.route(/\/api\/risks(\?.*)?$/, async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ risks: mockRisks() }),
+    });
+  });
 }
 
 test.describe("/risks new-risk pending-evaluation state (slice 680)", () => {
@@ -111,16 +155,71 @@ test.describe("/risks new-risk pending-evaluation state (slice 680)", () => {
     await expect(pendingReviewDue).toHaveCount(1);
     await expect(pendingReviewDue).toContainText("Pending evaluation");
 
-    // The scored risk renders a real residual magnitude (2×3/25 = 0.24),
-    // NOT the pending affordance.
-    const scoredResidual = desktop.getByTestId("risks-row-residual");
-    await expect(scoredResidual).toHaveCount(1);
-    await expect(scoredResidual).toContainText("0.24");
+    // The scored risk renders a real residual on the 1..25 scale
+    // (2×3 = 6, Low), NOT the pending affordance.
+    const scoredRow = desktop.locator("tr", { hasText: "Test risk scored" });
+    await expect(scoredRow.getByTestId("risks-row-residual")).toHaveText("6");
+    await expect(scoredRow.getByTestId("risks-row-residual-band")).toHaveText(
+      "Low",
+    );
 
     // Anti-criterion / honesty: the pending affordance appears exactly
     // twice in the desktop table (residual + review-due of the one
     // pending row), and the old bare em-dash is gone from those cells.
     await expect(desktop.getByText("Pending evaluation")).toHaveCount(2);
+  });
+
+  test("a backend-derived residual shows its score and band beside inherent, not 'Pending' (#2058)", async ({
+    authedPage,
+  }) => {
+    await mockListRoutes(authedPage);
+    await authedPage.goto("/risks");
+
+    const desktop = authedPage.locator('[data-testid="list-table-wrap"]');
+    const derivedRow = desktop.locator("tr", {
+      hasText: "Test risk derived",
+    });
+    await expect(derivedRow.getByTestId("risks-row-residual")).toHaveText("12");
+    await expect(derivedRow.getByTestId("risks-row-residual-band")).toHaveText(
+      "Medium",
+    );
+    // Same 1..25 scale and bands as inherent severity.
+    await expect(derivedRow.getByTestId("risks-row-severity")).toHaveText("16");
+    await expect(derivedRow.getByTestId("risks-row-severity-band")).toHaveText(
+      "High",
+    );
+    await expect(derivedRow.getByText("Pending evaluation")).toHaveCount(0);
+  });
+
+  test("the detail page shows a derived residual and inherent on one banded scale (#2058)", async ({
+    authedPage,
+  }) => {
+    const derived = mockRisks().find((r) => r.title === "Test risk derived")!;
+    await authedPage.route(/\/api\/risks\/[0-9a-fA-F-]+$/, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ risk: derived }),
+      });
+    });
+
+    await authedPage.goto(`/risks/${derived.id}`);
+
+    await expect(authedPage.getByTestId("risk-detail-residual")).toHaveText(
+      "12",
+    );
+    await expect(
+      authedPage.getByTestId("risk-detail-residual-band"),
+    ).toHaveText("Medium");
+    await expect(authedPage.getByTestId("risk-detail-severity")).toHaveText(
+      "16",
+    );
+    await expect(
+      authedPage.getByTestId("risk-detail-severity-band"),
+    ).toHaveText("High");
+    await expect(
+      authedPage.getByTestId("risk-detail-residual-card"),
+    ).not.toContainText("Pending evaluation");
   });
 
   test("column headers name the independent axes (Inherent severity vs Residual after controls)", async ({

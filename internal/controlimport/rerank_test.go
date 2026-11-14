@@ -11,8 +11,8 @@ import (
 
 func threeCands() []Candidate {
 	return []Candidate{
-		{Rank: 1, AnchorID: "a", SCFID: "IAC-06", Title: "MFA", Source: SourceCrosswalk, Reaches: []Requirement{req61}, TestedCount: 1},
-		{Rank: 2, AnchorID: "b", SCFID: "IAC-15", Title: "Review", Source: SourceCrosswalk},
+		{Rank: 1, AnchorID: "a", SCFID: "IAC-37", Title: "MFA", Source: SourceCrosswalk, Reaches: []Requirement{req61}, TestedCount: 1},
+		{Rank: 2, AnchorID: "b", SCFID: "IAC-12", Title: "Review", Source: SourceCrosswalk},
 		{Rank: 3, AnchorID: "c", SCFID: "MON-01", Title: "Monitoring", Source: SourceKeyword},
 	}
 }
@@ -22,13 +22,13 @@ func TestApplyRerankReordersWithinTheSet(t *testing.T) {
 	text := `{"ranking":[
 		{"scf_id":"mon-01","rationale":"  watches   events "},
 		{"scf_id":"ZZZ-99","rationale":"invented"},
-		{"scf_id":"IAC-06","rationale":"mfa"},
+		{"scf_id":"IAC-37","rationale":"mfa"},
 		{"scf_id":"MON-01","rationale":"repeat"}]}`
 	got, ok := applyRerank(threeCands(), text)
 	if !ok {
 		t.Fatal("applyRerank rejected a usable answer")
 	}
-	if s := sources(got); s != "MON-01/keyword IAC-06/crosswalk IAC-15/crosswalk" {
+	if s := sources(got); s != "MON-01/keyword IAC-37/crosswalk IAC-12/crosswalk" {
 		t.Fatalf("order = %s", s)
 	}
 	for i, c := range got {
@@ -107,7 +107,7 @@ func TestRerankAllRecordsEachGenerationUnderImportSurface(t *testing.T) {
 	var prompts []string
 	client := fnClient(func(req llm.GenerateRequest) (llm.GenerateResult, error) {
 		prompts = append(prompts, req.SystemPrompt)
-		return stubResult(`{"ranking":[{"scf_id":"IAC-15","rationale":"r"}]}`), nil
+		return stubResult(`{"ranking":[{"scf_id":"IAC-12","rationale":"r"}]}`), nil
 	})
 	rec := &memRecorder{}
 	staged, rows := rerankRows()
@@ -116,7 +116,7 @@ func TestRerankAllRecordsEachGenerationUnderImportSurface(t *testing.T) {
 	if len(prompts) != 2 {
 		t.Fatalf("calls = %d, want 2 (the row without candidates is skipped)", len(prompts))
 	}
-	if !strings.Contains(prompts[0], "tested under: CC6.1") || !strings.Contains(prompts[0], "IAC-06: MFA (crosswalk; reaches 1 of 1: CC6.1)") {
+	if !strings.Contains(prompts[0], "tested under: CC6.1") || !strings.Contains(prompts[0], "IAC-37: MFA (crosswalk; reaches 1 of 1: CC6.1)") {
 		t.Errorf("prompt lacks the row's criteria or candidate fit:\n%s", prompts[0])
 	}
 	for _, g := range rec.got {
@@ -130,8 +130,8 @@ func TestRerankAllRecordsEachGenerationUnderImportSurface(t *testing.T) {
 	if rows[0].LLMRerank != RerankApplied || rows[1].LLMRerank != RerankOff || rows[2].LLMRerank != RerankApplied {
 		t.Errorf("states = %s %s %s", rows[0].LLMRerank, rows[1].LLMRerank, rows[2].LLMRerank)
 	}
-	if rows[0].Candidates[0].SCFID != "IAC-15" {
-		t.Errorf("r1 top = %s, want IAC-15", rows[0].Candidates[0].SCFID)
+	if rows[0].Candidates[0].SCFID != "IAC-12" {
+		t.Errorf("r1 top = %s, want IAC-12", rows[0].Candidates[0].SCFID)
 	}
 }
 
@@ -163,7 +163,7 @@ func TestRerankRowDiscardsUnrecordedOrUnusableDrafts(t *testing.T) {
 	t.Parallel()
 	staged, rows := rerankRows()
 	good := fnClient(func(llm.GenerateRequest) (llm.GenerateResult, error) {
-		return stubResult(`{"ranking":[{"scf_id":"IAC-15","rationale":"r"}]}`), nil
+		return stubResult(`{"ranking":[{"scf_id":"IAC-12","rationale":"r"}]}`), nil
 	})
 	got, err := NewReranker(good, &memRecorder{err: errors.New("db down")}, nil).rerankRow(context.Background(), staged[0], rows[0])
 	if err == nil || sources(got.Candidates) != sources(threeCands()) {
@@ -204,8 +204,8 @@ func TestStageReranksWhenOptedIn(t *testing.T) {
 	store := newFakeBatchStore()
 	store.release = &SCFRelease{VersionID: "scf-1", Version: "2025.2"}
 	store.edges = []CrosswalkEdge{
-		{RequirementID: "r-61", AnchorID: "a-1", SCFID: "IAC-06", Strength: 0.9},
-		{RequirementID: "r-61", AnchorID: "a-2", SCFID: "IAC-15", Strength: 0.5},
+		{RequirementID: "r-61", AnchorID: "a-1", SCFID: "IAC-37", Strength: 0.9},
+		{RequirementID: "r-61", AnchorID: "a-2", SCFID: "IAC-12", Strength: 0.5},
 	}
 	client := fnClient(func(req llm.GenerateRequest) (llm.GenerateResult, error) {
 		ids, _ := req.Context["candidate_scf_ids"].([]string)
@@ -224,7 +224,7 @@ func TestStageReranksWhenOptedIn(t *testing.T) {
 		t.Fatalf("batch = %+v", b)
 	}
 	row := b.Staged[0]
-	if row.LLMRerank != RerankApplied || sources(row.Candidates) != "IAC-15/crosswalk IAC-06/crosswalk" || row.Candidates[0].Rationale != "last first" {
+	if row.LLMRerank != RerankApplied || sources(row.Candidates) != "IAC-12/crosswalk IAC-37/crosswalk" || row.Candidates[0].Rationale != "last first" {
 		t.Errorf("row = %+v, want reranked with the stub's rationale", row)
 	}
 }

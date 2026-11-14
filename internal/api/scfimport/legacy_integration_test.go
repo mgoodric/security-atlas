@@ -31,8 +31,8 @@ func legacyCatalog() *scfimport.Catalog {
 		ReleaseVersion: "test-legacy-1769",
 		ReleaseDate:    "2026-11-01",
 		Controls: []scfimport.Control{
-			{SCFID: "IAC-06", Family: "IAC", Title: "Multi-Factor Authentication (MFA)", Description: "MFA.", LegacySCFID: "IAC-06.1"},
-			{SCFID: "IAC-07", Family: "IAC", Title: "User Provisioning & Lifecycle", Description: "Provisioning.", LegacySCFID: "  "},
+			{SCFID: "IAC-37", Family: "IAC", Title: "Multi-Factor Authentication (MFA)", Description: "MFA.", LegacySCFID: "IAC-06.1"},
+			{SCFID: "IAC-04", Family: "IAC", Title: "User Provisioning & Lifecycle", Description: "Provisioning.", LegacySCFID: "  "},
 		},
 	}
 }
@@ -107,31 +107,31 @@ func TestImport_LegacySCFIDStoredAndReturnedByAnchorAPI(t *testing.T) {
 		t.Fatalf("Import: %v", err)
 	}
 
-	if got := storedLegacy(t, pool, cat.ReleaseVersion, "IAC-06"); got == nil || *got != "IAC-06.1" {
-		t.Fatalf("IAC-06 legacy_scf_id = %v; want IAC-06.1", got)
+	if got := storedLegacy(t, pool, cat.ReleaseVersion, "IAC-37"); got == nil || *got != "IAC-06.1" {
+		t.Fatalf("IAC-37 legacy_scf_id = %v; want IAC-06.1", got)
 	}
-	if got := storedLegacy(t, pool, cat.ReleaseVersion, "IAC-07"); got != nil {
-		t.Fatalf("IAC-07 legacy_scf_id = %q; want NULL", *got)
+	if got := storedLegacy(t, pool, cat.ReleaseVersion, "IAC-04"); got != nil {
+		t.Fatalf("IAC-04 legacy_scf_id = %q; want NULL", *got)
 	}
 
 	get := anchorAPI(t)
 
-	one := get("/v1/anchors/IAC-06")["anchor"].(map[string]any)
+	one := get("/v1/anchors/IAC-37")["anchor"].(map[string]any)
 	if one["legacy_scf_id"] != "IAC-06.1" {
-		t.Fatalf("GET /v1/anchors/IAC-06 legacy_scf_id = %v; want IAC-06.1", one["legacy_scf_id"])
+		t.Fatalf("GET /v1/anchors/IAC-37 legacy_scf_id = %v; want IAC-06.1", one["legacy_scf_id"])
 	}
-	other := get("/v1/anchors/IAC-07")["anchor"].(map[string]any)
+	other := get("/v1/anchors/IAC-04")["anchor"].(map[string]any)
 	if v, present := other["legacy_scf_id"]; present {
-		t.Fatalf("GET /v1/anchors/IAC-07 carries legacy_scf_id %v; want it absent", v)
+		t.Fatalf("GET /v1/anchors/IAC-04 carries legacy_scf_id %v; want it absent", v)
 	}
 
 	for _, path := range []string{"/v1/anchors", "/v1/anchors?include=state"} {
 		listed := listedBySCFID(t, get(path))
-		if listed["IAC-06"]["legacy_scf_id"] != "IAC-06.1" {
-			t.Fatalf("%s IAC-06 legacy_scf_id = %v; want IAC-06.1", path, listed["IAC-06"]["legacy_scf_id"])
+		if listed["IAC-37"]["legacy_scf_id"] != "IAC-06.1" {
+			t.Fatalf("%s IAC-37 legacy_scf_id = %v; want IAC-06.1", path, listed["IAC-37"]["legacy_scf_id"])
 		}
-		if v, present := listed["IAC-07"]["legacy_scf_id"]; present {
-			t.Fatalf("%s IAC-07 carries legacy_scf_id %v; want it absent", path, v)
+		if v, present := listed["IAC-04"]["legacy_scf_id"]; present {
+			t.Fatalf("%s IAC-04 carries legacy_scf_id %v; want it absent", path, v)
 		}
 	}
 }
@@ -178,8 +178,8 @@ func TestImport_ReimportBackfillsLegacySCFIDButNeverRewritesIt(t *testing.T) {
 	if report.Updated != 1 || report.Unchanged != 1 || report.IsNewVersion {
 		t.Fatalf("backfill report = %+v; want 1 updated, 1 unchanged, not new", report)
 	}
-	if got := storedLegacy(t, pool, bare.ReleaseVersion, "IAC-06"); got == nil || *got != "IAC-06.1" {
-		t.Fatalf("IAC-06 legacy_scf_id after backfill = %v; want IAC-06.1", got)
+	if got := storedLegacy(t, pool, bare.ReleaseVersion, "IAC-37"); got == nil || *got != "IAC-06.1" {
+		t.Fatalf("IAC-37 legacy_scf_id after backfill = %v; want IAC-06.1", got)
 	}
 
 	// Same catalog again is a no-op.
@@ -198,10 +198,10 @@ func TestImport_ReimportBackfillsLegacySCFIDButNeverRewritesIt(t *testing.T) {
 	if !errors.As(err, &conflict) {
 		t.Fatalf("Import with a different legacy_scf_id: err = %v; want *ReleaseConflictError", err)
 	}
-	if len(conflict.Changed) != 1 || conflict.Changed[0] != "IAC-06" {
-		t.Fatalf("conflict.Changed = %v; want [IAC-06]", conflict.Changed)
+	if len(conflict.Changed) != 1 || conflict.Changed[0] != "IAC-37" {
+		t.Fatalf("conflict.Changed = %v; want [IAC-37]", conflict.Changed)
 	}
-	if got := storedLegacy(t, pool, bare.ReleaseVersion, "IAC-06"); got == nil || *got != "IAC-06.1" {
-		t.Fatalf("IAC-06 legacy_scf_id after refused import = %v; want IAC-06.1", got)
+	if got := storedLegacy(t, pool, bare.ReleaseVersion, "IAC-37"); got == nil || *got != "IAC-06.1" {
+		t.Fatalf("IAC-37 legacy_scf_id after refused import = %v; want IAC-06.1", got)
 	}
 }

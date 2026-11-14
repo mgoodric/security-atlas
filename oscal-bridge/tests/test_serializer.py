@@ -114,7 +114,7 @@ def test_serialize_ssp_marks_excluded_requirements_not_applicable():
     assert not any(p["name"] == "evaluation-result" for p in na["props"])
 
     # The per-control entry is unchanged.
-    ctrl = by_id["iac-06"]
+    ctrl = by_id["iac-37"]
     assert {p["name"]: p["value"] for p in ctrl["props"]}["evaluation-result"] == "pass"
     assert not any(p["name"] == "implementation-status" for p in ctrl["props"])
 

@@ -76,6 +76,9 @@ security-atlas-cli evidence push \
 
 `--scope` is the scope predicate as JSON. `--payload` takes a JSON literal or
 `@path/to/file.json`. `--result` is one of `pass | fail | na | inconclusive`.
+`--control` takes the control's UUID or its bundle ID; a bundle ID links the
+record to the tenant's active version of that bundle. Any other value is kept
+as a free-form reference and does not link to a control.
 Optional: `--schema-version` (default `1.0.0`), `--actor-type` (default
 `service_account`), `--session-id`, `--payload-uri`.
 
@@ -103,7 +106,8 @@ security-atlas-cli credentials revoke --id <credential id>
 ```
 
 The bearer is printed exactly once, at issue time. `--kinds` empty means all
-evidence kinds; `--ttl 0` (the default) means no expiry.
+evidence kinds; `--ttl` takes a Go duration (`24h`, `90m`) or whole days
+(`30d`), and `--ttl 0` (the default) means no expiry.
 
 `credentials issue --reset-bootstrap --force` is the first-login recovery
 path — see [First-time login](troubleshooting/first-login.md). It mints a tenant admin key that expires (24h by default, `--ttl` up to `168h`) and refuses `--scope` and `--kinds`; revoke the key once you have signed in another way.

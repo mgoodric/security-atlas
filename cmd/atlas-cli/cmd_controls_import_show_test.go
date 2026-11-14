@@ -136,9 +136,9 @@ func TestControlsImportShow_PrintsRationalesAndUnavailableRerank(t *testing.T) {
 			{
 				RowNumber: 2, ExternalID: "ORG-AC-01", Title: "MFA", Status: "pending", LLMRerank: controlimport.RerankApplied,
 				Candidates: []controlimport.Candidate{
-					{Rank: 1, SCFID: "IAC-15", Title: "Account Management", Source: controlimport.SourceCrosswalk,
+					{Rank: 1, SCFID: "IAC-12", Title: "Account Management", Source: controlimport.SourceCrosswalk,
 						AIAssisted: true, Rationale: "Covers account lifecycle."},
-					{Rank: 2, SCFID: "IAC-06", Title: "Multi-Factor Authentication", Source: controlimport.SourceKeyword},
+					{Rank: 2, SCFID: "IAC-37", Title: "Multi-Factor Authentication", Source: controlimport.SourceKeyword},
 				},
 			},
 			{
@@ -155,8 +155,8 @@ func TestControlsImportShow_PrintsRationalesAndUnavailableRerank(t *testing.T) {
 		t.Fatalf("controls import show: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"  1. IAC-15  Account Management  (crosswalk, LLM-reranked)\n     why: Covers account lifecycle.\n",
-		"  2. IAC-06  Multi-Factor Authentication  (keyword)\n",
+		"  1. IAC-12  Account Management  (crosswalk, LLM-reranked)\n     why: Covers account lifecycle.\n",
+		"  2. IAC-37  Multi-Factor Authentication  (keyword)\n",
 		"row 3  ORG-AC-02  Review  [pending]\n  LLM rerank unavailable: deterministic order, no rationale\n",
 	} {
 		if !strings.Contains(out, want) {

@@ -43,7 +43,7 @@ server, and the Next.js frontend — and seeds it on first boot
 (migrations, default tenant/scope/user, the SCF catalog, and the 50 SOC 2
 control bundles). It is the bundle behind the "installable + first
 evidence in 4 hours" acceptance criterion; the end-to-end walkthrough
-lives in [`docs/getting-started/first-evidence.md`](getting-started/first-evidence.md).
+lives in the [Getting started guide](../docs-site/docs/getting-started.md).
 
 ```sh
 # 1. Clone the repo (the bundle bind-mounts migrations/ + controls/ from it).
