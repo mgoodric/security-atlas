@@ -297,6 +297,11 @@ describe("anchor fit", () => {
       label: "No SCF fit",
       title: "no SCF control covers retention",
     });
+    // A row whose note did not arrive still gets the marker, untitled.
+    expect(anchorFitMarker({ anchorFit: "partial" })).toEqual({
+      label: "Partial fit",
+      title: "",
+    });
   });
 
   test("labels each fit; absent reads as exact", () => {
