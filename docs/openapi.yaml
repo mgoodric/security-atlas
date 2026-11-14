@@ -2195,6 +2195,33 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/imports/settings:
+    get:
+      summary: GET /v1/controls/imports/settings — the tenant's control import settings, including the local-Ollama rerank opt-in (tenant-admin; #2079)
+      tags: [controls]
+      operationId: get-v1-controls-imports-settings
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    put:
+      summary: PUT /v1/controls/imports/settings — opt the tenant in or out of reranking import candidates on local Ollama (tenant-admin; #2079)
+      tags: [controls]
+      operationId: put-v1-controls-imports-settings
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/imports/{id}:
     get:
       summary: GET /v1/controls/imports/{id} — an import batch with its counts, staged rows and rejected rows (#1779)
@@ -3227,6 +3254,26 @@ paths:
       summary: POST /v1/framework-scopes/{id}/applicability/bulk — set one applicability decision on many requirements
       tags: [framework-scopes]
       operationId: post-v1-framework-scopes-id-applicability-bulk
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/framework-scopes/{id}/applicability/diff:
+    get:
+      summary: GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision
+      tags: [framework-scopes]
+      operationId: get-v1-framework-scopes-id-applicability-diff
       security:
         - bearer: []
       parameters:
@@ -5727,6 +5774,58 @@ paths:
       operationId: get-v1-themes
       security:
         - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    post:
+      summary: POST /v1/themes — add an organisation theme; body {name, description?}; names are unique across built-ins and the organisation
+      tags: [risks]
+      operationId: post-v1-themes
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/themes/{ref}:
+    delete:
+      summary: DELETE /v1/themes/{ref} — delete an unused organisation theme (409 with risk and rule counts while in use; built-ins refused); ref is name or id
+      tags: [risks]
+      operationId: delete-v1-themes-ref
+      security:
+        - bearer: []
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+    patch:
+      summary: PATCH /v1/themes/{ref} — rename an organisation theme; body {name?, description?}; rewrites every risk and aggregation rule that used the old name
+      tags: [risks]
+      operationId: patch-v1-themes-ref
+      security:
+        - bearer: []
+      parameters:
+        - name: ref
+          in: path
+          required: true
+          schema:
+            type: string
       responses:
         default:
           description: Default response envelope.

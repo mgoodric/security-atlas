@@ -107,6 +107,10 @@ export type FixtureName =
   // evaluated controls for the SoA tab (framework-scope-soa.spec.ts).
   // Deletes the version's scope revisions so each run starts clean.
   | "framework-scope-soa"
+  // #1795 — synthetic framework version with four requirements for the
+  // review-screen applicability diff (framework-scope-diff.spec.ts).
+  // Deletes the version's scope revisions so each run starts clean.
+  | "framework-scope-diff"
   // #2089 — one manual_attested control so attest.spec.ts can load the
   // real attest form (the base control is automated).
   | "attest";

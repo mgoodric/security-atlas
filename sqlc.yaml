@@ -113,6 +113,7 @@ sql:
       - "migrations/sql/20261012000000_taxonomy_audit_log.sql"
       - "migrations/sql/20261015000000_risk_review_cadence.sql"
       - "migrations/sql/20261018000000_vendor_initial_review_window.sql"
+      - "migrations/sql/20261024000000_taxonomy_audit_log_themes.sql"
     queries: "internal/db/queries"
     gen:
       go:
