@@ -612,7 +612,7 @@ type demoSCFAnchor struct {
 // SCF catalog (securecontrolsframework.com) so anchoring to them is anchoring
 // to real SCF controls, not fabricated ones.
 var demoSCFAnchors = []demoSCFAnchor{
-	{"IAC-06", "Identification & Authentication", "Multi-Factor Authentication"},
+	{"IAC-37", "Identification & Authentication", "Multi-Factor Authentication"},
 	{"CRY-05", "Cryptographic Protections", "Encryption of Data at Rest"},
 	{"BCD-11", "Business Continuity & Disaster Recovery", "Data Backups"},
 	{"TDA-09", "Technology Development & Acquisition", "Secure Coding"},

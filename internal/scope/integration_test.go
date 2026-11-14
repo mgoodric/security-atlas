@@ -239,7 +239,7 @@ func TestControlApplicability_AppliesExpression(t *testing.T) {
 	if err := withAdminTenant(migrate, tenant, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
-			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)
+			VALUES ($1, $2, 'IAC-37', 'MFA', 'IAC', 'automated', $3, $4)
 		`, controlID, tenant, exprJSON, bundleID)
 		return err
 	}); err != nil {
@@ -474,7 +474,7 @@ func TestHTTP_ControlApplicability_EndToEnd(t *testing.T) {
 	if err := withAdminTenant(migrate, tenant, func(ctx context.Context, tx pgx.Tx) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
-			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)
+			VALUES ($1, $2, 'IAC-37', 'MFA', 'IAC', 'automated', $3, $4)
 		`, controlID, tenant, exprJSON, bundleID)
 		return err
 	}); err != nil {

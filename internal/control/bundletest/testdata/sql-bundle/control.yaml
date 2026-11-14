@@ -2,7 +2,7 @@ bundle_schema_version: "1"
 bundle_id: sql_encrypted_test
 title: "Every record payload reports encrypted=true (SQL)"
 description: "A SQL evidence query over the in-window evidence relation."
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 control_family: IAC
 owner_role: security-engineering

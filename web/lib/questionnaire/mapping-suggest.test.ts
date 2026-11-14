@@ -9,7 +9,7 @@ import {
 const proposed: MappingSuggestResponse = {
   proposal_id: "11111111-1111-1111-1111-111111111111",
   question_id: "22222222-2222-2222-2222-222222222222",
-  scf_anchor_id: "IAC-06",
+  scf_anchor_id: "IAC-37",
   title: "Multi-Factor Authentication",
   rationale: "The question asks about MFA for access control.",
   model_name: "llama3.1",
@@ -22,7 +22,7 @@ describe("toMappingViewModel", () => {
     const vm = toMappingViewModel(proposed);
     expect(vm.status).toBe("proposed");
     expect(vm.canApprove).toBe(true);
-    expect(vm.scfAnchorId).toBe("IAC-06");
+    expect(vm.scfAnchorId).toBe("IAC-37");
     expect(vm.modelLabel).toContain("ollama-local");
   });
 

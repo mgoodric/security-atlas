@@ -116,7 +116,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rbac.Pull: %v", err)
 	}
-	rbacRec, err := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-21")
+	rbacRec, err := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildRBACRecord: %v", err)
 	}
@@ -320,7 +320,7 @@ func TestEmittedRecords_NoSecretsOrConfigValues(t *testing.T) {
 			Rules:    []rbac.Rule{{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get"}}}},
 	}}
 	bindings, _ := rbac.Pull(context.Background(), rbacAPI, fixed)
-	rbacRec, _ := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-21")
+	rbacRec, _ := buildRBACRecord(bindings[0], "cluster-1", "prod", "scf:IAC-10")
 
 	wlAPI := &fakeWorkloadForIntegration{workloads: []workload.RawWorkload{
 		{Kind: workload.KindDeployment, Name: "api", Namespace: "prod", RunAsNonRoot: true, ReadOnlyRootFilesystem: true, ContainerCount: 1},

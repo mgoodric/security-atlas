@@ -83,7 +83,7 @@ func startBridge(t *testing.T) (string, func()) {
 
 // seedCurrentSCFAnchor seeds a minimal 'scf'-slug framework with a CURRENT
 // version carrying one anchor whose scf_id matches a vendor-claim control id
-// ("IAC-06"). Proves the deterministic requirement -> SCF anchor mapping
+// ("IAC-37"). Proves the deterministic requirement -> SCF anchor mapping
 // (slice-512 D3). scf_anchors is global — seeded idempotently.
 func seedCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool, scfID string) {
 	t.Helper()
@@ -130,7 +130,7 @@ func TestImportComponentDefinition_ImportsEndToEnd(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	seedCurrentSCFAnchor(t, admin, "IAC-06")
+	seedCurrentSCFAnchor(t, admin, "IAC-37")
 
 	addr, stop := startBridge(t)
 	defer stop()
@@ -150,16 +150,16 @@ func TestImportComponentDefinition_ImportsEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Import: %v", err)
 	}
-	// Two components, three vendor claims (IAC-06, ac-2, au-2).
+	// Two components, three vendor claims (IAC-37, ac-2, au-2).
 	if report.ComponentCount != 2 {
 		t.Errorf("ComponentCount = %d, want 2", report.ComponentCount)
 	}
 	if report.ClaimCount != 3 {
-		t.Errorf("ClaimCount = %d, want 3 (IAC-06, ac-2, au-2)", report.ClaimCount)
+		t.Errorf("ClaimCount = %d, want 3 (IAC-37, ac-2, au-2)", report.ClaimCount)
 	}
-	// Only IAC-06 deterministically matched the seeded SCF anchor (D3).
+	// Only IAC-37 deterministically matched the seeded SCF anchor (D3).
 	if report.MappedCount != 1 {
-		t.Errorf("MappedCount = %d, want 1 (IAC-06 -> SCF anchor)", report.MappedCount)
+		t.Errorf("MappedCount = %d, want 1 (IAC-37 -> SCF anchor)", report.MappedCount)
 	}
 	if report.OSCALVersion == "" {
 		t.Error("OSCALVersion must be echoed from the validated document")
@@ -205,7 +205,7 @@ func TestImportComponentDefinition_ImportsEndToEnd(t *testing.T) {
 		t.Errorf("imported_components = %d, want 2", compCount)
 	}
 
-	// Claims: IAC-06 mapped to the SCF anchor; the other two NULL. EVERY claim
+	// Claims: IAC-37 mapped to the SCF anchor; the other two NULL. EVERY claim
 	// is a vendor claim ('asserted') — P0-512-1.
 	var mapped, total, asserted, vendorClaims int
 	if err := admin.QueryRow(ctx,
@@ -231,17 +231,17 @@ func TestImportComponentDefinition_ImportsEndToEnd(t *testing.T) {
 		t.Errorf("all 3 rows must be is_vendor_claim=TRUE, got %d", vendorClaims)
 	}
 
-	// The IAC-06 claim mapped to the SCF anchor.
+	// The IAC-37 claim mapped to the SCF anchor.
 	var anchorID *string
 	if err := admin.QueryRow(ctx,
 		`SELECT c.scf_anchor_id FROM imported_component_claims c
 		 JOIN imported_components ic ON ic.id = c.imported_component_id
-		 WHERE ic.imported_catalog_id = $1 AND c.control_id = 'IAC-06'`,
+		 WHERE ic.imported_catalog_id = $1 AND c.control_id = 'IAC-37'`,
 		report.ImportID).Scan(&anchorID); err != nil {
-		t.Fatalf("read IAC-06 mapping: %v", err)
+		t.Fatalf("read IAC-37 mapping: %v", err)
 	}
-	if anchorID == nil || *anchorID != "IAC-06" {
-		t.Errorf("IAC-06 scf_anchor_id = %v, want IAC-06 (requirement -> SCF anchor)", anchorID)
+	if anchorID == nil || *anchorID != "IAC-37" {
+		t.Errorf("IAC-37 scf_anchor_id = %v, want IAC-37 (requirement -> SCF anchor)", anchorID)
 	}
 
 	// AC-8: a success audit row exists with the component-definition action.
@@ -274,7 +274,7 @@ func TestImportComponentDefinition_DoesNotSatisfyAnyControl(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	seedCurrentSCFAnchor(t, admin, "IAC-06")
+	seedCurrentSCFAnchor(t, admin, "IAC-37")
 
 	addr, stop := startBridge(t)
 	defer stop()

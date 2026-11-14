@@ -125,7 +125,7 @@ export async function dispositionClaim(
 }
 
 // Slice 620 — map an unmapped vendor claim to a canonical SCF anchor. The
-// scf_anchor_id is the SCF code (e.g. "IAC-06"); the platform validates it
+// scf_anchor_id is the SCF code (e.g. "IAC-37"); the platform validates it
 // against the bundled catalog. Requirement -> SCF anchor only (invariant #7);
 // this only sets the crosswalk and NEVER fabricates control coverage.
 export async function mapClaimScfAnchor(

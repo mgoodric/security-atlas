@@ -139,7 +139,7 @@ func okFlags() runFlags {
 		environment:     "prod",
 		authMode:        "client-credentials",
 		subscriptionID:  "sub-1",
-		entraControl:    "scf:IAC-21",
+		entraControl:    "scf:IAC-10",
 		storageControl:  "scf:CRY-04",
 		aksControl:      "scf:CFG-02",
 		nsgControl:      "scf:NET-04",

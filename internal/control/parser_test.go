@@ -14,7 +14,7 @@ import (
 const minimalManifestYAML = `bundle_schema_version: "1"
 bundle_id: minimal_control
 title: "Minimal control"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 `
 

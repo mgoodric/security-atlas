@@ -135,7 +135,7 @@ func TestParseStockPolicy_NoFrontMatter(t *testing.T) {
 // controls table is populated.
 func TestNoopAnchorResolver_AllMissing(t *testing.T) {
 	resolver := seed.NoopAnchorResolver{}
-	codes := []string{"GOV-01", "IAC-07", "CHG-02"}
+	codes := []string{"GOV-01", "IAC-04", "CHG-02"}
 	resolved, missing, err := resolver.Resolve(context.TODO(), codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)

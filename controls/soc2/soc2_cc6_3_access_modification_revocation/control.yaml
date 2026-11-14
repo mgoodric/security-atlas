@@ -8,7 +8,7 @@ description: |
   an Okta user-deactivate or user-delete event within 24 hours. This is
   the auditor's most-sampled CC6.3 manifestation.
 
-scf_anchor_id: IAC-07
+scf_anchor_id: IAC-04
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering

@@ -46,7 +46,7 @@ const (
 
 // Citation is one resolved, tenant-grounded reference a task item makes. For a
 // control/policy the ID is the canonical UUID string; for an SCF anchor the ID
-// is the SCF id string (e.g. "IAC-06") since anchors are catalog-global, not
+// is the SCF id string (e.g. "IAC-37") since anchors are catalog-global, not
 // tenant rows — the grounding for an anchor citation is the tenant-owned
 // control that carries it (Ref).
 type Citation struct {

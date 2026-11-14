@@ -103,7 +103,7 @@ func TestListAnchors_ReturnsDBBackedAnchors(t *testing.T) {
 
 func TestGetAnchorByID_BySCFID(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
-	resp, body := get(t, ts, "/v1/anchors/IAC-06", bearer)
+	resp, body := get(t, ts, "/v1/anchors/IAC-37", bearer)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
 	}
@@ -113,8 +113,8 @@ func TestGetAnchorByID_BySCFID(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.Anchor["scf_id"] != "IAC-06" {
-		t.Fatalf("scf_id = %q; want IAC-06", got.Anchor["scf_id"])
+	if got.Anchor["scf_id"] != "IAC-37" {
+		t.Fatalf("scf_id = %q; want IAC-37", got.Anchor["scf_id"])
 	}
 	if got.Anchor["name"] != "Multi-Factor Authentication (MFA)" {
 		t.Fatalf("name = %q", got.Anchor["name"])
@@ -125,7 +125,7 @@ func TestGetAnchorByID_UUID(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
 
 	// First find the UUID via the SCF ID.
-	_, body := get(t, ts, "/v1/anchors/IAC-06", bearer)
+	_, body := get(t, ts, "/v1/anchors/IAC-37", bearer)
 	var first struct {
 		Anchor map[string]string `json:"anchor"`
 	}
@@ -153,7 +153,7 @@ func TestGetAnchor_UnknownReturns404(t *testing.T) {
 
 func TestRequirementsForAnchor_StillReturnsMappings(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
-	resp, body := get(t, ts, "/v1/anchors/IAC-06/requirements", bearer)
+	resp, body := get(t, ts, "/v1/anchors/IAC-37/requirements", bearer)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
 	}
@@ -164,11 +164,11 @@ func TestRequirementsForAnchor_StillReturnsMappings(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if got.Anchor["scf_id"] != "IAC-06" {
+	if got.Anchor["scf_id"] != "IAC-37" {
 		t.Fatalf("anchor scf_id = %q", got.Anchor["scf_id"])
 	}
 	if len(got.Requirements) == 0 {
-		t.Fatal("expected requirement mappings for IAC-06")
+		t.Fatal("expected requirement mappings for IAC-37")
 	}
 }
 
@@ -255,7 +255,7 @@ func TestAnchorsForRequirement_ResolvesSOC2CC66BySlugVersionCode(t *testing.T) {
 		t.Fatalf("requirement.code = %q; want CC6.6", got.Requirement["code"])
 	}
 	if len(got.Anchors) == 0 {
-		t.Fatal("expected at least one anchor for CC6.6 (NET-04, IAC-06 per crosswalk)")
+		t.Fatal("expected at least one anchor for CC6.6 (NET-04, IAC-37 per crosswalk)")
 	}
 	for _, a := range got.Anchors {
 		if a.SCFID == "" {

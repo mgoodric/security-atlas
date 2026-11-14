@@ -14,7 +14,7 @@ func TestManifestsEqualIgnoringDescription(t *testing.T) {
 bundle_id: c1
 title: "Test control"
 description: "Original prose."
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 evidence_queries:
   - id: q1

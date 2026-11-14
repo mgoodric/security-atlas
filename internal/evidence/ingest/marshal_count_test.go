@@ -80,7 +80,7 @@ func fixedFixture(t *testing.T) *evidencev1.EvidenceRecord {
 		IdempotencyKey: "slice-379-test-idem",
 		EvidenceKind:   "secret.scan.v1",
 		SchemaVersion:  "1.0.0",
-		ControlId:      "scf:IAC-06",
+		ControlId:      "scf:IAC-37",
 		Scope: []*evidencev1.ScopeDimension{
 			{Key: "env", Values: []string{"prod"}},
 		},
@@ -308,7 +308,7 @@ func BenchmarkIngestRedactionPath(b *testing.B) {
 			IdempotencyKey: "bench-379-idem",
 			EvidenceKind:   "secret.scan.v1",
 			SchemaVersion:  "1.0.0",
-			ControlId:      "scf:IAC-06",
+			ControlId:      "scf:IAC-37",
 			Scope: []*evidencev1.ScopeDimension{
 				{Key: "env", Values: []string{"prod"}},
 			},

@@ -931,7 +931,7 @@ type Querier interface {
 	// the oldest one (#1867).
 	GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskByKeyParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
-	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+	// Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 	// framework version.
 	GetSCFAnchorBySCFID(ctx context.Context, scfID string) (ScfAnchor, error)
 	// Existing-row lookup. Returns ErrNoRows when the anchor doesn't exist yet.

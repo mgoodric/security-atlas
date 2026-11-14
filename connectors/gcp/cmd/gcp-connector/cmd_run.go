@@ -93,7 +93,7 @@ func newRunCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&f.projectID, "project", "", "GCP project id to collect from [required]")
-	cmd.Flags().StringVar(&f.iamControlID, "iam-control-id", "scf:IAC-21", "control id attached to each IAM-binding record")
+	cmd.Flags().StringVar(&f.iamControlID, "iam-control-id", "scf:IAC-10", "control id attached to each IAM-binding record")
 	cmd.Flags().StringVar(&f.bucketControlID, "bucket-control-id", "scf:CRY-04", "control id attached to each storage-bucket record")
 	return cmd
 }

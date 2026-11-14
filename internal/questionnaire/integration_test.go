@@ -149,7 +149,7 @@ func TestStore_AddQuestionsFromParse_MappedAndUnmapped(t *testing.T) {
 		t.Fatalf("CreateQuestionnaire: %v", err)
 	}
 	parsed := []ParsedQuestion{
-		{Code: "Q-01", Text: "Mapped?", Domain: "IAC", AnswerType: "yes/no", ScfAnchorID: "IAC-06"},
+		{Code: "Q-01", Text: "Mapped?", Domain: "IAC", AnswerType: "yes/no", ScfAnchorID: "IAC-37"},
 		{Code: "Q-02", Text: "Unmapped?", Domain: "Misc", AnswerType: "yes/no"}, // no ScfAnchorID
 	}
 	got, err := store.AddQuestionsFromParse(ctx, q.ID, parsed)
@@ -159,8 +159,8 @@ func TestStore_AddQuestionsFromParse_MappedAndUnmapped(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("expected 2 questions, got %d", len(got))
 	}
-	if got[0].ScfAnchorID != "IAC-06" || got[0].NeedsMapping {
-		t.Fatalf("first row should be mapped to IAC-06: %+v", got[0])
+	if got[0].ScfAnchorID != "IAC-37" || got[0].NeedsMapping {
+		t.Fatalf("first row should be mapped to IAC-37: %+v", got[0])
 	}
 	if got[1].ScfAnchorID != "" || !got[1].NeedsMapping {
 		t.Fatalf("second row should be needs_mapping: %+v", got[1])
@@ -184,7 +184,7 @@ func TestStore_UpsertAnswer_WithLibrarySave(t *testing.T) {
 		t.Fatalf("CreateQuestionnaire: %v", err)
 	}
 	qs, err := store.AddQuestionsFromParse(ctx, q.ID, []ParsedQuestion{
-		{Code: "Q-01", Text: "MFA?", ScfAnchorID: "IAC-06"},
+		{Code: "Q-01", Text: "MFA?", ScfAnchorID: "IAC-37"},
 	})
 	if err != nil {
 		t.Fatalf("AddQuestionsFromParse: %v", err)
@@ -202,7 +202,7 @@ func TestStore_UpsertAnswer_WithLibrarySave(t *testing.T) {
 		Citations:       []any{map[string]any{"evidence_id": "ev-01"}},
 		AuthoredBy:      "alice@acme.test",
 		SaveToLibrary:   true,
-		SCFAnchorIDHint: "IAC-06",
+		SCFAnchorIDHint: "IAC-37",
 		SourceLabel:     "ACME-CAIQ-2026",
 	})
 	if err != nil {
@@ -216,7 +216,7 @@ func TestStore_UpsertAnswer_WithLibrarySave(t *testing.T) {
 	}
 
 	// Library should have one entry now.
-	sugg, err := store.SuggestForAnchorWithPool(ctx, "IAC-06", 10)
+	sugg, err := store.SuggestForAnchorWithPool(ctx, "IAC-37", 10)
 	if err != nil {
 		t.Fatalf("SuggestForAnchorWithPool: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestStore_UpsertAnswer_NoLibrarySaveWhenNarrativeEmpty(t *testing.T) {
 
 	q, _ := store.CreateQuestionnaire(ctx, CreateQuestionnaireParams{Name: "Q", SourceLabel: "s"})
 	qs, _ := store.AddQuestionsFromParse(ctx, q.ID, []ParsedQuestion{
-		{Code: "Q-01", Text: "MFA?", ScfAnchorID: "IAC-06"},
+		{Code: "Q-01", Text: "MFA?", ScfAnchorID: "IAC-37"},
 	})
 
 	// SaveToLibrary=true but Narrative="" — must NOT insert a library entry.
@@ -250,13 +250,13 @@ func TestStore_UpsertAnswer_NoLibrarySaveWhenNarrativeEmpty(t *testing.T) {
 		Narrative:       "",
 		AuthoredBy:      "alice@acme.test",
 		SaveToLibrary:   true,
-		SCFAnchorIDHint: "IAC-06",
+		SCFAnchorIDHint: "IAC-37",
 		SourceLabel:     "src",
 	})
 	if err != nil {
 		t.Fatalf("UpsertAnswer: %v", err)
 	}
-	sugg, err := store.SuggestForAnchorWithPool(ctx, "IAC-06", 10)
+	sugg, err := store.SuggestForAnchorWithPool(ctx, "IAC-37", 10)
 	if err != nil {
 		t.Fatalf("SuggestForAnchorWithPool: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestStore_ListQuestionsWithAnswers_StitchesAnswers(t *testing.T) {
 
 	q, _ := store.CreateQuestionnaire(ctx, CreateQuestionnaireParams{Name: "Q", SourceLabel: "s"})
 	qs, _ := store.AddQuestionsFromParse(ctx, q.ID, []ParsedQuestion{
-		{Code: "Q-01", Text: "first", ScfAnchorID: "IAC-06"},
+		{Code: "Q-01", Text: "first", ScfAnchorID: "IAC-37"},
 		{Code: "Q-02", Text: "second"}, // intentionally unmapped
 	})
 	// Answer only the first question.
@@ -319,7 +319,7 @@ func TestSuggestForAnchor_RLS_TenantIsolation(t *testing.T) {
 	ctxA := ctxFor(t, tenantA)
 	qA, _ := store.CreateQuestionnaire(ctxA, CreateQuestionnaireParams{Name: "A-Q", SourceLabel: "A"})
 	qsA, _ := store.AddQuestionsFromParse(ctxA, qA.ID, []ParsedQuestion{
-		{Code: "Q-01", Text: "?", ScfAnchorID: "IAC-06"},
+		{Code: "Q-01", Text: "?", ScfAnchorID: "IAC-37"},
 	})
 	if _, err := store.UpsertAnswer(ctxA, AnswerParams{
 		QuestionID:      qsA[0].ID,
@@ -327,7 +327,7 @@ func TestSuggestForAnchor_RLS_TenantIsolation(t *testing.T) {
 		Narrative:       "tenant-A confidential narrative",
 		AuthoredBy:      "alice@a.test",
 		SaveToLibrary:   true,
-		SCFAnchorIDHint: "IAC-06",
+		SCFAnchorIDHint: "IAC-37",
 		SourceLabel:     "tenant-A-source",
 	}); err != nil {
 		t.Fatalf("seed tenant-A library entry: %v", err)
@@ -335,7 +335,7 @@ func TestSuggestForAnchor_RLS_TenantIsolation(t *testing.T) {
 
 	// Read from tenant B's context — must see ZERO library entries.
 	ctxB := ctxFor(t, tenantB)
-	suggB, err := store.SuggestForAnchorWithPool(ctxB, "IAC-06", 10)
+	suggB, err := store.SuggestForAnchorWithPool(ctxB, "IAC-37", 10)
 	if err != nil {
 		t.Fatalf("tenant-B SuggestForAnchorWithPool: %v", err)
 	}
@@ -344,7 +344,7 @@ func TestSuggestForAnchor_RLS_TenantIsolation(t *testing.T) {
 	}
 
 	// Sanity — tenant A still sees its own.
-	suggA, err := store.SuggestForAnchorWithPool(ctxA, "IAC-06", 10)
+	suggA, err := store.SuggestForAnchorWithPool(ctxA, "IAC-37", 10)
 	if err != nil {
 		t.Fatalf("tenant-A SuggestForAnchorWithPool: %v", err)
 	}

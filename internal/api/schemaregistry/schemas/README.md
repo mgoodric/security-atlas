@@ -23,7 +23,7 @@ extension keys:
 | `x-evidence-kind`       | yes      | `aws.s3.bucket_encryption_state.v1` | Dotted name + major-version suffix.          |
 | `x-semver`              | yes      | `1.0.0`                             | Must match the filename (without `.json`).   |
 | `x-owner`               | yes      | `platform`                          | Team / connector that authored the schema.   |
-| `x-default-scf-anchors` | no       | `["IAC-06"]`                        | Optional default control mapping for ingest. |
+| `x-default-scf-anchors` | no       | `["IAC-37"]`                        | Optional default control mapping for ingest. |
 
 ## Version-bump discipline (slice 014)
 

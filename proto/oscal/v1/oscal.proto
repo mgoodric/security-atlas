@@ -115,7 +115,7 @@ message Metadata {
 // description — never AI-generated) and its latest evaluation result.
 message ControlImplementation {
   string control_id = 1;
-  // SCF anchor code, e.g. "IAC-06".
+  // SCF anchor code, e.g. "IAC-37".
   string scf_id = 2;
   string title = 3;
   // Human-authored implementation narrative (control bundle description).

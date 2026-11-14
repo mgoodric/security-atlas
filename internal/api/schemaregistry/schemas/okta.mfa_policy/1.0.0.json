@@ -4,7 +4,7 @@
   "x-evidence-kind": "okta.mfa_policy.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-06"],
+  "x-default-scf-anchors": ["IAC-37"],
   "title": "Okta MFA policy state",
   "description": "Effective MFA enforcement for one Okta group or application.",
   "type": "object",

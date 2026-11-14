@@ -48,7 +48,7 @@ def _ssp_input() -> oscal_pb2.SspInput:
         control_implementations=[
             oscal_pb2.ControlImplementation(
                 control_id="ctrl-1",
-                scf_id="IAC-06",
+                scf_id="IAC-37",
                 title="Multi-factor authentication",
                 statement="MFA is enforced for all administrative access via Okta.",
                 evaluation_result="pass",
@@ -95,7 +95,7 @@ def _ssp_input_with_vendor_claim() -> oscal_pb2.SspInput:
         oscal_pb2.VendorAttestedImplementation(
             claim_id="claim-aaaa",
             control_id="AC-2",
-            scf_id="IAC-07",
+            scf_id="IAC-04",
             component_uuid="vendor-uuid-1",
             component_title="AcmeVault",
             component_type="service",

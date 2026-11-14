@@ -208,7 +208,7 @@ func TestRLS_CompositeFK_PreventsCrossTenantReference(t *testing.T) {
 
 	// Seed: tenant A owns controlA; tenant B owns controlB.
 	withTenantTx(t, tenantA, true, func(ctx context.Context, tx pgx.Tx) {
-		mustInsertControl(ctx, t, tx, tenantA, controlA, "IAC-10")
+		mustInsertControl(ctx, t, tx, tenantA, controlA, "IAC-14")
 	})
 	withTenantTx(t, tenantB, true, func(ctx context.Context, tx pgx.Tx) {
 		mustInsertControl(ctx, t, tx, tenantB, controlB, "IAC-11")

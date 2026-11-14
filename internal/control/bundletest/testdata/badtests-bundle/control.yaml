@@ -1,7 +1,7 @@
 bundle_schema_version: "1"
 bundle_id: badtests_bundle_test
 title: "Bundle with an invalid test case"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 

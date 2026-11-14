@@ -121,7 +121,7 @@ func DefaultSeed() []KindVersion {
 		// traffic contents; read-only (never mutates a network resource).
 		{Kind: "azure.nsg_rules.v1", Version: "1.0.0"},
 		// Slice 521: Azure connector Key-Vault access-policy / RBAC posture
-		// (secrets-management / least-privilege controls: SCF IAC-21 / CRY-09).
+		// (secrets-management / least-privilege controls: SCF IAC-10 / CRY-09).
 		// ARM Reader only — management-plane CONFIGURATION + access-policy /
 		// role-assignment METADATA only, NEVER a secret/key/certificate VALUE
 		// (the connector never touches the Key-Vault data plane and is never
@@ -223,7 +223,7 @@ func DefaultSeed() []KindVersion {
 		// Slice 534: Grafana connector authn/authz CONFIG evidence — the
 		// deliberate slice-488 deferred authn/authz surface (P0-488-7). Proves
 		// SSO is enforced + access is role-based (SOC 2 CC6.1/CC6.2/CC6.3): SCF
-		// IAC-06 Authenticator Management / IAC-22 Least Privilege. A SIBLING
+		// IAC-37 Multi-Factor Authentication (MFA) / IAC-22 Least Privilege. A SIBLING
 		// kind to monitoring.alert_config.v1 because this is an IAM surface, not
 		// a monitoring surface. Read-only (sso-settings + access-control reads);
 		// CONFIGURATION + COUNTS only — never a SAML private key, an OAuth client
@@ -302,7 +302,7 @@ func DefaultSeed() []KindVersion {
 		// platform wire stays push (invariant #3).
 		//   - workspace_member: access evidence (who has workspace access +
 		//     admin/owner role + 2FA enforcement). Anchors IAC-01 (identity &
-		//     access mgmt) + IAC-06 (authenticator mgmt — the 2FA dimension).
+		//     access mgmt) + IAC-37 (multi-factor authentication — the 2FA dimension).
 		//   - admin_audit_event: admin-action evidence from the audit-logs API.
 		//     Anchor MON-01 (continuous monitoring — same anchor as
 		//     github.audit_event.v1).
@@ -323,10 +323,10 @@ func DefaultSeed() []KindVersion {
 		// on an honest interval; platform wire stays push (invariant #3).
 		//   - iam_policy_binding: access evidence (one record per project-IAM
 		//     (role, member) binding + service-account inventory facts).
-		//     Anchors IAC-21 (Privileged Account Management — the "who has what
-		//     role" surface) + IAC-15 (Account Review — feeds access review).
+		//     Anchors IAC-10 (Privileged Account Management — the "who has what
+		//     role" surface) + IAC-12 (Account Review — feeds access review).
 		//     The spec candidate IAC-22 (Least Privilege) is ABSENT from the
-		//     bundled SCF catalog fixture, so IAC-21 — the closest present
+		//     bundled SCF catalog fixture, so IAC-10 — the closest present
 		//     privileged-access anchor — is the primary (decisions-log D3).
 		//   - storage_bucket_config: bucket hardening evidence (encryption,
 		//     public-access prevention, uniform access, versioning, retention).

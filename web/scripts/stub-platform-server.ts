@@ -76,7 +76,7 @@ const PREFIX_MAP: Array<[string, string]> = [
   // Audit workspace (slice 042)
   ["/v1/audit/controls/acme-soc2-ac-1", "audit-control.json"],
   // SCF anchor requirements (slice 005 — sidebar / catalog)
-  ["/v1/anchors/scf-iac-06/requirements", "control-detail.json"],
+  ["/v1/anchors/scf-iac-37/requirements", "control-detail.json"],
 ];
 
 function matchPath(pathname: string): string | undefined {

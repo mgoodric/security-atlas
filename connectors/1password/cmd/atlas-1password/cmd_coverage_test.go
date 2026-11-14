@@ -460,7 +460,7 @@ func TestDoRun_AuthResolveFails(t *testing.T) {
 	err := doRun(context.Background(), runFlags{
 		environment: "prod",
 		opBaseURL:   "https://api.1password.example.invalid",
-		controlID:   "scf:IAC-10",
+		controlID:   "scf:IAC-14",
 		// serviceToken intentionally empty
 	})
 	if err == nil {
@@ -489,7 +489,7 @@ func TestDoRun_InspectFails(t *testing.T) {
 		environment:  "prod",
 		opBaseURL:    opSrv.URL,
 		serviceToken: "test-service-token",
-		controlID:    "scf:IAC-10",
+		controlID:    "scf:IAC-14",
 	})
 	if err == nil {
 		t.Fatal("expected inspect error from doRun against 500 server")
@@ -529,7 +529,7 @@ func TestDoRun_PushFails(t *testing.T) {
 		environment:  "prod",
 		opBaseURL:    opSrv.URL,
 		serviceToken: "test-service-token",
-		controlID:    "scf:IAC-10",
+		controlID:    "scf:IAC-14",
 	})
 	if err == nil {
 		t.Fatal("expected push error from doRun against unreachable endpoint")
@@ -554,7 +554,7 @@ func TestBuildOrgPolicyRecord_ZeroValueOptionalFields(t *testing.T) {
 		Result:                    opaccount.ResultPass,
 		ObservedAt:                time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	rec, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-10")
+	rec, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-14")
 	if err != nil {
 		t.Fatalf("buildOrgPolicyRecord: %v", err)
 	}

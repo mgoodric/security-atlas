@@ -40,13 +40,13 @@ var hipaaResidualRows = []hipaaResidualRow{
 	// --- Re-pointed onto anchors slice 567 added to the palette (16 rows) ---
 	{"164.308(a)(1)(ii)(C)", "HRS-07", "subset_of", 0.8, "re-point"},        // Sanction Policy
 	{"164.308(a)(4)(ii)(A)", "NET-06", "intersects_with", 0.65, "re-point"}, // Isolate Clearinghouse Functions
-	{"164.308(a)(5)(ii)(D)", "IAC-10", "equal", 0.85, "re-point"},           // Password Management
+	{"164.308(a)(5)(ii)(D)", "IAC-14", "equal", 0.85, "re-point"},           // Password Management
 	{"164.308(a)(7)(ii)(E)", "RSK-08", "equal", 0.85, "re-point"},           // Applications & Data Criticality Analysis
 	{"164.310(a)(2)(iv)", "MNT-02", "intersects_with", 0.7, "re-point"},     // Maintenance Records
 	{"164.310(b)", "HRS-12", "intersects_with", 0.75, "re-point"},           // Workstation Use
 	{"164.310(d)(2)(iii)", "DCH-07", "subset_of", 0.75, "re-point"},         // Accountability (media custody)
-	{"164.312(a)(2)(ii)", "IAC-24", "equal", 0.8, "re-point"},               // Emergency Access Procedure
-	{"164.312(a)(2)(iii)", "IAC-25", "equal", 0.85, "re-point"},             // Automatic Logoff
+	{"164.312(a)(2)(ii)", "IAC-11", "equal", 0.8, "re-point"},               // Emergency Access Procedure
+	{"164.312(a)(2)(iii)", "CFG-04.5", "equal", 0.85, "re-point"},           // Automatic Logoff
 	{"164.312(c)(1)", "DCH-05", "subset_of", 0.8, "re-point"},               // Integrity
 	{"164.312(c)(2)", "CRY-11", "subset_of", 0.8, "re-point"},               // Mechanism to Authenticate ePHI
 	{"164.312(e)(2)(i)", "CRY-12", "subset_of", 0.85, "re-point"},           // Integrity Controls (Transmission)
@@ -70,8 +70,8 @@ var hipaaResidualRows = []hipaaResidualRow{
 // with the integration suite, which proves they are actually seeded.
 var hipaaFinerAnchorsAddedBy567 = []string{
 	"HRS-07", "HRS-12", // personnel sanctions, rules of behavior
-	"NET-06",                     // network segmentation
-	"IAC-10", "IAC-24", "IAC-25", // authenticator mgmt, break-glass, session termination
+	"NET-06",                       // network segmentation
+	"IAC-14", "IAC-11", "CFG-04.5", // authenticator mgmt, break-glass, session termination
 	"RSK-08",           // business impact analysis
 	"MNT-02",           // controlled maintenance
 	"DCH-05", "DCH-07", // data integrity, media custody

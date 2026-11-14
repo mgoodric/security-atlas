@@ -79,8 +79,8 @@ def test_import_profile_resolves_against_supplied_catalog():
     # stamps on the resolved catalog (issue #1875).
     assert result.oscal_version == "1.1.2", result.oscal_version
     ids = {c.control_id for c in result.controls}
-    # include-controls selected exactly ac-1, ac-2, IAC-06 (NOT ac-3).
-    assert ids == {"ac-1", "ac-2", "IAC-06"}
+    # include-controls selected exactly ac-1, ac-2, IAC-37 (NOT ac-3).
+    assert ids == {"ac-1", "ac-2", "IAC-37"}
     assert "ac-3" not in ids
     # set-parameters resolved the moustache into the prose.
     by_id = {c.control_id: c for c in result.controls}
@@ -174,8 +174,8 @@ def test_import_profile_no_imports_is_rejected():
 
 def test_import_profile_chained_resolves_end_to_end():
     # Entry profile -> intermediate profile -> base catalog. The entry narrows
-    # the intermediate's selection (ac-1, ac-2, ac-3, IAC-06) down to
-    # ac-1, ac-2, IAC-06.
+    # the intermediate's selection (ac-1, ac-2, ac-3, IAC-37) down to
+    # ac-1, ac-2, IAC-37.
     result = import_profile(
         _fixture("profile_chained_entry.json"),
         _base_catalogs(),
@@ -184,7 +184,7 @@ def test_import_profile_chained_resolves_end_to_end():
     )
     assert result.valid, result.errors
     ids = {c.control_id for c in result.controls}
-    assert ids == {"ac-1", "ac-2", "IAC-06"}, ids
+    assert ids == {"ac-1", "ac-2", "IAC-37"}, ids
     assert "ac-3" not in ids
 
 
@@ -269,7 +269,7 @@ def test_grpc_import_profile_valid(_bridge_channel):
     )
     assert resp.valid, list(resp.errors)
     ids = {c.control_id for c in resp.controls}
-    assert ids == {"ac-1", "ac-2", "IAC-06"}
+    assert ids == {"ac-1", "ac-2", "IAC-37"}
     assert resp.source_label == "FedRAMP Moderate test"
     assert resp.profile_title == "FedRAMP-style Test Moderate Baseline"
 
@@ -286,7 +286,7 @@ def test_grpc_import_profile_chained(_bridge_channel):
     )
     assert resp.valid, list(resp.errors)
     ids = {c.control_id for c in resp.controls}
-    assert ids == {"ac-1", "ac-2", "IAC-06"}, ids
+    assert ids == {"ac-1", "ac-2", "IAC-37"}, ids
 
 
 def test_grpc_import_profile_cycle_rejected(_bridge_channel):

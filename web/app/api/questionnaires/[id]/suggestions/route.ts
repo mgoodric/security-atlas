@@ -13,7 +13,7 @@
 //   for the enforcement (no model badges, no confidence numbers).
 //
 // Wire shape:
-//   GET /api/questionnaires/{id}/suggestions?anchor=IAC-06
+//   GET /api/questionnaires/{id}/suggestions?anchor=IAC-37
 //   -> { suggestions: Suggestion[] }
 //
 // Constitutional invariants:

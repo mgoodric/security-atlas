@@ -135,7 +135,7 @@ func seedComponentDef(t *testing.T, admin *pgxpool.Pool, tenant string) (uuid.UU
 		t.Fatalf("seed component: %v", err)
 	}
 
-	anchor := "SCF-IAC-06"
+	anchor := "SCF-IAC-37"
 	claims := []seededClaim{
 		{claimID: uuid.New(), controlID: "ac-2", scfAnchor: &anchor},
 		{claimID: uuid.New(), controlID: "ac-3", scfAnchor: nil},

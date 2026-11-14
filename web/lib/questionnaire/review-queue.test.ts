@@ -25,7 +25,7 @@ function question(overrides: Partial<Question> & { id: string }): Question {
     text: "Do you encrypt data at rest?",
     domain: "IAM",
     answer_type: "yes_no",
-    scf_anchor_id: "IAC-06",
+    scf_anchor_id: "IAC-37",
     sort_order: 1,
     needs_mapping: false,
     ...overrides,

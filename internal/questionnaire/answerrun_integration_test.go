@@ -87,7 +87,7 @@ func seedQuestion(t *testing.T, admin *pgxpool.Pool, tenant string, qnID uuid.UU
 	id := uuid.New()
 	var anchor any
 	if mapped {
-		anchor = "IAC-06"
+		anchor = "IAC-37"
 	}
 	if _, err := admin.Exec(context.Background(), `
 		INSERT INTO questionnaire_questions

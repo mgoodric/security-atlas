@@ -133,7 +133,7 @@ def _oscal_token(raw: str) -> str:
     """Coerce an arbitrary id into an OSCAL NCName-style token.
 
     OSCAL ``control-id`` / ``statement-id`` must start with a letter or
-    underscore and contain no whitespace. SCF codes ("IAC-06") already
+    underscore and contain no whitespace. SCF codes ("IAC-37") already
     qualify; raw control UUIDs may start with a digit. We lowercase,
     replace any disallowed run with a hyphen, and prefix ``ctrl-`` when
     the result would not start with a letter/underscore — so the mapping
@@ -266,7 +266,7 @@ def serialize_ssp(pb_input) -> bytes:
             props.append(_prop("linked-policy-id", pid))
         # OSCAL control-id and statement-id are NCName-style tokens: they
         # must start with a letter/underscore and contain no spaces. SCF
-        # codes (e.g. "IAC-06") satisfy this; raw control UUIDs may start
+        # codes (e.g. "IAC-37") satisfy this; raw control UUIDs may start
         # with a digit, so we always prefix with "ctrl-" to guarantee a
         # valid token.
         control_token = _oscal_token(ci.scf_id or ci.control_id)

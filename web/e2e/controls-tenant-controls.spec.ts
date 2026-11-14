@@ -28,7 +28,7 @@ const myControls = [
     id: CONTROL_A,
     title: "Quarterly access review (1741)",
     control_family: "Identity & Access Management",
-    scf_id: "IAC-06",
+    scf_id: "IAC-37",
     lifecycle_state: "active",
     bundle_id: "ctrl-1741-a",
     scf_anchor_id: ANCHOR_A,
@@ -55,7 +55,7 @@ const myControls = [
 
 const controlledAnchor = {
   id: ANCHOR_A,
-  scf_id: "IAC-06",
+  scf_id: "IAC-37",
   family: "Identification & Authentication",
   name: "Multi-factor authentication",
   description: "",

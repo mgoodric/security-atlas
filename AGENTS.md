@@ -161,7 +161,7 @@ The platform supports AI assistance for:
 - **Suggesting** SCF mappings for unmapped questionnaire questions (human approves once; mapping is canonical thereafter)
 - **Summarizing** prior responses for similarity matching
 - **Drafting** board-report narrative sections (templated, human-approved per section)
-- **Explaining** gaps ("evidence covers SCF:IAC-06 but freshness is 95 days")
+- **Explaining** gaps ("evidence covers SCF:IAC-37 but freshness is 95 days")
 
 The platform does NOT:
 

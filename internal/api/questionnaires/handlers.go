@@ -306,7 +306,7 @@ func (h *Handler) UpsertAnswer(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, a)
 }
 
-// ===== GET /v1/questionnaires/{id}/suggestions?anchor=IAC-06&limit=10 =====
+// ===== GET /v1/questionnaires/{id}/suggestions?anchor=IAC-37&limit=10 =====
 
 // Suggestions returns prior canonical answers for a given SCF anchor.
 func (h *Handler) Suggestions(w http.ResponseWriter, r *http.Request) {

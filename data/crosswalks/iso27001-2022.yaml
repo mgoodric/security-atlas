@@ -349,10 +349,10 @@ mappings:
     strength: 0.9
     rationale: "Roles & responsibilities allocation aligns with SCF GOV-04."
   - requirement_code: A.5.3
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Segregation of duties is enforced through user provisioning and access-lifecycle controls; IAC-07 (User Provisioning & Lifecycle) is the nearest sample anchor that carries the entitlement-separation concept."
+    rationale: "Segregation of duties is enforced through user provisioning and access-lifecycle controls; IAC-04 (User Provisioning & De-Provisioning) is the nearest sample anchor that carries the entitlement-separation concept."
   - requirement_code: A.5.4
     scf_anchor: GOV-04
     relationship_type: equal
@@ -429,20 +429,20 @@ mappings:
     strength: 0.9
     rationale: "Identity management across the identity life cycle is the core of the Identification & Authentication Policy anchor (IAC-01)."
   - requirement_code: A.5.16
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Provisioning, modification, and de-provisioning of identities is the User Provisioning & Lifecycle facet (IAC-07)."
+    rationale: "Provisioning, modification, and de-provisioning of identities is the User Provisioning & De-Provisioning facet (IAC-04)."
   - requirement_code: A.5.17
     scf_anchor: IAC-01
     relationship_type: subset_of
     strength: 0.7
     rationale: "Management of authentication information is a subset of the broader I&A policy anchor."
   - requirement_code: A.5.18
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Provision/review/remove access rights maps to SCF User Provisioning & Lifecycle — shared with SOC 2 CC6.2/CC6.3."
+    rationale: "Provision/review/remove access rights maps to SCF User Provisioning & De-Provisioning — shared with SOC 2 CC6.2/CC6.3."
   - requirement_code: A.5.19
     scf_anchor: TPM-01
     relationship_type: equal
@@ -712,7 +712,7 @@ mappings:
     strength: 0.9
     rationale: "Protection of information on user endpoint devices maps to Endpoint Security (END-04)."
   - requirement_code: A.8.2
-    scf_anchor: IAC-21
+    scf_anchor: IAC-10
     relationship_type: equal
     strength: 0.9
     rationale: "Privileged access rights map to SCF Privileged Account Management."
@@ -722,22 +722,22 @@ mappings:
     strength: 0.8
     rationale: "Restricting access per the access-control policy is the Identification & Authentication Policy (IAC-01) concept."
   - requirement_code: A.8.3
-    scf_anchor: IAC-15
+    scf_anchor: IAC-12
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Periodic verification that access remains appropriately restricted is the Account Review (IAC-15) facet."
+    rationale: "Periodic verification that access remains appropriately restricted is the Account Review (IAC-12) facet."
   - requirement_code: A.8.4
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Managing read/write access to source code is an access-provisioning control (IAC-07)."
+    rationale: "Managing read/write access to source code is an access-provisioning control (IAC-04)."
   - requirement_code: A.8.4
     scf_anchor: SEA-05
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Source-code access governance is part of Secure Software Development (SEA-05)."
   - requirement_code: A.8.5
-    scf_anchor: IAC-06
+    scf_anchor: IAC-37
     relationship_type: subset_of
     strength: 0.7
     rationale: "Secure authentication (incl. MFA) is a subset/instance of the SCF Multi-Factor Authentication anchor — shared with SOC 2 CC6.1 MFA mapping."
@@ -842,10 +842,10 @@ mappings:
     strength: 0.6
     rationale: "Synchronized clocks underpin accurate, correlatable audit timestamps; clock sync is a prerequisite facet of Auditing & Accountability (AAA-01)."
   - requirement_code: A.8.18
-    scf_anchor: IAC-21
+    scf_anchor: IAC-10
     relationship_type: equal
     strength: 0.8
-    rationale: "Restricting privileged utility programs maps to Privileged Account Management (IAC-21)."
+    rationale: "Restricting privileged utility programs maps to Privileged Account Management (IAC-10)."
   - requirement_code: A.8.19
     scf_anchor: CFG-04
     relationship_type: equal

@@ -118,7 +118,7 @@ func TestRun_PushesAllKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("entra.Pull: %v", err)
 	}
-	entraRec, err := buildEntraRecord(assignments[0], "prod", "scf:IAC-21")
+	entraRec, err := buildEntraRecord(assignments[0], "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildEntraRecord: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestEmittedRecords_NoPIIOrSecrets(t *testing.T) {
 			RoleDefinitionID: "role", RoleDisplayName: "Reader"},
 	}}
 	assignments, _ := entra.Pull(context.Background(), entraAPI, "tenant-1", fixed)
-	entraRec, _ := buildEntraRecord(assignments[0], "prod", "scf:IAC-21")
+	entraRec, _ := buildEntraRecord(assignments[0], "prod", "scf:IAC-10")
 
 	armAPI := &fakeARMForIntegration{accounts: []storage.RawAccount{
 		{ID: "/sub/a", Name: "a", EncryptionEnabled: true, EncryptionKeySource: "Microsoft.Storage", HTTPSTrafficOnly: true},

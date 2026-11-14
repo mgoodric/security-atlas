@@ -109,7 +109,7 @@ func seedScopeAndControl(t *testing.T, admin *pgxpool.Pool, app *pgxpool.Pool, t
 		// for pre-existing rows. version defaults to 1.
 		_, err := tx.Exec(ctx, `
 			INSERT INTO controls (id, tenant_id, scf_id, title, control_family, implementation_type, applicability_expr, bundle_id)
-			VALUES ($1, $2, 'IAC-06', 'MFA', 'IAC', 'automated', $3, $4)
+			VALUES ($1, $2, 'IAC-37', 'MFA', 'IAC', 'automated', $3, $4)
 		`, controlID, tenant, exprJSON, bundleID)
 		return err
 	}); err != nil {

@@ -80,7 +80,7 @@ func okEventGridFlags() eventGridFlags {
 		path:            "/webhooks/azure/eventgrid",
 		credentialIn:    "header",
 		credentialName:  "Authorization",
-		entraControl:    "scf:IAC-21",
+		entraControl:    "scf:IAC-10",
 		storageControl:  "scf:CRY-04",
 		aksControl:      "scf:CFG-02",
 		nsgControl:      "scf:NET-04",

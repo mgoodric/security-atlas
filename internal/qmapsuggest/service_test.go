@@ -95,7 +95,7 @@ func TestSuggest_NoCandidatesManualOnly(t *testing.T) {
 
 func TestSuggest_FabricatedAnchorSuppressed(t *testing.T) {
 	t.Parallel()
-	c := Candidate{AnchorUUID: uuid.NewString(), SCFID: "IAC-06", Title: "MFA", Excerpt: "multi-factor authentication"}
+	c := Candidate{AnchorUUID: uuid.NewString(), SCFID: "IAC-37", Title: "MFA", Excerpt: "multi-factor authentication"}
 	st := &fakeStore{}
 	audit := &fakeAudit{}
 	svc := stubSvc(fakeReader{
@@ -123,13 +123,13 @@ func TestSuggest_FabricatedAnchorSuppressed(t *testing.T) {
 
 func TestSuggest_ValidPickPersistsUnapprovedProposal(t *testing.T) {
 	t.Parallel()
-	c := Candidate{AnchorUUID: uuid.NewString(), SCFID: "IAC-06", Title: "MFA", Excerpt: "multi-factor authentication"}
+	c := Candidate{AnchorUUID: uuid.NewString(), SCFID: "IAC-37", Title: "MFA", Excerpt: "multi-factor authentication"}
 	st := &fakeStore{}
 	svc := stubSvc(fakeReader{
 		text:       "Do you enforce MFA?",
 		candidates: []Candidate{c},
 		resolve:    map[string]Candidate{c.SCFID: c},
-	}, st, &fakeAudit{}, `{"scf_id":"IAC-06","rationale":"The question asks about multi-factor access controls."}`)
+	}, st, &fakeAudit{}, `{"scf_id":"IAC-37","rationale":"The question asks about multi-factor access controls."}`)
 	out, err := svc.Suggest(context.Background(), SuggestParams{QuestionID: uuid.New(), Actor: "key_grc"})
 	if err != nil {
 		t.Fatalf("Suggest: %v", err)
@@ -137,7 +137,7 @@ func TestSuggest_ValidPickPersistsUnapprovedProposal(t *testing.T) {
 	if out.Suppressed || out.ManualOnly || out.ProposalID == "" {
 		t.Fatalf("want proposal, got %+v", out)
 	}
-	if out.SCFAnchorID != "IAC-06" || out.Rationale == "" {
+	if out.SCFAnchorID != "IAC-37" || out.Rationale == "" {
 		t.Fatalf("proposal fields not surfaced: %+v", out)
 	}
 	if st.persisted != 1 {

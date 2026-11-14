@@ -97,7 +97,7 @@ JOIN frameworks f ON f.id = fv.framework_id
 WHERE f.slug = 'scf' AND fv.status = 'current' AND a.scf_id = $1 AND f.tenant_id IS NULL
 `
 
-// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+// Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 // framework version.
 func (q *Queries) GetSCFAnchorBySCFID(ctx context.Context, scfID string) (ScfAnchor, error) {
 	row := q.db.QueryRow(ctx, getSCFAnchorBySCFID, scfID)

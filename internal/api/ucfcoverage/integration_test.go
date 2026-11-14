@@ -150,14 +150,14 @@ func get(t *testing.T, ts *httptest.Server, path, bearer string) (*http.Response
 
 // AC-1: forward traversal — requirement → anchors → controls. Given
 // SOC2:2017:CC6.6 (which slice-007's crosswalk maps to NET-04 +
-// IAC-06), the handler must return:
+// IAC-37), the handler must return:
 //   - requirement.{id, code, title}
 //   - anchors[] each with scf_id, relationship_type, strength
-//   - controls[] containing the tenant's MFA control anchored on IAC-06
+//   - controls[] containing the tenant's MFA control anchored on IAC-37
 func TestRequirementCoverage_ReturnsAnchorsAndControls(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantControls(t)
-	_ = seedControl(t, tenantA, "IAC-06", "test-mfa-enforcement", "MFA Enforcement")
+	_ = seedControl(t, tenantA, "IAC-37", "test-mfa-enforcement", "MFA Enforcement")
 
 	ts, bearer := setupHTTPServer(t, tenantA)
 	resp, body := get(t, ts, "/v1/requirements/soc2:2017:CC6.6/coverage", bearer)
@@ -190,12 +190,12 @@ func TestRequirementCoverage_ReturnsAnchorsAndControls(t *testing.T) {
 		t.Fatalf("requirement.code = %q; want CC6.6", got.Requirement.Code)
 	}
 	if len(got.Anchors) < 2 {
-		t.Fatalf("expected >=2 anchors for CC6.6 (NET-04 + IAC-06), got %d", len(got.Anchors))
+		t.Fatalf("expected >=2 anchors for CC6.6 (NET-04 + IAC-37), got %d", len(got.Anchors))
 	}
-	sawIAC06 := false
+	sawIAC37 := false
 	for _, a := range got.Anchors {
-		if a.SCFID == "IAC-06" {
-			sawIAC06 = true
+		if a.SCFID == "IAC-37" {
+			sawIAC37 = true
 		}
 		if a.RelationshipType == "" {
 			t.Fatalf("anchor missing relationship_type: %+v", a)
@@ -204,8 +204,8 @@ func TestRequirementCoverage_ReturnsAnchorsAndControls(t *testing.T) {
 			t.Fatalf("anchor strength %v out of (0,1]", a.Strength)
 		}
 	}
-	if !sawIAC06 {
-		t.Fatalf("expected IAC-06 in anchors, got %+v", got.Anchors)
+	if !sawIAC37 {
+		t.Fatalf("expected IAC-37 in anchors, got %+v", got.Anchors)
 	}
 
 	// Tenant A's seeded MFA control should appear; bundle_id is the
@@ -214,8 +214,8 @@ func TestRequirementCoverage_ReturnsAnchorsAndControls(t *testing.T) {
 	for _, c := range got.Controls {
 		if c.BundleID == "test-mfa-enforcement" {
 			sawSeeded = true
-			if c.SCFID != "IAC-06" {
-				t.Fatalf("control.scf_id = %q; want IAC-06", c.SCFID)
+			if c.SCFID != "IAC-37" {
+				t.Fatalf("control.scf_id = %q; want IAC-37", c.SCFID)
 			}
 			if c.Title != "MFA Enforcement" {
 				t.Fatalf("control.title = %q; want MFA Enforcement", c.Title)
@@ -227,15 +227,15 @@ func TestRequirementCoverage_ReturnsAnchorsAndControls(t *testing.T) {
 	}
 }
 
-// AC-2: reverse traversal by SCF id. /v1/anchors/IAC-06/requirements
-// returns every framework requirement that maps to IAC-06 with strength
+// AC-2: reverse traversal by SCF id. /v1/anchors/IAC-37/requirements
+// returns every framework requirement that maps to IAC-37 with strength
 // and relationship_type. Slice-007's CC6.6 is the canonical example.
 func TestAnchorRequirements_BySCFID(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantControls(t)
 	ts, bearer := setupHTTPServer(t, tenantA)
 
-	resp, body := get(t, ts, "/v1/anchors/IAC-06/requirements", bearer)
+	resp, body := get(t, ts, "/v1/anchors/IAC-37/requirements", bearer)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
 	}
@@ -255,8 +255,8 @@ func TestAnchorRequirements_BySCFID(t *testing.T) {
 	if err := json.Unmarshal(body, &got); err != nil {
 		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
 	}
-	if got.Anchor.SCFID != "IAC-06" {
-		t.Fatalf("anchor.scf_id = %q; want IAC-06", got.Anchor.SCFID)
+	if got.Anchor.SCFID != "IAC-37" {
+		t.Fatalf("anchor.scf_id = %q; want IAC-37", got.Anchor.SCFID)
 	}
 	sawCC66 := false
 	for _, r := range got.Requirements {
@@ -274,7 +274,7 @@ func TestAnchorRequirements_BySCFID(t *testing.T) {
 		}
 	}
 	if !sawCC66 {
-		t.Fatalf("expected SOC2:2017:CC6.6 in IAC-06 reverse traversal, got %+v", got.Requirements)
+		t.Fatalf("expected SOC2:2017:CC6.6 in IAC-37 reverse traversal, got %+v", got.Requirements)
 	}
 }
 
@@ -287,7 +287,7 @@ func TestAnchorRequirements_FrameworkVersionPin(t *testing.T) {
 	ts, bearer := setupHTTPServer(t, tenantA)
 
 	// Pin to soc2:2017 — should still see CC6.6.
-	resp, body := get(t, ts, "/v1/anchors/IAC-06/requirements?framework_version=soc2:2017", bearer)
+	resp, body := get(t, ts, "/v1/anchors/IAC-37/requirements?framework_version=soc2:2017", bearer)
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status = %d; want 200; body=%s", resp.StatusCode, body)
 	}
@@ -310,7 +310,7 @@ func TestAnchorRequirements_FrameworkVersionPin(t *testing.T) {
 	}
 
 	// Pin to a non-existent version → empty list, 200.
-	resp2, body2 := get(t, ts, "/v1/anchors/IAC-06/requirements?framework_version=soc2:9999", bearer)
+	resp2, body2 := get(t, ts, "/v1/anchors/IAC-37/requirements?framework_version=soc2:9999", bearer)
 	if resp2.StatusCode != http.StatusOK {
 		t.Fatalf("nonexistent pin status = %d; want 200; body=%s", resp2.StatusCode, body2)
 	}
@@ -337,11 +337,11 @@ func TestAnchorRequirements_404OnUnknownAnchor(t *testing.T) {
 
 // AC-3: GET /v1/controls/{id}/coverage returns control + anchor +
 // satisfied requirements. The seeded MFA-Enforcement control on
-// IAC-06 should report at least SOC 2 CC6.6.
+// IAC-37 should report at least SOC 2 CC6.6.
 func TestControlCoverage_ReturnsAnchorAndRequirements(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantControls(t)
-	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-enforcement", "MFA Enforcement")
+	cid := seedControl(t, tenantA, "IAC-37", "test-mfa-enforcement", "MFA Enforcement")
 	ts, bearer := setupHTTPServer(t, tenantA)
 
 	resp, body := get(t, ts, "/v1/controls/"+cid.String()+"/coverage", bearer)
@@ -371,8 +371,8 @@ func TestControlCoverage_ReturnsAnchorAndRequirements(t *testing.T) {
 	if got.Control.BundleID != "test-mfa-enforcement" {
 		t.Fatalf("control.bundle_id = %q", got.Control.BundleID)
 	}
-	if got.Anchor == nil || got.Anchor.SCFID != "IAC-06" {
-		t.Fatalf("anchor.scf_id = %+v; want IAC-06", got.Anchor)
+	if got.Anchor == nil || got.Anchor.SCFID != "IAC-37" {
+		t.Fatalf("anchor.scf_id = %+v; want IAC-37", got.Anchor)
 	}
 	sawCC66 := false
 	for _, r := range got.Requirements {
@@ -412,7 +412,7 @@ func TestControlCoverage_400OnNonUUID(t *testing.T) {
 func TestControlCoverage_FrameworkVersionPin(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantControls(t)
-	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-pin", "MFA Enforcement (pin)")
+	cid := seedControl(t, tenantA, "IAC-37", "test-mfa-pin", "MFA Enforcement (pin)")
 	ts, bearer := setupHTTPServer(t, tenantA)
 
 	resp, body := get(t, ts, "/v1/controls/"+cid.String()+"/coverage?framework_version=soc2:2017", bearer)
@@ -509,9 +509,9 @@ func TestControlCoverage_NullAnchorWhenUnanchored(t *testing.T) {
 func TestRequirementCoverage_RLSHidesForeignTenantControls(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantControls(t)
-	// Tenant A seeds an MFA control on IAC-06.
-	_ = seedControl(t, tenantA, "IAC-06", "tenantA-mfa", "Tenant A MFA")
-	// Tenant B has no controls anchored on IAC-06.
+	// Tenant A seeds an MFA control on IAC-37.
+	_ = seedControl(t, tenantA, "IAC-37", "tenantA-mfa", "Tenant A MFA")
+	// Tenant B has no controls anchored on IAC-37.
 
 	// Tenant B queries the same requirement.
 	ts, bearer := setupHTTPServer(t, tenantB)
@@ -559,7 +559,7 @@ func TestRequirementCoverage_RLSHidesForeignTenantControls(t *testing.T) {
 func TestControlCoverage_RLSHidesForeignControl(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantControls(t)
-	cid := seedControl(t, tenantA, "IAC-06", "tenantA-only", "Tenant A only")
+	cid := seedControl(t, tenantA, "IAC-37", "tenantA-only", "Tenant A only")
 
 	ts, bearer := setupHTTPServer(t, tenantB)
 	resp, body := get(t, ts, "/v1/controls/"+cid.String()+"/coverage", bearer)
@@ -587,7 +587,7 @@ func TestUCFCoverage_RejectsMissingBearer(t *testing.T) {
 	ts, _ := setupHTTPServer(t, tenantA)
 	for _, p := range []string{
 		"/v1/requirements/soc2:2017:CC6.6/coverage",
-		"/v1/anchors/IAC-06/requirements",
+		"/v1/anchors/IAC-37/requirements",
 		"/v1/controls/00000000-0000-0000-0000-000000000000/coverage",
 	} {
 		resp, _ := get(t, ts, p, "")
@@ -754,7 +754,7 @@ func wipeTenantState(t *testing.T) {
 func TestControlCoverage_Slice256_InScopeRowReturnsNumeric(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantState(t)
-	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-inscope", "MFA Enforcement (256-inscope)")
+	cid := seedControl(t, tenantA, "IAC-37", "test-mfa-256-inscope", "MFA Enforcement (256-inscope)")
 	soc2FVID := soc2017FrameworkVersionID(t)
 	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — Test Activated")
 
@@ -820,7 +820,7 @@ func TestControlCoverage_Slice256_InScopeRowReturnsNumeric(t *testing.T) {
 func TestControlCoverage_Slice256_OutOfScopeRowReturnsNull(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantState(t)
-	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-oos", "MFA Enforcement (256-oos)")
+	cid := seedControl(t, tenantA, "IAC-37", "test-mfa-256-oos", "MFA Enforcement (256-oos)")
 
 	// Plenty of effectiveness data so the null can't be confused with
 	// "no data yet".
@@ -862,7 +862,7 @@ func TestControlCoverage_Slice256_OutOfScopeRowReturnsNull(t *testing.T) {
 func TestControlCoverage_Slice256_NoEffectivenessDataReturnsNull(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantState(t)
-	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-nodata", "MFA Enforcement (256-nodata)")
+	cid := seedControl(t, tenantA, "IAC-37", "test-mfa-256-nodata", "MFA Enforcement (256-nodata)")
 	soc2FVID := soc2017FrameworkVersionID(t)
 	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — Test Activated (nodata)")
 	// Intentionally seed NO control_evaluations rows.
@@ -911,7 +911,7 @@ func TestControlCoverage_Slice256_NoEffectivenessDataReturnsNull(t *testing.T) {
 func TestControlCoverage_Slice256_CoverageKeyAlwaysEmitted(t *testing.T) {
 	ensureCatalog(t)
 	wipeTenantState(t)
-	cid := seedControl(t, tenantA, "IAC-06", "test-mfa-256-keypresent", "MFA Enforcement (256-keypresent)")
+	cid := seedControl(t, tenantA, "IAC-37", "test-mfa-256-keypresent", "MFA Enforcement (256-keypresent)")
 
 	ts, bearer := setupHTTPServer(t, tenantA)
 	resp, body := get(t, ts, "/v1/controls/"+cid.String()+"/coverage", bearer)
@@ -941,7 +941,7 @@ func TestControlCoverage_Slice256_CoverageKeyAlwaysEmitted(t *testing.T) {
 // CC6.6's crosswalk (data/crosswalks/soc2-tsc-2017.yaml) maps it to two
 // anchors:
 //   - NET-04  subset_of        strength 0.8
-//   - IAC-06  intersects_with  strength 0.7
+//   - IAC-37  intersects_with  strength 0.7
 //
 // The rollup is best-satisfying-path: max over anchors of
 // (edge_strength × the tenant's best evaluated coverage on that anchor).
@@ -993,7 +993,7 @@ func TestRequirementCoverage_Slice482_AdditiveFieldsUncoveredByDefault(t *testin
 // AC-6: mixed-strength edges + mixed evidence produce the expected band.
 //
 // Tenant A seeds:
-//   - an IAC-06 control (edge strength 0.7) with all-pass evals → pass_rate 1.0
+//   - an IAC-37 control (edge strength 0.7) with all-pass evals → pass_rate 1.0
 //     → path = 0.7 × 1.0 = 0.70
 //   - a NET-04 control (edge strength 0.8) with 2/3-pass evals → pass_rate ~0.667
 //     → path = 0.8 × 0.667 = 0.533
@@ -1012,11 +1012,11 @@ func TestRequirementCoverage_Slice482_MixedEdgesMixedEvidenceBand(t *testing.T) 
 	seedActivatedFrameworkScope(t, tenantA, soc2FVID, "SOC 2 — 482 mixed")
 	seedScopeCell(t, tenantA)
 
-	iacControl := seedControl(t, tenantA, "IAC-06", "test-482-iac", "MFA (482)")
+	iacControl := seedControl(t, tenantA, "IAC-37", "test-482-iac", "MFA (482)")
 	netControl := seedControl(t, tenantA, "NET-04", "test-482-net", "Boundary (482)")
 
 	now := time.Now().UTC()
-	// IAC-06: all pass → pass_rate 1.0.
+	// IAC-37: all pass → pass_rate 1.0.
 	seedEvaluation(t, tenantA, iacControl, "pass", now.Add(-1*time.Hour))
 	seedEvaluation(t, tenantA, iacControl, "pass", now.Add(-2*time.Hour))
 	// NET-04: 2 pass / 1 fail → pass_rate 2/3.
@@ -1092,7 +1092,7 @@ func TestRequirementCoverage_Slice482_OutOfScopeControlIsUncovered(t *testing.T)
 	wipeTenantState(t)
 
 	// Control + evidence but NO activated framework_scope for SOC 2.
-	iacControl := seedControl(t, tenantA, "IAC-06", "test-482-oos", "MFA (482 oos)")
+	iacControl := seedControl(t, tenantA, "IAC-37", "test-482-oos", "MFA (482 oos)")
 	now := time.Now().UTC()
 	seedEvaluation(t, tenantA, iacControl, "pass", now.Add(-1*time.Hour))
 	seedEvaluation(t, tenantA, iacControl, "pass", now.Add(-2*time.Hour))

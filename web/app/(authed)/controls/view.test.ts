@@ -23,7 +23,7 @@ function control(over: Partial<ControlWithState> = {}): ControlWithState {
     id: CONTROL_ID,
     title: "Quarterly access review",
     control_family: "Identity & Access Management",
-    scf_id: "IAC-06",
+    scf_id: "IAC-37",
     lifecycle_state: "active",
     bundle_id: "ctrl-iac-06",
     scf_anchor_id: ANCHOR_ID,
@@ -36,7 +36,7 @@ function control(over: Partial<ControlWithState> = {}): ControlWithState {
 function anchor(over: Partial<AnchorWithState> = {}): AnchorWithState {
   return {
     id: ANCHOR_ID,
-    scf_id: "IAC-06",
+    scf_id: "IAC-37",
     family: "Identification & Authentication",
     name: "Multi-factor authentication",
     description: "",

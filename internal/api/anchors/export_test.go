@@ -239,12 +239,12 @@ func TestSlice174_WriteAnchorsCSV_FlatNestedShape(t *testing.T) {
 	a1 := uuid.New()
 	a2 := uuid.New()
 	anchors := []anchorExportRow{
-		{ID: a1, SCFID: "IAC-06", Family: "iam", Title: "MFA", Description: "force MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf", FrameworkVersion: "2026.1"},
-		{ID: a2, SCFID: "IAC-07", Family: "iam", Title: "PWD", Description: "password policy", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf", FrameworkVersion: "2026.1"},
+		{ID: a1, SCFID: "IAC-37", Family: "iam", Title: "MFA", Description: "force MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf", FrameworkVersion: "2026.1"},
+		{ID: a2, SCFID: "IAC-04", Family: "iam", Title: "PWD", Description: "password policy", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf", FrameworkVersion: "2026.1"},
 	}
 	edges := map[uuid.UUID][]edgeExportRow{
 		a1: {
-			{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-06", FrameworkSlug: "soc2", FrameworkVersion: "2017", FrameworkRequirementCode: "CC6.6", RelationshipType: "equal", Strength: 1.0, SourceAttribution: "scf_official"},
+			{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-37", FrameworkSlug: "soc2", FrameworkVersion: "2017", FrameworkRequirementCode: "CC6.6", RelationshipType: "equal", Strength: 1.0, SourceAttribution: "scf_official"},
 		},
 	}
 	var buf bytes.Buffer
@@ -279,11 +279,11 @@ func TestSlice174_WriteAnchorsJSON_NestedShape(t *testing.T) {
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	a1 := uuid.New()
 	anchors := []anchorExportRow{
-		{ID: a1, SCFID: "IAC-06", Family: "iam", Title: "MFA", Description: "force MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf", FrameworkVersion: "2026.1"},
+		{ID: a1, SCFID: "IAC-37", Family: "iam", Title: "MFA", Description: "force MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf", FrameworkVersion: "2026.1"},
 	}
 	edges := map[uuid.UUID][]edgeExportRow{
 		a1: {
-			{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-06", FrameworkSlug: "soc2", FrameworkVersion: "2017", FrameworkRequirementCode: "CC6.6", RelationshipType: "equal", Strength: 1.0, SourceAttribution: "scf_official"},
+			{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-37", FrameworkSlug: "soc2", FrameworkVersion: "2017", FrameworkRequirementCode: "CC6.6", RelationshipType: "equal", Strength: 1.0, SourceAttribution: "scf_official"},
 		},
 	}
 	var buf bytes.Buffer
@@ -297,8 +297,8 @@ func TestSlice174_WriteAnchorsJSON_NestedShape(t *testing.T) {
 	if len(parsed) != 1 {
 		t.Fatalf("anchor count = %d; want 1", len(parsed))
 	}
-	if parsed[0].SCFID != "IAC-06" {
-		t.Errorf("scf_id = %q; want IAC-06", parsed[0].SCFID)
+	if parsed[0].SCFID != "IAC-37" {
+		t.Errorf("scf_id = %q; want IAC-37", parsed[0].SCFID)
 	}
 	if len(parsed[0].FrameworkSatisfactions) != 1 {
 		t.Fatalf("satisfaction count = %d; want 1", len(parsed[0].FrameworkSatisfactions))
@@ -317,7 +317,7 @@ func TestSlice174_WriteAnchorsJSON_EmptySatisfactionsRendersEmptyArray(t *testin
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	a1 := uuid.New()
 	anchors := []anchorExportRow{
-		{ID: a1, SCFID: "IAC-06", Family: "iam", Title: "MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf"},
+		{ID: a1, SCFID: "IAC-37", Family: "iam", Title: "MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf"},
 	}
 	var buf bytes.Buffer
 	if err := writeAnchorsJSON(&buf, anchors, nil); err != nil {
@@ -338,10 +338,10 @@ func TestSlice174_WriteAnchorsXLSX_ZipMemberList_SixFiles(t *testing.T) {
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	a1 := uuid.New()
 	anchors := []anchorExportRow{
-		{ID: a1, SCFID: "IAC-06", Family: "iam", Title: "MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf"},
+		{ID: a1, SCFID: "IAC-37", Family: "iam", Title: "MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf"},
 	}
 	edges := []edgeExportRow{
-		{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-06", FrameworkSlug: "soc2", FrameworkVersion: "2017", FrameworkRequirementCode: "CC6.6", RelationshipType: "equal", Strength: 1.0, SourceAttribution: "scf_official"},
+		{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-37", FrameworkSlug: "soc2", FrameworkVersion: "2017", FrameworkRequirementCode: "CC6.6", RelationshipType: "equal", Strength: 1.0, SourceAttribution: "scf_official"},
 	}
 	var buf bytes.Buffer
 	if err := writeAnchorsXLSX(&buf, anchors, edges); err != nil {
@@ -401,10 +401,10 @@ func TestSlice174_WriteAnchorsXLSX_TwoSheetsCarryHeaders(t *testing.T) {
 	now := time.Date(2026, 5, 20, 12, 0, 0, 0, time.UTC)
 	a1 := uuid.New()
 	anchors := []anchorExportRow{
-		{ID: a1, SCFID: "IAC-06", Family: "iam", Title: "MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf"},
+		{ID: a1, SCFID: "IAC-37", Family: "iam", Title: "MFA", CreatedAt: now, UpdatedAt: now, FrameworkSlug: "scf"},
 	}
 	edges := []edgeExportRow{
-		{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-06", FrameworkSlug: "soc2", FrameworkRequirementCode: "CC6.6", RelationshipType: "equal", Strength: 1.0, SourceAttribution: "scf_official"},
+		{EdgeID: uuid.New(), AnchorID: a1, AnchorSCFID: "IAC-37", FrameworkSlug: "soc2", FrameworkRequirementCode: "CC6.6", RelationshipType: "equal", Strength: 1.0, SourceAttribution: "scf_official"},
 	}
 	var buf bytes.Buffer
 	if err := writeAnchorsXLSX(&buf, anchors, edges); err != nil {
@@ -437,7 +437,7 @@ func TestSlice174_WriteAnchorsXLSX_TwoSheetsCarryHeaders(t *testing.T) {
 	if !strings.Contains(sheet1, "scf_id") || !strings.Contains(sheet1, "family") {
 		t.Errorf("sheet1.xml missing anchor headers: %s", sheet1)
 	}
-	if !strings.Contains(sheet1, "IAC-06") {
+	if !strings.Contains(sheet1, "IAC-37") {
 		t.Errorf("sheet1.xml missing anchor data row: %s", sheet1)
 	}
 	sheet2 := readMember("xl/worksheets/sheet2.xml")

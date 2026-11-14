@@ -88,7 +88,7 @@ func seedControl(t *testing.T, admin *pgxpool.Pool, tenant string) uuid.UUID {
 
 func validCreate(owner uuid.UUID) actionplan.CreateInput {
 	return actionplan.CreateInput{
-		Title:           "Close the IAC-06 freshness gap",
+		Title:           "Close the IAC-37 freshness gap",
 		Description:     "Customer X Q2 2026 TPRM finding #4 remediation.",
 		TriggeringEvent: "Customer X Q2 2026 TPRM finding #4",
 		OwnerID:         owner,

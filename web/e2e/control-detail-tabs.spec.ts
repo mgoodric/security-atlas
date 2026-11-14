@@ -148,7 +148,7 @@ test.describe("control detail tab strip (slice 254)", () => {
           },
           anchor: {
             id: "11111111-1111-1111-1111-111111110001",
-            scf_id: "SCF:IAC-06",
+            scf_id: "SCF:IAC-37",
             family: "IAC",
             name: "Multi-Factor Authentication",
             description: "MFA spine anchor",

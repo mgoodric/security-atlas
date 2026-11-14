@@ -10,7 +10,7 @@
     "imports": [
       {
         "href": "#44444444-4444-4444-8444-444444444444",
-        "include-controls": [{ "with-ids": ["ac-1", "ac-2", "IAC-06"] }]
+        "include-controls": [{ "with-ids": ["ac-1", "ac-2", "IAC-37"] }]
       }
     ],
     "merge": { "as-is": true }
