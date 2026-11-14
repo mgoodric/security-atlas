@@ -24,6 +24,7 @@
 --     drafting a new revision. (decisions log D3)
 --   * A decision's requirement must belong to the revision's framework
 --     version, and the revision must be visible under the caller's tenant.
+--   * A decision never moves to another revision or requirement.
 --
 -- These rules live in triggers so no caller can bypass them; the store checks
 -- the same conditions first to return typed errors.
@@ -96,17 +97,34 @@ DECLARE
     scope_fv     UUID;
     scope_tenant UUID;
 BEGIN
+    -- A decision's revision and requirement never change; moving a row
+    -- would carry a frozen decision out of an activated revision.
+    IF TG_OP = 'UPDATE' AND (
+        OLD.framework_scope_id <> NEW.framework_scope_id
+        OR OLD.framework_requirement_id <> NEW.framework_requirement_id
+    ) THEN
+        RAISE EXCEPTION 'framework_scope_applicability: a decision cannot move to another scope or requirement'
+            USING ERRCODE = 'check_violation',
+                  CONSTRAINT = 'framework_scope_applicability_keys_immutable';
+    END IF;
+
+    -- FOR SHARE holds the scope row until this tx ends, so a concurrent
+    -- activation either waits for this write or is seen here as
+    -- `activated`; without it a write could land on a revision that is
+    -- activated between this check and commit.
     SELECT state, framework_version_id, tenant_id
       INTO scope_state, scope_fv, scope_tenant
       FROM framework_scopes
-     WHERE id = NEW.framework_scope_id;
+     WHERE id = NEW.framework_scope_id
+       FOR SHARE;
     IF NOT FOUND OR scope_tenant <> NEW.tenant_id THEN
         RAISE EXCEPTION 'framework_scope_applicability: framework scope % not found for tenant', NEW.framework_scope_id
             USING ERRCODE = 'foreign_key_violation';
     END IF;
     IF scope_state IN ('activated', 'superseded') THEN
         RAISE EXCEPTION 'framework_scope_applicability: decisions on a % framework scope are frozen', scope_state
-            USING ERRCODE = 'check_violation';
+            USING ERRCODE = 'check_violation',
+                  CONSTRAINT = 'framework_scope_applicability_frozen';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM framework_requirements

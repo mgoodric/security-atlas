@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 	"time"
@@ -23,6 +24,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api"
+	"github.com/mgoodric/security-atlas/internal/api/testjwt"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -600,4 +604,185 @@ func TestHTTP_Applicability_RLSIsolation(t *testing.T) {
 	if list := a.mustList(scopeID); list.Counts.Undecided != 1 || list.Counts.Excluded != 2 {
 		t.Fatalf("tenant A counts after B's attempts = %+v", list.Counts)
 	}
+}
+
+// A raw UPDATE cannot move a decision to another revision or requirement,
+// so a frozen decision can't be carried out of an activated revision.
+func TestApplicability_DecisionKeysImmutable(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := soaTenant(t, admin)
+	f := seedSoAFixture(t, admin, tenant)
+	ts, bearer, approver := setupHTTPServer(t, tenant)
+	c := soaClient{t: t, base: ts.URL, bearer: bearer}
+
+	a := c.createScope(f.FrameworkVersionID, "ISMS rev A")
+	applyFixtureDecisions(c, f, a)
+	c.transition(a, "submit", bearer, "")
+	c.transition(a, "approve", approver, "")
+	c.transition(a, "activate", bearer, fmt.Sprintf(`{"effective_from":%q}`, time.Now().UTC().Format(time.RFC3339)))
+	b := c.createScope(f.FrameworkVersionID, "ISMS rev B")
+
+	app := dbtest.NewAppPool(t)
+	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	for name, move := range map[string]struct {
+		col string
+		to  any
+	}{
+		"move to another scope":       {"framework_scope_id", b},
+		"move to another requirement": {"framework_requirement_id", f.Req["R-03"]},
+	} {
+		stmt := `UPDATE framework_scope_applicability SET ` + move.col + ` = $3
+			WHERE framework_scope_id = $1 AND framework_requirement_id = $2`
+		err := withAppTenant(ctx, app, func(tx pgx.Tx) error {
+			tag, err := tx.Exec(ctx, stmt, a, f.Req["R-01"], move.to)
+			if err == nil && tag.RowsAffected() == 0 {
+				return fmt.Errorf("no row matched")
+			}
+			return err
+		})
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.ConstraintName != "framework_scope_applicability_keys_immutable" {
+			t.Fatalf("%s: err = %v, want framework_scope_applicability_keys_immutable", name, err)
+		}
+	}
+}
+
+// The guard holds the scope row FOR SHARE: a decision write racing an
+// activation waits for it and is then refused, rather than landing on the
+// freshly activated revision.
+func TestApplicability_WriteRacingActivationIsRefused(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := soaTenant(t, admin)
+	f := seedSoAFixture(t, admin, tenant)
+	ts, bearer, approver := setupHTTPServer(t, tenant)
+	c := soaClient{t: t, base: ts.URL, bearer: bearer}
+	scopeID := c.createScope(f.FrameworkVersionID, "ISMS")
+	c.transition(scopeID, "submit", bearer, "")
+	c.transition(scopeID, "approve", approver, "")
+
+	bg := context.Background()
+	activation, err := admin.Begin(bg)
+	if err != nil {
+		t.Fatalf("begin activation: %v", err)
+	}
+	defer func() { _ = activation.Rollback(bg) }()
+	if _, err := activation.Exec(bg, `UPDATE framework_scopes SET state = 'activated', effective_from = now()
+		WHERE id = $1 AND state = 'approved'`, scopeID); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+
+	app := dbtest.NewAppPool(t)
+	ctx, _ := tenancy.WithTenant(bg, tenant)
+	done := make(chan error, 1)
+	go func() {
+		done <- withAppTenant(ctx, app, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `INSERT INTO framework_scope_applicability
+				(tenant_id, framework_scope_id, framework_requirement_id, decision, updated_by)
+				VALUES ($1, $2, $3, 'applicable', 'test')`, tenant, scopeID, f.Req["R-03"])
+			return err
+		})
+	}()
+	select {
+	case err := <-done:
+		t.Fatalf("decision write did not wait for the activation: err = %v", err)
+	case <-time.After(500 * time.Millisecond):
+	}
+	if err := activation.Commit(bg); err != nil {
+		t.Fatalf("commit activation: %v", err)
+	}
+	select {
+	case err := <-done:
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.ConstraintName != "framework_scope_applicability_frozen" {
+			t.Fatalf("racing write: err = %v, want framework_scope_applicability_frozen", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("decision write still blocked after the activation committed")
+	}
+}
+
+// A real requirement from another framework version is refused by the API
+// and by the guard trigger.
+func TestHTTP_Applicability_RequirementFromAnotherVersion(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := soaTenant(t, admin)
+	f := seedSoAFixture(t, admin, tenant)
+	other := seedSoAFixture(t, admin, tenant)
+	ts, bearer, _ := setupHTTPServer(t, tenant)
+	c := soaClient{t: t, base: ts.URL, bearer: bearer}
+	scopeID := c.createScope(f.FrameworkVersionID, "ISMS")
+
+	if code, _, payload := c.set(scopeID, other.Req["R-01"], applicableBody); code != http.StatusNotFound {
+		t.Fatalf("requirement from another version: status %d, want 404; body %s", code, payload)
+	}
+
+	app := dbtest.NewAppPool(t)
+	ctx, _ := tenancy.WithTenant(context.Background(), tenant)
+	err := withAppTenant(ctx, app, func(tx pgx.Tx) error {
+		_, err := tx.Exec(ctx, `INSERT INTO framework_scope_applicability
+			(tenant_id, framework_scope_id, framework_requirement_id, decision, updated_by)
+			VALUES ($1, $2, $3, 'applicable', 'test')`, tenant, scopeID, other.Req["R-01"])
+		return err
+	})
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23503" {
+		t.Fatalf("DB insert with another version's requirement: err = %v, want foreign_key_violation", err)
+	}
+	if list := c.mustList(scopeID); list.Counts.Total != 8 || list.Counts.Undecided != 8 {
+		t.Fatalf("counts after refused writes = %+v", list.Counts)
+	}
+}
+
+// Writes are limited by the authz policy to grc_engineer and admin: a
+// viewer can read the decisions but gets 403 on PUT.
+func TestHTTP_Applicability_ViewerCannotWrite(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := soaTenant(t, admin)
+	f := seedSoAFixture(t, admin, tenant)
+	app := dbtest.NewAppPool(t)
+	srv := api.New(api.Config{RotationGrace: time.Hour})
+	srv.AttachDB(app)
+	// Unit servers run without the OPA engine; attach it so the rego
+	// role gate decides. The resolver stands in for user_roles rows, the
+	// way production resolves a JWT subject's roles.
+	tid := uuid.MustParse(tenant)
+	viewerClaims := testjwt.OwnerFor(tid, []string{"viewer"})
+	viewerClaims.Subject = "test-viewer-1787:" + tenant
+	engineerClaims := testjwt.OwnerFor(tid, []string{"grc_engineer"})
+	engineerClaims.Subject = "test-engineer-1787:" + tenant
+	engine, err := authz.NewEngine(context.Background(), subjectRoles{
+		viewerClaims.Subject:   {authz.RoleViewer},
+		engineerClaims.Subject: {authz.RoleGRCEngineer},
+	})
+	if err != nil {
+		t.Fatalf("authz.NewEngine: %v", err)
+	}
+	srv.AttachAuthz(engine, nil)
+	viewer := srv.IssueTestJWT(t, viewerClaims)
+	engineer := srv.IssueTestJWT(t, engineerClaims)
+	ts := httptest.NewServer(srv.HTTPHandlerForTests())
+	t.Cleanup(ts.Close)
+
+	eng := soaClient{t: t, base: ts.URL, bearer: engineer}
+	scopeID := eng.createScope(f.FrameworkVersionID, "ISMS")
+	eng.mustSet(scopeID, f.Req["R-04"], applicableBody)
+
+	v := soaClient{t: t, base: ts.URL, bearer: viewer}
+	if list := v.mustList(scopeID); list.Counts.Applicable != 1 {
+		t.Fatalf("viewer list counts = %+v", list.Counts)
+	}
+	if code, _, payload := v.set(scopeID, f.Req["R-05"], applicableBody); code != http.StatusForbidden {
+		t.Fatalf("viewer PUT: status %d, want 403; body %s", code, payload)
+	}
+	if list := eng.mustList(scopeID); list.Counts.Applicable != 1 {
+		t.Fatalf("counts after viewer PUT = %+v", list.Counts)
+	}
+}
+
+// subjectRoles is a RolesResolver standing in for user_roles rows, keyed on
+// the credential's user id (the JWT subject).
+type subjectRoles map[string][]authz.Role
+
+func (m subjectRoles) RolesFor(_ context.Context, _, userID string) ([]authz.Role, error) {
+	return m[userID], nil
 }

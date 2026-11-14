@@ -9,9 +9,10 @@ package frameworkscopes
 //
 // Every requirement of the framework version is listed; one with no decision
 // is `undecided` (which counts as applicable) and is tallied in counts.
-// Writes use the same gate as the predicate PATCH: any tenant credential may
-// edit a draft, and an edit on a revision in review or approved sends it back
-// to draft (approval_invalidated: true).
+// Writes use the same gate as the predicate PATCH: the rego bundle admits
+// writes on `framework-scopes` from grc_engineer and admin only. An edit on a
+// revision in review or approved sends it back to draft
+// (approval_invalidated: true).
 
 import (
 	"encoding/json"

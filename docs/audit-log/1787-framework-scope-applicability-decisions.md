@@ -65,11 +65,13 @@ picks up the new action unchanged, as kind `framework_scope`.
 `GET /v1/framework-scopes/{id}/applicability`,
 `PUT /v1/framework-scopes/{id}/applicability/{requirement_id}`, and
 `GET /v1/framework-scopes/applicability?framework_version=&as_of=` (the
-`as_of` read, mirroring the scope list's `as_of`). Writes use the same gate
-as the predicate PATCH (any tenant credential), since a write can only land
-on a draft or reset a revision to draft, and approval stays approver-gated.
-Bulk set, CSV import, filters, coverage, contradictions and export belong
-to the later #1744 tickets.
+`as_of` read, mirroring the scope list's `as_of`). Writes go through the
+same authz gate as the predicate PATCH: the `framework-scopes` resource in
+the rego bundle, which admits writes from `grc_engineer` and `admin` only.
+`viewer`, `auditor` and `control_owner` get 403 (tested with the OPA engine
+attached). The handler adds no role check of its own. Approval stays
+`IsApprover || IsAdmin`. Bulk set, CSV import, filters, coverage,
+contradictions and export belong to the later #1744 tickets.
 
 **D8 — Fixture.** `seedSoAFixture` in
 `internal/frameworkscope/applicability_integration_test.go` is the spec's
@@ -77,3 +79,22 @@ fixture: eight requirements with crosswalk edges, three controls (C1 and C2
 passing, C3 failing), with R-01 excluded behind a passing control, R-02
 excluded with none, R-03 undecided and the rest applicable. The coverage and
 contradiction tickets can reuse it.
+
+**D9 — Guard hardening (from review).** Two changes to the guard:
+
+- On UPDATE it refuses a change to `framework_scope_id` or
+  `framework_requirement_id` (`framework_scope_applicability_keys_immutable`).
+  Without this, a raw UPDATE could move a frozen decision out of an
+  activated revision.
+- It reads the parent scope `FOR SHARE`. Without the lock, a decision write
+  could read the scope as `approved` just before a concurrent activation
+  committed, and land on the activated revision: the reset trigger's
+  `UPDATE` waits for the activation, then matches no row. With the lock,
+  the write waits, re-reads the scope as `activated` and is refused
+  (`framework_scope_applicability_frozen`). The store maps that constraint
+  to `ErrDecisionsFrozen` (409).
+
+Both changes are tested at the DB layer, and each test was seen failing
+against the unhardened guard. Not changed: a re-PUT of an identical
+decision still resets an approval. Reset-on-write is the D2 rule, and a
+no-op compare is a possible follow-up.

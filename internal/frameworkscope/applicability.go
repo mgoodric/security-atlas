@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -28,6 +29,10 @@ const (
 
 // ActionApplicabilityUpdate is the workflow-log action for a decision change.
 const ActionApplicabilityUpdate = "applicability.update"
+
+// constraintDecisionsFrozen is the constraint name the guard trigger raises
+// for a write on an activated or superseded revision.
+const constraintDecisionsFrozen = "framework_scope_applicability_frozen"
 
 var (
 	// ErrInvalidDecision is returned for a decision other than applicable or
@@ -162,6 +167,12 @@ func (s *Store) SetDecision(ctx context.Context, req SetDecisionRequest) (dec De
 			UpdatedBy:              req.Actor,
 		})
 		if uerr != nil {
+			// The guard trigger re-checks the state under FOR SHARE, so an
+			// activation that committed after the read above lands here.
+			var pgErr *pgconn.PgError
+			if errors.As(uerr, &pgErr) && pgErr.ConstraintName == constraintDecisionsFrozen {
+				return ErrDecisionsFrozen
+			}
 			return fmt.Errorf("upsert decision: %w", uerr)
 		}
 		after, aerr := q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
