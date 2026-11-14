@@ -51,7 +51,11 @@ Migration `20260924000000_demo_seed_rows.sql` adds `demo_seed_rows
 Inside the seed transaction, `ApplyInPlace` reads the primary key of every
 row in every table with a `tenant_id` column (found from `pg_catalog`; the
 whole row when there is no primary key). It does this before and after the
-writers run, and records the difference.
+writers run, and records the difference. The after-snapshot keeps only rows
+this transaction wrote (`xmin` equals its transaction id). The seed runs at
+READ COMMITTED, so without that filter a row another session committed for
+the tenant mid-seed would be recorded and later deleted by teardown (#2039
+review B1; `TestSeedInPlace_RowCommittedMidSeedBySomeoneElse_IsKept`).
 
 The alternative was to have each of the ~30 writers record its own rows.
 That breaks silently the next time someone adds a writer and forgets to
@@ -74,8 +78,18 @@ transaction:
   id; and
 - finds no evidence in the tenant other than its own.
 
-So the backdated insert still cannot reach a tenant holding real evidence,
-which is #1830's stated property. The guard tests cover the new arm passing,
+So the backdated insert cannot reach a tenant that held real evidence when
+the guard ran, which is #1830's stated property.
+
+A window remains. `evidence_records` has no foreign key to `tenants`, so the
+`FOR UPDATE` lock on the tenant row does not block another session's ingest.
+Evidence pushed for the tenant after the guard runs, while the seed
+transaction is still open, lands beside the demo evidence. It is never
+recorded (B1 above), so teardown keeps it. But for that stretch the tenant
+holds real and demo evidence together. Closing the window would need a
+lock that ingest also takes; ingest takes none today. On a fresh install
+nothing is pushing evidence while an operator runs `demo seed`, so the
+window is accepted, not closed. The guard tests cover the new arm passing,
 a mark naming another tenant, and a tenant with earlier evidence. The
 in-place mark carries the tenant id because the bootstrap tenant has no slug
 to match on.
@@ -121,7 +135,7 @@ pre-seed rows" is a property of this code.
 `admintenants.DefaultAllowMultiTenant()`. The super-admin HTTP demo button
 (`internal/api/admindemo`) still calls `Apply` directly and creates a `demo`
 tenant as before. That button is the subject of other #1758 work and is out
-of this ticket's CLI scope; it is flagged in the PR rather than changed here.
+of this ticket's CLI scope; it is filed as #2042 rather than changed here.
 
 ## D9 — Tests stand in for "the only tenant" with a resolver override
 

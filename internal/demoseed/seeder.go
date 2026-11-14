@@ -132,6 +132,10 @@ type Seeder struct {
 	// over authPool; test-overridable because the shared integration
 	// database always holds several tenants.
 	resolveTenant func(ctx context.Context) (tenancy.TenantRef, error)
+
+	// beforeRecord, when set, runs after ApplyInPlace's writers and before
+	// it records the rows it added. Test-only (export_test.go).
+	beforeRecord func(ctx context.Context)
 }
 
 // NewSeeder constructs a Seeder over the BYPASSRLS auth pool. authPool

@@ -142,7 +142,7 @@ func (s *Seeder) ApplyInPlace(ctx context.Context, tenantID uuid.UUID, actorUser
 	if err != nil {
 		return Result{}, err
 	}
-	before, err := snapshotTenantRows(ctx, tx, tables, tenantID)
+	before, err := snapshotTenantRows(ctx, tx, tables, tenantID, false)
 	if err != nil {
 		return Result{}, err
 	}
@@ -162,7 +162,13 @@ func (s *Seeder) ApplyInPlace(ctx context.Context, tenantID uuid.UUID, actorUser
 		return Result{}, err
 	}
 
-	after, err := snapshotTenantRows(ctx, tx, tables, tenantID)
+	if s.beforeRecord != nil {
+		s.beforeRecord(ctx)
+	}
+	// Only this transaction's rows: at READ COMMITTED the after-snapshot
+	// also sees rows other sessions committed meanwhile, and those are not
+	// the seed's to record or to delete.
+	after, err := snapshotTenantRows(ctx, tx, tables, tenantID, true)
 	if err != nil {
 		return Result{}, err
 	}
@@ -306,13 +312,19 @@ func rowKeyExpr(pk []string) string {
 }
 
 // snapshotTenantRows returns, per table, the key of every row the tenant
-// holds.
-func snapshotTenantRows(ctx context.Context, tx pgx.Tx, tables []tenantTable, tenantID uuid.UUID) (map[string]map[string]struct{}, error) {
+// holds; with ownOnly, only rows tx itself last wrote (their xmin is tx's
+// transaction id, the test assertFreshDemoTenant uses). The seed opens no
+// savepoints, so every row it writes carries that xmin.
+func snapshotTenantRows(ctx context.Context, tx pgx.Tx, tables []tenantTable, tenantID uuid.UUID, ownOnly bool) (map[string]map[string]struct{}, error) {
+	filter := ""
+	if ownOnly {
+		filter = ` AND t.xmin::text::bigint = (txid_current() & 4294967295)`
+	}
 	snap := make(map[string]map[string]struct{}, len(tables))
 	for _, t := range tables {
 		rows, err := tx.Query(ctx,
-			fmt.Sprintf(`SELECT (%s)::text FROM %s t WHERE t.tenant_id::text = $1`,
-				t.keyExpr, pgx.Identifier{t.name}.Sanitize()),
+			fmt.Sprintf(`SELECT (%s)::text FROM %s t WHERE t.tenant_id::text = $1%s`,
+				t.keyExpr, pgx.Identifier{t.name}.Sanitize(), filter),
 			tenantID.String(),
 		)
 		if err != nil {
@@ -331,8 +343,9 @@ func snapshotTenantRows(ctx context.Context, tx pgx.Tx, tables []tenantTable, te
 	return snap, nil
 }
 
-// recordNewRows writes every key in after but not before to demo_seed_rows
-// and returns how many it wrote.
+// recordNewRows writes every key in after (the rows tx wrote) but not in
+// before (rows that already existed, which tx may have updated) to
+// demo_seed_rows and returns how many it wrote.
 func recordNewRows(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, before, after map[string]map[string]struct{}) (int, error) {
 	var tables, keys []string
 	for table, set := range after {

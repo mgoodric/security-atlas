@@ -432,3 +432,45 @@ func TestSeedInPlace_Teardown_RefusesWhenRealRowReferencesDemoRow(t *testing.T) 
 		t.Errorf("refused teardown changed %d rows; first: %s", len(d), d[0])
 	}
 }
+
+// B1 (#2039 review): the seed runs at READ COMMITTED, so a row another
+// session commits for the tenant mid-seed is visible to the after-snapshot.
+// It is not the seed's, so it must not be recorded, and teardown keeps it.
+func TestSeedInPlace_RowCommittedMidSeedBySomeoneElse_IsKept(t *testing.T) {
+	ref := freshInstallTenant(t)
+	ctx := context.Background()
+	realID := uuid.New()
+	seeder := soleTenantSeeder(t, ref).WithBeforeRecordHook(func(context.Context) {
+		// A separate connection, committed while the seed transaction is open.
+		if _, err := adminPool.Exec(ctx,
+			`INSERT INTO scope_dimensions (id, tenant_id, name, value_type, allowed_values, is_required, is_builtin)
+			 VALUES ($1, $2, 'region', 'string', '["us", "eu"]'::jsonb, FALSE, FALSE)`,
+			realID, ref.ID,
+		); err != nil {
+			t.Errorf("commit real row mid-seed: %v", err)
+		}
+	})
+	if _, err := seeder.Seed(ctx, demoseed.SeedInput{}); err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	var recorded bool
+	if err := adminPool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM demo_seed_rows
+		 WHERE tenant_id = $1 AND table_name = 'scope_dimensions' AND row_key->>'id' = $2)`,
+		ref.ID, realID.String(),
+	).Scan(&recorded); err != nil {
+		t.Fatalf("probe demo_seed_rows: %v", err)
+	}
+	if recorded {
+		t.Error("a row another session committed mid-seed was recorded as a demo row")
+	}
+	if _, err := seeder.TeardownImplicit(ctx, uuid.Nil, uuid.Nil); err != nil {
+		t.Fatalf("teardown: %v", err)
+	}
+	var kept bool
+	if err := adminPool.QueryRow(ctx,
+		`SELECT EXISTS (SELECT 1 FROM scope_dimensions WHERE id = $1)`, realID,
+	).Scan(&kept); err != nil || !kept {
+		t.Errorf("teardown removed the row committed mid-seed by another session (kept=%v, err=%v)", kept, err)
+	}
+}
