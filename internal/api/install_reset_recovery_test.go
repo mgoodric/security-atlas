@@ -199,7 +199,7 @@ func TestMarkFirstSignin_RevokesRecoveryKeyForOtherCaller(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Authenticate recovery key: %v", err)
 			}
-			caller := credstore.Credential{ID: "jwt:someone", TenantID: f.tenantID}
+			caller := credstore.Credential{ID: "jwt:someone", TenantID: f.tenantID, IsAdmin: true}
 			if tc.asRecovery {
 				caller = recovery
 			}
@@ -228,12 +228,50 @@ func TestMarkFirstSignin_RepeatSigninRevokesNothing(t *testing.T) {
 	f := newResetFixture(t, 1)
 	reset := decodeReset(t, f.post(t, f.superAdminJWT))
 	f.srv.AttachPlatformStatus(&fakePlatformStatus{markDid: false})
-	resp := markFirstSignin(t, f.srv, credstore.Credential{ID: "jwt:someone", TenantID: f.tenantID})
+	resp := markFirstSignin(t, f.srv, credstore.Credential{ID: "jwt:someone", TenantID: f.tenantID, IsAdmin: true})
 	if len(resp.RevokedCredentialIDs) != 0 {
 		t.Fatalf("repeat sign-in revoked %v", resp.RevokedCredentialIDs)
 	}
 	if _, err := f.srv.credStore.Authenticate(reset.BearerToken); err != nil {
 		t.Fatalf("repeat sign-in revoked the recovery key: %v", err)
+	}
+}
+
+// #1906: after a reset, a non-admin credential calling mark-first-signin
+// first is refused before the marker flips, so the recovery key stays live.
+// A request with no credential at all is 401.
+func TestMarkFirstSignin_RefusesNonAdminCaller(t *testing.T) {
+	for name, tc := range map[string]struct {
+		withCred bool
+		want     int
+	}{
+		"non-admin credential": {true, http.StatusForbidden},
+		"no credential":        {false, http.StatusUnauthorized},
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := newResetFixture(t, 1)
+			reset := decodeReset(t, f.post(t, f.superAdminJWT))
+			status := &fakePlatformStatus{markDid: true}
+			f.srv.AttachPlatformStatus(status)
+
+			req := httptest.NewRequest(http.MethodPost, "/v1/install/mark-first-signin", nil)
+			if tc.withCred {
+				req = req.WithContext(authctx.WithCredential(req.Context(),
+					credstore.Credential{ID: "low-priv", TenantID: f.tenantID}))
+			}
+			rec := httptest.NewRecorder()
+			f.srv.handleMarkFirstSignin(rec, req)
+
+			if rec.Code != tc.want {
+				t.Fatalf("status = %d, want %d; body=%s", rec.Code, tc.want, rec.Body.String())
+			}
+			if status.markCalls != 0 {
+				t.Fatalf("MarkFirstSignin called %d times; want 0 for a refused caller", status.markCalls)
+			}
+			if _, err := f.srv.credStore.Authenticate(reset.BearerToken); err != nil {
+				t.Fatalf("refused caller revoked the recovery key: %v", err)
+			}
+		})
 	}
 }
 
