@@ -63,6 +63,11 @@ const DefaultImplementationType = "manual_attested"
 // maxRejectReason caps a rejection reason, in characters.
 const maxRejectReason = 2000
 
+// beforeControlUpload, when set, runs between the bundle-ID check and the
+// upload. Only the integration test sets it, to commit a colliding control
+// in that window (the concurrent-approval race). Nil in production.
+var beforeControlUpload func(ctx context.Context, bundleID string)
+
 // DecisionStore approves and rejects staged rows. Implementations apply the
 // caller's tenant to every read and write (RLS).
 type DecisionStore interface {
@@ -248,6 +253,9 @@ func (s *Store) ApproveRow(ctx context.Context, in ApproveRowInput) (RowDecision
 		if taken {
 			return fmt.Errorf("%w: %s (from %s)", ErrBundleIDTaken, bundle.Manifest.BundleID, row.ExternalID)
 		}
+		if beforeControlUpload != nil {
+			beforeControlUpload(ctx, bundle.Manifest.BundleID)
+		}
 
 		res, err := control.UploadTx(ctx, tx, bundle, in.Approver)
 		switch {
@@ -255,6 +263,12 @@ func (s *Store) ApproveRow(ctx context.Context, in ApproveRowInput) (RowDecision
 			return fmt.Errorf("%w: %s is not in SCF release %s", ErrAnchorNotInRelease, scfID, row.SCFRelease)
 		case err != nil:
 			return fmt.Errorf("controlimport: upload control: %w", err)
+		case !res.IsNewBundle:
+			// The check above saw no control with this bundle ID, but a
+			// concurrent approval committed one since: the upload found it
+			// and versioned it (or matched it). Roll back, so another row's
+			// control is never changed and this row stays pending.
+			return fmt.Errorf("%w: %s (from %s), created concurrently", ErrBundleIDTaken, bundle.Manifest.BundleID, row.ExternalID)
 		}
 
 		out.Status = RowStatusApproved
@@ -350,6 +364,23 @@ func chosenAnchor(ctx context.Context, tx pgx.Tx, in ApproveRowInput) (string, b
 		return scfID, ai, nil
 	}
 	scfID = strings.TrimSpace(in.SCFID)
+	if _, err := uuid.Parse(scfID); err == nil {
+		// An anchor id: name it by its code, and only within the batch's
+		// SCF release. Mapping an id from another release to the same code
+		// here would silently re-bind it.
+		err := tx.QueryRow(ctx, `
+			SELECT a.scf_id
+			FROM scf_anchors a
+			JOIN control_import_batches b ON b.scf_framework_version_id = a.framework_version_id
+			WHERE a.id = $1::uuid AND b.id = $2::uuid
+		`, scfID, in.BatchID).Scan(&scfID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, fmt.Errorf("%w: anchor %s is not in the batch's SCF release", ErrAnchorNotInRelease, in.SCFID)
+		}
+		if err != nil {
+			return "", false, fmt.Errorf("controlimport: resolve anchor id: %w", err)
+		}
+	}
 	err := tx.QueryRow(ctx, `
 		SELECT ai_assisted FROM control_import_candidates WHERE row_id = $1::uuid AND scf_id = $2
 	`, in.RowID, scfID).Scan(&ai)

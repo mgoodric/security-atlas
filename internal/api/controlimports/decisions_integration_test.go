@@ -495,3 +495,106 @@ func TestDecisionsAppearInAuditLog(t *testing.T) {
 		t.Error("DELETE on control_import_audit_log succeeded, want the append-only trigger to refuse")
 	}
 }
+
+// ----- bundle-ID collision, anchors outside the batch's release, anchor ids -----
+
+// legacyRelease adds a second, non-current SCF release holding one anchor and
+// returns that anchor's code and id. Cleanup removes both.
+func legacyRelease(t *testing.T, admin *pgxpool.Pool) (string, string) {
+	t.Helper()
+	ctx := context.Background()
+	verID, anchorID := uuid.New(), uuid.New()
+	code := "LEG" + strings.ToUpper(uuid.NewString()[:8]) + "-01"
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM scf_anchors WHERE id = $1`, anchorID)
+		_, _ = admin.Exec(context.Background(), `DELETE FROM framework_versions WHERE id = $1`, verID)
+	})
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+		SELECT $1, NULL, fv.framework_id, $2, 'legacy'
+		FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.status = 'current'
+		ORDER BY fv.created_at DESC LIMIT 1`,
+		verID, "legacy-"+code); err != nil {
+		t.Fatalf("insert legacy release: %v", err)
+	}
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description)
+		VALUES ($1, $2, $3, 'IAC', 'Legacy anchor', 'Only in the legacy release.')`, anchorID, verID, code); err != nil {
+		t.Fatalf("insert legacy anchor: %v", err)
+	}
+	return code, anchorID.String()
+}
+
+func anchorIDOf(t *testing.T, admin *pgxpool.Pool, scfID string) string {
+	t.Helper()
+	var id string
+	if err := admin.QueryRow(context.Background(), `SELECT id::text FROM scf_anchors WHERE scf_id = $1`, scfID).Scan(&id); err != nil {
+		t.Fatalf("read anchor %s: %v", scfID, err)
+	}
+	return id
+}
+
+func TestApproveBundleIDCollisionAndReleaseBinding(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	cat := seedCatalog(t, admin)
+	legacyCode, legacyID := legacyRelease(t, admin)
+	tenant := freshTenant(t, admin)
+	env := decisionServer(t, app, tenant)
+
+	// "AC 01" and "AC-01" are distinct organisation IDs with one slug.
+	status, raw := doUpload(t, env.testEnv, upload{filename: "slugs.csv", framework: cat.framework,
+		payload: []byte("Control ID,Title,Description\nAC 01,First,First control.\nAC-01,Second,Second control.\n")})
+	if status != http.StatusCreated {
+		t.Fatalf("upload = %d %s", status, raw)
+	}
+	b := decodeBatch(t, raw)
+	first, second := rowByOrgID(t, b, "AC 01"), rowByOrgID(t, b, "AC-01")
+
+	// An anchor of another SCF release is refused by code and by id: never
+	// re-bound into the batch's release.
+	for _, ref := range []string{legacyCode, legacyID} {
+		status, raw = doPost(t, env.testEnv, env.bearer, decisionPath(b.ID, first.ID, "approve"), map[string]any{"scf_id": ref})
+		if status != http.StatusBadRequest || !strings.Contains(string(raw), "not in") {
+			t.Errorf("approve with legacy anchor %s = %d %s, want 400", ref, status, raw)
+		}
+	}
+
+	// An anchor id of the batch's release binds, and is reported by code.
+	mfaID := anchorIDOf(t, admin, cat.anchors["mfa"])
+	status, raw = doPost(t, env.testEnv, env.bearer, decisionPath(b.ID, first.ID, "approve"), map[string]any{"scf_id": mfaID})
+	if status != http.StatusOK {
+		t.Fatalf("approve by anchor id = %d %s", status, raw)
+	}
+	d := decodeDecision(t, raw)
+	if d.SCFID != cat.anchors["mfa"] || d.SCFAnchorID != mfaID || d.BundleID != "ac-01" {
+		t.Errorf("decision = %+v, want code %s, anchor %s, bundle ac-01", d, cat.anchors["mfa"], mfaID)
+	}
+	var stored string
+	if err := admin.QueryRow(context.Background(), `SELECT scf_id FROM control_import_rows WHERE id = $1`, first.ID).Scan(&stored); err != nil {
+		t.Fatalf("read row: %v", err)
+	}
+	if stored != cat.anchors["mfa"] {
+		t.Errorf("row scf_id = %q, want the code %s", stored, cat.anchors["mfa"])
+	}
+
+	// The second slug collides: 409, no new version of the first's control,
+	// and the row stays pending.
+	status, raw = doPost(t, env.testEnv, env.bearer, decisionPath(b.ID, second.ID, "approve"), map[string]any{"scf_id": cat.anchors["review"]})
+	if status != http.StatusConflict || !strings.Contains(string(raw), "bundle ID") {
+		t.Errorf("colliding approve = %d %s, want 409 naming the bundle ID", status, raw)
+	}
+	var n, version int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*), max(version) FROM controls WHERE tenant_id = $1 AND bundle_id = 'ac-01'`, tenant).Scan(&n, &version); err != nil {
+		t.Fatalf("count controls: %v", err)
+	}
+	if n != 1 || version != 1 {
+		t.Errorf("ac-01 controls = %d (max version %d), want one at v1", n, version)
+	}
+	status, raw = doGet(t, env.testEnv, "/v1/controls/imports/"+b.ID+"/rows?status=pending")
+	if status != http.StatusOK || !strings.Contains(string(raw), second.ID) {
+		t.Errorf("colliding row not pending: %d %s", status, raw)
+	}
+}

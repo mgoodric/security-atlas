@@ -107,7 +107,8 @@ Actions are `approve`, `reject` and `duplicate`. A row carries:
 - on approve: the anchor id, SCF code and release, the control and the bundle;
 - on reject: the reason.
 
-The table is the twelfth branch of the unified audit log. `target_type` is
+The table is the 13th branch of the unified audit log, after #1797's
+`mapping_overlay`. `target_type` is
 `control_import_row` and `target_id` is the row id.
 
 **Why its own table.** No existing audit table has a batch, row and anchor
@@ -127,6 +128,23 @@ shape. The unified log's extension pattern is a table per domain.
   and its decision.
 - **Rows read.** The rows API returns `decided_by`, `control_id`,
   `approved_scf_id` and `rejection_reason`.
+
+## D8 — Review follow-ups: the bundle-ID race and anchor ids
+
+**The race.** The bundle-ID check (D4) does not lock. Two approvals whose
+organisation IDs share a slug can both pass it, and the second upload then
+finds the first's control. It versions that control, or matches it. So
+approval refuses any upload that is not a new bundle (`!IsNewBundle`) with
+`ErrBundleIDTaken`. The transaction rolls back, the other row's control is
+untouched, and this row stays pending. The in-package integration test
+`TestApproveRow_ConcurrentBundleIDCollisionRollsBack` commits the rival
+control in that window through the unexported `beforeControlUpload` hook,
+so the race is deterministic. It fails without the guard.
+
+**Anchor ids.** `scf_id` may be an anchor uuid. It resolves only within the
+batch's SCF version (`scf_framework_version_id`), and the code is what is
+recorded and returned. A uuid from another release is refused; it is not
+mapped to the same code in the batch's release, which would re-bind it.
 
 ## Out of this ticket
 
