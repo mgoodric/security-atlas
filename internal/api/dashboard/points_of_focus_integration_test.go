@@ -14,7 +14,9 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/api/scfseed"
 	"github.com/mgoodric/security-atlas/internal/api/soc2import"
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
 const pofPostureSlug = "pof-posture-test"
@@ -42,6 +44,14 @@ func TestFrameworkPosture_PointsOfFocusNotInDenominator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSCFWorkbook: %v", err)
 	}
+	// The workbook's "SCF 2026.3" sheet declares a release this database
+	// does not hold (#1771); bind against the seeded sample release, which
+	// is what this posture test reads.
+	rel, err := scfrelease.Lookup(ctx, dbx.New(admin), "")
+	if err != nil {
+		t.Fatalf("current SCF release: %v", err)
+	}
+	cw.SCFRelease = rel.Version
 	if _, err := soc2import.Import(ctx, admin, cw); err != nil {
 		t.Fatalf("Import: %v", err)
 	}
