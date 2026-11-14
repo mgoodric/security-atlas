@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import {
   Card,
   CardContent,
@@ -109,16 +110,11 @@ export default function VendorsPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Vendors</h1>
-          <p className="text-sm text-muted-foreground">
-            Third-party register. Lite scope: contract dates, DPA, review
-            cadence, criticality. Phase 2 adds questionnaire issuance.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
+    <PageShell
+      title="Vendors"
+      subtitle="Third-party register. Lite scope: contract dates, DPA, review cadence, criticality. Phase 2 adds questionnaire issuance."
+      actions={
+        <>
           {/* Slice 139 — vendor data export (csv|json|xlsx). The
               button group renders three direct links to the BFF;
               clicking each triggers the browser's file-save dialog.
@@ -127,9 +123,9 @@ export default function VendorsPage() {
           <Link href="/vendors/new" className={buttonVariants()}>
             Add vendor
           </Link>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       <BurndownCard
         burndown={burndownQ.data}
         loading={burndownQ.isLoading}
@@ -212,7 +208,7 @@ export default function VendorsPage() {
           {vendorsQ.data ? <VendorTable vendors={vendorsQ.data} /> : null}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }
 

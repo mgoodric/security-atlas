@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
@@ -43,23 +44,20 @@ export default function VendorEditPage({
   }, [error, id, router]);
 
   return (
-    <div className="space-y-6">
-      <div className="text-sm">
+    <PageShell
+      title="Edit vendor"
+      subtitle="Save updates the record and re-binds scope cells. Delete removes the row and its cell bindings."
+      width="reading"
+      actions={
         <Link
           href={`/vendors/${id}`}
-          className="text-muted-foreground hover:underline"
+          className="text-sm text-muted-foreground hover:underline"
           data-testid="vendor-edit-back"
         >
           ← Vendor detail
         </Link>
-      </div>
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Edit vendor</h1>
-        <p className="text-sm text-muted-foreground">
-          Save updates the record and re-binds scope cells. Delete removes the
-          row and its cell bindings.
-        </p>
-      </div>
+      }
+    >
       {isLoading ? <Skeleton className="h-96 w-full" /> : null}
       {error && !(error instanceof APIError && error.status === 401) ? (
         <Alert variant="destructive">
@@ -115,6 +113,6 @@ export default function VendorEditPage({
           </div>
         </>
       ) : null}
-    </div>
+    </PageShell>
   );
 }

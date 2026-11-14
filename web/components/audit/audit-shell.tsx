@@ -98,7 +98,10 @@ export function AuditShell({
             </div>
           </form>
         </div>
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <section
+          aria-label="Control workspace"
+          className="min-w-0 flex-1 overflow-y-auto p-4 sm:p-6"
+        >
           {selectedControlId ? (
             <ControlWorkspace
               controlId={selectedControlId}
@@ -120,7 +123,7 @@ export function AuditShell({
               </p>
             </div>
           )}
-        </main>
+        </section>
       </div>
     </AnnotationDraftProvider>
   );

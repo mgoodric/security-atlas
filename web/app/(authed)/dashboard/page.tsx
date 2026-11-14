@@ -28,6 +28,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { ActivityFeedPanel } from "@/components/dashboard/activity-feed-panel";
 import {
   DashboardHeaderSubtitle,
@@ -95,31 +96,24 @@ export default function DashboardPage() {
   }, [firstError, router]);
 
   return (
-    <div className="space-y-6" data-testid="program-dashboard">
-      {/* ============ HEADER ============ */}
-      {/*
-        Slice 229 — the H1 row carries the active tenant name (AC-1)
-        and the subtitle binds to the freshness pct / empty / error
-        state (AC-2, AC-3, AC-4, AC-5). The prior generic marketing
-        copy ("The home screen for the security program …") was
-        decoration that did not communicate which tenant the operator
-        was viewing nor the aggregate freshness posture; the mockup
-        (`Plans/_archive/mockups/dashboard.html` lines 117-120) encodes the
-        right design intent (operator orientation in one line).
-        Snapshot timestamp is OMITTED until the FreshnessReport wire
-        shape exposes a `received_at` — see slice header comment in
-        `dashboard-header-subtitle.tsx` for the JUDGMENT note.
-      */}
-      <header className="flex items-baseline justify-between">
-        <div>
-          <div className="flex items-baseline gap-3">
-            <h1 className="text-2xl font-semibold tracking-tight">Program</h1>
-            <TenantContext />
-          </div>
-          <DashboardHeaderSubtitle />
-        </div>
-      </header>
-
+    // ============ HEADER ============
+    // Slice 229 — the H1 row carries the active tenant name (AC-1)
+    // and the subtitle binds to the freshness pct / empty / error
+    // state (AC-2, AC-3, AC-4, AC-5). The prior generic marketing
+    // copy ("The home screen for the security program …") was
+    // decoration that did not communicate which tenant the operator
+    // was viewing nor the aggregate freshness posture; the mockup
+    // (`Plans/_archive/mockups/dashboard.html` lines 117-120) encodes the
+    // right design intent (operator orientation in one line).
+    // Snapshot timestamp is OMITTED until the FreshnessReport wire
+    // shape exposes a `received_at` — see slice header comment in
+    // `dashboard-header-subtitle.tsx` for the JUDGMENT note.
+    <PageShell
+      title="Program"
+      titleAdornment={<TenantContext />}
+      subtitle={<DashboardHeaderSubtitle />}
+      data-testid="program-dashboard"
+    >
       {/* ============ FRAMEWORK POSTURE TILES ============ */}
       <FrameworkPosturePanel
         report={postureQ.data}
@@ -201,6 +195,6 @@ export default function DashboardPage() {
           refetch: () => void activityQ.refetch(),
         }}
       />
-    </div>
+    </PageShell>
   );
 }
