@@ -363,7 +363,18 @@ func writeAuditPeriodsAndSamples(ctx context.Context, tx pgx.Tx, fs *fixtureSet)
 //
 // Returns the evidence row count + the distinct list of evidence
 // kinds used (for D3 / Result.EvidenceKindsUsed).
+//
+// Ingest exception (#1830): this is the one production raw INSERT into
+// evidence_records outside internal/evidence/ingest. The demo dataset
+// spreads observed_at across twelve months of audit periods, which the
+// ingest observed_at skew check (24h) exists to refuse, so it cannot go
+// through ingest.Service. assertFreshDemoTenant confines the exception to
+// a tenant this same transaction created and stamped with the
+// demo_seed_apply mark; anything else is refused before a row is written.
 func writeEvidence(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, []string, error) {
+	if err := assertFreshDemoTenant(ctx, tx, fs.tenant.ID); err != nil {
+		return 0, nil, err
+	}
 	kindsSet := map[string]struct{}{}
 	for i, e := range fs.evidence {
 		payloadBytes, err := json.Marshal(e.Payload)
@@ -1022,6 +1033,38 @@ func nullableUUIDPtr(p *uuid.UUID) any {
 type ctxKey int
 
 const ctxKeyTenantID ctxKey = 1
+
+// ErrNotDemoSeedContext is returned when the backdated demo evidence
+// writer is pointed at a tenant that tx did not create and demo-mark.
+var ErrNotDemoSeedContext = errors.New("demoseed: evidence writes are confined to a tenant created and demo-marked in the same transaction")
+
+// assertFreshDemoTenant guards the demoseed ingest exception (#1830): it
+// passes only when tx itself inserted the tenants row (its xmin is tx's
+// transaction id) and tx has written the demo_seed_apply
+// super_admin_audit_log row for its slug. A real tenant, or a demo tenant seeded by an earlier transaction,
+// fails, so the backdated raw insert cannot reach live tenant data.
+func assertFreshDemoTenant(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
+	var fresh bool
+	err := tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM tenants t
+			JOIN super_admin_audit_log a
+			  ON a.action = 'demo_seed_apply'
+			 AND a.payload_json->>'slug' = t.slug
+			 AND a.xmin::text::bigint = (txid_current() & 4294967295)
+			WHERE t.id = $1
+			  AND t.xmin::text::bigint = (txid_current() & 4294967295)
+		)
+	`, tenantID).Scan(&fresh)
+	if err != nil {
+		return fmt.Errorf("demoseed: demo-context probe: %w", err)
+	}
+	if !fresh {
+		return fmt.Errorf("%w (tenant %s)", ErrNotDemoSeedContext, tenantID)
+	}
+	return nil
+}
 
 func withTenant(ctx context.Context, id uuid.UUID) context.Context {
 	return context.WithValue(ctx, ctxKeyTenantID, id)
