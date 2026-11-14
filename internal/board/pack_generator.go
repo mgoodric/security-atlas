@@ -1,10 +1,10 @@
 // pack_generator.go — assembles a DRAFT quarterly board pack from live
 // program metrics and persists it as a draft `board_packs` row.
 //
-// The PackGenerator is a pure READER of upstream state — the slice-016
-// freshness + drift read models, the frameworks + risks tables, and the
-// slice-012 control_evaluations (via the board-pack-owned failing-evaluations
-// read) — plus an APPEND of the draft `board_packs` row (constitutional
+// The PackGenerator is a pure READER of upstream state — the dashboard's
+// per-framework posture query, the risks table, and the slice-012
+// control_evaluations (via the board-pack-owned failing-evaluations read) —
+// plus an APPEND of the draft `board_packs` row (constitutional
 // invariant 2). It computes the structured Pack, renders the templated
 // per-section narrative (NO LLM — pack_narrative.go), and writes both into
 // one draft row.
@@ -19,11 +19,9 @@
 //     spend (CLAUDE.md anti-pattern; decision D3).
 //   - asks is seeded with a templated placeholder; the operator authors it.
 //
-// Posture-attribution scope: reuses the slice-031 program-posture model —
-// true per-framework control attribution needs the SCF anchor graph +
-// framework-scope intersection, which is heavyweight. v1 reports the
-// program's tenant-wide posture numbers listed against each registered
-// framework.
+// Posture (#2056): each framework's posture is the dashboard's, from the same
+// query (pack_posture.go). The coverage_trend baseline is coverage at the
+// start of that query's 90-day trend, not a constant.
 package board
 
 import (
@@ -67,22 +65,17 @@ type VendorBurndownReadout struct {
 }
 
 // PackGenerator assembles and persists draft quarterly board packs. It is
-// wired with the freshness + drift read-model stores (reused from slice
-// 031), the board pack Store (frameworks/risks/findings reads, pack append),
-// the slice-273 vendor-burndown reader, and a wall-clock source (overridable
-// in tests for determinism).
+// wired with the board pack Store (posture/risks/findings reads, pack
+// append), the slice-273 vendor-burndown reader, and a wall-clock source
+// (overridable in tests for determinism).
 type PackGenerator struct {
-	store     *PackStore
-	freshness freshnessLister
-	drift     driftReporter
-	vendors   VendorBurndownReader
-	now       func() time.Time
+	store   *PackStore
+	vendors VendorBurndownReader
+	now     func() time.Time
 }
 
-// NewPackGenerator wires a PackGenerator. The freshness + drift arguments are
-// the slice-016 read-model stores (the same ones slice 031 uses); the pack
-// Store handles the frameworks/risks/findings reads and the append. The
-// vendors argument is the slice-273 high-criticality vendor-burndown reader
+// NewPackGenerator wires a PackGenerator. The pack Store handles the
+// posture/risks/findings reads and the append. The vendors argument is the slice-273 high-criticality vendor-burndown reader
 // (the adapter over vendor.Store.Burndown lives at the httpserver wiring
 // layer so the board package stays free of an internal/vendor import).
 //
@@ -90,13 +83,11 @@ type PackGenerator struct {
 // section with zero scalars, which is the honest read for a deployment with
 // the vendor module disabled or untouched. The integration wires a real
 // reader.
-func NewPackGenerator(store *PackStore, freshnessStore freshnessLister, driftStore driftReporter, vendors VendorBurndownReader) *PackGenerator {
+func NewPackGenerator(store *PackStore, vendors VendorBurndownReader) *PackGenerator {
 	return &PackGenerator{
-		store:     store,
-		freshness: freshnessStore,
-		drift:     driftStore,
-		vendors:   vendors,
-		now:       func() time.Time { return time.Now().UTC() },
+		store:   store,
+		vendors: vendors,
+		now:     func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -138,39 +129,15 @@ func (g *PackGenerator) Generate(ctx context.Context, periodEnd string) (StoredP
 // read, no write. Split out from Generate so the assembly is testable in
 // isolation from the append.
 func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt time.Time) (Pack, error) {
-	// --- drift: the control-drift summary over the slice-031 window ---
-	report, err := g.drift.Report(ctx, DriftWindow)
-	if err != nil {
-		return Pack{}, fmt.Errorf("board: drift report: %w", err)
-	}
-	driftDelta := report.Delta
-
-	// --- freshness: program coverage + freshness percentages ---
-	freshnessRows, err := g.freshness.List(ctx)
-	if err != nil {
-		return Pack{}, fmt.Errorf("board: freshness list: %w", err)
-	}
-	coveragePct, freshnessPct := programPosture(freshnessRows)
-
-	// --- frameworks: one posture row per registered framework ---
-	frameworks, err := g.store.ListFrameworks(ctx)
+	// --- posture: the dashboard's per-framework posture, trend measured
+	//     over the 90 days before generation (#2056) ---
+	postureRows, err := g.store.FrameworkPosture(ctx, generatedAt.Add(-PostureTrendWindow))
 	if err != nil {
 		return Pack{}, err
 	}
-	trendArrow := trendFromDelta(driftDelta)
-	postureState := stateFromCoverage(coveragePct)
-	postures := make([]FrameworkPosture, 0, len(frameworks))
-	for _, fw := range frameworks {
-		postures = append(postures, FrameworkPosture{
-			Slug:         fw.Slug,
-			Name:         fw.Name,
-			CoveragePct:  coveragePct,
-			FreshnessPct: freshnessPct,
-			TrendArrow:   trendArrow,
-			Delta:        driftDelta,
-			State:        postureState,
-		})
-	}
+	postures := packPostures(postureRows)
+	coveragePct, baselinePct, scopedCount := coverageTrend(postures)
+	coverageDelta := round2(coveragePct - baselinePct)
 
 	// --- risks: top-N aging, ranked by residual severity then age ---
 	riskRows, err := g.store.ListRisksAsOf(ctx, generatedAt)
@@ -214,14 +181,15 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 	pack.Sections[SectionTopRisks] = newSection(SectionTopRisks, SectionData{
 		TopRisks: topRisks,
 	})
-	// coverage_trend: coverage at quarter end vs an operator baseline
-	// (decision D5). The baseline starts at 0 — the operator sets it to the
-	// prior-quarter coverage. Delta is recomputed whenever the baseline is
-	// edited (see PackStore.UpdateSection).
+	// coverage_trend: the scoped frameworks' coverage now vs at the start of
+	// the 90-day posture trend (#2056). The operator may still overwrite the
+	// baseline (decision D5); the delta is recomputed on every edit (see
+	// PackStore.UpdateSection).
 	pack.Sections[SectionCoverageTrend] = newSection(SectionCoverageTrend, SectionData{
-		CoveragePct:         coveragePct,
-		BaselineCoveragePct: 0,
-		CoverageDelta:       coveragePct,
+		CoveragePct:          coveragePct,
+		BaselineCoveragePct:  baselinePct,
+		CoverageDelta:        coverageDelta,
+		ScopedFrameworkCount: scopedCount,
 	})
 	pack.Sections[SectionOpenFindings] = newSection(SectionOpenFindings, SectionData{
 		Findings:      findings,
@@ -251,7 +219,7 @@ func (g *PackGenerator) assemble(ctx context.Context, periodEnd, generatedAt tim
 		// CoverageDelta is mirrored here so the investment narrative can
 		// reference it; it is kept in sync with the coverage_trend section
 		// on edit (see PackStore.UpdateSection).
-		CoverageDelta: coveragePct,
+		CoverageDelta: coverageDelta,
 	})
 	pack.Sections[SectionAsks] = newSection(SectionAsks, SectionData{})
 
@@ -284,10 +252,10 @@ func newSection(key string, data SectionData) Section {
 }
 
 // costPerCoveragePoint computes spend / max(delta, 1) (decision D5). A
-// non-positive delta floors the denominator at 1 so the figure stays finite
-// and meaningful ("this spend bought at most this much per point"). Zero
-// spend yields zero.
-func costPerCoveragePoint(spendUSD, coverageDelta int) float64 {
+// delta below one point floors the denominator at 1 so the figure stays
+// finite and meaningful ("this spend bought at most this much per point").
+// Zero spend yields zero.
+func costPerCoveragePoint(spendUSD int, coverageDelta float64) float64 {
 	if spendUSD <= 0 {
 		return 0
 	}
@@ -295,7 +263,7 @@ func costPerCoveragePoint(spendUSD, coverageDelta int) float64 {
 	if denom < 1 {
 		denom = 1
 	}
-	return float64(spendUSD) / float64(denom)
+	return float64(spendUSD) / denom
 }
 
 // vendorOnTimeFraction computes on-time / total (slice 273). Zero total

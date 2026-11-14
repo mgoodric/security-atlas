@@ -63,20 +63,22 @@ func TestCostPerCoveragePoint(t *testing.T) {
 	cases := []struct {
 		name  string
 		spend int
-		delta int
+		delta float64
 		want  float64
 	}{
 		{"normal positive delta", 60000, 6, 10000},
 		{"delta of one", 5000, 1, 5000},
 		{"zero delta floors denominator at one", 8000, 0, 8000},
 		{"negative delta floors denominator at one", 8000, -4, 8000},
+		{"fractional delta below one floors at one", 8000, 0.5, 8000},
+		{"fractional delta above one divides", 9000, 1.5, 6000},
 		{"zero spend yields zero", 0, 5, 0},
 		{"negative spend yields zero", -100, 5, 0},
 	}
 	for _, c := range cases {
 		got := costPerCoveragePoint(c.spend, c.delta)
 		if got != c.want {
-			t.Errorf("%s: costPerCoveragePoint(%d, %d) = %v, want %v",
+			t.Errorf("%s: costPerCoveragePoint(%d, %v) = %v, want %v",
 				c.name, c.spend, c.delta, got, c.want)
 		}
 	}
@@ -177,14 +179,14 @@ func TestApplySectionEdit_BaselineRecomputesDeltaOnBothSections(t *testing.T) {
 
 	trend := out.Sections[SectionCoverageTrend]
 	if trend.Data.BaselineCoveragePct != 65 {
-		t.Errorf("baseline = %d, want 65", trend.Data.BaselineCoveragePct)
+		t.Errorf("baseline = %v, want 65", trend.Data.BaselineCoveragePct)
 	}
 	if trend.Data.CoverageDelta != 15 {
-		t.Errorf("coverage_trend delta = %d, want 15 (80 - 65)", trend.Data.CoverageDelta)
+		t.Errorf("coverage_trend delta = %v, want 15 (80 - 65)", trend.Data.CoverageDelta)
 	}
 	inv := out.Sections[SectionInvestment]
 	if inv.Data.CoverageDelta != 15 {
-		t.Errorf("investment delta = %d, want 15 (mirrors coverage_trend)", inv.Data.CoverageDelta)
+		t.Errorf("investment delta = %v, want 15 (mirrors coverage_trend)", inv.Data.CoverageDelta)
 	}
 }
 

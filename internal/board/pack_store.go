@@ -475,7 +475,7 @@ func applyInputs(sec *Section, in *SectionInputs) {
 		d.SpendUSD = *in.SpendUSD
 	}
 	if in.BaselineCoveragePct != nil {
-		d.BaselineCoveragePct = *in.BaselineCoveragePct
+		d.BaselineCoveragePct = float64(*in.BaselineCoveragePct)
 	}
 	sec.Data = d
 }
@@ -492,7 +492,7 @@ func recomputeDerived(sections map[string]Section) {
 	if !hasTrend || !hasInv {
 		return
 	}
-	delta := trend.Data.CoveragePct - trend.Data.BaselineCoveragePct
+	delta := round2(trend.Data.CoveragePct - trend.Data.BaselineCoveragePct)
 	trend.Data.CoverageDelta = delta
 	inv.Data.CoverageDelta = delta
 	inv.Data.CostPerCoveragePoint = costPerCoveragePoint(inv.Data.SpendUSD, delta)

@@ -8,9 +8,11 @@
 // The component imports the constant and renders it; the unit test
 // pins the constant to the constitutional source.
 //
-// Source of truth: Plans/_archive/mockups/board-pack.html §01 footer
-// (lines 146–148). Any drift between this constant and the mockup is
-// a bug — keep them aligned.
+// Source of truth (#2056): the dashboard's per-framework posture query
+// (internal/db/queries/dashboard.sql FrameworkPosture), which the board
+// pack reads verbatim. The archived mockup's wording ("weighted
+// SCF-anchored evidence pass rate") described a formula the platform
+// never computed; keep this caption aligned with the query instead.
 
 export const POSTURE_COVERAGE_CAPTION =
-  "Coverage definition: weighted SCF-anchored evidence pass rate intersected with each framework's scope predicate, over the period. Methodology unchanged from prior quarter.";
+  "Coverage definition: the share of each framework's in-scope requirements (those its activated framework scope does not exclude) with at least one control on a mapped SCF anchor. The same figure the dashboard shows; the trend and baseline are over the last 90 days.";

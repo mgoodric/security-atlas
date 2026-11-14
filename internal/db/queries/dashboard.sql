@@ -58,6 +58,11 @@
 -- requirement never shows up as a jump. Exclusions on draft, review or
 -- approved revisions have no effect; undecided requirements stay in.
 --
+-- scope_activated (#2056, #2114): whether the tenant has an ACTIVATED
+-- framework-scope revision for the version. Without one, nothing has been
+-- decided out of scope, so the percentage is over the whole requirement set;
+-- callers show "Scope not set" for that version instead of the number.
+--
 -- The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
 -- $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
 WITH version_reqs AS (
@@ -144,6 +149,13 @@ covered_then AS (
     JOIN control_passed_then cpt ON cpt.control_id = cc.control_id
     WHERE cpt.passed_then
 ),
+scoped_versions AS (
+    -- Framework versions with an activated scope revision in the tenant.
+    SELECT DISTINCT fs.framework_version_id
+    FROM framework_scopes fs
+    WHERE fs.tenant_id = $1
+      AND fs.state = 'activated'
+),
 control_freshness AS (
     -- Per covering control, whether it is fresh per the slice-016 read
     -- model. A control with no freshness row is treated as stale.
@@ -159,6 +171,7 @@ control_freshness AS (
 SELECT
     vr.framework_id,
     vr.framework_version,
+    vr.framework_version_id,
     -- coverage_pct: covered requirements / total requirements, 0..100.
     CASE WHEN COUNT(DISTINCT vr.requirement_id) = 0 THEN 0.0
          ELSE ROUND(
@@ -180,14 +193,16 @@ SELECT
                    / COUNT(DISTINCT vr.requirement_id)
            - 100.0 * COUNT(DISTINCT ct.requirement_id)
                    / COUNT(DISTINCT vr.requirement_id), 2)
-    END::float8 AS trend_delta_90d
+    END::float8 AS trend_delta_90d,
+    BOOL_OR(sv.framework_version_id IS NOT NULL)::bool AS scope_activated
 FROM version_reqs vr
 LEFT JOIN covered_now      cn ON cn.framework_version_id = vr.framework_version_id
                               AND cn.requirement_id      = vr.requirement_id
 LEFT JOIN covered_then     ct ON ct.framework_version_id = vr.framework_version_id
                               AND ct.requirement_id      = vr.requirement_id
 LEFT JOIN control_freshness cf ON cf.framework_version_id = vr.framework_version_id
-GROUP BY vr.framework_id, vr.framework_version
+LEFT JOIN scoped_versions  sv ON sv.framework_version_id = vr.framework_version_id
+GROUP BY vr.framework_id, vr.framework_version, vr.framework_version_id
 ORDER BY vr.framework_id, vr.framework_version;
 
 -- name: ListEvidenceActivity :many

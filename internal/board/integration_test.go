@@ -752,15 +752,6 @@ func TestPackGenerator_Generate_EndToEnd_WithVendorReader(t *testing.T) {
 	store := board.NewPackStore(app)
 	gen := board.NewPackGenerator(
 		store,
-		fixedFreshness{rows: []freshness.ControlFreshness{
-			{IsStale: false, EvidenceCount: 5},
-			{IsStale: false, EvidenceCount: 1},
-		}},
-		fixedDrift{report: drift.DriftReport{
-			SinceDate:   time.Date(2026, 3, 30, 0, 0, 0, 0, time.UTC),
-			ThroughDate: time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC),
-			Delta:       1,
-		}},
 		fixedVendorBurndown{out: board.VendorBurndownReadout{Total: 4, OnTime: 3, PastDue: 1}},
 	).WithClock(func() time.Time { return genClock })
 
@@ -790,11 +781,8 @@ func TestPackGenerator_Generate_EndToEnd_WithVendorReader(t *testing.T) {
 	if vb.VendorBurndownOnTimePct != 75 {
 		t.Errorf("vendor on-time pct = %d, want 75 (3/4)", vb.VendorBurndownOnTimePct)
 	}
-	// Posture section populated from the framework + freshness fixture.
-	posture := stored.Content.Sections[board.SectionPosture].Data
-	if len(posture.Frameworks) == 0 {
-		t.Error("posture section has no frameworks")
-	}
+	// Posture rows come from the dashboard posture query; their per-framework
+	// numbers are asserted in pack_posture_integration_test.go (#2056).
 	// Operator-entered sections start with empty data + a placeholder.
 	op := stored.Content.Sections[board.SectionOperational]
 	if op.Data.PhishingPassRatePct != nil {
@@ -816,11 +804,7 @@ func TestPackGenerator_Generate_NilVendorReader(t *testing.T) {
 
 	seedFramework(t, admin, tenant, "test-fw-nilreader", "Test FW (nil reader)")
 	store := board.NewPackStore(app)
-	gen := board.NewPackGenerator(store,
-		fixedFreshness{},
-		fixedDrift{},
-		nil,
-	).WithClock(func() time.Time {
+	gen := board.NewPackGenerator(store, nil).WithClock(func() time.Time {
 		return time.Date(2026, 6, 30, 12, 0, 0, 0, time.UTC)
 	})
 
@@ -845,7 +829,7 @@ func TestPackGenerator_Generate_BadPeriodEndRejected(t *testing.T) {
 	tenant := freshTenant(t, admin)
 	ctx := ctxFor(t, tenant)
 
-	gen := board.NewPackGenerator(board.NewPackStore(app), fixedFreshness{}, fixedDrift{}, nil)
+	gen := board.NewPackGenerator(board.NewPackStore(app), nil)
 	if _, err := gen.Generate(ctx, "not-a-date"); !errors.Is(err, board.ErrPackBadPeriodEnd) {
 		t.Fatalf("Generate(bad date) err = %v, want ErrPackBadPeriodEnd", err)
 	}

@@ -118,12 +118,23 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 		}
 		w.WriteString(`<div class="grid">`)
 		for _, fp := range d.Frameworks {
+			label := fp.Name
+			if fp.Version != "" {
+				label += " " + fp.Version
+			}
+			if fp.ScopeNotSet {
+				fmt.Fprintf(w,
+					`<div class="card"><div class="label">%s</div><div class="pct">Scope not set</div>`+
+						`<div class="muted">No framework scope is activated for this version</div></div>`,
+					html.EscapeString(label))
+				continue
+			}
 			fmt.Fprintf(w,
-				`<div class="card"><div class="label">%s</div><div class="pct">%d%%</div>`+
-					`<div class="muted">%s %s pts · %s</div></div>`,
-				html.EscapeString(fp.Name), fp.CoveragePct,
+				`<div class="card"><div class="label">%s</div><div class="pct">%s%%</div>`+
+					`<div class="muted">%s %s pts over 90 days · %s</div></div>`,
+				html.EscapeString(label), formatPct(fp.CoveragePct),
 				html.EscapeString(arrowGlyph(fp.TrendArrow)),
-				html.EscapeString(signedInt(fp.Delta)), html.EscapeString(fp.State))
+				html.EscapeString(signedPts(fp.Delta)), html.EscapeString(fp.State))
 		}
 		w.WriteString(`</div>`)
 
@@ -132,19 +143,20 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 			return
 		}
 		w.WriteString(`<table><thead><tr><th>#</th><th>Risk</th><th>Category</th>` +
-			`<th>Treatment</th><th>Residual severity</th><th>Age (days)</th></tr></thead><tbody>`)
+			`<th>Treatment</th><th>Residual severity (1-25)</th><th>Age (days)</th></tr></thead><tbody>`)
 		for i, r := range d.TopRisks {
 			fmt.Fprintf(w,
-				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%.1f</td><td>%d</td></tr>`,
+				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%.1f %s</td><td>%d</td></tr>`,
 				i+1, html.EscapeString(r.Title), html.EscapeString(r.Category),
-				html.EscapeString(r.Treatment), r.ResidualSeverity, r.AgeDays)
+				html.EscapeString(r.Treatment), r.ResidualSeverity,
+				severityBandLabel(r.ResidualSeverity), r.AgeDays)
 		}
 		w.WriteString(`</tbody></table>`)
 
 	case SectionCoverageTrend:
 		fmt.Fprintf(w,
-			`<div class="muted">Coverage %d%% · baseline %d%% · delta %s pts</div>`,
-			d.CoveragePct, d.BaselineCoveragePct, signedInt(d.CoverageDelta))
+			`<div class="muted">Coverage %s%% · baseline %s%% · delta %s pts</div>`,
+			formatPct(d.CoveragePct), formatPct(d.BaselineCoveragePct), signedPts(d.CoverageDelta))
 
 	case SectionOpenFindings:
 		if len(d.Findings) == 0 {
@@ -194,7 +206,7 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 	case SectionInvestment:
 		fmt.Fprintf(w,
 			`<div class="muted">Spend $%d · coverage delta %s pts · ~$%.0f per coverage point</div>`,
-			d.SpendUSD, signedInt(d.CoverageDelta), d.CostPerCoveragePoint)
+			d.SpendUSD, signedPts(d.CoverageDelta), d.CostPerCoveragePoint)
 	}
 }
 

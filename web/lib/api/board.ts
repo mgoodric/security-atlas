@@ -14,11 +14,18 @@ import { APIError } from "./base";
 
 export type BoardPackSectionData = {
   // posture
+  // posture (#2056): one row per framework version, the dashboard's own
+  // per-framework posture; scope_not_set rows carry no percentage.
   frameworks?: {
+    framework_id?: string;
+    framework_version_id?: string;
     slug: string;
     name: string;
+    version?: string;
+    scope_not_set?: boolean;
     coverage_pct: number;
     freshness_pct: number;
+    baseline_pct?: number;
     trend_arrow: string;
     delta: number;
     state: string;
@@ -36,6 +43,7 @@ export type BoardPackSectionData = {
   coverage_pct?: number;
   baseline_coverage_pct?: number;
   coverage_delta?: number;
+  scoped_framework_count?: number;
   // open_findings
   findings?: {
     evaluation_id: string;
