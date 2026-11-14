@@ -129,9 +129,11 @@ host that can reach the atlas API:
 # Build the CLI once (or use the atlas-cli container image).
 go build -o /tmp/atlas-cli ./cmd/atlas-cli
 
-# Issue a credential for the default tenant.
+# Issue a credential for the default tenant. --endpoint is the gRPC
+# port (host:port, no scheme), not the HTTP API on :8080; --insecure
+# because the local stack serves gRPC without TLS on loopback.
 /tmp/atlas-cli credentials issue \
-  --endpoint http://localhost:8080 \
+  --endpoint localhost:50051 --insecure \
   --token "$ATLAS_BOOTSTRAP_TOKEN" \
   --tenant 00000000-0000-4000-8000-000000000001
 ```
