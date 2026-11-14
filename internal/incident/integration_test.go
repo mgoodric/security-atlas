@@ -15,7 +15,9 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
+	"github.com/mgoodric/security-atlas/internal/evidence/ingest"
 	"github.com/mgoodric/security-atlas/internal/incident"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -29,6 +31,7 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 		"incident_risks",
 		"incident_controls",
 		"incidents",
+		"evidence_audit_log",
 		"evidence_records",
 		"vendors",
 		"risks",
@@ -126,7 +129,7 @@ func TestIncidentLifecycleLinksTimelineAndClosureEvidence(t *testing.T) {
 	risk := seedRisk(t, admin, tenant)
 	vendor := seedVendor(t, admin, tenant)
 	ev := seedEvidence(t, admin, tenant, ctrl)
-	store := incident.NewStore(app)
+	store := newStore(t, admin, app)
 	ctx := ctxFor(t, tenant)
 
 	created, err := store.Create(ctx, validCreate(ctrl, risk, vendor, ev))
@@ -207,7 +210,7 @@ func TestIncidentRejectsOutOfOrderTransitions(t *testing.T) {
 	risk := seedRisk(t, admin, tenant)
 	vendor := seedVendor(t, admin, tenant)
 	ev := seedEvidence(t, admin, tenant, ctrl)
-	store := incident.NewStore(app)
+	store := newStore(t, admin, app)
 	ctx := ctxFor(t, tenant)
 
 	created, err := store.Create(ctx, validCreate(ctrl, risk, vendor, ev))
@@ -234,7 +237,7 @@ func TestIncidentTimelineAppendOnlyForAppRole(t *testing.T) {
 	risk := seedRisk(t, admin, tenant)
 	vendor := seedVendor(t, admin, tenant)
 	ev := seedEvidence(t, admin, tenant, ctrl)
-	store := incident.NewStore(app)
+	store := newStore(t, admin, app)
 	ctx := ctxFor(t, tenant)
 
 	created, err := store.Create(ctx, validCreate(ctrl, risk, vendor, ev))
@@ -271,7 +274,7 @@ func TestIncidentRLSTwoTenantIsolationAndCrossTenantLinks(t *testing.T) {
 	vendorA := seedVendor(t, admin, tenantA)
 	evA := seedEvidence(t, admin, tenantA, ctrlA)
 	evB := seedEvidence(t, admin, tenantB, ctrlB)
-	store := incident.NewStore(app)
+	store := newStore(t, admin, app)
 
 	created, err := store.Create(ctxFor(t, tenantA), validCreate(ctrlA, riskA, vendorA, evA))
 	if err != nil {
@@ -333,7 +336,7 @@ func TestCloseRequiresPostmortemAndLinkedControl(t *testing.T) {
 	risk := seedRisk(t, admin, tenant)
 	vendor := seedVendor(t, admin, tenant)
 	ev := seedEvidence(t, admin, tenant, ctrl)
-	store := incident.NewStore(app)
+	store := newStore(t, admin, app)
 	ctx := ctxFor(t, tenant)
 
 	noControlInput := validCreate(ctrl, risk, vendor, ev)
@@ -354,5 +357,82 @@ func TestCloseRequiresPostmortemAndLinkedControl(t *testing.T) {
 	_, err = store.Close(ctx, noControl.Incident.ID, incident.CloseInput{Actor: "key_responder"})
 	if !errors.Is(err, incident.ErrPostmortemRequired) {
 		t.Fatalf("expected ErrPostmortemRequired, got %v", err)
+	}
+}
+
+// newStore builds the production wiring: an incident store writing
+// postmortem evidence through an ingest.Service over the app role,
+// validated by the DB-backed schema registry seeded with the bundled
+// platform schemas.
+func newStore(t *testing.T, admin, app *pgxpool.Pool) *incident.Store {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	reg := schemaregistry.NewService(admin)
+	if _, _, err := reg.ImportPlatformSchemas(ctx, schemaregistry.PlatformSchemasFS()); err != nil {
+		t.Fatalf("ImportPlatformSchemas: %v", err)
+	}
+	return incident.NewStore(app).WithIngest(ingest.New(app, reg))
+}
+
+// #1830: postmortem evidence goes through ingest.Service.ProcessInTx. A
+// close with an observed_at outside the skew window is refused with
+// ErrObservedAtSkew, the incident stays resolved, no ledger row lands,
+// and the refusal leaves an evidence_audit_log row.
+func TestCloseBackdatedPostmortemRefusedAndAudited(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctrl := seedControl(t, admin, tenant)
+	store := newStore(t, admin, app)
+	ctx := ctxFor(t, tenant)
+
+	created, err := store.Create(ctx, incident.CreateInput{
+		Title:            "Backdated close",
+		OperatorSeverity: incident.SeverityP2,
+		DetectedBy:       "key_responder",
+		ControlIDs:       []uuid.UUID{ctrl},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	for _, next := range []string{incident.StateTriaged, incident.StateContained, incident.StateResolved} {
+		if _, err := store.Transition(ctx, created.Incident.ID, next, "key_responder", ""); err != nil {
+			t.Fatalf("Transition(%s): %v", next, err)
+		}
+	}
+	_, err = store.Close(ctx, created.Incident.ID, incident.CloseInput{
+		Actor:             "key_responder",
+		PostmortemSummary: "Closed long after the fact.",
+		ObservedAt:        time.Now().Add(-ingest.MaxObservedAtSkew - time.Hour),
+	})
+	if !errors.Is(err, ingest.ErrObservedAtSkew) {
+		t.Fatalf("backdated Close: got %v, want ErrObservedAtSkew", err)
+	}
+	got, err := store.Get(ctx, created.Incident.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Incident.Status != incident.StateResolved {
+		t.Fatalf("status after refused close = %q, want resolved", got.Incident.Status)
+	}
+	var n int
+	if err := admin.QueryRow(context.Background(),
+		`SELECT count(*) FROM evidence_records WHERE tenant_id = $1`, tenant).Scan(&n); err != nil {
+		t.Fatalf("count evidence: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("evidence rows after refusal = %d, want 0", n)
+	}
+	idem := "incident:" + created.Incident.ID.String() + ":" + ctrl.String() + ":postmortem"
+	var decision, credential string
+	if err := admin.QueryRow(context.Background(), `
+		SELECT decision, credential_id FROM evidence_audit_log
+		WHERE tenant_id = $1 AND idempotency_key = $2
+	`, tenant, idem).Scan(&decision, &credential); err != nil {
+		t.Fatalf("fetch audit row: %v", err)
+	}
+	if decision != "rejected_observed_at_skew" || credential != incident.EvidenceCredentialID {
+		t.Fatalf("audit row = %q/%q, want rejected_observed_at_skew/%s", decision, credential, incident.EvidenceCredentialID)
 	}
 }

@@ -43,7 +43,7 @@ func (s *Server) registerGovernance(root *chi.Mux) {
 
 	// OE-631: incident register backend. Minimal writer/reader routes for
 	// log, list, detail, lifecycle transition, and post-mortem closure.
-	incidentsH := incidentsapi.New(incident.NewStore(s.dbPool))
+	incidentsH := incidentsapi.New(incident.NewStore(s.dbPool).WithIngest(s.ingestService))
 	root.Post("/v1/incidents", incidentsH.Create)
 	root.Get("/v1/incidents", incidentsH.List)
 	root.Get("/v1/incidents/{id}", incidentsH.Get)
