@@ -14,7 +14,8 @@ import (
 const frameworkPosture = `-- name: FrameworkPosture :many
 
 WITH version_reqs AS (
-    -- Every (framework_version, requirement) pair for current versions.
+    -- Every (framework_version, requirement) pair for current versions,
+    -- less the requirements the activated scope revision excludes.
     SELECT
         fv.id            AS framework_version_id,
         fv.framework_id  AS framework_id,
@@ -23,6 +24,18 @@ WITH version_reqs AS (
     FROM framework_versions fv
     JOIN framework_requirements fr ON fr.framework_version_id = fv.id
     WHERE fv.status = 'current'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM framework_scopes fs
+          JOIN framework_scope_applicability fsa
+            ON fsa.framework_scope_id = fs.id
+           AND fsa.tenant_id = fs.tenant_id
+          WHERE fs.tenant_id = $1
+            AND fs.framework_version_id = fv.id
+            AND fs.state = 'activated'
+            AND fsa.framework_requirement_id = fr.id
+            AND fsa.decision = 'excluded'
+      )
 ),
 req_anchor AS (
     -- Each requirement -> the SCF anchors a real STRM edge connects it to.
@@ -190,6 +203,14 @@ type FrameworkPostureRow struct {
 // ledger (slice 012): a control counted toward coverage 90 days ago iff its
 // latest evaluation on/before the cutoff had result='pass'. The delta is in
 // percentage points (e.g. +12.5 means coverage rose 12.5 points).
+//
+// Statement of Applicability (#1788): a requirement the tenant's ACTIVATED
+// framework-scope revision for the version marks `excluded` leaves the
+// requirement set entirely, so it drops out of the coverage numerator and
+// denominator, the freshness composite, and both halves of the trend. The
+// trend uses today's exclusions for the 90-day-ago half too, so excluding a
+// requirement never shows up as a jump. Exclusions on draft, review or
+// approved revisions have no effect; undecided requirements stay in.
 //
 // The whole thing is ONE statement with CTEs — no N+1 (anti-criterion P0).
 // $1 = tenant_id; $2 = the 90-day-ago cutoff timestamptz (computed in Go).
