@@ -2816,6 +2816,8 @@ type PolicyAuditLog struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	PreviousNextReviewAt   pgtype.Timestamptz `json:"previous_next_review_at"`
 	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
+	PolicyTitle            *string            `json:"policy_title"`
+	PolicyVersion          *string            `json:"policy_version"`
 }
 
 type Population struct {

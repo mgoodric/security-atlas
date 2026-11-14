@@ -34,6 +34,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "DELETE", Path: "/v1/me/sessions", Tag: "me", Tier: "bearer", Internal: false, Summary: "DELETE /v1/me/sessions"},
 	{Method: "DELETE", Path: "/v1/me/sessions/{id}", Tag: "me", Tier: "bearer", Internal: false, Summary: "DELETE /v1/me/sessions/{id}"},
 	{Method: "DELETE", Path: "/v1/org_units/{id}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "DELETE /v1/org_units/{id}"},
+	{Method: "DELETE", Path: "/v1/policies/{id}", Tag: "policies", Tier: "bearer", Internal: false, Summary: "DELETE /v1/policies/{id} — discard a draft policy, audit-logged (#1987)"},
 	{Method: "DELETE", Path: "/v1/risks/{id}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "DELETE /v1/risks/{id}"},
 	{Method: "DELETE", Path: "/v1/risks/{id}/themes/{theme}", Tag: "risks", Tier: "bearer", Internal: false, Summary: "DELETE /v1/risks/{id}/themes/{theme}"},
 	{Method: "DELETE", Path: "/v1/saved-views/{id}", Tag: "saved-views", Tier: "bearer", Internal: false, Summary: "DELETE /v1/saved-views/{id}"},

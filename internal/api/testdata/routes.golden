@@ -12,6 +12,7 @@ DELETE /v1/decisions/{id}/links/{kind}/{targetID}
 DELETE /v1/me/sessions
 DELETE /v1/me/sessions/{id}
 DELETE /v1/org_units/{id}
+DELETE /v1/policies/{id}
 DELETE /v1/risks/{id}
 DELETE /v1/risks/{id}/themes/{theme}
 DELETE /v1/saved-views/{id}
