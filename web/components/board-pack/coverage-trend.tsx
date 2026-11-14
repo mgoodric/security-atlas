@@ -23,16 +23,16 @@ export function CoverageTrend({
 }: CoverageTrendProps) {
   const deltaTone =
     delta > 0
-      ? "text-emerald-700"
+      ? "text-pass"
       : delta < 0
-        ? "text-rose-700"
-        : "text-slate-500";
-  const deltaBg =
+        ? "text-critical"
+        : "text-muted-foreground";
+  const deltaBorder =
     delta > 0
-      ? "bg-emerald-50 border-emerald-100"
+      ? "border-pass/40"
       : delta < 0
-        ? "bg-rose-50 border-rose-100"
-        : "bg-slate-50 border-slate-200";
+        ? "border-critical/40"
+        : "border-border";
 
   return (
     <div className="space-y-4" data-testid="coverage-trend">
@@ -40,17 +40,19 @@ export function CoverageTrend({
         <CoverageCard label="Baseline" value={`${baseline}%`} tone="muted" />
         <CoverageCard label="Current" value={`${current}%`} tone="primary" />
         <div
-          className={cn("rounded-lg border p-3", deltaBg)}
+          className={cn("rounded-lg border p-3", deltaBorder)}
           data-testid="coverage-delta-card"
         >
-          <div className="mb-0.5 text-xs text-slate-600">Quarter delta</div>
+          <div className="mb-0.5 text-xs text-muted-foreground">
+            Quarter delta
+          </div>
           <div className={cn("font-semibold", deltaTone)}>
             {delta > 0 ? `+${delta}` : delta === 0 ? "flat" : delta}
             {delta !== 0 ? " pts" : ""}
           </div>
         </div>
       </div>
-      <p className="text-xs text-slate-500">
+      <p className="text-xs text-muted-foreground">
         Baseline is the operator-entered prior-quarter coverage; delta is
         current minus baseline.
       </p>
@@ -68,12 +70,12 @@ function CoverageCard({
   tone: "primary" | "muted";
 }) {
   return (
-    <div className="rounded-lg border border-slate-200 p-3">
-      <div className="mb-0.5 text-xs text-slate-600">{label}</div>
+    <div className="rounded-lg border border-border p-3">
+      <div className="mb-0.5 text-xs text-muted-foreground">{label}</div>
       <div
         className={cn(
           "text-lg font-semibold",
-          tone === "primary" ? "text-slate-900" : "text-slate-600",
+          tone === "primary" ? "text-foreground" : "text-muted-foreground",
         )}
       >
         {value}

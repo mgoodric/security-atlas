@@ -31,6 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { HumanAuthoredBadge, TemplatedBadge } from "./templated-badge";
+import { TONE_CHIP } from "./tone";
 
 type SectionCardProps = {
   index: number;
@@ -86,12 +87,12 @@ export function SectionCard({
 
   return (
     <section
-      className="mb-6 rounded-2xl border border-slate-200 bg-white p-7"
+      className="mb-6 rounded-2xl border border-border bg-card p-7"
       data-testid={`section-card-${section.key}`}
     >
       <header className="mb-5 flex items-baseline justify-between">
         <div className="flex items-baseline gap-2">
-          <span className="font-mono text-xs text-slate-400">
+          <span className="font-mono text-xs text-muted-foreground">
             § {String(index).padStart(2, "0")}
           </span>
           <h2 className="text-xl font-semibold tracking-tight">
@@ -99,11 +100,10 @@ export function SectionCard({
           </h2>
         </div>
         <Badge
+          variant={section.approved ? "outline" : "secondary"}
           className={cn(
             "rounded text-[10px] font-semibold uppercase tracking-wider",
-            section.approved
-              ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-50"
-              : "bg-slate-100 text-slate-600 hover:bg-slate-100",
+            section.approved && TONE_CHIP.pass,
           )}
           data-testid={`section-status-${section.key}`}
         >
@@ -113,24 +113,24 @@ export function SectionCard({
 
       {children && <div className="mb-5">{children}</div>}
 
-      <div className="rounded-lg border border-slate-200 bg-slate-50 p-5">
+      <div className="rounded-lg border border-border bg-muted p-5">
         <div className="mb-3 flex items-center justify-between">
           {isHumanAuthored ? <HumanAuthoredBadge /> : <TemplatedBadge />}
           {section.approved && (
-            <span className="text-xs text-slate-500">approved</span>
+            <span className="text-xs text-muted-foreground">approved</span>
           )}
         </div>
         {isPublished || !canApprove ? (
-          <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-slate-800">
+          <p className="whitespace-pre-wrap text-[15px] leading-relaxed text-foreground">
             {effectiveText || (
-              <span className="italic text-slate-400">
+              <span className="italic text-muted-foreground">
                 No narrative recorded.
               </span>
             )}
           </p>
         ) : (
           <textarea
-            className="min-h-28 w-full rounded-md border border-slate-300 bg-white p-2 text-sm"
+            className="min-h-28 w-full rounded-md border border-border bg-card p-2 text-sm"
             value={overrideText}
             placeholder={section.templated_text}
             onChange={(e) => setOverrideText(e.target.value)}
@@ -228,16 +228,16 @@ function OperatorInputs({
 
   return (
     <div
-      className="mt-4 space-y-2 rounded-md bg-slate-50 p-3"
+      className="mt-4 space-y-2 rounded-md bg-muted p-3"
       data-testid={`operator-inputs-${sectionKey}`}
     >
-      <p className="text-xs font-medium text-slate-600">
+      <p className="text-xs font-medium text-muted-foreground">
         Operator-entered (no automated connector for v1)
       </p>
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {fields.map((f) => (
           <div key={f.key} className="space-y-1">
-            <label className="text-xs text-slate-600">{f.label}</label>
+            <label className="text-xs text-muted-foreground">{f.label}</label>
             <Input
               type="number"
               value={inputs[f.key] ?? ""}

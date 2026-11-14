@@ -45,11 +45,16 @@ func (e *vendorRiskConcentrationEvaluator) Compute(ctx context.Context) (Result,
 	if err := e.pool.QueryRow(ctx, query).Scan(&concentration, &topN); err != nil {
 		return Result{}, fmt.Errorf("vendor_risk_concentration: query: %w", err)
 	}
-	return Result{
-		Value: concentration,
-		Dimensions: map[string]string{
-			"v1_proxy":    "criticality_weighted",
-			"top_n_count": fmt.Sprintf("%d", topN),
-		},
-	}, nil
+	return vendorRiskConcentrationResult(concentration, topN), nil
+}
+
+func vendorRiskConcentrationResult(concentration float64, topN int) Result {
+	dims := map[string]string{
+		"v1_proxy":    "criticality_weighted",
+		"top_n_count": fmt.Sprintf("%d", topN),
+	}
+	if topN == 0 {
+		return noData("No vendors recorded", dims)
+	}
+	return Result{Value: concentration, Dimensions: dims}
 }

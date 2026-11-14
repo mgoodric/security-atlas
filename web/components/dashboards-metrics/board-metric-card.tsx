@@ -24,7 +24,13 @@ import {
   EVIDENCE_FRESHNESS_METRIC_ID,
   freshnessPctFromReport,
 } from "@/lib/api/freshness-consistency";
-import { fetchObservations, fetchTarget, type Metric } from "@/lib/api/metrics";
+import {
+  fetchObservations,
+  fetchTarget,
+  measuredObservations,
+  noDataReason,
+  type Metric,
+} from "@/lib/api/metrics";
 
 import { formatValue, parseValue } from "./format";
 import { Sparkline } from "./sparkline";
@@ -86,8 +92,18 @@ export function BoardMetricCard({
     liveFreshnessPct !== null ? liveFreshnessPct / 100 : null;
   const latest: Latest =
     isFreshnessKPI && liveFreshnessFraction !== null
-      ? { raw: String(liveFreshnessFraction), value: liveFreshnessFraction }
+      ? {
+          raw: String(liveFreshnessFraction),
+          value: liveFreshnessFraction,
+          noDataReason: null,
+        }
       : latestObservation(obsQuery.data?.observations);
+
+  // #2064: an observation computed with no inputs carries the empty
+  // marker. Its number is a placeholder (the critical-findings SLA used
+  // to emit 1.0 = "100%"), so the card shows "No data" and the reason,
+  // with no percentage and a neutral badge.
+  const emptyReason = latest ? latest.noDataReason : null;
 
   // The freshness KPI's value-loading and has-value signals follow the
   // live freshness query; every other metric follows the observations
@@ -128,8 +144,18 @@ export function BoardMetricCard({
                 className="text-2xl font-semibold tracking-tight"
                 data-testid={`board-metric-${metric.id}-value`}
               >
-                {formatValue(latest?.value, metric.unit)}
+                {emptyReason
+                  ? "No data"
+                  : formatValue(latest?.value, metric.unit)}
               </span>
+              {emptyReason ? (
+                <span
+                  className="text-xs text-muted-foreground"
+                  data-testid={`board-metric-${metric.id}-no-data-reason`}
+                >
+                  {emptyReason}
+                </span>
+              ) : null}
               {target && target.target_value ? (
                 <span className="text-xs text-muted-foreground">
                   target{" "}
@@ -142,14 +168,16 @@ export function BoardMetricCard({
               )}
             </div>
             <Sparkline
-              observations={obsQuery.data?.observations ?? []}
+              observations={measuredObservations(
+                obsQuery.data?.observations ?? [],
+              )}
               testid={`board-metric-${metric.id}-sparkline`}
             />
           </div>
         )}
         <div className="flex items-center justify-between">
           <ThresholdBadge
-            value={latest?.raw}
+            value={emptyReason ? undefined : latest?.raw}
             target={target}
             testid={`board-metric-${metric.id}-badge`}
           />
@@ -177,12 +205,23 @@ export function BoardMetricCard({
   );
 }
 
-type Latest = { raw: string; value: number | undefined } | undefined;
+type Latest =
+  | { raw: string; value: number | undefined; noDataReason: string | null }
+  | undefined;
 
-function latestObservation(observations?: { numeric_value: string }[]): Latest {
+function latestObservation(
+  observations?: {
+    numeric_value: string;
+    dimensions: Record<string, unknown>;
+  }[],
+): Latest {
   if (!observations || observations.length === 0) return undefined;
   // Upstream sort is `ORDER BY observed_at DESC` per the slice-076
   // ListMetricObservations query; the first row is the newest.
   const raw = observations[0].numeric_value;
-  return { raw, value: parseValue(raw) };
+  return {
+    raw,
+    value: parseValue(raw),
+    noDataReason: noDataReason(observations[0]),
+  };
 }

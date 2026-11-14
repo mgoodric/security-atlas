@@ -28,8 +28,10 @@ const AA_NORMAL_TEXT_FLOOR = 4.5;
 
 /** Parse `oklch(L C H ...)` lightness from a `--token: oklch(...)` line in :root. */
 function readRootOklchLightness(css: string, token: string): number {
-  // grab the :root { ... } block (first occurrence — light mode)
-  const rootMatch = css.match(/:root\s*\{([\s\S]*?)\}/);
+  // grab the :root { ... } block (first occurrence — light mode). The block's
+  // selector may be a list (`:root, .paper {` — the board-pack sheet shares
+  // the light token set, #2057).
+  const rootMatch = css.match(/:root\s*(?:,[^{]*)?\{([\s\S]*?)\}/);
   if (!rootMatch)
     throw new Error("could not locate :root block in globals.css");
   const rootBlock = rootMatch[1];
