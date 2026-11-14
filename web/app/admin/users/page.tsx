@@ -72,6 +72,7 @@ import {
   ROLES,
   type Role,
 } from "@/components/admin/roles";
+import { MintedKeysWarning } from "@/components/admin/minted-keys-warning";
 import type {
   AdminUserRow,
   AdminUserListResult,
@@ -793,6 +794,13 @@ export default function UsersPage() {
                     </code>
                   </div>
                 ) : null}
+                {/* #1953: the user's still-live minted keys. Informational;
+                    revoking roles never revokes them. */}
+                <MintedKeysWarning
+                  userId={revokeTarget.id}
+                  userTenantId={revokeTarget.tenant_id}
+                  sessionTenantId={me?.tenant_id}
+                />
               </div>
             ) : null}
             {revokeError ? (

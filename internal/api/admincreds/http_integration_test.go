@@ -28,6 +28,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/tenancymw"
 	"github.com/mgoodric/security-atlas/internal/auth/apikeystore"
 	"github.com/mgoodric/security-atlas/internal/auth/bearer"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 const testHashKey = "atlas-slice-034-test-hash-key!!1"
@@ -321,4 +322,61 @@ func cleanupTenant(tenantID uuid.UUID) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, _ = adminPool.Exec(ctx, "DELETE FROM api_keys WHERE tenant_id = $1", tenantID)
+}
+
+// #1953: ?minted_by lists the live keys a user minted, with minted_by and
+// expires_at, and leaves out revoked keys and keys minted by anyone else.
+// Listing revokes nothing.
+func TestList_MintedByFiltersLiveKeys(t *testing.T) {
+	tenantID := uuid.New()
+	_, store, handler := newHandler(t, tenantID)
+	defer cleanupTenant(tenantID)
+
+	ctx, err := tenancy.WithTenant(context.Background(), tenantID.String())
+	if err != nil {
+		t.Fatalf("WithTenant: %v", err)
+	}
+	minter, other := uuid.New(), uuid.New()
+	issue := func(in apikeystore.IssueInput) credstore.Credential {
+		t.Helper()
+		c, _, err := store.Issue(ctx, tenantID.String(), in)
+		if err != nil {
+			t.Fatalf("Issue: %v", err)
+		}
+		return c
+	}
+	live := issue(apikeystore.IssueInput{MintedBy: &minter, TTL: time.Hour})
+	revoked := issue(apikeystore.IssueInput{MintedBy: &minter})
+	_ = issue(apikeystore.IssueInput{MintedBy: &other})
+	_ = issue(apikeystore.IssueInput{})
+	revUUID, _ := uuid.Parse(strings.TrimPrefix(revoked.ID, "key_"))
+	if err := store.Revoke(ctx, tenantID.String(), revUUID); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+
+	list := func() admincreds.ListResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/v1/admin/credentials?minted_by="+minter.String(), nil)
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("List: want 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp admincreds.ListResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+	resp := list()
+	if len(resp.Items) != 1 || resp.Items[0].ID != live.ID {
+		t.Fatalf("minted_by list = %+v; want only %s", resp.Items, live.ID)
+	}
+	if got := resp.Items[0]; got.MintedBy != minter.String() || got.ExpiresAt == nil {
+		t.Fatalf("item minted_by=%q expires_at=%v; want %s and a deadline", got.MintedBy, got.ExpiresAt, minter)
+	}
+	// Listing is read-only: the key is still listed on a second read.
+	if again := list(); len(again.Items) != 1 {
+		t.Fatalf("second list = %d items; want 1", len(again.Items))
+	}
 }
