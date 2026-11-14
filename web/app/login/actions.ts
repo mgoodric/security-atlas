@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { localLoginBody } from "@/lib/auth/login-tenant";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { shouldUseSecureCookie } from "@/lib/secure-cookie";
 
@@ -101,7 +102,10 @@ export async function signInLocal(formData: FormData): Promise<void> {
     String(formData.get("from") ?? "/dashboard"),
   );
 
-  if (!tenantID || !email || !password) {
+  // #1756 — tenant_id may be empty: on a single-tenant install the
+  // server resolves the only tenant, and on a multi-tenant one it
+  // answers 400, surfaced below as a tenant error.
+  if (!email || !password) {
     redirect(
       `/login?error=${encodeURIComponent("email and password are required")}` +
         `&from=${encodeURIComponent(target)}`,
@@ -113,11 +117,7 @@ export async function signInLocal(formData: FormData): Promise<void> {
     response = await fetch(`${apiBaseURL()}/auth/local/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        tenant_id: tenantID,
-        email,
-        password,
-      }),
+      body: JSON.stringify(localLoginBody(tenantID, email, password)),
     });
   } catch {
     // Network error reaching the backend — surface as a non-credential
@@ -132,6 +132,13 @@ export async function signInLocal(formData: FormData): Promise<void> {
     // No oracle — same message regardless of email-exists vs. wrong-password.
     redirect(
       `/login?error=${encodeURIComponent("invalid credentials")}` +
+        `&from=${encodeURIComponent(target)}`,
+    );
+  }
+  if (response.status === 400) {
+    // Missing or malformed tenant_id on a multi-tenant install (#1756).
+    redirect(
+      `/login?error=${encodeURIComponent("enter a valid tenant ID")}` +
         `&from=${encodeURIComponent(target)}`,
     );
   }
