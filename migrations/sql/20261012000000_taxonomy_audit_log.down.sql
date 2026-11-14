@@ -1,4 +1,4 @@
--- Reverses 20261008000000_taxonomy_audit_log.sql.
+-- Reverses 20261012000000_taxonomy_audit_log.sql.
 DROP TABLE IF EXISTS taxonomy_audit_log;
 DROP FUNCTION IF EXISTS taxonomy_audit_log_append_only();
 
