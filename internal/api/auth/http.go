@@ -76,6 +76,10 @@ type Handler struct {
 	// implicitTenant, when set, supplies the tenant for a local login that
 	// omits tenant_id (#1727). nil keeps tenant_id required.
 	implicitTenant ImplicitTenantResolver
+
+	// loginThrottle rate-limits /auth/local/login per IP and per account
+	// before the argon2id work (#1913).
+	loginThrottle *loginThrottle
 }
 
 // New constructs a Handler. secureCookies=false is for local-dev HTTP
@@ -98,6 +102,7 @@ func New(
 		sessions:      s,
 		secureCookies: secureCookies,
 		localAS:       localAS,
+		loginThrottle: newLoginThrottle(time.Now),
 	}
 }
 
@@ -177,6 +182,11 @@ func loginTenant(ctx context.Context, raw string, resolver ImplicitTenantResolve
 // omitted on a single-tenant install when an ImplicitTenantResolver is
 // attached (#1727).
 func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
+	// #1913: the per-IP bucket runs first, before the body is read.
+	if ok, retry := h.loginThrottle.ip.Allow(clientIP(r)); !ok {
+		writeLoginThrottled(w, retry)
+		return
+	}
 	var req LocalLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeAuthError(w, http.StatusBadRequest, "invalid JSON body")
@@ -185,6 +195,12 @@ func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
 	tenantID, status, msg := loginTenant(r.Context(), req.TenantID, h.implicitTenant)
 	if status != 0 {
 		writeAuthError(w, status, msg)
+		return
+	}
+	// The per-account key comes from the request alone, so an unknown
+	// email is throttled the same as a known one (no existence oracle).
+	if ok, retry := h.loginThrottle.account.Allow(loginAccountKey(tenantID, req.Email)); !ok {
+		writeLoginThrottled(w, retry)
 		return
 	}
 	ctx, err := tenancy.WithTenant(r.Context(), tenantID.String())
