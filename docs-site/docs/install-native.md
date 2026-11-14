@@ -54,7 +54,9 @@ security-atlas connects as two roles, never as a superuser:
 `atlas_service_account`) and makes `atlas_migrate` the owner of schema
 `public`. Postgres 15+ no longer lets ordinary roles create objects in
 `public`, so that ownership change is required, and **only a superuser
-can make it**. Run the file once as a superuser:
+can make it**. Because it takes over `public`, give security-atlas a
+database of its own; never point it at a database other applications
+use. Run the file once as a superuser:
 
 ```sh
 # Homebrew: your macOS user is the superuser. On Linux: sudo -u postgres <command>.
@@ -62,15 +64,17 @@ createdb security_atlas
 psql -d security_atlas -v ON_ERROR_STOP=1 -f migrations/bootstrap/01-roles.sql
 ```
 
-Then give both roles passwords. Generate them now and keep them for the
-environment file in Step 3:
+Then give both roles passwords. Generate two values with
+`openssl rand -hex 24` and keep them for the environment file in Step 3.
+Set them with `psql`'s `\password`, which prompts for the value and sends
+only its hash, so the password never appears on a command line, in
+`ps` output or in shell history:
 
 ```sh
-ATLAS_MIGRATE_PASSWORD=$(openssl rand -hex 24)
-ATLAS_APP_PASSWORD=$(openssl rand -hex 24)
-psql -d security_atlas -v ON_ERROR_STOP=1 \
-  -c "ALTER ROLE atlas_migrate PASSWORD '$ATLAS_MIGRATE_PASSWORD'" \
-  -c "ALTER ROLE atlas_app PASSWORD '$ATLAS_APP_PASSWORD'"
+psql -d security_atlas
+security_atlas=# \password atlas_migrate
+security_atlas=# \password atlas_app
+security_atlas=# \q
 ```
 
 Check the ownership step took:
@@ -92,6 +96,10 @@ psql -d security_atlas -tAc \
     ALTER ROLE atlas_migrate BYPASSRLS CREATEROLE;
     ALTER SCHEMA public OWNER TO atlas_migrate;
     ```
+
+    The schema ownership change applies to the `security_atlas` database
+    only, and that database must be dedicated to security-atlas. Never
+    transfer ownership of `public` in a database other applications use.
 
     Without them, `01-roles.sql` stops with `permission denied to create
     role` or `must be owner of schema public`. The header of
@@ -143,9 +151,15 @@ Every variable is described in the
 (`POSTGRES_PASSWORD`, `MINIO_*`, the host-port variables) do not apply here.
 
 ```sh
-mkdir -p "$ATLAS_DATA_DIR" && chmod 700 "$ATLAS_DATA_DIR"
+chmod 600 /path/to/atlas.env
 source /path/to/atlas.env
+mkdir -p "$ATLAS_DATA_DIR" && chmod 700 "$ATLAS_DATA_DIR"
 ```
+
+Leave `ATLAS_APP_PASSWORD` unset: you set the `atlas_app` password in
+Step 1. When it is set, `migrate.sh` re-applies it with
+`ALTER ROLE ... PASSWORD`, which passes the value on `psql`'s command
+line.
 
 ## Step 4 — apply migrations
 
@@ -225,7 +239,8 @@ source /path/to/atlas.env
 CGO_ENABLED=0 go build -o ./bin/ ./cmd/atlas ./cmd/atlas-cli
 sh deploy/docker/bootstrap/migrate.sh      # before restarting the server
 # restart atlas
-(cd web && npm ci && npm run build)        # then restart the web app
+nvm use && npm ci                          # at the repo root, as in Step 7
+(cd web && npm run build)                  # then restart the web app
 ```
 
 Run `migrate.sh` before the new server starts. A newer binary against an
