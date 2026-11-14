@@ -23,6 +23,13 @@ intended effect: the marker gates a recovery path, so only the operator
 should close it. The web `signIn` action already ignores the call's result,
 so the sign-in itself is unaffected.
 
+The bootstrap-token file is deleted on that same first flip. After a
+non-admin first sign-in, the file, which holds an admin bearer, stays on
+disk until an admin signs in. That is an accepted trade-off: the file
+was already on disk for the whole fresh-install period, under the
+data-dir permissions, and deleting it on a non-admin call would need the
+marker flip this change refuses.
+
 ## D2 — gRPC `admin.Issue` refuses a negative TTL
 
 `durationpb.AsDuration` passes a negative duration through. The RPC now

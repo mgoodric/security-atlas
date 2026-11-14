@@ -29,20 +29,30 @@ SELECT id, tenant_id, issued_at, last_used_at, last4
    AND purpose IS NULL
    AND ttl_seconds = 0
    AND revoked_at IS NULL
-   AND issued_at BETWEEN :window_start AND :window_end
+   AND issued_at BETWEEN :'window_start' AND :'window_end'
  ORDER BY issued_at;
 ```
 
-Set `:window_start` and `:window_end` to when the install ran the #1886
-build (deploy of #1886 to deploy of #1893). If you know when you ran the
-reset, narrow the window to a few minutes around it.
+Set `window_start` and `window_end` to when the install ran the #1886
+build (deploy of #1886 to deploy of #1893), for example
+`psql "$DATABASE_URL" -v window_start='2026-11-13 12:51-08' -v window_end='2026-11-13 14:48-08'`.
+The quoted `:'window_start'` form makes psql pass each value as a string
+literal. If you know when you ran the reset, narrow the window to a few
+minutes around it.
 
 The columns alone cannot tell a recovery key from the admin key the platform
 mints at boot for `ATLAS_BOOTSTRAP_TENANT`: both are admin, have no
-`issued_by`, no purpose and no TTL. Tell them apart by time. A boot key's
-`issued_at` matches a server start in the platform log. A recovery key's
-matches the reset call, and its `last4` matches the bearer the reset wrote
-to the bootstrap-token file.
+`issued_by`, no purpose and no TTL. Tell them apart by time:
+
+- **Boot key: do not revoke.** A row whose `issued_at` matches a server
+  start is the boot key. That includes the restart that deployed #1893.
+  Check the platform log for every boot time in the window before you
+  revoke anything.
+- **Recovery key.** Its `issued_at` matches the reset call. If the
+  bootstrap-token file the reset wrote is still on disk, its bearer's last
+  four characters match the row's `last4`. The file may be gone, though:
+  first sign-in deletes it, and a later reset overwrites it. Without the
+  file, timing is the only signal.
 
 ## Revoke
 
