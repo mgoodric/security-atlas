@@ -222,14 +222,16 @@ func TestSearchOperationDocumentsContract(t *testing.T) {
 		"          in: query",
 		"            minLength: 2",
 		"        - name: types",
-		"            pattern: \"^(anchors|controls|risks|evidence)(,(anchors|controls|risks|evidence))*$\"",
+		"            pattern: \"^(controls|risks|policies|evidence|anchors)(,(controls|risks|policies|evidence|anchors))*$\"",
 		"        - name: limit",
 		"            maximum: 50",
 		"        \"200\":",
 		"                $ref: \"#/components/schemas/SearchResponse\"",
 		"    SearchResponse:",
+		"      required: [hits, count, groups, partial_types]",
+		"    SearchGroup:",
 		"    SearchHit:",
-		"          enum: [anchors, controls, risks, evidence]",
+		"          enum: [controls, risks, policies, evidence, anchors]",
 		"        relevance_score:",
 	} {
 		if !strings.Contains(yaml, want) {
