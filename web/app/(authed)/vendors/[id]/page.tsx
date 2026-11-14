@@ -31,9 +31,9 @@ import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
+import { DetailHeader } from "@/components/detail/detail-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
@@ -145,12 +145,14 @@ export default function VendorDetailPage({
       <BackLink />
 
       {/* ============ HEADER ============ */}
-      <header
-        className="flex flex-wrap items-start justify-between gap-4"
+      {/* #2102: the shared detail-page header. Record review is the
+          vendor's lifecycle action; there are no overflow items yet. */}
+      <DetailHeader
         data-testid="vendor-detail-header"
-      >
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+        titleTestId="vendor-detail-name"
+        title={vendor.name}
+        status={
+          <>
             <CriticalityBadge value={vendor.criticality} />
             {vendor.overdue ? (
               <Badge variant="destructive" data-testid="vendor-detail-status">
@@ -165,39 +167,28 @@ export default function VendorDetailPage({
                 on time
               </Badge>
             )}
-          </div>
-          <h1
-            className="text-2xl font-semibold tracking-tight"
-            data-testid="vendor-detail-name"
-          >
-            {vendor.name}
-          </h1>
-          {vendor.domain ? (
+          </>
+        }
+        subtitle={
+          vendor.domain ? (
             <p
               className="text-sm text-muted-foreground"
               data-testid="vendor-detail-domain"
             >
               {vendor.domain}
             </p>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href={`/vendors/${id}/reviews/new`}
-            className={buttonVariants({ variant: "secondary" })}
-            data-testid="vendor-detail-record-review"
-          >
-            Record review
-          </Link>
-          <Link
-            href={`/vendors/${id}/edit`}
-            className={buttonVariants()}
-            data-testid="vendor-detail-edit"
-          >
-            Edit
-          </Link>
-        </div>
-      </header>
+          ) : null
+        }
+        primaryAction={{
+          label: "Record review",
+          href: `/vendors/${id}/reviews/new`,
+          "data-testid": "vendor-detail-record-review",
+        }}
+        edit={{
+          href: `/vendors/${id}/edit`,
+          "data-testid": "vendor-detail-edit",
+        }}
+      />
 
       {/* ============ SUMMARY ============ */}
       <Card data-testid="vendor-detail-summary-card">
