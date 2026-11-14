@@ -13,6 +13,8 @@
 //   * delta / flipped_out_count are numbers
 //   * flipped_out is always an array (never null) — empty set is []
 //   * each row carries string control_id/last_passing/current_result
+//   * started_passing is always an array of { control_id } and
+//     started_passing_count is a number (#2063)
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -73,6 +75,17 @@ describe("contract: GET /api/dashboard/drift <-> atlas GET /v1/controls/drift", 
         expect(typeof row.control_id).toBe("string");
         expect(typeof row.last_passing).toBe("string");
         expect(typeof row.current_result).toBe("string");
+      }
+      expect(
+        typeof body.started_passing_count,
+        `${name}.started_passing_count`,
+      ).toBe("number");
+      expect(
+        Array.isArray(body.started_passing),
+        `${name}.started_passing must be array`,
+      ).toBe(true);
+      for (const row of body.started_passing as Record<string, unknown>[]) {
+        expect(typeof row.control_id).toBe("string");
       }
     }
   });

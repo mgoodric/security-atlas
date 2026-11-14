@@ -33,6 +33,7 @@ package drift
 import (
 	"context"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -84,14 +85,23 @@ type DriftRow struct {
 	CurrentResult string    // "fail" | "stale" | "not_passing" — why it is no longer passing
 }
 
+// GainRow is one control that started passing in the window: passing on the
+// latest snapshot, absent from the passing set on some earlier day. It is the
+// mirror of DriftRow, so the dashboard can show gains and losses as two
+// counts of the same kind (#2063) instead of a net delta beside a loss list.
+type GainRow struct {
+	ControlID uuid.UUID
+}
+
 // DriftReport is the AC-3 endpoint payload: the signed delta over the window
-// plus the controls that flipped out of passing.
+// plus the controls that flipped out of passing and those that started passing.
 type DriftReport struct {
-	SinceDate    time.Time
-	ThroughDate  time.Time
-	Delta        int // controls_passing(latest) - controls_passing(earliest in window)
-	FlippedToOut []DriftRow
-	Snapshots    []Snapshot
+	SinceDate      time.Time
+	ThroughDate    time.Time
+	Delta          int // controls_passing(latest) - controls_passing(earliest in window)
+	FlippedToOut   []DriftRow
+	StartedPassing []GainRow
+	Snapshots      []Snapshot
 }
 
 // CaptureSnapshot computes and APPENDS one drift snapshot for the tenant in
@@ -172,6 +182,7 @@ func (s *Store) Report(ctx context.Context, since time.Duration) (DriftReport, e
 		report.Snapshots = snaps
 		report.Delta = computeDelta(snaps)
 		report.FlippedToOut = computeFlips(snaps)
+		report.StartedPassing = computeGains(snaps)
 		return nil
 	})
 	if err != nil {
@@ -230,6 +241,36 @@ func computeFlips(snaps []Snapshot) []DriftRow {
 			CurrentResult: "not_passing",
 		})
 	}
+	return out
+}
+
+// computeGains is the mirror of computeFlips: every control passing on the
+// latest snapshot that was NOT passing on some earlier day in the window.
+// A control that dipped mid-window and recovered counts, exactly as a control
+// that rose mid-window and fell counts as a flip. Sorted by control id so the
+// wire order is stable.
+func computeGains(snaps []Snapshot) []GainRow {
+	if len(snaps) < 2 {
+		return nil
+	}
+	latest := snaps[len(snaps)-1]
+	gained := make(map[uuid.UUID]bool)
+	for _, snap := range snaps[:len(snaps)-1] {
+		passing := make(map[uuid.UUID]bool, len(snap.PassingControlIDs))
+		for _, id := range snap.PassingControlIDs {
+			passing[id] = true
+		}
+		for _, id := range latest.PassingControlIDs {
+			if !passing[id] {
+				gained[id] = true
+			}
+		}
+	}
+	out := make([]GainRow, 0, len(gained))
+	for id := range gained {
+		out = append(out, GainRow{ControlID: id})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ControlID.String() < out[j].ControlID.String() })
 	return out
 }
 

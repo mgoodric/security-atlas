@@ -46,6 +46,7 @@ import (
 const (
 	contractTenantID = "00000000-0000-4000-8000-000000000409"
 	contractControlA = "33333333-3333-4333-8333-333333333333"
+	contractControlB = "44444444-4444-4444-8444-444444444444"
 )
 
 // stubFreshness is the fixed-row implementation of the freshnessLister
@@ -137,13 +138,16 @@ func TestContract_Drift(t *testing.T) {
 	populated := stubDrift{report: drift.DriftReport{
 		SinceDate:   mustTime("2026-05-08T00:00:00Z"),
 		ThroughDate: mustTime("2026-05-15T00:00:00Z"),
-		Delta:       -1,
+		Delta:       0,
 		FlippedToOut: []drift.DriftRow{
 			{
 				ControlID:     uuid.MustParse(contractControlA),
 				LastPassing:   mustTime("2026-05-12T00:00:00Z"),
 				CurrentResult: "fail",
 			},
+		},
+		StartedPassing: []drift.GainRow{
+			{ControlID: uuid.MustParse(contractControlB)},
 		},
 	}}
 	empty := stubDrift{report: drift.DriftReport{

@@ -167,6 +167,11 @@ type driftRowWire struct {
 	CurrentResult string `json:"current_result"`
 }
 
+// gainRowWire is one control that started passing in the window (#2063).
+type gainRowWire struct {
+	ControlID string `json:"control_id"`
+}
+
 // Drift handles GET /v1/controls/drift.
 //
 // Query params:
@@ -175,7 +180,8 @@ type driftRowWire struct {
 //
 // The AC-3 contract: the response carries the signed drift delta over the
 // window plus the controls that flipped OUT of passing, each with its
-// last-passing date and current (no-longer-passing) result.
+// last-passing date and current (no-longer-passing) result, and the
+// controls that started passing (#2063).
 func (h *Handler) Drift(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	if _, err := tenancy.TenantFromContext(ctx); err != nil {
@@ -211,12 +217,19 @@ func (h *Handler) Drift(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
+	gains := make([]gainRowWire, 0, len(report.StartedPassing))
+	for _, g := range report.StartedPassing {
+		gains = append(gains, gainRowWire{ControlID: g.ControlID.String()})
+	}
+
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
-		"since":             report.SinceDate.UTC().Format("2006-01-02"),
-		"through":           report.ThroughDate.UTC().Format("2006-01-02"),
-		"delta":             report.Delta,
-		"flipped_out_count": len(flips),
-		"flipped_out":       flips,
+		"since":                 report.SinceDate.UTC().Format("2006-01-02"),
+		"through":               report.ThroughDate.UTC().Format("2006-01-02"),
+		"delta":                 report.Delta,
+		"flipped_out_count":     len(flips),
+		"flipped_out":           flips,
+		"started_passing_count": len(gains),
+		"started_passing":       gains,
 	})
 
 }
