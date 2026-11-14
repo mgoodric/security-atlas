@@ -2,11 +2,11 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc9_2_vendor_management
 title: "Vendor inventory maintained with criticality and contract status"
 description: |
-  The entity assesses and manages risks associated with vendors and
-  business partners (TSC CC9.2). The control owner uploads quarterly
-  evidence — an export of the vendor inventory listing each vendor's
-  criticality tier, data-access scope, contract status (active /
-  expiring / lapsed), DPA status, and last-review date.
+  Risk from vendors and partners is assessed and managed (TSC CC9.2). The
+  control owner uploads quarterly evidence — an export of the vendor
+  inventory listing each vendor's criticality tier, data-access scope,
+  contract status (active / expiring / lapsed), DPA status, and
+  last-review date.
 
 scf_anchor_id: TPM-01
 control_family: TPM

@@ -2,14 +2,13 @@ bundle_schema_version: "1"
 bundle_id: soc2_cc3_4_change_risk_reassessment
 title: "Material configuration changes are reviewed before merge"
 description: |
-  The entity identifies and assesses changes that could significantly
-  impact the system of internal control (TSC CC3.4). Operationally for a
-  SaaS startup the auditor-tested manifestation is: configuration
-  changes (infrastructure-as-code, security-relevant code, schema
-  migrations) are subject to peer review before merge. The query reads
-  the GitHub audit log and asserts that every push to a protected branch
-  in the period was preceded by a pull-request approval from a non-author
-  reviewer.
+  Significant changes are assessed for their effect on controls before
+  they land (TSC CC3.4). Operationally for a SaaS startup the
+  auditor-tested manifestation is: configuration changes
+  (infrastructure-as-code, security-relevant code, schema migrations) are
+  subject to peer review before merge. The query reads the GitHub audit
+  log and asserts that every push to a protected branch in the period was
+  preceded by a pull-request approval from a non-author reviewer.
 
 scf_anchor_id: CFG-04
 control_family: CFG
