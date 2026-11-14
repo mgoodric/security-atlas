@@ -65,6 +65,8 @@ func (s *Server) registerRisk(root *chi.Mux, risksStore *risk.Store) {
 	actionPlansH := actionplansapi.New(actionplan.NewStore(s.dbPool))
 	root.Get("/v1/risks/{id}/action-plans", actionPlansH.PlansForRisk)
 	root.Get("/v1/risks/{id}", risksH.GetRisk)
+	// #1749: move a risk between hierarchy levels and org units.
+	root.Patch("/v1/risks/{id}", risksH.PatchRisk)
 	root.Delete("/v1/risks/{id}", risksH.DeleteRisk)
 	// Slice 384: ActionPlan primitive — the fourth first-class risk-register
 	// primitive (canvas §6). Routes appended per the parallel-batch

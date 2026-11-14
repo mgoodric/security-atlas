@@ -206,6 +206,7 @@ PATCH /v1/oscal/component-claims/{id}/scf-anchor 9
 PATCH /v1/policies/{id}/approve 8
 PATCH /v1/policies/{id}/submit 8
 PATCH /v1/questionnaires/{id}/answers/{qid} 8
+PATCH /v1/risks/{id} 8
 PATCH /v1/tenants/{id} 8
 PATCH /v1/vendors/{id} 8
 POST /auth/local/login 8

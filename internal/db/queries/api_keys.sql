@@ -68,3 +68,12 @@ WHERE tenant_id = $1 AND id = $2;
 UPDATE api_keys
 SET retires_at = $3
 WHERE tenant_id = $1 AND id = $2 AND revoked_at IS NULL;
+
+-- name: RevokeUserAPIKeys :many
+-- Deactivation (#1915): revoke every live key owned by the user (issued_by).
+-- Keys with no owner (issued_by IS NULL: the env bootstrap key, recovery
+-- keys, admin-issued push keys) never match. Returns the revoked ids.
+UPDATE api_keys
+SET revoked_at = now()
+WHERE tenant_id = $1 AND issued_by = $2 AND revoked_at IS NULL
+RETURNING id;

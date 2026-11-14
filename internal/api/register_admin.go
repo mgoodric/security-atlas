@@ -71,7 +71,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 		root.Get("/v1/admin/scim-credentials", adminScimH.List)
 		root.Delete("/v1/admin/scim-credentials/{id}", adminScimH.Revoke)
 
-		scimUserH := scimapi.NewHandler(scim.NewStore(s.dbPool))
+		scimUserH := scimapi.NewHandler(scim.NewStore(s.dbPool).WithCredentialRevoker(s.credStore))
 		// Slice 733: the SCIM /Groups resource. Membership changes drive a
 		// re-derivation through the slice-509 grouprole resolver — the SOLE path
 		// to a role (P0-733-1 / P0-733-3). The resolver is REUSED via the
@@ -137,7 +137,7 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	// ListDispatch routes super-admins to the cross-tenant view and
 	// everyone else to the slice-062 within-tenant List (P0-478-3: a
 	// tenant-admin's view is never widened).
-	usersH := adminusers.New(s.dbPool).SetAuthPool(s.authPool)
+	usersH := adminusers.New(s.dbPool).SetAuthPool(s.authPool).SetCredentialRevoker(s.credStore)
 	root.Get("/v1/admin/users", usersH.ListDispatch)
 	root.Get("/v1/admin/users/{id}", usersH.Get)
 	root.Patch("/v1/admin/users/{id}/roles", usersH.PatchRoles)

@@ -4,7 +4,7 @@
 //	POST   /v1/risks           create
 //	GET    /v1/risks           list (optional ?treatment=&category=&methodology= filters)
 //	GET    /v1/risks/{id}      get one
-//	PATCH  /v1/risks/{id}      partial update (TBD; v1 ships POST/GET/DELETE+heatmap)
+//	PATCH  /v1/risks/{id}      move between levels and org units (#1749)
 //	DELETE /v1/risks/{id}      delete
 //	GET    /v1/risks/heatmap   5x5 grid for nist_800_30 + qualitative_5x5
 //
@@ -23,6 +23,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -98,6 +99,11 @@ type createReq struct {
 	Accepter            string          `json:"accepter"`
 	InstrumentReference string          `json:"instrument_reference"`
 	LinkedControlIDs    []string        `json:"linked_control_ids"`
+	// Level and OrgUnitID place the risk in the hierarchy (#1749). Both
+	// are optional: with an org unit and no level the risk takes the
+	// unit's level; with neither it is a team risk with no unit.
+	Level     string  `json:"level"`
+	OrgUnitID *string `json:"org_unit_id"`
 }
 
 type riskWire struct {
@@ -134,9 +140,11 @@ type riskWire struct {
 	//	            explicit aggregate `severity` for a slice-053 parent
 	//	            risk). 0 for a non-5×5 / malformed inherent_score —
 	//	            computed, not stored (risks has no severity column).
-	OrgUnitID *string  `json:"org_unit_id,omitempty"`
-	Themes    []string `json:"themes"`
-	Severity  int      `json:"severity"`
+	OrgUnitID *string `json:"org_unit_id,omitempty"`
+	// Level is the risk's hierarchy tier: team | org | company (#1749).
+	Level    string   `json:"level"`
+	Themes   []string `json:"themes"`
+	Severity int      `json:"severity"`
 }
 
 // CreateRisk handles POST /v1/risks (AC-1..AC-5).
@@ -176,6 +184,11 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "accepted_until must be YYYY-MM-DD")
 		return
 	}
+	orgUnitID, err := parseUUIDPtr(req.OrgUnitID)
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "org_unit_id must be a UUID")
+		return
+	}
 
 	in := risk.CreateInput{
 		Title:               req.Title,
@@ -192,6 +205,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 		Accepter:            req.Accepter,
 		InstrumentReference: req.InstrumentReference,
 		LinkedControlIDs:    linkedIDs,
+		Level:               dbx.RiskLevel(req.Level),
+		OrgUnitID:           orgUnitID,
 	}
 	created, err := h.store.Create(ctx, in)
 	if err != nil {
@@ -204,7 +219,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 				"code":  "treatment_validation_failed",
 			})
 		case errors.Is(err, risk.ErrInvalidMethodology),
-			errors.Is(err, risk.ErrInherentScoreInvalid):
+			errors.Is(err, risk.ErrInherentScoreInvalid),
+			risk.IsPlacementValidation(err):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "create risk", err)
@@ -359,6 +375,98 @@ func (h *Handler) GetRisk(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, body)
 }
 
+// patchReq is the PATCH /v1/risks/{id} body. OrgUnitID is raw so the
+// handler can tell an omitted field (keep the unit) from an explicit null
+// (unbind it).
+type patchReq struct {
+	Level     *string         `json:"level"`
+	OrgUnitID json.RawMessage `json:"org_unit_id"`
+}
+
+// PatchRisk handles PATCH /v1/risks/{id} (#1749): move a risk between
+// hierarchy levels and org units. Only `level` and `org_unit_id` are
+// accepted; any other field is a 400, so a caller never mistakes this for a
+// general update. Each change writes one risk_audit_log row naming the
+// caller. A level that differs from the target unit's level is a 400.
+func (h *Handler) PatchRisk(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	in, msg := decodePatch(r)
+	if msg != "" {
+		httpresp.WriteError(w, http.StatusBadRequest, msg)
+		return
+	}
+	in.Actor = actorFrom(r)
+	updated, err := h.store.UpdatePlacement(ctx, id, in)
+	if err != nil {
+		switch {
+		case errors.Is(err, risk.ErrNotFound):
+			httpresp.WriteError(w, http.StatusNotFound, "risk not found")
+		case risk.IsPlacementValidation(err):
+			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
+		default:
+			httperr.WriteInternal(w, r, "update risk placement", err)
+		}
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"risk": riskWireFrom(updated)})
+}
+
+// decodePatch parses a PATCH /v1/risks/{id} body into a PlacementInput. A
+// non-empty message is the 400 to return.
+func decodePatch(r *http.Request) (risk.PlacementInput, string) {
+	var req patchReq
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		return risk.PlacementInput{}, "invalid JSON body: only level and org_unit_id can be changed"
+	}
+	var in risk.PlacementInput
+	if req.Level != nil {
+		if *req.Level == "" {
+			return risk.PlacementInput{}, "level must be one of: team, org, company"
+		}
+		in.Level = dbx.RiskLevel(*req.Level)
+	}
+	if req.OrgUnitID != nil {
+		in.OrgUnitSet = true
+		if string(req.OrgUnitID) != "null" {
+			var s string
+			if err := json.Unmarshal(req.OrgUnitID, &s); err != nil {
+				return risk.PlacementInput{}, "org_unit_id must be a UUID or null"
+			}
+			ouID, err := uuid.Parse(s)
+			if err != nil {
+				return risk.PlacementInput{}, "org_unit_id must be a UUID or null"
+			}
+			in.OrgUnitID = &ouID
+		}
+	}
+	if req.Level == nil && !in.OrgUnitSet {
+		return risk.PlacementInput{}, "body must set level and/or org_unit_id"
+	}
+	return in, ""
+}
+
+// actorFrom names the caller on the audit row: the credential's id, or a
+// non-empty sentinel when no credential is in context (unit-test servers),
+// so the audit log's actor CHECK never trips. Same rule as the aggregation
+// rules handler.
+func actorFrom(r *http.Request) string {
+	if cred, ok := authctx.CredentialFromContext(r.Context()); ok && cred.ID != "" {
+		return cred.ID
+	}
+	return "system"
+}
+
 // DeleteRisk handles DELETE /v1/risks/{id}.
 func (h *Handler) DeleteRisk(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
@@ -480,6 +588,7 @@ func riskWireFrom(r risk.Risk) riskWire {
 		s := r.OrgUnitID.String()
 		w.OrgUnitID = &s
 	}
+	w.Level = string(r.Level)
 	w.Themes = append([]string{}, r.Themes...) // never null on the wire
 	w.Severity = severityOf(r.InherentScore)
 	return w
@@ -531,6 +640,17 @@ func parseUUIDs(in []string) ([]uuid.UUID, error) {
 		out = append(out, id)
 	}
 	return out, nil
+}
+
+func parseUUIDPtr(s *string) (*uuid.UUID, error) {
+	if s == nil || *s == "" {
+		return nil, nil
+	}
+	id, err := uuid.Parse(*s)
+	if err != nil {
+		return nil, err
+	}
+	return &id, nil
 }
 
 func parseDatePtr(s *string) (*time.Time, error) {
