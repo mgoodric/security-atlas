@@ -323,6 +323,88 @@ func (q *Queries) GetFrameworkScopeByID(ctx context.Context, arg GetFrameworkSco
 	return i, err
 }
 
+const insertFrameworkScopeWorkflowLog = `-- name: InsertFrameworkScopeWorkflowLog :exec
+
+INSERT INTO framework_scope_workflow_log (
+    tenant_id, framework_scope_id, action, from_state, to_state, before, after, actor
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+`
+
+type InsertFrameworkScopeWorkflowLogParams struct {
+	TenantID         pgtype.UUID `json:"tenant_id"`
+	FrameworkScopeID pgtype.UUID `json:"framework_scope_id"`
+	Action           string      `json:"action"`
+	FromState        *string     `json:"from_state"`
+	ToState          string      `json:"to_state"`
+	Before           []byte      `json:"before"`
+	After            []byte      `json:"after"`
+	Actor            string      `json:"actor"`
+}
+
+// ===== framework_scope_workflow_log (issue #1786) =====
+//
+// Append-only history of framework_scopes changes. Written by
+// internal/frameworkscope.Store in the same tx as the change it records.
+// No UPDATE or DELETE query exists, and atlas_app holds no grant for one.
+func (q *Queries) InsertFrameworkScopeWorkflowLog(ctx context.Context, arg InsertFrameworkScopeWorkflowLogParams) error {
+	_, err := q.db.Exec(ctx, insertFrameworkScopeWorkflowLog,
+		arg.TenantID,
+		arg.FrameworkScopeID,
+		arg.Action,
+		arg.FromState,
+		arg.ToState,
+		arg.Before,
+		arg.After,
+		arg.Actor,
+	)
+	return err
+}
+
+const listFrameworkScopeWorkflowLog = `-- name: ListFrameworkScopeWorkflowLog :many
+SELECT id, tenant_id, framework_scope_id, action, from_state, to_state, before, after, actor, occurred_at, subject_module FROM framework_scope_workflow_log
+WHERE tenant_id = $1 AND framework_scope_id = $2
+ORDER BY occurred_at, id
+`
+
+type ListFrameworkScopeWorkflowLogParams struct {
+	TenantID         pgtype.UUID `json:"tenant_id"`
+	FrameworkScopeID pgtype.UUID `json:"framework_scope_id"`
+}
+
+func (q *Queries) ListFrameworkScopeWorkflowLog(ctx context.Context, arg ListFrameworkScopeWorkflowLogParams) ([]FrameworkScopeWorkflowLog, error) {
+	rows, err := q.db.Query(ctx, listFrameworkScopeWorkflowLog, arg.TenantID, arg.FrameworkScopeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FrameworkScopeWorkflowLog
+	for rows.Next() {
+		var i FrameworkScopeWorkflowLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.FrameworkScopeID,
+			&i.Action,
+			&i.FromState,
+			&i.ToState,
+			&i.Before,
+			&i.After,
+			&i.Actor,
+			&i.OccurredAt,
+			&i.SubjectModule,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFrameworkScopes = `-- name: ListFrameworkScopes :many
 SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at
 FROM framework_scopes

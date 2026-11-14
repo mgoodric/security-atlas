@@ -1031,7 +1031,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces
         run: npm ci --no-audit --no-fund
@@ -1121,7 +1121,7 @@ jobs:
           python-version: "3.11"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       # Slice 693 — cache the pre-commit hook environments (the dominant
       # cost of this job: pre-commit creates a venv/node_env per hook repo
@@ -1456,7 +1456,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces
         working-directory: .
@@ -1513,7 +1513,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces
         working-directory: .
@@ -1639,7 +1639,7 @@ jobs:
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       # Slice 418 — shared bring-up, one canonical copy. The atlas server
       # is started by the SECOND call below (after the web build), which
@@ -1851,7 +1851,7 @@ jobs:
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       # Slice 418 — shared bring-up, one canonical copy; same stack as the
       # dev-server Playwright leg. The atlas server is started by the
@@ -2039,7 +2039,7 @@ jobs:
           cache: true
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces
         run: npm ci --no-audit --no-fund
@@ -2699,7 +2699,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v6
         with:
-          node-version: "22"
+          node-version-file: .nvmrc
           cache: "npm"
       - name: Install workspaces (production dependency tree only)
         # Use the lockfile-faithful install so audit sees the same

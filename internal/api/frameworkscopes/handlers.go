@@ -146,6 +146,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		FrameworkVersionID: fvID,
 		Name:               req.Name,
 		Predicate:          []byte(req.Predicate),
+		Actor:              actorOf(r),
 	})
 	if err != nil {
 		if errors.Is(err, frameworkscope.ErrPredicateMalformed) {
@@ -180,7 +181,7 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "predicate is required for PATCH")
 		return
 	}
-	out, invalidated, err := h.store.UpdatePredicate(ctx, id, []byte(req.Predicate))
+	out, invalidated, err := h.store.UpdatePredicate(ctx, id, []byte(req.Predicate), actorOf(r))
 	if err != nil {
 		if errors.Is(err, frameworkscope.ErrNotFound) {
 			httpresp.WriteError(w, http.StatusNotFound, "framework_scope not found")
@@ -211,7 +212,7 @@ func (h *Handler) Submit(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out, err := h.store.Submit(ctx, id)
+	out, err := h.store.Submit(ctx, id, actorOf(r))
 	if err != nil {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
@@ -280,6 +281,7 @@ func (h *Handler) Approve(w http.ResponseWriter, r *http.Request) {
 	out, err := h.store.Approve(ctx, frameworkscope.ApproveRequest{
 		ID:               id,
 		ApproverUserID:   cred.UserID,
+		Actor:            cred.ID,
 		EvidenceFileURL:  req.ApprovalEvidenceFileURL,
 		EvidenceFileHash: req.ApprovalEvidenceFileHash,
 	})
@@ -322,7 +324,7 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "effective_from must be RFC3339: "+err.Error())
 		return
 	}
-	out, err := h.store.Activate(ctx, id, t)
+	out, err := h.store.Activate(ctx, id, actorOf(r), t)
 	if err != nil {
 		switch {
 		case errors.Is(err, frameworkscope.ErrNotFound):
@@ -538,4 +540,12 @@ func isLikelySha256Hex(s string) bool {
 		}
 	}
 	return true
+}
+
+// actorOf returns the calling credential id recorded on the framework-scope
+// workflow log, the same attribution exception_audit_log uses. Handlers run
+// behind tenantContext, which has already confirmed a credential is present.
+func actorOf(r *http.Request) string {
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	return cred.ID
 }
