@@ -60,7 +60,8 @@ control_owner_readable_resources := {
     # defaults.rego.catalog_resources["frameworks"] (slice 035), so
     # the slice-156 contract is two new resource-type symbols here.
     "activity",
-    "upcoming",
+    # (#2130 retired the upcoming rollup and its "upcoming" admit: the
+    # dashboard's Coming up reads "calendar", admitted above.)
 }
 
 # Slice 148: control owner can mint their own ICS subscription URL via

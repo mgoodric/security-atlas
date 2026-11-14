@@ -31,6 +31,7 @@ export const AUDIT_LOG_KINDS = [
   "walkthrough",
   "framework_scope",
   "taxonomy",
+  "mapping_overlay",
 ] as const;
 
 export type AuditLogKind = (typeof AUDIT_LOG_KINDS)[number];
