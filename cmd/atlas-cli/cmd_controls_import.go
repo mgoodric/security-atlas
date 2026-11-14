@@ -68,6 +68,7 @@ func newControlsImportCmd() *cobra.Command {
 	cmd.Flags().StringVar(&framework, "framework", "", "slug of the framework the tested-under codes belong to (e.g. soc2)")
 	cmd.Flags().StringArrayVar(&columnMap, "column-map", nil, "field=Header override of header detection; repeatable")
 	cmd.Flags().BoolVar(&jsonOut, "json", false, "print the API response as JSON")
+	cmd.AddCommand(newControlsImportShowCmd())
 	return cmd
 }
 

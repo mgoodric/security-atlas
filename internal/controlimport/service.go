@@ -36,6 +36,7 @@ var (
 // AnchorCandidate is one real SCF control the matcher may cite. The production
 // retriever should obtain these from the SCF catalog and not from tenant data.
 type AnchorCandidate struct {
+	AnchorID    string
 	SCFID       string
 	Title       string
 	Description string

@@ -3,7 +3,9 @@ package controlimport
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -13,6 +15,14 @@ type fakeBatchStore struct {
 	frameworks   map[string]FrameworkRef
 	requirements map[string]Requirement // lower-cased code -> requirement
 	created      *Batch
+	release      *SCFRelease
+	edges        []CrosswalkEdge
+	keyword      []AnchorCandidate
+	crosswalkErr error
+
+	mu     sync.Mutex
+	saved  []RowSuggestions
+	status string
 }
 
 func (f *fakeBatchStore) ResolveFramework(_ context.Context, slug string) (FrameworkRef, bool, error) {
@@ -32,6 +42,9 @@ func (f *fakeBatchStore) ResolveRequirements(_ context.Context, _ string, codes 
 
 func (f *fakeBatchStore) CreateBatch(_ context.Context, b Batch) (Batch, error) {
 	b.ID = "batch-1"
+	for i := range b.Staged {
+		b.Staged[i].ID = fmt.Sprintf("row-%d", b.Staged[i].RowNumber)
+	}
 	f.created = &b
 	return b, nil
 }
@@ -41,6 +54,57 @@ func (f *fakeBatchStore) GetBatch(_ context.Context, id string) (Batch, error) {
 		return Batch{}, ErrBatchNotFound
 	}
 	return *f.created, nil
+}
+
+func (f *fakeBatchStore) ResolveSCFRelease(context.Context) (SCFRelease, bool, error) {
+	if f.release == nil {
+		return SCFRelease{}, false, nil
+	}
+	return *f.release, true, nil
+}
+
+func (f *fakeBatchStore) CrosswalkAnchors(_ context.Context, _ string, reqIDs []string) ([]CrosswalkEdge, error) {
+	if f.crosswalkErr != nil {
+		return nil, f.crosswalkErr
+	}
+	var out []CrosswalkEdge
+	for _, e := range f.edges {
+		for _, id := range reqIDs {
+			if e.RequirementID == id {
+				out = append(out, e)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeBatchStore) KeywordAnchors(_ context.Context, keywords []string) ([]AnchorCandidate, error) {
+	if len(keywords) == 0 {
+		return nil, nil
+	}
+	return f.keyword, nil
+}
+
+func (f *fakeBatchStore) SaveSuggestions(_ context.Context, _ string, rows []RowSuggestions, status string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.saved = rows
+	f.status = status
+	return nil
+}
+
+func (f *fakeBatchStore) ListRows(_ context.Context, _ string, filter RowFilter) ([]BatchControl, error) {
+	var out []BatchControl
+	for _, c := range f.created.Staged {
+		if filter.Status != "" && c.Status != filter.Status {
+			continue
+		}
+		if filter.NoCandidateReaches && !c.NoCandidateReaches {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out, nil
 }
 
 func newFakeBatchStore() *fakeBatchStore {
