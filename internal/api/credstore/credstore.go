@@ -711,11 +711,21 @@ func CallerUserID(c Credential) (uuid.UUID, bool) {
 	if c.UserID == "" || c.UserID == c.ID {
 		return uuid.Nil, false
 	}
-	id := strings.TrimPrefix(c.UserID, "user:")
-	if id == c.ID {
+	if strings.TrimPrefix(c.UserID, "user:") == c.ID {
 		return uuid.Nil, false
 	}
-	u, err := uuid.Parse(id)
+	return SubjectUserID(c.UserID)
+}
+
+// SubjectUserID returns the users(id) named by a stored principal string,
+// such as an audit-note author_user_id recorded from cred.UserID: the
+// "user:<uuid>" JWT form or a bare uuid. Anything else ("key_...",
+// "bootstrap-admin", "oauth_client:<id>") names no user. Use CallerUserID
+// for a live credential; this cannot tell an unbound key whose id is
+// uuid-shaped from a user, so it is only for strings already written as a
+// user id.
+func SubjectUserID(s string) (uuid.UUID, bool) {
+	u, err := uuid.Parse(strings.TrimPrefix(s, "user:"))
 	if err != nil || u == uuid.Nil {
 		return uuid.Nil, false
 	}

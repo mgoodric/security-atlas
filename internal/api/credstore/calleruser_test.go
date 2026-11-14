@@ -51,6 +51,25 @@ func TestCallerUserID_PerCredentialType(t *testing.T) {
 	}
 }
 
+func TestSubjectUserID(t *testing.T) {
+	t.Parallel()
+	u := uuid.New()
+	for in, want := range map[string]bool{
+		"user:" + u.String():        true,
+		u.String():                  true,
+		"key_abc":                   false,
+		"bootstrap-admin":           false,
+		"oauth_client:ci-runner":    false,
+		"user:" + uuid.Nil.String(): false,
+		"":                          false,
+	} {
+		got, ok := SubjectUserID(in)
+		if ok != want || (ok && got != u) {
+			t.Errorf("SubjectUserID(%q) = (%s, %v); want ok=%v", in, got, ok, want)
+		}
+	}
+}
+
 // rawCredUserIDParse matches a uuid parse whose argument reads a credential's
 // UserID, directly or through jwtmw.SubjectUserID / a local prefix-stripper:
 // uuid.Parse(cred.UserID), uuid.Parse(jwtmw.SubjectUserID(cred.UserID)),
