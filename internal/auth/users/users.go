@@ -207,7 +207,7 @@ func emailLinkAllowed(verified *bool, trustUnverified bool) bool {
 var ErrIdentityConflict = errors.New("users: email belongs to another identity")
 
 // oidcLinkAuditAction is the me_audit_log action for an email link
-// (migration 20260910000000).
+// (migration 20260920000000).
 const oidcLinkAuditAction = "oidc_identity_link"
 
 // isUniqueViolationOn reports whether err is a unique_violation on one of the

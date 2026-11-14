@@ -61,7 +61,7 @@ this check, so returning users behave as before.
 
 A sign-in links to a SCIM row by email only when the IdP asserts
 `email_verified=true`. `oidc_idp_configs.trust_unverified_email_for_link`
-(boolean, default `false`, migration `20260910000000`) is a per-IdP opt-out:
+(boolean, default `false`, migration `20260920000000`) is a per-IdP opt-out:
 when it is on, an absent claim also links. An explicit `false` is refused
 either way. The flag is set through `PATCH /v1/admin/sso` and the admin SSO
 form. `oidc-setup.md` tells Entra ID operators who use SCIM to turn it on,
@@ -91,7 +91,7 @@ later SCIM re-activation working.
 ### D5 — Audit each link in `me_audit_log`. **Confidence: HIGH.**
 
 A link decides who can sign in as the user from then on, so it writes one
-`me_audit_log` row (`oidc_identity_link`, added by migration `20260910000000`)
+`me_audit_log` row (`oidc_identity_link`, added by migration `20260920000000`)
 in the same transaction. `user_id` is the linked user. `after` holds
 `idp_issuer` and `idp_config_id` and never the email. A repeat sign-in writes
 nothing. A refused sign-in writes no audit row, because nothing changed; the
