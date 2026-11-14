@@ -168,6 +168,13 @@ func TestPDF_ReturnsPDFOrServiceUnavailable(t *testing.T) {
 
 	resp, raw := doRaw(t, env, exportPDFPath(wtID))
 	assertPDFOrServiceUnavailable(t, resp, raw)
+	// Log which outcome the render produced; in CI (Chrome installed,
+	// ATLAS_REQUIRE_PDF set) a 503 is a failure, not degradation (#1847).
+	t.Logf("PDF render: status %d, %d bytes", resp.StatusCode, len(raw))
+	if resp.StatusCode != http.StatusOK && pdfrender.RequireRealPDF() {
+		t.Fatalf("ATLAS_REQUIRE_PDF is set but export?format=pdf = %d, want 200 with a %%PDF- body; body=%q",
+			resp.StatusCode, raw)
+	}
 }
 
 // TestPDF_RenderDeadlineDegradesTo503 is the load-bearing slice-477 proof
