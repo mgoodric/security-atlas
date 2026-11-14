@@ -9,8 +9,10 @@ that the anchor was approximate. A control can now state its fit:
 `anchor_fit: exact | partial | none`, with `anchor_fit_note` required for a
 non-exact fit.
 
-`detection_tier_actual = none` (no bug surfaced; the ticket is a gap found
-by a first-run adopter) · `detection_tier_target = none`.
+`detection_tier_actual = manual_review` (the #1994 review found unanchored
+controls exporting an all-zero `scf_anchor_id`, D6) ·
+`detection_tier_target = unit` (now covered by
+`TestIssue1736_UnanchoredControlExportsEmptyAnchorID`).
 
 ## D1 — `none` is the only fit that may omit `scf_anchor_id`
 
@@ -62,7 +64,33 @@ anchor rows have no fit. `GET /v1/controls?include=state` also accepts
 any other value is a 400) for API callers. `anchor_fit` joins the saved-view
 filter allow-list on both sides.
 
-## D5 — Marker copy
+## D5 — An `anchor_fit` change supersedes; a note-only change should not
+
+**Decision (reviewer's call on #1994).** Changing `anchor_fit` is a change
+to what the control claims, so it versions the control like any other
+content change. Changing only `anchor_fit_note` is prose, like
+`description`, and should update the active row in place (issue #1908)
+rather than mint a new control id.
+
+**Status: follow-up.** On `main` when this merged, the in-place path
+compares manifests with only the top-level `description` removed
+(`manifestsEqualIgnoringDescription`), so a note-only edit still
+supersedes. #2013 (for #1958) generalises that to an
+`inPlaceManifestKeys` set holding `description` and `external_refs`, and
+it had not landed. Once it does, add `anchor_fit_note` to that set, extend
+the in-place UPDATE to write the note column, and add an integration test
+that a note-only re-upload keeps the control id and version while an
+`anchor_fit` change bumps the version.
+
+## D6 — Unanchored controls export an empty anchor cell
+
+`scf_anchor_id` is NULL for an unanchored `none` control. The controls
+export and the history export both read it through `pgtype.UUID.Bytes`,
+which is the all-zero UUID for NULL. Both now write an empty cell for it
+(`anchorIDCell`), the same as the other nullable columns. No anchor has
+the zero UUID, so the sentinel cannot hide a real one.
+
+## D7 — Marker copy
 
 A non-exact row carries an outline badge after the control name: "Partial
 fit" or "No SCF fit", with the note as its tooltip. The detail page shows

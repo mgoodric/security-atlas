@@ -417,6 +417,17 @@ func controlsExportHeader() []string {
 	}
 }
 
+// anchorIDCell renders the scf_anchor_id export cell. An unanchored
+// control (anchor_fit: none, issue #1736) has a NULL anchor, which the
+// row mapping reads as uuid.Nil; it exports as an empty cell, not the
+// all-zero UUID, which no anchor has.
+func anchorIDCell(id uuid.UUID) string {
+	if id == uuid.Nil {
+		return ""
+	}
+	return id.String()
+}
+
 // controlsToRowIter projects a slice of controlExportRow into an
 // iter.Seq[[]string] in the canonical column order. Pure projection —
 // no DB I/O.
@@ -424,7 +435,7 @@ func controlsExportHeader() []string {
 // Date fields render as RFC3339 (timestamps). The UUID columns render
 // as canonical 8-4-4-4-12 hex (UUID.String()). The nullable string
 // columns (`scf_id`, `freshness_class`) render as the empty string
-// when absent.
+// when absent, and so does `scf_anchor_id` (see anchorIDCell).
 func controlsToRowIter(rows []controlExportRow) iter.Seq[[]string] {
 	return func(yield func([]string) bool) {
 		for _, r := range rows {
@@ -435,7 +446,7 @@ func controlsToRowIter(rows []controlExportRow) iter.Seq[[]string] {
 				r.Title,
 				r.ControlFamily,
 				r.SCFID,
-				r.SCFAnchorID.String(),
+				anchorIDCell(r.SCFAnchorID),
 				r.ImplementationType,
 				r.OwnerRole,
 				r.LifecycleState,

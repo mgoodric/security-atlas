@@ -33,6 +33,58 @@ import (
 	"github.com/mgoodric/security-atlas/internal/export"
 )
 
+// Issue #1736 — an unanchored control (anchor_fit: none) has a NULL
+// scf_anchor_id. Both the controls export and the history export must
+// write an empty cell for it, never the all-zero UUID.
+func TestIssue1736_UnanchoredControlExportsEmptyAnchorID(t *testing.T) {
+	t.Parallel()
+	cellOf := func(header, cells []string, col string) string {
+		t.Helper()
+		for i, h := range header {
+			if h == col {
+				return cells[i]
+			}
+		}
+		t.Fatalf("column %q missing from header", col)
+		return ""
+	}
+	first := func(it func(func([]string) bool)) []string {
+		var cells []string
+		it(func(r []string) bool { cells = r; return false })
+		return cells
+	}
+	anchor := uuid.New()
+
+	for _, tc := range []struct {
+		name   string
+		anchor uuid.UUID
+		want   string
+	}{
+		{"unanchored", uuid.Nil, ""},
+		{"anchored", anchor, anchor.String()},
+	} {
+		t.Run("controls/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			cells := first(controlsToRowIter([]controlExportRow{{
+				ID: uuid.New(), SCFAnchorID: tc.anchor, AnchorFit: "none",
+				AnchorFitNote: "no SCF control covers retention",
+			}}))
+			if got := cellOf(controlsExportHeader(), cells, "scf_anchor_id"); got != tc.want {
+				t.Errorf("scf_anchor_id = %q; want %q", got, tc.want)
+			}
+		})
+		t.Run("history/"+tc.name, func(t *testing.T) {
+			t.Parallel()
+			cells := first(controlsHistoryToRowIter([]controlHistoryExportRow{{
+				ID: uuid.New(), SCFAnchorID: tc.anchor,
+			}}))
+			if got := cellOf(controlsHistoryExportHeader(), cells, "scf_anchor_id"); got != tc.want {
+				t.Errorf("scf_anchor_id = %q; want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // controlsToRowIter must emit rows in canonical column order. Guards
 // against a future contributor reshuffling controlsExportHeader
 // without updating controlsToRowIter (or vice versa).
