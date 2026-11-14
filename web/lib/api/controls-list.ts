@@ -69,7 +69,7 @@ export const ANCHORS_PAGE_LIMIT = 500;
 
 // Hard stop for the catalog walk: 20 pages of 500 is 10,000 anchors, well
 // past SCF's ~1,600, so a `total` that never arrives cannot loop forever.
-const ANCHORS_MAX_PAGES = 20;
+export const ANCHORS_MAX_PAGES = 20;
 
 // Issue #1740 — browser-side fn: every anchor of the SCF catalog, walked
 // page by page through the BFF. The /controls page filters (family,
@@ -77,23 +77,36 @@ const ANCHORS_MAX_PAGES = 20;
 // must not stop at the platform's first page of 100. The walk ends when
 // `total` is reached, a page comes back short, or the page cap is hit.
 // The totals of the last page are returned alongside the rows.
+//
+// Issue #1895 — rows can shift between pages while the walk runs, so an
+// anchor may arrive twice. The walk keeps the first copy of each `id`
+// (no duplicate React keys) and pages by rows fetched, not rows kept.
+// When the cap stops the walk early, `anchors.length < total` and the
+// page says so (`catalogTruncationNote`).
 export async function fetchControlsCatalog(
   scopeCellID?: string,
   hasControl?: boolean,
 ): Promise<ControlsListResponse> {
   const anchors: AnchorWithState[] = [];
+  const seen = new Set<string>();
+  let fetched = 0;
   let last: ControlsListResponse = { anchors: [] };
   for (let i = 0; i < ANCHORS_MAX_PAGES; i++) {
     last = await fetchControlsList(
       scopeCellID,
       hasControl,
       ANCHORS_PAGE_LIMIT,
-      anchors.length,
+      fetched,
     );
     const rows = last.anchors ?? [];
-    anchors.push(...rows);
+    fetched += rows.length;
+    for (const row of rows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      anchors.push(row);
+    }
     if (rows.length < ANCHORS_PAGE_LIMIT) break;
-    if (last.total !== undefined && anchors.length >= last.total) break;
+    if (last.total !== undefined && fetched >= last.total) break;
   }
   return { ...last, anchors };
 }

@@ -7,6 +7,7 @@
 //	PATCH  /v1/risks/{id}      move between levels and org units (#1749)
 //	DELETE /v1/risks/{id}      delete
 //	GET    /v1/risks/heatmap   5x5 grid for nist_800_30 + qualitative_5x5
+//	GET    /v1/risks/categories the tenant's risk categories (#1809)
 //
 // All handlers run with the tenant set by upstream auth middleware (see
 // internal/api/authctx). The store opens its own transaction per call and
@@ -197,7 +198,7 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 	in := risk.CreateInput{
 		Title:               req.Title,
 		Description:         req.Description,
-		Category:            dbx.RiskCategory(req.Category),
+		CategoryRef:         req.Category,
 		Methodology:         methodology,
 		InherentScore:       []byte(req.InherentScore),
 		Treatment:           treatment,
@@ -224,7 +225,8 @@ func (h *Handler) CreateRisk(w http.ResponseWriter, r *http.Request) {
 			})
 		case errors.Is(err, risk.ErrInvalidMethodology),
 			errors.Is(err, risk.ErrInherentScoreInvalid),
-			risk.IsPlacementValidation(err):
+			risk.IsPlacementValidation(err),
+			risk.IsUnknownCategory(err):
 			httpresp.WriteError(w, http.StatusBadRequest, err.Error())
 		default:
 			httperr.WriteInternal(w, r, "create risk", err)

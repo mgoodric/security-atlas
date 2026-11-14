@@ -9,6 +9,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/schemaregistry"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/controlimport"
+	"github.com/mgoodric/security-atlas/internal/llm"
 )
 
 // registerControls registers its domain's routes onto the shared root
@@ -60,7 +61,14 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// sheet and get back a staged import batch, every row staged or
 	// rejected with a reason. Literal /v1/controls/imports segment, so it
 	// sits ahead of the /v1/controls/{id}/... patterns like /export.
-	controlimportsapi.New(controlimport.NewStager(controlimport.NewStore(s.dbPool))).RegisterRoutes(root)
+	// #1781: candidates are LLM-reranked only for tenants whose cloud-LLM
+	// opt-in is on.
+	stager := controlimport.NewStager(controlimport.NewStore(s.dbPool)).WithReranker(controlimport.NewReranker(
+		s.inferenceClient(),
+		controlimport.AuditRecorder(llm.NewAuditWriter(s.dbPool)),
+		s.cloudLLMOptedIn,
+	))
+	controlimportsapi.New(stager).RegisterRoutes(root)
 	// Slice 175: controls history export (lineage incl. superseded
 	// versions). Sibling endpoint to /v1/controls/export — same shape,
 	// 17-column projection (slice 137's 15 + superseded_by +

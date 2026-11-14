@@ -16,7 +16,8 @@ import (
 // readCandidates reads a batch's candidates keyed by row ID, in rank order.
 func readCandidates(ctx context.Context, tx pgx.Tx, batchID string) (map[string][]Candidate, error) {
 	rows, err := tx.Query(ctx, `
-		SELECT row_id::text, rank, scf_anchor_id::text, scf_id, title, source, reaches, strength
+		SELECT row_id::text, rank, scf_anchor_id::text, scf_id, title, source, reaches, strength,
+		       ai_assisted, COALESCE(rationale, '')
 		FROM control_import_candidates
 		WHERE batch_id = $1::uuid
 		ORDER BY row_id, rank
@@ -30,7 +31,8 @@ func readCandidates(ctx context.Context, tx pgx.Tx, batchID string) (map[string]
 		var rowID string
 		var c Candidate
 		var reaches []byte
-		if err := rows.Scan(&rowID, &c.Rank, &c.AnchorID, &c.SCFID, &c.Title, &c.Source, &reaches, &c.Strength); err != nil {
+		if err := rows.Scan(&rowID, &c.Rank, &c.AnchorID, &c.SCFID, &c.Title, &c.Source, &reaches, &c.Strength,
+			&c.AIAssisted, &c.Rationale); err != nil {
 			return nil, fmt.Errorf("controlimport: scan candidate: %w", err)
 		}
 		if err := json.Unmarshal(reaches, &c.Reaches); err != nil {
@@ -153,18 +155,19 @@ func (s *Store) SaveSuggestions(ctx context.Context, batchID string, rows []RowS
 				if _, err := tx.Exec(ctx, `
 					INSERT INTO control_import_candidates (
 						tenant_id, batch_id, row_id, rank, scf_anchor_id, scf_id, title,
-						source, reaches, strength)
-					VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, $7, $8, $9::jsonb, $10)
+						source, reaches, strength, ai_assisted, rationale)
+					VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6, $7, $8, $9::jsonb, $10,
+						$11, NULLIF($12, ''))
 				`, tenantID, batchID, r.RowID, c.Rank, c.AnchorID, c.SCFID, c.Title,
-					c.Source, string(reaches), c.Strength); err != nil {
+					c.Source, string(reaches), c.Strength, c.AIAssisted, c.Rationale); err != nil {
 					return fmt.Errorf("controlimport: insert candidate: %w", err)
 				}
 			}
 			if _, err := tx.Exec(ctx, `
 				UPDATE control_import_rows
-				SET no_candidate_reaches = $2, updated_at = now()
+				SET no_candidate_reaches = $2, llm_rerank = $3, updated_at = now()
 				WHERE id = $1::uuid
-			`, r.RowID, r.NoCandidateReaches); err != nil {
+			`, r.RowID, r.NoCandidateReaches, rerankState(r.LLMRerank)); err != nil {
 				return fmt.Errorf("controlimport: flag row: %w", err)
 			}
 		}
@@ -181,6 +184,13 @@ func (s *Store) SaveSuggestions(ctx context.Context, batchID string, rows []RowS
 		}
 		return nil
 	})
+}
+
+func rerankState(s string) string {
+	if s == "" {
+		return RerankOff
+	}
+	return s
 }
 
 func releaseVersionID(r *SCFRelease) *string {

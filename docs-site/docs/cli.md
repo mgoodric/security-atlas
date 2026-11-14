@@ -79,6 +79,10 @@ security-atlas-cli evidence push \
 Optional: `--schema-version` (default `1.0.0`), `--actor-type` (default
 `service_account`), `--session-id`, `--payload-uri`.
 
+The gRPC endpoint accepts API keys only, not a UI session token; issue one
+with `credentials issue`. [Push a first manual attestation](first-manual-attestation.md)
+walks the whole path.
+
 `evidence verify` re-hashes the ledger and reports mismatches:
 
 ```sh
@@ -92,7 +96,7 @@ Add `--page-size` to tune the keyset page size (default 1000).
 
 ```sh
 security-atlas-cli credentials issue --tenant <tenant id> \
-  --scope '{"environment":"prod"}' --kinds sast.scan_result.v1 --ttl 30d
+  --scope '{"environment":"prod"}' --kinds sast.scan_result.v1 --ttl 720h
 security-atlas-cli credentials list   --tenant <tenant id>
 security-atlas-cli credentials rotate --id <credential id>
 security-atlas-cli credentials revoke --id <credential id>

@@ -105,6 +105,7 @@ import {
 } from "./filters";
 import { controlsCountLabel } from "./count-label";
 import {
+  catalogTruncationNote,
   controlHref,
   controlsViewSummary,
   HAS_CONTROL_OPTIONS,
@@ -776,6 +777,10 @@ function ControlsPageInner() {
         : anchorsQ.data?.catalog_total,
     withControlTotal: anchorsQ.data?.with_control_total,
   });
+  const truncationNote =
+    view === "catalog" && anchorsQ.data
+      ? catalogTruncationNote(anchorsQ.data.anchors.length, anchorsQ.data.total)
+      : "";
   const meta = (
     <span className="inline-flex flex-wrap items-baseline gap-x-3">
       <span data-testid="controls-count-label">
@@ -801,6 +806,14 @@ function ControlsPageInner() {
           data-testid="controls-view-summary"
         >
           {viewSummary}
+        </span>
+      ) : null}
+      {truncationNote ? (
+        <span
+          className="text-xs text-muted-foreground"
+          data-testid="controls-catalog-truncated"
+        >
+          {truncationNote}
         </span>
       ) : null}
     </span>
