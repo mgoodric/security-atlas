@@ -421,19 +421,27 @@ if [ "${MODE}" = "proxy" ]; then
     OPTIN_ARGS="${OPTIN_ARGS} -f deploy/docker/docker-compose.proxy.yml"
 fi
 OPTIN_CMD="docker compose ${OPTIN_ARGS} run --rm --entrypoint atlas-cli atlas-bootstrap catalog import-crosswalk /repo/data/crosswalks/iso27001-2022.yaml"
+# security-atlas#1940: poll for the opt-in line itself rather than reading
+# the log once after phase 4. Seeing the phase-4 line does not guarantee a
+# single `compose logs` snapshot already holds the earlier opt-in line
+# (seen on #1921: the read landed ~110ms before the line did).
 PHASE4_SEEN=""
+OPTIN_SEEN=""
 for i in $(seq 1 60); do
     BOOTSTRAP_LOG="$("${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1 || true)"
     if grep -qF -- "waiting for atlas /health" <<<"${BOOTSTRAP_LOG}"; then
         PHASE4_SEEN=1
+    fi
+    if grep -qF -- "${OPTIN_CMD}" <<<"${BOOTSTRAP_LOG}"; then
+        OPTIN_SEEN=1
+    fi
+    if [ -n "${PHASE4_SEEN}" ] && [ -n "${OPTIN_SEEN}" ]; then
         break
     fi
     sleep 2
 done
 [ -n "${PHASE4_SEEN}" ] || fail "atlas-bootstrap did not reach phase 4 within ~2 min of stage-1 migrations"
-BOOTSTRAP_LOG="$("${COMPOSE[@]}" logs --no-color atlas-bootstrap 2>&1)"
-grep -qF -- "${OPTIN_CMD}" <<<"${BOOTSTRAP_LOG}" \
-    || fail "first-boot bootstrap log lacks the opt-in command: ${OPTIN_CMD}"
+[ -n "${OPTIN_SEEN}" ] || fail "first-boot bootstrap log lacks the opt-in command: ${OPTIN_CMD}"
 log "first boot printed the repo-root opt-in crosswalk commands"
 
 # ---------------------------------------------------------------------
