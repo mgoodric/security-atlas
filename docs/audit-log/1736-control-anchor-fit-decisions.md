@@ -72,15 +72,15 @@ content change. Changing only `anchor_fit_note` is prose, like
 `description`, and should update the active row in place (issue #1908)
 rather than mint a new control id.
 
-**Status: follow-up, filed as
+**Status: done in
 [#2023](https://github.com/mgoodric/security-atlas/issues/2023).**
 [#2013](https://github.com/mgoodric/security-atlas/pull/2013) (for #1958)
-landed the `inPlaceManifestKeys` set in `internal/control/store.go`, holding
-`description` and `external_refs`. This PR does not add `anchor_fit_note`
-to it, so a note-only edit still supersedes. #2023 owns adding the key,
-having the in-place UPDATE write the note column, and the integration test
-that a note-only re-upload keeps the control id and version while an
-`anchor_fit` change bumps the version.
+landed the `inPlaceManifestKeys` set in `internal/control/store.go`; #2023
+adds `anchor_fit_note` to it, and `UpdateControlMetadataInPlace` now writes
+the `anchor_fit_note` column. A note-only re-upload keeps the control id and
+version and records the overwritten manifest in `control_manifest_revisions`;
+an `anchor_fit` change, with or without a note change, still supersedes.
+`TestUpload_AnchorFitNoteOnlyChangeUpdatesInPlace` covers both.
 
 ## D6 — Unanchored controls export an empty anchor cell
 
