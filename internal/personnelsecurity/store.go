@@ -424,6 +424,7 @@ func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx, *db
 	if err != nil {
 		return fmt.Errorf("personnel security: parse tenant id: %w", err)
 	}
+	ctx, audit := ingest.WithAuditOutbox(ctx)
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("personnel security: begin tx: %w", err)
@@ -435,7 +436,11 @@ func (s *Store) withTx(ctx context.Context, fn func(context.Context, pgx.Tx, *db
 	if err := fn(ctx, tx, dbx.New(tx), tenantID); err != nil {
 		return err
 	}
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	audit.Flush(ctx)
+	return nil
 }
 
 func checklistFromRow(row dbx.PersonnelSecurityChecklist, itemRows []dbx.PersonnelSecurityChecklistItem) Checklist {
