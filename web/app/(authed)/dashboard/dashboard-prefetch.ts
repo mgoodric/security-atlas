@@ -47,7 +47,7 @@ import {
   getEvidenceFreshness,
   getFrameworkPosture,
   getMitigateRisks,
-  getUpcoming,
+  getComingUp,
 } from "@/lib/api/dashboard";
 
 // DASHBOARD_QUERY_KEYS mirrors the queryKeys the page's six `useQuery`
@@ -62,7 +62,7 @@ export const DASHBOARD_QUERY_KEYS = {
   drift: ["dashboard", "drift"],
   freshness: ["dashboard", "freshness"],
   risks: ["dashboard", "risks"],
-  upcoming: ["dashboard", "upcoming"],
+  comingUp: ["dashboard", "coming-up"],
   frameworkPosture: ["dashboard", "framework-posture"],
   activity: ["dashboard", "activity"],
 } as const;
@@ -120,7 +120,7 @@ export const DASHBOARD_PANEL_PREFETCHES: readonly PanelPrefetch[] = [
   // path uses -- so the bare fn reference (called with one arg) is
   // wire-equivalent to the client path (P0-4).
   { queryKey: DASHBOARD_QUERY_KEYS.drift, load: getControlDrift },
-  { queryKey: DASHBOARD_QUERY_KEYS.upcoming, load: getUpcoming },
+  { queryKey: DASHBOARD_QUERY_KEYS.comingUp, load: getComingUp },
   { queryKey: DASHBOARD_QUERY_KEYS.activity, load: getActivity },
 ];
 

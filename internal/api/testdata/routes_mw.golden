@@ -193,7 +193,6 @@ GET /v1/themes 8
 DELETE /v1/themes/{ref} 8
 PATCH /v1/themes/{ref} 8
 POST /v1/themes 8
-GET /v1/upcoming 8
 GET /v1/vendors 8
 GET /v1/vendors/burndown 8
 GET /v1/vendors/spend 8
