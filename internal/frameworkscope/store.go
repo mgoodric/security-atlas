@@ -192,9 +192,9 @@ func (s *Store) UpdatePredicate(ctx context.Context, id uuid.UUID, predicate []b
 
 // Submit transitions draft -> review. AC-6. actor is the calling
 // credential id, recorded on the workflow log; submitter is the person
-// behind it (a users(id) uuid), or the credential id for a machine, which
+// behind it (a users(id) uuid), or the principal for a machine, which
 // approval compares against (#2101). It also re-submits a review row whose
-// submitter was recorded as a session id, which approval refuses.
+// submitter is unrecorded or a session id, which approval refuses.
 func (s *Store) Submit(ctx context.Context, id uuid.UUID, actor, submitter string) (FrameworkScope, error) {
 	return s.guardedTransition(ctx, id, ActionSubmit, actor, func(q *dbx.Queries, tenantID uuid.UUID) (dbx.FrameworkScope, error) {
 		return q.SubmitFrameworkScope(ctx, dbx.SubmitFrameworkScopeParams{
@@ -275,11 +275,16 @@ func (s *Store) Approve(ctx context.Context, req ApproveRequest) (FrameworkScope
 // errors onto this package's. A machine credential never approves,
 // whatever the setting.
 func checkApprover(row dbx.FrameworkScope, req ApproveRequest, allowSelf bool) (selfApproved bool, err error) {
-	submitter := ""
-	if row.SubmittedBy != nil {
-		submitter = *row.SubmittedBy
+	if req.ApproverUserID == "" {
+		return false, ErrApproverNotPerson
 	}
-	self, err := approval.Check(submitter, approval.Approver{UserID: req.ApproverUserID, CredentialID: req.Actor}, allowSelf)
+	// A scope in review with no recorded submitter (submitted before #2101
+	// and not backfilled) names nobody to compare against, so, unlike a
+	// policy, it must be re-submitted first.
+	if row.SubmittedBy == nil || *row.SubmittedBy == "" {
+		return false, ErrSubmitterUnknown
+	}
+	self, err := approval.Check(*row.SubmittedBy, approval.Approver{UserID: req.ApproverUserID, CredentialID: req.Actor}, allowSelf)
 	switch {
 	case errors.Is(err, approval.ErrNotPerson):
 		return false, ErrApproverNotPerson

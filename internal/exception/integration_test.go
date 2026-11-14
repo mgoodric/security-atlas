@@ -280,7 +280,7 @@ func TestDeny_RejectsSelfDenial(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_same"))
-	_, err := store.Deny(ctx, created.ID, "key_same", "trying to deny myself")
+	_, err := store.Deny(ctx, created.ID, exception.Denier{Principal: "key_same"}, "trying to deny myself")
 	if !errors.Is(err, exception.ErrSegregationOfDuties) {
 		t.Fatalf("expected ErrSegregationOfDuties, got %v", err)
 	}
@@ -297,7 +297,7 @@ func TestDeny_Transitions(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_requester"))
-	denied, err := store.Deny(ctx, created.ID, "key_approver", "no executive backing")
+	denied, err := store.Deny(ctx, created.ID, exception.Denier{Principal: "key_approver"}, "no executive backing")
 	if err != nil {
 		t.Fatalf("Deny: %v", err)
 	}
@@ -347,7 +347,7 @@ func TestApprove_RejectsAlreadyDenied(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate(ctrl, "key_requester"))
-	_, _ = store.Deny(ctx, created.ID, "key_approver", "")
+	_, _ = store.Deny(ctx, created.ID, exception.Denier{Principal: "key_approver"}, "")
 	_, err := store.Approve(ctx, created.ID, approverPerson)
 	if !errors.Is(err, exception.ErrWrongState) {
 		t.Fatalf("expected ErrWrongState, got %v", err)

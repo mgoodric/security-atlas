@@ -3368,8 +3368,8 @@ type Querier interface {
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already
 	// under-review row by accident (would still be valid but masks bugs).
 	// #2101: records the submitter as a person, so approval can compare. Also
-	// re-submits a review row whose submitter was recorded as a session id
-	// ('jwt:<token id>'), which approval refuses because it names no person.
+	// re-submits a review row whose submitter is unrecorded (NULL) or a session
+	// id ('jwt:<token id>'), which approval refuses because it names no person.
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
 	// Transition: draft -> under_review. Operator action; no role gate.
 	// Also re-submits an under_review policy whose submitter was recorded

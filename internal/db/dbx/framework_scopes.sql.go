@@ -914,7 +914,8 @@ SET state = 'review',
     submitted_by = $3,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-  AND (state = 'draft' OR (state = 'review' AND submitted_by LIKE 'jwt:%'))
+  AND (state = 'draft'
+       OR (state = 'review' AND (submitted_by IS NULL OR submitted_by LIKE 'jwt:%')))
 RETURNING id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
 `
 
@@ -927,8 +928,8 @@ type SubmitFrameworkScopeParams struct {
 // AC-6: draft -> review. Guarded so callers can never re-submit an already
 // under-review row by accident (would still be valid but masks bugs).
 // #2101: records the submitter as a person, so approval can compare. Also
-// re-submits a review row whose submitter was recorded as a session id
-// ('jwt:<token id>'), which approval refuses because it names no person.
+// re-submits a review row whose submitter is unrecorded (NULL) or a session
+// id ('jwt:<token id>'), which approval refuses because it names no person.
 func (q *Queries) SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error) {
 	row := q.db.QueryRow(ctx, submitFrameworkScope, arg.TenantID, arg.ID, arg.SubmittedBy)
 	var i FrameworkScope

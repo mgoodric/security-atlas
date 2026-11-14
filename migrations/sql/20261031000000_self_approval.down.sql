@@ -20,6 +20,15 @@ BEGIN
 END
 $$;
 
+DROP TRIGGER IF EXISTS exceptions_self_approval_requires_setting_trg ON exceptions;
+DROP TRIGGER IF EXISTS framework_scopes_self_approval_requires_setting_trg ON framework_scopes;
+DROP TRIGGER IF EXISTS policies_self_approval_requires_setting_trg ON policies;
+DROP FUNCTION IF EXISTS self_approval_requires_setting();
+DROP FUNCTION IF EXISTS framework_scopes_backfill_submitted_by();
+
+ALTER TABLE exceptions
+    DROP CONSTRAINT IF EXISTS exceptions_self_approved_has_approver;
+
 CREATE OR REPLACE FUNCTION framework_scopes_bounce_on_predicate_change()
 RETURNS trigger
 LANGUAGE plpgsql

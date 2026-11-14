@@ -331,7 +331,7 @@ func (h *Handler) Deny(w http.ResponseWriter, r *http.Request) {
 	if r.ContentLength > 0 {
 		_ = json.NewDecoder(r.Body).Decode(&req) // reason is optional
 	}
-	denied, err := h.store.Deny(ctx, id, credstore.PrincipalOf(cred), req.Reason)
+	denied, err := h.store.Deny(ctx, id, exception.Denier{Principal: credstore.PrincipalOf(cred), CredentialID: cred.ID}, req.Reason)
 	if err != nil {
 		h.writeTransitionErr(w, r, err)
 		return

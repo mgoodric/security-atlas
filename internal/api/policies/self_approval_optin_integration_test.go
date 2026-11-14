@@ -90,3 +90,23 @@ func TestApprove_SelfApprovalOptIn(t *testing.T) {
 	s.do(t, http.MethodPatch, "/v1/policies/"+off+"/submit", nil, userJWT(t, s, s.adminUser), http.StatusOK)
 	s.do(t, http.MethodPatch, "/v1/policies/"+off+"/approve", nil, userJWT(t, s, s.adminUser), http.StatusForbidden)
 }
+
+// TestDB_SelfApprovedFlagNeedsTheSetting covers the database leg: a direct
+// write that marks a policy self-approved, skipping the application rule,
+// is refused by the self_approval_requires_setting trigger while the
+// setting is off.
+func TestDB_SelfApprovedFlagNeedsTheSetting(t *testing.T) {
+	s := setup(t)
+	allowSelfApproval(t, s, false)
+	id := createDraftPolicy(t, s, "Direct Write Policy", "1.0", nil)
+
+	const flag = `UPDATE policies SET self_approved = true WHERE id = $1`
+	_, err := s.admin.Exec(context.Background(), flag, id)
+	if err == nil || !strings.Contains(err.Error(), "Allow self-approval") {
+		t.Fatalf("direct self_approved write with the setting off: err = %v, want the trigger to refuse", err)
+	}
+	allowSelfApproval(t, s, true)
+	if _, err := s.admin.Exec(context.Background(), flag, id); err != nil {
+		t.Fatalf("direct self_approved write with the setting on: %v", err)
+	}
+}

@@ -335,26 +335,38 @@ func checkApprover(requester string, a approval.Approver, allowSelf bool) (selfA
 	return self, err
 }
 
+// Denier names who is denying an exception. Principal is who stands
+// behind the credential (credstore.PrincipalOf: the users(id) for a person)
+// and is recorded as denied_by. CredentialID is the credential itself:
+// requested_by held the credential id before #2101, so a requester recorded
+// that way is matched against it too.
+type Denier struct {
+	Principal    string
+	CredentialID string
+}
+
 // Deny transitions requested -> denied (terminal). AC-7.
-// Same SoD invariant as Approve.
-func (s *Store) Deny(ctx context.Context, id uuid.UUID, denier, reason string) (Exception, error) {
-	if denier == "" {
+// The requester cannot deny their own exception: the denier must differ
+// from requested_by by principal and by credential id (#2101). Allow
+// self-approval does not extend to denial.
+func (s *Store) Deny(ctx context.Context, id uuid.UUID, denier Denier, reason string) (Exception, error) {
+	if denier.Principal == "" {
 		return Exception{}, ErrRequesterRequired
 	}
 	return s.transition(ctx, id, transitionParams{
 		expectedPrior: StateRequested,
 		newState:      StateDenied,
-		actor:         denier,
+		actor:         denier.Principal,
 		action:        ActionDenied,
 		reason:        reason,
 		run: func(q *dbx.Queries, tenantID uuid.UUID, _ bool) (dbx.Exception, error) {
 			return q.DenyException(ctx, dbx.DenyExceptionParams{
 				TenantID: pgUUID(tenantID),
 				ID:       pgUUID(id),
-				DeniedBy: stringPtr(denier),
+				DeniedBy: stringPtr(denier.Principal),
 			})
 		},
-		requesterCheck: denier,
+		requesterChecks: []string{denier.Principal, denier.CredentialID},
 	})
 }
 
@@ -507,10 +519,12 @@ type transitionParams struct {
 	reason        string
 	// run performs the UPDATE; self is true when an approval was allowed
 	// as a self-approval (#2101), false for every other transition.
-	run            func(q *dbx.Queries, tenantID uuid.UUID, self bool) (dbx.Exception, error)
-	requesterCheck string // when non-empty, asserts actor != row.RequestedBy (segregation of duties)
+	run func(q *dbx.Queries, tenantID uuid.UUID, self bool) (dbx.Exception, error)
+	// requesterChecks, when non-empty, asserts row.RequestedBy matches none
+	// of these non-empty identities (segregation of duties).
+	requesterChecks []string
 	// approver, when set, applies the shared approval rule (#2101) instead
-	// of requesterCheck.
+	// of requesterChecks.
 	approver *approval.Approver
 }
 
@@ -523,7 +537,7 @@ func (s *Store) transition(ctx context.Context, id uuid.UUID, p transitionParams
 		// Segregation-of-duties pre-check (only for approve/deny). Fetch
 		// the row first so we can compare actor against requested_by.
 		var priorRequester string
-		if p.requesterCheck != "" {
+		if len(p.requesterChecks) > 0 {
 			before, gErr := q.GetExceptionByID(ctx, dbx.GetExceptionByIDParams{
 				TenantID: pgUUID(tenantID),
 				ID:       pgUUID(id),
@@ -535,8 +549,10 @@ func (s *Store) transition(ctx context.Context, id uuid.UUID, p transitionParams
 				return fmt.Errorf("get exception (sod): %w", gErr)
 			}
 			priorRequester = before.RequestedBy
-			if priorRequester == p.requesterCheck {
-				return ErrSegregationOfDuties
+			for _, who := range p.requesterChecks {
+				if who != "" && priorRequester == who {
+					return ErrSegregationOfDuties
+				}
 			}
 		}
 		var self bool

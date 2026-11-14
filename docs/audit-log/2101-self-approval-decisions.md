@@ -19,13 +19,17 @@
 
 `internal/approval.Check(requester, approver, allowSelf)` decides. Each module maps its three errors (not a person / self-approval / requester unknown) onto its own error values, so the HTTP bodies stay module-specific and the existing #1807 policy errors are unchanged. Policy's `checkApprover` now delegates; it was the "extend this function" hook #1807 left.
 
-## D2 — The exceptions CHECK: a denormalised flag, not a trigger
+## D2 — The database legs: a denormalised flag, and a trigger for the setting
 
-The ADR records the trade-off. Briefly: `exceptions_sod` becomes `approved_by IS NULL OR approved_by <> requested_by OR self_approved`. The store reads `tenants.allow_self_approval` in the approval transaction and sets the flag only when the rule allowed a self-approval. A trigger reading `tenants` was rejected: it would put half the rule in PL/pgSQL. `exceptions_denied_by_sod` is unchanged; the opt-in covers approval, not denial.
+The ADR records the trade-off. Briefly: `exceptions_sod` becomes `approved_by IS NULL OR approved_by <> requested_by OR self_approved`. The store reads `tenants.allow_self_approval` in the approval transaction and sets the flag only when the rule allowed a self-approval. `exceptions_self_approved_has_approver` keeps the flag off an unapproved row. `exceptions_denied_by_sod` is unchanged; the opt-in covers approval, not denial.
+
+The first cut stopped there. Review (the #1965 precedent) required the setting to hold in the database too. `self_approval_requires_setting` is a `BEFORE INSERT OR UPDATE` trigger on policies, framework scopes and exceptions. It refuses a row that newly becomes `self_approved` while its tenant's setting is off, and it checks only the setting. The person rule stays in Go, so the trigger does not duplicate credential-shape logic. A row already flagged is not re-checked, so turning the setting off later does not block unrelated updates to it. The lookup runs as the writing role; under RLS an invisible tenants row reads as off, which fails closed.
 
 ## D3 — Legacy exception requesters keep their original rule
 
 Exceptions recorded `requested_by` as the credential id. For a JWT caller that is `jwt:<jti>`. Policies and scopes refuse a session-recorded submitter until it is re-submitted. An exception has no re-request path, so refusing would strand every in-flight request. A `jwt:` requester is therefore compared against the approving credential id, which is exactly the pre-#2101 behaviour, and then only the "only people approve" half of the rule applies. New requests record the person.
+
+Denial gets the same two-way comparison (found in review). `Deny` takes a `Denier{Principal, CredentialID}` and refuses when `requested_by` equals either. Comparing the principal alone would have let a person whose legacy request was recorded as `key_…` deny it with that key, because the key now resolves to their user id.
 
 ## D4 — Where "the audit log shows it"
 
@@ -42,7 +46,7 @@ Ordinary policy approvals still write no `policy_audit_log` row; adding one for 
 
 ## D5 — Framework scopes record a submitter
 
-`framework_scopes` had no submitter column; the workflow log held only the credential id. The migration adds `submitted_by` and backfills it for rows already in `review` from the log's latest `submit` row. The backfill writes credential ids, so a backfilled `jwt:` submitter is refused until it is re-submitted. The submit query now accepts a re-submit of such a row, as the policy query already did. The workflow-log `actor` stays the credential id, as before.
+`framework_scopes` had no submitter column; the workflow log held only the credential id. The migration adds `submitted_by` and backfills it for rows already in `review` from the log's latest `submit` row. A `key_<uuid>` actor whose key is bound to a user (`api_keys.issued_by`) is mapped to that user (found in review); any other actor is kept verbatim. A backfilled `jwt:` submitter, or a review row the backfill could not fill (NULL), is refused until it is re-submitted. Unlike policies, a NULL scope submitter is not waved through, because the column is new and NULL means unknown. The submit query accepts a re-submit of either. The backfill is a named, idempotent function, `framework_scopes_backfill_submitted_by()`, so its mapping is under test. The workflow-log `actor` stays the credential id, as before.
 
 ## D6 — Exception approval is people-only
 

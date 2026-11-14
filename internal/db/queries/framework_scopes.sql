@@ -87,14 +87,15 @@ RETURNING *;
 -- AC-6: draft -> review. Guarded so callers can never re-submit an already
 -- under-review row by accident (would still be valid but masks bugs).
 -- #2101: records the submitter as a person, so approval can compare. Also
--- re-submits a review row whose submitter was recorded as a session id
--- ('jwt:<token id>'), which approval refuses because it names no person.
+-- re-submits a review row whose submitter is unrecorded (NULL) or a session
+-- id ('jwt:<token id>'), which approval refuses because it names no person.
 UPDATE framework_scopes
 SET state = 'review',
     submitted_by = sqlc.arg('submitted_by'),
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-  AND (state = 'draft' OR (state = 'review' AND submitted_by LIKE 'jwt:%'))
+  AND (state = 'draft'
+       OR (state = 'review' AND (submitted_by IS NULL OR submitted_by LIKE 'jwt:%')))
 RETURNING *;
 
 -- name: ApproveFrameworkScope :one

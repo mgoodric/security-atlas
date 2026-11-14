@@ -11,7 +11,10 @@
 --   2. self_approved on policies, framework_scopes and exceptions.
 --   3. framework_scopes.submitted_by      the person who submitted the
 --      scope for review, so approval has someone to compare. Rows already
---      in review are backfilled from the workflow log's last 'submit'.
+--      in review are backfilled from the workflow log's last 'submit'
+--      actor; a 'key_<uuid>' actor bound to a user (api_keys.issued_by)
+--      is mapped to that user. A row left NULL, or holding a 'jwt:'
+--      session id, must be re-submitted before it can be approved.
 --   4. exceptions_sod is relaxed to `approved_by <> requested_by OR
 --      self_approved`. A CHECK cannot read tenants at write time, so the
 --      setting is denormalised onto the row: the application sets
@@ -19,7 +22,16 @@
 --      transaction. The CHECK still refuses a same-person approval that
 --      does not carry the flag, so a write that skips the application
 --      rule cannot hide a self-approval. exceptions_denied_by_sod is
---      unchanged: the opt-in covers approval only.
+--      unchanged: the opt-in covers approval only. A second CHECK,
+--      exceptions_self_approved_has_approver, keeps the flag off a row
+--      nobody approved.
+--   7. self_approval_requires_setting, a BEFORE INSERT OR UPDATE trigger
+--      on policies, framework_scopes and exceptions: a row may newly
+--      become self_approved only while its tenant's allow_self_approval
+--      is on. It checks the setting alone; who may approve stays in Go
+--      (internal/approval). With it, a direct write that skips the
+--      application cannot mark a self-approval the organisation has not
+--      allowed.
 --   5. Audit actions: me_audit_log gains 'tenant_self_approval_update'
 --      (the setting change); policy_audit_log gains 'self_approved' (one
 --      row per self-approved policy). Every existing value is kept. The
@@ -50,17 +62,46 @@ ALTER TABLE framework_scopes
 ALTER TABLE exceptions
     ADD COLUMN IF NOT EXISTS self_approved BOOLEAN NOT NULL DEFAULT false;
 
-UPDATE framework_scopes fs
-SET submitted_by = (
-    SELECT l.actor
-    FROM framework_scope_workflow_log l
-    WHERE l.tenant_id = fs.tenant_id
-      AND l.framework_scope_id = fs.id
-      AND l.action = 'submit'
-    ORDER BY l.occurred_at DESC, l.id DESC
-    LIMIT 1)
-WHERE fs.state = 'review'
-  AND fs.submitted_by IS NULL;
+-- The backfill is a function so its mapping can be tested
+-- (internal/frameworkscope/self_approval_integration_test.go); it touches
+-- only review rows with no submitter, so a second call changes nothing.
+-- The workflow log's actor is a credential id: a 'key_<uuid>' key bound to
+-- a user (api_keys.issued_by) maps to that user; anything else is kept
+-- verbatim, and a 'jwt:' session id is then refused until re-submitted.
+-- The CASE guards the uuid cast, which a WHERE clause would not order.
+CREATE OR REPLACE FUNCTION framework_scopes_backfill_submitted_by()
+RETURNS BIGINT
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    n BIGINT;
+BEGIN
+    UPDATE framework_scopes fs
+    SET submitted_by = (
+        SELECT COALESCE(
+            (SELECT k.issued_by::text
+             FROM api_keys k
+             WHERE k.tenant_id = fs.tenant_id
+               AND k.issued_by IS NOT NULL
+               AND k.id = CASE
+                   WHEN l.actor ~ '^key_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+                   THEN substr(l.actor, 5)::uuid
+               END),
+            l.actor)
+        FROM framework_scope_workflow_log l
+        WHERE l.tenant_id = fs.tenant_id
+          AND l.framework_scope_id = fs.id
+          AND l.action = 'submit'
+        ORDER BY l.occurred_at DESC, l.id DESC
+        LIMIT 1)
+    WHERE fs.state = 'review'
+      AND fs.submitted_by IS NULL;
+    GET DIAGNOSTICS n = ROW_COUNT;
+    RETURN n;
+END;
+$$;
+
+SELECT framework_scopes_backfill_submitted_by();
 
 -- ===== 4. exceptions segregation of duties =====
 
@@ -70,6 +111,13 @@ ALTER TABLE exceptions
 ALTER TABLE exceptions
     ADD CONSTRAINT exceptions_sod
     CHECK (approved_by IS NULL OR approved_by <> requested_by OR self_approved);
+
+ALTER TABLE exceptions
+    DROP CONSTRAINT IF EXISTS exceptions_self_approved_has_approver;
+
+ALTER TABLE exceptions
+    ADD CONSTRAINT exceptions_self_approved_has_approver
+    CHECK (NOT self_approved OR approved_by IS NOT NULL);
 
 -- ===== 5. audit actions =====
 
@@ -170,3 +218,52 @@ BEGIN
     RETURN NULL;
 END;
 $$;
+
+-- ===== 7. the setting, enforced in the database =====
+--
+-- Fires when a row newly becomes self_approved (an INSERT carrying the
+-- flag, or an UPDATE turning it on). The lookup runs as the writing role:
+-- under atlas_app RLS shows only the current tenant's row, and a missing
+-- or invisible row reads as the default, off, so the write is refused.
+-- Rows already flagged are left alone, so turning the setting off later
+-- does not block unrelated updates to them.
+
+CREATE OR REPLACE FUNCTION self_approval_requires_setting()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    newly_flagged BOOLEAN;
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        newly_flagged := NEW.self_approved;
+    ELSE
+        newly_flagged := NEW.self_approved AND NOT COALESCE(OLD.self_approved, false);
+    END IF;
+    IF newly_flagged AND NOT COALESCE(
+        (SELECT t.allow_self_approval FROM tenants t WHERE t.id = NEW.tenant_id),
+        false) THEN
+        RAISE EXCEPTION '%: self_approved requires the organisation''s Allow self-approval setting (#2101)', TG_TABLE_NAME
+            USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS policies_self_approval_requires_setting_trg ON policies;
+CREATE TRIGGER policies_self_approval_requires_setting_trg
+    BEFORE INSERT OR UPDATE ON policies
+    FOR EACH ROW
+    EXECUTE FUNCTION self_approval_requires_setting();
+
+DROP TRIGGER IF EXISTS framework_scopes_self_approval_requires_setting_trg ON framework_scopes;
+CREATE TRIGGER framework_scopes_self_approval_requires_setting_trg
+    BEFORE INSERT OR UPDATE ON framework_scopes
+    FOR EACH ROW
+    EXECUTE FUNCTION self_approval_requires_setting();
+
+DROP TRIGGER IF EXISTS exceptions_self_approval_requires_setting_trg ON exceptions;
+CREATE TRIGGER exceptions_self_approval_requires_setting_trg
+    BEFORE INSERT OR UPDATE ON exceptions
+    FOR EACH ROW
+    EXECUTE FUNCTION self_approval_requires_setting();
