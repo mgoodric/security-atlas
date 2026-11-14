@@ -1835,6 +1835,9 @@ type Querier interface {
 	//      leaver access-removal tasks surface on the compliance calendar.
 	//   7. risks                   — review_due_at is the next risk review (#2130)
 	//   8. action_plans            — due_date of an open plan (#2130)
+	//   9. policy_acknowledgments  — the latest ack per (policy version, user)
+	//      + 365 days, when the annual re-acknowledgement lapses (#2130; it
+	//      moved here from the retired dashboard upcoming rollup)
 	//
 	// Past-due items: every branch filters on its own date against [from, to),
 	// so a window that starts in the past returns the items that fell due in
@@ -1848,8 +1851,11 @@ type Querier interface {
 	// timestamptz bounds.
 	//
 	// Type filter (`type_filter`) is a CSV string. Empty string ('') means
-	// "all five sources." A non-empty filter narrows to the subset by checking
-	// membership on the per-branch literal type discriminator.
+	// "every source." A non-empty filter narrows to the subset by exact
+	// membership of the per-branch literal type in the CSV (#2130: it was a
+	// substring match, which `policy_ack` would have tripped for `policy`).
+	// The handler also narrows it by the caller's OPA access (risk,
+	// action_plan) before it reaches this query.
 	//
 	// Cadence math for the controls branch:
 	//   - The control's freshness_class is mapped to a max-acceptable-age

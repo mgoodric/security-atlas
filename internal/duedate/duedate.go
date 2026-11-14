@@ -1,12 +1,14 @@
-// Package duedate holds the estate's one rule for whether a dated item is
-// overdue, due soon or upcoming.
+// Package duedate holds the rule for whether a dated item is overdue, due
+// soon or upcoming.
 //
 // The due day is the UTC calendar date of the due timestamp (a date-only
 // value is stored as 00:00 UTC). An item is Overdue only once its due day
 // has ended, that is from the next UTC day on; it is DueSoon from soonDays
 // days before its due day through the due day itself, and Upcoming before
-// that. This is the policy-review rule (#2009, #2075), which risk reviews
-// (#2059) and the compliance calendar (#2130) share.
+// that. It is the policy-review rule (#2009, #2075). So far policy
+// reviews, and the calendar's risk-review, action-plan and policy
+// acknowledgement events (#2130), use it; vendor reviews still compute
+// their own (vendor.IsOverdueAsOf), and converging them is a follow-up.
 package duedate
 
 import "time"

@@ -62,6 +62,8 @@ function typeLabel(type: string): string {
       return "Risk review";
     case "action_plan":
       return "Action plan";
+    case "policy_ack":
+      return "Policy ack";
     case "offboarding":
       return "Offboarding";
     default:
@@ -79,7 +81,7 @@ export function UpcomingPanel({
   return (
     <PanelCard
       title={`Coming up · next ${COMING_UP_DAYS} days`}
-      description="From the compliance calendar: reviews, due dates, expiring exceptions, audit milestones"
+      description="From the compliance calendar: reviews, due dates, acknowledgements, expiring exceptions, audit milestones"
       state={state}
       skeletonClassName="h-40 w-full"
       testid="upcoming-panel"

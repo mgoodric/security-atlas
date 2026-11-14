@@ -43,6 +43,9 @@ type attentionTenant struct {
 	LaterRisk         uuid.UUID // review due in 30 days (upcoming, not due soon)
 	CompletedPlan     uuid.UUID // past due but completed: never on the calendar
 	WaiverControl     uuid.UUID // the control the two exceptions waive
+	AckDueSoon        uuid.UUID // Owner's latest ack of OverduePolicy, lapses in 10 days
+	AckOverdue        uuid.UUID // Other's ack of OverduePolicy, lapsed 35 days ago
+	AckSuperseded     uuid.UUID // Owner's older ack, superseded by AckDueSoon
 	riskTitlePrefix   string
 	planTitlePrefix   string
 	policyTitlePrefix string
@@ -60,6 +63,7 @@ var attentionCleanupTables = []string{
 	"control_owner_assignments",
 	"control_evaluations",
 	"exceptions",
+	"policy_acknowledgments",
 	"action_plans",
 	"risks",
 	"org_risk_categories",
@@ -173,6 +177,21 @@ func seedAttentionTenant(t *testing.T, admin *pgxpool.Pool, now time.Time, label
 		        '# body', 'security_lead', 'ciso', 'tester',
 		        now(), 'tester', $4)
 	`, at.OverduePolicy, at.ID, at.policyTitlePrefix+"overdue review", now.Add(-5*day))
+
+	ack := func(user uuid.UUID, when time.Time) uuid.UUID {
+		id := uuid.New()
+		exec("policy acknowledgment", `
+			INSERT INTO policy_acknowledgments (
+				id, tenant_id, policy_id, policy_version_id, user_id,
+				acknowledged_at, ack_token
+			)
+			VALUES ($1, $2, $3, $3, $4, $5, $6)
+		`, id, at.ID, at.OverduePolicy, user, when, "attention-"+id.String())
+		return id
+	}
+	at.AckSuperseded = ack(at.Owner, now.Add(-700*day))
+	at.AckDueSoon = ack(at.Owner, now.Add(-355*day))
+	at.AckOverdue = ack(at.Other, now.Add(-400*day))
 
 	risk := func(title, owner string, reviewDue time.Time) uuid.UUID {
 		id := uuid.New()

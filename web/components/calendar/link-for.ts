@@ -61,6 +61,8 @@ export function linkFor(ev: CalendarEvent): LinkForResult {
     case "exception":
       return { kind: "static", reason: EXCEPTION_REASON };
     case "policy":
+    case "policy_ack":
+      // #2130: an acknowledgement expiry has no page of its own either.
       return { kind: "static", reason: POLICY_REASON };
     case "vendor":
       // Slice 675: vendor review events link to the real per-vendor

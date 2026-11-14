@@ -40,8 +40,8 @@ import (
 )
 
 // DueSoonDays is the due-soon window, in whole UTC days, for the event
-// types whose status the store computes: risk reviews and action-plan due
-// dates (#2130). It matches the control-review branch's 14 days and the
+// types whose status the store computes: risk reviews, action-plan due
+// dates and policy acknowledgement expiries (#2130). It matches the control-review branch's 14 days and the
 // dashboard's "Coming up" window.
 const DueSoonDays = 14
 
@@ -51,6 +51,7 @@ const DueSoonDays = 14
 var storeStatusTypes = map[string]bool{
 	"risk":        true,
 	"action_plan": true,
+	"policy_ack":  true,
 }
 
 // Store is the calendar read layer. It holds no write methods on the four

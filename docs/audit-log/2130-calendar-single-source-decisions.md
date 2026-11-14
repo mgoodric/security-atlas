@@ -22,9 +22,9 @@ private `utcDay`. It moves to a new `internal/duedate` package as
 `Status(due, now, soonDays)`; `policy.ReviewStatusOf` now calls it with its
 30 days, so the policy list is unchanged.
 
-The two new SQL branches return an empty status, and
-`calendar.Store.ListEvents` fills it with `duedate.Status(starts_at, now,
-14)`. That keeps the comparison in one place instead of a third SQL copy of
+The new SQL branches (risk, action_plan, policy_ack) return an empty
+status, and `calendar.Store.ListEvents` fills it with
+`duedate.Status(starts_at, now, 14)`. That keeps the comparison in one place instead of a third SQL copy of
 it. The existing branches keep their own SQL status (policy reviews already
 implement the same rule in SQL; control, offboarding and vendor statuses are
 untouched): changing them is outside this ticket.
@@ -82,10 +82,13 @@ keeps its name and its five columns, `due_date, category, title,
 resource_type, resource_id`, now filled from calendar events
 (`starts_at`, `type`, `title`, `related_entity_kind`, `related_entity_id`).
 Renaming them would break anyone parsing the export for no gain here. The
-rows themselves change: categories are calendar types (`exception`,
-`policy`, `risk`, ...), not the rollup's (`policy_ack`, `vendor_review`), and
-policy acknowledgement expiries are no longer listed, because the calendar
-does not carry them. That is the point of one source.
+rows themselves change: the window is today + 14 days, and categories are
+calendar types (`exception`, `policy`, `vendor`, `risk`, `policy_ack`, ...),
+not the rollup's (`vendor_review`, `vendor_renewal`, `audit_period`). The
+CHANGELOG lists the new vocabulary. Policy acknowledgement expiries stay in
+the panel through the calendar's `policy_ack` type (D9). The export is
+admin and approver only (slice 269 D3), roles that read risks and action
+plans, so it reads the calendar store without the D8 narrowing.
 
 ## D7 — The front-door fixture lives beside the calendar tests
 
@@ -102,3 +105,41 @@ consumer, would be a guess at its shape.
 The e2e dashboard fixture moves its exception from 14 to 10 days (14 days
 at `now()` sits past a window that ends at midnight) and adds a risk review
 due in 7 days and an action plan due in 5.
+
+## D8 — Risk and action-plan events follow the caller's OPA access
+
+Review finding. The calendar is admitted to every signed-in role, but
+auditor and control_owner are not admitted to `risks`, and only the
+admin and grc_engineer wildcards admit `action-plans`. Listing risk
+reviews and plan titles on the calendar would have shown those roles
+records they cannot open. So the JSON handler asks OPA, as the caller,
+for a read of `risks` and of `action-plans`, the per-type admit
+`/v1/search` uses, and drops the denied event types from the query
+(`readableTypes`). Result: admin and grc_engineer see both, a viewer sees
+risk reviews only, an auditor and a control owner see neither. With no
+engine wired (unit-test servers) every type stays, as in search.
+
+The ICS feed cannot do the same: its URL token is a credstore key with
+no user, and the `minted_by` attribution column says nothing authorizes
+on it. So the feed leaves risk and action-plan events out for every
+token (fail closed). A follow-up could bind the token to its subscriber
+and evaluate that user's roles at fetch time. Vendor and exception events
+keep their current visibility; role filtering for those is a separate
+follow-up.
+
+## D9 — Policy acknowledgement expiries are a calendar type
+
+Review finding: retiring the rollup must not drop lapsing
+acknowledgements. `policy_ack` is the rollup's branch moved over: the
+freshest ack per (policy version, user), due 365 days on. Its title now
+names the policy (a tenant-scoped LEFT JOIN on `policies`) instead of
+printing the version UUID, its related entity is the acknowledgement,
+and its status comes from `duedate.Status` with 14 days. It stays visible
+to every calendar reader, as it was on the dashboard rollup.
+
+## D10 — The type filter matches exactly
+
+The SQL matched the CSV type filter with `position(type IN filter)`, a
+substring test. With `policy_ack` added, a filter of `policy_ack` would
+also have switched the `policy` branch on. Every branch now tests
+`type = ANY(string_to_array(filter, ','))`.

@@ -41,7 +41,7 @@ FROM (
     WHERE ap.tenant_id = $1
       AND ap.period_end::timestamptz >= $2::timestamptz
       AND ap.period_end::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('audit' IN $4::text) > 0)
+      AND ($4::text = '' OR 'audit' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -86,7 +86,7 @@ FROM (
       AND e.expires_at IS NOT NULL
       AND e.expires_at::timestamptz >= $2::timestamptz
       AND e.expires_at::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('exception' IN $4::text) > 0)
+      AND ($4::text = '' OR 'exception' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -122,7 +122,7 @@ FROM (
       AND p.next_review_at IS NOT NULL
       AND p.next_review_at::timestamptz >= $2::timestamptz
       AND p.next_review_at::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('policy' IN $4::text) > 0)
+      AND ($4::text = '' OR 'policy' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -165,7 +165,7 @@ FROM (
             WHEN 'biannual'  THEN INTERVAL '6 months'
             WHEN 'annual'    THEN INTERVAL '12 months'
            END)::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('vendor' IN $4::text) > 0)
+      AND ($4::text = '' OR 'vendor' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -189,7 +189,7 @@ FROM (
       AND v.commercial_status <> 'churned'
       AND v.renewal_date::timestamptz >= $2::timestamptz
       AND v.renewal_date::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR position('vendor' IN $4::text) > 0)
+      AND ($4::text = '' OR 'vendor' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -289,7 +289,7 @@ FROM (
                     END
             END
           ) <  $3::timestamptz
-      AND ($4::text = '' OR position('control' IN $4::text) > 0)
+      AND ($4::text = '' OR 'control' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -315,7 +315,7 @@ FROM (
       AND r.review_due_at IS NOT NULL
       AND r.review_due_at >= $2::timestamptz
       AND r.review_due_at <  $3::timestamptz
-      AND ($4::text = '' OR position('risk' IN $4::text) > 0)
+      AND ($4::text = '' OR 'risk' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -341,7 +341,41 @@ FROM (
       AND ap.due_date IS NOT NULL
       AND (ap.due_date::timestamp AT TIME ZONE 'UTC') >= $2::timestamptz
       AND (ap.due_date::timestamp AT TIME ZONE 'UTC') <  $3::timestamptz
-      AND ($4::text = '' OR position('action_plan' IN $4::text) > 0)
+      AND ($4::text = '' OR 'action_plan' = ANY(string_to_array($4::text, ',')))
+
+    UNION ALL
+
+    -- policy acknowledgement expiries (#2130): the freshest ack per
+    -- (policy_version, user) plus 365 days, when that attestation lapses.
+    -- The query is the retired dashboard rollup's policy_ack branch; the
+    -- title now names the policy (LEFT JOIN, tenant-scoped composite key)
+    -- instead of printing its version UUID. status is filled by the store
+    -- with duedate.Status, as for risk reviews.
+    SELECT
+        latest_ack.id::text                                           AS event_id,
+        'policy_ack'::text                                            AS event_type,
+        ('Policy acknowledgement due: ' ||
+            COALESCE(p.title, latest_ack.policy_version_id::text))::text AS title,
+        (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz AS starts_at,
+        NULL::timestamptz                                             AS ends_at,
+        latest_ack.id::text                                           AS related_entity_id,
+        'policy_acknowledgment'::text                                 AS related_entity_kind,
+        latest_ack.user_id::text                                      AS summary,
+        ''::text                                                      AS status,
+        NULL::text                                                    AS cadence
+    FROM (
+        SELECT DISTINCT ON (pa.policy_version_id, pa.user_id)
+            pa.id, pa.tenant_id, pa.policy_version_id, pa.user_id, pa.acknowledged_at
+        FROM policy_acknowledgments pa
+        WHERE pa.tenant_id = $1
+        ORDER BY pa.policy_version_id, pa.user_id, pa.acknowledged_at DESC
+    ) latest_ack
+    LEFT JOIN policies p
+      ON p.tenant_id = latest_ack.tenant_id
+     AND p.id = latest_ack.policy_version_id
+    WHERE (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz >= $2::timestamptz
+      AND (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz <  $3::timestamptz
+      AND ($4::text = '' OR 'policy_ack' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -367,7 +401,7 @@ FROM (
       AND psc.status = 'open'
       AND psc.due_at >= $2::timestamptz
       AND psc.due_at <  $3::timestamptz
-      AND ($4::text = '' OR position('offboarding' IN $4::text) > 0)
+      AND ($4::text = '' OR 'offboarding' = ANY(string_to_array($4::text, ',')))
 ) calendar_events
 ORDER BY starts_at ASC, event_id ASC
 LIMIT $6::int
@@ -415,6 +449,9 @@ type ListCalendarEventsRow struct {
 //     leaver access-removal tasks surface on the compliance calendar.
 //  7. risks                   — review_due_at is the next risk review (#2130)
 //  8. action_plans            — due_date of an open plan (#2130)
+//  9. policy_acknowledgments  — the latest ack per (policy version, user)
+//     + 365 days, when the annual re-acknowledgement lapses (#2130; it
+//     moved here from the retired dashboard upcoming rollup)
 //
 // Past-due items: every branch filters on its own date against [from, to),
 // so a window that starts in the past returns the items that fell due in
@@ -428,8 +465,11 @@ type ListCalendarEventsRow struct {
 // timestamptz bounds.
 //
 // Type filter (`type_filter`) is a CSV string. Empty string (”) means
-// "all five sources." A non-empty filter narrows to the subset by checking
-// membership on the per-branch literal type discriminator.
+// "every source." A non-empty filter narrows to the subset by exact
+// membership of the per-branch literal type in the CSV (#2130: it was a
+// substring match, which `policy_ack` would have tripped for `policy`).
+// The handler also narrows it by the caller's OPA access (risk,
+// action_plan) before it reaches this query.
 //
 // Cadence math for the controls branch:
 //   - The control's freshness_class is mapped to a max-acceptable-age

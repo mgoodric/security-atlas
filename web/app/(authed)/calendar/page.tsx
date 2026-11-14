@@ -26,8 +26,8 @@
 // - P0-A6: NO calendar-library dependency (FullCalendar etc.). Both
 //   views are hand-rolled with Tailwind. See decision D6.
 // - P0-A1: a closed event-type set (audit/exception/policy/vendor/control/
-//   risk/action_plan). Slice 675 added `vendor`; #2130 added `risk` and
-//   `action_plan`. The set is still closed (no free-form types).
+//   risk/action_plan/policy_ack). Slice 675 added `vendor`; #2130 added
+//   `risk`, `action_plan` and `policy_ack`. The set is still closed (no free-form types).
 // - P0-A5: per-event links fall back to placeholders for pages that
 //   have not shipped yet.
 
@@ -55,6 +55,7 @@ const ALL_TYPES = [
   "control",
   "risk",
   "action_plan",
+  "policy_ack",
 ] as const;
 type AllowedType = (typeof ALL_TYPES)[number];
 
