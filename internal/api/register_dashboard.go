@@ -3,6 +3,7 @@ package api
 import (
 	"github.com/go-chi/chi/v5"
 
+	calendarapi "github.com/mgoodric/security-atlas/internal/api/calendar"
 	dashboardapi "github.com/mgoodric/security-atlas/internal/api/dashboard"
 	dashboardexportapi "github.com/mgoodric/security-atlas/internal/api/dashboardexport"
 	freshnessdriftapi "github.com/mgoodric/security-atlas/internal/api/freshnessdrift"
@@ -34,13 +35,14 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 	freshnessDriftH := freshnessdriftapi.New(freshnessStore, driftStore)
 	root.Get("/v1/evidence/freshness", freshnessDriftH.Freshness)
 	root.Get("/v1/controls/drift", freshnessDriftH.Drift)
-	// Slice 066: dashboard backend read endpoints. Three pure reads that
-	// fill three of the four binding placeholders slice 040's program
-	// dashboard view shipped (per-framework posture, the evidence-ingest
-	// activity feed, the unified upcoming-items rollup; the fourth,
+	// Slice 066: dashboard backend read endpoints. Pure reads that fill
+	// the binding placeholders slice 040's program dashboard view shipped
+	// (per-framework posture, the evidence-ingest activity feed; a third,
 	// sort=residual,age on /v1/risks, extends the risks routes below).
+	// The fourth, the upcoming rollup, was retired by #2130: the
+	// compliance calendar is the one list of what is due.
 	// Routes appended per the parallel-batch convention (chi rejects two
-	// Mounts at "/"). /v1/frameworks/posture, /v1/activity, /v1/upcoming are
+	// Mounts at "/"). /v1/frameworks/posture and /v1/activity are
 	// fresh top-level paths -- no shadowing of any existing route. The Store
 	// is a pure read surface over existing tables + the slice-062
 	// admin_audit_log_v view -- this slice adds no migration and no write
@@ -49,11 +51,11 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 	dashboardH := dashboardapi.New(dashboardStoreForExport)
 	root.Get("/v1/frameworks/posture", dashboardH.FrameworkPosture)
 	root.Get("/v1/activity", dashboardH.Activity)
-	root.Get("/v1/upcoming", dashboardH.Upcoming)
 	// Slice 269: dashboard snapshot export (`GET /v1/dashboard/export
 	// ?format=json|csv|xlsx`). Composes the six per-panel reads
 	// (framework posture + risks + freshness + drift + upcoming +
-	// activity) into a single artifact in three formats — single
+	// activity; upcoming reads the calendar's next 14 days, #2130)
+	// into a single artifact in three formats — single
 	// JSON document, ZIP of one CSV per panel, or XLSX workbook with
 	// one sheet per panel. Reuses the already-wired
 	// dashboardStoreForExport (shared with the per-panel reads
@@ -73,6 +75,7 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 		risksStore,
 		freshnessStore,
 		driftStore,
+		calendarapi.NewStore(s.dbPool),
 	)
 	dashboardExportH := dashboardexportapi.NewHandler(s.dbPool, dashboardExportSource)
 	root.Get("/v1/dashboard/export", dashboardExportH.ExportDashboard)
