@@ -131,16 +131,25 @@ func renderImportRows(out io.Writer, r controlimport.RowList) {
 		if row.NoCandidateReaches {
 			_, _ = fmt.Fprintln(out, "  flag: no candidate reaches a tested criterion")
 		}
+		if row.LLMRerank == controlimport.RerankUnavailable {
+			_, _ = fmt.Fprintln(out, "  LLM rerank unavailable: deterministic order, no rationale")
+		}
 		if len(row.Candidates) == 0 {
 			_, _ = fmt.Fprintln(out, "  no candidates")
 			continue
 		}
 		for _, c := range row.Candidates {
 			line := fmt.Sprintf("  %d. %s  %s  (%s", c.Rank, printable(c.SCFID), printable(c.Title), printable(c.Source))
+			if c.AIAssisted {
+				line += ", LLM-reranked"
+			}
 			if fit := c.Fit(); fit != "" {
 				line += "; " + printable(fit)
 			}
 			_, _ = fmt.Fprintln(out, line+")")
+			if c.Rationale != "" {
+				_, _ = fmt.Fprintf(out, "     why: %s\n", printable(c.Rationale))
+			}
 		}
 	}
 }

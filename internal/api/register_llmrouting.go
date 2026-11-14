@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"log"
 	"sync"
 
@@ -55,6 +56,17 @@ func (s *Server) routingStore() *cloud.Store {
 func (s *Server) inferenceClient() llm.Client {
 	local := llm.NewOllamaClient(llm.ConfigFromEnv())
 	return cloud.NewRouter(local, s.routingStore(), nil)
+}
+
+// cloudLLMOptedIn reports whether the caller's tenant has opted in to a cloud
+// LLM provider. Surfaces that call an LLM only on opt-in (the control
+// importer's rerank, #1781) gate on it.
+func (s *Server) cloudLLMOptedIn(ctx context.Context) (bool, error) {
+	cfg, err := s.routingStore().Get(ctx)
+	if err != nil {
+		return false, err
+	}
+	return cfg.IsCloud, nil
 }
 
 // registerLLMRouting mounts the tenant-admin routing-config endpoint. The

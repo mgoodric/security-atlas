@@ -125,3 +125,42 @@ func TestControlsImportShow_SurfacesAPIError(t *testing.T) {
 		t.Fatalf("err = %v, want the API's 404 message", err)
 	}
 }
+
+func TestControlsImportShow_PrintsRationalesAndUnavailableRerank(t *testing.T) {
+	resetControlsAuth(t)
+	var path, query, auth string
+	srv := rowsAPI(t, http.StatusOK, controlimport.RowList{
+		BatchID:           "batch-1",
+		SuggestionsStatus: controlimport.SuggestionsReady,
+		Rows: []controlimport.BatchControl{
+			{
+				RowNumber: 2, ExternalID: "ORG-AC-01", Title: "MFA", Status: "pending", LLMRerank: controlimport.RerankApplied,
+				Candidates: []controlimport.Candidate{
+					{Rank: 1, SCFID: "IAC-15", Title: "Account Management", Source: controlimport.SourceCrosswalk,
+						AIAssisted: true, Rationale: "Covers account lifecycle."},
+					{Rank: 2, SCFID: "IAC-06", Title: "Multi-Factor Authentication", Source: controlimport.SourceKeyword},
+				},
+			},
+			{
+				RowNumber: 3, ExternalID: "ORG-AC-02", Title: "Review", Status: "pending", LLMRerank: controlimport.RerankUnavailable,
+				Candidates: []controlimport.Candidate{
+					{Rank: 1, SCFID: "IAC-17", Title: "Periodic Review", Source: controlimport.SourceKeyword},
+				},
+			},
+		},
+	}, &path, &query, &auth)
+
+	out, err := runImportCmd(t, "--endpoint", srv.URL, "--token", "tok-123", "controls", "import", "show", "batch-1")
+	if err != nil {
+		t.Fatalf("controls import show: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"  1. IAC-15  Account Management  (crosswalk, LLM-reranked)\n     why: Covers account lifecycle.\n",
+		"  2. IAC-06  Multi-Factor Authentication  (keyword)\n",
+		"row 3  ORG-AC-02  Review  [pending]\n  LLM rerank unavailable: deterministic order, no rationale\n",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output missing %q:\n%s", want, out)
+		}
+	}
+}
