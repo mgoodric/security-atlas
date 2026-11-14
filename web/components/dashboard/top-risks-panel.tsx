@@ -16,16 +16,9 @@
 import Link from "next/link";
 
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
+import { treatmentBadge } from "@/components/dashboard/treatment-badge";
 import { Badge } from "@/components/ui/badge";
 import type { DashboardRisk } from "@/lib/api/dashboard";
-
-function treatmentVariant(
-  treatment: string,
-): "destructive" | "secondary" | "outline" {
-  if (treatment === "mitigate") return "destructive";
-  if (treatment === "accept") return "secondary";
-  return "outline";
-}
 
 export function TopRisksPanel({
   risks,
@@ -59,28 +52,29 @@ export function TopRisksPanel({
           className="divide-y divide-foreground/5"
           data-testid="top-risks-list"
         >
-          {risks.map((risk) => (
-            <li
-              key={risk.id}
-              data-testid="top-risk-row"
-              className="grid grid-cols-12 items-center gap-3 py-3 text-sm"
-            >
-              <div className="col-span-7">
-                <div className="font-medium">{risk.title}</div>
-                <div className="mt-0.5 font-mono text-xs text-muted-foreground">
-                  {risk.id.slice(0, 8)} · {risk.methodology || "—"}
+          {risks.map((risk) => {
+            const badge = treatmentBadge(risk);
+            return (
+              <li
+                key={risk.id}
+                data-testid="top-risk-row"
+                className="grid grid-cols-12 items-center gap-3 py-3 text-sm"
+              >
+                <div className="col-span-7">
+                  <div className="font-medium">{risk.title}</div>
+                  <div className="mt-0.5 font-mono text-xs text-muted-foreground">
+                    {risk.id.slice(0, 8)} · {risk.methodology || "—"}
+                  </div>
                 </div>
-              </div>
-              <div className="col-span-2">
-                <Badge variant={treatmentVariant(risk.treatment)}>
-                  {risk.treatment}
-                </Badge>
-              </div>
-              <div className="col-span-3 truncate text-xs text-muted-foreground">
-                {risk.treatment_owner || "unassigned"}
-              </div>
-            </li>
-          ))}
+                <div className="col-span-2">
+                  <Badge variant={badge.variant}>{badge.label}</Badge>
+                </div>
+                <div className="col-span-3 truncate text-xs text-muted-foreground">
+                  {risk.treatment_owner || "unassigned"}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
     </PanelCard>
