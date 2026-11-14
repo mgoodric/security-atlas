@@ -26,6 +26,12 @@ type Report struct {
 	RequirementsUpdated   int
 	RequirementsUnchanged int
 
+	// RequirementsDiffered lists the codes of existing requirements whose
+	// incoming title or body differed from the stored one in a frozen
+	// version. The stored text is kept: a frozen version is never updated,
+	// it ships a new version instead (#1730).
+	RequirementsDiffered []string
+
 	EdgesCreated   int
 	EdgesUpdated   int
 	EdgesUnchanged int
@@ -295,6 +301,14 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 				report.RequirementsUnchanged++
 				continue
 			}
+			// A frozen version's requirements are immutable: the trigger
+			// would reject this UPDATE and roll back the whole import, edges
+			// included. Keep the stored title and body, import the edges, and
+			// report the difference (#1730).
+			if isFrozenVersionStatus(version.Status) {
+				report.RequirementsDiffered = append(report.RequirementsDiffered, r.Code)
+				continue
+			}
 			if _, err := q.UpsertFrameworkRequirement(ctx, dbx.UpsertFrameworkRequirementParams{
 				ID:                 existing.ID,
 				FrameworkVersionID: version.ID,
@@ -478,6 +492,16 @@ func importIntoTx(ctx context.Context, tx pgx.Tx, cw *Crosswalk) (Report, error)
 	}
 
 	return report, nil
+}
+
+// isFrozenVersionStatus mirrors enforce_framework_requirement_immutability:
+// a version in one of these states rejects UPDATEs of its requirements.
+func isFrozenVersionStatus(s dbx.FrameworkVersionStatus) bool {
+	switch s {
+	case dbx.FrameworkVersionStatusCurrent, dbx.FrameworkVersionStatusLegacy, dbx.FrameworkVersionStatusWithdrawn:
+		return true
+	}
+	return false
 }
 
 func edgeContentEqual(row dbx.FwToScfEdge, relType dbx.StrmRelationshipType, strength float64, srcAttr dbx.CrosswalkSourceAttribution, rationale string) bool {

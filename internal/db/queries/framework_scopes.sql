@@ -211,3 +211,21 @@ LEFT JOIN framework_scope_applicability a
       AND a.framework_scope_id = sqlc.narg(framework_scope_id)
 WHERE r.framework_version_id = @framework_version_id
 ORDER BY r.code, r.id;
+
+-- name: GetActivatedExclusionForRequirement :one
+-- The exclusion, if any, the tenant's ACTIVATED scope revision records for a
+-- requirement (#1788). Per-requirement coverage reads report such a
+-- requirement as `excluded` instead of uncovered. No row means the
+-- requirement is applicable or undecided, or no revision is activated.
+SELECT fsa.framework_scope_id,
+       fsa.justification,
+       fsa.implementation_ref,
+       fsa.updated_at
+FROM framework_scope_applicability fsa
+JOIN framework_scopes fs
+  ON fs.id = fsa.framework_scope_id
+ AND fs.tenant_id = fsa.tenant_id
+WHERE fsa.tenant_id = @tenant_id
+  AND fsa.framework_requirement_id = @framework_requirement_id
+  AND fsa.decision = 'excluded'
+  AND fs.state = 'activated';
