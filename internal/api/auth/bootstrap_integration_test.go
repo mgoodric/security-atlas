@@ -187,7 +187,13 @@ func (h harness) insertTenant(t *testing.T, id uuid.UUID, name, slug string, boo
 // response of GET /auth/oidc/callback?tenant_id=<urlTenant>.
 func (h harness) callback(t *testing.T, urlTenant uuid.UUID) *httptest.ResponseRecorder {
 	t.Helper()
-	idp := newFakeIdP(t)
+	return h.callbackVia(t, newFakeIdP(t), urlTenant)
+}
+
+// callbackVia is callback against a given IdP, so repeat logins keep one
+// issuer and land on the same principal.
+func (h harness) callbackVia(t *testing.T, idp *fakeIdP, urlTenant uuid.UUID) *httptest.ResponseRecorder {
+	t.Helper()
 	authn := oidc.New(stubResolver{cfg: oidc.IdpConfig{
 		ID:           uuid.New(),
 		TenantID:     urlTenant,
@@ -310,5 +316,48 @@ func TestOIDCCallback_FirstLogin_TwoTenants_Generic409(t *testing.T) {
 	}
 	if n := h.count(t, `SELECT COUNT(*) FROM tenants`); n != 2 {
 		t.Errorf("tenants = %d, want 2", n)
+	}
+}
+
+// #1912: a deactivated user who still passes the IdP gets no session.
+// Admin revoke-membership sets status='disabled' and leaves the IdP account
+// alone, so the IdP still authenticates them; SCIM sets active=false.
+func TestOIDCCallback_DeactivatedUserRefused(t *testing.T) {
+	for name, deactivate := range map[string]string{
+		"status disabled": `UPDATE users SET status = 'disabled' WHERE tenant_id = $1`,
+		"scim inactive":   `UPDATE users SET active = false WHERE tenant_id = $1`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h := newHarness(t)
+			tenant := uuid.MustParse("00000000-0000-4000-8000-000000000001")
+			h.insertTenant(t, tenant, "Seeded Org", "seeded-org", true)
+			idp := newFakeIdP(t)
+			if rec := h.callbackVia(t, idp, tenant); rec.Code != http.StatusFound {
+				t.Fatalf("first login: status = %d, want 302", rec.Code)
+			}
+			// A returning active user signs in again (#1912 also fixes the
+			// UpsertOIDC conflict target this second login used to 500 on).
+			if rec := h.callbackVia(t, idp, tenant); rec.Code != http.StatusFound {
+				t.Fatalf("returning login: status = %d, want 302; body %s", rec.Code, rec.Body.String())
+			}
+			if _, err := h.admin.Exec(context.Background(), deactivate, tenant); err != nil {
+				t.Fatalf("deactivate: %v", err)
+			}
+			if _, err := h.admin.Exec(context.Background(), `DELETE FROM sessions`); err != nil {
+				t.Fatalf("clear sessions: %v", err)
+			}
+
+			rec := h.callbackVia(t, idp, tenant)
+
+			if rec.Code != http.StatusUnauthorized || !strings.Contains(rec.Body.String(), "invalid credentials") {
+				t.Errorf("got %d %s, want 401 invalid credentials", rec.Code, rec.Body.String())
+			}
+			if c := cookieNamed(rec, sessions.CookieName); c != nil && c.Value != "" {
+				t.Errorf("session cookie set for a deactivated user")
+			}
+			if n := h.count(t, `SELECT COUNT(*) FROM sessions`); n != 0 {
+				t.Errorf("sessions = %d, want 0", n)
+			}
+		})
 	}
 }
