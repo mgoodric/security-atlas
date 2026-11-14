@@ -9,7 +9,7 @@
 //	GET /v1/me/audit-period    most-recent active assignment (AC-5)
 //	GET /v1/me/audit-periods   full list of assignments (AC-6)
 //
-// Both endpoints scope to the caller's UserID -- the response is empty
+// Both endpoints scope to the caller's bare users(id) -- the response is empty
 // for non-auditor callers (who have zero auditor_assignments rows by
 // construction). The handler does NOT gate on cred.OwnerRoles
 // containing "auditor"; the upstream OPA middleware already enforces
@@ -85,7 +85,7 @@ func (h *Handler) AuditPeriod(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
 		return
 	}
-	rows, err := h.store.ListAssignmentsFor(ctx, cred.UserID)
+	rows, err := h.assignmentsFor(ctx, cred)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list assignments", err)
 		return
@@ -116,7 +116,7 @@ func (h *Handler) AuditPeriods(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "user id missing on credential")
 		return
 	}
-	rows, err := h.store.ListAssignmentsFor(ctx, cred.UserID)
+	rows, err := h.assignmentsFor(ctx, cred)
 	if err != nil {
 		httperr.WriteInternal(w, r, "list assignments", err)
 		return
@@ -133,6 +133,20 @@ func (h *Handler) AuditPeriods(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----- helpers -----
+
+// assignmentsFor lists the caller's auditor assignments, keyed by the bare
+// users(id) from credstore.CallerUserID (#2183). The authz attrs resolver
+// (auditor.DBAttrsResolver) keys on the same form, so a period listed here is
+// one the auditor can act in. A caller that is not a user holds no
+// assignments: AuditPeriod answers 404 and AuditPeriods an empty list, as for
+// any caller with no rows.
+func (h *Handler) assignmentsFor(ctx context.Context, cred credstore.Credential) ([]auditor.Assignment, error) {
+	userID, isUser := credstore.CallerUserID(cred)
+	if !isUser {
+		return nil, nil
+	}
+	return h.store.ListAssignmentsFor(ctx, userID.String())
+}
 
 // authnContext extracts the credential + tenant from the request
 // context. Shared by every handler in this package.

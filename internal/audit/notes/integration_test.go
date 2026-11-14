@@ -439,24 +439,54 @@ func TestAttrsResolver_PopulatesAuditPeriodIDs(t *testing.T) {
 		time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 		time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC))
 
+	// Assignments are keyed by the bare users(id) (#2183).
+	auditorUser := uuid.NewString()
 	store := auditor.NewStore(app)
-	if err := store.Assign(ctxFor(t, tenant), "auditor-A", p1, "test"); err != nil {
+	if err := store.Assign(ctxFor(t, tenant), auditorUser, p1, "test"); err != nil {
 		t.Fatalf("Assign: %v", err)
 	}
 
 	resolver := auditor.NewDBAttrsResolver(app)
-	got, err := resolver.AttrsFor(context.Background(), tenant, "auditor-A", nil)
-	if err != nil {
-		t.Fatalf("AttrsFor: %v", err)
+	// The authz input carries the raw cred.UserID: a user-bound key's bare
+	// uuid, or a local-login JWT's "user:<uuid>". Both hydrate the period.
+	for _, principal := range []string{auditorUser, "user:" + auditorUser} {
+		got, err := resolver.AttrsFor(context.Background(), tenant, principal, nil)
+		if err != nil {
+			t.Fatalf("AttrsFor(%q): %v", principal, err)
+		}
+		ids, ok := got["audit_period_ids"].([]interface{})
+		if !ok {
+			t.Fatalf("AttrsFor(%q): expected audit_period_ids as []interface{}, got %T", principal, got["audit_period_ids"])
+		}
+		if len(ids) != 1 || ids[0].(string) != p1.String() {
+			t.Fatalf("AttrsFor(%q): expected [%v], got %v", principal, p1, ids)
+		}
 	}
-	ids, ok := got["audit_period_ids"].([]interface{})
-	if !ok {
-		t.Fatalf("expected audit_period_ids as []interface{}, got %T", got["audit_period_ids"])
-	}
-	if len(ids) != 1 {
-		t.Fatalf("expected 1 id, got %d", len(ids))
-	}
-	if ids[0].(string) != p1.String() {
-		t.Fatalf("expected %v, got %v", p1, ids[0])
+}
+
+// #2183: a principal that names no user hydrates no audit periods, even when
+// an assignment row carries that exact string.
+func TestAttrsResolver_MachinePrincipalHydratesNothing(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	fwID := seedFrameworkVersion(t, admin)
+	p1 := seedPeriod(t, admin, tenant, fwID, "attrs resolver machine",
+		time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC))
+
+	store := auditor.NewStore(app)
+	resolver := auditor.NewDBAttrsResolver(app)
+	for _, principal := range []string{"key_2183", "bootstrap-admin", "oauth_client:ci-runner"} {
+		if err := store.Assign(ctxFor(t, tenant), principal, p1, "test"); err != nil {
+			t.Fatalf("Assign(%q): %v", principal, err)
+		}
+		got, err := resolver.AttrsFor(context.Background(), tenant, principal, nil)
+		if err != nil {
+			t.Fatalf("AttrsFor(%q): %v", principal, err)
+		}
+		if ids, _ := got["audit_period_ids"].([]interface{}); len(ids) != 0 {
+			t.Errorf("AttrsFor(%q) hydrated %v; want no audit periods", principal, ids)
+		}
 	}
 }

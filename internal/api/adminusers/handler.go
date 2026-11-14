@@ -50,6 +50,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
@@ -278,10 +279,11 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Self-demotion guard. cred.UserID is the caller's identity (set by
-	// the auth layer). When the target equals the caller and admin is
-	// being dropped, require explicit confirmation.
-	if cred.UserID == targetID.String() && !hasAdmin && !req.ConfirmSelfDemotion {
+	// Self-demotion guard. When the target is the caller and admin is
+	// being dropped, require explicit confirmation. The caller resolves
+	// through credstore.CallerUserID: a local-login JWT carries
+	// "user:<uuid>", which never string-equals the bare target id (#2183).
+	if self, isUser := credstore.CallerUserID(cred); isUser && self == targetID && !hasAdmin && !req.ConfirmSelfDemotion {
 		httpresp.WriteError(w, http.StatusBadRequest, "self-demotion from admin requires confirm_self_demotion=true")
 		return
 	}

@@ -82,8 +82,9 @@ allow if {
 
 # Slice 029: /v1/me/notifications -- self-info notification surface.
 # Any authenticated role (auditor included) can read their own
-# notifications. The query layer pins recipient_user_id = caller.UserID
-# so cross-recipient leakage is impossible. Mark-read (PATCH) is
+# notifications. The query layer pins recipient_user_id to the caller's
+# bare users(id), resolved by credstore.CallerUserID (#2183), so
+# cross-recipient leakage is impossible. Mark-read (PATCH) is
 # allowed by the same rule.
 allow if {
     has_role("auditor")

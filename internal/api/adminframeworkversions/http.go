@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
@@ -322,7 +323,7 @@ func requireAdminActor(w http.ResponseWriter, r *http.Request) (uuid.UUID, bool)
 		httpresp.WriteError(w, http.StatusForbidden, "admin credential required")
 		return uuid.UUID{}, false
 	}
-	return actorID(w, cred.UserID)
+	return actorID(w, cred)
 }
 
 // requireSuperAdminActor enforces the super_admin gate on the global-catalog
@@ -340,15 +341,15 @@ func requireSuperAdminActor(w http.ResponseWriter, r *http.Request) (uuid.UUID, 
 		httpresp.WriteError(w, http.StatusForbidden, "super_admin required")
 		return uuid.UUID{}, false
 	}
-	return actorID(w, cred.UserID)
+	return actorID(w, cred)
 }
 
-// actorID parses the caller's user subject. A verified JWT always carries a
-// parseable user subject; fail closed rather than write an audit row with a nil
-// actor.
-func actorID(w http.ResponseWriter, subject string) (uuid.UUID, bool) {
-	actor, err := uuid.Parse(jwtmw.SubjectUserID(subject))
-	if err != nil {
+// actorID resolves the caller's users(id) through credstore.CallerUserID
+// (#2183). A verified JWT always carries a user subject; fail closed rather
+// than write an audit row with a nil actor.
+func actorID(w http.ResponseWriter, cred credstore.Credential) (uuid.UUID, bool) {
+	actor, ok := credstore.CallerUserID(cred)
+	if !ok {
 		httpresp.WriteError(w, http.StatusForbidden, "credential lacks a resolvable user id")
 		return uuid.UUID{}, false
 	}

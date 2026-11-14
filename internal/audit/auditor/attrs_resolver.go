@@ -10,6 +10,7 @@ import (
 
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/identity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -48,6 +49,15 @@ func (r *DBAttrsResolver) AttrsFor(ctx context.Context, tenantID, userID string,
 	if _, err := uuid.Parse(tenantID); err != nil {
 		return nil, nil
 	}
+	// Assignments are keyed by the bare users(id) (#2183), the same key
+	// /v1/me/audit-period(s) reads. Only this lookup key is normalized:
+	// userID itself is the raw authz input and stays as it is. A principal
+	// that names no user (an unbound "key_..." credential, bootstrap-admin,
+	// an oauth_client: machine token) hydrates no audit periods.
+	user, isUser := identity.UserID(userID)
+	if !isUser {
+		return nil, nil
+	}
 
 	// Build a synthetic tenant context for tenancy.ApplyTenant. The
 	// upstream chi middleware already put the tenant id on the request
@@ -71,7 +81,7 @@ func (r *DBAttrsResolver) AttrsFor(ctx context.Context, tenantID, userID string,
 	q := dbx.New(tx)
 	rows, err := q.GetAuditPeriodIDsForUser(ctx, dbx.GetAuditPeriodIDsForUserParams{
 		TenantID: pgUUID(uuid.MustParse(tenantID)),
-		UserID:   userID,
+		UserID:   user.String(),
 	})
 	if err != nil {
 		if err == pgx.ErrNoRows {

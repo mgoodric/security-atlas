@@ -43,6 +43,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/audit/notes"
 	"github.com/mgoodric/security-atlas/internal/audit/notifications"
+	"github.com/mgoodric/security-atlas/internal/identity"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -354,17 +355,17 @@ func (h *Handler) authnContext(r *http.Request) (context.Context, credstore.Cred
 
 // userRecipients turns the prior-thread authors into notification
 // recipients: each one's bare users(id), the form every notification reader
-// and digest channel looks up (#2183). Authors are stored as the raw
+// and digest channel looks up (#2183), via identity.UserID. Authors are stored as the raw
 // cred.UserID, so one person can appear as both "user:<uuid>" and "<uuid>";
 // they collapse to one recipient, and the note's own author is dropped.
 // Authors that name no user (an unbound key, bootstrap-admin, a machine
 // token) have no inbox and get no notification.
 func userRecipients(authors []string, noteAuthor string) []string {
-	self, _ := credstore.SubjectUserID(noteAuthor)
+	self, _ := identity.UserID(noteAuthor)
 	seen := map[uuid.UUID]bool{}
 	var out []string
 	for _, a := range authors {
-		u, ok := credstore.SubjectUserID(a)
+		u, ok := identity.UserID(a)
 		if !ok || u == self || seen[u] {
 			continue
 		}

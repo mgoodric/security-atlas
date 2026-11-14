@@ -24,6 +24,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/identity"
 )
 
 // ErrUnknownKey indicates a lookup or operation referenced a key that
@@ -705,8 +707,9 @@ func MinterUserID(c Credential) string {
 //     ("bootstrap-admin") and a machine token ("oauth_client:<id>") are not
 //     users and never resolve, even when the remainder happens to parse.
 //
-// Authorization never reads this value: resolveRoles and authz.BuildInput
-// keep the raw cred.UserID.
+// Authorization inputs never carry this value: resolveRoles and
+// authz.BuildInput keep the raw cred.UserID. The prefix rule itself lives in
+// identity.UserID, shared with the auditor attrs resolver.
 func CallerUserID(c Credential) (uuid.UUID, bool) {
 	if c.UserID == "" || c.UserID == c.ID {
 		return uuid.Nil, false
@@ -714,22 +717,7 @@ func CallerUserID(c Credential) (uuid.UUID, bool) {
 	if strings.TrimPrefix(c.UserID, "user:") == c.ID {
 		return uuid.Nil, false
 	}
-	return SubjectUserID(c.UserID)
-}
-
-// SubjectUserID returns the users(id) named by a stored principal string,
-// such as an audit-note author_user_id recorded from cred.UserID: the
-// "user:<uuid>" JWT form or a bare uuid. Anything else ("key_...",
-// "bootstrap-admin", "oauth_client:<id>") names no user. Use CallerUserID
-// for a live credential; this cannot tell an unbound key whose id is
-// uuid-shaped from a user, so it is only for strings already written as a
-// user id.
-func SubjectUserID(s string) (uuid.UUID, bool) {
-	u, err := uuid.Parse(strings.TrimPrefix(s, "user:"))
-	if err != nil || u == uuid.Nil {
-		return uuid.Nil, false
-	}
-	return u, true
+	return identity.UserID(c.UserID)
 }
 
 // OwnedByUser reports whether c belongs to a user: its UserID is a users(id)

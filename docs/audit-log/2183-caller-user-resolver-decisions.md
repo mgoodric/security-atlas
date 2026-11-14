@@ -10,7 +10,7 @@ change moves the resolver into `credstore.CallerUserID` and uses it everywhere.
 
 **Detection-tier classification (slice 353 / Q-13):**
 
-- `detection_tier_actual`: manual_review
+- `detection_tier_actual`: manual_review (the first commit); integration (the self-demotion guard and the audit-notes HTTP authz gap, both surfaced by new tests)
 - `detection_tier_target`: integration
 
 The bug was found in review of #2162, not by a test: the integration suites for
@@ -76,11 +76,58 @@ same PR.
   could ever see it.
 - Channel opt-in already resolved through the shared helper (`parseCredIDs`,
   updated in the first commit).
-- Rows written before this change addressed to `user:<uuid>` stay as they are:
-  they are courtesy notifications, and rewriting them is a data migration
-  nobody asked for.
+- Rows written before this change are rewritten by migration
+  `20261021000000` (D7).
 
-## D6 — audited, left alone
+## D6 — `internal/identity` holds the prefix rule
+
+The `user:<uuid>` rule is needed below the API layer (the auditor attrs
+resolver in `internal/audit/auditor`), where importing `internal/api/credstore`
+would invert the layering. `identity.UserID` is a dependency-free function that
+both `credstore.CallerUserID` and the resolver call, so there is one copy of the
+rule. `CallerUserID` adds the one check a bare string cannot make: an unbound
+key whose own id is uuid-shaped is not a user.
+
+## D7 — migration `20261021000000` normalizes stored principals
+
+`notifications.recipient_user_id` and `auditor_assignments.user_id` are
+rewritten from `user:<uuid>` to the lower-cased bare uuid. Only a canonical
+uuid suffix qualifies; the nil uuid, `key_...`, `oauth_client:...` and the e2e
+fixture's email id are left alone. A grant held in both forms collapses to the
+bare row before the UPDATE, so the `auditor_assignments` primary key cannot
+collide. The migration is idempotent; its test applies it twice.
+
+The down migration is a no-op. The rewrite does not record which rows it
+touched, and a rewritten row is indistinguishable from one written bare, so
+re-adding the prefix would corrupt rows that never had it.
+
+## D8 — auditor assignments key on the bare users(id)
+
+Both readers resolve to it: `/v1/me/audit-period(s)` through `CallerUserID`,
+and `auditor.DBAttrsResolver` through `identity.UserID`. Only the resolver's
+lookup key changes; the raw `cred.UserID` still flows into `resolveRoles` and
+`BuildInput`. A principal that names no user hydrates no audit periods, even
+when an assignment row carries that exact string. An empty `UserID` on
+`/v1/me/audit-period(s)` keeps its 401 (AC-4).
+
+Found while testing, outside #2183: the HTTP authz middleware never sets
+`input.resource.attrs.audit_period_id` for `POST /v1/audit-notes`, so the
+`auditor_period_matches` write rule cannot match over HTTP for any auditor,
+bare or prefixed subject (verified: both get 403). The end-to-end test asserts
+the write at `Engine.Decide` with the period supplied, and the gap is reported
+on PR #2186 for its own ticket.
+
+## D9 — other callers moved to the resolver
+
+- `adminframeworkversions` `actorID` takes the credential and resolves it with
+  `CallerUserID`; it parsed `jwtmw.SubjectUserID(subject)` on a string the
+  grep guard could not see.
+- The `adminusers` self-demotion guard compared the raw `cred.UserID` with the
+  bare target id. For a local-login admin that never matched, so the admin
+  could drop their own admin role with no confirmation (the new test returns
+  200 on the old code).
+
+## D10 — audited, left alone
 
 - `audit_notes.author_user_id` stays the raw `cred.UserID`. Private-note
   visibility filters on it by exact match; normalizing it changes who sees
