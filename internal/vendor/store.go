@@ -50,6 +50,10 @@ func (s *Store) Create(ctx context.Context, in CreateVendorInput) (Vendor, error
 	}
 	var out Vendor
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		window, err := initialReviewDays(ctx, q, tenantID)
+		if err != nil {
+			return err
+		}
 		vendorID := uuid.New()
 		row, err := q.CreateVendor(ctx, dbx.CreateVendorParams{
 			ID:               pgUUID(vendorID),
@@ -86,7 +90,7 @@ func (s *Store) Create(ctx context.Context, in CreateVendorInput) (Vendor, error
 		if err := bindScopeCells(ctx, q, tenantID, vendorID, in.ScopeCellIDs); err != nil {
 			return err
 		}
-		v, err := hydrate(ctx, q, tenantID, row)
+		v, err := hydrate(ctx, q, tenantID, row, window)
 		if err != nil {
 			return err
 		}
@@ -109,6 +113,10 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateVendorInput) 
 	}
 	var out Vendor
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		window, err := initialReviewDays(ctx, q, tenantID)
+		if err != nil {
+			return err
+		}
 		row, err := q.UpdateVendor(ctx, dbx.UpdateVendorParams{
 			TenantID:         pgUUID(tenantID),
 			ID:               pgUUID(id),
@@ -155,7 +163,7 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateVendorInput) 
 		if err := bindScopeCells(ctx, q, tenantID, id, in.ScopeCellIDs); err != nil {
 			return err
 		}
-		v, err := hydrate(ctx, q, tenantID, row)
+		v, err := hydrate(ctx, q, tenantID, row, window)
 		if err != nil {
 			return err
 		}
@@ -169,6 +177,10 @@ func (s *Store) Update(ctx context.Context, id uuid.UUID, in UpdateVendorInput) 
 func (s *Store) Get(ctx context.Context, id uuid.UUID) (Vendor, error) {
 	var out Vendor
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		window, err := initialReviewDays(ctx, q, tenantID)
+		if err != nil {
+			return err
+		}
 		row, err := q.GetVendor(ctx, dbx.GetVendorParams{
 			TenantID: pgUUID(tenantID),
 			ID:       pgUUID(id),
@@ -179,7 +191,7 @@ func (s *Store) Get(ctx context.Context, id uuid.UUID) (Vendor, error) {
 			}
 			return fmt.Errorf("get vendor: %w", err)
 		}
-		v, err := hydrate(ctx, q, tenantID, row)
+		v, err := hydrate(ctx, q, tenantID, row, window)
 		if err != nil {
 			return err
 		}
@@ -215,9 +227,12 @@ type ListFilter struct {
 func (s *Store) List(ctx context.Context, f ListFilter) ([]Vendor, error) {
 	var out []Vendor
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		window, err := initialReviewDays(ctx, q, tenantID)
+		if err != nil {
+			return err
+		}
 		critArg := pgCriticality(f.Criticality)
 		var rows []dbx.Vendor
-		var err error
 		if f.OverdueOnly {
 			cutoff := f.Cutoff
 			if cutoff.IsZero() {
@@ -240,7 +255,7 @@ func (s *Store) List(ctx context.Context, f ListFilter) ([]Vendor, error) {
 		}
 		out = make([]Vendor, 0, len(rows))
 		for _, r := range rows {
-			v, err := hydrate(ctx, q, tenantID, r)
+			v, err := hydrate(ctx, q, tenantID, r, window)
 			if err != nil {
 				return err
 			}
@@ -336,7 +351,21 @@ func bindScopeCells(ctx context.Context, q *dbx.Queries, tenantID, vendorID uuid
 	return nil
 }
 
-func hydrate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, r dbx.Vendor) (Vendor, error) {
+// initialReviewDays reads the tenant's vendor initial-review window (#2061).
+// A tenant with no `tenants` row gets DefaultInitialReviewDays, the same
+// default the overdue SQL COALESCEs to.
+func initialReviewDays(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (int, error) {
+	days, err := q.GetTenantVendorInitialReviewDays(ctx, pgUUID(tenantID))
+	if errors.Is(err, pgx.ErrNoRows) {
+		return DefaultInitialReviewDays, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read vendor initial review window: %w", err)
+	}
+	return int(days), nil
+}
+
+func hydrate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, r dbx.Vendor, initialReviewDays int) (Vendor, error) {
 	cells, err := q.ListVendorScopeCells(ctx, dbx.ListVendorScopeCellsParams{
 		TenantID: pgUUID(tenantID),
 		VendorID: r.ID,
@@ -347,6 +376,11 @@ func hydrate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, r dbx.Vend
 	cellIDs := make([]uuid.UUID, 0, len(cells))
 	for _, c := range cells {
 		cellIDs = append(cellIDs, uuid.UUID(c.Bytes))
+	}
+	var firstReviewDue *time.Time
+	if !r.LastReviewDate.Valid {
+		d := FirstReviewDueDate(r.CreatedAt.Time, initialReviewDays)
+		firstReviewDue = &d
 	}
 	return Vendor{
 		ID:             uuid.UUID(r.ID.Bytes),
@@ -373,6 +407,7 @@ func hydrate(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, r dbx.Vend
 		Status:         CommercialStatus(r.CommercialStatus),
 		BillingCadence: fromBillingCadence(r.BillingCadence),
 		ScopeCellIDs:   cellIDs,
+		FirstReviewDue: firstReviewDue,
 		CreatedAt:      r.CreatedAt.Time,
 		UpdatedAt:      r.UpdatedAt.Time,
 	}, nil
