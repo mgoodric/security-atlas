@@ -14,6 +14,7 @@ import { rowsFromAnchors } from "@/app/(authed)/controls/view";
 
 import {
   activeControlsTotal,
+  ANCHORS_MAX_PAGES,
   ANCHORS_PAGE_LIMIT,
   fetchCatalogCounts,
   fetchControlsCatalog,
@@ -83,9 +84,13 @@ describe("active control count (issue 1832)", () => {
       expect(badge).toBe(n);
       expect(page.total).toBe(badge);
       expect(page.controls).toHaveLength(badge);
-      expect(seen[0]).toContain("limit=1");
-      for (const u of seen) {
-        expect(u.startsWith("/api/controls-list?include=state")).toBe(true);
+      // Parse rather than string-match, so the assertion does not depend
+      // on the order the client appends query parameters in.
+      const urls = seen.map((u) => new URL(u, "http://localhost"));
+      expect(urls[0].searchParams.get("limit")).toBe("1");
+      for (const u of urls) {
+        expect(u.pathname).toBe("/api/controls-list");
+        expect(u.searchParams.get("include")).toBe("state");
       }
     },
   );
@@ -195,6 +200,7 @@ describe("fetchControlsCatalog (issue 1740)", () => {
       result: "all",
       freshness: "all",
       scope: "all",
+      anchor_fit: "all",
     });
     expect(late).toHaveLength(200);
   });
@@ -216,21 +222,37 @@ describe("fetchControlsCatalog (issue 1740)", () => {
     }
   });
 
-  test("caps the walk when the total never arrives", async () => {
-    // Every page is full and the reported total is out of reach.
-    vi.spyOn(globalThis, "fetch").mockImplementation(
-      async () =>
-        new Response(
-          JSON.stringify({
-            anchors: fakeAnchors(ANCHORS_PAGE_LIMIT),
-            total: 1_000_000,
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-    );
+  test("caps the walk when the total is out of reach", async () => {
+    // Every page is full and the reported total is past the page cap.
+    const { seen } = stubCatalogBFF(12_000);
     const got = await fetchControlsCatalog();
-    expect(globalThis.fetch).toHaveBeenCalledTimes(20);
-    expect(got.anchors).toHaveLength(20 * ANCHORS_PAGE_LIMIT);
+    expect(seen).toHaveLength(ANCHORS_MAX_PAGES);
+    expect(got.anchors).toHaveLength(ANCHORS_MAX_PAGES * ANCHORS_PAGE_LIMIT);
+    expect(got.total).toBe(12_000);
+  });
+
+  // Issue #1895 — a row inserted ahead of the cursor between two page
+  // reads shifts the next page by one, so its first anchor repeats the
+  // last anchor of the page before.
+  test("keeps one copy of an anchor that two pages both carry", async () => {
+    const all = fakeAnchors(700);
+    const seen: URL[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = new URL(String(input), "http://test.local");
+      seen.push(url);
+      const offset = Number(url.searchParams.get("offset") ?? "0");
+      const start = offset === 0 ? 0 : offset - 1;
+      const page = all.slice(start, start + ANCHORS_PAGE_LIMIT);
+      return new Response(JSON.stringify({ anchors: page, total: 701 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const got = await fetchControlsCatalog();
+    expect(seen.map((u) => u.searchParams.get("offset"))).toEqual(["0", "500"]);
+    const ids = got.anchors.map((a) => a.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toHaveLength(700);
   });
 
   test("throws when a page fails", async () => {

@@ -54,6 +54,10 @@ const (
 	SurfaceGapExplanation Surface = "gap_explanation"
 	SurfaceChecklist      Surface = "checklist"
 	SurfaceSummary        Surface = "summary"
+	// SurfaceControlImport is the control importer's anchor rerank and
+	// rationale (#1781), its own label so usage reporting and opt-in do not
+	// count imports as questionnaires.
+	SurfaceControlImport Surface = "control_import"
 )
 
 // validSurfaces is the canonical set; ValidSurface gates writer + request
@@ -65,6 +69,7 @@ var validSurfaces = map[Surface]bool{
 	SurfaceGapExplanation: true,
 	SurfaceChecklist:      true,
 	SurfaceSummary:        true,
+	SurfaceControlImport:  true,
 }
 
 // ValidSurface reports whether s is a known AI-assist surface.

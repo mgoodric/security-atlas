@@ -39,6 +39,7 @@ const FRESH_VIEW_FILTERS = {
   result: "fail",
   freshness: "stale",
   scope: ALL,
+  anchor_fit: ALL,
 };
 
 describe("sanitizeFilters", () => {
