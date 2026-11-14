@@ -3,7 +3,6 @@ package dashboard
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"time"
 
@@ -31,7 +30,6 @@ const trendWindow = 90 * 24 * time.Hour
 type reader interface {
 	FrameworkPosture(ctx context.Context, trendCutoff pgtype.Timestamptz) ([]dbx.FrameworkPostureRow, error)
 	ActivityFeed(ctx context.Context, cursor keyset, pageRows int32) ([]dbx.ListEvidenceActivityRow, error)
-	UpcomingItems(ctx context.Context, categoryFilter string, cursor keyset, pageRows int32) ([]dbx.ListUpcomingItemsRow, error)
 }
 
 // Handler bundles the slice-066 dashboard read routes over a single Store.
@@ -53,10 +51,9 @@ func newHandlerWithReader(r reader) *Handler { return &Handler{store: r} }
 
 // ===== wire shapes =====
 //
-// The three row shapes are the slice-066 acceptance-criteria contracts and
-// match slice 040's four placeholder contracts (the frontend re-pointing of
-// framework-posture-panel / activity-feed-panel / upcoming-panel is the
-// documented follow-up).
+// The row shapes are the slice-066 acceptance-criteria contracts. The
+// third, the AC-4 upcoming rollup, was retired by #2130: the compliance
+// calendar (GET /v1/calendar) is the one list of what is due.
 
 // postureWire is the AC-1 row shape: one framework version's posture.
 type postureWire struct {
@@ -75,15 +72,6 @@ type activityWire struct {
 	ResourceType string          `json:"resource_type"`
 	ResourceID   string          `json:"resource_id"`
 	Summary      json.RawMessage `json:"summary"`
-}
-
-// upcomingWire is the AC-4 row shape: one upcoming item.
-type upcomingWire struct {
-	DueDate      string `json:"due_date"`
-	Category     string `json:"category"`
-	Title        string `json:"title"`
-	ResourceType string `json:"resource_type"`
-	ResourceID   string `json:"resource_id"`
 }
 
 // ===== AC-1: GET /v1/frameworks/posture =====
@@ -184,71 +172,6 @@ func (h *Handler) Activity(w http.ResponseWriter, r *http.Request) {
 
 }
 
-// ===== AC-4: GET /v1/upcoming =====
-
-// Upcoming handles GET /v1/upcoming — a unified rollup across expiring
-// exceptions, policy-ack expirations, vendor reviews, vendor renewals, and audit-period
-// milestones, merged into one date-sorted (ascending) paginated feed.
-//
-// Query params:
-//   - cursor   (optional) opaque keyset cursor. Omit for the first page.
-//   - limit    (optional) page size, default 50, max 200.
-//   - category (optional) one of exception / policy_ack / vendor_review /
-//     vendor_renewal /
-//     audit_period — narrows to one source. Omit for all.
-func (h *Handler) Upcoming(w http.ResponseWriter, r *http.Request) {
-	if !requireProgramRead(w, r) {
-		return
-	}
-	ctx, ok := tenantContext(r)
-	if !ok {
-		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
-		return
-	}
-
-	category := r.URL.Query().Get("category")
-	if category != "" && !validUpcomingCategory(category) {
-		httpresp.WriteError(w, http.StatusBadRequest,
-			"category must be one of: exception, policy_ack, vendor_review, vendor_renewal, audit_period")
-
-		return
-	}
-	cursor, err := decodeCursor(r.URL.Query().Get("cursor"), firstPageUpcoming())
-	if err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	pageRows, err := parseLimit(r.URL.Query().Get("limit"))
-	if err != nil {
-		httpresp.WriteError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	rows, err := h.store.UpcomingItems(ctx, category, cursor, pageRows)
-	if err != nil {
-		httperr.WriteInternal(w, r, "dashboard", err)
-		return
-	}
-
-	page, next := splitUpcomingPage(rows, pageRows)
-	out := make([]upcomingWire, len(page))
-	for i, it := range page {
-		out[i] = upcomingWire{
-			DueDate:      tsString(it.DueDate),
-			Category:     it.Category,
-			Title:        anyToString(it.Title),
-			ResourceType: it.ResourceType,
-			ResourceID:   it.ResourceID,
-		}
-	}
-	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
-		"upcoming":    out,
-		"count":       len(out),
-		"next_cursor": next,
-	})
-
-}
-
 // ===== page-splitting =====
 
 // splitActivityPage trims the +1 probe row off an activity result set and
@@ -264,29 +187,7 @@ func splitActivityPage(rows []dbx.ListEvidenceActivityRow, pageRows int32) ([]db
 	return page, encodeCursor(keyset{ts: last.Ts.Time.UTC(), id: last.ResourceID})
 }
 
-// splitUpcomingPage is splitActivityPage's twin for the upcoming rollup.
-func splitUpcomingPage(rows []dbx.ListUpcomingItemsRow, pageRows int32) ([]dbx.ListUpcomingItemsRow, string) {
-	if int32(len(rows)) <= pageRows {
-		return rows, ""
-	}
-	page := rows[:pageRows]
-	last := page[len(page)-1]
-	return page, encodeCursor(keyset{ts: last.DueDate.Time.UTC(), id: last.ResourceID})
-}
-
 // ===== helpers =====
-
-// validUpcomingCategory reports whether c is one of the rollup
-// category names. The empty string ("all") is handled before this is
-// called.
-func validUpcomingCategory(c string) bool {
-	switch c {
-	case "exception", "policy_ack", "vendor_review", "vendor_renewal", "audit_period":
-		return true
-	default:
-		return false
-	}
-}
 
 // tenantContext confirms the upstream slice-033 tenancy middleware lifted a
 // tenant id onto the request context. Absent it, the request is
@@ -337,22 +238,4 @@ func jsonOrNull(b []byte) json.RawMessage {
 		return json.RawMessage("null")
 	}
 	return json.RawMessage(b)
-}
-
-// anyToString renders the upcoming rollup's `title` column. sqlc types it
-// as interface{} because it is a `||` string concatenation it cannot
-// statically resolve; at runtime pgx scans it as a string. A nil value
-// (impossible for the rollup's non-null concatenations, but defensive)
-// renders "".
-func anyToString(v any) string {
-	switch s := v.(type) {
-	case string:
-		return s
-	case []byte:
-		return string(s)
-	case nil:
-		return ""
-	default:
-		return fmt.Sprintf("%v", v)
-	}
 }
