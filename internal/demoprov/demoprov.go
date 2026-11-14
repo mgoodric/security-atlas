@@ -9,7 +9,10 @@
 // it is demo.
 //
 // Lookups run on the caller's querier, inside its tenant transaction, so RLS
-// scopes demo_seed_rows to the caller's tenant like every other read.
+// scopes demo_seed_rows to the caller's tenant like every other read. The
+// query also names the context's tenant explicitly (#2153), so a connection
+// RLS does not bind still reads one tenant's marks, and a context with no
+// tenant reads none.
 package demoprov
 
 import (
@@ -20,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // Tables whose rows carry the demo mark, named as demo_seed_rows.table_name
@@ -44,13 +48,28 @@ func (s Set) Has(id uuid.UUID) bool {
 	return ok
 }
 
-// Lookup returns which of ids the in-place demo seed added to table. An
-// empty ids slice issues no query.
+// Lookup returns which of ids the in-place demo seed added to table, for the
+// tenant in ctx. An empty ids slice issues no query; a ctx with no tenant is
+// an error, not an empty set.
 func Lookup(ctx context.Context, q Querier, table string, ids []uuid.UUID) (Set, error) {
 	if len(ids) == 0 {
 		return Set{}, nil
 	}
-	arg := dbx.DemoSeededIDsParams{TableName: table, Ids: make([]pgtype.UUID, len(ids))}
+	// tenancy.WithTenant only stores a parseable id, so the Parse cannot
+	// fail after TenantFromContext succeeds; it shares the error path.
+	var tenantID uuid.UUID
+	tenantStr, err := tenancy.TenantFromContext(ctx)
+	if err == nil {
+		tenantID, err = uuid.Parse(tenantStr)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("demoprov: lookup %s: tenant: %w", table, err)
+	}
+	arg := dbx.DemoSeededIDsParams{
+		TenantID:  pgtype.UUID{Bytes: tenantID, Valid: true},
+		TableName: table,
+		Ids:       make([]pgtype.UUID, len(ids)),
+	}
 	for i, id := range ids {
 		arg.Ids[i] = pgtype.UUID{Bytes: id, Valid: true}
 	}
