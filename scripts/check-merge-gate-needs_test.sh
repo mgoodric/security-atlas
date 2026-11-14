@@ -124,11 +124,72 @@ assert_eq "$rc" "2" "missing workflow exits 2"
 printf 'jobs:\n  changes:\n    runs-on: ubuntu-latest\n' > "$tmp/nogate.yml"
 run "$tmp/nogate.yml"
 assert_eq "$rc" "2" "workflow without merge-gate exits 2"
+printf 'jobs:\n  changes:\n    runs-on: x\n  merge-gate:\n    runs-on: x\n' > "$tmp/noneeds.yml"
+run "$tmp/noneeds.yml"
+assert_eq "$rc" "2" "merge-gate without needs exits 2"
+printf 'jobs:\n  changes: [unclosed\n' > "$tmp/bad.yml"
+run "$tmp/bad.yml"
+assert_eq "$rc" "2" "invalid YAML exits 2"
+
+# Case 8 — flow-style needs is read as YAML, not refused (#1950).
 printf 'jobs:\n  changes:\n    runs-on: x\n  merge-gate:\n    needs: [changes]\n' > "$tmp/flow.yml"
 run "$tmp/flow.yml"
-assert_eq "$rc" "2" "flow-style needs exits 2"
+assert_eq "$rc" "0" "flow-style needs passes"
 
-# Case 8 — the real ci.yml passes with the real allowlist.
+# Case 9 — a job key with a trailing comment, or quoted, is still a job
+# (#1950). The awk parser folded it into the previous job and skipped it.
+cat > "$tmp/keys.yml" <<'EOF'
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+  commented:  # the comment hid this job from the awk parser
+    runs-on: ubuntu-latest
+  "quoted":
+    runs-on: ubuntu-latest
+  merge-gate:
+    needs:
+      - changes
+    if: always()
+EOF
+run "$tmp/keys.yml"
+assert_eq "$rc" "1" "commented and quoted job keys are checked"
+assert_contains "$out" "'commented' runs on every PR" "commented job key is named"
+assert_contains "$out" "'quoted' runs on every PR" "quoted job key is named"
+
+# Case 10 — always() and !cancelled() run on every PR, so they are
+# unconditional (#1950); always() && <filter> stays conditional.
+cat > "$tmp/always.yml" <<'EOF'
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+  bare-always:
+    if: always()
+  expr-always:
+    if: ${{ always() }}
+  bare-not-cancelled:
+    if: "!cancelled()"
+  expr-not-cancelled:
+    if: ${{ !cancelled() }}
+  filtered:
+    if: always() && needs.changes.outputs.code == 'true'
+  merge-gate:
+    needs:
+      - changes
+    if: always()
+EOF
+run "$tmp/always.yml"
+assert_eq "$rc" "1" "always()/!cancelled() jobs outside needs fail"
+for j in bare-always expr-always bare-not-cancelled expr-not-cancelled; do
+  assert_contains "$out" "'$j' runs on every PR" "$j is unconditional"
+done
+if [[ "$out" == *"'filtered'"* ]]; then
+  fail=$((fail + 1))
+  fail_messages+=("FAIL: always() && <filter> treated as unconditional")
+else
+  pass=$((pass + 1))
+fi
+
+# Case 11 — the real ci.yml passes with the real allowlist.
 set +e
 out="$(cd "$REPO_ROOT" && bash "$SCRIPT" 2>&1)"
 rc=$?

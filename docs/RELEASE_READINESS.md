@@ -48,6 +48,13 @@ The slice issue gates the public flip on three previously-deferred open question
 
 Trace: `CONTEXT.md → License posture` (slice 050 entry).
 
+**Clarified 2026-11-13 (issue #1717, Matt).** SCF is CC BY-ND 4.0, which permits verbatim, attributed excerpts. Two such excerpts are allowed:
+
+- **A test-only ID/title pin.** `internal/api/scfseed/testdata/scf-pin.json` holds SCF IDs and titles only, with attribution. It is not in any built artifact.
+- **The shipped sample** (`migrations/fixtures/scf-sample.json`). It uses official SCF IDs and titles verbatim, with CC BY-ND attribution in its header. Its descriptions stay in our own words, not SCF text.
+
+The full SCF catalog is still never bundled. See `docs/audit-log/1717-scf-pin-ratchet-decisions.md` D3.
+
 ### OQ #3 — Project license
 
 **Resolution:** **Apache 2.0.** Permissive licensing is the canonical instance of the "license that lets the platform be embedded in commercial deployments" requirement from canvas §1.2 — the same requirement that disqualifies OpenGRC's CC BY-NC-SA. AGPL was considered and rejected because it would block the same commercial-embedding use case the platform targets.

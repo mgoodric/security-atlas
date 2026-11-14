@@ -2,6 +2,8 @@
   "schema_version": "1.0",
   "release_version": "test-2026.1",
   "release_date": "2026-01-15",
+  "attribution": "Control IDs and titles are from the Secure Controls Framework (SCF) 2026.3, (c) Secure Controls Framework Council, LLC, https://securecontrolsframework.com, used unmodified. Descriptions are security-atlas's own wording, not SCF text. Rows not yet aligned to SCF 2026.3 are tracked in internal/api/scfseed/scfpin_test.go (issue #1717).",
+  "license": "SCF content: CC BY-ND 4.0, https://creativecommons.org/licenses/by-nd/4.0/ (SCF EULA: https://securecontrolsframework.com/terms-conditions/)",
   "controls": [
     {
       "scf_id": "IAC-01",

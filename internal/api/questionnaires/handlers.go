@@ -204,7 +204,8 @@ func (h *Handler) ImportExcel(w http.ResponseWriter, r *http.Request) {
 	parsed, err := questionnaire.ParseExcel(raw)
 	if err != nil {
 		switch {
-		case errors.Is(err, questionnaire.ErrUploadTooLarge):
+		case errors.Is(err, questionnaire.ErrUploadTooLarge),
+			errors.Is(err, questionnaire.ErrDecompressedTooLarge):
 			httpresp.WriteError(w, http.StatusRequestEntityTooLarge, err.Error())
 		case errors.Is(err, questionnaire.ErrEmptyWorkbook),
 			errors.Is(err, questionnaire.ErrNoHeaderRow),
