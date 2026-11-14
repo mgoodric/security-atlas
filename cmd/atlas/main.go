@@ -435,13 +435,19 @@ func main() {
 			superAdmins := superadmin.NewDBChecker(resolverAuthPool)
 			ep.AttachSuperAdminChecker(superAdmins)
 			srv.AttachSuperAdminChecker(superAdmins)
-			authorizeEP := oauthapi.NewAuthorizeEndpoint(oauthapi.AuthorizeEndpointConfig{
+			authorizeCfg := oauthapi.AuthorizeEndpointConfig{
 				Codes:    codeStore,
 				Clients:  clients,
 				Sessions: sessions.NewStore(pool, 0),
 				Users:    localAuthResolver,
 				Issuer:   issuer,
-			})
+			}
+			// #1761: on a single-tenant install /oauth/authorize may omit
+			// tenant_id. The lookup needs the BYPASSRLS pool.
+			if resolverAuthPool != nil {
+				authorizeCfg.ImplicitTenant = authapi.PoolImplicitTenantResolver{Q: resolverAuthPool}.ImplicitTenant
+			}
+			authorizeEP := oauthapi.NewAuthorizeEndpoint(authorizeCfg)
 			oauthHandler.AttachAuthorizeEndpoint(authorizeEP)
 			logger.Info("atlas: OAuth authorize endpoint wired",
 				"pkce_methods", "S256")
