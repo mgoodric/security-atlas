@@ -73,6 +73,7 @@ var beforeControlUpload func(ctx context.Context, bundleID string)
 type DecisionStore interface {
 	ApproveRow(ctx context.Context, in ApproveRowInput) (RowDecision, error)
 	RejectRow(ctx context.Context, in RejectRowInput) (RowDecision, error)
+	ApproveClear(ctx context.Context, in ApproveClearInput) (ApproveClearResult, error)
 }
 
 // ApproveRowInput approves one staged row with one of its candidates
@@ -91,6 +92,10 @@ type ApproveRowInput struct {
 	// attestation, applicable everywhere.
 	ImplementationType string
 	ApplicabilityExpr  map[string]any
+	// auditReason is written to the approval's audit row. Only
+	// ApproveClear sets it (BulkAuditReason), so an auditor can tell the
+	// rows of one bulk action apart; the API cannot.
+	auditReason string
 }
 
 // RejectRowInput rejects one staged row with a reason.
@@ -302,7 +307,7 @@ func (s *Store) ApproveRow(ctx context.Context, in ApproveRowInput) (RowDecision
 			BatchID: row.BatchID, RowID: in.RowID, RowNumber: row.RowNumber, OrgControlID: row.ExternalID,
 			Action: "approve", Actor: in.Approver,
 			SCFAnchorID: out.SCFAnchorID, SCFID: scfID, SCFRelease: out.SCFRelease,
-			ControlID: out.ControlID, BundleID: out.BundleID,
+			ControlID: out.ControlID, BundleID: out.BundleID, Reason: in.auditReason,
 		})
 	})
 	if err != nil {
@@ -421,7 +426,7 @@ func markDuplicate(ctx context.Context, tx pgx.Tx, tenantID string, in ApproveRo
 	}
 	return insertAudit(ctx, tx, tenantID, auditEntry{
 		BatchID: row.BatchID, RowID: in.RowID, RowNumber: row.RowNumber, OrgControlID: row.ExternalID,
-		Action: "duplicate", Actor: in.Approver, ControlID: existing,
+		Action: "duplicate", Actor: in.Approver, ControlID: existing, Reason: in.auditReason,
 	})
 }
 
