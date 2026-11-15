@@ -91,7 +91,7 @@ func TestControlsImportApprove_WithSearchedAnchorAndRowID(t *testing.T) {
 	srv := api.server(t)
 
 	out, err := runImportCmd(t, "--endpoint", srv.URL, "--token", "tok",
-		"controls", "import", "approve", "batch-1", "row-uuid-3", "--scf-id", "MON-01",
+		"controls", "import", "approve", "batch-1", "row-uuid-3", "--scf-id", "MON-02",
 		"--applicability-expr", `{"op":"eq","dim":"env","value":"prod"}`)
 	if err != nil {
 		t.Fatalf("approve: %v\n%s", err, out)
@@ -99,7 +99,7 @@ func TestControlsImportApprove_WithSearchedAnchorAndRowID(t *testing.T) {
 	if api.gotPath != "/v1/controls/imports/batch-1/rows/row-uuid-3/approve" {
 		t.Errorf("path = %q", api.gotPath)
 	}
-	if api.gotBody["scf_id"] != "MON-01" || api.gotBody["candidate_rank"] != nil {
+	if api.gotBody["scf_id"] != "MON-02" || api.gotBody["candidate_rank"] != nil {
 		t.Errorf("body = %v", api.gotBody)
 	}
 	if appl, ok := api.gotBody["applicability_expr"].(map[string]any); !ok || appl["dim"] != "env" {
