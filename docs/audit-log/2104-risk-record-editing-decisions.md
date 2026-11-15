@@ -99,6 +99,17 @@ calendar day, as the form and History do. The platform renders
 timestamps in its own zone, so slicing the string could show a different
 day from the one saved.
 
+**D13: A record-only edit takes no category lock.** #2233 (#2335) holds
+the target category `FOR SHARE` inside `ResolveCategoryTx`, and PATCH
+calls that only when the body names `category`. A PATCH of record fields
+alone never resolves a category, so it takes no category lock. It locks
+the risk row (`LockRiskByID`), as the placement path already did.
+`UpdateRisk` writes back the category enum the locked row already
+holds, so the `risks_category_sync` trigger sees no category move. A
+PATCH that names `category` takes the share lock first and then the
+risk row, in the order #2335 set. The review of #2310 against #2335
+found no lock-order conflict.
+
 ## Not done here
 
 - Treatment and acceptance transitions (propose, approve, change

@@ -135,8 +135,11 @@ func (s *Store) UpdatePlacement(ctx context.Context, riskID uuid.UUID, in Placem
 	}
 	var out Risk
 	err := s.inTxRuleLocked(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, lastAttempt bool) error {
-		// Lock order (#1867, #2204): the vocabulary first, then the rules'
-		// advisory locks, then the row, as AssignThemes and Delete do.
+		// Lock order (#1867, #2204, #2233): the target category row FOR
+		// SHARE first (ResolveCategoryTx), then the rules' advisory locks,
+		// then the risk row, as AssignThemes and Delete take their
+		// vocabulary and rule locks. Category admin locks only category
+		// rows, so no path takes these in the reverse order.
 		var (
 			category     Category
 			categoryEnum dbx.RiskCategory

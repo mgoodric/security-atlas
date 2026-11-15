@@ -140,9 +140,10 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
 }
 
 /**
- * GATED_MODULES are the slice 660 gating flags (internal/featureflag
- * GatingKeys). Both ship OFF, and since #2092 the route layout checks
- * them server-side — a check `page.route` cannot mock. The board-pack and
+ * GATED_MODULES are the module switches of the two optional modules that
+ * ship OFF (internal/featureflag Modules: Board reporting, Vendor
+ * claims). Since #2092 the route layout checks them server-side — a
+ * check `page.route` cannot mock. The board-pack and
  * vendor-claims specs need the module rendered, so the demo tenant turns
  * both on here, through the real admin API. The off state is covered
  * against a separate tenant that keeps the defaults

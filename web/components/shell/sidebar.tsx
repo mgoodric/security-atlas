@@ -7,7 +7,7 @@ import {
   fetchCsfVersionId,
 } from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
-import { fetchEnabledModules } from "@/lib/feature-nav.server";
+import { fetchEffectiveModules } from "@/lib/feature-nav.server";
 import { buildNav, type NavGroup } from "@/lib/nav";
 import { cn } from "@/lib/utils";
 import { VersionFooter } from "@/components/version-footer";
@@ -27,8 +27,10 @@ import { VersionFooter } from "@/components/version-footer";
 //     `shouldShowAdminEntry` admits the caller's `/v1/me` body. This is
 //     UI chrome only; `app/admin/layout.tsx` is the authz gate. A probe
 //     failure hides the entry (P0-186-4 fail-closed).
-//   * Slice 660 — `gateNavItems` drops Board packs and Vendor claims when
-//     their flags are off, for every user. A probe failure hides both.
+//   * Slice 660 / #2170 — `gateNavItems` drops every entry whose optional
+//     module is switched off, for every user. Which pages a module owns
+//     comes from `GET /v1/me/modules`, the server's registry. A probe
+//     failure gates nothing here; the page's FeatureGate fails closed.
 //
 // One gate is new: CSF assessment renders only when a NIST CSF framework
 // version is loaded, and links to it. A probe failure hides it.
@@ -55,7 +57,7 @@ export async function getAuthedNav(): Promise<NavGroup[]> {
   const bearer = await readBearer();
   const [me, modules, csfVersionId] = await Promise.all([
     bearer ? fetchAdminMeServer(bearer) : Promise.resolve({}),
-    fetchEnabledModules(),
+    fetchEffectiveModules(),
     bearer ? fetchCsfVersionId(bearer) : Promise.resolve(null),
   ]);
   return buildNav({ me, modules, csfVersionId });

@@ -427,12 +427,6 @@
       "functions": 98,
       "lines": 98
     },
-    "app/api/features/enabled/route.ts": {
-      "statements": 98,
-      "branches": 98,
-      "functions": 98,
-      "lines": 98
-    },
     "app/api/install-state/route.ts": {
       "statements": 98,
       "branches": 98,
