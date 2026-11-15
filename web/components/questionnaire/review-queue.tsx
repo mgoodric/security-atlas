@@ -358,7 +358,7 @@ export function ReviewQueue({
                     current.questionId,
                   );
                 }}
-                className="text-xs px-3 py-1 rounded-md border border-destructive/50 text-destructive font-medium hover:bg-destructive/10 disabled:opacity-50"
+                className="text-xs px-3 py-1 rounded-md border border-border bg-background font-medium hover:bg-muted disabled:opacity-50"
               >
                 Reject draft
               </button>
