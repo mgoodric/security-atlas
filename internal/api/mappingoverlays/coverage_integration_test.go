@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -203,12 +204,40 @@ func (f coverageFixture) assertOverlayCounted(t *testing.T, v coverageViews, edg
 		if row["origin"] != "overlay" || row["edge_id"] != edgeID {
 			t.Errorf("%s C2 row = %v; want origin overlay, edge %s", name, row, edgeID)
 		}
+		assertOverlayProvenance(t, name, row)
 	}
+	assertOverlayProvenance(t, "requirement coverage", anchor)
 
-	// The catalog path is still marked catalog.
+	// The catalog path is still marked catalog, with no overlay provenance.
 	c1 := pathTo(decode(t, v.control)["requirements"], "requirement_id", f.requirement["C1"].String())
 	if c1 == nil || c1["origin"] != "catalog" || c1["edge_id"] != f.catalogC1.String() {
 		t.Errorf("control coverage C1 row = %v; want the catalog edge, origin catalog", c1)
+	}
+	if _, ok := c1["overlay"]; ok {
+		t.Errorf("control coverage C1 catalog row carries overlay provenance: %v", c1)
+	}
+}
+
+// assertOverlayProvenance checks an overlay row carries the source, author
+// and date the "org mapping" entry shows (#1800), and the rationale.
+func assertOverlayProvenance(t *testing.T, name string, row map[string]any) {
+	t.Helper()
+	if row["rationale"] != "auditor tested the confidentiality-agreement control under C2" {
+		t.Errorf("%s C2 rationale = %v", name, row["rationale"])
+	}
+	ov, ok := row["overlay"].(map[string]any)
+	if !ok {
+		t.Errorf("%s C2 row has no overlay provenance: %v", name, row)
+		return
+	}
+	if ov["source_ref"] != "FY25 SOC 2 report, section 4, C2" {
+		t.Errorf("%s C2 overlay source_ref = %v", name, ov["source_ref"])
+	}
+	if by, _ := ov["created_by"].(string); by == "" {
+		t.Errorf("%s C2 overlay created_by is empty: %v", name, ov)
+	}
+	if at, _ := ov["created_at"].(string); at == "" || strings.HasPrefix(at, "0001-") {
+		t.Errorf("%s C2 overlay created_at = %v", name, ov["created_at"])
 	}
 }
 

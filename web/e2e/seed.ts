@@ -113,7 +113,11 @@ export type FixtureName =
   | "framework-scope-diff"
   // #2089 — one manual_attested control so attest.spec.ts can load the
   // real attest form (the base control is automated).
-  | "attest";
+  | "attest"
+  // #1800 — a requirement with a catalog edge and a demo-tenant overlay
+  // edge, a control behind the overlay, and a second tenant
+  // (org-mapping.spec.ts).
+  | "org-mapping";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

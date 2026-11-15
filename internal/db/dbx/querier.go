@@ -1792,12 +1792,16 @@ type Querier interface {
 	// non-`no_relationship` STRM edge to an SCF anchor, joined to scf_anchors
 	// so callers get scf_id + family + title in one round-trip. Sorted by
 	// strength DESC (strongest matches first) then scf_id (stable order).
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListAnchorsForRequirementWithEdges(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListAnchorsForRequirementWithEdgesRow, error)
 	// AC-1 + AC-4 (historical pinning arm). Same as
 	// ListAnchorsForRequirementWithEdges, but additionally filtered by the
 	// SCF framework_version_id so callers can pin to a specific SCF
 	// release. When no SCF release is pinned, callers use the unfiltered
 	// variant above.
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx context.Context, arg ListAnchorsForRequirementWithEdgesByFrameworkVersionParams) ([]ListAnchorsForRequirementWithEdgesByFrameworkVersionRow, error)
 	// All answers for a questionnaire, joined to the questions table so
 	// callers can render the questionnaire end-to-end in a single read.
@@ -2611,10 +2615,14 @@ type Querier interface {
 	// callers see the full natural key (slug + version + code) in one
 	// round-trip. Sorted by framework slug + version + code for stable
 	// output. `no_relationship` edges excluded.
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListRequirementsForAnchor(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorRow, error)
 	// AC-2 + AC-4 (framework_version pinning). Same as
 	// ListRequirementsForAnchor but filtered to a specific framework
 	// version id. Used when the caller passes ?framework_version=slug:version.
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListRequirementsForAnchorByFrameworkVersion(ctx context.Context, arg ListRequirementsForAnchorByFrameworkVersionParams) ([]ListRequirementsForAnchorByFrameworkVersionRow, error)
 	// slice 484 (AC-5 / ADR 0019 §4). The DEFAULT (no ?framework_version pin)
 	// reverse traversal: identical to ListRequirementsForAnchor but restricted to
@@ -2624,6 +2632,8 @@ type Querier interface {
 	// A pinned read (ListRequirementsForAnchorByFrameworkVersion) can still reach a
 	// legacy version when explicitly requested (ADR 0019 §4 — legacy readable when
 	// pinned).
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListRequirementsForAnchorCurrentVersions(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorCurrentVersionsRow, error)
 	// All child risks rolled up under this parent.
 	ListRiskAggregationChildren(ctx context.Context, arg ListRiskAggregationChildrenParams) ([]ListRiskAggregationChildrenRow, error)
