@@ -116,13 +116,9 @@ describe("policies new-policy future-state disclosure (slice 241)", () => {
     );
   });
 
-  it("disclosure copy names the platform API endpoint so the header is a signpost, not a dead end (slice 242 precedent)", () => {
-    // The disclosure gives the operator a concrete next action —
-    // creating drafts via `POST /v1/policies` — so the inert
-    // affordance converts into useful signposting. Slice 217 D3 +
-    // slice 242 D2 precedent: "Action hint baked in. Tells the
-    // operator HOW to reach the working capability."
-    expect(POLICIES_NEW_POLICY_FUTURE_REASON).toMatch(/POST \/v1\/policies/);
+  it("disclosure copy names who can help and no API path, so the header is a signpost in the user's terms (#2082)", () => {
+    expect(POLICIES_NEW_POLICY_FUTURE_REASON).toMatch(/administrator/);
+    expect(POLICIES_NEW_POLICY_FUTURE_REASON).not.toMatch(/\/v1\//);
   });
 });
 

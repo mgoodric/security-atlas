@@ -11,8 +11,8 @@
 // (which reports WHETHER a device is compliant) and the slice-555 software
 // inventory: it reports WHICH configuration / compliance profiles are deployed
 // to a managed device and what compliance-relevant settings they enforce, as
-// evidence for configuration-management controls (SCF CFG-02 Secure Baseline
-// Configurations / CFG-04 Configuration Change Control).
+// evidence for configuration-management controls (SCF CFG-04 Secure Baseline
+// Configurations / CHG-03 Configuration Change Control).
 //
 // The load-bearing guard (P0-556 / threat-model I — SECRET REDACTION): a
 // configuration profile routinely embeds SECRETS — Wi-Fi PSKs, VPN shared

@@ -4,7 +4,7 @@
   "x-evidence-kind": "change.approval.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["CHG-02", "CFG-04"],
+  "x-default-scf-anchors": ["CHG-02", "CHG-03"],
   "title": "Change approval evidence",
   "description": "Evidence that an operational change was approved before implementation.",
   "type": "object",

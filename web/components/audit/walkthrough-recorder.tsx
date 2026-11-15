@@ -34,9 +34,8 @@ function describeError(err: unknown): { title: string; body: string } {
     return {
       title: "Walkthrough authoring is not permitted for this role",
       body:
-        "The platform currently restricts walkthrough creation to admin / grc_engineer credentials. " +
-        "Canvas §8.3 expects auditors to author walkthroughs too — this is a tracked backend role gap. " +
-        "Ask a GRC engineer to record this walkthrough, or use an admin credential.",
+        "Only admins and GRC engineers can record walkthroughs today. " +
+        "Ask a GRC engineer to record this one, or sign in as an admin.",
     };
   }
   const msg =

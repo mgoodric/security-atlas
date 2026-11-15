@@ -4,7 +4,7 @@
   "x-evidence-kind": "osquery.host_posture.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["END-04", "CFG-02"],
+  "x-default-scf-anchors": ["END-04", "CFG-04"],
   "title": "osquery host posture snapshot",
   "description": "One endpoint's posture as reported by osquery / Fleet.",
   "type": "object",

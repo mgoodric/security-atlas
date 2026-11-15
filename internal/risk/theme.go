@@ -40,6 +40,10 @@ type Theme struct {
 	Name        string
 	Description string
 	Source      ThemeSource
+	// RiskCount and RuleCount are the theme's usage in the tenant (#1818):
+	// the risks that carry it and the aggregation rules that target it.
+	RiskCount int64
+	RuleCount int64
 }
 
 // ListVisibleThemes returns the union of default themes (tenant_id IS NULL)
@@ -50,7 +54,7 @@ type Theme struct {
 func (s *Store) ListVisibleThemes(ctx context.Context) ([]Theme, error) {
 	var out []Theme
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		rows, err := q.ListAllVisibleThemes(ctx, pgUUID(tenantID))
+		rows, err := q.ListVisibleThemesWithUsage(ctx, pgUUID(tenantID))
 		if err != nil {
 			return fmt.Errorf("list visible themes: %w", err)
 		}
@@ -64,6 +68,8 @@ func (s *Store) ListVisibleThemes(ctx context.Context) ([]Theme, error) {
 				Name:        r.ThemeName,
 				Description: r.Description,
 				Source:      src,
+				RiskCount:   r.RiskCount,
+				RuleCount:   r.RuleCount,
 			})
 		}
 		// Sort alphabetically per AC-3. The SQL `ORDER BY (tenant_id IS NULL)

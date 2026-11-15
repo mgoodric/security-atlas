@@ -45,8 +45,8 @@ and push to the platform.
 
 This reports WHICH configuration / compliance profiles are deployed to a managed
 device and what compliance-relevant settings they enforce — evidence for
-configuration-management controls (SCF CFG-02 Secure Baseline Configurations /
-CFG-04 Configuration Change Control) at a finer grain than the posture verdict.
+configuration-management controls (SCF CFG-04 Secure Baseline Configurations /
+CHG-03 Configuration Change Control) at a finer grain than the posture verdict.
 
 Per-setting enrichment (slice 595): each assigned profile carries its allow-listed
 profile_assignment_state (compliant / nonCompliant / conflict / error), and each
@@ -84,7 +84,7 @@ compliance-relevant allow-list whose values are non-secret summaries.`,
 		},
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
-	cmd.Flags().StringVar(&f.configControl, "config-control", "scf:CFG-02", "control_id to attach to endpoint.config_profile.v1 records")
+	cmd.Flags().StringVar(&f.configControl, "config-control", "scf:CFG-04", "control_id to attach to endpoint.config_profile.v1 records")
 	cmd.Flags().StringVar(&f.tenantID, "tenant-id", "", "Entra tenant id override (env: INTUNE_TENANT_ID)")
 	return cmd
 }

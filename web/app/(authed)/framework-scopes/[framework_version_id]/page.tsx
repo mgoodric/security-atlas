@@ -33,6 +33,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { ComingSoon } from "@/components/coming-soon";
 import { ReviewDiff } from "@/components/framework-scopes/review-diff";
 import { SoATab, useSoATitle } from "@/components/framework-scopes/soa-tab";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -304,10 +305,12 @@ function ScopeTable({
 }) {
   if (scopes.length === 0) {
     return (
-      <p className="py-12 text-center text-sm text-muted-foreground">
-        No scopes yet. Create one via the platform API (POST
-        /v1/framework-scopes); the in-app create form is not available yet.
-      </p>
+      <div className="space-y-3 py-12 text-center">
+        <p className="text-sm text-muted-foreground">
+          No scopes yet for this framework.
+        </p>
+        <ComingSoon what="Creating a scope in the app" />
+      </div>
     );
   }
   return (

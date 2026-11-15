@@ -172,7 +172,7 @@ device contents, or owner personal contact detail.
 
 The 'run-config-profiles' subcommand reads the configuration-profile DETAIL (the
 CONFIGURATION_PROFILES section) for configuration-management evidence (SCF
-CFG-02 / CFG-04). Each profile carries the name + identifier + type + assigned
+CFG-04 / CHG-03). Each profile carries the name + identifier + type + assigned
 scope + uuid + last-modified + a bounded list of compliance-relevant settings.
 It NEVER collects the secrets configuration profiles routinely embed — Wi-Fi
 PSKs, VPN shared secrets, certificate private keys, API tokens, SCEP challenges,

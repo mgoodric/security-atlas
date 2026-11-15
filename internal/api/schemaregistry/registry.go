@@ -112,7 +112,7 @@ func DefaultSeed() []KindVersion {
 		{Kind: "azure.entra_role_assignment.v1", Version: "1.0.0"},
 		{Kind: "azure.storage_account_config.v1", Version: "1.0.0"},
 		// Slice 519: Azure connector AKS managed-cluster hardening posture
-		// (cloud-config / network controls: SCF CFG-02 / NET-04). ARM Reader
+		// (cloud-config / network controls: SCF CFG-04 / NET-04). ARM Reader
 		// only — never admin kubeconfig, secrets, or workload manifests.
 		{Kind: "azure.aks_cluster_config.v1", Version: "1.0.0"},
 		// Slice 520: Azure connector NSG / firewall security-rule posture
@@ -150,7 +150,7 @@ func DefaultSeed() []KindVersion {
 		// enforcement plane. Both fields are optional — no version bump.
 		{Kind: "k8s.networkpolicy_coverage.v1", Version: "1.0.0"},
 		// Slice 524: Kubernetes connector Pod-Security-Standards admission config
-		// (configuration-baseline control: SCF CFG-02). Read-only (get/list on
+		// (configuration-baseline control: SCF CFG-04). Read-only (get/list on
 		// core namespaces — NO new ClusterRole rule; reuses the base grant). PSS
 		// LABEL configuration only (the pod-security.kubernetes.io/enforce|audit|
 		// warn levels + optional pinned versions), NEVER pod specs, container env,
@@ -178,7 +178,7 @@ func DefaultSeed() []KindVersion {
 		// (gating k8s.admission_policy.v1). CONFIG metadata only — NEVER the webhook
 		// caBundle/TLS key, the policy Rego/CEL decision-logic body, or an intercepted
 		// payload (structural reflection guard + caBundle/Rego/CEL drop tests). Both
-		// anchored to CFG-02 (the same configuration-hardening anchor the PSS admission
+		// anchored to CFG-04 (the same configuration-hardening anchor the PSS admission
 		// + webhook kinds share). Read-only get,list, no wildcard, no `secrets`.
 		{Kind: "k8s.admission_webhook.v1", Version: "1.0.0"},
 		{Kind: "k8s.admission_policy.v1", Version: "1.0.0"},
@@ -269,7 +269,7 @@ func DefaultSeed() []KindVersion {
 		// Slice 556: MDM connectors (Jamf + Intune) — shared managed-device
 		// configuration-profile detail evidence kind (which compliance/config
 		// profiles are deployed + their compliance-relevant settings), evidence
-		// for configuration-management controls (SCF CFG-02 / CFG-04). Secrets
+		// for configuration-management controls (SCF CFG-04 / CHG-03). Secrets
 		// embedded in profiles (Wi-Fi PSKs, VPN shared secrets, certificate
 		// private keys, SCEP challenges, payload blobs) are structurally redacted.
 		{Kind: "endpoint.config_profile.v1", Version: "1.0.0"},
