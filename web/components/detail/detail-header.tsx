@@ -7,7 +7,7 @@
 // detail page follows: status, the record title, **Edit** (a link to
 // the record's edit route), one primary **lifecycle action** for the
 // current state, and an overflow menu whose destructive items confirm
-// inline (`components/ui/overflow-menu.tsx`, shared with row actions).
+// inline (`RowActions`, `components/ui/row-actions.tsx`, #2090).
 //
 // It renders through PageShell (#2080): the title in the H1, status and
 // subtitle in the subtitle slot, and the back link, primary action, Edit
@@ -19,9 +19,7 @@ import type { ReactNode } from "react";
 
 import { PageShell } from "@/components/shell/page-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { OverflowMenu, type OverflowItem } from "@/components/ui/overflow-menu";
-
-export type { OverflowItem } from "@/components/ui/overflow-menu";
+import { RowActions, type RowActionItem } from "@/components/ui/row-actions";
 
 export type DetailHeaderLink = {
   href: string;
@@ -49,7 +47,7 @@ export type DetailHeaderProps = {
   back?: ReactNode;
   edit?: DetailHeaderLink;
   primaryAction?: DetailHeaderAction;
-  overflow?: readonly OverflowItem[];
+  overflow?: readonly RowActionItem[];
   /** Page body, rendered under the header by PageShell. */
   children?: ReactNode;
   tabs?: ReactNode;
@@ -133,7 +131,11 @@ export function DetailHeaderActions({
           {edit.label ?? "Edit"}
         </Link>
       ) : null}
-      <OverflowMenu items={overflow} testIdPrefix="detail-header" />
+      <RowActions
+        items={overflow}
+        variant="header"
+        data-testid="detail-header-overflow-trigger"
+      />
     </div>
   );
 }

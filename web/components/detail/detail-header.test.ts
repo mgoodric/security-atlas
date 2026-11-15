@@ -3,18 +3,18 @@
 // The vitest tier is node-only with no DOM (slice 069 P0-A3), so this
 // renders the header to static markup with `createElement` (no JSX).
 // The overflow menu and its inline confirm are covered in
-// `components/ui/overflow-menu.test.ts`; the vendor page's Playwright
+// `components/ui/row-actions.test.ts`; the vendor page's Playwright
 // specs cover the header in the real app.
 
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
-import type { OverflowItem } from "@/components/ui/overflow-menu-model";
+import type { RowActionItem } from "@/components/ui/row-actions-model";
 
 import { DetailHeader } from "./detail-header";
 
-function items(): OverflowItem[] {
+function items(): RowActionItem[] {
   return [
     { id: "archive", label: "Archive", onSelect: () => {} },
     {
@@ -34,7 +34,7 @@ function tag(html: string, testid: string): string {
   return html.slice(open, html.indexOf(">", at) + 1);
 }
 
-function render(overflow: OverflowItem[] = []) {
+function render(overflow: RowActionItem[] = []) {
   return renderToStaticMarkup(
     h(DetailHeader, {
       "data-testid": "hdr",
