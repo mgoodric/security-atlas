@@ -88,7 +88,7 @@ func TestTHRFinerCrosswalk_EdgesResolve(t *testing.T) {
 // TestTHRFinerCrosswalk_RelationshipsAreHonest spot-checks the STRM
 // relationship_type on the two edges whose strength selection is the
 // load-bearing JUDGMENT of this slice: ID.RA-02 -> THR-03 is the dedicated
-// `equal` upgrade of the slice-480 LOW-confidence MON-08 placeholder, and
+// `equal` upgrade of the slice-480 LOW-confidence MON-08 placeholder (MON-16 since the SCF 2026.3 remap), and
 // CC7.2 -> THR-04 is the honest `intersects_with` (hunting is one technique
 // within CC7.2's broader anomaly monitoring, not an equivalence).
 func TestTHRFinerCrosswalk_RelationshipsAreHonest(t *testing.T) {

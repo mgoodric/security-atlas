@@ -121,7 +121,7 @@ func TestRun_PushesRuleRecords(t *testing.T) {
 		t.Fatalf("Collect: %v", err)
 	}
 	rules := alertcfg.Normalize(alertcfg.VendorGrafana, raw, fixed)
-	rec, err := monrecord.Build(rules[0], "scf:MON-01", actorID("alerts"), "grafana", "prod")
+	rec, err := monrecord.Build(rules[0], "scf:MON-02", actorID("alerts"), "grafana", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -149,8 +149,8 @@ func TestRun_DedupesWithinHour(t *testing.T) {
 	api := &fakeAlertRulesAPI{rules: []alertrules.RawRule{{UID: "r1", Title: "t"}}}
 	raw, _ := alertrules.Collect(context.Background(), api)
 	rules := alertcfg.Normalize(alertcfg.VendorGrafana, raw, fixed)
-	r1, _ := monrecord.Build(rules[0], "scf:MON-01", actorID("alerts"), "grafana", "prod")
-	r2, _ := monrecord.Build(rules[0], "scf:MON-01", actorID("alerts"), "grafana", "prod")
+	r1, _ := monrecord.Build(rules[0], "scf:MON-02", actorID("alerts"), "grafana", "prod")
+	r2, _ := monrecord.Build(rules[0], "scf:MON-02", actorID("alerts"), "grafana", "prod")
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first push: %v", err)
@@ -174,7 +174,7 @@ func TestEmittedRecords_NoSecretsOrPII(t *testing.T) {
 	}
 	raw, _ := alertrules.Collect(context.Background(), api)
 	rules := alertcfg.Normalize(alertcfg.VendorGrafana, raw, fixed)
-	rec, _ := monrecord.Build(rules[0], "scf:MON-01", actorID("alerts"), "grafana", "prod")
+	rec, _ := monrecord.Build(rules[0], "scf:MON-02", actorID("alerts"), "grafana", "prod")
 
 	allowed := map[string]bool{
 		"source_vendor": true, "rule_id": true, "rule_name": true, "rule_type": true,

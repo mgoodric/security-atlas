@@ -49,25 +49,6 @@
     },
 
     {
-      "scf_id": "AAA-01",
-      "family": "AAA",
-      "title": "Auditing & Accountability",
-      "description": "Mechanisms exist to facilitate the implementation of operational auditing and accountability."
-    },
-    {
-      "scf_id": "AAA-10",
-      "family": "AAA",
-      "title": "Event Log Retention",
-      "description": "Mechanisms exist to retain event logs for a defined period consistent with risk and legal requirements."
-    },
-    {
-      "scf_id": "AAA-12",
-      "family": "AAA",
-      "title": "Audit Log Review",
-      "description": "Mechanisms exist to provide for the review and analysis of audit records."
-    },
-
-    {
       "scf_id": "AST-01",
       "family": "AST",
       "title": "Asset Management Policy",
@@ -309,15 +290,33 @@
     },
 
     {
-      "scf_id": "MON-01",
+      "scf_id": "MON-02",
       "family": "MON",
       "title": "Continuous Monitoring",
       "description": "Mechanisms exist to facilitate the implementation of enterprise-wide monitoring."
     },
     {
-      "scf_id": "MON-08",
+      "scf_id": "MON-04",
       "family": "MON",
-      "title": "Anomalous Behavior Detection",
+      "title": "System Generated Event Logs & Security-Relevant Telemetry",
+      "description": "Mechanisms exist to facilitate the implementation of operational auditing and accountability."
+    },
+    {
+      "scf_id": "MON-05.1",
+      "family": "MON",
+      "title": "Centralized Event Log & Security-Relevant Telemetry Review & Analysis",
+      "description": "Mechanisms exist to provide for the review and analysis of audit records."
+    },
+    {
+      "scf_id": "MON-13",
+      "family": "MON",
+      "title": "Event Log & Security-Relevant Telemetry Retention",
+      "description": "Mechanisms exist to retain event logs for a defined period consistent with risk and legal requirements."
+    },
+    {
+      "scf_id": "MON-16",
+      "family": "MON",
+      "title": "Anomalous Behavior",
       "description": "Mechanisms exist to detect anomalous behavior."
     },
 

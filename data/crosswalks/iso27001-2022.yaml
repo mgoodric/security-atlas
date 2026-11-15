@@ -372,7 +372,7 @@ mappings:
     scf_anchor: THR-01
     relationship_type: equal
     strength: 1.0
-    rationale: "Threat Intelligence Program (THR-01) is the dedicated SCF threat-intel anchor and the direct STRM equivalent of A.5.7 Threat intelligence. Upgraded from the slice-438 placeholder MON-08 (intersects_with/0.5, LOW CONFIDENCE) once slice 635 seeded the THR domain into the sample catalog."
+    rationale: "Threat Intelligence Program (THR-01) is the dedicated SCF threat-intel anchor and the direct STRM equivalent of A.5.7 Threat intelligence. Upgraded from the slice-438 placeholder MON-08 (MON-16 since the SCF 2026.3 remap) (intersects_with/0.5, LOW CONFIDENCE) once slice 635 seeded the THR domain into the sample catalog."
   - requirement_code: A.5.7
     scf_anchor: THR-03
     relationship_type: subset_of
@@ -494,10 +494,10 @@ mappings:
     strength: 0.6
     rationale: "Evidence collection and preservation is the forensic-readiness facet of incident response (IRO-04)."
   - requirement_code: A.5.28
-    scf_anchor: AAA-01
+    scf_anchor: MON-04
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Preserved logs and audit records are a primary evidence source; Auditing & Accountability (AAA-01) underpins evidentiary integrity."
+    rationale: "Preserved logs and audit records are a primary evidence source; System Generated Event Logs & Security-Relevant Telemetry (MON-04) underpins evidentiary integrity."
   - requirement_code: A.5.29
     scf_anchor: BCD-02
     relationship_type: intersects_with
@@ -524,10 +524,10 @@ mappings:
     strength: 0.7
     rationale: "Protection and integrity of records over their lifetime maps to Data Retention (DCH-03)."
   - requirement_code: A.5.33
-    scf_anchor: AAA-10
+    scf_anchor: MON-13
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Retention and protection of log/audit records is the Event Log Retention (AAA-10) facet of record protection."
+    rationale: "Retention and protection of log/audit records is the Event Log & Security-Relevant Telemetry Retention (MON-13) facet of record protection."
   - requirement_code: A.5.34
     scf_anchor: PRI-01
     relationship_type: equal
@@ -631,10 +631,10 @@ mappings:
     strength: 0.6
     rationale: "Continuous monitoring for unauthorized physical access extends Physical Access Control (PES-04)."
   - requirement_code: A.7.4
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Physical-access monitoring shares the continuous-monitoring discipline (MON-01)."
+    rationale: "Physical-access monitoring shares the continuous-monitoring discipline (MON-02)."
   - requirement_code: A.7.5
     scf_anchor: PES-04
     relationship_type: intersects_with
@@ -742,10 +742,10 @@ mappings:
     strength: 0.7
     rationale: "Secure authentication (incl. MFA) is a subset/instance of the SCF Multi-Factor Authentication anchor — shared with SOC 2 CC6.1 MFA mapping."
   - requirement_code: A.8.6
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Monitoring and adjusting resource use ties to Continuous Monitoring (MON-01) of system health."
+    rationale: "Monitoring and adjusting resource use ties to Continuous Monitoring (MON-02) of system health."
   - requirement_code: A.8.6
     scf_anchor: BCD-02
     relationship_type: intersects_with
@@ -817,12 +817,12 @@ mappings:
     strength: 0.5
     rationale: "Redundant data copies relate to Backups (BCD-09)."
   - requirement_code: A.8.15
-    scf_anchor: AAA-01
+    scf_anchor: MON-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Logging maps to SCF Auditing & Accountability — shared with SOC 2 CC7.2 logging."
+    rationale: "Logging maps to SCF System Generated Event Logs & Security-Relevant Telemetry — shared with SOC 2 CC7.2 logging."
   - requirement_code: A.8.16
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: equal
     strength: 0.9
     rationale: "Monitoring activities maps to SCF Continuous Monitoring — shared with SOC 2 CC7.2."
@@ -837,10 +837,10 @@ mappings:
     strength: 0.6
     rationale: "A.8.16 'networks, systems, and applications are monitored for anomalous behavior' overlaps Threat Hunting (slice 641 THR-04) — proactive hunting is one monitoring technique that surfaces anomalous behavior. Partial: A.8.16 also covers passive/automated monitoring beyond active hunting. Added by slice 646."
   - requirement_code: A.8.17
-    scf_anchor: AAA-01
+    scf_anchor: MON-04
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Synchronized clocks underpin accurate, correlatable audit timestamps; clock sync is a prerequisite facet of Auditing & Accountability (AAA-01)."
+    rationale: "Synchronized clocks underpin accurate, correlatable audit timestamps; clock sync is a prerequisite facet of System Generated Event Logs & Security-Relevant Telemetry (MON-04)."
   - requirement_code: A.8.18
     scf_anchor: IAC-10
     relationship_type: equal

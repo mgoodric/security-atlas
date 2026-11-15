@@ -117,7 +117,7 @@ func TestRun_PushesMonitorRecords(t *testing.T) {
 		t.Fatalf("Collect: %v", err)
 	}
 	rules := alertcfg.Normalize(alertcfg.VendorDatadog, raw, fixed)
-	rec, err := monrecord.Build(rules[0], "scf:MON-01", actorID("monitors"), "datadog", "prod")
+	rec, err := monrecord.Build(rules[0], "scf:MON-02", actorID("monitors"), "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -142,8 +142,8 @@ func TestRun_DedupesWithinHour(t *testing.T) {
 	api := &fakeMonitorsAPI{monitors: []monitors.RawMonitor{{ID: "1", Name: "n", Type: "t", Enabled: true}}}
 	raw, _ := monitors.Collect(context.Background(), api)
 	rules := alertcfg.Normalize(alertcfg.VendorDatadog, raw, fixed)
-	r1, _ := monrecord.Build(rules[0], "scf:MON-01", actorID("monitors"), "datadog", "prod")
-	r2, _ := monrecord.Build(rules[0], "scf:MON-01", actorID("monitors"), "datadog", "prod")
+	r1, _ := monrecord.Build(rules[0], "scf:MON-02", actorID("monitors"), "datadog", "prod")
+	r2, _ := monrecord.Build(rules[0], "scf:MON-02", actorID("monitors"), "datadog", "prod")
 	rec1, err := client.Push(context.Background(), r1)
 	if err != nil {
 		t.Fatalf("first push: %v", err)
@@ -168,7 +168,7 @@ func TestEmittedRecords_NoSecretsOrPII(t *testing.T) {
 	}}
 	raw, _ := monitors.Collect(context.Background(), api)
 	rules := alertcfg.Normalize(alertcfg.VendorDatadog, raw, fixed)
-	rec, _ := monrecord.Build(rules[0], "scf:MON-01", actorID("monitors"), "datadog", "prod")
+	rec, _ := monrecord.Build(rules[0], "scf:MON-02", actorID("monitors"), "datadog", "prod")
 
 	allowed := map[string]bool{
 		"source_vendor": true, "rule_id": true, "rule_name": true, "rule_type": true,

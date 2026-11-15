@@ -154,7 +154,7 @@ export function RiskHierarchyLinks({ risk }: Props) {
               {childRows.map((c) => (
                 <LinkedRiskRow key={c.id} link={c} testid="risk-detail-child">
                   <Button
-                    variant="destructive"
+                    variant="outline"
                     size="xs"
                     disabled={detach.isPending}
                     onClick={() => detach.mutate(c.id)}
