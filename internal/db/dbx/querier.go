@@ -184,6 +184,12 @@ type Querier interface {
 	// Issue #1741 — total for the paged ListActiveControlsWithState read.
 	// The optional anchor_fit filter matches the list's (issue #1736).
 	CountActiveControls(ctx context.Context, arg CountActiveControlsParams) (int64, error)
+	// #2261: the distinct users holding 'admin' in the tenant (any origin) whose
+	// membership is active (status='active' AND active). user_roles.user_id is
+	// TEXT; a "user:<uuid>" principal is read as its bare uuid (identity.UserID).
+	// A role row naming no users row (an API key, bootstrap-admin) is not an
+	// admin user and is not counted.
+	CountActiveTenantAdmins(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Count of all checklist sections visible to the caller's tenant. Used by the
 	// cross-tenant isolation integration test to prove tenant B sees zero of
 	// tenant A's rows (AC-8).
@@ -269,11 +275,6 @@ type Querier interface {
 	CountSinkFailures(ctx context.Context) (int64, error)
 	// Count claims for a recipient (tests assert no duplicate rows after a re-run).
 	CountStalenessRollupClaims(ctx context.Context, arg CountStalenessRollupClaimsParams) (int64, error)
-	// Counts the DISTINCT users holding the 'admin' role in the tenant (regardless
-	// of origin). The resolver's last-admin guard (AC-5 / P0-509-3) reads this
-	// before revoking an admin role: it refuses to drop the final admin so a group
-	// re-derivation can never lock the tenant out.
-	CountTenantAdmins(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
@@ -3103,6 +3104,14 @@ type Querier interface {
 	// lock (LockAggregationKey) so the two locks are always acquired in the
 	// same order.
 	LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error
+	// #2261: serialises every change that can remove a tenant's admin. It takes
+	// the tenant row FOR NO KEY UPDATE, which conflicts with itself but not with
+	// the FOR KEY SHARE that foreign-key checks take, so ordinary tenant-scoped
+	// writes are not blocked. A transaction holding it, under READ COMMITTED,
+	// sees every admin change committed before it acquired the lock. It returns
+	// the row so a caller that cannot see it (wrong id, RLS) fails closed rather
+	// than proceeding unlocked.
+	LockTenantAdminRoster(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	LockTenantTheme(ctx context.Context, arg LockTenantThemeParams) (OrgTheme, error)
 	// ===== #1811: organisation theme management =====
 	// #1811: serialize a theme rename or delete with every theme assignment in
