@@ -158,6 +158,19 @@ export type ReferenceChange = Omit<ApplicabilityChange, "change"> & {
   change: "reference_changed";
 };
 
+// describeReferenceMove renders the reference move on a change row whose
+// decision or justification also changed: "reference: <before> → <after>",
+// or null when both sides are present and the reference is the same (an
+// added or removed row has one side, so it is null too). Plain text.
+export function describeReferenceMove(c: ApplicabilityChange): string | null {
+  if (!c.before || !c.after) return null;
+  if (c.before.implementation_ref === c.after.implementation_ref) return null;
+  const ref = (s: string) => s || "(none)";
+  return `reference: ${ref(c.before.implementation_ref)} → ${ref(
+    c.after.implementation_ref,
+  )}`;
+}
+
 // describeReferenceChange renders a reference-only change as one line:
 // "reference changed: <before> → <after>", "(none)" for an empty side. The
 // reference is org-supplied text and is rendered as text, never a link.

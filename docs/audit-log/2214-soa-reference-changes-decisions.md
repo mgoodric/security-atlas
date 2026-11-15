@@ -16,7 +16,10 @@ per-kind badges see what they saw before. A reference-only row is a requirement
 decided the same way on both sides, with the same justification, and a
 different `implementation_ref`. When the decision or justification also
 changed, the row stays in `changes[]` (both sides already carry the reference)
-and is not listed a second time.
+and is not listed a second time. So that such a bundled move is still
+visible, the card adds a muted sub-line, "reference: before -> after", under
+the after side of any `changes[]` row whose two references differ. Like the
+reference-only lines, it is plain text and is not counted.
 
 **D2: Muted, informational, plain text.** The card lists each reference
 change below the change table as a muted line, "reference changed: before ->

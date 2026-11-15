@@ -8,7 +8,9 @@
 //     stored"), DIFF-03 applicable, DIFF-04 undecided; predicate true
 //   rev B (in review): DIFF-01 applicable      -> decision changed
 //                      DIFF-02 excluded ("Card data is tokenised at the
-//                        edge")                 -> justification changed
+//                        edge", reference moved)
+//                                              -> justification changed, with
+//                                                 a muted reference sub-line
 //                      DIFF-03 applicable, new implementation_ref
 //                                              -> not a change row; a muted
 //                                                 reference line (#2214)
@@ -81,7 +83,13 @@ test.describe("framework scope · review-screen applicability diff (#1795)", () 
 
     const revA = await createScope("Diff scope rev A (e2e)", { op: "true" });
     await decide(revA, "DIFF-01", "excluded", "No assets of our own");
-    await decide(revA, "DIFF-02", "excluded", "No card data stored");
+    await decide(
+      revA,
+      "DIFF-02",
+      "excluded",
+      "No card data stored",
+      "wiki/cards-a",
+    );
     await decide(revA, "DIFF-03", "applicable", "", "wiki/change-a");
     await atlas(`/v1/framework-scopes/${revA}/submit`, "PATCH");
     await atlas(`/v1/framework-scopes/${revA}/approve`, "PATCH");
@@ -100,6 +108,7 @@ test.describe("framework scope · review-screen applicability diff (#1795)", () 
       "DIFF-02",
       "excluded",
       "Card data is tokenised at the edge",
+      "wiki/cards-b",
     );
     await decide(revB, "DIFF-03", "applicable", "", "wiki/change-b");
     await decide(revB, "DIFF-04", "excluded", "Fully remote company");
@@ -154,6 +163,17 @@ test.describe("framework scope · review-screen applicability diff (#1795)", () 
       "DIFF-03 reference changed: wiki/change-a → wiki/change-b",
     );
     await expect(refs.locator("a")).toHaveCount(0);
+
+    // A reference move bundled with DIFF-02's justification change is a
+    // muted sub-line on that row; DIFF-01's unmoved reference has none.
+    const moved = diff.getByTestId("review-diff-row-ref-DIFF-02");
+    await expect(moved).toHaveText("reference: wiki/cards-a → wiki/cards-b");
+    await expect(moved).toHaveClass(/text-muted-foreground/);
+    await expect(moved.locator("a")).toHaveCount(0);
+    await expect(diff.getByTestId("review-diff-row-ref-DIFF-01")).toHaveCount(
+      0,
+    );
+    await expect(diff.getByTestId("review-diff-ref-DIFF-02")).toHaveCount(0);
     await expect(diff.getByTestId("review-diff-predicate")).toContainText(
       '"prod"',
     );
