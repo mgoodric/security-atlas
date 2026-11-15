@@ -14,13 +14,32 @@ Approve rewrites the control's stored `control.yaml`. It sets `scf_anchor_id` to
 
 The rewritten manifest declares `scf_release`, so the approved control is pinned to the target release. That is the point of a reviewed re-anchor: the choice should not drift on the next import. The active row's description is carried over, because the stored YAML does not hold any `DESCRIPTION.md` text.
 
-**Known edge, not fixed here.** A stock control re-uploaded at boot from its original `controls/soc2/` manifest no longer matches the approved revision's hash, so it supersedes again with the original code. Stock controls mostly move through #2321's title-only re-bind and not through this queue. A stock control that a person re-anchors here should also get its bundle updated in `controls/soc2/`.
+## D1a — The boot seed keeps an approved re-anchor of a stock control (review B1)
+
+Bootstrap re-uploads every `controls/soc2/` manifest on each boot. After a person approves a remap of a stock control, the shipped manifest no longer matches the active revision. Without a guard it would supersede that revision on every boot and put the control back on the shipped code, while the proposal and the history still said "approved". When the shipped code is gone (a split or a withdrawn anchor), the upload would instead fail with 404 on every boot.
+
+So `control.upload` first checks two things. Is the incoming manifest a shipped stock manifest (`scfimport.IsStockManifest`: hash and bundle ID)? Is the bundle's active revision the `new_control_id` of an `approved` decision (`IsApprovedRemapRevision`)? When both hold, the upload is a no-op and returns `KeptReviewedAnchor` with a warning. The upload handler also logs the kept anchor, and `atlas-cli controls upload` prints the response, so the boot log shows it. The check runs before the manifest's anchor is resolved, so a shipped code missing from the current release does not fail the boot.
+
+We keyed on the stock manifest, not on the uploader. Any non-stock upload, including a person's own revised bundle, proceeds as before and can supersede the approved revision on purpose. Changing a reviewed stock control means uploading a changed bundle.
+
+`TestRemapDecide_ApprovedStockReanchorSurvivesBootSeed` approves the real `soc2_cc8_1_change_management` stock control twice:
+
+- once when its code is split, so the shipped code is gone;
+- once when its code is reused for another control, so the shipped code still resolves and an unguarded upload would silently move the control.
+
+After each approval it re-runs the boot seed and the re-bind, then asserts the control is still on the approved anchor. With the guard disabled, the reused case supersedes to v3 on the reused code. That is the failure this guard prevents.
+
+We considered refusing approval of stock controls instead (the alternative), and rejected it. Split and no-successor stock controls are exactly where the human choice matters, and #2321 cannot move them.
 
 ## D2 — The history is a separate, append-only table
 
 `scf_remap_decisions` takes one row per decision. A row holds the decision, the legacy control and its anchor, code and release, the new control, anchor, code and release (on an approval only), an optional reason, `decided_by` and `decided_at`. A CHECK ties the four `new_*` columns to `decision = 'approved'`.
 
 The proposal row also changes: its `status`, and its `target_anchor_id` on an approval. But a rejected proposal can later be approved, and one row cannot hold both decisions. So the history is its own table. The app role has `SELECT, INSERT` and no `UPDATE` or `DELETE`. RLS (`tenant_read`, `tenant_insert`, FORCE) scopes it, and composite `(tenant_id, …)` FKs to the proposal and to both control rows keep each row inside its tenant.
+
+Every FK on the history is `ON DELETE RESTRICT` (review R2). Deleting a decided proposal, either control row or either anchor fails, rather than erasing the record with it. An undecided proposal still cascades from its control and anchors, as #1775 set up. No production path deletes controls: they are superseded, never deleted. The catalog reseed's `TRUNCATE controls CASCADE` still clears the table, as `TRUNCATE` does. Test cleanups delete `scf_remap_decisions` before `controls`.
+
+Every query in the decision path also filters on `tenant_id` explicitly, on top of RLS (review R1, the #2337 convention). Decision bodies must be one JSON object; trailing data is a 400 (review R3).
 
 ## D3 — Statuses and transitions
 

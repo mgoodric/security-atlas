@@ -399,6 +399,31 @@ func (q *Queries) InsertSCFRemapProposal(ctx context.Context, arg InsertSCFRemap
 	return result.RowsAffected(), nil
 }
 
+const isApprovedRemapRevision = `-- name: IsApprovedRemapRevision :one
+SELECT EXISTS (
+    SELECT 1 FROM scf_remap_decisions
+    WHERE tenant_id = $1
+      AND new_control_id = $2
+      AND decision = 'approved'
+) AS approved
+`
+
+type IsApprovedRemapRevisionParams struct {
+	TenantID  pgtype.UUID `json:"tenant_id"`
+	ControlID pgtype.UUID `json:"control_id"`
+}
+
+// Issue #1776: whether a control row is the revision a person's approved SCF
+// remap decision created. The upload path keeps such a revision when the
+// boot seed re-uploads the stock manifest it replaced, so a reviewed
+// re-anchor is never undone silently.
+func (q *Queries) IsApprovedRemapRevision(ctx context.Context, arg IsApprovedRemapRevisionParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isApprovedRemapRevision, arg.TenantID, arg.ControlID)
+	var approved bool
+	err := row.Scan(&approved)
+	return approved, err
+}
+
 const listActiveControls = `-- name: ListActiveControls :many
 SELECT id, tenant_id, bundle_id, version, scf_id, scf_anchor_id, title,
        control_family, implementation_type, owner_role, lifecycle_state,

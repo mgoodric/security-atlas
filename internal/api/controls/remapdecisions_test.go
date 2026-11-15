@@ -110,8 +110,11 @@ func TestRemapDecisions_RoutesAndErrorMapping(t *testing.T) {
 	if rr := serveRemap(t, f, &person, "/v1/controls/remap-proposals/approve-unchanged", ""); rr.Code != http.StatusOK || f.bulkBy != person.UserID {
 		t.Errorf("approve-unchanged: %d by %q", rr.Code, f.bulkBy)
 	}
-	if rr := serveRemap(t, &fakeRemapDecider{}, &person, "/v1/controls/remap-proposals/p1/approve", `{"bogus":1}`); rr.Code != http.StatusBadRequest {
-		t.Errorf("unknown field: %d; want 400", rr.Code)
+	for _, body := range []string{`{"bogus":1}`, `{"scf_id":"IAC-60"} {"scf_id":"X"}`, `{} []`, `[1]`} {
+		f := &fakeRemapDecider{}
+		if rr := serveRemap(t, f, &person, "/v1/controls/remap-proposals/p1/approve", body); rr.Code != http.StatusBadRequest || f.calledBy != "" {
+			t.Errorf("body %q: %d (store %q); want 400 before the store", body, rr.Code, f.calledBy)
+		}
 	}
 
 	for _, c := range []struct {

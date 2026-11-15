@@ -173,6 +173,10 @@ func decodeRemapBody(w http.ResponseWriter, r *http.Request, dst any) bool {
 		httpresp.WriteError(w, http.StatusBadRequest, "body must be a JSON object: "+err.Error())
 		return false
 	}
+	if dec.More() {
+		httpresp.WriteError(w, http.StatusBadRequest, "body must be a single JSON object")
+		return false
+	}
 	return true
 }
 

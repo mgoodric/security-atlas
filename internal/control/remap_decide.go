@@ -163,7 +163,7 @@ func (s *Store) ApproveRemap(ctx context.Context, in RemapApproveInput) (RemapDe
 	}
 	var out RemapDecision
 	err := s.inPgxTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
-		p, err := lockRemapProposal(ctx, tx, in.ProposalID)
+		p, err := lockRemapProposal(ctx, tx, tenantID, in.ProposalID)
 		if err != nil {
 			return err
 		}
@@ -190,14 +190,14 @@ func (s *Store) closeRemap(ctx context.Context, in RemapCloseInput, status strin
 	}
 	var out RemapDecision
 	err := s.inPgxTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
-		p, err := lockRemapProposal(ctx, tx, in.ProposalID)
+		p, err := lockRemapProposal(ctx, tx, tenantID, in.ProposalID)
 		if err != nil {
 			return err
 		}
 		if !slices.Contains(from, p.Status) {
 			return fmt.Errorf("%w (status %s)", ErrRemapProposalDecided, p.Status)
 		}
-		if err := setRemapStatus(ctx, tx, p.ID, status, uuid.Nil); err != nil {
+		if err := setRemapStatus(ctx, tx, tenantID, p.ID, status, uuid.Nil); err != nil {
 			return err
 		}
 		out = RemapDecision{
@@ -225,9 +225,9 @@ func (s *Store) BulkApproveUnchangedRemaps(ctx context.Context, decidedBy string
 		rows, err := tx.Query(ctx, `
 			SELECT `+remapProposalColumns+`
 			FROM scf_remap_proposals
-			WHERE class = $1 AND status = $2
+			WHERE tenant_id = $1 AND class = $2 AND status = $3
 			ORDER BY bundle_id, id
-			FOR UPDATE NOWAIT`, remapClassUnchanged, RemapStatusOpen)
+			FOR UPDATE NOWAIT`, tenantID, remapClassUnchanged, RemapStatusOpen)
 		if err != nil {
 			return lockErr(err)
 		}
@@ -302,8 +302,8 @@ func approveLocked(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p remapPr
 	err := tx.QueryRow(ctx, `
 		SELECT bundle_manifest_yaml, description, scf_anchor_id
 		FROM controls
-		WHERE id = $1 AND superseded_by IS NULL
-		FOR UPDATE`, p.ControlID).Scan(&manifest, &description, &anchor)
+		WHERE tenant_id = $1 AND id = $2 AND superseded_by IS NULL
+		FOR UPDATE`, tenantID, p.ControlID).Scan(&manifest, &description, &anchor)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return RemapDecision{}, fmt.Errorf("%w: control %s has a newer version", ErrRemapControlChanged, p.BundleID)
 	}
@@ -338,7 +338,7 @@ func approveLocked(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, p remapPr
 		return RemapDecision{}, fmt.Errorf("%w: re-anchoring %s did not supersede it", ErrRemapControlChanged, p.BundleID)
 	}
 
-	if err := setRemapStatus(ctx, tx, p.ID, RemapStatusApproved, res.AnchorID); err != nil {
+	if err := setRemapStatus(ctx, tx, tenantID, p.ID, RemapStatusApproved, res.AnchorID); err != nil {
 		return RemapDecision{}, err
 	}
 	out := RemapDecision{
@@ -396,16 +396,17 @@ func checkDecider(decidedBy, reason string) error {
 	return nil
 }
 
-// lockRemapProposal reads and locks one proposal. RLS keeps it to the
-// caller's tenant, so another tenant's id reads as not found.
-func lockRemapProposal(ctx context.Context, tx pgx.Tx, id string) (remapProposalRow, error) {
+// lockRemapProposal reads and locks one proposal. RLS and the explicit
+// tenant filter keep it to the caller's tenant, so another tenant's id reads
+// as not found.
+func lockRemapProposal(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID, id string) (remapProposalRow, error) {
 	pid, err := uuid.Parse(strings.TrimSpace(id))
 	if err != nil {
 		return remapProposalRow{}, ErrRemapProposalNotFound
 	}
 	p, err := scanRemapProposal(tx.QueryRow(ctx, `
 		SELECT `+remapProposalColumns+`
-		FROM scf_remap_proposals WHERE id = $1 FOR UPDATE`, pid))
+		FROM scf_remap_proposals WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, tenantID, pid))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return remapProposalRow{}, ErrRemapProposalNotFound
 	}
@@ -415,14 +416,14 @@ func lockRemapProposal(ctx context.Context, tx pgx.Tx, id string) (remapProposal
 	return p, nil
 }
 
-func setRemapStatus(ctx context.Context, tx pgx.Tx, id uuid.UUID, status string, target uuid.UUID) error {
+func setRemapStatus(ctx context.Context, tx pgx.Tx, tenantID, id uuid.UUID, status string, target uuid.UUID) error {
 	var targetArg any
 	if target != uuid.Nil {
 		targetArg = target
 	}
 	tag, err := tx.Exec(ctx, `
-		UPDATE scf_remap_proposals SET status = $2, target_anchor_id = $3
-		WHERE id = $1`, id, status, targetArg)
+		UPDATE scf_remap_proposals SET status = $3, target_anchor_id = $4
+		WHERE tenant_id = $1 AND id = $2`, tenantID, id, status, targetArg)
 	if err != nil {
 		return fmt.Errorf("control remap: record status: %w", err)
 	}

@@ -11,7 +11,11 @@
 -- The proposal's status carries the current outcome. Every decision also
 -- appends one row to scf_remap_decisions, the anchor history: old release
 -- and anchor, new release and anchor, the new control revision, who decided
--- and when. That table is append-only for the app role.
+-- and when. That table is append-only for the app role, and its foreign
+-- keys RESTRICT: deleting a decided proposal, either control row or either
+-- anchor fails rather than erasing the history with it. (A proposal itself
+-- still cascades from its control and anchors, so an undecided one goes
+-- with them as before; a decided one blocks the delete.)
 --
 -- #2236's composite (tenant_id, control_id) FK and its tenant_insert /
 -- tenant_update policies are kept as they are; only the status CHECK and
@@ -51,13 +55,13 @@ CREATE TABLE IF NOT EXISTS scf_remap_decisions (
     bulk              BOOLEAN NOT NULL DEFAULT false,
     -- The control version on the legacy anchor when the decision was made.
     legacy_control_id UUID NOT NULL,
-    legacy_anchor_id  UUID NOT NULL REFERENCES scf_anchors(id) ON DELETE CASCADE,
+    legacy_anchor_id  UUID NOT NULL REFERENCES scf_anchors(id) ON DELETE RESTRICT,
     legacy_scf_id     TEXT NOT NULL,
     legacy_release    TEXT NOT NULL,
     -- Set on an approval only: the superseding control revision and the
     -- anchor it is bound to.
     new_control_id    UUID,
-    new_anchor_id     UUID REFERENCES scf_anchors(id) ON DELETE CASCADE,
+    new_anchor_id     UUID REFERENCES scf_anchors(id) ON DELETE RESTRICT,
     new_scf_id        TEXT,
     new_release       TEXT,
     reason            TEXT CHECK (reason IS NULL OR char_length(reason) <= 2000),
@@ -67,13 +71,13 @@ CREATE TABLE IF NOT EXISTS scf_remap_decisions (
 
     CONSTRAINT scf_remap_decisions_proposal_fk
         FOREIGN KEY (tenant_id, proposal_id)
-        REFERENCES scf_remap_proposals (tenant_id, id) ON DELETE CASCADE,
+        REFERENCES scf_remap_proposals (tenant_id, id) ON DELETE RESTRICT,
     CONSTRAINT scf_remap_decisions_legacy_control_fk
         FOREIGN KEY (tenant_id, legacy_control_id)
-        REFERENCES controls (tenant_id, id) ON DELETE CASCADE,
+        REFERENCES controls (tenant_id, id) ON DELETE RESTRICT,
     CONSTRAINT scf_remap_decisions_new_control_fk
         FOREIGN KEY (tenant_id, new_control_id)
-        REFERENCES controls (tenant_id, id) ON DELETE CASCADE,
+        REFERENCES controls (tenant_id, id) ON DELETE RESTRICT,
     CONSTRAINT scf_remap_decisions_target_matches_decision CHECK (
         (decision = 'approved') = (new_control_id IS NOT NULL)
         AND (decision = 'approved') = (new_anchor_id IS NOT NULL)

@@ -122,7 +122,7 @@ func setupDecide(t *testing.T, tenants int) []decideFixture {
 	importRelease(t, admin, cat("a"))
 	var fx []decideFixture
 	for i := 0; i < tenants; i++ {
-		tenant := dbtest.SeedTenant(t, admin, "controls")
+		tenant := dbtest.SeedTenant(t, admin, "scf_remap_decisions", "controls")
 		fx = append(fx, decideFixture{admin: admin, app: app, tenant: tenant, controls: seedDecideControls(t, app, tenant)})
 	}
 	importRelease(t, admin, cat("b"))
