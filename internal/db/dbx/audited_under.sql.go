@@ -35,9 +35,10 @@ JOIN framework_versions fv    ON fv.framework_id = f.id AND fv.tenant_id IS NULL
 JOIN framework_requirements r ON r.framework_version_id = fv.id AND r.code = ref->>'id'
 LEFT JOIN scf_anchors a         ON a.id = c.scf_anchor_id
 LEFT JOIN framework_versions av ON av.id = a.framework_version_id
-WHERE c.superseded_by IS NULL
+WHERE c.tenant_id = $1
+  AND c.superseded_by IS NULL
   AND ref->>'kind' = 'tested_under'
-  AND ($1::text IS NULL OR f.slug = $1::text)
+  AND ($2::text IS NULL OR f.slug = $2::text)
   AND NOT EXISTS (
       SELECT 1
       FROM effective_fw_to_scf_edges e
@@ -48,6 +49,11 @@ WHERE c.superseded_by IS NULL
   )
 ORDER BY f.slug, r.code, c.bundle_id, c.id
 `
+
+type ListAuditedUnderGapsParams struct {
+	TenantID      pgtype.UUID `json:"tenant_id"`
+	FrameworkSlug *string     `json:"framework_slug"`
+}
 
 type ListAuditedUnderGapsRow struct {
 	ControlID        pgtype.UUID `json:"control_id"`
@@ -68,7 +74,9 @@ type ListAuditedUnderGapsRow struct {
 
 // #1801: the "audited under" report (#1735). Every query runs under the
 // caller's tenant (RLS on controls and, through effective_fw_to_scf_edges,
-// on fw_to_scf_overlay_edges).
+// on fw_to_scf_overlay_edges); the controls read also passes tenant_id
+// explicitly as a second leg, the house style of the overlay queries
+// (fw_to_scf_overlay_edges.sql).
 // One row per (active control, tested-under criterion) pair the control's
 // anchor does not reach. A tested-under reference is an external_refs
 // element with kind 'tested_under': system is the framework slug, id the
@@ -81,8 +89,8 @@ type ListAuditedUnderGapsRow struct {
 // to the control's own anchor, not no_relationship, not rejected. A control
 // with no anchor reaches nothing, so every criterion it was tested under is
 // a row. Superseded control versions are left out, as in coverage.
-func (q *Queries) ListAuditedUnderGaps(ctx context.Context, frameworkSlug *string) ([]ListAuditedUnderGapsRow, error) {
-	rows, err := q.db.Query(ctx, listAuditedUnderGaps, frameworkSlug)
+func (q *Queries) ListAuditedUnderGaps(ctx context.Context, arg ListAuditedUnderGapsParams) ([]ListAuditedUnderGapsRow, error) {
+	rows, err := q.db.Query(ctx, listAuditedUnderGaps, arg.TenantID, arg.FrameworkSlug)
 	if err != nil {
 		return nil, err
 	}

@@ -1849,7 +1849,9 @@ type Querier interface {
 	ListAuditPeriodsWithFrameworkByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListAuditPeriodsWithFrameworkByTenantRow, error)
 	// #1801: the "audited under" report (#1735). Every query runs under the
 	// caller's tenant (RLS on controls and, through effective_fw_to_scf_edges,
-	// on fw_to_scf_overlay_edges).
+	// on fw_to_scf_overlay_edges); the controls read also passes tenant_id
+	// explicitly as a second leg, the house style of the overlay queries
+	// (fw_to_scf_overlay_edges.sql).
 	// One row per (active control, tested-under criterion) pair the control's
 	// anchor does not reach. A tested-under reference is an external_refs
 	// element with kind 'tested_under': system is the framework slug, id the
@@ -1862,7 +1864,7 @@ type Querier interface {
 	// to the control's own anchor, not no_relationship, not rejected. A control
 	// with no anchor reaches nothing, so every criterion it was tested under is
 	// a row. Superseded control versions are left out, as in coverage.
-	ListAuditedUnderGaps(ctx context.Context, frameworkSlug *string) ([]ListAuditedUnderGapsRow, error)
+	ListAuditedUnderGaps(ctx context.Context, arg ListAuditedUnderGapsParams) ([]ListAuditedUnderGapsRow, error)
 	// Returns every assignment the user holds in the current tenant, joined with
 	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
 	// full picture in one round trip.

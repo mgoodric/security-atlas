@@ -1,6 +1,8 @@
 -- #1801: the "audited under" report (#1735). Every query runs under the
 -- caller's tenant (RLS on controls and, through effective_fw_to_scf_edges,
--- on fw_to_scf_overlay_edges).
+-- on fw_to_scf_overlay_edges); the controls read also passes tenant_id
+-- explicitly as a second leg, the house style of the overlay queries
+-- (fw_to_scf_overlay_edges.sql).
 
 -- name: ListAuditedUnderGaps :many
 -- One row per (active control, tested-under criterion) pair the control's
@@ -37,7 +39,8 @@ JOIN framework_versions fv    ON fv.framework_id = f.id AND fv.tenant_id IS NULL
 JOIN framework_requirements r ON r.framework_version_id = fv.id AND r.code = ref->>'id'
 LEFT JOIN scf_anchors a         ON a.id = c.scf_anchor_id
 LEFT JOIN framework_versions av ON av.id = a.framework_version_id
-WHERE c.superseded_by IS NULL
+WHERE c.tenant_id = sqlc.arg(tenant_id)
+  AND c.superseded_by IS NULL
   AND ref->>'kind' = 'tested_under'
   AND (sqlc.narg(framework_slug)::text IS NULL OR f.slug = sqlc.narg(framework_slug)::text)
   AND NOT EXISTS (

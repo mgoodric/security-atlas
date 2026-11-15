@@ -67,8 +67,11 @@ type AuditedUnderReport struct {
 // set, keeps only that framework's criteria.
 func (s *Store) AuditedUnder(ctx context.Context, framework string) (AuditedUnderReport, error) {
 	var out AuditedUnderReport
-	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, _ uuid.UUID) error {
-		rows, err := q.ListAuditedUnderGaps(ctx, optional(framework))
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		rows, err := q.ListAuditedUnderGaps(ctx, dbx.ListAuditedUnderGapsParams{
+			TenantID:      pgUUID(tenantID),
+			FrameworkSlug: optional(framework),
+		})
 		if err != nil {
 			return fmt.Errorf("mapping overlay: audited-under gaps: %w", err)
 		}
