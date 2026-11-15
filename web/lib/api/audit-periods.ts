@@ -65,3 +65,79 @@ export async function fetchAuditPeriods(): Promise<AuditPeriodsListResponse> {
   }
   return (await res.json()) as AuditPeriodsListResponse;
 }
+
+// ----- #2117: /audits/[id] detail page (browser-side BFF calls) -----
+//
+// One period, its freeze, and its per-control horizon read. Each goes
+// through a BFF under `web/app/api/audits/[id]/` that forwards the
+// bearer cookie to `internal/api/auditperiods/handlers.go`.
+
+export type AuditPeriodResponse = { audit_period: AuditPeriod };
+
+// The platform's `controlStateObservationWire`: one evidence record
+// inside the period's horizon (observed_at <= COALESCE(frozen_at, now)).
+export type ControlStateObservation = {
+  evidence_record_id: string;
+  observed_at: string;
+  result: string;
+  hash: string;
+};
+
+export type ControlStateResponse = {
+  audit_period_id: string;
+  control_id: string;
+  observations: ControlStateObservation[];
+  count: number;
+};
+
+async function throwAPIError(res: Response): Promise<never> {
+  let msg = `${res.status} ${res.statusText}`;
+  try {
+    const j = (await res.json()) as { error?: string };
+    if (j.error) msg = j.error;
+  } catch {
+    /* body not JSON — keep the status line */
+  }
+  throw new APIError(res.status, msg);
+}
+
+function periodPath(id: string): string {
+  return `/api/audits/${encodeURIComponent(id)}`;
+}
+
+export async function fetchAuditPeriod(
+  id: string,
+): Promise<AuditPeriodResponse> {
+  const res = await fetch(periodPath(id));
+  if (!res.ok) return throwAPIError(res);
+  return (await res.json()) as AuditPeriodResponse;
+}
+
+/** Freezes the period. Irreversible. The platform answers 409 when it
+ *  is already frozen and 403 for a role it does not admit. */
+export async function freezeAuditPeriod(
+  id: string,
+): Promise<AuditPeriodResponse> {
+  const res = await fetch(`${periodPath(id)}/freeze`, { method: "POST" });
+  if (!res.ok) return throwAPIError(res);
+  return (await res.json()) as AuditPeriodResponse;
+}
+
+export async function fetchPeriodControlState(
+  id: string,
+  controlID: string,
+): Promise<ControlStateResponse> {
+  const qs = new URLSearchParams({ control: controlID });
+  const res = await fetch(`${periodPath(id)}/control-state?${qs.toString()}`);
+  if (!res.ok) return throwAPIError(res);
+  return (await res.json()) as ControlStateResponse;
+}
+
+/** Fetches the signed OSCAL bundle through the download BFF. Throws
+ *  APIError on a non-2xx so the caller can tell the bridge being absent
+ *  (the platform route is not mounted) from a real refusal. */
+export async function fetchOscalBundle(id: string): Promise<Blob> {
+  const res = await fetch(`${periodPath(id)}/oscal-export`);
+  if (!res.ok) return throwAPIError(res);
+  return await res.blob();
+}
