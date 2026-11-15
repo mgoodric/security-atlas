@@ -10,7 +10,7 @@ description: |
   asserts every active employee endpoint has a posture record within the
   last 24 hours.
 
-scf_anchor_id: MON-01
+scf_anchor_id: MON-02
 control_family: MON
 implementation_type: automated
 owner_role: security-engineering

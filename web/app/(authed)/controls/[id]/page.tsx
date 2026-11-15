@@ -232,7 +232,7 @@ function ControlDetailPageInner() {
 
   // ATLAS-012 — when the coverage call 404s, the id in the URL is an SCF
   // anchor with no instantiated control. The empty-state copy should name
-  // the human-readable SCF code (e.g. "AAA-01"), not the raw UUID. The
+  // the human-readable SCF code (e.g. "MON-04"), not the raw UUID. The
   // anchor still resolves in the global catalog, so we look up its
   // requirements (same BFF the catalog detail page uses) purely to read
   // `anchor.scf_id`. Enabled only on the notfound branch so the happy
@@ -390,7 +390,7 @@ function ControlDetailPageInner() {
   return (
     <div className="space-y-4">
       {/* breadcrumb — ATLAS-011: include the leaf crumb (the SCF anchor
-          code, e.g. "Controls › AAA-01") so the trail ends at the page the
+          code, e.g. "Controls › MON-04") so the trail ends at the page the
           operator is on, not at the section. Falls back to the control's
           bundle id when the row is unanchored. */}
       <nav
@@ -829,7 +829,7 @@ function KpiCard({
 
 // ATLAS-012 — resolve an SCF anchor's human-readable code via the same
 // BFF the catalog detail page uses. Used only on the control-detail
-// 404 empty-state to print "AAA-01" instead of the raw anchor UUID.
+// 404 empty-state to print "MON-04" instead of the raw anchor UUID.
 async function fetchAnchorDetail(id: string): Promise<AnchorDetail> {
   const res = await fetch(
     `/api/anchors/${encodeURIComponent(id)}/requirements`,

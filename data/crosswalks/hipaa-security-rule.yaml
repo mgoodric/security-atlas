@@ -349,10 +349,10 @@ mappings:
     strength: 0.8
     rationale: "Slice 567 re-point (was HRS-01 @ 0.60). Sanction Policy (apply appropriate sanctions against workforce members who fail to comply) is the disciplinary-process control itself, not the HR-security program that contains it; HRS-07 Personnel Sanctions is the dedicated anchor and HRS-01 over-covered the requirement. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 1."
   - requirement_code: "164.308(a)(1)(ii)(D)"
-    scf_anchor: "AAA-12"
+    scf_anchor: "MON-05.1"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Information System Activity Review (regularly review audit logs, access reports, incident tracking) maps directly to SCF Audit Log Review."
+    rationale: "Information System Activity Review (regularly review audit logs, access reports, incident tracking) maps directly to SCF Centralized Event Log & Security-Relevant Telemetry Review & Analysis."
   - requirement_code: "164.308(a)(2)"
     scf_anchor: "GOV-04"
     relationship_type: "equal"
@@ -414,10 +414,10 @@ mappings:
     strength: 0.85
     rationale: "Protection from Malicious Software maps directly to SCF Malicious Code Protection."
   - requirement_code: "164.308(a)(5)(ii)(C)"
-    scf_anchor: "MON-08"
+    scf_anchor: "MON-16"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Log-in Monitoring (monitor log-in attempts, report discrepancies) overlaps SCF Anomalous Behavior Detection; broader correlation gap (MEDIUM)."
+    rationale: "Log-in Monitoring (monitor log-in attempts, report discrepancies) overlaps SCF Anomalous Behavior; broader correlation gap (MEDIUM)."
   - requirement_code: "164.308(a)(5)(ii)(D)"
     scf_anchor: "IAC-14"
     relationship_type: "equal"
@@ -569,10 +569,10 @@ mappings:
     strength: 0.85
     rationale: "Encryption and Decryption of ePHI at rest maps directly to SCF Encryption At Rest."
   - requirement_code: "164.312(b)"
-    scf_anchor: "AAA-01"
+    scf_anchor: "MON-04"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Audit Controls (record and examine system activity) map directly to SCF Auditing & Accountability."
+    rationale: "Audit Controls (record and examine system activity) map directly to SCF System Generated Event Logs & Security-Relevant Telemetry."
   - requirement_code: "164.312(c)(1)"
     scf_anchor: "DCH-05"
     relationship_type: "subset_of"

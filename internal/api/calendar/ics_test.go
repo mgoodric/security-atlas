@@ -183,7 +183,7 @@ func TestRenderICS_ExceptionSummaryUsesSCFCodeNotUUID(t *testing.T) {
 		{
 			EventID:           "exc-1",
 			EventType:         "exception",
-			Title:             "Exception on AAA-01 — Access Control Policy",
+			Title:             "Exception on MON-04 — Access Control Policy",
 			StartsAt:          pgtype.Timestamptz{Time: starts, Valid: true},
 			RelatedEntityID:   "exc-1",
 			RelatedEntityKind: "exception",
@@ -193,7 +193,7 @@ func TestRenderICS_ExceptionSummaryUsesSCFCodeNotUUID(t *testing.T) {
 	}
 	out := renderICS(rows, "test", now)
 
-	wantSummary := "SUMMARY:Exception on AAA-01 — Access Control Policy\r\n"
+	wantSummary := "SUMMARY:Exception on MON-04 — Access Control Policy\r\n"
 	if !strings.Contains(out, wantSummary) {
 		t.Errorf("expected exception SUMMARY %q, got:\n%s", wantSummary, out)
 	}

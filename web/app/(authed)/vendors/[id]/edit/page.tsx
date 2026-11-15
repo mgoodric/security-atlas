@@ -101,7 +101,7 @@ export default function VendorEditPage({
             }}
             submitLabel="Save changes"
           />
-          <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+          <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-4">
             <div>
               <p className="text-sm font-medium">Delete vendor</p>
               <p className="text-xs text-muted-foreground">
