@@ -369,6 +369,20 @@ func TestDropRiskCategoryEnum_RefusesADisagreeingRisk(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("contract migration over agreeing risks: %v", err)
 	}
+	// Under a role RLS binds, the guard would see no rows and pass
+	// vacuously; it refuses instead. The role switch is undone with the
+	// savepoint.
+	err = inSavepoint(ctx, t, tx, func(sp pgx.Tx) error {
+		if _, err := sp.Exec(ctx, `SET LOCAL ROLE atlas_app`); err != nil {
+			t.Fatalf("SET ROLE atlas_app: %v", err)
+		}
+		_, err := sp.Exec(ctx, readMigration(t, dropEnumUp))
+		return err
+	})
+	var roleErr *pgconn.PgError
+	if !errors.As(err, &roleErr) || roleErr.Code != "42501" || !strings.Contains(roleErr.Message, "needs BYPASSRLS") {
+		t.Fatalf("contract migration as atlas_app: want SQLSTATE 42501 naming BYPASSRLS, got %v", err)
+	}
 	if _, err := tx.Exec(ctx, `ALTER TABLE risks DISABLE TRIGGER risks_category_sync_trg`); err != nil {
 		t.Fatalf("disable sync trigger: %v", err)
 	}

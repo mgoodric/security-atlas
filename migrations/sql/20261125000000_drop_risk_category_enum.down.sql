@@ -37,6 +37,9 @@ WHERE c.tenant_id = r.tenant_id
 
 ALTER TABLE risks ALTER COLUMN category SET NOT NULL;
 
+-- Dropped with the column by the up step (slice 019's index).
+CREATE INDEX IF NOT EXISTS idx_risks_tenant_category ON risks (tenant_id, category);
+
 -- The #1809 dual-write trigger, as it was.
 CREATE OR REPLACE FUNCTION risks_category_sync()
 RETURNS TRIGGER AS $$

@@ -43,6 +43,16 @@ type diffResp struct {
 			Justification string `json:"justification"`
 		} `json:"after"`
 	} `json:"changes"`
+	ReferenceChanges []struct {
+		Code   string `json:"code"`
+		Change string `json:"change"`
+		Before *struct {
+			ImplementationRef string `json:"implementation_ref"`
+		} `json:"before"`
+		After *struct {
+			ImplementationRef string `json:"implementation_ref"`
+		} `json:"after"`
+	} `json:"reference_changes"`
 }
 
 func (c soaClient) diff(scopeID string) (int, diffResp, []byte) {
@@ -153,12 +163,27 @@ func TestHTTP_ApplicabilityDiff_ListsExactlyTheChanges(t *testing.T) {
 		}
 	}
 
+	// #2214: the R-04 reference-only edit is listed apart, not in changes.
+	if len(d.ReferenceChanges) != 1 {
+		t.Fatalf("reference_changes = %+v, want R-04 only", d.ReferenceChanges)
+	}
+	if rc := d.ReferenceChanges[0]; rc.Code != "R-04" || rc.Change != "reference_changed" ||
+		rc.Before == nil || rc.Before.ImplementationRef != "https://wiki.example/isms/A" ||
+		rc.After == nil || rc.After.ImplementationRef != "https://wiki.example/isms/B" {
+		t.Errorf("R-04 reference change = %+v", rc)
+	}
+
 	// Approving B and activating it makes it the baseline-less current
 	// revision: its own diff has no baseline.
 	c.transition(b, "approve", approver, "")
 	c.transition(b, "activate", bearer, fmt.Sprintf(`{"effective_from":%q}`, time.Now().UTC().Format(time.RFC3339)))
 	if _, after, _ := c.diff(b); after.Baseline != nil || after.FrameworkScope.State != "activated" {
 		t.Fatalf("diff of activated B: baseline %+v state %s", after.Baseline, after.FrameworkScope.State)
+	}
+	// #2214: the diff of superseded A compares it against the current
+	// activated revision, B, not against what A replaced.
+	if _, old, _ := c.diff(a); old.FrameworkScope.State != "superseded" || old.Baseline == nil || old.Baseline.ID != b {
+		t.Fatalf("diff of superseded A: state %s baseline %+v, want B", old.FrameworkScope.State, old.Baseline)
 	}
 }
 

@@ -35,6 +35,17 @@ BEGIN
         RETURN;
     END IF;
 
+    -- The guard is only as good as what it can see. Under a role that RLS
+    -- binds, the count below would see no tenant's rows and pass vacuously,
+    -- so refuse to run under anything but a superuser or BYPASSRLS role.
+    IF NOT (SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user) THEN
+        RAISE EXCEPTION
+            'refusing to drop risks.category: role % cannot see every tenant''s risks (needs BYPASSRLS)',
+            current_user
+            USING ERRCODE = 'insufficient_privilege',
+                  HINT = 'Run the migration as atlas_migrate.';
+    END IF;
+
     SELECT count(*), min(r.id::text)
     INTO v_bad, v_first
     FROM risks r

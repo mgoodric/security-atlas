@@ -19,7 +19,10 @@ raises `check_violation` naming the count and the first id, and the
 transaction rolls back with the column still there. The expand step's
 trigger should make that state impossible, but a live install must never
 lose a category silently, so the migration checks instead of trusting it.
-It runs as `atlas_migrate` (BYPASSRLS), so the count sees every tenant.
+It runs as `atlas_migrate` (BYPASSRLS), so the count sees every tenant. It
+also checks that: under a role RLS binds, the count would see no rows and
+pass vacuously, so the migration refuses (`insufficient_privilege`) unless
+the role is a superuser or BYPASSRLS. The data-safety review asked for this.
 
 `TestDropRiskCategoryEnum_RefusesADisagreeingRisk` observes the guard both
 ways in one rolled-back transaction: the migration succeeds over agreeing
