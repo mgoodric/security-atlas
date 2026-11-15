@@ -186,7 +186,7 @@ function ReferenceMove({ change }: { change: ApplicabilityChange }) {
   return (
     <div
       className="mt-1 break-all text-muted-foreground"
-      data-testid={`review-diff-row-ref-${change.code}`}
+      data-testid={`review-diff-moved-ref-${change.code}`}
     >
       {text}
     </div>

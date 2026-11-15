@@ -166,11 +166,11 @@ test.describe("framework scope · review-screen applicability diff (#1795)", () 
 
     // A reference move bundled with DIFF-02's justification change is a
     // muted sub-line on that row; DIFF-01's unmoved reference has none.
-    const moved = diff.getByTestId("review-diff-row-ref-DIFF-02");
+    const moved = diff.getByTestId("review-diff-moved-ref-DIFF-02");
     await expect(moved).toHaveText("reference: wiki/cards-a → wiki/cards-b");
     await expect(moved).toHaveClass(/text-muted-foreground/);
     await expect(moved.locator("a")).toHaveCount(0);
-    await expect(diff.getByTestId("review-diff-row-ref-DIFF-01")).toHaveCount(
+    await expect(diff.getByTestId("review-diff-moved-ref-DIFF-01")).toHaveCount(
       0,
     );
     await expect(diff.getByTestId("review-diff-ref-DIFF-02")).toHaveCount(0);
