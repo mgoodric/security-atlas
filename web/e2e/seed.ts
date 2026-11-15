@@ -114,6 +114,9 @@ export type FixtureName =
   // #2089 — one manual_attested control so attest.spec.ts can load the
   // real attest form (the base control is automated).
   | "attest"
+  // #2081 — a dedicated tenant with `board.reporting` + `oscal.export`
+  // on, for the sidebar's flag-on case (sidebar-nav.spec.ts).
+  | "sidebar-nav"
   // #2137 — one manual attestation for evidence-detail.spec.ts.
   | "evidence-detail"
   // #1800 — a requirement with a catalog edge and a demo-tenant overlay

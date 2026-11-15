@@ -24,6 +24,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
 import type { ComponentDefinitionList } from "@/lib/api/oscal-components";
 import { isFeatureDisabledError } from "@/lib/feature-nav";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function ComponentDefinitionsPage() {
   const q = useQuery({
@@ -40,7 +41,7 @@ export default function ComponentDefinitionsPage() {
   // Render the clean disabled panel instead of the raw error Alert.
   if (q.isError && isFeatureDisabledError(q.error)) {
     return (
-      <PageShell title="Vendor Claims">
+      <PageShell title={pageTitle("/oscal/component-definitions")}>
         <FeatureDisabledState moduleName="Vendor Claims" />
       </PageShell>
     );
@@ -48,7 +49,7 @@ export default function ComponentDefinitionsPage() {
 
   return (
     <PageShell
-      title="Vendor Claims"
+      title={pageTitle("/oscal/component-definitions")}
       subtitle="Imported vendor component-definitions. Each claim is a vendor assertion, not platform-verified evidence — accept, reject, or ask for more information."
       data-testid="component-definitions-page"
     >

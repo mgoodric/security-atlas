@@ -6,9 +6,10 @@
 // breadcrumb names this section "Catalog"; the title matches.
 
 import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-titles";
 
 export const metadata: Metadata = {
-  title: "Catalog",
+  title: pageTitle("/catalog/scf"),
 };
 
 export default function CatalogScfLayout({
