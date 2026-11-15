@@ -97,7 +97,7 @@ FROM (
     -- exception expirations: active waivers ordered by when they lapse.
     -- Slice 732: the title resolves the control UUID to its human SCF code
     -- + control name (controls.title) so the agenda / month-grid / ICS read
-    -- "Exception on AAA-01 — <name>" instead of the raw
+    -- "Exception on MON-04 — <name>" instead of the raw
     -- "Exception on control <uuid>". The SCF code is resolved two ways and
     -- COALESCEd: (1) controls.scf_id, the code stamped directly on the
     -- control row; (2) the global scf_anchors.scf_id reached through the

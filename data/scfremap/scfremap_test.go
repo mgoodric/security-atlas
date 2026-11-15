@@ -1,6 +1,10 @@
 package scfremap
 
-import "testing"
+import (
+	"encoding/json"
+	"os"
+	"testing"
+)
 
 func TestEmbeddedTableParses(t *testing.T) {
 	t.Parallel()
@@ -16,6 +20,47 @@ func TestEmbeddedTableParses(t *testing.T) {
 	}
 	if _, ok, _ := Lookup("test-2026.3", "IAC-21"); ok {
 		t.Fatal("a remap is keyed on its from_release")
+	}
+}
+
+// TestRemapTargetsExistInTheSample: every row that remaps into the bundled
+// sample's release names a code the sample carries, so a re-anchoring note
+// never points an operator at an anchor that is not there (#1972 review).
+func TestRemapTargetsExistInTheSample(t *testing.T) {
+	t.Parallel()
+	b, err := os.ReadFile("../../migrations/fixtures/scf-sample.json")
+	if err != nil {
+		t.Fatalf("read sample: %v", err)
+	}
+	var sample struct {
+		ReleaseVersion string `json:"release_version"`
+		Controls       []struct {
+			SCFID string `json:"scf_id"`
+		} `json:"controls"`
+	}
+	if err := json.Unmarshal(b, &sample); err != nil {
+		t.Fatalf("parse sample: %v", err)
+	}
+	codes := make(map[string]bool, len(sample.Controls))
+	for _, c := range sample.Controls {
+		codes[c.SCFID] = true
+	}
+	rows, err := Parse(raw)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	checked := 0
+	for _, r := range rows {
+		if r.ToRelease != sample.ReleaseVersion {
+			continue
+		}
+		checked++
+		if !codes[r.To] {
+			t.Errorf("remap %s: %s is not in scf-sample.json (release %s)", r.Note(), r.To, sample.ReleaseVersion)
+		}
+	}
+	if checked == 0 {
+		t.Fatalf("no remap row targets the sample's release %q", sample.ReleaseVersion)
 	}
 }
 

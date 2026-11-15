@@ -312,7 +312,7 @@ func TestCalendar_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
 	tenant := freshTenant(t, admin)
 	now := time.Now().UTC()
 
-	ctrl := seedControlWithSCF(t, admin, tenant, "AAA-01", "Access Control Policy")
+	ctrl := seedControlWithSCF(t, admin, tenant, "MON-04", "Access Control Policy")
 	seedException(t, admin, tenant, ctrl, now.Add(10*24*time.Hour))
 
 	env := testServer(t, app, tenant)
@@ -327,7 +327,7 @@ func TestCalendar_ExceptionTitleUsesSCFCodeNotUUID(t *testing.T) {
 	}
 	title := events[0].(map[string]any)["title"].(string)
 
-	const wantTitle = "Exception on AAA-01 — Access Control Policy"
+	const wantTitle = "Exception on MON-04 — Access Control Policy"
 	if title != wantTitle {
 		t.Errorf("exception title = %q; want %q", title, wantTitle)
 	}

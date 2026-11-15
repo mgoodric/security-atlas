@@ -190,7 +190,7 @@ func DefaultSeed() []KindVersion {
 		// monitoring.alert_config.v1. Slice 488 reads which alerts are CONFIGURED
 		// (CC7.2); this reads what actually FIRED and resolved (CC7.3/CC7.4): one
 		// record per firing event (rule_id, vendor, fired_at, resolved_at, state,
-		// routing-target HANDLE). Anchors MON-01 + IRO-09 (the spec candidate
+		// routing-target HANDLE). Anchors MON-02 + IRO-09 (the spec candidate
 		// IRO-02 is absent from the bundled SCF fixture; IRO-09 is the closest
 		// present incident anchor — decisions-log D3). Read-only (Datadog
 		// events_read GET /api/v1/events; Grafana Viewer GET /api/v1/rules/history),
@@ -203,7 +203,7 @@ func DefaultSeed() []KindVersion {
 		// Slice 533: Datadog Cloud-SIEM / Security-Monitoring detection-rule
 		// inventory — the deliberate slice-488 D1 sibling-kind SPLIT (a detection
 		// rule carries a severity + detection-class field monitoring.alert_config
-		// lacks, so it gets its own kind: MON-01 + THR-01). Read-only
+		// lacks, so it gets its own kind: MON-02 + THR-01). Read-only
 		// (security_monitoring_rules_read); RULE configuration only — never firing
 		// signals, raw log samples, matched-event payloads, secret notification
 		// targets, recipient PII, or the raw detection query.
@@ -304,7 +304,7 @@ func DefaultSeed() []KindVersion {
 		//     admin/owner role + 2FA enforcement). Anchors IAC-01 (identity &
 		//     access mgmt) + IAC-37 (multi-factor authentication — the 2FA dimension).
 		//   - admin_audit_event: admin-action evidence from the audit-logs API.
-		//     Anchor MON-01 (continuous monitoring — same anchor as
+		//     Anchor MON-02 (continuous monitoring — same anchor as
 		//     github.audit_event.v1).
 		//   - retention_settings: data-retention evidence (message/file
 		//     retention durations + policy flags). Anchors DCH-01 (data
