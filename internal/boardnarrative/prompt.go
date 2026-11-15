@@ -27,15 +27,15 @@ Rules you MUST follow:
 
 1. GROUNDING. Use ONLY the pre-computed rollup numbers and the cited control/evidence material provided below. Do not introduce any number, coverage claim, date, or fact that is not in the rollup.
 
-2. NUMBERS. State ONLY numbers that appear verbatim in the rollup. Do not compute new numbers, do not round, do not estimate, do not invent a target. If the rollup says coverage is 84, write 84 — never "about 85" or "85%".
+2. NUMBERS. State ONLY numbers that appear verbatim in the rollup, written exactly as the rollup writes them. Do not compute new numbers, do not round, do not estimate, do not invent a target. If the rollup says coverage is 41.9, write 41.9 — never "about 42" or "42%".
 
 3. CITATIONS. For the scope sentence, cite the supporting control or evidence by its exact id verbatim (the canonical UUID shown in the rollup), in parentheses. Cite ONLY ids that appear in the rollup's citable material below. Do not invent ids.
 
 4. SECTION SHAPE. Emit EXACTLY this structure and nothing else — no preamble, no summary, no extra sections, no closing remarks:
 
 ## Control coverage summary
-1. <one sentence stating the program control-coverage percentage>
-2. <one sentence stating the evidence-freshness percentage>
+1. <one sentence stating the requirement coverage averaged across the frameworks with an activated scope (control_coverage_pct and scoped_framework_count); when the rollup says no framework has an activated scope, say that in words and state no coverage percentage>
+2. <one sentence stating the tenant-wide evidence freshness rate; call it the evidence freshness rate, never coverage>
 3. <one sentence stating the 30-day drift: the net change in passing controls, how many controls started passing (when the rollup gives controls_started_passing) and how many drifted out of passing>
 4. <one sentence stating how many frameworks the program runs against, citing one or more control/evidence ids from the rollup>
 
@@ -69,8 +69,13 @@ func buildPrompt(r Rollup) string {
 	var b strings.Builder
 	b.WriteString("Pre-computed rollup (state ONLY these numbers):\n")
 	fmt.Fprintf(&b, "  - period_end: %s\n", r.PeriodEnd)
-	fmt.Fprintf(&b, "  - control_coverage_pct: %s\n", itoa(r.CoveragePct))
-	fmt.Fprintf(&b, "  - evidence_freshness_pct: %s\n", itoa(r.FreshnessPct))
+	if r.ScopedFrameworkCount > 0 {
+		fmt.Fprintf(&b, "  - control_coverage_pct: %s (mean requirement coverage of the frameworks with an activated scope)\n", r.coverageText())
+		fmt.Fprintf(&b, "  - scoped_framework_count: %s\n", itoa(r.ScopedFrameworkCount))
+	} else {
+		b.WriteString("  - control_coverage_pct: not reported, because no framework has an activated scope\n")
+	}
+	fmt.Fprintf(&b, "  - evidence_freshness_rate_pct: %s (tenant-wide share of controls with fresh evidence)\n", itoa(r.FreshnessPct))
 	writeDriftMovement(&b, r)
 	fmt.Fprintf(&b, "  - drift_window_days: %s\n", itoa(r.WindowDays))
 	fmt.Fprintf(&b, "  - framework_count: %s\n", itoa(r.FrameworkCount))
@@ -130,8 +135,11 @@ func sectionContextInputs(section SectionKey, r Rollup) map[string]any {
 		base["exceptions_past_expiry"] = r.ExceptionsPastDue
 		base["oldest_exception_age_days"] = r.OldestExceptionAgeDays
 	default: // coverage
-		base["control_coverage_pct"] = r.CoveragePct
-		base["evidence_freshness_pct"] = r.FreshnessPct
+		if r.ScopedFrameworkCount > 0 {
+			base["control_coverage_pct"] = r.coverageText()
+		}
+		base["scoped_framework_count"] = r.ScopedFrameworkCount
+		base["evidence_freshness_rate_pct"] = r.FreshnessPct
 		base["drift_delta_30d"] = r.Delta
 		base["controls_drifted_out"] = r.FlippedOutCount
 		addStartedPassing(base, r)
