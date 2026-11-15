@@ -51,6 +51,7 @@ const NO_ROW_ID = "00000000-0000-0000-0000-000000002080";
 // including the segment. Seeded rows where the harness has one.
 const PARAM_VALUES: Record<string, string> = {
   "/action-plans/[id]": NO_ROW_ID,
+  "/audits/[id]": seeded.auditPeriodId,
   "/board-packs/[id]": NO_ROW_ID,
   "/catalog/scf/[id]": NO_ROW_ID,
   "/controls/[id]": seeded.controlId,

@@ -25,9 +25,11 @@ WHERE tenant_id = $1 AND id = $2;
 -- are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
 -- value to leave the column unchanged. The handler builds the diff from the request
 -- body before calling this query.
+-- #2142: theme (system | light | dark) rides the same PATCH; CHECK-constrained.
 UPDATE users
 SET display_name = $3,
     time_zone    = $4,
+    theme        = $5,
     updated_at   = now()
 WHERE tenant_id = $1 AND id = $2
 RETURNING *;

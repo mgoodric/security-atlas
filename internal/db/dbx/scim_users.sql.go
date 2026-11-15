@@ -30,7 +30,7 @@ INSERT INTO users (
 VALUES (
     $1, $2, $3, $4, 'active', true, $5, true
 )
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type CreateSCIMUserParams struct {
@@ -68,12 +68,13 @@ func (q *Queries) CreateSCIMUser(ctx context.Context, arg CreateSCIMUserParams) 
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
 
 const getSCIMUserByEmail = `-- name: GetSCIMUserByEmail :one
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 FROM users
 WHERE tenant_id = $1 AND lower(email) = lower($2::text)
 `
@@ -102,12 +103,13 @@ func (q *Queries) GetSCIMUserByEmail(ctx context.Context, arg GetSCIMUserByEmail
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
 
 const getSCIMUserByExternalID = `-- name: GetSCIMUserByExternalID :one
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 FROM users
 WHERE tenant_id = $1 AND scim_external_id = $2
 `
@@ -135,12 +137,13 @@ func (q *Queries) GetSCIMUserByExternalID(ctx context.Context, arg GetSCIMUserBy
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
 
 const listSCIMUsers = `-- name: ListSCIMUsers :many
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 FROM users
 WHERE tenant_id = $1
 ORDER BY created_at ASC, id ASC
@@ -178,6 +181,7 @@ func (q *Queries) ListSCIMUsers(ctx context.Context, arg ListSCIMUsersParams) ([
 			&i.Active,
 			&i.ScimExternalID,
 			&i.ScimManaged,
+			&i.Theme,
 		); err != nil {
 			return nil, err
 		}
@@ -190,7 +194,7 @@ func (q *Queries) ListSCIMUsers(ctx context.Context, arg ListSCIMUsersParams) ([
 }
 
 const listSCIMUsersByUserName = `-- name: ListSCIMUsersByUserName :many
-SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+SELECT id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 FROM users
 WHERE tenant_id = $1 AND lower(email) = lower($2::text)
 ORDER BY created_at ASC, id ASC
@@ -225,6 +229,7 @@ func (q *Queries) ListSCIMUsersByUserName(ctx context.Context, arg ListSCIMUsers
 			&i.Active,
 			&i.ScimExternalID,
 			&i.ScimManaged,
+			&i.Theme,
 		); err != nil {
 			return nil, err
 		}
@@ -241,7 +246,7 @@ UPDATE users
 SET display_name = $3,
     updated_at   = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type PatchSCIMUserDisplayNameParams struct {
@@ -268,6 +273,7 @@ func (q *Queries) PatchSCIMUserDisplayName(ctx context.Context, arg PatchSCIMUse
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
@@ -280,7 +286,7 @@ SET display_name = $3,
     status       = CASE WHEN $5 THEN 'active' ELSE 'disabled' END,
     updated_at   = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type ReplaceSCIMUserParams struct {
@@ -317,6 +323,7 @@ func (q *Queries) ReplaceSCIMUser(ctx context.Context, arg ReplaceSCIMUserParams
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
@@ -351,7 +358,7 @@ SET active     = $3,
     status     = CASE WHEN $3 THEN 'active' ELSE 'disabled' END,
     updated_at = now()
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed
+RETURNING id, tenant_id, email, display_name, status, idp_issuer, idp_subject, created_at, updated_at, time_zone, active, scim_external_id, scim_managed, theme
 `
 
 type SetSCIMUserActiveParams struct {
@@ -379,6 +386,7 @@ func (q *Queries) SetSCIMUserActive(ctx context.Context, arg SetSCIMUserActivePa
 		&i.Active,
 		&i.ScimExternalID,
 		&i.ScimManaged,
+		&i.Theme,
 	)
 	return i, err
 }
