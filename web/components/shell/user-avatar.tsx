@@ -56,7 +56,15 @@ function asString(v: unknown): string {
   return typeof v === "string" ? v : "";
 }
 
-export async function UserAvatar() {
+export type UserIdentity = { name: string; initials: string };
+
+/**
+ * #2213 — the operator's display name and initials, or `null` on any
+ * failure. Split out of `<UserAvatar>` so the top bar reads `/v1/me`
+ * once and hands the result to both the inline avatar (from `lg` up)
+ * and the account menu (below `lg`).
+ */
+export async function fetchUserIdentity(): Promise<UserIdentity | null> {
   const me = await fetchMe();
   if (!me) return null;
 
@@ -67,7 +75,12 @@ export async function UserAvatar() {
   const name = deriveDisplayName(profile);
   if (name.length === 0) return null;
 
-  const initials = deriveInitials(name);
+  return { name, initials: deriveInitials(name) };
+}
+
+export function UserAvatar({ identity }: { identity: UserIdentity | null }) {
+  if (!identity) return null;
+  const { name, initials } = identity;
 
   return (
     <div
