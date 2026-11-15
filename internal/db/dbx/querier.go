@@ -658,8 +658,14 @@ type Querier interface {
 	// trend_delta_90d: coverage_pct now minus the coverage_pct as it stood ~90
 	// days ago. "As it stood" is reconstructed from the control_evaluations
 	// ledger (slice 012): a control counted toward coverage 90 days ago iff its
-	// latest evaluation on/before the cutoff had result='pass'. The delta is in
+	// latest evaluation on/before the cutoff had result 'pass' or 'excepted'
+	// (#2112: excepted counts as covered, now and then). The delta is in
 	// percentage points (e.g. +12.5 means coverage rose 12.5 points).
+	//
+	// covered_by_exception_pct (#2112): the share of requirements covered today
+	// only by controls that rest on an active exception (at least one of the
+	// control's cells evaluates `excepted`). It is part of coverage_pct, and
+	// callers show it beside it so a waiver never reads as a demonstrated control.
 	//
 	// Statement of Applicability (#1788): a requirement the tenant's ACTIVATED
 	// framework-scope revision for the version marks `excluded` leaves the

@@ -197,6 +197,7 @@ const RESULT_OPTIONS: { value: string; label: string }[] = [
   { value: "fail", label: "fail" },
   { value: "insufficient_evidence", label: "insufficient_evidence" },
   { value: "not_applicable", label: "not_applicable" },
+  { value: "excepted", label: "Excepted" },
 ];
 
 // Slice <NNN> — map the control evaluation `result` enum (the real wire
@@ -210,11 +211,14 @@ const RESULT_OPTIONS: { value: string; label: string }[] = [
 //   fail                  -> critical (red    — the card's "Gap")
 //   insufficient_evidence -> warning  (amber  — needs attention, not a hard fail)
 //   not_applicable        -> secondary (neutral — out of scope, no signal hue)
-// `info` and `progress` from the badge family have no member in the
-// control-result enum, so they are intentionally unused here (they exist
-// for other surfaces and the design preview).
+//   excepted              -> info     (blue   — waived by an active exception;
+//                                      #2112: never the pass hue, never "pass")
+// `progress` from the badge family has no member in the control-result
+// enum, so it is intentionally unused here (it exists for other surfaces
+// and the design preview).
 type StatusBadgeVariant =
   | "pass"
+  | "info"
   | "critical"
   | "warning"
   | "secondary"
@@ -225,7 +229,20 @@ const RESULT_BADGE_VARIANT: Record<string, StatusBadgeVariant> = {
   fail: "critical",
   insufficient_evidence: "warning",
   not_applicable: "secondary",
+  excepted: "info",
 };
+
+// #2112 — display text for a result. The raw enum value stays the visible
+// text (and the data-result attribute) except where a value is named for a
+// person: `excepted` reads "Excepted", so a waived control can never be
+// mistaken for a passing one.
+const RESULT_LABEL: Record<string, string> = {
+  excepted: "Excepted",
+};
+
+function resultLabel(result: string): string {
+  return RESULT_LABEL[result] ?? result;
+}
 
 function resultBadgeVariant(result: string): StatusBadgeVariant {
   // Unknown / future result values fall back to a neutral outline pill
@@ -949,7 +966,7 @@ function ControlsPageInner() {
               aria-hidden="true"
               className="size-1.5 shrink-0 rounded-full bg-current"
             />
-            {row.state.result}
+            {resultLabel(row.state.result)}
           </Badge>
         ) : (
           <span className="text-muted-foreground">—</span>

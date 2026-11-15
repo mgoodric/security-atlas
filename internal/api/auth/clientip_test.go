@@ -10,6 +10,7 @@ package auth
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -300,24 +301,88 @@ func TestInitTrustedProxies_CIDRsTakePrecedenceOverAlias(t *testing.T) {
 
 // --- threat-model D: hop cap bounds the walk ---
 
-func TestForwardedHops_CapsAtMax(t *testing.T) {
-	var b []byte
-	for i := 0; i < maxForwardedHops+25; i++ {
-		if i > 0 {
-			b = append(b, ',', ' ')
-		}
-		b = append(b, "10.0.0.1"...)
-	}
-	hops := forwardedHops(string(b))
-	if len(hops) != maxForwardedHops {
-		t.Errorf("forwardedHops capped at %d; want %d", len(hops), maxForwardedHops)
+// xffList joins n copies of ip with ", ".
+func xffList(ip string, n int) string {
+	return strings.TrimSuffix(strings.Repeat(ip+", ", n), ", ")
+}
+
+func TestClientIP_TrustedHopCapStopsWalk(t *testing.T) {
+	// An all-trusted chain longer than the cap: the walk steps over
+	// maxForwardedHops trusted addresses (the peer is the first) and
+	// returns the last one it reached, never the client-most entry.
+	withTrustedProxies(t, "10.0.0.0/8")
+	xff := "198.51.100.42, " + xffList("10.0.0.1", maxForwardedHops-2) + ", 10.0.0.2, 10.0.0.3"
+	r := newReq(t, "10.0.0.5:443", map[string]string{"X-Forwarded-For": xff})
+	if got := clientIP(r); got != "10.0.0.1" {
+		t.Errorf("clientIP over trusted cap = %q; want 10.0.0.1 (cap reached before 198.51.100.42)", got)
 	}
 }
 
-func TestForwardedHops_DropsEmptyEntries(t *testing.T) {
-	hops := forwardedHops("198.51.100.42, , 10.0.0.9,")
-	if len(hops) != 2 || hops[0] != "198.51.100.42" || hops[1] != "10.0.0.9" {
-		t.Errorf("forwardedHops = %v; want [198.51.100.42 10.0.0.9]", hops)
+func TestLastForwardedHop_SkipsEmptyEntries(t *testing.T) {
+	var got []string
+	xff := "198.51.100.42, , 10.0.0.9,"
+	for {
+		hop, rest, ok := lastForwardedHop(xff)
+		if !ok {
+			break
+		}
+		got = append(got, hop)
+		xff = rest
+	}
+	if len(got) != 2 || got[0] != "10.0.0.9" || got[1] != "198.51.100.42" {
+		t.Errorf("lastForwardedHop order = %v; want [10.0.0.9 198.51.100.42]", got)
+	}
+}
+
+// --- #2272: the walk keeps the RIGHT-most hops, across every XFF line ---
+
+func TestClientIP_ManyForgedEntriesBeforeTrustedProxy(t *testing.T) {
+	// The client forges 60 entries; the trusted proxy appends the real
+	// client after them. Keeping the left-most 50 would return a forged
+	// entry; walking from the right returns the real client.
+	withTrustedProxies(t, "10.0.0.0/8")
+	xff := xffList("1.2.3.4", 60) + ", 198.51.100.42"
+	r := newReq(t, "10.0.0.5:443", map[string]string{"X-Forwarded-For": xff})
+	if got := clientIP(r); got != "198.51.100.42" {
+		t.Errorf("clientIP with 60 forged entries = %q; want 198.51.100.42", got)
+	}
+}
+
+func TestClientIP_SplitXFFLinesReadInOrder(t *testing.T) {
+	// The client sends its own XFF line; the trusted proxy adds a second
+	// line instead of appending. Header.Get would see only the client's.
+	withTrustedProxies(t, "10.0.0.0/8")
+	r := newReq(t, "10.0.0.5:443", nil)
+	r.Header.Add("X-Forwarded-For", "1.2.3.4")
+	r.Header.Add("X-Forwarded-For", "198.51.100.42")
+	if got := clientIP(r); got != "198.51.100.42" {
+		t.Errorf("clientIP two-line XFF = %q; want 198.51.100.42 (proxy-appended line)", got)
+	}
+}
+
+func TestClientIP_UntrustedPeerWithJunkHopsReturnsPeer(t *testing.T) {
+	withTrustedProxies(t, "10.0.0.0/8")
+	r := newReq(t, "203.0.113.50:44100", map[string]string{
+		"X-Forwarded-For": xffList("10.0.0.1", 500),
+	})
+	if got := clientIP(r); got != "203.0.113.50" {
+		t.Errorf("clientIP untrusted peer + 500 hops = %q; want 203.0.113.50", got)
+	}
+}
+
+func TestClientIP_TrustAnyAliasStillTrustsEveryHop(t *testing.T) {
+	// The deprecated TRUST_FORWARDED_HEADERS=1 path trusts every address,
+	// so the walk runs to the trusted-hop cap and stays on the right.
+	t.Setenv(trustedProxyCIDRsEnv, "")
+	t.Setenv(trustForwardedHeadersEnv, "1")
+	prev := loadTrustedProxies()
+	t.Cleanup(func() { setTrustedProxies(prev) })
+	if _, err := InitTrustedProxiesFromEnv(); err != nil {
+		t.Fatalf("init: %v", err)
+	}
+	r := newReq(t, "203.0.113.50:44100", map[string]string{"X-Forwarded-For": "198.51.100.42"})
+	if got := clientIP(r); got != "198.51.100.42" {
+		t.Errorf("clientIP trust-any = %q; want 198.51.100.42", got)
 	}
 }
 
