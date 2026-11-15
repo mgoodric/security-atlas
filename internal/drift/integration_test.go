@@ -140,6 +140,10 @@ func TestCaptureSnapshot_RecordsPassingControls(t *testing.T) {
 	// (canvas §2.3: stale evidence drives the drift signal).
 	stalePassCtrl := seedControl(t, admin, tenant)
 	seedEvaluation(t, admin, tenant, stalePassCtrl, "pass", "stale", now.Add(-1*time.Hour))
+	// #2112: an excepted control is never passing, so an exception that
+	// starts shows up as a flip out of passing and never as a gain.
+	exceptedCtrl := seedControl(t, admin, tenant)
+	seedEvaluation(t, admin, tenant, exceptedCtrl, "excepted", "fresh", now.Add(-1*time.Hour))
 
 	store := drift.NewStore(app)
 	snap, err := store.CaptureSnapshot(ctx, drift.TriggerManual)

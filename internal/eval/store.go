@@ -123,6 +123,30 @@ func (s *Store) loadEvidence(ctx context.Context, q *dbx.Queries, tenantID, cont
 	return out, nil
 }
 
+// loadActiveExceptions reads the control's exceptions in status 'active'
+// (#2112). Pure SELECT, run inside the caller's tenant-GUC transaction so RLS
+// on `exceptions` binds the read. The in-force window and the scope-cell
+// match are applied by exceptedIn.
+func (s *Store) loadActiveExceptions(ctx context.Context, q *dbx.Queries, tenantID, controlID uuid.UUID) ([]activeException, error) {
+	rows, err := q.ListExceptionsByControl(ctx, dbx.ListExceptionsByControlParams{
+		TenantID:  pgUUID(tenantID),
+		ControlID: pgUUID(controlID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list active exceptions: %w", err)
+	}
+	out := make([]activeException, 0, len(rows))
+	for _, r := range rows {
+		x := activeException{predicate: r.ScopeCellPredicate, expiresAt: r.ExpiresAt.Time}
+		if r.EffectiveFrom.Valid {
+			from := r.EffectiveFrom.Time
+			x.effectiveFrom = &from
+		}
+		out = append(out, x)
+	}
+	return out, nil
+}
+
 // appendEvaluation writes ONE row to control_evaluations. This is the
 // engine's ONLY write. There is no sibling method that touches
 // evidence_records — invariant #2 is enforced by the absence of that code.

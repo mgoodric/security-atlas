@@ -118,6 +118,7 @@ sql:
       - "migrations/sql/20261028000000_component_claim_scf_release.sql"
       - "migrations/sql/20261029000000_fw_to_scf_overlay_edges.sql"
       - "migrations/sql/20261031000000_self_approval.sql"
+      - "migrations/sql/20261101000000_control_evaluation_excepted.sql"
       - "migrations/sql/20261106000000_effective_edges_overlay_union.sql"
       # The control import tables (#1779-#1781), which the #1782 approval
       # migration alters; the unified audit log reads its audit table.

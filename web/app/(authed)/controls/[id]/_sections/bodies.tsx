@@ -361,9 +361,11 @@ export function EvidenceStreamRow({
       : result === "fail"
         ? "text-rose-600"
         : "text-muted-foreground";
+  // #2137 — the row opens the evidence detail page.
   return (
-    <div
-      className="grid grid-cols-12 items-center gap-3 py-2.5"
+    <Link
+      href={`/evidence/${encodeURIComponent(evidenceID)}`}
+      className="grid grid-cols-12 items-center gap-3 py-2.5 hover:bg-muted/50"
       data-testid="evidence-stream-row"
     >
       <div className="col-span-1">
@@ -384,7 +386,7 @@ export function EvidenceStreamRow({
       <div className={`col-span-2 text-right font-mono text-xs ${resultClass}`}>
         {result}
       </div>
-    </div>
+    </Link>
   );
 }
 

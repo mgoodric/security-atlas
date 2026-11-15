@@ -64,6 +64,20 @@ describe("RowActions", () => {
     expect(trigger).toContain('aria-label="Actions for key ab12"');
   });
 
+  it("sizes the trigger for a page header with variant header", () => {
+    const trigger = (variant?: "row" | "header") => {
+      const html = renderToStaticMarkup(
+        h(RowActions, { items: items().list, variant, "data-testid": "t" }),
+      );
+      const at = html.indexOf('data-testid="t"');
+      return html.slice(html.lastIndexOf("<", at), html.indexOf(">", at));
+    };
+    expect(trigger("header")).toContain("border-border");
+    expect(trigger("header")).toContain("size-8");
+    expect(trigger()).toContain("size-7");
+    expect(trigger()).not.toContain("border-border");
+  });
+
   it("renders nothing when every item is hidden", () => {
     const html = renderToStaticMarkup(
       h(RowActions, {

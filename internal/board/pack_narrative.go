@@ -83,7 +83,7 @@ var sectionSources = map[string]string{
 		`{{ if .Data.Frameworks }}The program runs against {{ len .Data.Frameworks }} {{ pluralize (len .Data.Frameworks) "framework" "frameworks" }}: ` +
 		`{{ range $i, $f := .Data.Frameworks }}{{ if $i }}; {{ end }}{{ $f.Name }}{{ if $f.Version }} {{ $f.Version }}{{ end }} ` +
 		`{{ if $f.ScopeNotSet }}has no activated framework scope (scope not set), so no coverage is reported` +
-		`{{ else }}at {{ pct $f.CoveragePct }}% coverage ({{ $f.State }}, ` +
+		`{{ else }}at {{ pct $f.CoveragePct }}% coverage ({{ if gt $f.CoveredByExceptionPct 0.0 }}{{ pct $f.CoveredByExceptionPct }}% of requirements covered by exception, {{ end }}{{ $f.State }}, ` +
 		`{{ if $f.NoTrendHistory }}{{ noBaseline }}{{ else }}{{ arrow $f.TrendArrow }} {{ pts $f.Delta }} pts over 90 days, from {{ pct $f.BaselinePct }}%{{ end }}){{ end }}{{ end }}.` +
 		`{{ else }}No frameworks are registered yet — register a framework to populate per-framework posture.{{ end }}`,
 

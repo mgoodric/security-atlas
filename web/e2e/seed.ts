@@ -113,7 +113,9 @@ export type FixtureName =
   | "framework-scope-diff"
   // #2089 — one manual_attested control so attest.spec.ts can load the
   // real attest form (the base control is automated).
-  | "attest";
+  | "attest"
+  // #2137 — one manual attestation for evidence-detail.spec.ts.
+  | "evidence-detail";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
