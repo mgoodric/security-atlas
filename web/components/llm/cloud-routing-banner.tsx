@@ -31,7 +31,7 @@ export function CloudRoutingBanner({ vm }: CloudRoutingBannerProps) {
   const resolved = useResolvedBanner(vm);
   if (!resolved.isCloud) return null;
   return (
-    <Alert data-testid="cloud-routing-banner" variant="destructive">
+    <Alert data-testid="cloud-routing-banner" variant="info">
       <AlertTitle>Cloud AI routing enabled</AlertTitle>
       <AlertDescription>{resolved.message}</AlertDescription>
     </Alert>
