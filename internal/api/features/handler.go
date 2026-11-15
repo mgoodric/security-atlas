@@ -47,6 +47,18 @@ type ListItem struct {
 	LastChangedBy string     `json:"last_changed_by,omitempty"`
 	LastChangedAt *time.Time `json:"last_changed_at,omitempty"`
 	HasOverride   bool       `json:"has_override"`
+	// Module is the key of the module the flag belongs to (#2171), and
+	// ModuleName its display name. ModuleSwitch is true for the module's
+	// own switch and false for a feature inside it, whose display name is
+	// FeatureName. The admin page groups by module, with features nested
+	// under their module's switch.
+	Module       string `json:"module,omitempty"`
+	ModuleName   string `json:"module_name,omitempty"`
+	ModuleSwitch bool   `json:"module_switch"`
+	// ModuleCore marks a feature of a core module, which has no switch of
+	// its own and is always on.
+	ModuleCore  bool   `json:"module_core"`
+	FeatureName string `json:"feature_name,omitempty"`
 }
 
 // ListResponse is the GET /v1/admin/features shape.
@@ -75,6 +87,14 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 			Category:      f.Category,
 			LastChangedBy: f.LastChangedBy,
 			HasOverride:   f.HasOverride,
+		}
+		if m, feat, ok := featureflag.ModuleForFlag(f.Key); ok {
+			item.Module, item.ModuleName, item.ModuleCore = m.Key, m.Name, m.Core
+			if feat != nil {
+				item.FeatureName = feat.Name
+			} else {
+				item.ModuleSwitch = true
+			}
 		}
 		if !f.LastChangedAt.IsZero() {
 			lc := f.LastChangedAt
@@ -160,6 +180,16 @@ const (
 // the web app gates nav entries and pages from the server's registry
 // rather than a map of its own.
 type EffectiveModule struct {
+	Key      string             `json:"key"`
+	Name     string             `json:"name"`
+	State    string             `json:"state"`
+	Pages    []string           `json:"pages"`
+	Features []EffectiveFeature `json:"features"`
+}
+
+// EffectiveFeature is one feature inside an optional module. Its state is
+// switched_off when its module is off or its own switch is off (#2171).
+type EffectiveFeature struct {
 	Key   string   `json:"key"`
 	Name  string   `json:"name"`
 	State string   `json:"state"`
@@ -182,8 +212,9 @@ func (h *Handler) Modules(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return
 	}
-	out := make([]EffectiveModule, 0, len(featureflag.Modules))
-	for _, m := range featureflag.Modules {
+	optional := featureflag.OptionalModules()
+	out := make([]EffectiveModule, 0, len(optional))
+	for _, m := range optional {
 		// Enabled() falls open to the Seed default on a DB error; only an
 		// unknown FlagKey (a registry code bug) surfaces an error.
 		on, err := featureflag.Enabled(r.Context(), h.store, m.FlagKey)
@@ -191,17 +222,36 @@ func (h *Handler) Modules(w http.ResponseWriter, r *http.Request) {
 			httperr.WriteInternal(w, r, "feature flag read failed", err)
 			return
 		}
-		state := ModuleOn
-		if !on {
-			state = ModuleSwitchedOff
+		em := EffectiveModule{Key: m.Key, Name: m.Name, State: stateOf(on), Pages: nonNil(m.Pages), Features: []EffectiveFeature{}}
+		for _, f := range m.Features {
+			fon, err := featureflag.Enabled(r.Context(), h.store, f.FlagKey)
+			if err != nil {
+				httperr.WriteInternal(w, r, "feature flag read failed", err)
+				return
+			}
+			em.Features = append(em.Features, EffectiveFeature{Key: f.Key, Name: f.Name, State: stateOf(on && fon), Pages: nonNil(f.Pages)})
 		}
-		out = append(out, EffectiveModule{Key: m.Key, Name: m.Name, State: state, Pages: m.Pages})
+		out = append(out, em)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(ModulesResponse{Modules: out})
 }
 
 // --- helpers ---
+
+func stateOf(on bool) string {
+	if on {
+		return ModuleOn
+	}
+	return ModuleSwitchedOff
+}
+
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
 
 func requireAdmin(w http.ResponseWriter, r *http.Request) bool {
 	cred, ok := authctx.CredentialFromContext(r.Context())

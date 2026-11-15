@@ -56,15 +56,20 @@ func getModules(t *testing.T, r http.Handler) features.ModulesResponse {
 
 func TestModulesReportsSeedDefaults(t *testing.T) {
 	t.Parallel()
+	// Only optional modules are reported; core modules are always on.
 	want := map[string]string{
-		"questionnaires":  features.ModuleOn,
-		"board_reporting": features.ModuleSwitchedOff,
-		"vendor_claims":   features.ModuleSwitchedOff,
+		"risk":               features.ModuleOn,
+		"third_party_risk":   features.ModuleOn,
+		"policies":           features.ModuleOn,
+		"questionnaires":     features.ModuleOn,
+		"personnel_security": features.ModuleOn,
+		"exceptions":         features.ModuleOn,
+		"board_reporting":    features.ModuleSwitchedOff,
 	}
 	for _, isAdmin := range []bool{false, true} {
 		body := getModules(t, newModulesRouter(true, isAdmin))
-		if len(body.Modules) != len(featureflag.Modules) {
-			t.Fatalf("admin=%v: %d modules; want %d", isAdmin, len(body.Modules), len(featureflag.Modules))
+		if len(body.Modules) != len(want) {
+			t.Fatalf("admin=%v: %d modules; want %d", isAdmin, len(body.Modules), len(want))
 		}
 		for _, m := range body.Modules {
 			if m.State != want[m.Key] {
@@ -72,6 +77,11 @@ func TestModulesReportsSeedDefaults(t *testing.T) {
 			}
 			if len(m.Pages) == 0 {
 				t.Errorf("admin=%v: %s has no pages", isAdmin, m.Key)
+			}
+			if m.Key == "third_party_risk" {
+				if len(m.Features) != 1 || m.Features[0].Key != "vendor_claims" || m.Features[0].State != features.ModuleSwitchedOff {
+					t.Errorf("admin=%v: third_party_risk features = %+v; want vendor_claims switched_off", isAdmin, m.Features)
+				}
 			}
 		}
 	}

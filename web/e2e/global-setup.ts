@@ -149,7 +149,7 @@ export default async function globalSetup(_config: FullConfig): Promise<void> {
  * against a separate tenant that keeps the defaults
  * (feature-flag-gating.spec.ts).
  */
-const GATED_MODULES = ["board.reporting", "oscal.export"];
+const GATED_MODULES = ["board.reporting", "vendor.claims"];
 
 async function enableGatedModules(token: string): Promise<void> {
   for (const key of GATED_MODULES) {

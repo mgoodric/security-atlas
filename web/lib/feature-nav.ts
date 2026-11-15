@@ -15,13 +15,22 @@ import { APIError } from "@/lib/api/base";
 /** A module's state for the caller, as `GET /v1/me/modules` reports it. */
 export type ModuleState = "on" | "switched_off";
 
-/** One optional module in the `GET /v1/me/modules` response. */
-export type EffectiveModule = {
+/**
+ * A feature inside an optional module (#2171). Its `state` is already
+ * effective: `switched_off` when its module or its own switch is off.
+ */
+export type EffectiveFeature = {
   key: string;
   name: string;
   state: ModuleState;
-  /** The web app paths the module owns. */
+  /** The web app paths the feature owns. */
   pages: string[];
+};
+
+/** One optional module in the `GET /v1/me/modules` response. */
+export type EffectiveModule = EffectiveFeature & {
+  /** The module's features; absent from an older platform. */
+  features?: EffectiveFeature[];
 };
 
 /**
@@ -38,12 +47,28 @@ function ownsPage(page: string, href: string): boolean {
   return href === page || href.startsWith(`${page}/`);
 }
 
-/** moduleForPage returns the optional module that owns `href`, if any. */
+/**
+ * moduleForPage returns the optional module, or the feature inside one,
+ * that owns `href`, if any. The longest owning page wins, so a feature's
+ * page beats a broader page of another module.
+ */
 export function moduleForPage(
   modules: EffectiveModules,
   href: string,
-): EffectiveModule | undefined {
-  return modules?.find((m) => m.pages.some((p) => ownsPage(p, href)));
+): EffectiveFeature | undefined {
+  let best: EffectiveFeature | undefined;
+  let bestLen = -1;
+  for (const m of modules ?? []) {
+    for (const entry of [m, ...(m.features ?? [])]) {
+      for (const p of entry.pages) {
+        if (ownsPage(p, href) && p.length > bestLen) {
+          best = entry;
+          bestLen = p.length;
+        }
+      }
+    }
+  }
+  return best;
 }
 
 /**
