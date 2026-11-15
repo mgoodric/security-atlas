@@ -34,6 +34,7 @@ package board
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -140,11 +141,37 @@ type DriftSummary struct {
 	// Since / Through bound the window (YYYY-MM-DD).
 	Since   string `json:"since"`
 	Through string `json:"through"`
-	// Delta is the signed drift count over the window.
+	// Delta is the net change in passing controls over the window
+	// (controls_passing on the latest snapshot minus the earliest). It is
+	// NOT started-passing minus flipped-out: a control can fail and recover
+	// inside the window, so render it beside both counts, labelled as net.
 	Delta int `json:"delta"`
 	// FlippedOutCount is how many controls drifted OUT of passing in the
 	// window.
 	FlippedOutCount int `json:"flipped_out_count"`
+	// StartedPassingCount is how many controls pass on the latest snapshot
+	// that were not passing on some earlier day in the window (#2195). Nil on
+	// a brief stored before it existed: those render without a gains count
+	// rather than claiming zero.
+	StartedPassingCount *int `json:"started_passing_count,omitempty"`
+}
+
+// MovementClause says which way controls moved in the window, for the
+// sentence that follows the net change: "3 control(s) started passing and 1
+// control(s) drifted out of passing". A brief stored before
+// StartedPassingCount existed states only the losses, as it always did.
+func (d DriftSummary) MovementClause() string {
+	out := "no controls drifted out of passing"
+	if d.FlippedOutCount > 0 {
+		out = fmt.Sprintf("%d control(s) drifted out of passing", d.FlippedOutCount)
+	}
+	if d.StartedPassingCount == nil {
+		return out
+	}
+	if *d.StartedPassingCount == 0 && d.FlippedOutCount == 0 {
+		return "no controls started or stopped passing"
+	}
+	return fmt.Sprintf("%d control(s) started passing and %s", *d.StartedPassingCount, out)
 }
 
 // RiskAging is one risk in the brief's "top-3 risks aging" section.

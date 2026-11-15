@@ -143,7 +143,7 @@ func TestBuildBriefHTML_DriftDeltaIsSigned(t *testing.T) {
 	sb := sampleStoredBrief()
 	sb.Content.Drift.Delta = -2
 	got := buildBriefHTML(sb)
-	if !strings.Contains(got, "drift count -2") {
+	if !strings.Contains(got, "net change in passing controls -2") {
 		t.Fatalf("drift delta must render with explicit sign; got: %q", got[:200])
 	}
 }
