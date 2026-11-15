@@ -93,3 +93,37 @@ func TestReanchorNote(t *testing.T) {
 		}
 	}
 }
+
+// #2176: the upgrade and the tenant read share one classifier, so pinned
+// and rebindable controls never reach the dashboard warning.
+func TestNeedsReanchoring(t *testing.T) {
+	t.Parallel()
+	withManifest := func(r dbx.ListControlsOnLegacySCFAnchorsRow, m string) dbx.ListControlsOnLegacySCFAnchorsRow {
+		r.BundleManifestYaml = m
+		return r
+	}
+	const code = "bundle_id: a\nscf_anchor_id: IAC-10\n"
+	rows := []dbx.ListControlsOnLegacySCFAnchorsRow{
+		withManifest(legacy("IAC-01", "Policy", "Policy", true, ""), code),
+		withManifest(legacy("IAC-10", "Authenticator Management", "Privileged Account Management (PAM)", true, ""), code),
+		withManifest(legacy("IAC-10", "Authenticator Management", "Privileged Account Management (PAM)", true, ""), code+"scf_release: test-2026.1\n"),
+		withManifest(legacy("IAC-21", "Privileged Account Management", "", false, ""), "not: [valid"),
+	}
+	got, err := NeedsReanchoring(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("NeedsReanchoring returned %d rows; want 2 (the changed title and the unparseable manifest): %+v", len(got), got)
+	}
+	if got[0].LegacySCFID != "IAC-10" || got[0].Note == "" {
+		t.Errorf("first row = %+v; want IAC-10 with a note", got[0])
+	}
+	if got[1].Note != unparseableNote {
+		t.Errorf("second row note = %q; want the unparseable note", got[1].Note)
+	}
+	empty, err := NeedsReanchoring(nil)
+	if err != nil || empty == nil || len(empty) != 0 {
+		t.Errorf("NeedsReanchoring(nil) = %v, %v; want an empty, non-nil slice", empty, err)
+	}
+}

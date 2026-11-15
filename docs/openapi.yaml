@@ -2313,6 +2313,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/needs-reanchoring:
+    get:
+      summary: GET /v1/controls/needs-reanchoring — the tenant's controls left on a legacy SCF release's anchor that need re-anchoring, each with its remap note; pinned controls are excluded (#2176)
+      tags: [controls]
+      operationId: get-v1-controls-needs-reanchoring
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/action-plans:
     get:
       summary: GET /v1/controls/{id}/action-plans
