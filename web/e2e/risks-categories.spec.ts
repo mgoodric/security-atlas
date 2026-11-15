@@ -172,8 +172,11 @@ test.describe("/risks organisation categories (#1817)", () => {
       "Ledger reconciliation gap",
     ]);
 
-    await page.getByTestId("risks-show-archived").check();
+    // The toggles are URL-driven: the state flips once router.replace
+    // lands, not synchronously, so click and assert rather than check().
+    await page.getByTestId("risks-show-archived").click();
     await expect(page).toHaveURL(/archived=1/);
+    await expect(page.getByTestId("risks-show-archived")).toBeChecked();
     await expect(
       pill.locator("option", { hasText: "Legacy systems (archived)" }),
     ).toHaveCount(1);
@@ -184,8 +187,9 @@ test.describe("/risks organisation categories (#1817)", () => {
 
     // Additive with the roll-ups toggle: turning it on keeps the archived
     // filter.
-    await page.getByTestId("risks-show-rollups").check();
+    await page.getByTestId("risks-show-rollups").click();
     await expect(page).toHaveURL(/rollups=1/);
+    await expect(page.getByTestId("risks-show-rollups")).toBeChecked();
     await expect(page).toHaveURL(/archived=1/);
     await expect(page.getByTestId("risks-show-archived")).toBeChecked();
   });
