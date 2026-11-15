@@ -8,8 +8,12 @@
 //     stored"), DIFF-03 applicable, DIFF-04 undecided; predicate true
 //   rev B (in review): DIFF-01 applicable      -> decision changed
 //                      DIFF-02 excluded ("Card data is tokenised at the
-//                        edge")                 -> justification changed
-//                      DIFF-03 applicable      -> unchanged, not listed
+//                        edge", reference moved)
+//                                              -> justification changed, with
+//                                                 a muted reference sub-line
+//                      DIFF-03 applicable, new implementation_ref
+//                                              -> not a change row; a muted
+//                                                 reference line (#2214)
 //                      DIFF-04 excluded        -> added
 //                      predicate env = prod    -> predicate changed
 //
@@ -60,11 +64,12 @@ async function decide(
   code: keyof typeof REQ,
   decision: "applicable" | "excluded",
   justification = "",
+  implementation_ref = "",
 ) {
   await atlas(
     `/v1/framework-scopes/${scopeID}/applicability/${REQ[code]}`,
     "PUT",
-    { decision, justification },
+    { decision, justification, implementation_ref },
   );
 }
 
@@ -78,8 +83,14 @@ test.describe("framework scope · review-screen applicability diff (#1795)", () 
 
     const revA = await createScope("Diff scope rev A (e2e)", { op: "true" });
     await decide(revA, "DIFF-01", "excluded", "No assets of our own");
-    await decide(revA, "DIFF-02", "excluded", "No card data stored");
-    await decide(revA, "DIFF-03", "applicable");
+    await decide(
+      revA,
+      "DIFF-02",
+      "excluded",
+      "No card data stored",
+      "wiki/cards-a",
+    );
+    await decide(revA, "DIFF-03", "applicable", "", "wiki/change-a");
     await atlas(`/v1/framework-scopes/${revA}/submit`, "PATCH");
     await atlas(`/v1/framework-scopes/${revA}/approve`, "PATCH");
     await atlas(`/v1/framework-scopes/${revA}/activate`, "PATCH", {
@@ -97,8 +108,9 @@ test.describe("framework scope · review-screen applicability diff (#1795)", () 
       "DIFF-02",
       "excluded",
       "Card data is tokenised at the edge",
+      "wiki/cards-b",
     );
-    await decide(revB, "DIFF-03", "applicable");
+    await decide(revB, "DIFF-03", "applicable", "", "wiki/change-b");
     await decide(revB, "DIFF-04", "excluded", "Fully remote company");
     await atlas(`/v1/framework-scopes/${revB}/submit`, "PATCH");
   });
@@ -133,6 +145,35 @@ test.describe("framework scope · review-screen applicability diff (#1795)", () 
     await expect(diff.getByTestId("review-diff-count-added")).toHaveText(
       "Added: 1",
     );
+    await expect(
+      diff.getByTestId("review-diff-count-decision_changed"),
+    ).toHaveText("Decision changed: 1");
+    await expect(
+      diff.getByTestId("review-diff-count-justification_changed"),
+    ).toHaveText("Justification changed: 1");
+    await expect(diff.getByTestId("review-diff-count-removed")).toHaveText(
+      "Removed: 0",
+    );
+
+    // #2214: DIFF-03's reference-only edit is a muted informational line,
+    // outside the change rows and their counts.
+    const refs = diff.getByTestId("review-diff-reference-changes");
+    await expect(refs).toHaveClass(/text-muted-foreground/);
+    await expect(diff.getByTestId("review-diff-ref-DIFF-03")).toHaveText(
+      "DIFF-03 reference changed: wiki/change-a → wiki/change-b",
+    );
+    await expect(refs.locator("a")).toHaveCount(0);
+
+    // A reference move bundled with DIFF-02's justification change is a
+    // muted sub-line on that row; DIFF-01's unmoved reference has none.
+    const moved = diff.getByTestId("review-diff-moved-ref-DIFF-02");
+    await expect(moved).toHaveText("reference: wiki/cards-a → wiki/cards-b");
+    await expect(moved).toHaveClass(/text-muted-foreground/);
+    await expect(moved.locator("a")).toHaveCount(0);
+    await expect(diff.getByTestId("review-diff-moved-ref-DIFF-01")).toHaveCount(
+      0,
+    );
+    await expect(diff.getByTestId("review-diff-ref-DIFF-02")).toHaveCount(0);
     await expect(diff.getByTestId("review-diff-predicate")).toContainText(
       '"prod"',
     );

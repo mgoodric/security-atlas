@@ -3,8 +3,9 @@
 // After a new SCF release, a control left on the previous release's anchor
 // row earns no framework credit (coverage joins controls to crosswalk edges
 // by anchor row). #1971 D3 moves a control to the current release only when
-// the same code keeps the same title; every other control is flagged for a
-// person to re-anchor. This endpoint lists the flagged controls of the
+// the same code keeps the same title, or, for a stock control, when only the
+// title changed (#2321); every other control is flagged for a person to
+// re-anchor. This endpoint lists the flagged controls of the
 // bearer's tenant, each with its remap note, for the dashboard warning.
 //
 // The classification is scfimport.Classify, the same function the upgrade
