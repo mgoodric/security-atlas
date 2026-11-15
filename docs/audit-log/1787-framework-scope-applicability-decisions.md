@@ -47,7 +47,8 @@ revision. This PR covers the decisions side. Freezing the predicate side
 (a PATCH on an activated revision returns 409 and points the caller to
 create a new revision) changes existing API behaviour, so it is a separate
 ticket. Until that lands, the predicate PATCH still edits an activated
-revision in place.
+revision in place. (Landed in #1965: the predicate PATCH now returns 409;
+see `1965-framework-scope-predicate-frozen-decisions.md`.)
 
 **D4 — No DELETE guard.** No API deletes a decision. DELETE is left
 unguarded so the FK cascades and the operator purge
