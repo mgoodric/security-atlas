@@ -11,10 +11,9 @@ metrics:
     category: risk
     name: Open risk financial exposure
     description: |
-      Sum of ALE (Annualized Loss Expectancy) for risks where
-      treatment <> 'accept' OR acceptance_status IS DISTINCT FROM
-      'approved', so a proposed acceptance still counts. The board-pack dollar figure for "what is
-      our open risk worth?".
+      Total annualized loss expectancy (ALE) of risks that are not
+      accepted, or whose acceptance is not yet approved. The board-pack
+      dollar figure for "what is our open risk worth?".
     unit: dollars_ale
     cadence: weekly
     compute_strategy: computed
@@ -30,9 +29,8 @@ metrics:
     category: risk
     name: Risk treatment progress
     description: |
-      Fraction of open risks whose treatment_plan has progressed in
-      the last quarter (measured via decision_audit_log writes touching
-      the risk's treatment field, slice 035).
+      Share of open risks whose treatment plan was updated in the last
+      quarter.
     unit: percent
     cadence: monthly
     compute_strategy: manual_input
@@ -68,9 +66,9 @@ metrics:
     category: risk
     name: Risk-treatment plan completeness rate
     description: |
-      Fraction of open risks whose treatment_plan field is non-empty
-      AND linked to a control or compensating action. A risk without a
-      treatment plan is a board narrative hole.
+      Share of open risks that have a treatment plan linked to a control
+      or a compensating action. A risk without a treatment plan is a
+      hole in the board narrative.
     unit: percent
     cadence: quarterly
     compute_strategy: manual_input
