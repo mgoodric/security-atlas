@@ -20,25 +20,23 @@ export type VersionOption = {
 // buildVersionOptions derives the selectable framework versions from an
 // unpinned anchor-detail payload: one option per distinct (framework, version)
 // present in the requirements, plus the leading ALL_CURRENT default. The
-// `slug:version` pin value is reconstructed from the framework abbreviation;
-// callers that have the slug should pass it via the optional slugFor map. When
-// no slug is known the version is still selectable using the framework label
-// lowercased as a best-effort slug (the backend resolves slug:version itself).
+// `slug:version` pin value uses the row's own `framework_slug` (#1800: the
+// rows carry the slug; the former nested shape did not, so this used to guess
+// it from the display name).
 //
 // Deterministic: options are sorted by label after the leading default, so the
 // dropdown order is stable across renders.
 export function buildVersionOptions(
   detail: Pick<AnchorDetail, "requirements"> | null | undefined,
-  slugFor?: Record<string, string>,
 ): VersionOption[] {
   const seen = new Map<string, VersionOption>();
   for (const r of detail?.requirements ?? []) {
-    const framework = r.framework_version.framework;
-    const version = r.framework_version.version;
-    const slug = slugFor?.[framework] ?? framework.toLowerCase();
-    const value = `${slug}:${version}`;
+    const value = `${r.framework_slug}:${r.framework_version}`;
     if (!seen.has(value)) {
-      seen.set(value, { value, label: `${framework} — ${version}` });
+      seen.set(value, {
+        value,
+        label: `${r.framework_name} — ${r.framework_version}`,
+      });
     }
   }
   const specific = [...seen.values()].sort((a, b) =>

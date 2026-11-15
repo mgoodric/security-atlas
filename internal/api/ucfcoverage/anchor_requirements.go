@@ -161,6 +161,7 @@ func mapCurrentVersionRequirements(rows []dbx.ListRequirementsForAnchorCurrentVe
 			MappingTier:            string(x.MappingTier),
 			Origin:                 x.Origin,
 			Rationale:              x.Rationale,
+			Overlay:                overlayFrom(x.Origin, x.OverlaySourceRef, x.OverlayCreatedBy, x.OverlayCreatedAt),
 		})
 	}
 	return out
@@ -186,6 +187,7 @@ func mapPinnedRequirements(rows []dbx.ListRequirementsForAnchorByFrameworkVersio
 			MappingTier:            string(x.MappingTier),
 			Origin:                 x.Origin,
 			Rationale:              x.Rationale,
+			Overlay:                overlayFrom(x.Origin, x.OverlaySourceRef, x.OverlayCreatedBy, x.OverlayCreatedAt),
 		})
 	}
 	return out
