@@ -61,6 +61,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { CreateTenantResponse, TenantRow } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
 
 type TenantListResponse = { items: TenantRow[]; error?: string };
 
@@ -146,17 +147,18 @@ export default function AdminTenantsPage() {
   const createErrorId = createError ? "create-tenant-error" : undefined;
 
   return (
-    <div className="space-y-6" data-testid="admin-tenants-page">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Tenants</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Tenants"
+      data-testid="admin-tenants-page"
+      subtitle={
+        <>
           Platform-global tenant identities. Super admins create new tenants
           here. Each new tenant ships with one builtin <code>environment</code>{" "}
           scope dimension and a default <code>All</code> scope cell so it is
           immediately usable for control + evidence work.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       <Alert>
         <AlertTitle>Create discipline</AlertTitle>
         <AlertDescription>
@@ -403,6 +405,6 @@ export default function AdminTenantsPage() {
           </DialogContent>
         </DialogPortal>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

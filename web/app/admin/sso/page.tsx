@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import type { AdminSSOConfig } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
 
 type Preflight =
   | { state: "idle" }
@@ -228,15 +229,15 @@ export default function SSOConfigPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">SSO</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="SSO"
+      subtitle={
+        <>
           Configure a per-tenant OIDC identity provider. The platform is a
           relying party only — it never issues identity itself.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       <Card>
         <CardHeader>
           <CardTitle>Discovery preflight</CardTitle>
@@ -421,7 +422,7 @@ export default function SSOConfigPage() {
           </form>
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }
 
