@@ -142,6 +142,10 @@ Recommended handling:
    control satisfies none. For an anchored control, a tenant overlay
    edge (`atlas-cli mappings overlay add`) maps a requirement its anchor
    misses to that anchor for your organisation, and coverage counts it.
+   Many edges at once load from a CSV or YAML file with
+   `atlas-cli mappings overlay import <file>` (nothing is written if
+   any row is bad unless you pass `--partial`), and
+   `atlas-cli mappings overlay export` writes them back out as CSV.
 
 ```yaml
 bundle_schema_version: "1"

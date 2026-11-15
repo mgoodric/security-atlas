@@ -198,41 +198,53 @@ func (s *Store) Create(ctx context.Context, in NewEdge, actor string) (Edge, err
 	}
 	var out Edge
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		req, err := resolveRequirement(ctx, q, in.Framework, in.FrameworkVersion, in.RequirementCode)
-		if err != nil {
-			return err
-		}
-		anchor, _, err := scfrelease.Resolve(ctx, q, in.SCFRelease, in.AnchorCode)
-		if err != nil {
-			return err
-		}
-		if err := refuseCatalogDuplicate(ctx, q, req.ID, anchor.ID); err != nil {
-			return err
-		}
-		row, err := q.InsertOverlayEdge(ctx, dbx.InsertOverlayEdgeParams{
-			TenantID:               pgUUID(tenantID),
-			FrameworkRequirementID: req.ID,
-			ScfAnchorID:            anchor.ID,
-			RelationshipType:       dbx.StrmRelationshipType(in.RelationshipType),
-			Strength:               in.Strength,
-			Rationale:              in.Rationale,
-			SourceRef:              in.SourceRef,
-			CreatedBy:              actor,
-		})
-		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-				return ErrDuplicateOverlay
-			}
-			return fmt.Errorf("mapping overlay: insert: %w", err)
-		}
-		out, err = getView(ctx, q, tenantID, row.ID)
-		if err != nil {
-			return err
-		}
-		return writeAudit(ctx, q, tenantID, "create", nil, &out, actor)
+		var err error
+		out, err = create(ctx, q, tenantID, in, actor)
+		return err
 	})
 	return out, err
+}
+
+// create is the one write path for an overlay edge. Create and every
+// import row go through it, so both apply the same rules and write the same
+// audit row.
+func create(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, in NewEdge, actor string) (Edge, error) {
+	if err := in.Validate(); err != nil {
+		return Edge{}, err
+	}
+	req, err := resolveRequirement(ctx, q, in.Framework, in.FrameworkVersion, in.RequirementCode)
+	if err != nil {
+		return Edge{}, err
+	}
+	anchor, _, err := scfrelease.Resolve(ctx, q, in.SCFRelease, in.AnchorCode)
+	if err != nil {
+		return Edge{}, err
+	}
+	if err := refuseCatalogDuplicate(ctx, q, req.ID, anchor.ID); err != nil {
+		return Edge{}, err
+	}
+	row, err := q.InsertOverlayEdge(ctx, dbx.InsertOverlayEdgeParams{
+		TenantID:               pgUUID(tenantID),
+		FrameworkRequirementID: req.ID,
+		ScfAnchorID:            anchor.ID,
+		RelationshipType:       dbx.StrmRelationshipType(in.RelationshipType),
+		Strength:               in.Strength,
+		Rationale:              in.Rationale,
+		SourceRef:              in.SourceRef,
+		CreatedBy:              actor,
+	})
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return Edge{}, ErrDuplicateOverlay
+		}
+		return Edge{}, fmt.Errorf("mapping overlay: insert: %w", err)
+	}
+	out, err := getView(ctx, q, tenantID, row.ID)
+	if err != nil {
+		return Edge{}, err
+	}
+	return out, writeAudit(ctx, q, tenantID, "create", nil, &out, actor)
 }
 
 // List returns the caller's overlay edges, newest first.
@@ -447,6 +459,14 @@ func writeAudit(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, action 
 }
 
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries, uuid.UUID) error) error {
+	return s.inRawTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
+		return fn(ctx, dbx.New(tx), tenantID)
+	})
+}
+
+// inRawTx is inTx handing over the transaction itself, for the import's
+// per-row savepoints.
+func (s *Store) inRawTx(ctx context.Context, fn func(context.Context, pgx.Tx, uuid.UUID) error) error {
 	tenantStr, err := tenancy.TenantFromContext(ctx)
 	if err != nil {
 		return err
@@ -463,7 +483,7 @@ func (s *Store) inTx(ctx context.Context, fn func(context.Context, *dbx.Queries,
 	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
 		return err
 	}
-	if err := fn(ctx, dbx.New(tx), tenantID); err != nil {
+	if err := fn(ctx, tx, tenantID); err != nil {
 		return err
 	}
 	if err := tx.Commit(ctx); err != nil {

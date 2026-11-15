@@ -3578,6 +3578,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/export:
+    get:
+      summary: GET /v1/mapping-overlays/export — the organisation's overlay edges as CSV (requirement, anchor, relationship, strength, rationale, source, author, dates, status); the list filters apply
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/import:
+    post:
+      summary: POST /v1/mapping-overlays/import — import overlay edges from a CSV or YAML body (?format=csv|yaml or Content-Type); all or nothing unless ?partial=true; bad rows reported by row and reason
+      tags: [mapping-overlays]
+      operationId: post-v1-mapping-overlays-import
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/mapping-overlays/{id}/retire:
     post:
       summary: POST /v1/mapping-overlays/{id}/retire — retire an overlay edge; body {reason}; the edge keeps its history
