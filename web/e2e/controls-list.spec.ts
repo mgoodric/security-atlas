@@ -274,6 +274,10 @@ test.describe("/controls list view", () => {
     //   2. No disabled `<button>` with the literal text "New control"
     //      exists anywhere on the page.
     //
+    // Retired by #2082: the create-control disclosure and
+    // new-control-future.ts were removed; only the "no disabled New
+    // control button" half still applies.
+    //
     // STILL QUARANTINED (slice 743): a toolbar-copy assertion
     // orthogonal to the controls-list seed; left for a focused
     // un-quarantine.

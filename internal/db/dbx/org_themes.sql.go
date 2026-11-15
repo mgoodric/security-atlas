@@ -222,6 +222,59 @@ func (q *Queries) ListTenantThemes(ctx context.Context, tenantID pgtype.UUID) ([
 	return items, nil
 }
 
+const listVisibleThemesWithUsage = `-- name: ListVisibleThemesWithUsage :many
+SELECT
+    t.theme_name,
+    t.description,
+    t.tenant_id,
+    (SELECT count(*) FROM risks r
+        WHERE r.tenant_id = $1
+          AND r.themes @> ARRAY[t.theme_name])::bigint AS risk_count,
+    (SELECT count(*) FROM aggregation_rules ar
+        WHERE ar.tenant_id = $1
+          AND ar.target_theme = t.theme_name)::bigint AS rule_count
+FROM org_themes t
+WHERE t.tenant_id IS NULL OR t.tenant_id = $1
+ORDER BY (t.tenant_id IS NULL) DESC, t.theme_name
+`
+
+type ListVisibleThemesWithUsageRow struct {
+	ThemeName   string      `json:"theme_name"`
+	Description string      `json:"description"`
+	TenantID    pgtype.UUID `json:"tenant_id"`
+	RiskCount   int64       `json:"risk_count"`
+	RuleCount   int64       `json:"rule_count"`
+}
+
+// The visible vocabulary (defaults + the tenant's own) with each theme's
+// usage (#1818): how many of the tenant's risks carry it, and how many of
+// its aggregation rules target it. Same counts as ThemeUsage.
+func (q *Queries) ListVisibleThemesWithUsage(ctx context.Context, tenantID pgtype.UUID) ([]ListVisibleThemesWithUsageRow, error) {
+	rows, err := q.db.Query(ctx, listVisibleThemesWithUsage, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVisibleThemesWithUsageRow
+	for rows.Next() {
+		var i ListVisibleThemesWithUsageRow
+		if err := rows.Scan(
+			&i.ThemeName,
+			&i.Description,
+			&i.TenantID,
+			&i.RiskCount,
+			&i.RuleCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockTenantTheme = `-- name: LockTenantTheme :one
 SELECT id, tenant_id, theme_name, description, created_at, updated_at
 FROM org_themes

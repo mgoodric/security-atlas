@@ -87,16 +87,10 @@
     },
 
     {
-      "scf_id": "CFG-02",
+      "scf_id": "CFG-04",
       "family": "CFG",
       "title": "Secure Baseline Configurations",
       "description": "Mechanisms exist to develop, document, and maintain secure baseline configurations for technology platforms."
-    },
-    {
-      "scf_id": "CFG-04",
-      "family": "CFG",
-      "title": "Configuration Change Control",
-      "description": "Mechanisms exist to authorize, document, and track configuration changes."
     },
     {
       "scf_id": "CFG-04.5",
@@ -108,8 +102,14 @@
     {
       "scf_id": "CHG-02",
       "family": "CHG",
-      "title": "Change Control Process",
-      "description": "Mechanisms exist to govern the technical configuration change control processes."
+      "title": "Change Management Program",
+      "description": "Mechanisms exist to run a change management program that governs how changes to technology assets are requested, reviewed, approved and tracked."
+    },
+    {
+      "scf_id": "CHG-03",
+      "family": "CHG",
+      "title": "Configuration Change Control",
+      "description": "Mechanisms exist to authorize, document, and track configuration changes."
     },
 
     {

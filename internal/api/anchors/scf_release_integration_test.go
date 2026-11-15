@@ -87,9 +87,9 @@ func TestGetAnchor_SCFRelease(t *testing.T) {
 }
 
 // Requirement coverage pins anchors to ?scf_release and echoes it; with no
-// parameter it stays unpinned and echoes null (#1770 D1). A requirement
-// mapped to IAC-06 in both releases shows one anchor per pin and both
-// unpinned.
+// parameter it pins to the current release and echoes that (#2203, the
+// contract step of #1770 D1). A requirement mapped to IAC-06 in both
+// releases shows one anchor under every read.
 func TestRequirementCoverage_SCFRelease(t *testing.T) {
 	ts, bearer := releaseServer(t)
 	admin := dbtest.NewMigratePool(t)
@@ -144,8 +144,8 @@ func TestRequirementCoverage_SCFRelease(t *testing.T) {
 	if rel, n := read("?scf_release=" + scfreleasetest.ReleaseA); rel == nil || *rel != scfreleasetest.ReleaseA || n != 1 {
 		t.Errorf("pinned to A: release=%v anchors=%d; want %q and 1", rel, n, scfreleasetest.ReleaseA)
 	}
-	if rel, n := read(""); rel != nil || n != 2 {
-		t.Errorf("unpinned: release=%v anchors=%d; want null and 2", rel, n)
+	if rel, n := read(""); rel == nil || *rel != scfreleasetest.ReleaseB || n != 1 {
+		t.Errorf("no parameter: release=%v anchors=%d; want current %q and 1", rel, n, scfreleasetest.ReleaseB)
 	}
 	resp, body := get(t, ts, "/v1/requirements/"+reqID.String()+"/coverage?scf_release=no-such-release", bearer)
 	if resp.StatusCode != http.StatusNotFound || !strings.Contains(string(body), `unknown SCF release \"no-such-release\"`) {

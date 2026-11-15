@@ -47,8 +47,7 @@ metrics:
     category: audit
     name: Open findings by severity
     description: |
-      Count of open audit findings grouped by severity_band.
-      Dimensions['severity'] carries the band ('p0', 'p1', 'p2', 'p3').
+      Open audit findings, counted by severity (P0 to P3).
     unit: count
     cadence: daily
     compute_strategy: manual_input

@@ -175,7 +175,7 @@ personal contact detail.
 
 The 'run-config-profiles' subcommand reads configuration-profile DETAIL (the
 deviceConfigurationStates expansion) for configuration-management evidence (SCF
-CFG-02 / CFG-04), using the SAME read-only DeviceManagementManagedDevices.Read.All
+CFG-04 / CHG-03), using the SAME read-only DeviceManagementManagedDevices.Read.All
 permission. Each profile carries the name + identifier + type + assigned scope +
 uuid + last-modified + a bounded list of compliance-relevant settings. It NEVER
 collects the secrets configuration profiles routinely embed — Wi-Fi PSKs, VPN
