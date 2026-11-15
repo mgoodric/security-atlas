@@ -6,9 +6,9 @@
 --   2. exceptions              — expires_at is the waiver-lapse date
 --   3. policies                — next_review_at is the next review date
 --                                 (published only; overdue / due-soon, #1806)
---   4. vendors                 — last_review_date + review_cadence interval is
---      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
---      vendor branch so the two surfaces cannot drift (slice 675).
+--   4. vendors                 — vendor_review_due_date() is the next
+--      vendor-review date, the one the vendor overdue list and burndown use
+--      (#2232), never-reviewed vendors' first review included.
 --      Also includes renewal_date as a separate vendor renewal event (OE-623).
 --   5. controls + control_evaluations — periodic-review controls whose
 --      cadence (derived from freshness_class) places their next review
@@ -140,13 +140,11 @@ FROM (
     UNION ALL
 
     -- policy review cycles: published policies with next_review_at set.
-    -- #1806: status is the review state, as for the other dated branches:
-    -- 'overdue' once the due day has ended, 'due-soon' within 30 days of
-    -- it (the window internal/policy ReviewDueSoonDays names), otherwise
-    -- 'upcoming'. #2009: the due day is next_review_at's UTC date, and the
-    -- comparison is in whole UTC days, as in internal/policy ReviewStatus,
-    -- so the list and the calendar agree at the boundary. The policy
-    -- lifecycle state moves to summary. Only the published chain tip has a
+    -- #1806: status is the review state. #2232: it is '' here and the store
+    -- fills it with duedate.Status and internal/policy ReviewDueSoonDays,
+    -- the rule internal/policy ReviewStatus applies to the policy list, so
+    -- the two cannot drift at the UTC day boundary. The policy lifecycle
+    -- state moves to summary. Only the published chain tip has a
     -- review due; superseded rows keep their date as history.
     SELECT
         p.id::text                                                    AS event_id,
@@ -157,13 +155,7 @@ FROM (
         p.id::text                                                    AS related_entity_id,
         'policy'::text                                                AS related_entity_kind,
         p.status                                                      AS summary,
-        CASE
-            WHEN (p.next_review_at AT TIME ZONE 'UTC')::date
-                 < (sqlc.arg(now_ts)::timestamptz AT TIME ZONE 'UTC')::date THEN 'overdue'
-            WHEN (p.next_review_at AT TIME ZONE 'UTC')::date
-                 <= (sqlc.arg(now_ts)::timestamptz AT TIME ZONE 'UTC')::date + 30 THEN 'due-soon'
-            ELSE 'upcoming'
-        END                                                           AS status,
+        ''::text                                                      AS status,
         NULL::text                                                    AS cadence
     FROM policies p
     WHERE p.tenant_id = $1
@@ -175,45 +167,34 @@ FROM (
 
     UNION ALL
 
-    -- vendor reviews: last_review_date + cadence interval is the next-review
-    -- date. Mirrors the dashboard "Upcoming" rollup's vendor branch
-    -- (internal/db/queries/dashboard.sql ListUpcomingItems) so the two
-    -- surfaces source the SAME vendor-review events (slice 675 AC-1/AC-3).
-    -- Vendors with no last_review_date are excluded — there is no anchor to
-    -- project a next-review date from. The cadence -> interval mapping is the
-    -- vendor_review_cadence enum (monthly/quarterly/biannual/annual); the
-    -- ELSE-less CASE is total over the enum so next_due_at is never NULL.
+    -- vendor reviews: vendor_review_due_date is the review due date (#2232),
+    -- the one the vendor overdue list and burndown use: last_review_date +
+    -- cadence, or for a vendor never reviewed its first-review date
+    -- (created_at's UTC date + the tenant's initial-review window, #2061).
+    -- The date is placed at 00:00 UTC. status is filled by the store with
+    -- duedate.Status, so a vendor is overdue here exactly when it is in
+    -- ListOverdueVendors.
     SELECT
         v.id::text                                                    AS event_id,
         'vendor'::text                                                AS event_type,
         ('Vendor review: ' || v.name)::text                           AS title,
-        (v.last_review_date + CASE v.review_cadence
-            WHEN 'monthly'   THEN INTERVAL '1 month'
-            WHEN 'quarterly' THEN INTERVAL '3 months'
-            WHEN 'biannual'  THEN INTERVAL '6 months'
-            WHEN 'annual'    THEN INTERVAL '12 months'
-         END)::timestamptz                                            AS starts_at,
+        (vd.due_date::timestamp AT TIME ZONE 'UTC')::timestamptz      AS starts_at,
         NULL::timestamptz                                             AS ends_at,
         v.id::text                                                    AS related_entity_id,
         'vendor'::text                                                AS related_entity_kind,
         v.criticality::text                                           AS summary,
-        v.review_cadence::text                                        AS status,
+        ''::text                                                      AS status,
         v.review_cadence::text                                        AS cadence
     FROM vendors v
+    CROSS JOIN LATERAL (
+        SELECT vendor_review_due_date(
+                   v.last_review_date, v.review_cadence, v.created_at,
+                   COALESCE((SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = v.tenant_id), 30)
+               )::date AS due_date
+    ) vd
     WHERE v.tenant_id = $1
-      AND v.last_review_date IS NOT NULL
-      AND (v.last_review_date + CASE v.review_cadence
-            WHEN 'monthly'   THEN INTERVAL '1 month'
-            WHEN 'quarterly' THEN INTERVAL '3 months'
-            WHEN 'biannual'  THEN INTERVAL '6 months'
-            WHEN 'annual'    THEN INTERVAL '12 months'
-           END)::timestamptz >= sqlc.arg(from_ts)::timestamptz
-      AND (v.last_review_date + CASE v.review_cadence
-            WHEN 'monthly'   THEN INTERVAL '1 month'
-            WHEN 'quarterly' THEN INTERVAL '3 months'
-            WHEN 'biannual'  THEN INTERVAL '6 months'
-            WHEN 'annual'    THEN INTERVAL '12 months'
-           END)::timestamptz <  sqlc.arg(to_ts)::timestamptz
+      AND (vd.due_date::timestamp AT TIME ZONE 'UTC') >= sqlc.arg(from_ts)::timestamptz
+      AND (vd.due_date::timestamp AT TIME ZONE 'UTC') <  sqlc.arg(to_ts)::timestamptz
       AND (sqlc.arg(type_filter)::text = '' OR 'vendor' = ANY(string_to_array(sqlc.arg(type_filter)::text, ',')))
 
     UNION ALL

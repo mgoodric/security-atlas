@@ -1061,6 +1061,15 @@ function ControlsPageInner() {
           Export History {CONTROLS_HISTORY_EXPORT_FORMAT_LABELS[format]}
         </a>
       ))}
+      {/* #1785 — upload a control sheet; the upload opens the batch's
+          review page. */}
+      <Link
+        href="/controls/imports"
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+        data-testid="controls-import"
+      >
+        Import controls
+      </Link>
     </>
   );
 

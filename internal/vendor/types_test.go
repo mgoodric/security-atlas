@@ -12,12 +12,12 @@ import (
 // behaviors:
 //  1. NULL last_review_date => overdue only after the first-review due day
 //     (#2061); with no first-review due date, never overdue
-//  2. last_review + cadence < cutoff => overdue
-//  3. last_review + cadence >= cutoff => NOT overdue
+//  2. the UTC day of last_review + cadence months has ended => overdue
+//  3. on or before that day => NOT overdue, whatever the hour (#2232)
 //
-// The duration approximations in ReviewCadence.Duration (30/91/182/365 days)
-// are tuned so this Go path agrees with the SQL CASE for all realistic
-// cutoffs; the integration test exercises the SQL path separately.
+// The cadence is whole calendar months clamped to the month's end, as the
+// SQL function vendor_review_due_date computes it; the integration test
+// exercises the SQL path separately.
 func TestIsOverdueAsOf(t *testing.T) {
 	parse := func(s string) time.Time {
 		t.Helper()
@@ -106,6 +106,45 @@ func TestIsOverdueAsOf(t *testing.T) {
 			cadence:     CadenceBiannual,
 			cutoff:      parse("2026-05-11"),
 			wantOverdue: false,
+		},
+		// #2232: the reviewed branch is the UTC-day rule, not a timestamp
+		// compare. Due 2026-05-10; the old 30-day Duration made it overdue
+		// from 00:00 on the due day itself.
+		{
+			name:        "monthly_last_minute_of_due_day",
+			lastReview:  ptr(parse("2026-04-10")),
+			cadence:     CadenceMonthly,
+			cutoff:      parse("2026-05-10").Add(23*time.Hour + 59*time.Minute),
+			wantOverdue: false,
+		},
+		{
+			name:        "monthly_first_instant_after_due_day",
+			lastReview:  ptr(parse("2026-04-10")),
+			cadence:     CadenceMonthly,
+			cutoff:      parse("2026-05-11"),
+			wantOverdue: true,
+		},
+		// Calendar months clamp: Jan 31 + 1 month is Feb 28, as in Postgres.
+		{
+			name:        "monthly_clamped_to_month_end_not_yet_overdue",
+			lastReview:  ptr(parse("2026-01-31")),
+			cadence:     CadenceMonthly,
+			cutoff:      parse("2026-02-28").Add(12 * time.Hour),
+			wantOverdue: false,
+		},
+		{
+			name:        "monthly_clamped_to_month_end_overdue_next_day",
+			lastReview:  ptr(parse("2026-01-31")),
+			cadence:     CadenceMonthly,
+			cutoff:      parse("2026-03-01"),
+			wantOverdue: true,
+		},
+		{
+			name:        "non_utc_cutoff_read_as_its_utc_day",
+			lastReview:  ptr(parse("2026-04-10")),
+			cadence:     CadenceMonthly,
+			cutoff:      time.Date(2026, 5, 10, 20, 0, 0, 0, time.FixedZone("x", -5*3600)), // 2026-05-11 01:00 UTC
+			wantOverdue: true,
 		},
 	}
 	for _, tc := range tests {

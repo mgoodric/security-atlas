@@ -55,7 +55,7 @@
 // as `lib/feature-nav.server.ts`). Never import this from a client
 // component.
 
-import type { EnabledModules } from "@/lib/feature-nav";
+import type { EffectiveModule, EffectiveModules } from "@/lib/feature-nav";
 
 import { apiBaseURL } from "./base";
 
@@ -99,23 +99,29 @@ export function normalizeAdminMe(parsed: unknown): AdminMe {
 }
 
 /**
- * normalizeEnabledModules coerces an upstream `/v1/features/enabled`
- * body into the nav-gate map. Fail-closed: anything that is not an
- * object-valued `modules` field collapses to `{}`, and `gateNavItems`
- * reads a missing key as "off".
- *
- * Shared by the `/api/features/enabled` BFF route handler and
- * `fetchEnabledModules` below.
+ * normalizeEffectiveModules coerces an upstream `/v1/me/modules` body
+ * into the module list. Anything that is not an array-valued `modules`
+ * field is `null` (unknown); an entry missing a field is dropped.
  */
-export function normalizeEnabledModules(parsed: unknown): EnabledModules {
+export function normalizeEffectiveModules(parsed: unknown): EffectiveModules {
   if (parsed === null || typeof parsed !== "object") {
-    return {};
+    return null;
   }
   const body = parsed as { modules?: unknown };
-  if (typeof body.modules !== "object" || body.modules === null) {
-    return {};
+  if (!Array.isArray(body.modules)) {
+    return null;
   }
-  return body.modules as EnabledModules;
+  return body.modules.filter(
+    (m): m is EffectiveModule =>
+      typeof m === "object" &&
+      m !== null &&
+      typeof (m as EffectiveModule).key === "string" &&
+      typeof (m as EffectiveModule).name === "string" &&
+      ((m as EffectiveModule).state === "on" ||
+        (m as EffectiveModule).state === "switched_off") &&
+      Array.isArray((m as EffectiveModule).pages) &&
+      (m as EffectiveModule).pages.every((p) => typeof p === "string"),
+  );
 }
 
 /**
@@ -188,18 +194,16 @@ export async function fetchSelfProfile(
 }
 
 /**
- * fetchEnabledModules reads the caller's tenant's gating flags from
- * `GET /v1/features/enabled` (authed, NOT admin-only). Fail-closed to
- * `{}` so every gated nav item hides rather than rendering a pre-GA link
- * the route would 404 on (slice 660).
- *
- * Replaces the self-fetch of the `/api/features/enabled` BFF route.
+ * fetchEffectiveModules reads the caller's effective modules from
+ * `GET /v1/me/modules` (every signed-in role, own tenant). `null` when the
+ * read fails: the sidebar then gates nothing, and FeatureGate fails
+ * closed to the off state.
  */
-export async function fetchEnabledModules(
+export async function fetchEffectiveModules(
   bearer: string,
-): Promise<EnabledModules> {
-  return normalizeEnabledModules(
-    await fetchPlatformJSON("/v1/features/enabled", bearer),
+): Promise<EffectiveModules> {
+  return normalizeEffectiveModules(
+    await fetchPlatformJSON("/v1/me/modules", bearer),
   );
 }
 

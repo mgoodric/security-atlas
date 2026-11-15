@@ -54,23 +54,25 @@ func TestSeedKeysAreSnakeCaseNamespaced(t *testing.T) {
 }
 
 // TestSeedCategoriesMatchSchemaEnum asserts every Seed.Category is one
-// of the 9 enum entries CHECKed at the DB layer. Drift between this list
+// of the 10 enum entries CHECKed at the DB layer (the slice-059 nine plus
+// #2170's 'questionnaire'). Drift between this list
 // and the migration's CHECK constraint would surface as a constraint
 // violation at first toggle; this unit test catches it pre-migration.
 func TestSeedCategoriesMatchSchemaEnum(t *testing.T) {
 	allowed := map[string]struct{}{
 		"core": {}, "risk": {}, "vendor": {}, "policy": {}, "controls": {},
 		"audit": {}, "evidence": {}, "board": {}, "integrations": {},
+		"questionnaire": {},
 	}
 	for _, d := range Seed {
 		if _, ok := allowed[d.Category]; !ok {
-			t.Errorf("seed key %q has invalid category %q (must be one of: core/risk/vendor/policy/controls/audit/evidence/board/integrations)", d.Key, d.Category)
+			t.Errorf("seed key %q has invalid category %q (must be one of: core/risk/vendor/policy/controls/audit/evidence/board/integrations/questionnaire)", d.Key, d.Category)
 		}
 	}
 }
 
 // TestSeedContainsExpectedKeys is the inverse of the spine-exclusion
-// test: the 12 documented seed keys MUST be present. A missing key
+// test: the 13 documented seed keys MUST be present. A missing key
 // surfaces as a regression before the integration tests catch it.
 func TestSeedContainsExpectedKeys(t *testing.T) {
 	expected := []string{
@@ -81,6 +83,7 @@ func TestSeedContainsExpectedKeys(t *testing.T) {
 		"audit.workflow",
 		"oscal.export", "board.reporting",
 		"decisions.log",
+		"questionnaires.enabled",
 	}
 	got := make(map[string]struct{}, len(Seed))
 	for _, d := range Seed {

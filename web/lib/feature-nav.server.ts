@@ -1,40 +1,32 @@
-// Slice 660 — server-only enabled-modules read.
+// Slice 660 / #2170 — server-only effective-modules read.
 //
 // Split from `feature-nav.ts` (pure/client-safe) because this module
 // imports `next/headers`, which must never reach the client bundle. The
-// authed shell's `getAuthedNav()` calls `fetchEnabledModules()` here and
+// authed shell's `getAuthedNav()` calls `fetchEffectiveModules()` here and
 // feeds the result to `gateNavItems` (in feature-nav.ts). Importing
 // `next/headers` makes this module server-only at runtime (it throws if
 // pulled into a client component); the `.server.ts` suffix documents the
 // boundary for humans.
+//
+// OE-549: the read goes to the platform through the stable internal base
+// (`lib/api/self.server.ts`), never a self-fetch of the app's own origin.
 
 import { cookies } from "next/headers";
 
-import { fetchEnabledModules as fetchEnabledModulesServer } from "@/lib/api/self.server";
+import { fetchEffectiveModules as fetchEffectiveModulesServer } from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
-import type { EnabledModules } from "@/lib/feature-nav";
+import type { EffectiveModules } from "@/lib/feature-nav";
 
 /**
- * fetchEnabledModules reads the caller's tenant's gating flags
- * (`GET /v1/features/enabled` — authed, NOT admin-only) server-side.
- * Fail-closed: any error returns `{}` so every gated nav item collapses
- * to hidden — rendering a pre-GA nav link the route would 404 on is worse
- * than a brief absence.
- *
- * OE-549: this was a self-referential fetch of the app's own
- * `/api/features/enabled` BFF route at an origin rebuilt from the
- * request Host header. Inside the web container that address is refused
- * (the Host carries the EXTERNAL published port; next-server binds the
- * container IP, not loopback), so the probe fail-closed on EVERY authed
- * page and the gated nav entries were hidden regardless of the tenant's
- * real flags — the same defect that 500'd `/admin/*`, just fail-soft. It
- * now reads the platform through the stable internal base.
+ * fetchEffectiveModules reads the caller's effective modules
+ * (`GET /v1/me/modules`) server-side with the caller's own bearer.
+ * `null` when there is no bearer or the read fails.
  */
-export async function fetchEnabledModules(): Promise<EnabledModules> {
+export async function fetchEffectiveModules(): Promise<EffectiveModules> {
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   if (!bearer) {
-    return {};
+    return null;
   }
-  return fetchEnabledModulesServer(bearer);
+  return fetchEffectiveModulesServer(bearer);
 }
