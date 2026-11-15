@@ -3076,6 +3076,10 @@ type Querier interface {
 	// committed meta-risk. hashtextextended maps the hex key to the BIGINT
 	// lock space; a hash collision only over-serializes, never under-.
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// The applicability carry-over's target (#2179): a draft or review revision
+	// of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
+	// (approved, activated, superseded) or unknown revision.
+	LockOpenFrameworkScope(ctx context.Context, arg LockOpenFrameworkScopeParams) (FrameworkScope, error)
 	LockOverlayEdge(ctx context.Context, arg LockOverlayEdgeParams) (FwToScfOverlayEdge, error)
 	// #1867: read a risk and hold its row against concurrent theme writes and
 	// deletes until the transaction ends, so a theme write or delete sees the
