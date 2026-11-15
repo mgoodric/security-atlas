@@ -10,9 +10,17 @@ package scfimport
 // same SCF code AND the same title, i.e. its meaning did not change. Every
 // other control on a legacy anchor is reported as needing re-anchoring, with
 // a note saying where its concept went; nothing is moved silently.
+//
+// One exception (#2321, Matt's call, 2026-11-15): a stock control, one whose
+// stored control.yaml is byte-identical to a revision the platform shipped
+// under controls/soc2/, also moves when the code is unchanged and only its
+// title differs. The platform chose that anchor, and the code still names
+// the same concept. Tenant-authored controls keep the D3 rule.
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -44,7 +52,8 @@ type ControlOnLegacyAnchor struct {
 // RebindReport is the outcome of RebindControls.
 type RebindReport struct {
 	// Rebound controls moved to the current release's anchor with the same
-	// code and title.
+	// code and title, or with the same code when the control is stock
+	// (#2321).
 	Rebound []ControlOnLegacyAnchor
 	// NeedsReanchoring controls stay on their legacy anchor: the code is
 	// gone from the current release or now names a different control.
@@ -95,6 +104,36 @@ func Rebindable(r dbx.ListControlsOnLegacySCFAnchorsRow) bool {
 	return r.CurrentAnchorID.Valid && r.CurrentAnchorTitle != nil && *r.CurrentAnchorTitle == r.LegacyAnchorTitle
 }
 
+// IsStockManifest reports whether a stored control.yaml is one the platform
+// shipped for bundleID: its sha256 is a revision of controls/soc2/ (#2321).
+// Content, not a field, decides it, so a tenant cannot mark a control of its
+// own as stock; uploading a shipped manifest unchanged is uploading the stock
+// control.
+func IsStockManifest(bundleID, manifestYAML string) bool {
+	sum := sha256.Sum256([]byte(manifestYAML))
+	id, ok := stockManifestHashes[hex.EncodeToString(sum[:])]
+	return ok && id == bundleID
+}
+
+// StockTitleOnlyRebindable reports whether a stock control on a legacy
+// anchor can move to the current release's anchor with the same code whose
+// title changed (#2321). The code must still continue the legacy anchor: SCF
+// lists no other code as its legacy ID, and the bundled remap table moves
+// nothing off it. A code reused for another control's lineage, or remapped
+// elsewhere, is not a title-only change.
+func StockTitleOnlyRebindable(r dbx.ListControlsOnLegacySCFAnchorsRow) (bool, error) {
+	if !r.CurrentAnchorID.Valid || r.CurrentAnchorTitle == nil {
+		return false, nil
+	}
+	if r.CurrentAnchorLegacyScfID != "" && r.CurrentAnchorLegacyScfID != r.LegacyScfID {
+		return false, nil
+	}
+	if _, remapped, err := scfremap.Lookup(r.LegacyRelease, r.LegacyScfID); err != nil || remapped {
+		return false, err
+	}
+	return IsStockManifest(r.BundleID, r.BundleManifestYaml), nil
+}
+
 // ReanchorNote tells an operator where a legacy anchor's concept went, most
 // specific source first: the bundled remap table (data/scfremap, the D5
 // table), then SCF's own legacy ID (#1769), then a code whose title changed,
@@ -136,7 +175,8 @@ const (
 	// outcomeUnknown is the zero value, returned only with an error.
 	outcomeUnknown Outcome = iota
 	// OutcomeRebindable: the current release has the same code with the
-	// same title, so the control can move there in place.
+	// same title, or the control is stock and only the title changed
+	// (#2321), so the control can move there in place.
 	OutcomeRebindable
 	// OutcomeNeedsReanchoring: the code is gone or now means something
 	// else, or the stored manifest does not parse; a person re-anchors it.
@@ -165,6 +205,13 @@ func Classify(r dbx.ListControlsOnLegacySCFAnchorsRow) (ControlOnLegacyAnchor, O
 	case pinned:
 		return row, OutcomePinned, nil
 	case Rebindable(r):
+		return row, OutcomeRebindable, nil
+	}
+	stock, err := StockTitleOnlyRebindable(r)
+	if err != nil {
+		return ControlOnLegacyAnchor{}, outcomeUnknown, err
+	}
+	if stock {
 		return row, OutcomeRebindable, nil
 	}
 	note, err := ReanchorNote(r)

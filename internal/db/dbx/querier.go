@@ -1423,8 +1423,10 @@ type Querier interface {
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
 	// Issue #1775: queue one remap proposal for a control on a legacy SCF
-	// anchor. Written by the migrate role during `catalog import-scf`; a re-run
-	// of the same import leaves the existing proposal alone.
+	// anchor. Written by the migrate role during `catalog import-scf`. A re-run
+	// of the same import leaves the existing proposal alone, except that an
+	// open proposal whose control this run re-bound becomes rebound (#2321: a
+	// stock control flagged before the title-only rule moves on the re-run).
 	InsertSCFRemapProposal(ctx context.Context, arg InsertSCFRemapProposalParams) (int64, error)
 	// Append-only audit row for a SCIM provision/deprovision mutation (AC-5).
 	InsertSCIMAuditLog(ctx context.Context, arg InsertSCIMAuditLogParams) error
