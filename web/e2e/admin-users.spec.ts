@@ -48,6 +48,15 @@ const SUPER_ROW_2 = {
   status: "active",
   roles: ["viewer"],
 };
+const USER_3 = "cccccccc-3333-4333-8333-333333333333";
+const SUPER_ROW_A_ADMIN_2 = {
+  id: USER_3,
+  tenant_id: TENANT_A,
+  email: "charlie@example.com",
+  display_name: "Charlie User",
+  status: "active",
+  roles: ["admin"],
+};
 const SUPER_ROW_NEW = {
   id: USER_1,
   tenant_id: TENANT_B,
@@ -296,6 +305,7 @@ test.describe("admin users management page", () => {
     });
 
     await authedPage.goto("/admin/users");
+    await authedPage.getByTestId(`user-actions-${USER_2}`).click();
     await authedPage.getByTestId(`revoke-user-${USER_2}`).click();
 
     // The confirm dialog appears before any network call.
@@ -317,8 +327,10 @@ test.describe("admin users management page", () => {
       await route.fulfill({
         status: 200,
         contentType: "application/json",
+        // A second Tenant A admin, so USER_1 is not the last one and
+        // "Revoke roles" is offered (#2090).
         body: JSON.stringify({
-          items: [SUPER_ROW_1, SUPER_ROW_2],
+          items: [SUPER_ROW_1, SUPER_ROW_2, SUPER_ROW_A_ADMIN_2],
           cross_tenant: true,
         }),
       });
@@ -376,6 +388,7 @@ test.describe("admin users management page", () => {
     );
 
     await authedPage.goto("/admin/users");
+    await authedPage.getByTestId(`user-actions-${USER_1}`).click();
     await authedPage.getByTestId(`revoke-user-${USER_1}`).click();
     const warning = authedPage.getByTestId("minted-keys-warning");
     await expect(warning).toBeVisible();
@@ -400,6 +413,63 @@ test.describe("admin users management page", () => {
     await authedPage.getByTestId("minted-keys-revoke-all-confirm").click();
     await expect(authedPage.getByTestId("minted-keys-none")).toBeVisible();
     expect(revoked).toEqual([KEY_1, KEY_2]);
+  });
+
+  // #2090: a tenant's only admin is not offered "Revoke roles"; the row
+  // menu shows the item disabled with its reason as readable text, and
+  // the Admin badge is not in the destructive tone.
+  test("tenant with one admin: Revoke roles is withheld from that admin, with the reason", async ({
+    authedPage,
+  }) => {
+    await mockMe(authedPage, TENANT_A);
+    await authedPage.route("**/api/admin/users", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [WITHIN_ROW] }),
+      });
+    });
+    let revokeCalls = 0;
+    await authedPage.route("**/api/admin/users/revoke", async (route) => {
+      revokeCalls++;
+      await route.fulfill({ status: 204, body: "" });
+    });
+
+    await authedPage.goto("/admin/users");
+    const trigger = authedPage.getByTestId(`user-actions-${USER_1}`);
+    await expect(trigger).toHaveAttribute("aria-haspopup", "menu");
+    await trigger.click();
+
+    const item = authedPage.getByTestId(`revoke-user-${USER_1}`);
+    await expect(item).toBeVisible();
+    await expect(item).toHaveAttribute("aria-disabled", "true");
+    await expect(
+      authedPage.getByTestId(`revoke-user-${USER_1}-reason`),
+    ).toHaveText(
+      "This is the tenant's only active admin. Assign admin to someone else first.",
+    );
+    // The reason is part of the item's accessible name, not only a tooltip.
+    await expect(
+      authedPage.getByRole("menuitem", { name: /only active admin/ }),
+    ).toBeVisible();
+
+    await item.click({ force: true });
+    await expect(authedPage.getByTestId("revoke-confirm-dialog")).toHaveCount(
+      0,
+    );
+    expect(revokeCalls).toBe(0);
+
+    // Esc closes the menu and returns focus to its trigger.
+    await authedPage.keyboard.press("Escape");
+    await expect(item).toBeHidden();
+    await expect(trigger).toBeFocused();
+
+    // The Admin badge is a category tone, not destructive.
+    const badge = authedPage
+      .getByTestId(`user-row-${USER_1}`)
+      .getByTestId("role-badge-admin");
+    await expect(badge).toBeVisible();
+    await expect(badge).not.toHaveClass(/(^|\s)text-destructive(\s|$)/);
   });
 
   test("revoke dialog: a user in another tenant gets a pointer, not a list", async ({
@@ -427,6 +497,7 @@ test.describe("admin users management page", () => {
     });
 
     await authedPage.goto("/admin/users");
+    await authedPage.getByTestId(`user-actions-${USER_2}`).click();
     await authedPage.getByTestId(`revoke-user-${USER_2}`).click();
     await expect(
       authedPage.getByTestId("minted-keys-other-tenant"),

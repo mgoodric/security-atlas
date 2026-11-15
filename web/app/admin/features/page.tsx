@@ -1,14 +1,15 @@
 // Slice 060 — /admin/features (AC-5).
 //
 // Real bind to slice 059: list + PATCH per key. Flags are grouped by
-// category. Each toggle requires explicit confirmation; re-enabling
-// (false → true) and disabling (true → false) both surface a modal,
-// because slice 059 + the slice 060 P0 anti-criterion call out that
-// flag flips are always intentional admin clicks.
+// category. Each toggle requires explicit confirmation, because slice
+// 059 + the slice 060 P0 anti-criterion call out that flag flips are
+// always intentional admin clicks. Re-enabling (false → true) surfaces
+// a modal with a reason; disabling (true → false) goes through the row
+// menu and its inline confirm, which also takes a reason (#2090).
 //
 // P0 anti-criterion: never silently re-enable a flag. The UI only flips
-// state inside the modal's onConfirm handler — there is no auto-flip
-// elsewhere in the codebase.
+// state inside a confirm handler — there is no auto-flip elsewhere in
+// the codebase.
 
 "use client";
 
@@ -26,6 +27,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { RowActions } from "@/components/ui/row-actions";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FeatureFlag, FeatureFlagListResponse } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
@@ -91,6 +93,17 @@ export default function FeaturesPage() {
           <AlertDescription>{(list.error as Error).message}</AlertDescription>
         </Alert>
       ) : null}
+      {/* #2090: the inline disable confirm closes on Confirm, so a
+          failed PATCH surfaces here. The enable modal stays open on
+          failure and this alert covers it too. */}
+      {mut.error ? (
+        <Alert variant="destructive" aria-live="polite">
+          <AlertTitle>Could not change the flag</AlertTitle>
+          <AlertDescription data-testid="flag-patch-error">
+            {(mut.error as Error).message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {Object.entries(grouped).map(([category, flags]) => (
         <Card key={category}>
@@ -106,8 +119,14 @@ export default function FeaturesPage() {
               <FlagRow
                 key={f.key}
                 flag={f}
-                onRequestToggle={(nextEnabled) =>
-                  setPending({ flag: f, nextEnabled })
+                onRequestEnable={() =>
+                  setPending({ flag: f, nextEnabled: true })
+                }
+                onDisable={(reason, onDone) =>
+                  mut.mutate(
+                    { key: f.key, enabled: false, reason },
+                    { onSuccess: onDone },
+                  )
                 }
               />
             ))}
@@ -136,11 +155,17 @@ export default function FeaturesPage() {
 
 function FlagRow({
   flag,
-  onRequestToggle,
+  onRequestEnable,
+  onDisable,
 }: {
   flag: FeatureFlag;
-  onRequestToggle: (nextEnabled: boolean) => void;
+  onRequestEnable: () => void;
+  /** `onDone` runs when the PATCH succeeds. */
+  onDisable: (reason: string, onDone: () => void) => void;
 }) {
+  // Reset on Cancel and on success, so a later disable never resends an
+  // earlier reason into the audit trail. Kept on failure for a retry.
+  const [reason, setReason] = useState("");
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="space-y-1">
@@ -162,13 +187,46 @@ function FlagRow({
         ) : null}
       </div>
       <div className="flex gap-2 sm:shrink-0">
-        <Button
-          size="sm"
-          variant={flag.enabled ? "destructive" : "default"}
-          onClick={() => onRequestToggle(!flag.enabled)}
-        >
-          {flag.enabled ? "Disable" : "Enable"}
-        </Button>
+        {flag.enabled ? (
+          // #2090: disabling is the destructive direction, so it sits in
+          // the row menu and confirms inline, with the same optional
+          // reason the enable modal takes.
+          <RowActions
+            label={`Actions for ${flag.key}`}
+            data-testid={`flag-actions-${flag.key}`}
+            items={[
+              {
+                id: "disable",
+                label: "Disable",
+                destructive: true,
+                confirmPrompt: `Disable ${flag.key}? Routes gated by this flag will return 404. Existing data is preserved; re-enable any time.`,
+                confirmLabel: "Confirm disable",
+                confirmDetail: (
+                  <label className="space-y-1 text-xs">
+                    <span className="font-medium">Reason (optional)</span>
+                    <Input
+                      value={reason}
+                      onChange={(e) => setReason(e.target.value)}
+                      placeholder="e.g. tenant doesn't use vendor module"
+                      data-testid={`flag-disable-reason-${flag.key}`}
+                    />
+                  </label>
+                ),
+                onSelect: () => onDisable(reason, () => setReason("")),
+                onCancel: () => setReason(""),
+                "data-testid": `flag-disable-${flag.key}`,
+              },
+            ]}
+          />
+        ) : (
+          <Button
+            size="sm"
+            onClick={onRequestEnable}
+            data-testid={`flag-enable-${flag.key}`}
+          >
+            Enable
+          </Button>
+        )}
       </div>
     </div>
   );
