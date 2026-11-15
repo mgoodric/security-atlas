@@ -57,6 +57,10 @@ func (s *Server) registerControls(root *chi.Mux) {
 	// multi-product orgs are large.
 	controlsExportH := controlsapi.NewExportHandler(s.dbPool)
 	root.Get("/v1/controls/export", controlsExportH.ExportControls)
+	// #1775: the SCF remap queue — one proposal per control left on an
+	// older SCF release's anchor, filterable by class and status. Literal
+	// segment, ahead of the /v1/controls/{id}/... patterns.
+	root.Get("/v1/controls/remap-proposals", controlsapi.NewRemapProposalsHandler(controlsStore).List)
 	// #2176: controls left on a legacy SCF release's anchor that the #1971
 	// D3 rule flags for re-anchoring, with remap notes, for the dashboard
 	// warning. Literal segment, ahead of the /v1/controls/{id}/... patterns.
