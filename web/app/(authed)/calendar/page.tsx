@@ -58,6 +58,7 @@ const ALL_TYPES = [
   "risk",
   "action_plan",
   "policy_ack",
+  "offboarding",
 ] as const;
 type AllowedType = (typeof ALL_TYPES)[number];
 
@@ -161,7 +162,7 @@ function CalendarPageInner() {
   return (
     <PageShell
       title={pageTitle("/calendar")}
-      subtitle="Upcoming audits, exception expirations, policy reviews, vendor reviews, periodic control reviews, risk reviews and action-plan due dates — one place for the whole team."
+      subtitle="Upcoming audits, exception expirations, policy reviews, vendor reviews, periodic control reviews, risk reviews, action-plan due dates and offboarding deadlines — one place for the whole team."
       actions={
         <div className="flex flex-col items-end gap-2">
           <div className="flex gap-2">

@@ -23,6 +23,9 @@ vi.mock("next/headers", () => ({
     }),
 }));
 
+import { linkFor } from "../../../components/calendar/link-for";
+import type { CalendarResponse } from "../../../lib/api/calendar";
+
 import { GET } from "./route";
 
 describe("GET /api/calendar", () => {
@@ -81,6 +84,42 @@ describe("GET /api/calendar", () => {
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
     const headers = init?.headers as Record<string, string> | undefined;
     expect(headers?.Authorization).toBe(`Bearer ${TEST_BEARER_094}`);
+  });
+
+  test("passes an offboarding event through, and linkFor links it (#2215)", async () => {
+    mockCookieGet.mockReturnValue({ value: TEST_BEARER_094 });
+    const offboarding = {
+      id: "psc-1",
+      type: "offboarding",
+      title: "Offboarding access removal: departing@example.com",
+      starts_at: "2026-06-03T00:00:00Z",
+      related_entity_id: "psc-1",
+      related_entity_kind: "personnel_security_checklist",
+      summary: "manual",
+      status: "upcoming",
+    };
+    vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          events: [offboarding],
+          count: 1,
+          from: "2026-06-01T00:00:00Z",
+          to: "2026-06-30T00:00:00Z",
+          truncated: false,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    const res = await GET(
+      new Request("http://localhost/api/calendar?types=offboarding"),
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as CalendarResponse;
+    expect(body.events).toEqual([offboarding]);
+    expect(body.events.map(linkFor)).toEqual([
+      { kind: "link", href: "/personnel-security/psc-1" },
+    ]);
   });
 
   test("propagates upstream error status", async () => {
