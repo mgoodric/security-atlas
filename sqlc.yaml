@@ -127,6 +127,7 @@ sql:
       - "migrations/sql/20260930000000_control_import_llm_rerank.sql"
       - "migrations/sql/20261010000000_control_import_candidates_row_fk.sql"
       - "migrations/sql/20261107000000_control_import_approval.sql"
+      - "migrations/sql/20261114120000_scf_remap_proposals.sql"
     queries: "internal/db/queries"
     gen:
       go:

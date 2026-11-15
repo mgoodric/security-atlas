@@ -259,6 +259,12 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 // so the bootstrap log names every control that lost framework coverage.
 func printRebindReport(w io.Writer, r scfimport.RebindReport) {
 	_, _ = fmt.Fprintf(w, "controls rebound=%d needs_reanchoring=%d pinned=%d superseded_mid_run=%d\n", len(r.Rebound), len(r.NeedsReanchoring), len(r.Pinned), r.SupersededMidRun)
+	// #1775: the remap queue this run filled, by class.
+	_, _ = fmt.Fprint(w, "remap_proposals")
+	for _, class := range scfimport.RemapClasses {
+		_, _ = fmt.Fprintf(w, " %s=%d", class, r.Proposals[class])
+	}
+	_, _ = fmt.Fprintln(w)
 	for _, c := range r.NeedsReanchoring {
 		_, _ = fmt.Fprintf(w, "control needs re-anchoring tenant=%s bundle=%s anchor=%s@%s: %s\n",
 			c.TenantID, c.BundleID, c.LegacySCFID, c.LegacyRelease, c.Note)

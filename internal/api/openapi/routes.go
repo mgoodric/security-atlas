@@ -105,6 +105,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/controls/imports/settings", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/imports/settings — the tenant's control import settings, including the local-Ollama rerank opt-in (tenant-admin; #2079)"},
 	{Method: "GET", Path: "/v1/controls/imports/{id}", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/imports/{id} — an import batch with its counts, staged rows and rejected rows (#1779)"},
 	{Method: "GET", Path: "/v1/controls/imports/{id}/rows", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/imports/{id}/rows — staged rows with ranked SCF anchor candidates, filterable by status and no_candidate_reaches (#1780)"},
+	{Method: "GET", Path: "/v1/controls/remap-proposals", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/remap-proposals — the tenant's SCF remap proposals, one per control left on an older SCF release's anchor, filterable by class and status (#1775)"},
 	{Method: "GET", Path: "/v1/controls/checklist/{generationID}", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/checklist/{generationID}"},
 	{Method: "GET", Path: "/v1/controls/checklist/{generationID}/export.md", Tag: "controls", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/checklist/{generationID}/export.md"},
 	{Method: "GET", Path: "/v1/controls/{id}/action-plans", Tag: "action-plans", Tier: "bearer", Internal: false, Summary: "GET /v1/controls/{id}/action-plans"},

@@ -56,6 +56,11 @@ type RebindReport struct {
 	// superseded between the listing and the update. They are not moved
 	// here; the new version bound its anchor on upload.
 	SupersededMidRun int
+	// Proposals counts the remap proposals (#1775) of this run by class:
+	// one per non-pinned control above, whether it was re-bound (status
+	// rebound) or still needs re-anchoring (status open). A control
+	// superseded mid-run gets none.
+	Proposals map[RemapClass]int
 }
 
 // IsPinned reports whether a stored control.yaml binds its anchor to one SCF
@@ -143,7 +148,29 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 	if err != nil {
 		return RebindReport{}, fmt.Errorf("scfimport: rebind: list controls on legacy anchors: %w", err)
 	}
-	var report RebindReport
+	report := RebindReport{Proposals: map[RemapClass]int{}}
+	// queue records the #1775 remap proposal for a control the D3 rule did
+	// not leave pinned.
+	queue := func(r dbx.ListControlsOnLegacySCFAnchorsRow, status string) error {
+		class, successors := RemapClassFor(r)
+		if _, err := q.InsertSCFRemapProposal(ctx, dbx.InsertSCFRemapProposalParams{
+			TenantID:                 r.TenantID,
+			ControlID:                r.ControlID,
+			BundleID:                 r.BundleID,
+			LegacyAnchorID:           r.LegacyAnchorID,
+			LegacyScfID:              r.LegacyScfID,
+			LegacyRelease:            r.LegacyRelease,
+			TargetFrameworkVersionID: r.CurrentFrameworkVersionID,
+			TargetRelease:            r.CurrentRelease,
+			Class:                    string(class),
+			Status:                   status,
+			SuccessorScfIds:          successors,
+		}); err != nil {
+			return fmt.Errorf("scfimport: queue remap proposal for control %s: %w", uuid.UUID(r.ControlID.Bytes), err)
+		}
+		report.Proposals[class]++
+		return nil
+	}
 	for _, r := range rows {
 		row := legacyRow(r)
 		// A bundle pinned to an SCF release (#1770) is bound there on
@@ -153,6 +180,9 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 		if !parsed {
 			row.Note = unparseableNote
 			report.NeedsReanchoring = append(report.NeedsReanchoring, row)
+			if err := queue(r, ProposalOpen); err != nil {
+				return RebindReport{}, err
+			}
 			continue
 		}
 		if pinned {
@@ -164,6 +194,9 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 				return RebindReport{}, err
 			}
 			report.NeedsReanchoring = append(report.NeedsReanchoring, row)
+			if err := queue(r, ProposalOpen); err != nil {
+				return RebindReport{}, err
+			}
 			continue
 		}
 		scfID := r.LegacyScfID
@@ -178,6 +211,9 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 		}
 		if n == 1 {
 			report.Rebound = append(report.Rebound, row)
+			if err := queue(r, ProposalRebound); err != nil {
+				return RebindReport{}, err
+			}
 		} else {
 			// Superseded by a concurrent upload between the list and the
 			// update; the new version binds through the upload path.
