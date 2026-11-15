@@ -151,6 +151,21 @@ func grantManualRole(t *testing.T, tenantID uuid.UUID, userID, role string) {
 	}
 }
 
+// seedMember inserts a users row with the given status and returns its id as
+// the string user_roles keys on. The last-admin guard counts only admins with
+// an active membership (#2261), so a second admin must be a real user.
+func seedMember(t *testing.T, tenantID uuid.UUID, status string) string {
+	t.Helper()
+	id := uuid.New()
+	if _, err := adminPool.Exec(context.Background(),
+		`INSERT INTO users (id, tenant_id, email, display_name, status)
+		 VALUES ($1, $2, $3, 'Group Role Member', $4)`,
+		id, tenantID, "test-gr-"+id.String()[:8]+"@example.com", status); err != nil {
+		t.Fatalf("seed member: %v", err)
+	}
+	return id.String()
+}
+
 // rolesFor returns the user's roles with their origins, sorted.
 func rolesFor(t *testing.T, tenantID uuid.UUID, userID string) map[string]string {
 	t.Helper()
@@ -295,8 +310,8 @@ func TestDerive_AdminRevokeAllowedWhenSecondAdminExists(t *testing.T) {
 	seedMapping(t, tenant, uuid.Nil, "Admins", "admin")
 	r := grouprole.NewResolver(appPool)
 	ctx := tenantCtx(t, tenant)
-	userA := uuid.New().String()
-	userB := uuid.New().String()
+	userA := seedMember(t, tenant, "active")
+	userB := seedMember(t, tenant, "active")
 
 	// userB holds admin manually (a second admin).
 	grantManualRole(t, tenant, userB, "admin")
@@ -319,6 +334,37 @@ func TestDerive_AdminRevokeAllowedWhenSecondAdminExists(t *testing.T) {
 	}
 	if len(res.Revoked) != 1 || res.Revoked[0] != "admin" {
 		t.Fatalf("expected admin revoke, got %v", res.Revoked)
+	}
+}
+
+// #2261: a second admin whose membership is disabled does not count, so the
+// reconciler keeps the only active admin's group-derived role.
+func TestDerive_DisabledSecondAdminDoesNotCount_2261(t *testing.T) {
+	requireAdminPool(t)
+	tenant := seedTenant(t, "gr-disabledadmin")
+	seedMapping(t, tenant, uuid.Nil, "Admins", "admin")
+	r := grouprole.NewResolver(appPool)
+	ctx := tenantCtx(t, tenant)
+	userA := seedMember(t, tenant, "active")
+	userB := seedMember(t, tenant, "disabled")
+	grantManualRole(t, tenant, userB, "admin")
+
+	if _, err := r.Derive(ctx, grouprole.DeriveInput{
+		UserID: userA, Groups: []string{"Admins"}, Source: grouprole.SourceSCIM,
+	}); err != nil {
+		t.Fatalf("derive 1: %v", err)
+	}
+	res, err := r.Derive(ctx, grouprole.DeriveInput{
+		UserID: userA, Groups: nil, Source: grouprole.SourceSCIM,
+	})
+	if err != nil {
+		t.Fatalf("derive 2: %v", err)
+	}
+	if rolesFor(t, tenant, userA)["admin"] != "group-derived" {
+		t.Fatalf("the only active admin was revoked; roles=%v", rolesFor(t, tenant, userA))
+	}
+	if len(res.SuppressedRevokes) != 1 || res.SuppressedRevokes[0] != "admin" {
+		t.Fatalf("expected suppressed admin revoke, got %v", res.SuppressedRevokes)
 	}
 }
 

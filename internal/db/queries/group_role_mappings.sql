@@ -91,14 +91,6 @@ ON CONFLICT (tenant_id, user_id, role) DO NOTHING;
 DELETE FROM user_roles
 WHERE tenant_id = $1 AND user_id = $2 AND role = $3 AND origin = 'group-derived';
 
--- name: CountTenantAdmins :one
--- Counts the DISTINCT users holding the 'admin' role in the tenant (regardless
--- of origin). The resolver's last-admin guard (AC-5 / P0-509-3) reads this
--- before revoking an admin role: it refuses to drop the final admin so a group
--- re-derivation can never lock the tenant out.
-SELECT COUNT(DISTINCT user_id) AS admin_count
-FROM user_roles
-WHERE tenant_id = $1 AND role = 'admin';
 
 -- ===== group-derived role audit (AC-7) =====
 
