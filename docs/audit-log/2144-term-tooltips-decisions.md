@@ -1,7 +1,7 @@
 # #2144 — user term list and `<Term>` tooltips — decisions log
 
 **Ticket:** https://github.com/mgoodric/security-atlas/issues/2144 (parent #2125)
-**Shape:** one JSON term list at `web/help/terms.json` (21 terms). `<Term id>`
+**Shape:** one JSON term list at `web/help/terms.json` (20 terms). `<Term id>`
 (`web/components/help/term.tsx`) shows a term's short definition on hover,
 focus or tap and links to its entry on the docs site's Terms page. That page is
 generated from the same JSON by the `docs-site/hooks/terms_page.py` mkdocs
@@ -43,25 +43,25 @@ org mapping) or use a different name there.
 Linking those under a mismatched name would make the check meaningless. A term
 gains a link when the glossary gains a matching entry.
 
-## D3 — definitions follow what has merged, or what the in-flight tickets state
+## D3 — definitions state only what is true on main
 
-The dispatcher asked that definitions match current behaviour:
+The Terms page publishes when `terms.json` merges, so a definition describing
+unmerged behaviour would be published as fact.
 
-- **Excepted** follows #2112 (in flight): never shown or counted as a pass;
-  posture counts it as covered and reports the share covered by exception
-  separately. The developer glossary's Exception entry still says otherwise
-  until #2112 corrects it. That's one reason this term has no glossary link yet.
-- **Self-approved** follows #2101 (merged during review): an org-level,
-  admin-only, audit-logged opt-in, and a visible marker.
+- **Excepted is left out.** Its behaviour (the `excepted` result, and posture
+  counting it as covered) arrives with #2112, which is still open. #2112 adds the
+  term to `terms.json` when it lands. The ticket's other 19 terms are all here,
+  so the list has 20 entries with Roll-up.
+- **Self-approved** follows #2101: an org-level, admin-only, audit-logged opt-in
+  and a visible marker. Even with it on, only a person approves; a machine
+  credential never does (ADR 0024).
 - **Posture** is per framework version, with "Scope not set" when no scope
   revision is activated (#2190).
-- **Roll-up** (added as a 21st term, since the dispatcher named it) follows
-  #2182: roll-ups are left out of register counts and top risks.
-- **Freeze** covers audit periods and framework scopes (Matt's D3 on #1943,
-  enforced by #1965 for the predicate): activated revisions are immutable, and a
-  change makes a new revision.
-
-If #2112 lands differently, its PR should update `web/help/terms.json`.
+- **Roll-up** is added because the dispatcher named it, and follows #2182:
+  roll-ups are left out of register counts and top risks.
+- **Freeze** covers audit periods and framework scopes (Matt's D3 on #1943;
+  #1965 / #2227 freeze the predicate). An activated or superseded revision can't
+  be changed apart from its name, and any other change makes a new revision.
 
 ## D4 — the adoption points
 

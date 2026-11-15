@@ -49,19 +49,13 @@
       "id": "framework-scope",
       "name": "Framework scope",
       "short": "The part of your organisation a framework applies to, such as the systems in a PCI cardholder data environment. A control counts for a framework only where the two overlap.",
-      "long": "Each framework has its own scope: PCI, HIPAA and SOC 2 usually cover different systems. A control's effective scope for a framework is where the control applies and the framework's scope applies. A framework scope is kept as revisions; once a revision is activated it can't be edited, and any change makes a new revision. A framework with no activated scope shows \"Scope not set\" instead of a posture."
+      "long": "Each framework has its own scope: PCI, HIPAA and SOC 2 usually cover different systems. A control's effective scope for a framework is where the control applies and the framework's scope applies. A framework scope is kept as revisions; once a revision is activated it can't be changed apart from its name, and any other change makes a new revision. A framework with no activated scope shows \"Scope not set\" instead of a posture."
     },
     {
       "id": "statement-of-applicability",
       "name": "Statement of Applicability",
       "short": "The list of a framework's requirements with a decision for each: applicable, or excluded with a reason. ISO 27001 requires one.",
       "long": "The Statement of Applicability (SoA) is recorded on the framework scope. An excluded requirement doesn't count against that framework's posture. If a working control sits behind an exclusion, the SoA flags the contradiction so you can check the exclusion is right. You can export the SoA as CSV or xlsx."
-    },
-    {
-      "id": "excepted",
-      "name": "Excepted",
-      "short": "The result a control gets where an active exception covers it. Excepted is never shown or counted as a pass.",
-      "long": "An exception is an approved, time-limited waiver for a control in part of your scope, lasting at most 365 days and never renewed automatically. While it's active, the control is evaluated as excepted in the scope cells it covers. Framework posture counts an excepted control as covered and reports the share covered by exception separately. When the exception expires, the next evaluation returns to normal."
     },
     {
       "id": "verified",
@@ -79,7 +73,7 @@
       "id": "self-approved",
       "name": "Self-approved",
       "short": "Marks a record that was approved by the same person who requested it. That's possible only when an admin has turned on Allow self-approval for the organisation.",
-      "long": "Approvals normally need a second person: the approver must be someone other than the requester. A small team can turn on Allow self-approval in the organisation settings; only an admin can change it, and the change is written to the audit log. A record approved by its own requester is marked Self-approved in the app, in exports and in the audit log, so the exception to the rule stays visible.",
+      "long": "Approvals normally need a second person: the approver must be someone other than the requester. A small team can turn on Allow self-approval in the organisation settings; only an admin can change it, and the change is written to the audit log. Even with it on, only a person approves: an API key, OAuth client or other machine credential never does. A record approved by its own requester is marked Self-approved in the app, in exports and in the audit log, so the exception to the rule stays visible.",
       "glossary": "GLOSSARY.md#self-approval-2101"
     },
     {
@@ -129,8 +123,8 @@
     {
       "id": "freeze",
       "name": "Freeze",
-      "short": "Locking something so it can't change. A frozen audit period only uses evidence observed up to the freeze; an activated framework-scope revision can't be edited.",
-      "long": "Freezing an audit period is final: it can't be unfrozen or edited, and the app records a fingerprint of exactly what was frozen. Live work carries on as normal; only the audit's view stops moving. Framework scopes work the same way: once a revision is activated, changing it means making a new revision, so you can always see the scope that was in force at a given date."
+      "short": "Locking something so it can't change. A frozen audit period only uses evidence observed up to the freeze; an activated framework-scope revision can't be changed apart from its name.",
+      "long": "Freezing an audit period is final: it can't be unfrozen or edited, and the app records a fingerprint of exactly what was frozen. Live work carries on as normal; only the audit's view stops moving. Framework scopes work the same way: once a revision is activated, only its name can change, and anything else means making a new revision, so you can always see the scope that was in force at a given date."
     }
   ]
 }
