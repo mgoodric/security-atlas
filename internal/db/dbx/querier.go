@@ -1851,6 +1851,24 @@ type Querier interface {
 	// tenant-NULL global rows; the audit_periods tenant filter + RLS still
 	// scope the result to the caller's tenant.
 	ListAuditPeriodsWithFrameworkByTenant(ctx context.Context, tenantID pgtype.UUID) ([]ListAuditPeriodsWithFrameworkByTenantRow, error)
+	// #1801: the "audited under" report (#1735). Every query runs under the
+	// caller's tenant (RLS on controls and, through effective_fw_to_scf_edges,
+	// on fw_to_scf_overlay_edges); the controls read also passes tenant_id
+	// explicitly as a second leg, the house style of the overlay queries
+	// (fw_to_scf_overlay_edges.sql).
+	// One row per (active control, tested-under criterion) pair the control's
+	// anchor does not reach. A tested-under reference is an external_refs
+	// element with kind 'tested_under': system is the framework slug, id the
+	// requirement code, resolved in the framework's CURRENT version of the
+	// global catalog. A reference that resolves to no requirement there is not
+	// a row (it names no criterion the report could close).
+	//
+	// "Reaches" is coverage's rule: a live edge in effective_fw_to_scf_edges
+	// (catalog edges plus the tenant's active overlay edges) from the criterion
+	// to the control's own anchor, not no_relationship, not rejected. A control
+	// with no anchor reaches nothing, so every criterion it was tested under is
+	// a row. Superseded control versions are left out, as in coverage.
+	ListAuditedUnderGaps(ctx context.Context, arg ListAuditedUnderGapsParams) ([]ListAuditedUnderGapsRow, error)
 	// Returns every assignment the user holds in the current tenant, joined with
 	// the period metadata so the /v1/me/audit-period(s) endpoint can render the
 	// full picture in one round trip.
@@ -1938,6 +1956,11 @@ type Querier interface {
 	// sqlc.arg keeps sqlc from inferring it as text[] just because it appears
 	// inside an ARRAY[] constructor.
 	ListCandidateRisksForRule(ctx context.Context, arg ListCandidateRisksForRuleParams) ([]Risk, error)
+	// The report's candidate anchors: for each requirement, the SCF anchors a
+	// live CATALOG edge joins it to (overlay edges are the organisation's own
+	// assertion, not a re-anchoring suggestion). Pinned to one SCF release when
+	// scf_release_id is set (the current release, as coverage defaults to).
+	ListCatalogAnchorsForRequirements(ctx context.Context, arg ListCatalogAnchorsForRequirementsParams) ([]ListCatalogAnchorsForRequirementsRow, error)
 	ListChangeAuditLog(ctx context.Context, arg ListChangeAuditLogParams) ([]ChangeAuditLog, error)
 	ListChangeControls(ctx context.Context, arg ListChangeControlsParams) ([]ListChangeControlsRow, error)
 	ListChanges(ctx context.Context, arg ListChangesParams) ([]Change, error)
