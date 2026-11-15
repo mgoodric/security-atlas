@@ -8,7 +8,7 @@ description: |
   document was reviewed and is current — including stated RTO / RPO
   targets, leadership succession plan, and communication tree.
 
-scf_anchor_id: BCD-02
+scf_anchor_id: BCD-04
 control_family: BCD
 implementation_type: semi_automated
 owner_role: ciso
