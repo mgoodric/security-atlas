@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -77,34 +78,34 @@ func (s *Store) QuestionTextForMapping(ctx context.Context, questionID uuid.UUID
 
 const sqlLimit = 50
 
-// RetrieveCandidates returns anchors of the current SCF release matching any
-// keyword.
-func (s *Store) RetrieveCandidates(ctx context.Context, keywords []string) ([]Candidate, error) {
-	return s.retrieve(ctx, nil, keywords)
+// LookupRelease returns the SCF release with the given label, or the
+// current release when label is empty (scfrelease.Lookup).
+func (s *Store) LookupRelease(ctx context.Context, label string) (scfrelease.Release, error) {
+	var rel scfrelease.Release
+	err := s.inTx(ctx, func(ctx context.Context, _ pgx.Tx, q *dbx.Queries, _ uuid.UUID) error {
+		var err error
+		rel, err = scfrelease.Lookup(ctx, q, label)
+		return err
+	})
+	return rel, err
 }
 
-// RetrieveCandidatesInRelease is RetrieveCandidates pinned to one SCF
-// release, whether or not it is still current. The control importer pins its
-// keyword candidates to the release recorded on the batch (#2038), so they
-// come from the same release as its crosswalk candidates.
+// RetrieveCandidatesInRelease returns the anchors of one SCF release that
+// match any keyword, whether or not the release is still current. Mapping
+// suggestions retrieve in the release the caller works in (#1772); the
+// control importer pins its keyword candidates to the release recorded on
+// the batch (#2038), so they come from the same release as its crosswalk
+// candidates.
 func (s *Store) RetrieveCandidatesInRelease(ctx context.Context, scfVersionID string, keywords []string) ([]Candidate, error) {
 	id, err := uuid.Parse(scfVersionID)
 	if err != nil {
 		return nil, fmt.Errorf("qmapsuggest: SCF version id: %w", err)
 	}
-	return s.retrieve(ctx, &id, keywords)
-}
-
-func (s *Store) retrieve(ctx context.Context, scfVersionID *uuid.UUID, keywords []string) ([]Candidate, error) {
 	if len(keywords) == 0 {
 		return nil, nil
 	}
-	version := pgtype.UUID{}
-	if scfVersionID != nil {
-		version = pgUUID(*scfVersionID)
-	}
 	var out []Candidate
-	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ *dbx.Queries, _ uuid.UUID) error {
+	err = s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ *dbx.Queries, _ uuid.UUID) error {
 		rows, err := tx.Query(ctx, `
 			SELECT a.id::text, a.scf_id, a.title, a.description
 			FROM scf_anchors a
@@ -112,7 +113,7 @@ func (s *Store) retrieve(ctx context.Context, scfVersionID *uuid.UUID, keywords 
 			JOIN frameworks f ON f.id = fv.framework_id
 			WHERE f.slug = 'scf'
 			  AND f.tenant_id IS NULL
-			  AND (CASE WHEN $3::uuid IS NULL THEN fv.status = 'current' ELSE fv.id = $3::uuid END)
+			  AND fv.id = $3
 			  AND (
 				  a.scf_id ILIKE ANY($1)
 				  OR a.family ILIKE ANY($1)
@@ -121,7 +122,7 @@ func (s *Store) retrieve(ctx context.Context, scfVersionID *uuid.UUID, keywords 
 			  )
 			ORDER BY a.scf_id
 			LIMIT $2
-		`, ilikePatterns(keywords), sqlLimit, version)
+		`, ilikePatterns(keywords), sqlLimit, pgUUID(id))
 		if err != nil {
 			return fmt.Errorf("qmapsuggest: retrieve anchors: %w", err)
 		}
@@ -146,29 +147,26 @@ func (s *Store) retrieve(ctx context.Context, scfVersionID *uuid.UUID, keywords 
 	return out, nil
 }
 
-func (s *Store) ResolveAnchor(ctx context.Context, scfID string) (Candidate, bool, error) {
+// ResolveAnchorInRelease resolves scfID in the named SCF release through
+// the shared resolver. ok is false when the release has no anchor with that
+// code.
+func (s *Store) ResolveAnchorInRelease(ctx context.Context, release, scfID string) (Candidate, bool, error) {
 	var out Candidate
 	var ok bool
-	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, _ *dbx.Queries, _ uuid.UUID) error {
-		var desc string
-		err := tx.QueryRow(ctx, `
-			SELECT a.id::text, a.scf_id, a.title, a.description
-			FROM scf_anchors a
-			JOIN framework_versions fv ON fv.id = a.framework_version_id
-			JOIN frameworks f ON f.id = fv.framework_id
-			WHERE f.slug = 'scf'
-			  AND f.tenant_id IS NULL
-			  AND fv.status = 'current'
-			  AND a.scf_id = $1
-		`, scfID).Scan(&out.AnchorUUID, &out.SCFID, &out.Title, &desc)
-		if errors.Is(err, pgx.ErrNoRows) {
-			ok = false
+	err := s.inTx(ctx, func(ctx context.Context, _ pgx.Tx, q *dbx.Queries, _ uuid.UUID) error {
+		row, _, err := scfrelease.Resolve(ctx, q, release, scfID)
+		if errors.Is(err, scfrelease.ErrCodeNotInRelease) {
 			return nil
 		}
 		if err != nil {
 			return fmt.Errorf("qmapsuggest: resolve anchor: %w", err)
 		}
-		out.Excerpt = boundExcerpt(desc, maxExcerptRune)
+		out = Candidate{
+			AnchorUUID: uuid.UUID(row.ID.Bytes).String(),
+			SCFID:      row.ScfID,
+			Title:      row.Title,
+			Excerpt:    boundExcerpt(row.Description, maxExcerptRune),
+		}
 		ok = true
 		return nil
 	})
