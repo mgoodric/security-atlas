@@ -197,13 +197,18 @@ export default function MetricDetailPage({
               <LineChart
                 observations={measuredObservations(observations)}
                 target={target}
+                unit={metric.unit}
                 testid="metric-detail-chart-svg"
               />
             )}
           </CardContent>
         </Card>
 
-        <Card size="sm" data-testid="metric-detail-target">
+        <Card
+          size="sm"
+          id="metric-detail-target"
+          data-testid="metric-detail-target"
+        >
           <CardHeader>
             <CardTitle>Target</CardTitle>
             <CardDescription>
