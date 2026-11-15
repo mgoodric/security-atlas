@@ -133,11 +133,17 @@ func writeSectionData(w *strings.Builder, key string, d SectionData) {
 			if fp.NoTrendHistory {
 				trend = noBaselineText
 			}
+			// #2112: the share covered only by exception is reported beside
+			// the coverage, never folded silently into it.
+			exception := ""
+			if fp.CoveredByExceptionPct > 0 {
+				exception = `<div class="muted">` + formatPct(fp.CoveredByExceptionPct) + `% covered by exception</div>`
+			}
 			fmt.Fprintf(w,
 				`<div class="card"><div class="label">%s</div><div class="pct">%s%%</div>`+
-					`<div class="muted">%s · %s</div></div>`,
+					`<div class="muted">%s · %s</div>%s</div>`,
 				html.EscapeString(label), formatPct(fp.CoveragePct),
-				html.EscapeString(trend), html.EscapeString(fp.State))
+				html.EscapeString(trend), html.EscapeString(fp.State), exception)
 		}
 		w.WriteString(`</div>`)
 
