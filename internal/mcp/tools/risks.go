@@ -37,7 +37,7 @@ const listRisksInputSchema = `{
     },
     "category": {
       "type": "string",
-      "description": "Filter by risk category (free-form string matching the platform's risk_categories list). Optional."
+      "description": "Filter by risk category slug, one of the organisation's own categories (call list_risk_categories for the valid slugs; archived ones are filterable). An unknown slug is an error naming the valid ones. Optional."
     },
     "limit": {
       "type": "integer",
@@ -126,6 +126,8 @@ type riskRow struct {
 	Title               string          `json:"title"`
 	Description         string          `json:"description"`
 	Category            string          `json:"category"`
+	CategoryID          string          `json:"category_id,omitempty"`
+	CategoryName        string          `json:"category_name,omitempty"`
 	Methodology         string          `json:"methodology"`
 	InherentScore       json.RawMessage `json:"inherent_score"`
 	Treatment           string          `json:"treatment"`
@@ -142,6 +144,79 @@ type riskRow struct {
 	Severity            int             `json:"severity"`
 	CreatedAt           time.Time       `json:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"`
+}
+
+// ===== list_risk_categories =====
+
+// #1815: risk categories are organisation-owned (#1745), so an assistant
+// learns the valid values here rather than from a fixed list in a schema.
+
+const listRiskCategoriesInputSchema = `{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "include_archived": {
+      "type": "boolean",
+      "description": "Also list archived categories. They stay on the risks that have them and are filterable, but cannot be given to a new risk. Default false."
+    }
+  }
+}`
+
+type listRiskCategoriesArgs struct {
+	IncludeArchived bool `json:"include_archived"`
+}
+
+// riskCategoryRow mirrors the GET /v1/risks/categories wire shape.
+type riskCategoryRow struct {
+	ID          string    `json:"id"`
+	Slug        string    `json:"slug"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Archived    bool      `json:"archived"`
+	IsDefault   bool      `json:"is_default"`
+	RiskCount   int64     `json:"risk_count"`
+	RuleCount   int64     `json:"rule_count"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ListRiskCategoriesTool wraps GET /v1/risks/categories.
+type ListRiskCategoriesTool struct {
+	client *mcp.Client
+}
+
+// NewListRiskCategories constructs the tool.
+func NewListRiskCategories(c *mcp.Client) *ListRiskCategoriesTool {
+	return &ListRiskCategoriesTool{client: c}
+}
+
+// Definition implements mcp.Tool.
+func (t *ListRiskCategoriesTool) Definition() mcp.ToolDefinition {
+	return mcp.ToolDefinition{
+		Name:        "list_risk_categories",
+		Description: "List the bearer tenant's own risk categories (slug, name, default flag, usage counts). These are the valid values for create_risk's category (by slug or name) and list_risks' category filter (by slug).",
+		InputSchema: json.RawMessage(listRiskCategoriesInputSchema),
+	}
+}
+
+// Handle implements mcp.Tool.
+func (t *ListRiskCategoriesTool) Handle(ctx context.Context, args json.RawMessage) (any, error) {
+	var in listRiskCategoriesArgs
+	if err := strictDecode(args, &in); err != nil {
+		return nil, err
+	}
+	q := url.Values{}
+	if in.IncludeArchived {
+		q.Set("include_archived", "true")
+	}
+	var resp struct {
+		Categories []riskCategoryRow `json:"categories"`
+		Count      int               `json:"count"`
+	}
+	if err := t.client.Get(ctx, "/v1/risks/categories", q, &resp); err != nil {
+		return nil, err
+	}
+	return map[string]any{"categories": resp.Categories, "count": len(resp.Categories)}, nil
 }
 
 // ===== get_risk =====
