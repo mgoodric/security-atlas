@@ -49,6 +49,7 @@ func TestRollupFromBrief_BoundsExcerpts(t *testing.T) {
 	b := board.Brief{
 		PeriodEnd:  "2026-05-31",
 		Frameworks: []board.FrameworkPosture{{Name: "SOC 2", CoveragePct: 80, FreshnessPct: 90}},
+		Coverage:   &board.CoverageSummary{CoveragePct: 80, ScopedFrameworkCount: 1, EvidenceFreshnessRatePct: 90},
 		Drift:      board.DriftSummary{WindowDays: 30, Delta: 1, FlippedOutCount: 0},
 	}
 	xs := make([]Excerpt, maxCitedExcerpts+5)
@@ -211,7 +212,7 @@ func TestVerifyNumbers_Library(t *testing.T) {
 // ground-truth integer set (so the library pins the right numbers per section).
 func TestAllowedNumbers_PerSection(t *testing.T) {
 	t.Parallel()
-	cov := Rollup{CoveragePct: 84, FreshnessPct: 91, FrameworkCount: 1, Delta: -3, FlippedOutCount: 3, WindowDays: 30}
+	cov := Rollup{CoveragePct: 84, ScopedFrameworkCount: 1, FreshnessPct: 91, FrameworkCount: 1, Delta: -3, FlippedOutCount: 3, WindowDays: 30}
 	if a := cov.AllowedNumbers(); !a[84] || !a[91] || !a[1] || !a[3] || !a[30] || !a[-3] {
 		t.Fatalf("coverage AllowedNumbers missing a ground-truth value: %+v", a)
 	}

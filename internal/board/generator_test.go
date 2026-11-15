@@ -13,58 +13,24 @@ import (
 	"github.com/mgoodric/security-atlas/internal/freshness"
 )
 
-// programPosture: freshnessPct is fresh/total; coveragePct is
-// not-stale-with-evidence / with-evidence.
-func TestProgramPosture(t *testing.T) {
+// evidenceFreshnessRate is fresh / total controls, rounded: stale controls
+// count against it whether or not they have evidence.
+func TestEvidenceFreshnessRate(t *testing.T) {
 	rows := []freshness.ControlFreshness{
-		{IsStale: false, EvidenceCount: 3}, // fresh, has evidence -> covered
-		{IsStale: false, EvidenceCount: 1}, // fresh, has evidence -> covered
-		{IsStale: true, EvidenceCount: 2},  // stale, has evidence -> not covered
-		{IsStale: true, EvidenceCount: 0},  // no evidence -> stale, not covered, not in coverage denominator
+		{IsStale: false, EvidenceCount: 3},
+		{IsStale: false, EvidenceCount: 1},
+		{IsStale: true, EvidenceCount: 2},
 	}
-	coverage, fresh := programPosture(rows)
-	// fresh = 2/4 = 50%.
-	if fresh != 50 {
-		t.Errorf("freshnessPct = %d, want 50", fresh)
-	}
-	// coverage = covered-with-evidence (2) / with-evidence (3) = 66.67 -> 67%.
-	if coverage != 67 {
-		t.Errorf("coveragePct = %d, want 67", coverage)
+	// 2/3 = 66.67 -> 67%.
+	if got := evidenceFreshnessRate(rows); got != 67 {
+		t.Errorf("evidenceFreshnessRate = %d, want 67", got)
 	}
 }
 
-// programPosture: zero controls is an honest 0%/0% — a program with no
-// controls has nothing covered and nothing fresh.
-func TestProgramPosture_NoControls(t *testing.T) {
-	coverage, fresh := programPosture(nil)
-	if coverage != 0 || fresh != 0 {
-		t.Errorf("programPosture(nil) = (%d, %d), want (0, 0)", coverage, fresh)
-	}
-}
-
-// programPosture: controls exist but none have evidence -> coverage 0%
-// (not a divide-by-zero), freshness reflects the not-stale set.
-func TestProgramPosture_NoEvidence(t *testing.T) {
-	rows := []freshness.ControlFreshness{
-		{IsStale: true, EvidenceCount: 0},
-		{IsStale: true, EvidenceCount: 0},
-	}
-	coverage, fresh := programPosture(rows)
-	if coverage != 0 {
-		t.Errorf("coveragePct = %d, want 0 (no evidence anywhere)", coverage)
-	}
-	if fresh != 0 {
-		t.Errorf("freshnessPct = %d, want 0 (all stale)", fresh)
-	}
-}
-
-// trendFromDelta maps the signed drift delta to a trend token.
-func TestTrendFromDelta(t *testing.T) {
-	cases := map[int]string{5: TrendUp, -3: TrendDown, 0: TrendFlat}
-	for delta, want := range cases {
-		if got := trendFromDelta(delta); got != want {
-			t.Errorf("trendFromDelta(%d) = %q, want %q", delta, got, want)
-		}
+// evidenceFreshnessRate: zero controls is 0%, not a divide-by-zero.
+func TestEvidenceFreshnessRate_NoControls(t *testing.T) {
+	if got := evidenceFreshnessRate(nil); got != 0 {
+		t.Errorf("evidenceFreshnessRate(nil) = %d, want 0", got)
 	}
 }
 
