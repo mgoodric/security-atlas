@@ -3224,6 +3224,11 @@ type Querier interface {
 	// Citation-resolution gate: does this id name a tenant-owned policy? Used when
 	// a generated item cites a linked policy id. Cross-tenant ids are RLS-invisible.
 	ResolveChecklistPolicy(ctx context.Context, arg ResolveChecklistPolicyParams) (pgtype.UUID, error)
+	// #1815: the tenant's categories whose display name matches name, case-
+	// insensitively on the trimmed value, archived included. Active names are
+	// unique per tenant, but an archived category can share one, so a caller
+	// gets every match and refuses more than one as ambiguous.
+	ResolveRiskCategoriesByName(ctx context.Context, arg ResolveRiskCategoriesByNameParams) ([]OrgRiskCategory, error)
 	// Find one of the tenant's categories by slug or by id (its text form).
 	// Slugs cannot be UUID-shaped strings that collide with another row's id
 	// in practice, and the tenant predicate keeps both arms tenant-local.

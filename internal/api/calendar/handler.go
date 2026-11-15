@@ -57,8 +57,10 @@ const (
 	// are rejected with 400. Slice 675 added `vendor`; #2130 added
 	// `risk` (risk reviews), `action_plan` (action-plan due dates) and
 	// `policy_ack` (policy acknowledgement expiries), making the calendar
-	// the one list of what is due.
-	validEventTypes = "audit,exception,policy,vendor,control,risk,action_plan,policy_ack"
+	// the one list of what is due. #2215 added `offboarding` (open
+	// offboarding checklists), which the query already emitted but the
+	// filter could not name.
+	validEventTypes = "audit,exception,policy,vendor,control,risk,action_plan,policy_ack,offboarding"
 
 	// calendarScopeKind is the api_keys AllowedKinds entry used to
 	// scope a credential to "may only fetch the ICS feed." See decision
@@ -427,6 +429,7 @@ func normalizeTypeFilter(raw string) (string, error) {
 		"risk":        {},
 		"action_plan": {},
 		"policy_ack":  {},
+		"offboarding": {},
 	}
 	kept := make([]string, 0, len(parts))
 	seen := map[string]struct{}{}
@@ -452,10 +455,13 @@ func normalizeTypeFilter(raw string) (string, error) {
 // Roles admitted to `calendar` (auditor, control_owner, viewer) are not
 // all admitted to risks or action plans, so those events are shown only
 // to a caller who could read the records themselves, as /v1/search does
-// per type.
+// per type. Offboarding events (#2215) carry the departing person's work
+// email, so they need a personnel-security read, which only the GRC
+// engineer and admin hold.
 var gatedEventTypes = map[string]string{
 	"risk":        "risks",
 	"action_plan": "action-plans",
+	"offboarding": "personnel-security",
 }
 
 // readableTypes narrows a normalized type filter to the types the caller
