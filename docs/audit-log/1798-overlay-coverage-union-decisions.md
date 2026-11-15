@@ -60,4 +60,12 @@ It is the crosswalk inspector, not a coverage view, and the ticket does not
 name it.
 
 **D6 — Down migration drops and recreates the view.** `CREATE OR REPLACE
-VIEW` cannot remove a column. No other view depends on this one.
+VIEW` cannot remove a column. No other view depends on this one. It
+restores the 20261014000000 shape (#1971: live catalog edges only).
+
+**D7 — Built on #1971's retired catalog edges.** The catalog arm keeps
+`retired_at IS NULL`, and the one-path-per-pair check counts only an
+unretired catalog edge, so an overlay edge is the live path for a pair whose
+catalog edge was retired. `TestOverlayCoverage_RetiredCatalogEdgeYieldsToOverlay`
+failed against the view without the retired check in the dedupe (no path,
+33.33%) and passes with it.

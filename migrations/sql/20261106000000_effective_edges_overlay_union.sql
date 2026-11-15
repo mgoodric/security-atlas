@@ -31,12 +31,14 @@
 --     and consumers drop 'rejected' edges, so the arm carries the tier that
 --     lets it count. origin, not the tier, says where it came from.
 --
+-- Retired catalog edges stay out, as in 20261014000000 (#1971).
+--
 -- One path per pair: an overlay edge is left out where the catalog already
--- has a live edge (not no_relationship, not rejected) for the same
--- requirement and anchor, so a redundant org mapping never doubles a
--- path. Where the catalog edge is rejected or no_relationship, the overlay
--- row is the live path and the catalog row stays as it was (consumers
--- filter it).
+-- has a live edge (not retired, not no_relationship, not rejected) for the
+-- same requirement and anchor, so a redundant org mapping never doubles a
+-- path. Where the catalog edge is retired, rejected or no_relationship,
+-- the overlay row is the live path (consumers filter a rejected or
+-- no_relationship catalog row; a retired one is not in the view).
 --
 -- The view gains one column, appended last (CREATE OR REPLACE VIEW may only
 -- add columns at the end).
@@ -56,6 +58,8 @@ SELECT
     e.mapping_tier,
     'catalog'::text AS origin
 FROM fw_to_scf_edges e
+-- Retired catalog edges never count (#1971, migration 20261014000000).
+WHERE e.retired_at IS NULL
 UNION ALL
 SELECT
     o.id,
@@ -77,6 +81,7 @@ WHERE o.status = 'active'
       FROM fw_to_scf_edges c
       WHERE c.framework_requirement_id = o.framework_requirement_id
         AND c.scf_anchor_id = o.scf_anchor_id
+        AND c.retired_at IS NULL
         AND c.relationship_type <> 'no_relationship'
         AND c.mapping_tier <> 'rejected'
   );

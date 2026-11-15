@@ -328,6 +328,37 @@ func TestOverlayCoverage_CatalogEdgeAddedLaterLeavesOnePath(t *testing.T) {
 	}
 }
 
+// A retired catalog edge (#1971) is not a path; an overlay edge the org
+// adds for that pair is the live one.
+func TestOverlayCoverage_RetiredCatalogEdgeYieldsToOverlay(t *testing.T) {
+	f := newCoverageFixture(t)
+	ctx := context.Background()
+	if status, body := call(t, f.tenantA, http.MethodPost, "/v1/mapping-overlays", f.tenantA.admin, f.body("C2", "IAC-06")); status != http.StatusCreated {
+		t.Fatalf("create overlay: status %d (%v)", status, body)
+	}
+	retired := uuid.New()
+	if _, err := f.admin.Exec(ctx, `
+		INSERT INTO fw_to_scf_edges (id, framework_requirement_id, scf_anchor_id,
+			relationship_type, strength, source_attribution, mapping_tier, retired_at)
+		VALUES ($1, $2, $3, 'equal', 1.0, 'scf_official', 'verified', now())`,
+		retired, f.requirement["C2"], f.anchorID); err != nil {
+		t.Fatalf("seed retired catalog edge C2 -> IAC-06: %v", err)
+	}
+	v := f.read(t, f.tenantA, f.controlA)
+	var paths []map[string]any
+	for _, a := range decode(t, v.requirementC2)["anchors"].([]any) {
+		if m := a.(map[string]any); m["scf_id"] == "IAC-06" {
+			paths = append(paths, m)
+		}
+	}
+	if len(paths) != 1 || paths[0]["origin"] != "overlay" {
+		t.Errorf("C2 -> IAC-06 paths = %v; want only the overlay edge", paths)
+	}
+	if got := f.dashboardPct(t, v.posture); got != 66.67 {
+		t.Errorf("coverage = %v; want 66.67", got)
+	}
+}
+
 // The view filters overlay rows by app.current_tenant itself, so even a
 // role that bypasses RLS (the migrate pool) sees only the tenant in
 // context, and nothing without one.
