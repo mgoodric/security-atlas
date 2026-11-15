@@ -61,7 +61,16 @@ type SoAExport struct {
 	// LinkedControls lists, per requirement, the bundle ids of the active
 	// tenant controls that reach it through the crosswalk.
 	LinkedControls map[uuid.UUID][]string
+	// PastRevision is set when the export reads a revision other than the
+	// activated one: any ?as_of=, or a ?revision= that is not activated.
+	// Contradiction flags are still evaluated against current control
+	// results (#1789 D6), which the xlsx then states (#2048).
+	PastRevision bool
 }
+
+// ContradictionNote is the xlsx title-block line written when PastRevision
+// is set.
+const ContradictionNote = "Contradictions are evaluated against current control results, not the results at the time of this revision."
 
 // Title is "Statement of Applicability" for ISO/IEC 27001 and
 // "Applicability" for every other framework.
@@ -126,6 +135,46 @@ func (e SoAExport) Rows() [][]string {
 	return rows
 }
 
+// formulaLead reports whether a spreadsheet would read s as a formula: it
+// starts with = + - @, a tab or a carriage return (OWASP CSV injection).
+func formulaLead(s string) bool {
+	if s == "" {
+		return false
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return true
+	}
+	return false
+}
+
+// quotedCell reports whether s is a QuoteFormulaCell output: a single quote
+// followed by a formula lead or by another quoted cell.
+func quotedCell(s string) bool {
+	return strings.HasPrefix(s, "'") && (formulaLead(s[1:]) || quotedCell(s[1:]))
+}
+
+// QuoteFormulaCell prefixes a single quote on a cell a spreadsheet would read
+// as a formula. It also prefixes a cell that already looks quoted, so
+// UnquoteFormulaCell gives back exactly the original text: a justification
+// that genuinely starts with `'=` survives the round trip.
+func QuoteFormulaCell(s string) string {
+	if formulaLead(s) || quotedCell(s) {
+		return "'" + s
+	}
+	return s
+}
+
+// UnquoteFormulaCell undoes QuoteFormulaCell: it strips one leading quote,
+// and only from a cell QuoteFormulaCell could have written. Any other
+// leading quote is the operator's text and is kept.
+func UnquoteFormulaCell(s string) string {
+	if quotedCell(s) {
+		return s[1:]
+	}
+	return s
+}
+
 // SoAExport assembles the export for a framework version from the revision
 // sel picks.
 func (s *Store) SoAExport(ctx context.Context, frameworkVersionID uuid.UUID, sel SoASelector) (SoAExport, error) {
@@ -147,6 +196,7 @@ func (s *Store) SoAExport(ctx context.Context, frameworkVersionID uuid.UUID, sel
 		if err != nil {
 			return err
 		}
+		out.PastRevision = sel.AsOf != nil || (sc != nil && sc.State != StateActivated)
 		if out.Applicability, err = listApplicability(ctx, q, tenantID, frameworkVersionID, sc); err != nil {
 			return err
 		}

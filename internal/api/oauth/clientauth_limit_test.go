@@ -162,6 +162,46 @@ func TestClientAuthLimit_PerIPAcrossClients(t *testing.T) {
 	}
 }
 
+// TestClientAuthLimit_PerIPKeysIPv6OnSlash64 (#2047): addresses in one
+// IPv6 /64 share the per-IP bucket, and an IPv4-mapped address shares
+// its IPv4 bucket.
+func TestClientAuthLimit_PerIPKeysIPv6OnSlash64(t *testing.T) {
+	t.Parallel()
+	srv := newLimitUnitServer(t, limitCfg{
+		clientRate: 100,
+		ipRate:     2,
+		clientIP:   func(r *http.Request) string { return r.Header.Get("X-Test-Client") },
+	})
+	post := func(clientID, source string) *http.Response {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+oauth.PathIntrospect,
+			strings.NewReader(url.Values{"token": {"t"}, "client_id": {clientID}}.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("X-Test-Client", source)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatalf("Do: %v", err)
+		}
+		t.Cleanup(func() { _ = resp.Body.Close() })
+		return resp
+	}
+	for i, src := range []string{"2001:db8:0:1::1", "2001:db8:0:1::2"} {
+		if resp := post(fmt.Sprintf("c%d", i), src); resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("request %d: status = %d, want 401", i, resp.StatusCode)
+		}
+	}
+	assertRateLimited(t, post("c3", "2001:db8:0:1:ffff::9"), "30")
+	if resp := post("c4", "2001:db8:0:2::1"); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("neighbouring /64: status = %d, want 401 (not throttled)", resp.StatusCode)
+	}
+
+	for i, src := range []string{"198.51.100.7", "::ffff:198.51.100.7"} {
+		if resp := post(fmt.Sprintf("m%d", i), src); resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("v4 request %d: status = %d, want 401", i, resp.StatusCode)
+		}
+	}
+	assertRateLimited(t, post("m3", "198.51.100.7"), "30")
+}
+
 // TestClientAuthLimit_BasicPrecedenceCannotBypass: an empty Basic
 // header falls through to the form client_id in the endpoints, so the
 // limiter must count the form client_id too. Default (nil) ClientIP

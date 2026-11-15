@@ -93,8 +93,12 @@ func main() {
 		fmt.Fprintf(os.Stderr, "atlas: trusted-proxy config: %v\n", err)
 		os.Exit(1)
 	} else if deprecated {
-		fmt.Fprintln(os.Stderr, "atlas: WARNING — TRUST_FORWARDED_HEADERS=1 is deprecated; "+
-			"it is mapped to TRUSTED_PROXY_CIDRS=0.0.0.0/0,::/0 (trust any proxy). "+
+		// #2047: trust-any-proxy lets every client choose its own per-IP
+		// rate-limit key, so the warning says that, not just "deprecated".
+		fmt.Fprintln(os.Stderr, "atlas: WARNING — TRUST_FORWARDED_HEADERS=1 is deprecated and UNSAFE; "+
+			"it is mapped to TRUSTED_PROXY_CIDRS=0.0.0.0/0,::/0 (trust any proxy), so any client "+
+			"can set X-Forwarded-For to choose the IP recorded on its session and the key of every "+
+			"per-IP rate limit (login, OAuth client auth, demo seed). "+
 			"Set TRUSTED_PROXY_CIDRS to the specific CIDR(s) your reverse proxy connects from "+
 			"and remove TRUST_FORWARDED_HEADERS. See deploy/docker/.env.example.")
 	}

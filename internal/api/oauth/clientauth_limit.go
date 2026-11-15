@@ -12,13 +12,16 @@
 // Both buckets are keyed on what the caller PRESENTS, checked before
 // any DB lookup: an unknown client_id is throttled exactly like a
 // registered one, so the limiter cannot be used to enumerate which
-// client_ids exist. The per-IP bucket is checked first, so a throttled
+// client_ids exist. The per-IP key is ratekey.IP, so IPv6 buckets on the
+// /64 (#2047). The per-IP bucket is checked first, so a throttled
 // source cannot grow the per-client map with fresh client_ids.
 package oauth
 
 import (
 	"net/http"
 	"time"
+
+	"github.com/mgoodric/security-atlas/internal/api/ratekey"
 )
 
 const (
@@ -90,7 +93,7 @@ func (l *clientAuthLimiter) allow(w http.ResponseWriter, r *http.Request) bool {
 			"client authentication failed")
 		return false
 	}
-	if !l.perIP.Allow(l.clientIP(r)) {
+	if !l.perIP.Allow(ratekey.IP(l.clientIP(r))) {
 		writeRateLimited(w, l.perIP.WindowSeconds())
 		return false
 	}
