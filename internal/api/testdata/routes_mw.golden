@@ -138,6 +138,8 @@ GET /v1/frameworks/posture 8
 GET /v1/frameworks/scf/versions 8
 GET /v1/install-state 8
 GET /v1/mapping-overlays 8
+GET /v1/mapping-overlays/audited-under 8
+GET /v1/mapping-overlays/audited-under/export 8
 GET /v1/mapping-overlays/export 8
 GET /v1/mcp/write-proposals 8
 GET /v1/mcp/write-proposals/{id} 8
