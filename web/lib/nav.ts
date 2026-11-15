@@ -52,7 +52,7 @@ export const NAV_GROUPS: readonly {
   },
   {
     label: "Risks",
-    routes: ["/risks", "/risks/hierarchy", "/action-plans"],
+    routes: ["/risks", "/risks/hierarchy", "/risks/taxonomy", "/action-plans"],
   },
   {
     label: "Audit",

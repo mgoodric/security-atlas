@@ -39,7 +39,10 @@ describe("buildNav — groups", () => {
         "Controls",
         ["Controls", "Evidence", "Exceptions", "Implementation checklist"],
       ],
-      ["Risks", ["Risk register", "Risk hierarchy", "Action plans"]],
+      [
+        "Risks",
+        ["Risk register", "Risk hierarchy", "Risk taxonomy", "Action plans"],
+      ],
       [
         "Audit",
         [
@@ -133,6 +136,7 @@ describe("buildNav — gates", () => {
         "Implementation checklist",
         "Risk register",
         "Risk hierarchy",
+        "Risk taxonomy",
         "Action plans",
         "Audit periods",
         "Framework scopes",

@@ -42,6 +42,7 @@ const DEMO_TENANT_LABELS = [
   "Implementation checklist",
   "Risk register",
   "Risk hierarchy",
+  "Risk taxonomy",
   "Action plans",
   "Audit periods",
   "Framework scopes",
