@@ -303,6 +303,12 @@ check-migration-timestamps:
 check-merge-gate-needs:
     bash scripts/check-merge-gate-needs.sh
 
+# Assert every path-filtered job in ci.yml has a stub twin with an identical
+# `name:` and the complementary `if:` on the same changes output (code, go,
+# web). #2099. Self-test: scripts/check-stub-twins_test.sh
+check-stub-twins:
+    bash scripts/check-stub-twins.sh
+
 # Count assertions per Go test file and warn where assertion density is below
 # threshold (cheap mutation-testing proxy). Slice 333 Q-6; slice 353. ADVISORY
 # only — never fails. Self-test: scripts/assertion-density_test.sh
