@@ -34,6 +34,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
+import { Markdown } from "@/components/markdown";
 import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
 import { PageShell } from "@/components/shell/page-shell";
 import { APIError } from "@/lib/api/base";
@@ -335,12 +336,10 @@ export default function RiskDetailPage({
         </CardHeader>
         <CardContent>
           {risk.description.trim() ? (
-            <p
-              className="text-sm text-foreground whitespace-pre-wrap break-words"
+            <Markdown
+              source={risk.description}
               data-testid="risk-detail-description"
-            >
-              {risk.description}
-            </p>
+            />
           ) : (
             <p
               className="text-sm text-muted-foreground"

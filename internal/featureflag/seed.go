@@ -3,7 +3,8 @@
 //
 // The package exposes:
 //
-//   - Seed (the 12 canonical capability flags shipped with v1 defaults).
+//   - Seed (the canonical capability flags and module switches, with defaults).
+//   - Modules (the module registry) and ModuleGate (its authz-chain step).
 //   - SpineForbiddenPrefixes (the namespaces that MUST NOT be toggleable).
 //   - Store (DB-backed CRUD + audit-log writes; tenant-scoped under RLS).
 //   - Enabled(ctx, key) (package-level helper with in-request memoization).
@@ -119,6 +120,12 @@ var Seed = []Default{
 		Category:    "board",
 	},
 	{
+		Key:         "questionnaires.enabled",
+		Enabled:     true,
+		Description: "Questionnaires module (slice 155). Switching it off hides /v1/questionnaires/* and the Questionnaires page; its data is kept.",
+		Category:    "questionnaire",
+	},
+	{
 		Key:         "decisions.log",
 		Enabled:     true,
 		Description: "Risk decision log (canvas §6.7, slice 055).",
@@ -192,31 +199,4 @@ func DefaultByKey(key string) (Default, bool) {
 		}
 	}
 	return Default{}, false
-}
-
-// GatingKeys is the slice 660 canonical set of capability flags that gate
-// a user-facing nav entry AND a route/handler when off. These are the
-// flags the non-admin enabled-modules read (GET /v1/features/enabled)
-// surfaces so the shell can hide nav for ALL users (not just admins), and
-// the route-guard middleware consults to make a flag-off module's API
-// unreachable.
-//
-// Both default OFF in Seed ("pending GA"); see seed.go. Keeping the set
-// here (not in the API package) lets the route-guard wiring + the
-// enabled-modules handler share one source of truth. Adding a module to
-// this set is a deliberate decision: it commits to BOTH a nav gate AND a
-// route gate for the key.
-var GatingKeys = []string{
-	"oscal.export",
-	"board.reporting",
-}
-
-// IsGatingKey reports whether key is in the slice 660 GatingKeys set.
-func IsGatingKey(key string) bool {
-	for _, k := range GatingKeys {
-		if k == key {
-			return true
-		}
-	}
-	return false
 }

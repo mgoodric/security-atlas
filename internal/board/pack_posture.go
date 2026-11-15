@@ -107,47 +107,69 @@ type frameworkPostureRow struct {
 func (s *PackStore) FrameworkPosture(ctx context.Context, trendCutoff time.Time) ([]frameworkPostureRow, error) {
 	var out []frameworkPostureRow
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
-		fws, err := q.ListFrameworksForTenant(ctx, pgUUID(tenantID))
-		if err != nil {
-			return fmt.Errorf("list frameworks: %w", err)
-		}
-		names := make(map[uuid.UUID]dbx.Framework, len(fws))
-		for _, f := range fws {
-			names[uuid.UUID(f.ID.Bytes)] = f
-		}
-		rows, err := q.FrameworkPosture(ctx, dbx.FrameworkPostureParams{
-			TenantID:    pgUUID(tenantID),
-			EvaluatedAt: pgTimestamptz(trendCutoff),
-		})
-		if err != nil {
-			return fmt.Errorf("framework posture: %w", err)
-		}
-		out = make([]frameworkPostureRow, 0, len(rows))
-		for _, r := range rows {
-			id := uuid.UUID(r.FrameworkID.Bytes)
-			fw, ok := names[id]
-			if !ok {
-				slog.WarnContext(ctx, "board pack: posture row's framework is not in the tenant's framework list; the pack names it by id",
-					"framework_id", id.String(), "framework_version", r.FrameworkVersion)
-			}
-			out = append(out, frameworkPostureRow{
-				FrameworkID:    id,
-				VersionID:      uuid.UUID(r.FrameworkVersionID.Bytes),
-				Slug:           fw.Slug,
-				Name:           fw.Name,
-				Version:        r.FrameworkVersion,
-				CoveragePct:    r.CoveragePct,
-				ExceptionPct:   r.CoveredByExceptionPct,
-				FreshnessPct:   r.FreshnessComposite,
-				TrendDelta90d:  r.TrendDelta90d,
-				ScopeActivated: r.ScopeActivated,
-				TrendHistory:   r.TrendHistory,
-			})
-		}
-		return nil
+		var err error
+		out, err = readFrameworkPosture(ctx, q, tenantID, trendCutoff)
+		return err
 	})
 	if err != nil {
 		return nil, err
+	}
+	return out, nil
+}
+
+// FrameworkPosture is the monthly brief's read of the same posture query the
+// pack reads (#2210), so the brief and the pack state one coverage figure.
+func (s *Store) FrameworkPosture(ctx context.Context, trendCutoff time.Time) ([]frameworkPostureRow, error) {
+	var out []frameworkPostureRow
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var err error
+		out, err = readFrameworkPosture(ctx, q, tenantID, trendCutoff)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// readFrameworkPosture is the posture read the brief and pack stores share.
+func readFrameworkPosture(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, trendCutoff time.Time) ([]frameworkPostureRow, error) {
+	fws, err := q.ListFrameworksForTenant(ctx, pgUUID(tenantID))
+	if err != nil {
+		return nil, fmt.Errorf("list frameworks: %w", err)
+	}
+	names := make(map[uuid.UUID]dbx.Framework, len(fws))
+	for _, f := range fws {
+		names[uuid.UUID(f.ID.Bytes)] = f
+	}
+	rows, err := q.FrameworkPosture(ctx, dbx.FrameworkPostureParams{
+		TenantID:    pgUUID(tenantID),
+		EvaluatedAt: pgTimestamptz(trendCutoff),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("framework posture: %w", err)
+	}
+	out := make([]frameworkPostureRow, 0, len(rows))
+	for _, r := range rows {
+		id := uuid.UUID(r.FrameworkID.Bytes)
+		fw, ok := names[id]
+		if !ok {
+			slog.WarnContext(ctx, "board: posture row's framework is not in the tenant's framework list; it is named by id",
+				"framework_id", id.String(), "framework_version", r.FrameworkVersion)
+		}
+		out = append(out, frameworkPostureRow{
+			FrameworkID:    id,
+			VersionID:      uuid.UUID(r.FrameworkVersionID.Bytes),
+			Slug:           fw.Slug,
+			Name:           fw.Name,
+			Version:        r.FrameworkVersion,
+			CoveragePct:    r.CoveragePct,
+			ExceptionPct:   r.CoveredByExceptionPct,
+			FreshnessPct:   r.FreshnessComposite,
+			TrendDelta90d:  r.TrendDelta90d,
+			ScopeActivated: r.ScopeActivated,
+			TrendHistory:   r.TrendHistory,
+		})
 	}
 	return out, nil
 }
@@ -251,6 +273,10 @@ func round2(v float64) float64 { return math.Round(v*100) / 100 }
 func formatPct(v float64) string {
 	return strconv.FormatFloat(math.Round(v*10)/10, 'f', -1, 64)
 }
+
+// FormatPct is formatPct for other packages: the one rendering of a posture
+// percentage, which the board-narrative gate holds a draft to (#2210).
+func FormatPct(v float64) string { return formatPct(v) }
 
 // signedPts formats a percentage-point delta with an explicit sign, to one
 // decimal: "+12.5" / "-3" / "0".

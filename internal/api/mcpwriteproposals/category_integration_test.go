@@ -83,7 +83,8 @@ func TestHTTP_ConfirmCreateRisk_ResolvesCategory(t *testing.T) {
 // #1815: create_risk takes a category by slug or by display name, the name
 // matched case-insensitively on the trimmed value and only within the
 // caller's tenant. An unknown category is refused with the valid slugs; a
-// name shared by several categories is refused with theirs.
+// name one active and one archived category share resolves to the active
+// one (#2233).
 func TestHTTP_ConfirmCreateRisk_CategoryByNameOrSlug(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	tenant := dbtest.SeedTenant(t, admin, "mcp_write_proposals", "risks", "org_risk_categories")
@@ -102,7 +103,7 @@ func TestHTTP_ConfirmCreateRisk_CategoryByNameOrSlug(t *testing.T) {
 		t.Fatalf("rename other tenant's category: %v", err)
 	}
 	// `availability` is archived and renamed to collide with active
-	// `integrity`'s name, so "Integrity" matches two categories.
+	// `integrity`'s name, so "Integrity" matches two categories, one active.
 	if _, err := admin.Exec(ctx, `UPDATE org_risk_categories SET archived = true, name = 'Integrity'
 		WHERE tenant_id = $1 AND slug = 'availability'`, tenant); err != nil {
 		t.Fatalf("archive availability: %v", err)
@@ -128,6 +129,7 @@ func TestHTTP_ConfirmCreateRisk_CategoryByNameOrSlug(t *testing.T) {
 		{"by slug", "privacy", "privacy"},
 		{"by name", "Regulatory", "regulatory"},
 		{"by name, any case, padded", "  oPeRaTiOnAl ", "operational"},
+		{"by a name an archived category shares", "Integrity", "integrity"},
 	} {
 		resp, raw := proposeAndConfirm(tc.title, tc.category)
 		if resp.StatusCode != http.StatusOK {
@@ -149,7 +151,6 @@ func TestHTTP_ConfirmCreateRisk_CategoryByNameOrSlug(t *testing.T) {
 		// Valid list: the tenant's active slugs (availability is archived).
 		{"technical", "valid categories: confidentiality, financial, integrity, operational, privacy, regulatory"},
 		{"Elsewhere", "unknown category"},
-		{"Integrity", "name one by slug: availability, integrity"},
 	} {
 		resp, raw := proposeAndConfirm("refused "+tc.category, tc.category)
 		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(raw), tc.want) {
