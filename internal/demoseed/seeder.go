@@ -136,6 +136,11 @@ type Seeder struct {
 	// beforeRecord, when set, runs after ApplyInPlace's writers and before
 	// it records the rows it added. Test-only (export_test.go).
 	beforeRecord func(ctx context.Context)
+
+	// scfRelease is the SCF release the posture spine adopts anchors from
+	// (#1772). DemoSCFRelease; test-overridable (export_test.go) so a test
+	// can name one of the #1770 fixture releases.
+	scfRelease string
 }
 
 // NewSeeder constructs a Seeder over the BYPASSRLS auth pool. authPool
@@ -149,9 +154,10 @@ func NewSeeder(authPool *pgxpool.Pool, scale float64) (*Seeder, error) {
 		return nil, fmt.Errorf("demoseed: scale %g out of range [%g, %g]", scale, MinScale, MaxScale)
 	}
 	return &Seeder{
-		authPool: authPool,
-		clock:    time.Now,
-		scale:    scale,
+		authPool:   authPool,
+		clock:      time.Now,
+		scale:      scale,
+		scfRelease: DemoSCFRelease,
 		resolveTenant: func(ctx context.Context) (tenancy.TenantRef, error) {
 			return tenancy.ResolveImplicitTenant(ctx, authPool)
 		},
@@ -403,7 +409,7 @@ func (s *Seeder) writeDataset(ctx context.Context, tx pgx.Tx, fixtures *fixtureS
 	// writeAuditPeriodsAndSamples (the framework-version creation order is
 	// settled) but BEFORE writeFrameworkScopes (which reuses the demo
 	// framework_version the spine guarantees is current).
-	reqCount, edgeCount, ctrlAnchored, err := writeFrameworkPostureSpine(ctx, tx, fixtures)
+	reqCount, edgeCount, ctrlAnchored, err := writeFrameworkPostureSpine(ctx, tx, fixtures, s.scfRelease)
 	if err != nil {
 		return Result{}, err
 	}

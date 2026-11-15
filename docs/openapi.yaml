@@ -5037,7 +5037,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest:
     post:
-      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest
+      summary: POST /v1/questionnaires/{id}/questions/{qid}/scf-mapping/ai-suggest — ?scf_release=<label> picks the SCF release the candidates come from, the current one when absent; the response names it in scf_release
       tags: [questionnaires]
       operationId: post-v1-questionnaires-id-questions-qid-scf-mapping-ai-suggest
       security:
