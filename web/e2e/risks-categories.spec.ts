@@ -163,9 +163,12 @@ test.describe("/risks organisation categories (#1817)", () => {
       { timeout: 30_000 },
     );
 
+    // The register renders each row twice (desktop table + phone cards);
+    // read the desktop table.
+    const table = page.getByTestId("list-table-wrap");
     await pill.selectOption({ label: "Financial" });
     await expect(page).toHaveURL(/category=financial/);
-    await expect(page.getByTestId("risks-row-title")).toHaveText([
+    await expect(table.getByTestId("risks-row-title")).toHaveText([
       "Ledger reconciliation gap",
     ]);
 
@@ -175,7 +178,7 @@ test.describe("/risks organisation categories (#1817)", () => {
       pill.locator("option", { hasText: "Legacy systems (archived)" }),
     ).toHaveCount(1);
     await pill.selectOption({ label: "Legacy systems (archived)" });
-    await expect(page.getByTestId("risks-row-title")).toHaveText([
+    await expect(table.getByTestId("risks-row-title")).toHaveText([
       "Mainframe patch backlog",
     ]);
 
@@ -208,7 +211,10 @@ test.describe("/risks organisation categories (#1817)", () => {
     );
 
     await page.goto("/risks");
-    const rows = page.getByTestId("risks-row-category");
+    // Desktop table only: the phone cards repeat each row.
+    const rows = page
+      .getByTestId("list-table-wrap")
+      .getByTestId("risks-row-category");
     await expect(rows.filter({ hasText: "Legacy systems" })).toContainText(
       "archived",
       { timeout: 30_000 },
