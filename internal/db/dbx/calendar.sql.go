@@ -326,39 +326,63 @@ FROM (
 
     UNION ALL
 
-    -- policy acknowledgement expiries (#2130): the freshest ack per
-    -- (policy_version, user) plus 365 days, when that attestation lapses.
-    -- The query is the retired dashboard rollup's policy_ack branch; the
-    -- title now names the policy (LEFT JOIN, tenant-scoped composite key)
-    -- instead of printing its version UUID, and summary names only the
-    -- policy: who acknowledged is not shown to calendar readers or ICS
-    -- subscribers (the rollup never exposed it). status is filled by the store
-    -- with duedate.Status, as for risk reviews.
+    -- policy acknowledgement expiries (#2130, #2234): the freshest ack per
+    -- (policy_version, user) plus 365 days, when that attestation lapses,
+    -- grouped into one event per policy and lapse day so a tenant-wide ack
+    -- campaign is one row, not one per user, under the 500-row cap and in
+    -- "Coming up". Only acks of a published policy version by an active
+    -- user count: a superseded version needs a fresh ack anyway (policies
+    -- have no other retired state), and a deactivated user's lapse is not
+    -- work anyone has to chase. The title names the policy and the count;
+    -- who acknowledged is not shown to calendar readers or ICS subscribers.
+    -- The related entity is the policy version. status is filled by the
+    -- store with duedate.Status, as for risk reviews.
     SELECT
-        latest_ack.id::text                                           AS event_id,
+        (acks.policy_version_id::text || ':' ||
+            to_char(acks.lapse_day, 'YYYY-MM-DD'))::text              AS event_id,
         'policy_ack'::text                                            AS event_type,
-        ('Policy acknowledgement due: ' ||
-            COALESCE(p.title, latest_ack.policy_version_id::text))::text AS title,
-        (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz AS starts_at,
+        (p.title || ': ' || acks.n::text ||
+            CASE WHEN acks.n = 1 THEN ' acknowledgement lapses on '
+                 ELSE ' acknowledgements lapse on ' END ||
+            to_char(acks.lapse_day, 'YYYY-MM-DD'))::text              AS title,
+        acks.first_lapse                                              AS starts_at,
         NULL::timestamptz                                             AS ends_at,
-        latest_ack.id::text                                           AS related_entity_id,
-        'policy_acknowledgment'::text                                 AS related_entity_kind,
-        COALESCE(p.title, '')::text                                   AS summary,
+        acks.policy_version_id::text                                  AS related_entity_id,
+        'policy'::text                                                AS related_entity_kind,
+        p.title::text                                                 AS summary,
         ''::text                                                      AS status,
         NULL::text                                                    AS cadence
     FROM (
-        SELECT DISTINCT ON (pa.policy_version_id, pa.user_id)
-            pa.id, pa.tenant_id, pa.policy_version_id, pa.user_id, pa.acknowledged_at
-        FROM policy_acknowledgments pa
-        WHERE pa.tenant_id = $1
-        ORDER BY pa.policy_version_id, pa.user_id, pa.acknowledged_at DESC
-    ) latest_ack
-    LEFT JOIN policies p
-      ON p.tenant_id = latest_ack.tenant_id
-     AND p.id = latest_ack.policy_version_id
-    WHERE (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz >= $2::timestamptz
-      AND (latest_ack.acknowledged_at + INTERVAL '365 days')::timestamptz <  $3::timestamptz
-      AND ($4::text = '' OR 'policy_ack' = ANY(string_to_array($4::text, ',')))
+        SELECT
+            latest_ack.policy_version_id,
+            (latest_ack.lapses_at AT TIME ZONE 'UTC')::date           AS lapse_day,
+            min(latest_ack.lapses_at)                                 AS first_lapse,
+            count(*)                                                  AS n
+        FROM (
+            SELECT DISTINCT ON (pa.policy_version_id, pa.user_id)
+                pa.policy_version_id,
+                (pa.acknowledged_at + INTERVAL '365 days')::timestamptz AS lapses_at
+            FROM policy_acknowledgments pa
+            JOIN policies pv
+              ON pv.tenant_id = pa.tenant_id
+             AND pv.id = pa.policy_version_id
+             AND pv.status = 'published'
+            JOIN users u
+              ON u.tenant_id = pa.tenant_id
+             AND u.id = pa.user_id
+             AND u.status = 'active'
+             AND u.active
+            WHERE pa.tenant_id = $1
+            ORDER BY pa.policy_version_id, pa.user_id, pa.acknowledged_at DESC
+        ) latest_ack
+        WHERE latest_ack.lapses_at >= $2::timestamptz
+          AND latest_ack.lapses_at <  $3::timestamptz
+        GROUP BY latest_ack.policy_version_id, (latest_ack.lapses_at AT TIME ZONE 'UTC')::date
+    ) acks
+    JOIN policies p
+      ON p.tenant_id = $1
+     AND p.id = acks.policy_version_id
+    WHERE ($4::text = '' OR 'policy_ack' = ANY(string_to_array($4::text, ',')))
 
     UNION ALL
 
@@ -434,7 +458,8 @@ type ListCalendarEventsRow struct {
 //  8. action_plans            — due_date of an open plan (#2130)
 //  9. policy_acknowledgments  — the latest ack per (policy version, user)
 //     + 365 days, when the annual re-acknowledgement lapses (#2130; it
-//     moved here from the retired dashboard upcoming rollup)
+//     moved here from the retired dashboard upcoming rollup), grouped per
+//     policy and lapse day (#2234)
 //
 // Past-due items: every branch filters on its own date against [from, to),
 // so a window that starts in the past returns the items that fell due in
