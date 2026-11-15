@@ -168,13 +168,13 @@ function HierarchyView() {
       }
     >
       {/* Three-panel layout: tree | heatmap | timeline. Stacks to a
-          single column below the md breakpoint (AC-1). The heatmap gets
+          single column below the lg breakpoint (AC-1; #2213 moved it from md, where a 768px tablet clipped the org-tree names). The heatmap gets
           the widest column on xl. #2080: `min-w-0` on each column, so
           a wide heatmap scrolls in its own container instead of
           widening its grid column and the page. */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <div
-          className="min-w-0 md:col-span-3"
+          className="min-w-0 lg:col-span-3"
           data-testid="risk-hierarchy-col-tree"
         >
           <OrgTreePanel
@@ -188,7 +188,7 @@ function HierarchyView() {
           />
         </div>
         <div
-          className="min-w-0 md:col-span-5"
+          className="min-w-0 lg:col-span-5"
           data-testid="risk-hierarchy-col-heatmap"
         >
           <ThemeHeatmapPanel
@@ -210,7 +210,7 @@ function HierarchyView() {
           />
         </div>
         <div
-          className="min-w-0 md:col-span-4"
+          className="min-w-0 lg:col-span-4"
           data-testid="risk-hierarchy-col-timeline"
         >
           <DecisionTimelinePanel
