@@ -3416,6 +3416,7 @@ type User struct {
 	Active         bool               `json:"active"`
 	ScimExternalID *string            `json:"scim_external_id"`
 	ScimManaged    bool               `json:"scim_managed"`
+	Theme          string             `json:"theme"`
 }
 
 type UserNotificationPreference struct {

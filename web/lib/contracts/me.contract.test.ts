@@ -83,6 +83,12 @@ describe("contract: GET /api/me <-> atlas GET /v1/me", () => {
         typeof body.time_zone === "string" || body.time_zone === null,
         `${name}.time_zone must be string or null`,
       ).toBe(true);
+      // #2142: theme is system | light | dark for a users row, null for a
+      // credential with no users row.
+      expect(
+        body.theme === null || ["system", "light", "dark"].includes(body.theme),
+        `${name}.theme must be system, light, dark or null`,
+      ).toBe(true);
     }
   });
 

@@ -52,6 +52,9 @@ export const DEMO_AUDIT_PERIOD_ID = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001";
 // Slice 201: the global-setup module also uses this UUID as the JWT
 // `sub` claim so the synthesized credential's UserID matches.
 export const DEMO_USER_ID = "44444444-4444-4444-4444-444444440001";
+// #2142 — seeded by fixtures/e2e/theme.sql. The stored theme is per user,
+// so the theme spec signs in as this user rather than the shared demo one.
+export const THEME_USER_ID = "44444444-4444-4444-4444-444444442142";
 
 // The fixture names the harness understands. Each maps to one
 // per-spec SQL file under fixtures/e2e/.
@@ -115,7 +118,10 @@ export type FixtureName =
   // real attest form (the base control is automated).
   | "attest"
   // #2137 — one manual attestation for evidence-detail.spec.ts.
-  | "evidence-detail";
+  | "evidence-detail"
+  // #2142 — a user of settings-theme.spec.ts's own, its stored theme
+  // reset to never-chosen on each run.
+  | "theme";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
