@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/controlimports"
@@ -69,7 +70,7 @@ func optIn(t *testing.T, app *pgxpool.Pool, tenant string) *cloud.Store {
 		t.Fatalf("NewCrypter: %v", err)
 	}
 	store := cloud.NewStore(app, crypter)
-	if _, err := store.Set(dbtest.WithTenantCtx(t, tenant), cloud.ProviderAnthropic, cloud.Secret("control-import-fake-key-DO-NOT-USE")); err != nil {
+	if _, err := store.Set(dbtest.WithTenantCtx(t, tenant), cloud.ProviderAnthropic, cloud.Secret("control-import-fake-key-DO-NOT-USE"), uuid.Nil); err != nil {
 		t.Fatalf("opt in: %v", err)
 	}
 	return store
@@ -119,6 +120,7 @@ func rerankTenant(t *testing.T, admin *pgxpool.Pool) string {
 		"ai_generations",
 		"tenant_llm_routing",
 		"control_import_settings",
+		"me_audit_log",
 	)
 }
 
@@ -302,7 +304,7 @@ func TestLocalOptInReranksOnLocalOllama(t *testing.T) {
 	}
 
 	ctx := dbtest.WithTenantCtx(t, tenant)
-	if _, err := store.SetSettings(ctx, controlimport.Settings{LLMRerankLocal: true}, "admin"); err != nil {
+	if _, err := store.SetSettings(ctx, controlimport.Settings{LLMRerankLocal: true}, "admin", uuid.Nil); err != nil {
 		t.Fatalf("SetSettings: %v", err)
 	}
 	if s, err := store.GetSettings(dbtest.WithTenantCtx(t, other)); err != nil || s.LLMRerankLocal {

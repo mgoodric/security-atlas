@@ -2,10 +2,15 @@ package controlimport
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
 // Settings is a tenant's control import configuration (#2079).
@@ -51,9 +56,23 @@ func (s *Store) GetSettings(ctx context.Context) (Settings, error) {
 	return out, err
 }
 
-// SetSettings stores the caller's tenant's settings.
-func (s *Store) SetSettings(ctx context.Context, in Settings, updatedBy string) (Settings, error) {
+// AuditActionSettingsUpdate is the me_audit_log action written for every
+// settings change (#2224). CHECK constraint extended in migration
+// 20261120000000_llm_settings_audit.sql.
+const AuditActionSettingsUpdate = "control_import_settings_update"
+
+// SetSettings stores the caller's tenant's settings and, in the same
+// transaction, writes one me_audit_log row naming actor and the before and
+// after values (#2224). The setting decides whether tenant text is sent to an
+// LLM, so its history is audit evidence. actor is uuid.Nil for a caller that
+// is not a user (a bootstrap key).
+func (s *Store) SetSettings(ctx context.Context, in Settings, updatedBy string, actor uuid.UUID) (Settings, error) {
 	err := s.inTx(ctx, func(ctx context.Context, tx pgx.Tx, tenantID string) error {
+		var before Settings
+		err := tx.QueryRow(ctx, `SELECT llm_rerank_local FROM control_import_settings FOR UPDATE`).Scan(&before.LLMRerankLocal)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("controlimport: read settings: %w", err)
+		}
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO control_import_settings (tenant_id, llm_rerank_local, updated_by)
 			VALUES ($1::uuid, $2, $3)
@@ -63,6 +82,27 @@ func (s *Store) SetSettings(ctx context.Context, in Settings, updatedBy string) 
 			    updated_at = now()
 		`, tenantID, in.LLMRerankLocal, updatedBy); err != nil {
 			return fmt.Errorf("controlimport: write settings: %w", err)
+		}
+		beforeBlob, err := json.Marshal(before)
+		if err != nil {
+			return fmt.Errorf("controlimport: audit before: %w", err)
+		}
+		afterBlob, err := json.Marshal(in)
+		if err != nil {
+			return fmt.Errorf("controlimport: audit after: %w", err)
+		}
+		tenant, err := uuid.Parse(tenantID)
+		if err != nil {
+			return fmt.Errorf("controlimport: parse tenant id: %w", err)
+		}
+		if err := dbx.New(tx).InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+			TenantID: pgtype.UUID{Bytes: tenant, Valid: true},
+			UserID:   pgtype.UUID{Bytes: actor, Valid: true},
+			Action:   AuditActionSettingsUpdate,
+			Before:   beforeBlob,
+			After:    afterBlob,
+		}); err != nil {
+			return fmt.Errorf("controlimport: audit settings: %w", err)
 		}
 		return nil
 	})
