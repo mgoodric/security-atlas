@@ -31,11 +31,14 @@ type Rollup struct {
 	CoveragePct  int `json:"coverage_pct"`
 	FreshnessPct int `json:"freshness_pct"`
 
-	// Delta is the signed 30-day control-drift count; FlippedOutCount is how
-	// many controls drifted OUT of passing in the window. Both from the Brief's
-	// drift summary.
-	Delta           int `json:"delta"`
-	FlippedOutCount int `json:"flipped_out_count"`
+	// Delta is the net change in passing controls over the 30-day window;
+	// FlippedOutCount is how many controls drifted OUT of passing and
+	// StartedPassingCount how many started passing (#2195). All three from the
+	// Brief's drift summary. Gains minus losses is not Delta in general.
+	// StartedPassingCount is nil for a brief stored before it existed.
+	Delta               int  `json:"delta"`
+	FlippedOutCount     int  `json:"flipped_out_count"`
+	StartedPassingCount *int `json:"started_passing_count,omitempty"`
 
 	// WindowDays is the drift lookback window (30 for the monthly brief).
 	WindowDays int `json:"window_days"`
@@ -122,15 +125,16 @@ func RollupFromBrief(b board.Brief, excerpts []Excerpt) (Rollup, error) {
 		bounded = bounded[:maxCitedExcerpts]
 	}
 	return Rollup{
-		PeriodEnd:       b.PeriodEnd,
-		CoveragePct:     head.CoveragePct,
-		FreshnessPct:    head.FreshnessPct,
-		Delta:           b.Drift.Delta,
-		FlippedOutCount: b.Drift.FlippedOutCount,
-		WindowDays:      b.Drift.WindowDays,
-		FrameworkCount:  len(b.Frameworks),
-		FrameworkNames:  names,
-		Excerpts:        bounded,
+		PeriodEnd:           b.PeriodEnd,
+		CoveragePct:         head.CoveragePct,
+		FreshnessPct:        head.FreshnessPct,
+		Delta:               b.Drift.Delta,
+		FlippedOutCount:     b.Drift.FlippedOutCount,
+		StartedPassingCount: b.Drift.StartedPassingCount,
+		WindowDays:          b.Drift.WindowDays,
+		FrameworkCount:      len(b.Frameworks),
+		FrameworkNames:      names,
+		Excerpts:            bounded,
 	}, nil
 }
 
@@ -177,12 +181,14 @@ func (r Rollup) AllowedNumbers() map[int]bool {
 	}
 	// Drift-activity section: only the drift integers are ground truth.
 	if r.driftOnly {
-		return map[int]bool{
+		allow := map[int]bool{
 			r.FlippedOutCount: true,
 			r.WindowDays:      true,
 			abs(r.Delta):      true,
 			r.Delta:           true,
 		}
+		r.allowStartedPassing(allow)
+		return allow
 	}
 	// Coverage section (slice-440 default — a zero-value Rollup is a coverage
 	// rollup, so the behavior is byte-for-byte the slice-440 set).
@@ -196,7 +202,17 @@ func (r Rollup) AllowedNumbers() map[int]bool {
 	}
 	// The literal signed delta is also allowed (a draft may write "-3").
 	allow[r.Delta] = true
+	r.allowStartedPassing(allow)
 	return allow
+}
+
+// allowStartedPassing adds the started-passing count to a drift-bearing
+// section's allowed set, when the brief recorded one. A brief stored before
+// #2195 has none, and the gate then admits no number for it.
+func (r Rollup) allowStartedPassing(allow map[int]bool) {
+	if r.StartedPassingCount != nil {
+		allow[*r.StartedPassingCount] = true
+	}
 }
 
 // allowedExcerptIDs builds the grounding set for citation validation: every

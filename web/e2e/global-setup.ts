@@ -66,15 +66,21 @@ function atlasBaseURL(): string {
  * almost certainly means `ATLAS_TEST_MODE=1` is unset on the atlas
  * server; the error message surfaces that hypothesis to the operator.
  */
-async function issueTestJWT(): Promise<string> {
+//
+// #2142: exported with a `userId` parameter so a spec whose writes would
+// leak into the shared demo user (settings-theme.spec.ts) can sign in as
+// a user of its own.
+export async function issueTestJWT(
+  // Default DEMO_USER_ID so PATCH /v1/me + /v1/me/preferences resolve to
+  // the real users row inserted by fixtures/e2e/settings.sql (slice 164 —
+  // required for AC-3 round-trip + AC-8 timezone + the broader settings
+  // spec body).
+  userId: string = DEMO_USER_ID,
+): Promise<string> {
   const url = `${atlasBaseURL()}/v1/test/issue-jwt`;
   const body = {
     tenant_id: DEMO_TENANT_ID,
-    // Subject = DEMO_USER_ID so PATCH /v1/me + /v1/me/preferences
-    // resolve to the real users row inserted by
-    // fixtures/e2e/settings.sql (slice 164 — required for AC-3
-    // round-trip + AC-8 timezone + the broader settings spec body).
-    user_id: DEMO_USER_ID,
+    user_id: userId,
     // Admin + grc_engineer roles cover both AC-10 multi-role tail
     // badge (settings) AND every admin-gated route the dashboard
     // suite touches.
