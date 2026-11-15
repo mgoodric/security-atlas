@@ -10,12 +10,13 @@
 //	PATCH  /v1/exceptions/{id}/approve          requested -> approved (AC-3)
 //	PATCH  /v1/exceptions/{id}/deny             requested -> denied
 //	PATCH  /v1/exceptions/{id}/activate         approved -> active (AC-4 enable)
+//	PATCH  /v1/exceptions/{id}/revoke           active -> revoked (#2113)
 //
 // All handlers run with the tenant set by upstream auth middleware (see
 // internal/api/authctx). The store opens its own transaction per call and
 // applies the tenant GUC.
 //
-// AC-3 + segregation of duties: approve/deny/activate require IsApprover
+// AC-3 + segregation of duties: approve/deny/activate/revoke require IsApprover
 // (with IsAdmin implying IsApprover). approve/deny also reject when the
 // caller's credential id equals the row's requested_by (defense in depth
 // against same-user filing + adjudicating).
@@ -79,6 +80,10 @@ type activateReq struct {
 	EffectiveFrom *time.Time `json:"effective_from"`
 }
 
+type revokeReq struct {
+	Reason string `json:"reason"`
+}
+
 type exceptionWire struct {
 	ID                   string          `json:"id"`
 	ControlID            string          `json:"control_id"`
@@ -99,6 +104,8 @@ type exceptionWire struct {
 	EffectiveFrom *time.Time `json:"effective_from,omitempty"`
 	ExpiresAt     time.Time  `json:"expires_at"`
 	ExpiredAt     *time.Time `json:"expired_at,omitempty"`
+	RevokedBy     *string    `json:"revoked_by,omitempty"`
+	RevokedAt     *time.Time `json:"revoked_at,omitempty"`
 	Status        string     `json:"status"`
 	CreatedAt     time.Time  `json:"created_at"`
 	UpdatedAt     time.Time  `json:"updated_at"`
@@ -131,6 +138,10 @@ func (h *Handler) CreateException(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ExpiresAt == nil {
 		httpresp.WriteError(w, http.StatusBadRequest, "expires_at is required")
+		return
+	}
+	if msg := checkPredicate(req.ScopeCellPredicate); msg != "" {
+		httpresp.WriteError(w, http.StatusBadRequest, msg)
 		return
 	}
 
@@ -371,7 +382,62 @@ func (h *Handler) Activate(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(activated)})
 }
 
+// Revoke handles PATCH /v1/exceptions/{id}/revoke (#2113): an approver
+// ends an active exception before it expires, with a reason.
+func (h *Handler) Revoke(w http.ResponseWriter, r *http.Request) {
+	ctx, cred, ok := h.tenantCredContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	if !cred.IsApprover && !cred.IsAdmin {
+		httpresp.WriteError(w, http.StatusForbidden, "approver role required")
+		return
+	}
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "id must be a UUID")
+		return
+	}
+	var req revokeReq
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		httpresp.WriteError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.Reason) == "" {
+		httpresp.WriteError(w, http.StatusBadRequest, "reason is required")
+		return
+	}
+	revoked, err := h.store.Revoke(ctx, id, credstore.PrincipalOf(cred), req.Reason)
+	if err != nil {
+		h.writeTransitionErr(w, r, err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"exception": exceptionWireFrom(revoked)})
+}
+
 // ----- helpers -----
+
+// checkPredicate refuses a scope_cell_predicate the evaluator would read
+// as something the requester did not mean. A JSON null, or anything that
+// is not an object, is refused: internal/scope reads a stored null as
+// matching every cell, and the request form's picker emits null for an
+// incomplete choice (#2103), so a null here is an unfinished form, never
+// "the whole control". The whole control is {"op":"true"}, or the field
+// left out. Returns the 400 message, or "" when the predicate is fine.
+func checkPredicate(raw json.RawMessage) string {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return ""
+	}
+	if trimmed == "null" {
+		return `scope_cell_predicate must not be null; send {"op":"true"} for the whole control`
+	}
+	if !strings.HasPrefix(trimmed, "{") {
+		return "scope_cell_predicate must be a JSON object"
+	}
+	return ""
+}
 
 func (h *Handler) writeCreateErr(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
@@ -403,6 +469,8 @@ func (h *Handler) writeTransitionErr(w http.ResponseWriter, r *http.Request, err
 		httpresp.WriteError(w, http.StatusForbidden, "approver must differ from requester (segregation of duties)")
 	case errors.Is(err, exception.ErrApproverNotPerson):
 		httpresp.WriteError(w, http.StatusForbidden, exception.ErrApproverNotPerson.Error())
+	case errors.Is(err, exception.ErrReasonRequired):
+		httpresp.WriteError(w, http.StatusBadRequest, "reason is required")
 	default:
 		httperr.WriteInternal(w, r, "transition", err)
 	}
@@ -448,6 +516,8 @@ func exceptionWireFrom(e exception.Exception) exceptionWire {
 	out.ActivatedAt = e.ActivatedAt
 	out.EffectiveFrom = e.EffectiveFrom
 	out.ExpiredAt = e.ExpiredAt
+	out.RevokedBy = e.RevokedBy
+	out.RevokedAt = e.RevokedAt
 	return out
 }
 

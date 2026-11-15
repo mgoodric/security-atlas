@@ -56,6 +56,7 @@ import { cn } from "@/lib/utils";
 import type { CoverageRequirement } from "@/lib/api/control-detail";
 import { isOrgMapping } from "@/lib/api/org-mapping";
 import { strmStyle } from "@/components/control/strm";
+import { frameworkLabel } from "@/lib/labels/framework-label";
 import {
   coverageBarPercent,
   formatCoverage,
@@ -133,7 +134,8 @@ export function CoverageTable({
                       outOfScope ? "text-muted-foreground" : "text-foreground",
                     )}
                   >
-                    {req.framework_name} ·{" "}
+                    {frameworkLabel(req.framework_name, req.framework_version)}{" "}
+                    ·{" "}
                     <Link
                       href={`/requirements/${encodeURIComponent(
                         req.requirement_id,
@@ -171,9 +173,8 @@ export function CoverageTable({
                       style.badge,
                     )}
                     data-strm={req.relationship_type}
-                    title={style.label}
                   >
-                    {req.relationship_type}
+                    {style.label}
                   </span>
                 </TableCell>
                 <TableCell className="text-right font-mono text-sm">

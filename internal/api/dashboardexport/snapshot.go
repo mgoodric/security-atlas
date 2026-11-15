@@ -248,7 +248,7 @@ func NewLivePanelSource(
 // parallelising would saturate the pool under a burst of export
 // requests without a meaningful latency benefit at v1 dashboard
 // volumes.
-func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
+func (s *LivePanelSource) Snapshot(ctx context.Context, upcoming UpcomingTypes) (Snapshot, error) {
 	out := Snapshot{
 		SnapshotAt: time.Now().UTC(),
 	}
@@ -338,12 +338,16 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 
 	// 5. Upcoming — the calendar's next 14 days, the window the
-	//    dashboard's "Coming up" panel shows (#2130).
+	//    dashboard's "Coming up" panel shows (#2130), narrowed to the
+	//    event types the caller may read on the calendar (#2234).
 	now := time.Now().UTC()
 	from := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
-	events, err := s.calendarStore.ListEvents(ctx, from, from.Add(UpcomingWindow), now, "", upcomingRowLimit)
-	if err != nil {
-		return out, fmt.Errorf("upcoming panel: %w", err)
+	var events []dbx.ListCalendarEventsRow
+	if !upcoming.None {
+		events, err = s.calendarStore.ListEvents(ctx, from, from.Add(UpcomingWindow), now, upcoming.Filter, upcomingRowLimit)
+		if err != nil {
+			return out, fmt.Errorf("upcoming panel: %w", err)
+		}
 	}
 	out.Panels.Upcoming = make([]UpcomingPanelRow, 0, len(events))
 	for _, e := range events {

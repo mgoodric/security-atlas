@@ -1901,7 +1901,8 @@ type Querier interface {
 	//   8. action_plans            — due_date of an open plan (#2130)
 	//   9. policy_acknowledgments  — the latest ack per (policy version, user)
 	//      + 365 days, when the annual re-acknowledgement lapses (#2130; it
-	//      moved here from the retired dashboard upcoming rollup)
+	//      moved here from the retired dashboard upcoming rollup), grouped per
+	//      policy and lapse day (#2234)
 	//
 	// Past-due items: every branch filters on its own date against [from, to),
 	// so a window that starts in the past returns the items that fell due in
@@ -3305,6 +3306,11 @@ type Querier interface {
 	// deprovisioned account loses all access immediately. No keep-id — unlike the
 	// /v1/me "sign out other devices" path, deprovision kills the whole set.
 	RevokeAllSCIMUserSessions(ctx context.Context, arg RevokeAllSCIMUserSessionsParams) (int64, error)
+	// #2113: active -> revoked (terminal). An approver ends an active
+	// exception before its expires_at; the reason lives on the paired audit
+	// row. expires_at is left as granted, so the record shows both the
+	// window that was approved and the moment it was cut short.
+	RevokeException(ctx context.Context, arg RevokeExceptionParams) (Exception, error)
 	// Slice 108: DELETE /v1/me/sessions (no {id}). Revokes every valid session for the
 	// caller EXCEPT the one identified by $3 (the "current" session id). When the caller
 	// has no current-session cookie, pass an empty string to revoke ALL sessions for the

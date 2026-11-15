@@ -473,12 +473,20 @@ var gatedEventTypes = map[string]string{
 }
 
 // readableTypes narrows a normalized type filter to the types the caller
-// may read. Gated types the caller's OPA decision denies are dropped. It
-// returns the filter to query with and whether any type is left; an
-// empty filter means every type, so a narrowed one is spelled out. With
-// no engine wired every type stays (unit-test servers).
+// may read; see ReadableTypes.
 func (h *Handler) readableTypes(r *http.Request, typeFilter string) (string, bool) {
-	if h.engine == nil {
+	return ReadableTypes(r, h.engine, typeFilter)
+}
+
+// ReadableTypes narrows a normalized type filter to the event types the
+// caller of r may read. Gated types (gatedEventTypes) the caller's OPA
+// decision denies are dropped. It returns the filter to query with and
+// whether any type is left; an empty filter means every type, so a
+// narrowed one is spelled out. With no engine every type stays (unit-test
+// servers). The dashboard export's upcoming panel calls it too (#2234),
+// so the export and the calendar show a caller the same events.
+func ReadableTypes(r *http.Request, engine *authz.Engine, typeFilter string) (string, bool) {
+	if engine == nil {
 		return typeFilter, true
 	}
 	denied := map[string]string{}
@@ -487,7 +495,7 @@ func (h *Handler) readableTypes(r *http.Request, typeFilter string) (string, boo
 		in.Resource.Type = resource
 		in.Resource.ID = ""
 		in.Action = "read"
-		d, err := h.engine.Decide(r.Context(), in)
+		d, err := engine.Decide(r.Context(), in)
 		if err != nil || !d.Allow {
 			denied[eventType] = resource
 		}

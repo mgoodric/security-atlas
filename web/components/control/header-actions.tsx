@@ -16,17 +16,8 @@
 //       with tooltips; they are no longer rendered.
 //
 //   D2: Request exception renders as a LINK (shadcn outline size=sm) to
-//       `/exceptions?control_id=<id>`. That route exists on main
-//       (`web/app/(authed)/exceptions/page.tsx`) and its `filters.ts`
-//       accepts `?control_id=…` as a URL-driven filter — so the
-//       destination is real, not a placeholder. This is the closest
-//       honest behavior we can ship without a new endpoint
-//       (anti-criterion P0-255-4). The button label still says
-//       "Request exception" — the navigation lands on the tenant-wide
-//       exception register filtered to this control, where the operator
-//       sees the existing exception requests for the control. The
-//       "create exception" affordance itself is a v2 surface (the
-//       exception-request workflow per canvas §4.6).
+//       the request form, `/exceptions/new?control_id=<id>` (#2113),
+//       which opens with this control pre-filled.
 //
 //   D3: relative-time formatter lives in `web/lib/relative-time.ts` (new
 //       — see that file's preamble). The freshness-clock's `humanizeSince`
@@ -47,8 +38,8 @@
 //     entry point is rendered for either (#2082).
 //   - P0-255-3: no `<a href="#">` anywhere. Request exception links to a
 //     real, existing route.
-//   - P0-255-4: no new API endpoint. /exceptions?control_id is an
-//     existing URL-driven filter on a merged page.
+//   - P0-255-4: no new API endpoint. The request form posts to the
+//     existing POST /v1/exceptions.
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
@@ -162,7 +153,7 @@ export function ControlHeaderActions({
         data-testid="control-header-action-buttons"
       >
         <Link
-          href={`/exceptions?control_id=${encodeURIComponent(controlID)}`}
+          href={`/exceptions/new?control_id=${encodeURIComponent(controlID)}`}
           className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
           data-testid="control-action-request-exception"
         >
