@@ -107,14 +107,11 @@ func (s *Server) registerAdmin(root *chi.Mux, featureFlagStore *featureflag.Stor
 	featuresH := featuresapi.New(featureFlagStore)
 	root.Get("/v1/admin/features", featuresH.List)
 	root.Patch("/v1/admin/features/{key}", featuresH.Patch)
-	// Slice 660: NON-admin, tenant-scoped enabled-modules read. The web
-	// shell calls this for EVERY authed user to gate nav (hide Vendor
-	// Claims / Board Packs when their flag is off) — the admin
-	// GET /v1/admin/features above stays admin-only (it carries the full
-	// inventory + toggle/audit surface). This route exposes ONLY the
-	// slice 660 gating booleans (featureflag.GatingKeys) for the caller's
-	// own tenant (RLS — invariant #6); no write path, no audit metadata.
-	root.Get("/v1/features/enabled", featuresH.Enabled)
+	// #2170: the caller's effective modules (featureflag.Modules), read
+	// by every signed-in role for its own tenant (RLS — invariant #6). The
+	// web app's sidebar and FeatureGate read it in place of a gating map
+	// of their own. It replaces slice 660's GET /v1/features/enabled.
+	root.Get("/v1/me/modules", featuresH.Modules)
 	// Slice 062: admin BFF backend endpoints — SSO config, users + roles,
 	// and unified audit-log read across the seven per-domain audit log
 	// tables (via the admin_audit_log_v view from migration _022). Each

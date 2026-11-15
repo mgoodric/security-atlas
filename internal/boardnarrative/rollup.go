@@ -25,11 +25,17 @@ type Rollup struct {
 	// PeriodEnd labels the rollup (YYYY-MM-DD), echoed from the Brief.
 	PeriodEnd string `json:"period_end"`
 
-	// CoveragePct / FreshnessPct are the program-wide posture numbers from the
-	// Brief (identical across frameworks in v1 — board decisions log D3). These
-	// are the headline numbers the coverage section reports.
-	CoveragePct  int `json:"coverage_pct"`
-	FreshnessPct int `json:"freshness_pct"`
+	// CoveragePct is the program coverage figure the board pack reports: the
+	// unweighted mean of the scoped frameworks' requirement coverage, from
+	// the Brief's Coverage (#2210). The draft may state it only as
+	// board.FormatPct renders it ("41.9", "75"), the pack's own rendering.
+	// Not reported when ScopedFrameworkCount is 0.
+	CoveragePct float64 `json:"coverage_pct"`
+	// ScopedFrameworkCount is how many frameworks the mean is over.
+	ScopedFrameworkCount int `json:"scoped_framework_count"`
+	// FreshnessPct is the tenant-wide evidence freshness rate. It is not
+	// coverage and the prompt names it so.
+	FreshnessPct int `json:"evidence_freshness_rate_pct"`
 
 	// Delta is the net change in passing controls over the 30-day window;
 	// FlippedOutCount is how many controls drifted OUT of passing and
@@ -104,18 +110,19 @@ type Excerpt struct {
 
 // RollupFromBrief projects a board.Brief into the coverage-section Rollup,
 // attaching the bounded citable excerpts. Pure — no IO. Returns ErrNoBriefData
-// when the Brief carries no framework posture (nothing to summarize).
+// when the Brief carries no framework posture (nothing to summarize), or no
+// Coverage: a brief assembled before #2210 holds only the tenant-wide
+// freshness figure, which is not coverage and must not ground a coverage
+// claim.
 //
-// The coverage / freshness / delta numbers are taken from the FIRST framework
-// posture row (they are program-wide and identical across frameworks in v1 —
-// board decisions log D3) plus the Brief's drift summary. The excerpts come
-// from the caller (the Store's bounded, RLS-scoped control/evidence read).
+// The coverage and freshness numbers are the Brief's Coverage (the board
+// pack's figure, #2210); the drift numbers are its drift summary. The
+// excerpts come from the caller (the Store's bounded, RLS-scoped
+// control/evidence read).
 func RollupFromBrief(b board.Brief, excerpts []Excerpt) (Rollup, error) {
-	if len(b.Frameworks) == 0 {
+	if len(b.Frameworks) == 0 || b.Coverage == nil {
 		return Rollup{}, ErrNoBriefData
 	}
-	// Program-wide numbers (identical across frameworks in v1) — read the first.
-	head := b.Frameworks[0]
 	names := make([]string, 0, len(b.Frameworks))
 	for _, fw := range b.Frameworks {
 		names = append(names, fw.Name)
@@ -125,16 +132,17 @@ func RollupFromBrief(b board.Brief, excerpts []Excerpt) (Rollup, error) {
 		bounded = bounded[:maxCitedExcerpts]
 	}
 	return Rollup{
-		PeriodEnd:           b.PeriodEnd,
-		CoveragePct:         head.CoveragePct,
-		FreshnessPct:        head.FreshnessPct,
-		Delta:               b.Drift.Delta,
-		FlippedOutCount:     b.Drift.FlippedOutCount,
-		StartedPassingCount: b.Drift.StartedPassingCount,
-		WindowDays:          b.Drift.WindowDays,
-		FrameworkCount:      len(b.Frameworks),
-		FrameworkNames:      names,
-		Excerpts:            bounded,
+		PeriodEnd:            b.PeriodEnd,
+		CoveragePct:          b.Coverage.CoveragePct,
+		ScopedFrameworkCount: b.Coverage.ScopedFrameworkCount,
+		FreshnessPct:         b.Coverage.EvidenceFreshnessRatePct,
+		Delta:                b.Drift.Delta,
+		FlippedOutCount:      b.Drift.FlippedOutCount,
+		StartedPassingCount:  b.Drift.StartedPassingCount,
+		WindowDays:           b.Drift.WindowDays,
+		FrameworkCount:       len(b.Frameworks),
+		FrameworkNames:       names,
+		Excerpts:             bounded,
 	}, nil
 }
 
@@ -152,12 +160,12 @@ func RollupFromBrief(b board.Brief, excerpts []Excerpt) (Rollup, error) {
 // "down", not by the digit — so we accept the magnitude and let tone/shape
 // govern the direction word.
 //
-// Percent-shaped numbers (coverage, freshness) and counts (framework count,
-// flipped-out count, window days, delta magnitude) all live in one set: a
-// number is valid if it equals ANY ground-truth value. This is deliberately
-// permissive on WHICH field a number maps to (the model may legitimately state
-// "84% coverage and 84%..." — same value, different sentence) and strict on
-// WHETHER the value exists in the pre-computation at all.
+// Counts (framework count, flipped-out count, window days, delta magnitude)
+// live in one set: a number is valid if it equals ANY ground-truth value. This
+// is deliberately permissive on WHICH field a number maps to and strict on
+// WHETHER the value exists in the pre-computation at all. The coverage section
+// adds two checks on top (verifyCoverageNumbers, #2210): a decimal must be the
+// coverage figure as rendered, and a percentage must be a percentage field.
 func (r Rollup) AllowedNumbers() map[int]bool {
 	// Risk-posture section: only the risk integers are ground truth.
 	if r.riskSeverity {
@@ -190,10 +198,12 @@ func (r Rollup) AllowedNumbers() map[int]bool {
 		r.allowStartedPassing(allow)
 		return allow
 	}
-	// Coverage section (slice-440 default — a zero-value Rollup is a coverage
-	// rollup, so the behavior is byte-for-byte the slice-440 set).
+	// Coverage section (a zero-value Rollup is a coverage rollup). The
+	// coverage figure is an integer here only when the pack renders it as one
+	// ("75"); a decimal rendering ("41.9") is admitted by coverageDecimal
+	// instead. With no scoped framework neither the figure nor the scoped
+	// count is a number the draft may state (#2210).
 	allow := map[int]bool{
-		r.CoveragePct:     true,
 		r.FreshnessPct:    true,
 		r.FlippedOutCount: true,
 		r.WindowDays:      true,
@@ -202,8 +212,62 @@ func (r Rollup) AllowedNumbers() map[int]bool {
 	}
 	// The literal signed delta is also allowed (a draft may write "-3").
 	allow[r.Delta] = true
+	if r.ScopedFrameworkCount > 0 {
+		allow[r.ScopedFrameworkCount] = true
+		if n, ok := r.coverageInt(); ok {
+			allow[n] = true
+		}
+	}
 	r.allowStartedPassing(allow)
 	return allow
+}
+
+// coverageText is the coverage figure as the board pack renders it.
+func (r Rollup) coverageText() string { return board.FormatPct(r.CoveragePct) }
+
+// coverageInt is the coverage figure when the pack renders it as a whole
+// number.
+func (r Rollup) coverageInt() (int, bool) {
+	n, err := strconv.Atoi(r.coverageText())
+	return n, err == nil
+}
+
+// coverageDecimal is the one decimal token a coverage draft may contain: the
+// coverage figure as the pack renders it, when that rendering has a decimal
+// point. Empty otherwise.
+func (r Rollup) coverageDecimal() string {
+	if r.ScopedFrameworkCount == 0 {
+		return ""
+	}
+	if _, ok := r.coverageInt(); ok {
+		return ""
+	}
+	return r.coverageText()
+}
+
+// allowedPercents is the set of integers a coverage draft may write as a
+// percentage: the evidence freshness rate, and the coverage figure when it is
+// a whole number and some framework is scoped. A count followed by "%", or
+// "0%" for a tenant with no scoped framework, is not a percentage the rollup
+// produced (#2210).
+func (r Rollup) allowedPercents() map[int]bool {
+	allow := map[int]bool{r.FreshnessPct: true}
+	if r.ScopedFrameworkCount > 0 {
+		if n, ok := r.coverageInt(); ok {
+			allow[n] = true
+		}
+	}
+	return allow
+}
+
+// verifyDraftNumbers is guardrail 5 for this rollup's section. The coverage
+// section runs the stricter coverage check; every other section runs the
+// shared library over its AllowedNumbers.
+func (r Rollup) verifyDraftNumbers(text string) bool {
+	if r.riskSeverity || r.driftOnly || r.exceptionOnly {
+		return VerifyNumbers(text, r.AllowedNumbers(), r.PeriodEnd)
+	}
+	return verifyCoverageNumbers(text, r)
 }
 
 // allowStartedPassing adds the started-passing count to a drift-bearing

@@ -3240,20 +3240,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
-  /v1/features/enabled:
-    get:
-      summary: GET /v1/features/enabled — non-admin enabled-modules read (slice 660 gating flags)
-      tags: [feature-flags]
-      operationId: get-v1-features-enabled
-      security:
-        - bearer: []
-      responses:
-        default:
-          description: Default response envelope.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes:
     get:
       summary: GET /v1/framework-scopes
@@ -3466,7 +3452,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/framework-scopes/{id}/applicability/diff:
     get:
-      summary: GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision
+      summary: GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision; implementation-reference-only edits are listed apart in reference_changes; the baseline is always the currently activated revision, so a superseded revision is compared against its successor
       tags: [framework-scopes]
       operationId: get-v1-framework-scopes-id-applicability-diff
       security:
@@ -3772,6 +3758,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/audited-under:
+    get:
+      summary: GET /v1/mapping-overlays/audited-under — controls whose anchor, through catalog and overlay edges, does not reach a criterion they were tested under, with candidate anchors from the current SCF release; ?framework
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays-audited-under
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/mapping-overlays/audited-under/export:
+    get:
+      summary: GET /v1/mapping-overlays/audited-under/export — the audited-under report as CSV; ?framework
+      tags: [mapping-overlays]
+      operationId: get-v1-mapping-overlays-audited-under-export
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/mapping-overlays/export:
     get:
       summary: GET /v1/mapping-overlays/export — the organisation's overlay edges as CSV (requirement, anchor, relationship, strength, rationale, source, author, dates, status); the list filters apply
@@ -3994,6 +4008,20 @@ paths:
       summary: PUT /v1/me/email-channel
       tags: [me]
       operationId: put-v1-me-email-channel
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/me/modules:
+    get:
+      summary: GET /v1/me/modules — the caller's effective optional modules (#2170)
+      tags: [feature-flags]
+      operationId: get-v1-me-modules
       security:
         - bearer: []
       responses:
@@ -5263,7 +5291,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     post:
-      summary: POST /v1/risks
+      summary: POST /v1/risks — create a risk; category is a slug, id or display name, refused when unknown, ambiguous or archived
       tags: [risks]
       operationId: post-v1-risks
       security:
@@ -5511,7 +5539,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?, category?}; category is a slug or id, refused when unknown or archived
+      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?, category?}; category is a slug, id or display name, refused when unknown, ambiguous or archived
       tags: [risks]
       operationId: patch-v1-risks-id
       security:

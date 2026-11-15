@@ -8,7 +8,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/board"
 	"github.com/mgoodric/security-atlas/internal/boardnarrative"
 	"github.com/mgoodric/security-atlas/internal/drift"
-	"github.com/mgoodric/security-atlas/internal/featureflag"
 	"github.com/mgoodric/security-atlas/internal/freshness"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/vendor"
@@ -22,7 +21,7 @@ import (
 // registered here is gated identically to how it was inline (slice 436
 // AC-6). Behavior is unchanged: routes, handlers, and declaration order are
 // preserved verbatim.
-func (s *Server) registerBoard(root *chi.Mux, featureFlagStore *featureflag.Store, freshnessStore *freshness.Store, driftStore *drift.Store, vendorStore *vendor.Store) {
+func (s *Server) registerBoard(root *chi.Mux, freshnessStore *freshness.Store, driftStore *drift.Store, vendorStore *vendor.Store) {
 	// Slice 031: monthly board brief. Generates a single-page, board-ready
 	// posture snapshot (per-framework posture + 30-day drift + top-3 risks
 	// aging) and persists it as a PINNED, IMMUTABLE snapshot (canvas §7.5).
@@ -37,15 +36,13 @@ func (s *Server) registerBoard(root *chi.Mux, featureFlagStore *featureflag.Stor
 	boardStore := board.NewStore(s.dbPool)
 	boardGen := board.NewGenerator(boardStore, freshnessStore, driftStore)
 	boardH := boardapi.New(boardGen, boardStore)
-	// Slice 660: the board-reporting module (briefs + packs) gates on the
-	// `board.reporting` feature flag. Both RegisterRoutes calls receive a
-	// featureflag.Gate-wrapped router so a flag-off tenant gets a clean 404
-	// + {"error":"feature disabled"} on EVERY board route (briefs + packs),
-	// matching the OSCAL gate above (consistent 404 shape; no internal
-	// leak). `board.reporting` is OFF by default pending GA. The Gate reads
-	// the caller's tenant flag under RLS (invariant #6).
+	// Slice 660 / #2170: the board-reporting module (briefs, packs and
+	// narratives) is switched by the `board.reporting` flag. Its routes are
+	// in the module registry (featureflag.Modules), so the module gate in
+	// the authorization chain answers 404 + {"error":"feature disabled"} on
+	// every one of them when the module is off. `board.reporting` is OFF by
+	// default pending GA.
 	root.Group(func(r chi.Router) {
-		r.Use(featureflag.Gate(featureFlagStore, "board.reporting"))
 		boardH.RegisterRoutes(r)
 		// Slice 032: quarterly board pack. Extends the slice-031 monthly brief
 		// into the full board-meeting artifact — a multi-section report

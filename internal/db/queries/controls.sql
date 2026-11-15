@@ -512,9 +512,12 @@ WHERE tenant_id = sqlc.arg(tenant_id) AND superseded_by IS NULL
 -- Issue #1775: queue one remap proposal for a control on a legacy SCF
 -- anchor. Written by the migrate role during `catalog import-scf` (source
 -- 'boot') and by the app role when an upload re-binds or flags a control in
--- place (source 'upload', #2236); a re-run leaves the existing proposal
--- alone. target_anchor_id is the anchor a 'rebound' control moved to, NULL
--- for an 'open' one.
+-- place (source 'upload', #2236). A re-run leaves the existing proposal
+-- alone, except that an open proposal whose control this run re-bound
+-- becomes rebound, taking the run's target anchor and source (#2321: a stock
+-- control flagged before the title-only rule moves on the re-run).
+-- target_anchor_id is the anchor a 'rebound' control moved to, NULL for an
+-- 'open' one.
 INSERT INTO scf_remap_proposals (
     tenant_id, control_id, bundle_id, legacy_anchor_id, legacy_scf_id,
     legacy_release, target_framework_version_id, target_release, class,
@@ -527,7 +530,11 @@ INSERT INTO scf_remap_proposals (
     sqlc.arg(successor_scf_ids)::text[], sqlc.narg(target_anchor_id),
     sqlc.arg(source)
 )
-ON CONFLICT (control_id, target_framework_version_id) DO NOTHING;
+ON CONFLICT (control_id, target_framework_version_id) DO UPDATE
+    SET status = 'rebound',
+        target_anchor_id = EXCLUDED.target_anchor_id,
+        source = EXCLUDED.source
+    WHERE scf_remap_proposals.status = 'open' AND EXCLUDED.status = 'rebound';
 
 -- name: ListSCFRemapProposals :many
 -- Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap

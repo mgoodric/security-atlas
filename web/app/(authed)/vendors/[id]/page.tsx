@@ -31,6 +31,7 @@ import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
+import { Markdown } from "@/components/markdown";
 import { PageShell } from "@/components/shell/page-shell";
 import { DetailHeader } from "@/components/detail/detail-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -292,12 +293,7 @@ export default function VendorDetailPage({
         </CardHeader>
         <CardContent>
           {vendor.notes.trim() ? (
-            <p
-              className="whitespace-pre-wrap break-words text-sm text-foreground"
-              data-testid="vendor-detail-notes"
-            >
-              {vendor.notes}
-            </p>
+            <Markdown source={vendor.notes} data-testid="vendor-detail-notes" />
           ) : (
             <p
               className="text-sm text-muted-foreground"
@@ -385,12 +381,11 @@ function ReviewRow({ review }: { review: VendorReview }) {
         ) : null}
       </div>
       {review.notes.trim() ? (
-        <p
-          className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground"
+        <Markdown
+          source={review.notes}
+          className="mt-1 text-muted-foreground"
           data-testid="vendor-detail-review-notes"
-        >
-          {review.notes}
-        </p>
+        />
       ) : null}
     </li>
   );

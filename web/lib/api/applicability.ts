@@ -149,7 +149,36 @@ export type ApplicabilityDiff = {
   baseline: FrameworkScope | null;
   predicate: { changed: boolean; before: unknown; after: unknown };
   changes: ApplicabilityChange[];
+  // #2214: requirements whose implementation reference alone changed.
+  // Informational, listed apart so the four kinds' counts are unchanged.
+  reference_changes: ReferenceChange[];
 };
+
+export type ReferenceChange = Omit<ApplicabilityChange, "change"> & {
+  change: "reference_changed";
+};
+
+// describeReferenceMove renders the reference move on a change row whose
+// decision or justification also changed: "reference: <before> → <after>",
+// or null when both sides are present and the reference is the same (an
+// added or removed row has one side, so it is null too). Plain text.
+export function describeReferenceMove(c: ApplicabilityChange): string | null {
+  if (!c.before || !c.after) return null;
+  if (c.before.implementation_ref === c.after.implementation_ref) return null;
+  const ref = (s: string) => s || "(none)";
+  return `reference: ${ref(c.before.implementation_ref)} → ${ref(
+    c.after.implementation_ref,
+  )}`;
+}
+
+// describeReferenceChange renders a reference-only change as one line:
+// "reference changed: <before> → <after>", "(none)" for an empty side. The
+// reference is org-supplied text and is rendered as text, never a link.
+export function describeReferenceChange(c: ReferenceChange): string {
+  const ref = (side: DecisionSide | null) =>
+    side?.implementation_ref || "(none)";
+  return `reference changed: ${ref(c.before)} → ${ref(c.after)}`;
+}
 
 export const CHANGE_LABELS: Record<ApplicabilityChangeKind, string> = {
   added: "Added",

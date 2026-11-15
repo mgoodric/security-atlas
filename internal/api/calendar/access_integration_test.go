@@ -3,7 +3,8 @@
 // #2130 review — risk reviews and action-plan due dates reach only callers
 // who may read risks / action plans; the ICS feed (whose token names no
 // user) never carries them; and policy acknowledgement expiries stay on the
-// calendar after the upcoming rollup's retirement.
+// calendar after the upcoming rollup's retirement. #2232 gates vendor and
+// exception events the same way, on vendors and exceptions reads.
 
 package calendar_test
 
@@ -90,8 +91,10 @@ func countType(events map[string]map[string]any, typ string) int {
 
 // TestCalendar_RiskAndPlanEventsFollowOPA: an auditor and a control owner
 // see neither risk reviews nor action plans, asked for or not; a viewer
-// sees risk reviews but no plans; a GRC engineer sees both. Every role
-// still sees the ungated events.
+// sees risk reviews but no plans; a GRC engineer sees both. #2232: vendor
+// events follow a vendors read (viewer, GRC engineer) and exception events
+// an exceptions read (auditor, GRC engineer); the control owner sees
+// neither. Every role still sees the ungated events.
 func TestCalendar_RiskAndPlanEventsFollowOPA(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	now := time.Now().UTC()
@@ -99,13 +102,14 @@ func TestCalendar_RiskAndPlanEventsFollowOPA(t *testing.T) {
 	window := "from=" + ymd(now.AddDate(0, 0, -7)) + "&to=" + ymd(now.AddDate(0, 0, 14))
 
 	cases := []struct {
-		role        authz.Role
-		risks, plan int
+		role              authz.Role
+		risks, plan       int
+		vendor, exception bool
 	}{
-		{authz.RoleAuditor, 0, 0},
-		{authz.RoleControlOwner, 0, 0},
-		{authz.RoleViewer, 2, 0},
-		{authz.RoleGRCEngineer, 2, 2},
+		{authz.RoleAuditor, 0, 0, false, true},
+		{authz.RoleControlOwner, 0, 0, false, false},
+		{authz.RoleViewer, 2, 0, true, false},
+		{authz.RoleGRCEngineer, 2, 2, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.role), func(t *testing.T) {
@@ -116,19 +120,36 @@ func TestCalendar_RiskAndPlanEventsFollowOPA(t *testing.T) {
 			if got := countType(all, "action_plan"); got != tc.plan {
 				t.Errorf("action_plan events = %d, want %d", got, tc.plan)
 			}
-			wantEvent(t, all, fx.A.ExpiringWaiver.String(), "exception", "active")
+			if tc.exception {
+				wantEvent(t, all, fx.A.ExpiringWaiver.String(), "exception", "active")
+			} else if got := countType(all, "exception"); got != 0 {
+				t.Errorf("exception events = %d, want none", got)
+			}
 			wantEvent(t, all, fx.A.OverduePolicy.String(), "policy", "overdue")
 
 			asked := calendarAs(t, fx.A.ID, tc.role, "?types=risk,action_plan&"+window)
 			if got := countType(asked, "risk") + countType(asked, "action_plan"); got != tc.risks+tc.plan {
 				t.Errorf("asking for risk,action_plan: %d events, want %d", got, tc.risks+tc.plan)
 			}
+			// The fixture's vendor review fell due 10 days ago: a wider window.
+			wide := "from=" + ymd(now.AddDate(0, 0, -30)) + "&to=" + ymd(now.AddDate(0, 0, 14))
+			asked = calendarAs(t, fx.A.ID, tc.role, "?types=vendor,exception&"+wide)
+			if tc.vendor {
+				wantEvent(t, asked, fx.A.OverdueVendor.String(), "vendor", "overdue")
+			}
+			if got, want := countType(asked, "vendor") > 0, tc.vendor; got != want {
+				t.Errorf("asking for vendor,exception: vendor events present=%v, want %v", got, want)
+			}
+			if got, want := countType(asked, "exception") > 0, tc.exception; got != want {
+				t.Errorf("asking for vendor,exception: exception events present=%v, want %v", got, want)
+			}
 		})
 	}
 }
 
 // TestCalendarICS_LeavesOutRiskAndPlanEvents: the ICS feed carries the
-// ungated events and no risk review or action plan, even when asked.
+// ungated events and no risk review, action plan, vendor or exception,
+// even when asked (#2130, #2232).
 func TestCalendarICS_LeavesOutRiskAndPlanEvents(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -168,13 +189,15 @@ func TestCalendarICS_LeavesOutRiskAndPlanEvents(t *testing.T) {
 		for _, banned := range []string{
 			"Risk review:", "Action plan due:", fx.A.OverdueRisk.String(), fx.A.OverduePlan.String(),
 			fx.A.Owner.String(), fx.A.Other.String(),
+			"Vendor review:", "Vendor renewal:", fx.A.OverdueVendor.String(),
+			"Exception on", fx.A.ExpiringWaiver.String(),
 		} {
 			if strings.Contains(ics, banned) {
 				t.Errorf("ICS%s carries %q", types, banned)
 			}
 		}
-		if !strings.Contains(ics, "Exception on") {
-			t.Errorf("ICS%s lost the ungated exception event", types)
+		if types == "" && !strings.Contains(ics, "Policy review:") {
+			t.Errorf("ICS lost the ungated policy review event")
 		}
 	}
 }
