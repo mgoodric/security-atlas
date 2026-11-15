@@ -608,7 +608,7 @@ mappings:
     scf_anchor: "THR-03"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "ID.RA-02 'cyber threat intelligence is received from information-sharing sources and analyzed' is the direct STRM match for Threat Intelligence Feeds (slice 641 THR-03) — the dedicated threat-intel-feed anchor the slice-480 row's '(LOW)' note flagged as absent. The MON-16 placeholder above stays as a secondary anomaly-detection overlap; THR-03 is now the primary dedicated anchor. Added by slice 646."
+    rationale: "ID.RA-02 'cyber threat intelligence is received from information-sharing sources and analyzed' is the direct STRM match for Threat Intelligence Feeds (slice 641 THR-03) — the dedicated threat-intel-feed anchor the slice-480 row's '(LOW)' note flagged as absent. The MON-08 placeholder above (MON-16 since the SCF 2026.3 remap) stays as a secondary anomaly-detection overlap; THR-03 is now the primary dedicated anchor. Added by slice 646."
   - requirement_code: "ID.RA-03"
     scf_anchor: "RSK-04"
     relationship_type: "subset_of"
@@ -854,7 +854,7 @@ mappings:
     scf_anchor: "THR-01"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "DE.AE-07 'cyber threat intelligence and other contextual information are integrated into event analysis' is the program-level threat-intel function; Threat Intelligence Program (THR-01, reconciled in slice 641 to name monitoring/hunting/response as program outputs) is the dedicated anchor for integrating intelligence into analysis — supersedes the MON-16 '(LOW)' placeholder above as the primary anchor. Added by slice 646."
+    rationale: "DE.AE-07 'cyber threat intelligence and other contextual information are integrated into event analysis' is the program-level threat-intel function; Threat Intelligence Program (THR-01, reconciled in slice 641 to name monitoring/hunting/response as program outputs) is the dedicated anchor for integrating intelligence into analysis — supersedes the MON-08 (MON-16 since the SCF 2026.3 remap) '(LOW)' placeholder above as the primary anchor. Added by slice 646."
   - requirement_code: "DE.AE-08"
     scf_anchor: "IRO-04"
     relationship_type: "subset_of"

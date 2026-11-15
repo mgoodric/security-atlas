@@ -35,7 +35,7 @@ func TestBuildCandidatesRanksCrosswalkByCriteriaReachedThenStrength(t *testing.T
 	keyword := []AnchorCandidate{
 		{AnchorID: "a-both", SCFID: "IAC-37"},
 		{AnchorID: "k-1", SCFID: "MON-02"},
-		{AnchorID: "k-2", SCFID: "MON-02"},
+		{AnchorID: "k-2", SCFID: "MON-03"},
 	}
 	got := buildCandidates(row, edges, keyword, 4)
 
