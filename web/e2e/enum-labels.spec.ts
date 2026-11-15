@@ -90,7 +90,19 @@ const MOCK_RISKS = [
 test.describe("enum display labels (#2083)", () => {
   test("Dashboard: posture tiles show name plus version, top risks show labels", async ({
     authedPage: page,
+    baseURL,
   }) => {
+    // The dashboard layout prefetches its panels server-side, where a
+    // browser-side page.route mock cannot reach. The test-only
+    // e2e_no_prefetch cookie (honoured only under ATLAS_TEST_MODE=1)
+    // makes the page fetch client-side, as dashboard.spec.ts does.
+    await page.context().addCookies([
+      {
+        name: "e2e_no_prefetch",
+        value: "1",
+        url: baseURL ?? "http://localhost:3000",
+      },
+    ]);
     await page.route("**/api/dashboard/framework-posture", (route) =>
       route.fulfill(
         json({
