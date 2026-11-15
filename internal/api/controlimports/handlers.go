@@ -8,6 +8,12 @@
 //	                                 staged rows with their ranked SCF anchor
 //	                                 candidates (#1780); ?status= and
 //	                                 ?no_candidate_reaches=true filter
+//	POST /v1/controls/imports/{id}/rows/{row}/approve
+//	                                 approve a staged row with a candidate
+//	                                 or any anchor of the batch's SCF
+//	                                 release; creates a control (#1782)
+//	POST /v1/controls/imports/{id}/rows/{row}/reject
+//	                                 reject a staged row with a reason
 //	GET  /v1/controls/imports/settings
 //	PUT  /v1/controls/imports/settings
 //	                                 the tenant's import settings: the
@@ -46,8 +52,9 @@ const multipartOverhead = 64 * 1024
 
 // Handler serves the control import routes.
 type Handler struct {
-	stager   *controlimport.Stager
-	settings SettingsStore
+	stager    *controlimport.Stager
+	settings  SettingsStore
+	decisions controlimport.DecisionStore
 }
 
 func New(stager *controlimport.Stager) *Handler { return &Handler{stager: stager} }
@@ -62,6 +69,10 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/v1/controls/imports", h.Create)
 	r.Get("/v1/controls/imports/{id}", h.Get)
 	r.Get("/v1/controls/imports/{id}/rows", h.ListRows)
+	if h.decisions != nil {
+		r.Post("/v1/controls/imports/{id}/rows/{row}/approve", h.Approve)
+		r.Post("/v1/controls/imports/{id}/rows/{row}/reject", h.Reject)
+	}
 }
 
 // Create stages an uploaded control sheet as an import batch.

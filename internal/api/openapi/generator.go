@@ -482,6 +482,10 @@ func writeOperation(w io.Writer, r RouteSpec) error {
 		_, err := io.WriteString(w, resetBootstrapOperationDetails)
 		return err
 	}
+	if isSoAExportOperation(r) {
+		_, err := io.WriteString(w, soaExportOperationDetails)
+		return err
+	}
 	// Responses — single `default` ref to the Ack envelope. v1 spec
 	// does not commit to per-operation response schemas; follow-on
 	// slice will refine. Operations that genuinely return bodies (most
@@ -567,6 +571,78 @@ const resetBootstrapOperationDetails = `      requestBody:
                 $ref: "#/components/schemas/Error"
         "503":
           description: Platform resetter, credential store or write pool not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+`
+
+func isSoAExportOperation(r RouteSpec) bool {
+	return r.Method == "GET" && r.Path == "/v1/framework-scopes/applicability/export"
+}
+
+// soaExportOperationDetails documents the Statement of Applicability export's
+// query parameters and file responses (#1791, #2048) in place of the generic
+// Ack.
+const soaExportOperationDetails = `      parameters:
+        - name: framework_version
+          in: query
+          required: true
+          description: Framework version id. Every requirement of this version is exported.
+          schema:
+            type: string
+            format: uuid
+        - name: format
+          in: query
+          required: true
+          description: csv is the bare table, header first, and reads back through POST /v1/framework-scopes/{id}/applicability/import. xlsx adds a title block above the same table.
+          schema:
+            type: string
+            enum: [csv, xlsx]
+        - name: revision
+          in: query
+          required: false
+          description: Scope revision id to export instead of the activated revision. Mutually exclusive with as_of.
+          schema:
+            type: string
+            format: uuid
+        - name: as_of
+          in: query
+          required: false
+          description: RFC3339 time; exports the revision in force then, or every requirement undecided when none was. Mutually exclusive with revision.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: >-
+            The export file, as an attachment. Cells a spreadsheet would read as a formula
+            (leading = + - @, tab or carriage return) are prefixed with a single quote in CSV;
+            the import strips it. The contradiction column is always evaluated against current
+            control results, including for as_of and a non-activated revision; the xlsx states
+            this in its title block, the CSV carries no preamble.
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Bad framework_version, format, revision or as_of; revision and as_of together; or a revision of another framework version.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: Missing tenant or bearer context.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown framework version or revision.
           content:
             application/json:
               schema:

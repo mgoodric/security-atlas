@@ -1,0 +1,14 @@
+// Fixture: a page using <Term> with known ids, one unknown id and one
+// computed id. Read as text by terms.test.ts; never compiled.
+export function Page({ which }: { which: string }) {
+  return (
+    <div>
+      <Term id="treatment">Treatment</Term>
+      <Term id='audit-period'>Audit period</Term>
+      <Term id={"acceptance"}>Accepted</Term>
+      <Term id="no-such-term">Mystery</Term>
+      <Term id={which}>Computed</Term>
+      <TermList id="ignored" />
+    </div>
+  );
+}
