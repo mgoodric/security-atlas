@@ -135,6 +135,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/evidence/receipts/{record_id}", Tag: "evidence", Tier: "bearer", Internal: false, Summary: "GET /v1/evidence/receipts/{record_id}"},
 	{Method: "GET", Path: "/v1/evidence-summary/portfolio", Tag: "evidence", Tier: "bearer", Internal: false, Summary: "GET /v1/evidence-summary/portfolio"},
 	{Method: "GET", Path: "/v1/evidence/freshness", Tag: "evidence", Tier: "bearer", Internal: false, Summary: "GET /v1/evidence/freshness"},
+	{Method: "GET", Path: "/v1/evidence/{id}", Tag: "evidence", Tier: "bearer", Internal: false, Summary: "GET /v1/evidence/{id} — one evidence record with its redacted payload"},
 	{Method: "GET", Path: "/v1/exceptions", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "GET /v1/exceptions"},
 	{Method: "GET", Path: "/v1/exceptions/expiring", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "GET /v1/exceptions/expiring"},
 	{Method: "GET", Path: "/v1/exceptions/{id}", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "GET /v1/exceptions/{id}"},

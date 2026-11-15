@@ -115,6 +115,7 @@ GET /v1/evidence
 GET /v1/evidence/receipts/{record_id}
 GET /v1/evidence-summary/portfolio
 GET /v1/evidence/freshness
+GET /v1/evidence/{id}
 GET /v1/exceptions
 GET /v1/exceptions/expiring
 GET /v1/exceptions/{id}
