@@ -4,12 +4,24 @@
 // See https://tanstack.com/query/latest/docs/framework/react/guides/advanced-ssr
 import { QueryClient } from "@tanstack/react-query";
 
+import { isFeatureDisabledError } from "@/lib/feature-nav";
+
+// shouldRetryQuery retries a failed query once, except a gated module's
+// 404 "feature disabled": that is the platform's final answer, and
+// retrying it kept the page on its loading-state form for a second before
+// it swapped to the disabled panel, unmounting whatever held focus
+// (#2266).
+export function shouldRetryQuery(failureCount: number, error: unknown) {
+  if (isFeatureDisabledError(error)) return false;
+  return failureCount < 1;
+}
+
 function makeQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
         staleTime: 60 * 1000,
-        retry: 1,
+        retry: shouldRetryQuery,
       },
     },
   });
