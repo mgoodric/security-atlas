@@ -4,10 +4,10 @@
 // Hermetic mock pattern (per the feedback_e2e_shared_db_hermetic_mock
 // lesson, slice 594): this spec route-mocks the BFF for the board-packs
 // list (GET) and the generate (POST) so the assertions do not depend on the
-// slice-205 demo seed — and so the `board.reporting` feature gate does not
-// short-circuit the page into the FeatureDisabledState (a 200 list response
-// is the flag-on signal the page keys off). The `authedPage` fixture
-// supplies the session cookie that gets past the (authed) layout proxy.
+// slice-205 demo seed. The `board.reporting` flag is checked server-side
+// (#2092 FeatureGate) and global-setup turns it on for the demo tenant, so
+// the page renders. The `authedPage` fixture supplies the session cookie
+// that gets past the (authed) layout proxy.
 //
 // Two scenarios mirror the slice ACs:
 //   1. AC-1 + AC-2: clicking "Generate draft" with an empty quarter-end date

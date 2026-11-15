@@ -130,4 +130,37 @@ async function issueTestJWT(): Promise<string> {
 export default async function globalSetup(_config: FullConfig): Promise<void> {
   const token = await issueTestJWT();
   process.env.TEST_BEARER = token;
+  await enableGatedModules(token);
+}
+
+/**
+ * GATED_MODULES are the slice 660 gating flags (internal/featureflag
+ * GatingKeys). Both ship OFF, and since #2092 the route layout checks
+ * them server-side — a check `page.route` cannot mock. The board-pack and
+ * vendor-claims specs need the module rendered, so the demo tenant turns
+ * both on here, through the real admin API. The off state is covered
+ * against a separate tenant that keeps the defaults
+ * (feature-flag-gating.spec.ts).
+ */
+const GATED_MODULES = ["board.reporting", "oscal.export"];
+
+async function enableGatedModules(token: string): Promise<void> {
+  for (const key of GATED_MODULES) {
+    const url = `${atlasBaseURL()}/v1/admin/features/${key}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ enabled: true, reason: "e2e global-setup" }),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `#2092 global-setup: PATCH ${url} returned ${
+          res.status
+        }: ${await res.text()}`,
+      );
+    }
+  }
 }
