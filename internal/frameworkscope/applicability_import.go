@@ -114,7 +114,9 @@ func ParseDecisionCSV(r io.Reader) ([]ImportRow, []ImportRejection, error) {
 		if !ok || i >= len(rec) {
 			return ""
 		}
-		return strings.TrimSpace(rec[i])
+		// The SoA export quotes formula-leading cells (#2048); strip that
+		// quote so an exported file re-imports to the same text.
+		return UnquoteFormulaCell(strings.TrimSpace(rec[i]))
 	}
 	var rows []ImportRow
 	var rejected []ImportRejection
