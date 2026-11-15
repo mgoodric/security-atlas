@@ -28,6 +28,9 @@ type Proposal struct {
 	SCFAnchorUUID string `json:"scf_anchor_uuid,omitempty"`
 	Title         string `json:"title,omitempty"`
 	Rationale     string `json:"rationale,omitempty"`
+	// SCFRelease is the label of the SCF release the candidates came from
+	// (#1772). Empty only when no SCF release is loaded.
+	SCFRelease string `json:"scf_release,omitempty"`
 
 	Suppressed bool   `json:"suppressed"`
 	Reason     string `json:"reason,omitempty"`

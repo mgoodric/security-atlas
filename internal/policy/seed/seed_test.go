@@ -59,6 +59,11 @@ func TestLoadFromFS_RealStockBundle(t *testing.T) {
 		if fm.SourceAttribution != "community_draft" {
 			t.Errorf("%s: expected community_draft attribution, got %q", p.SourcePath, fm.SourceAttribution)
 		}
+		// #1772: the codes are bound in the release they were written
+		// against, never whatever release is current at seed time.
+		if fm.SCFRelease != "2026.3" {
+			t.Errorf("%s: scf_release = %q; want 2026.3", p.SourcePath, fm.SCFRelease)
+		}
 	}
 }
 
@@ -136,7 +141,7 @@ func TestParseStockPolicy_NoFrontMatter(t *testing.T) {
 func TestNoopAnchorResolver_AllMissing(t *testing.T) {
 	resolver := seed.NoopAnchorResolver{}
 	codes := []string{"GOV-01", "IAC-04", "CHG-02"}
-	resolved, missing, err := resolver.Resolve(context.TODO(), codes)
+	resolved, missing, err := resolver.Resolve(context.TODO(), "", codes)
 	if err != nil {
 		t.Fatalf("Resolve: %v", err)
 	}
