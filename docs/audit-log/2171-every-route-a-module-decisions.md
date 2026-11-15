@@ -68,7 +68,7 @@ restores it without changing its switch") holds through the module.
 
 Reusing `oscal.export` for the SSP/POA&M export would have turned the
 vendor-claims value (default off) into the export's value for every tenant
-that stored it. Migration `20261128000000` renames each stored row to
+that stored it. Migration `20261130000000` renames each stored row to
 `vendor.claims` (category `vendor`), value unchanged; the append-only audit
 log keeps the old key on history rows. The down migration renames back and
 refuses, rather than deletes, if a `personnel.enabled` or
@@ -80,7 +80,7 @@ refuses, rather than deletes, if a `personnel.enabled` or
 were seeded and stored but read by nothing. Now they hide their module. The
 ticket requires existing tenants to keep today's behaviour, so the migration
 sets any stored `false` on those four keys to `true`, writing a
-`feature_flag_audit_log` row (actor `migration:20261128000000`) for each. The
+`feature_flag_audit_log` row (actor `migration:20261130000000`) for each. The
 down migration does not undo this: the switches hid nothing before.
 
 ### D6 — fail-open on a flag-store error, for every module

@@ -109,7 +109,7 @@ var Seed = []Default{
 	},
 	{
 		// #2171: renamed from `oscal.export`, which gated vendor claims
-		// under a misleading name. Migration 20261128000000 moves each
+		// under a misleading name. Migration 20261130000000 moves each
 		// tenant's stored value to this key.
 		Key:         "vendor.claims",
 		Enabled:     false,

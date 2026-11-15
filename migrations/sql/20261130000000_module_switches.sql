@@ -36,7 +36,7 @@ UPDATE feature_flags
 
 INSERT INTO feature_flag_audit_log (id, tenant_id, flag_key, from_enabled, to_enabled, actor, reason)
 SELECT gen_random_uuid(), tenant_id, flag_key, false, true,
-       'migration:20261128000000',
+       'migration:20261130000000',
        'Module switches are enforced from #2171. This switch was stored off but hid nothing, so it is set on to keep the module visible as before.'
   FROM feature_flags
  WHERE flag_key IN ('risk.enabled', 'vendor.enabled', 'policy.enabled', 'exceptions.enabled')
@@ -44,7 +44,7 @@ SELECT gen_random_uuid(), tenant_id, flag_key, false, true,
 
 UPDATE feature_flags
    SET enabled = true,
-       last_changed_by = 'migration:20261128000000',
+       last_changed_by = 'migration:20261130000000',
        last_changed_at = now()
  WHERE flag_key IN ('risk.enabled', 'vendor.enabled', 'policy.enabled', 'exceptions.enabled')
    AND enabled = false;
