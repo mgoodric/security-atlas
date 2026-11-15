@@ -11,9 +11,9 @@
 //
 // The two existing gates are applied unchanged:
 //
-//   * feature flags — `gateNavItems` (lib/feature-nav.ts, slice 660)
-//     drops Board packs when `board.reporting` is off and Vendor claims
-//     when `oscal.export` is off;
+//   * modules — `gateNavItems` (lib/feature-nav.ts, slice 660 / #2170)
+//     drops the entries of every optional module that is not on for the
+//     caller, using the pages `GET /v1/me/modules` lists per module;
 //   * the Admin entry — `shouldShowAdminEntry` (lib/admin-nav.ts, slice
 //     186 / #2216) decides whether it is appended.
 //
@@ -21,7 +21,7 @@
 // framework version is loaded, and links to that version.
 
 import { shouldShowAdminEntry } from "@/lib/admin-nav";
-import { type EnabledModules, gateNavItems } from "@/lib/feature-nav";
+import { type EffectiveModules, gateNavItems } from "@/lib/feature-nav";
 import { PAGE_TITLES, type TitledRoute } from "@/lib/page-titles";
 
 export type NavEntry = {
@@ -83,8 +83,8 @@ export const NAV_GROUPS: readonly {
 export type NavFacts = {
   /** The caller's `/v1/me` body; decides the Admin entry. */
   me: { is_admin?: unknown; roles?: unknown };
-  /** The tenant's gating flags; decides Board packs and Vendor claims. */
-  modules: EnabledModules;
+  /** The caller's effective modules; decides each module's entries. */
+  modules: EffectiveModules;
   /** The loaded NIST CSF framework version, or null when none is. */
   csfVersionId: string | null;
 };

@@ -106,6 +106,7 @@ me_self_read_paths := {
     "/v1/me/email-channel",
     "/v1/me/slack-channel",
     "/v1/me/webhook-channel",
+    "/v1/me/modules",
 }
 
 # #2022 — the caller's own `/v1/me/*` settings writes.

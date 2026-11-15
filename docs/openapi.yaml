@@ -3212,20 +3212,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
-  /v1/features/enabled:
-    get:
-      summary: GET /v1/features/enabled — non-admin enabled-modules read (slice 660 gating flags)
-      tags: [feature-flags]
-      operationId: get-v1-features-enabled
-      security:
-        - bearer: []
-      responses:
-        default:
-          description: Default response envelope.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes:
     get:
       summary: GET /v1/framework-scopes
@@ -3966,6 +3952,20 @@ paths:
       summary: PUT /v1/me/email-channel
       tags: [me]
       operationId: put-v1-me-email-channel
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/me/modules:
+    get:
+      summary: GET /v1/me/modules — the caller's effective optional modules (#2170)
+      tags: [feature-flags]
+      operationId: get-v1-me-modules
       security:
         - bearer: []
       responses:

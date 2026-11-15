@@ -7,7 +7,38 @@ import { csfVersionFromFrameworks } from "@/lib/api/self.server";
 import { buildNav, NAV_GROUPS, type NavFacts } from "@/lib/nav";
 import { PAGE_TITLES } from "@/lib/page-titles";
 
-const ALL_ON = { "board.reporting": true, "oscal.export": true };
+type State = "on" | "switched_off";
+
+// The `GET /v1/me/modules` body, with each module in the given state.
+function modules(
+  board: State,
+  vendorClaims: State,
+  questionnaires: State = "on",
+) {
+  return [
+    {
+      key: "questionnaires",
+      name: "Questionnaires",
+      state: questionnaires,
+      pages: ["/questionnaires"],
+    },
+    {
+      key: "board_reporting",
+      name: "Board reporting",
+      state: board,
+      pages: ["/board-packs"],
+    },
+    {
+      key: "vendor_claims",
+      name: "Vendor claims",
+      state: vendorClaims,
+      pages: ["/oscal/component-definitions"],
+    },
+  ];
+}
+
+const ALL_ON = modules("on", "on");
+const DEFAULTS = modules("switched_off", "switched_off");
 const CSF = "11111111-1111-4111-8111-1111111c5f20";
 
 // The bodies `/v1/me` returns for each role. Only a super-admin passes
@@ -21,7 +52,7 @@ const ME = {
 };
 
 function facts(over: Partial<NavFacts>): NavFacts {
-  return { me: ME.viewer, modules: {}, csfVersionId: null, ...over };
+  return { me: ME.viewer, modules: DEFAULTS, csfVersionId: null, ...over };
 }
 
 function labels(f: NavFacts): string[] {
@@ -89,18 +120,30 @@ describe("buildNav — groups", () => {
 
 describe("buildNav — gates", () => {
   test("flags off: Board packs and Vendor claims are not listed", () => {
-    const l = labels(facts({ modules: {} }));
+    const l = labels(facts({ modules: DEFAULTS }));
     expect(l).not.toContain("Board packs");
     expect(l).not.toContain("Vendor claims");
   });
 
   test("each flag shows only its own entry", () => {
-    const board = labels(facts({ modules: { "board.reporting": true } }));
+    const board = labels(facts({ modules: modules("on", "switched_off") }));
     expect(board).toContain("Board packs");
     expect(board).not.toContain("Vendor claims");
-    const oscal = labels(facts({ modules: { "oscal.export": true } }));
+    const oscal = labels(facts({ modules: modules("switched_off", "on") }));
     expect(oscal).toContain("Vendor claims");
     expect(oscal).not.toContain("Board packs");
+  });
+
+  test("Questionnaires switched off: it is not listed", () => {
+    const l = labels(facts({ modules: modules("on", "on", "switched_off") }));
+    expect(l).not.toContain("Questionnaires");
+    expect(l).toContain("Board packs");
+  });
+
+  test("modules unknown (read failed): nothing is gated in the nav", () => {
+    const l = labels(facts({ modules: null }));
+    expect(l).toContain("Questionnaires");
+    expect(l).toContain("Board packs");
   });
 
   test("no CSF framework loaded: CSF assessment is not listed", () => {
@@ -122,7 +165,7 @@ describe("buildNav — gates", () => {
   // Implementation checklist, Risk hierarchy, Framework scopes).
   for (const role of ["viewer", "auditor"] as const) {
     test(`${role}: no Admin and no gated entry with flags off`, () => {
-      expect(labels(facts({ me: ME[role], modules: {} }))).toEqual([
+      expect(labels(facts({ me: ME[role], modules: DEFAULTS }))).toEqual([
         "Dashboard",
         "Calendar",
         "Metrics",
