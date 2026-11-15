@@ -25,7 +25,7 @@ func writeSOC2WideWorkbook(t *testing.T, cells map[string]string) string {
 		t.Fatalf("NewSheet: %v", err)
 	}
 	rows := [][]interface{}{{"SCF Domain", "SCF Control", "SCF #", "AICPA\nTSC 2017"}}
-	for _, anchor := range []string{"AST-01", "BCD-02", "IAC-01"} {
+	for _, anchor := range []string{"AST-01", "BCD-04", "IAC-01"} {
 		if cell, ok := cells[anchor]; ok {
 			rows = append(rows, []interface{}{"Domain", "Control", anchor, cell})
 		}
@@ -71,7 +71,7 @@ func TestLoadSCFWorkbook_RollsPointsOfFocusIntoCriterion(t *testing.T) {
 	t.Parallel()
 	xlsx := writeSOC2WideWorkbook(t, map[string]string{
 		"AST-01": "CC1.1",
-		"BCD-02": "CC1.1-POF1",
+		"BCD-04": "CC1.1-POF1",
 		"IAC-01": "CC1.1-POF2",
 	})
 	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{FrameworkSlug: "soc2", FrameworkVersion: "2017"})
@@ -82,7 +82,7 @@ func TestLoadSCFWorkbook_RollsPointsOfFocusIntoCriterion(t *testing.T) {
 		t.Fatalf("requirements = %+v; want only CC1.1", cw.Requirements)
 	}
 	wantPOF := []soc2import.PointOfFocus{
-		{Code: "CC1.1-POF1", SCFAnchors: []string{"BCD-02"}},
+		{Code: "CC1.1-POF1", SCFAnchors: []string{"BCD-04"}},
 		{Code: "CC1.1-POF2", SCFAnchors: []string{"IAC-01"}},
 	}
 	if got := cw.Requirements[0].PointsOfFocus; !reflect.DeepEqual(got, wantPOF) {
@@ -92,13 +92,13 @@ func TestLoadSCFWorkbook_RollsPointsOfFocusIntoCriterion(t *testing.T) {
 	if len(cw.Mappings) != 3 {
 		t.Fatalf("mappings = %d (%+v); want 3", len(cw.Mappings), cw.Mappings)
 	}
-	for _, key := range []string{"CC1.1->AST-01", "CC1.1->BCD-02", "CC1.1->IAC-01"} {
+	for _, key := range []string{"CC1.1->AST-01", "CC1.1->BCD-04", "CC1.1->IAC-01"} {
 		if _, ok := edges[key]; !ok {
 			t.Fatalf("missing edge %s in %+v", key, cw.Mappings)
 		}
 	}
-	if !strings.Contains(edges["CC1.1->BCD-02"].Rationale, "point of focus CC1.1-POF1") {
-		t.Fatalf("rolled-up edge rationale should name its point of focus: %q", edges["CC1.1->BCD-02"].Rationale)
+	if !strings.Contains(edges["CC1.1->BCD-04"].Rationale, "point of focus CC1.1-POF1") {
+		t.Fatalf("rolled-up edge rationale should name its point of focus: %q", edges["CC1.1->BCD-04"].Rationale)
 	}
 	if got := cw.PointsOfFocusRollUp; got.PointsOfFocus != 2 || got.Criteria != 1 || len(got.CreatedParents) != 0 {
 		t.Fatalf("roll-up = %+v; want 2 points of focus into 1 criterion, none created", got)

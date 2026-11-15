@@ -84,6 +84,41 @@
       "from": "MON-08",
       "to": "MON-16",
       "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "AST-03",
+      "to": "AST-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "AST-09",
+      "to": "AST-22",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "BCD-02",
+      "to": "BCD-04",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "BCD-09",
+      "to": "BCD-24",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "BCD-11",
+      "to": "BCD-32",
+      "basis": "concept"
     }
   ]
 }

@@ -46,7 +46,7 @@ function controlsBody() {
         id: CONTROL_OTHER_ID,
         title: "Backup integrity verification",
         control_family: "BCD",
-        scf_id: "BCD-11",
+        scf_id: "BCD-32",
         lifecycle_state: "active",
         bundle_id: "soc2-starter",
       },
