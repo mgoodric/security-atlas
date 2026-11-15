@@ -1,12 +1,15 @@
-// #2092 — FeatureGate: a gated route checks its flag on the server.
+// #2092 — FeatureGate: a gated route checks its module on the server.
 //
-// Wraps a gated module's route (board packs, vendor claims) in its
-// layout. The flag is read before anything renders, with the caller's own
-// bearer, through the same `GET /v1/features/enabled` read the sidebar
-// uses, plus `GET /v1/me` for `is_admin`. No privileged read: a caller
-// learns only their own tenant's flag and their own admin bit.
+// Wraps an optional module's route (questionnaires, board packs, vendor
+// claims) in its layout. The module's state is read before anything
+// renders, with the caller's own bearer, through the same
+// `GET /v1/me/modules` read the sidebar uses, plus `GET /v1/me` for
+// `is_admin`. The page names itself; which module owns it comes from the
+// server's registry (#2170), so the web app keeps no map of its own. No
+// privileged read: a caller learns only their own tenant's modules and
+// their own admin bit.
 //
-// Flag on: the route renders as normal. Flag off: a calm off state, and
+// Module on: the route renders as normal. Module off: a calm off state, and
 // the client page never mounts, so there is no skeleton, no flash of the
 // form, and no "Could not load…" error from the gated API's 404.
 //
@@ -14,8 +17,9 @@
 // ask one and never sees the link. Neither message leaks internal detail
 // (slice 367).
 //
-// Both reads fail closed (`{}` and not-admin), so a transport error shows
-// the non-admin off state rather than a module the API would refuse.
+// Both reads fail closed (unknown modules and not-admin), so a transport
+// error shows the non-admin off state rather than a module the API would
+// refuse.
 
 import { cookies } from "next/headers";
 import Link from "next/link";
@@ -23,17 +27,17 @@ import type { ReactNode } from "react";
 
 import { PageShell } from "@/components/shell/page-shell";
 import { Card, CardContent } from "@/components/ui/card";
-import { fetchAdminMe, fetchEnabledModules } from "@/lib/api/self.server";
+import { fetchAdminMe, fetchEffectiveModules } from "@/lib/api/self.server";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { resolveFeatureGate } from "@/lib/feature-nav";
 
 export async function FeatureGate({
-  flag,
+  page,
   moduleName,
   children,
 }: {
-  /** The gating flag key (one of NAV_FEATURE_GATES' values). */
-  flag: string;
+  /** The gated page's path, as the module registry lists it. */
+  page: string;
   /** The page title shown above the off state. */
   moduleName: string;
   children: ReactNode;
@@ -41,10 +45,10 @@ export async function FeatureGate({
   const jar = await cookies();
   const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
   const [modules, me] = bearer
-    ? await Promise.all([fetchEnabledModules(bearer), fetchAdminMe(bearer)])
-    : [{}, { is_admin: false }];
+    ? await Promise.all([fetchEffectiveModules(bearer), fetchAdminMe(bearer)])
+    : [null, { is_admin: false }];
 
-  const state = resolveFeatureGate(modules, flag, me.is_admin);
+  const state = resolveFeatureGate(modules, page, me.is_admin);
   if (state === "on") {
     return children;
   }

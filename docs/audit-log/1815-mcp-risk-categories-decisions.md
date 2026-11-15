@@ -24,7 +24,7 @@ and keeps one resolver for every writer.
 
 ## D2. Case-insensitive on the trimmed value, tenant-scoped, archived included
 
-`ResolveRiskCategoriesByName` matches `lower(btrim(name))` against
+`ResolveRiskCategoriesByName` (now `ShareLockRiskCategoriesByName`, #2233) matches `lower(btrim(name))` against
 `lower(btrim(ref))` within the caller's tenant (explicit predicate plus RLS).
 It returns archived categories as well, so a name that only an archived
 category carries is refused as archived (the existing message) rather than
@@ -38,6 +38,13 @@ one. Such a name is an `AmbiguousCategoryError` naming every matching slug,
 rather than preferring the active match. Fail closed: the caller names the
 category by slug, which is never ambiguous. Revisit if operators routinely
 recycle archived names and find the refusal noisy.
+
+**Superseded by #2233.** Archived categories take no assignments, and active
+names are unique per tenant, so a name matching one active category and any
+number of archived ones resolves to the active match. Only zero or several
+active matches are refused (zero with archived matches refuses as archived,
+as D2 says; several active is the `AmbiguousCategoryError`). The query is now
+`ShareLockRiskCategoriesByName`, which also holds the matched rows FOR SHARE.
 
 ## D4. A `list_risk_categories` read tool, not a list baked into the schema
 
