@@ -15,6 +15,8 @@ import { apiFetch, bffControlFetch } from "./_shared";
 // acknowledgement expiries), making the calendar the one list of what is
 // due. The dashboard's "Coming up" panel reads it. Risk and action-plan
 // events reach only callers who may read risks / action plans.
+// #2215 added `offboarding` (open offboarding checklists), shown only to
+// callers who may read personnel security.
 
 export type CalendarEventType =
   | "audit"
@@ -24,7 +26,8 @@ export type CalendarEventType =
   | "control"
   | "risk"
   | "action_plan"
-  | "policy_ack";
+  | "policy_ack"
+  | "offboarding";
 
 export type CalendarEvent = {
   id: string;
