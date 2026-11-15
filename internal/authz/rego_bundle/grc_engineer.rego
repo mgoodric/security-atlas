@@ -86,3 +86,15 @@ allow if {
     input.resource.type == "calendar"
     input.request.path == "/v1/calendar/subscription"
 }
+
+# #2113: grc_engineer revokes an active exception (PATCH
+# /v1/exceptions/{id}/revoke). The path's terminal segment promotes the
+# action to "revoke", which grc_actions does not hold because revoke on
+# other resources (API keys, sessions, grants) stays admin's. This admit
+# is bound to exceptions only. The handler still requires the approver
+# flag, so a grc_engineer without it is refused with 403 there.
+allow if {
+    has_role("grc_engineer")
+    input.action == "revoke"
+    input.resource.type == "exceptions"
+}

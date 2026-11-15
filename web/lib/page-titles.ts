@@ -37,6 +37,7 @@ export const PAGE_TITLES = {
   "/personnel-security": "Personnel security",
   "/questionnaires": "Questionnaires",
   "/catalog/scf": "SCF catalog",
+  "/catalog/audited-under": "Audited under",
   "/settings": "Settings",
   "/admin": "Admin",
 } as const;

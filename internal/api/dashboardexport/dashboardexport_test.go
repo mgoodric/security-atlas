@@ -863,7 +863,7 @@ type stubSource struct {
 	err  error
 }
 
-func (s *stubSource) Snapshot(_ context.Context) (Snapshot, error) {
+func (s *stubSource) Snapshot(_ context.Context, _ UpcomingTypes) (Snapshot, error) {
 	return s.snap, s.err
 }
 

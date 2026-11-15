@@ -183,7 +183,7 @@ func TestCalendarICS_LeavesOutRiskAndPlanEvents(t *testing.T) {
 		ics := string(body)
 		// The acknowledgement lapsing in 10 days is in the feed without its
 		// user: no user id reaches an ICS subscriber.
-		if types == "" && !strings.Contains(ics, "Policy acknowledgement due:") {
+		if types == "" && !strings.Contains(ics, "acknowledgement lapses on") {
 			t.Errorf("ICS lost the policy acknowledgement event")
 		}
 		for _, banned := range []string{
@@ -202,32 +202,44 @@ func TestCalendarICS_LeavesOutRiskAndPlanEvents(t *testing.T) {
 	}
 }
 
+// ackEventID is the id of the grouped policy_ack event for policy whose
+// acknowledgements lapse on lapse's UTC day (#2234).
+func ackEventID(policy uuid.UUID, lapse time.Time) string {
+	return policy.String() + ":" + ymd(lapse)
+}
+
 // TestCalendar_PolicyAckExpiries: the latest acknowledgement per policy
 // version and user lapses 365 days on; it is due-soon inside 14 days,
-// overdue once lapsed, and an older superseded ack is not listed.
+// overdue once lapsed, and an older superseded ack is not counted. Acks
+// are grouped per policy and lapse day (#2234), so an event names the
+// policy and the count, never who acknowledged.
 func TestCalendar_PolicyAckExpiries(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	now := time.Now().UTC()
+	day := 24 * time.Hour
 	fx := seedAttentionFixture(t, admin, now)
+	dueSoon := ackEventID(fx.A.OverduePolicy, now.Add(10*day))
+	overdue := ackEventID(fx.A.OverduePolicy, now.Add(-35*day))
 
 	events := calendarEvents(t, testServer(t, app, fx.A.ID),
 		"/v1/calendar?types=policy_ack&from="+ymd(now.AddDate(0, 0, -60))+"&to="+ymd(now.AddDate(0, 0, 14)))
-	wantEvent(t, events, fx.A.AckDueSoon.String(), "policy_ack", "due-soon")
-	wantEvent(t, events, fx.A.AckOverdue.String(), "policy_ack", "overdue")
-	if _, ok := events[fx.A.AckSuperseded.String()]; ok {
-		t.Error("a superseded acknowledgement is listed")
-	}
+	wantEvent(t, events, dueSoon, "policy_ack", "due-soon")
+	wantEvent(t, events, overdue, "policy_ack", "overdue")
 	if got := len(events); got != 2 {
-		t.Errorf("%d policy_ack events, want 2: %v", got, events)
+		t.Errorf("%d policy_ack events, want 2 (the superseded ack is not counted): %v", got, events)
 	}
-	if ev := events[fx.A.AckDueSoon.String()]; ev != nil {
-		if want := "Policy acknowledgement due: tenant A policy: overdue review"; ev["title"] != want {
+	if ev := events[dueSoon]; ev != nil {
+		want := "tenant A policy: overdue review: 1 acknowledgement lapses on " + ymd(now.Add(10*day))
+		if ev["title"] != want {
 			t.Errorf("title=%v, want %q", ev["title"], want)
 		}
 		// Who acknowledged is not exposed: the summary names the policy.
 		if want := "tenant A policy: overdue review"; ev["summary"] != want {
 			t.Errorf("summary=%v, want %q", ev["summary"], want)
+		}
+		if ev["related_entity_kind"] != "policy" || ev["related_entity_id"] != fx.A.OverduePolicy.String() {
+			t.Errorf("related entity = %v %v, want the policy", ev["related_entity_kind"], ev["related_entity_id"])
 		}
 	}
 	for id, ev := range events {
@@ -238,7 +250,7 @@ func TestCalendar_PolicyAckExpiries(t *testing.T) {
 			}
 		}
 	}
-	if _, ok := events[fx.B.AckDueSoon.String()]; ok {
+	if _, ok := events[ackEventID(fx.B.OverduePolicy, now.Add(10*day))]; ok {
 		t.Error("tenant A sees tenant B's acknowledgement")
 	}
 
@@ -246,7 +258,84 @@ func TestCalendar_PolicyAckExpiries(t *testing.T) {
 	// lapsing acknowledgement.
 	comingUp := calendarEvents(t, testServer(t, app, fx.A.ID),
 		"/v1/calendar?from="+ymd(now)+"&to="+ymd(now.AddDate(0, 0, 13)))
-	wantEvent(t, comingUp, fx.A.AckDueSoon.String(), "policy_ack", "due-soon")
+	wantEvent(t, comingUp, dueSoon, "policy_ack", "due-soon")
+}
+
+// TestCalendar_PolicyAckGroupedAndScoped (#2234): a campaign's acks that
+// lapse on one day are one event carrying the count, and another day is
+// another event. Acks of a superseded policy version, and acks by a
+// disabled or SCIM-deactivated user, are left out.
+func TestCalendar_PolicyAckGroupedAndScoped(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	day := 24 * time.Hour
+	tenant := dbtest.SeedTenant(t, admin, "policy_acknowledgments", "policies", "users")
+	exec := func(what, sql string, args ...any) {
+		t.Helper()
+		if _, err := admin.Exec(ctx, sql, args...); err != nil {
+			t.Fatalf("seed %s: %v", what, err)
+		}
+	}
+	user := func(status string, active bool) uuid.UUID {
+		id := uuid.New()
+		exec("user", `
+			INSERT INTO users (id, tenant_id, email, display_name, status, active)
+			VALUES ($1, $2, $3, 'Ack campaign', $4, $5)
+		`, id, tenant, "ack-"+id.String()[:8]+"@test.example", status, active)
+		return id
+	}
+	policy := func(title, status string, supersededAt *time.Time) uuid.UUID {
+		id := uuid.New()
+		exec("policy "+title, `
+			INSERT INTO policies (
+				id, tenant_id, title, version, status, effective_date,
+				body_md, owner_role, approver_role, created_by,
+				published_at, published_by, superseded_at
+			)
+			VALUES ($1, $2, $3, '1.0.0', $4, now()::date,
+			        '# body', 'security_lead', 'ciso', 'tester',
+			        now(), 'tester', $5)
+		`, id, tenant, title, status, supersededAt)
+		return id
+	}
+	ack := func(p, u uuid.UUID, when time.Time) {
+		id := uuid.New()
+		exec("ack", `
+			INSERT INTO policy_acknowledgments (
+				id, tenant_id, policy_id, policy_version_id, user_id, acknowledged_at, ack_token
+			)
+			VALUES ($1, $2, $3, $3, $4, $5, $6)
+		`, id, tenant, p, u, when, "campaign-"+id.String())
+	}
+
+	current := policy("Acceptable use", "published", nil)
+	old := policy("Acceptable use (old)", "superseded", &now)
+	campaign := now.Add(-355 * day)
+	for i := 0; i < 3; i++ {
+		ack(current, user("active", true), campaign)
+	}
+	ack(current, user("disabled", true), campaign)
+	ack(current, user("active", false), campaign)
+	ack(old, user("active", true), campaign)
+	ack(current, user("active", true), campaign.Add(-2*day))
+
+	events := calendarEvents(t, testServer(t, app, tenant),
+		"/v1/calendar?types=policy_ack&from="+ymd(now)+"&to="+ymd(now.AddDate(0, 0, 13)))
+	grouped := ackEventID(current, campaign.Add(365*day))
+	wantEvent(t, events, grouped, "policy_ack", "due-soon")
+	if want := "Acceptable use: 3 acknowledgements lapse on " + ymd(campaign.Add(365*day)); events[grouped]["title"] != want {
+		t.Errorf("campaign title=%v, want %q", events[grouped]["title"], want)
+	}
+	single := ackEventID(current, campaign.Add(363*day))
+	wantEvent(t, events, single, "policy_ack", "due-soon")
+	if want := "Acceptable use: 1 acknowledgement lapses on " + ymd(campaign.Add(363*day)); events[single]["title"] != want {
+		t.Errorf("single title=%v, want %q", events[single]["title"], want)
+	}
+	if got := len(events); got != 2 {
+		t.Errorf("%d policy_ack events, want 2 (none for the superseded version): %v", got, events)
+	}
 }
 
 // TestCalendar_OffboardingEventsFollowOPA (#2215): an open offboarding
