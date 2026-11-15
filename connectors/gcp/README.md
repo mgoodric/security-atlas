@@ -13,7 +13,7 @@ It follows the slice-004 AWS connector pattern: register-per-run, stable
 
 | Kind                           | Profile | Source                                                  | Default SCF anchors |
 | ------------------------------ | ------- | ------------------------------------------------------- | ------------------- |
-| `gcp.iam_policy_binding.v1`    | pull    | Resource Manager `getIamPolicy` + IAM `serviceAccounts` | `IAC-21`, `IAC-15`  |
+| `gcp.iam_policy_binding.v1`    | pull    | Resource Manager `getIamPolicy` + IAM `serviceAccounts` | `IAC-10`, `IAC-12`  |
 | `gcp.storage_bucket_config.v1` | pull    | Cloud Storage `buckets.list` (`projection=noAcl`)       | `CRY-04`, `NET-04`  |
 
 - **iam_policy_binding** — one record per project-IAM `(role, member)` binding,
@@ -108,7 +108,7 @@ gcp-connector run \
 | `--token`             | both       | yes      | env `SECURITY_ATLAS_TOKEN`    | platform bearer token                 |
 | `--insecure`          | both       | no       | `false`                       | disables TLS; loopback endpoints only |
 | `--project`           | `run`      | yes      | —                             | GCP project id to collect from        |
-| `--iam-control-id`    | `run`      | no       | `scf:IAC-21`                  | control id on IAM-binding records     |
+| `--iam-control-id`    | `run`      | no       | `scf:IAC-10`                  | control id on IAM-binding records     |
 | `--bucket-control-id` | `run`      | no       | `scf:CRY-04`                  | control id on storage-bucket records  |
 
 The GCP credential is supplied via Application Default Credentials — set

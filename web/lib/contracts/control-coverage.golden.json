@@ -8,11 +8,11 @@
         "family": "IAC",
         "id": "22222222-2222-4222-8222-222222222222",
         "name": "Identity \u0026 Access Management",
-        "scf_id": "IAC-06"
+        "scf_id": "IAC-37"
       },
       "control": {
         "anchor_fit": "partial",
-        "anchor_fit_note": "IAC-06 covers the review cadence, not the reviewer's independence.",
+        "anchor_fit_note": "IAC-37 covers the review cadence, not the reviewer's independence.",
         "bundle_id": "ctl.access-review",
         "control_family": "IAC",
         "freshness_class": "30d",
@@ -21,7 +21,7 @@
         "lifecycle_state": "active",
         "owner_role": "grc_engineer",
         "scf_anchor_id": "22222222-2222-4222-8222-222222222222",
-        "scf_id": "IAC-06",
+        "scf_id": "IAC-37",
         "title": "Periodic access review",
         "version": 3
       },
@@ -52,11 +52,11 @@
         "family": "IAC",
         "id": "22222222-2222-4222-8222-222222222222",
         "name": "Identity \u0026 Access Management",
-        "scf_id": "IAC-06"
+        "scf_id": "IAC-37"
       },
       "control": {
         "anchor_fit": "partial",
-        "anchor_fit_note": "IAC-06 covers the review cadence, not the reviewer's independence.",
+        "anchor_fit_note": "IAC-37 covers the review cadence, not the reviewer's independence.",
         "bundle_id": "ctl.access-review",
         "control_family": "IAC",
         "freshness_class": "30d",
@@ -65,7 +65,7 @@
         "lifecycle_state": "active",
         "owner_role": "grc_engineer",
         "scf_anchor_id": "22222222-2222-4222-8222-222222222222",
-        "scf_id": "IAC-06",
+        "scf_id": "IAC-37",
         "title": "Periodic access review",
         "version": 3
       },
@@ -112,7 +112,7 @@
       "anchor": null,
       "control": {
         "anchor_fit": "partial",
-        "anchor_fit_note": "IAC-06 covers the review cadence, not the reviewer's independence.",
+        "anchor_fit_note": "IAC-37 covers the review cadence, not the reviewer's independence.",
         "bundle_id": "ctl.access-review",
         "control_family": "IAC",
         "freshness_class": "30d",
@@ -121,7 +121,7 @@
         "lifecycle_state": "active",
         "owner_role": "grc_engineer",
         "scf_anchor_id": "22222222-2222-4222-8222-222222222222",
-        "scf_id": "IAC-06",
+        "scf_id": "IAC-37",
         "title": "Periodic access review",
         "version": 3
       },

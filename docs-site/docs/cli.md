@@ -150,6 +150,12 @@ with `internal/api/scfimport/catalog.go` as the contract. Each control may
 carry an optional `legacy_scf_id`, its code in the previous SCF release;
 the anchor API returns it as `legacy_scf_id`.
 
+After importing a new release, `import-scf` re-binds controls that are
+still on the previous release's anchors. A control moves only when the new
+anchor has the same code and the same title. Every other control is printed
+as `control needs re-anchoring`, with a note saying where its concept went
+(see the [upgrade guide](upgrade.md#4-verify-the-upgrade)).
+
 `import-scf` also reads SCF's published Excel workbook directly, with no
 conversion step. Download it from the
 [SCF website](https://securecontrolsframework.com/) or the
@@ -165,7 +171,7 @@ It reads the `SCF <release>` sheet (`SCF #`, `SCF Control`, and the
 `import-crosswalk` reads from that workbook. The release version comes from the
 sheet name (`2026.3`); `--release-version` overrides it. The workbook carries
 no release date; pass `--release-date YYYY-MM-DD` to record one. Family is the `SCF #`
-prefix (`IAC` for `IAC-06`), as in the JSON catalog.
+prefix (`IAC` for `IAC-37`), as in the JSON catalog.
 
 To import a full OSCAL catalog (NIST 800-53 and friends), use the separate
 `atlas-oscal import-catalog` binary — see

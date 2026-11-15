@@ -361,7 +361,7 @@ atlas-k8s permissions
 | `--environment`                   | `run`       | yes      | —                             | environment scope tag; records are never emitted un-scoped                                                    |
 | `--api-server`                    | `run`       | no\*     | env `KUBERNETES_API_SERVER`   | API server URL (\*required, via flag or env)                                                                  |
 | `--auth-mode`                     | `run`       | no       | `kubeconfig-token`            | `kubeconfig-token` or `in-cluster`                                                                            |
-| `--rbac-control`                  | `run`       | no       | `scf:IAC-21`                  | control id attached to RBAC records                                                                           |
+| `--rbac-control`                  | `run`       | no       | `scf:IAC-10`                  | control id attached to RBAC records                                                                           |
 | `--workload-control`              | `run`       | no       | `scf:CFG-02`                  | control id attached to workload records                                                                       |
 | `--netpol-control`                | `run`       | no       | `scf:NET-04`                  | control id attached to NetworkPolicy coverage records                                                         |
 | `--pss-control`                   | `run`       | no       | `scf:CFG-02`                  | control id attached to PSS admission records                                                                  |

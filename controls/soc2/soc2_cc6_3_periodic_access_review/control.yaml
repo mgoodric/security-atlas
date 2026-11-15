@@ -9,7 +9,7 @@ description: |
   cadence). The reviewer and remediation actions are captured in the
   evidence record.
 
-scf_anchor_id: IAC-15
+scf_anchor_id: IAC-12
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering

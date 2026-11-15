@@ -233,6 +233,7 @@ func fixtureSnapshot() Snapshot {
 					Title:         "Customer data leak",
 					Treatment:     "mitigate",
 					Category:      "operational",
+					CategoryName:  "Operational Resilience",
 					Methodology:   "nist_800_30",
 					ResidualScore: `{"value":12}`,
 					CreatedAt:     "2026-04-01T00:00:00Z",
@@ -356,11 +357,15 @@ func TestSlice269_EncodeCSVZip_PanelBodyShape(t *testing.T) {
 
 	// Risks: header + one row containing the fixture title.
 	body := zipMemberBody(t, zr, "risks.csv")
-	if !strings.HasPrefix(body, "id,title,treatment,category,methodology,residual_score,created_at\r\n") {
+	if !strings.HasPrefix(body, "id,title,treatment,category,methodology,residual_score,created_at,category_name\r\n") {
 		t.Errorf("risks header mismatch; got:\n%s", body)
 	}
 	if !strings.Contains(body, "Customer data leak") {
 		t.Errorf("risks body missing fixture title; got:\n%s", body)
+	}
+	// #1814: the organisation's category name rides beside the slug.
+	if !strings.Contains(body, ",operational,") || !strings.Contains(body, ",Operational Resilience\r\n") {
+		t.Errorf("risks body missing category slug and name; got:\n%s", body)
 	}
 
 	// Freshness: summary __total__ row first, then class rows.
@@ -537,7 +542,7 @@ func TestSlice269_PanelTable_PerPanelShape(t *testing.T) {
 		minRows  int
 	}{
 		{"framework_posture", 6, 1}, // #2112 adds covered_by_exception_pct
-		{"risks", 7, 1},
+		{"risks", 8, 1},
 		{"freshness", 4, 2}, // 1 summary + 1 class row
 		{"drift", 3, 2},     // 1 window summary + 1 flipped-out row
 		{"upcoming", 5, 1},
