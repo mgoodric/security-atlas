@@ -16,11 +16,12 @@
 import { PageShell } from "@/components/shell/page-shell";
 
 import { ActivityPageClient } from "./page-client";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function ActivityPage() {
   return (
     <PageShell
-      title="Activity"
+      title={pageTitle("/activity")}
       subtitle="Tenant activity ledger: state changes, evidence ingestion, audit milestones, and your own audit trail. Filter by time window, actor, or event kind; expand a row to see its raw payload. Read-only."
       bodyClassName="space-y-4"
     >

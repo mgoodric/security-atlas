@@ -5,9 +5,10 @@
 // this sibling server-component layout.
 
 import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-titles";
 
 export const metadata: Metadata = {
-  title: "Questionnaires",
+  title: pageTitle("/questionnaires"),
 };
 
 export default function QuestionnairesLayout({

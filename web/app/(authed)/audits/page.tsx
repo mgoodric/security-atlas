@@ -98,6 +98,7 @@ import {
   statusPillClass,
   statusTallyLabel,
 } from "./format";
+import { pageTitle } from "@/lib/page-titles";
 
 const FILTER_KEYS: (keyof AuditFilters)[] = ["framework", "status", "year"];
 
@@ -466,7 +467,7 @@ function AuditsPageInner() {
   if (periodsQ.isLoading) {
     return (
       <ListPage
-        title="Audit periods"
+        title={pageTitle("/audits")}
         subtitle="Period-level index — open a period for the per-control walk-through"
         actions={actions}
         filterRow={
@@ -483,7 +484,7 @@ function AuditsPageInner() {
   if (periodsQ.isError) {
     return (
       <ListPage
-        title="Audit periods"
+        title={pageTitle("/audits")}
         subtitle="Period-level index — open a period for the per-control walk-through"
         actions={actions}
       >
@@ -560,7 +561,7 @@ function AuditsPageInner() {
 
   return (
     <ListPage
-      title="Audit periods"
+      title={pageTitle("/audits")}
       titleAdornment={titleAdornment}
       subtitle="Period-level index — open a period for the per-control walk-through"
       actions={actions}

@@ -46,6 +46,7 @@ import {
   statusBadgeClass,
   statusBadgeLabel,
 } from "./status";
+import { pageTitle } from "@/lib/page-titles";
 
 const ALL = "__all__";
 
@@ -218,7 +219,7 @@ function PersonnelSecurityPageInner() {
   if (listQ.isLoading) {
     return (
       <ListPage
-        title="Personnel Security"
+        title={pageTitle("/personnel-security")}
         subtitle={subtitle}
         actions={actions}
         filterRow={
@@ -233,7 +234,7 @@ function PersonnelSecurityPageInner() {
   if (listQ.isError) {
     return (
       <ListPage
-        title="Personnel Security"
+        title={pageTitle("/personnel-security")}
         subtitle={subtitle}
         actions={actions}
       >
@@ -247,7 +248,7 @@ function PersonnelSecurityPageInner() {
 
   return (
     <ListPage
-      title="Personnel Security"
+      title={pageTitle("/personnel-security")}
       subtitle={subtitle}
       actions={actions}
       filterRow={

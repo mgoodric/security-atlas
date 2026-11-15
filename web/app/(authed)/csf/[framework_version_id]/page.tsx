@@ -35,6 +35,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { CsfGapView, CsfTier } from "@/lib/api/csf";
+import { pageTitle } from "@/lib/page-titles";
 
 const TIER_LABEL: Record<CsfTier, string> = {
   tier1_partial: "Tier 1 — Partial",
@@ -90,18 +91,22 @@ export default function CsfAssessmentPage() {
 
   return (
     <PageShell
-      title={
-        data ? (
-          <span data-testid="csf-title">
-            {data.framework_name} {data.framework_version} Assessment
-          </span>
-        ) : isLoading ? (
-          <Skeleton className="inline-block h-8 w-64 align-middle" />
-        ) : (
-          "CSF Assessment"
-        )
+      // #2081 — the H1 is the sidebar entry's label; the framework name
+      // and version that titled the page before move into the subtitle.
+      title={pageTitle("/csf")}
+      subtitle={
+        <>
+          {data ? (
+            <span data-testid="csf-title">
+              {data.framework_name} {data.framework_version}
+            </span>
+          ) : isLoading ? (
+            <Skeleton className="inline-block h-4 w-32 align-middle" />
+          ) : null}
+          {data || isLoading ? " — " : null}
+          Tier rating and Current-vs-Target profile gap for this CSF version.
+        </>
       }
-      subtitle="Tier rating and Current-vs-Target profile gap for this CSF version."
       data-testid="csf-assessment"
     >
       <Card data-testid="csf-tier-card">
