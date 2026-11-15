@@ -1881,7 +1881,8 @@ type Querier interface {
 	//   8. action_plans            — due_date of an open plan (#2130)
 	//   9. policy_acknowledgments  — the latest ack per (policy version, user)
 	//      + 365 days, when the annual re-acknowledgement lapses (#2130; it
-	//      moved here from the retired dashboard upcoming rollup)
+	//      moved here from the retired dashboard upcoming rollup), grouped per
+	//      policy and lapse day (#2234)
 	//
 	// Past-due items: every branch filters on its own date against [from, to),
 	// so a window that starts in the past returns the items that fell due in

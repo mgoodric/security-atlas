@@ -107,9 +107,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/calendar"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -160,7 +162,25 @@ var validFormats = map[Format]bool{
 // type-safe at the boundary — the encoders work off a `Snapshot`
 // value, not a free-form map.
 type PanelSource interface {
-	Snapshot(ctx context.Context) (Snapshot, error)
+	Snapshot(ctx context.Context, upcoming UpcomingTypes) (Snapshot, error)
+}
+
+// UpcomingTypes is the calendar type filter the upcoming panel reads with:
+// the caller's readable event types from calendar.ReadableTypes, the same
+// OPA narrowing GET /v1/calendar applies (#2234). Filter is a normalized
+// CSV ("" is every type); None means the caller may read no type, so the
+// panel is empty.
+type UpcomingTypes struct {
+	Filter string
+	None   bool
+}
+
+// UpcomingTypesFor is the upcoming panel's type filter for the caller of
+// r: calendar.ReadableTypes over every type. With no engine every type
+// stays, as on the calendar.
+func UpcomingTypesFor(r *http.Request, engine *authz.Engine) UpcomingTypes {
+	filter, anyLeft := calendar.ReadableTypes(r, engine, "")
+	return UpcomingTypes{Filter: filter, None: !anyLeft}
 }
 
 // Handler owns the slice 269 dashboard export endpoint. The pool is
@@ -169,12 +189,21 @@ type PanelSource interface {
 type Handler struct {
 	source PanelSource
 	pool   *pgxpool.Pool
+	engine *authz.Engine
 }
 
 // NewHandler constructs a Handler. `source` MUST be non-nil for
 // production callers; pass a stub via `WithSource` for unit tests.
 func NewHandler(pool *pgxpool.Pool, source PanelSource) *Handler {
 	return &Handler{source: source, pool: pool}
+}
+
+// WithAuthz wires the OPA engine the upcoming panel's type filter asks, as
+// the calendar does (#2234). With no engine every type stays, as on the
+// calendar's unit-test servers.
+func (h *Handler) WithAuthz(engine *authz.Engine) *Handler {
+	h.engine = engine
+	return h
 }
 
 // WithSource overrides the PanelSource — used by unit tests so the
@@ -244,7 +273,9 @@ func (h *Handler) ExportDashboard(w http.ResponseWriter, r *http.Request) {
 	// Each panel's underlying call opens its own RLS-gated tx; cross-
 	// tenant isolation is a property of those stores, NOT of this
 	// handler.
-	snapshot, snapErr := h.source.Snapshot(ctx)
+	// #2234: the upcoming panel shows the event types the caller may read
+	// on the calendar, from the same function, not the flag gate above.
+	snapshot, snapErr := h.source.Snapshot(ctx, UpcomingTypesFor(r, h.engine))
 	if snapErr != nil {
 		h.writeMetaAudit(ctx, tenantID, userIdentifier, exportMetaAudit{
 			Format: string(format),
