@@ -69,7 +69,9 @@ func (s *Server) registerControls(root *chi.Mux) {
 		controlimport.AuditRecorder(llm.NewAuditWriter(s.dbPool)),
 		s.importRerankAllowed(importStore),
 	))
-	controlimportsapi.New(stager).WithSettings(importStore).RegisterRoutes(root)
+	// #1782: approve (creating a control through the bundle store) and
+	// reject staged rows; a person decides, never a machine credential.
+	controlimportsapi.New(stager).WithSettings(importStore).WithDecisions(importStore).RegisterRoutes(root)
 	// Slice 175: controls history export (lineage incl. superseded
 	// versions). Sibling endpoint to /v1/controls/export — same shape,
 	// 17-column projection (slice 137's 15 + superseded_by +

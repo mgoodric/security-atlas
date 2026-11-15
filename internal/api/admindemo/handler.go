@@ -22,6 +22,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/api/ratekey"
 	"github.com/mgoodric/security-atlas/internal/auth/jwtmw"
 	"github.com/mgoodric/security-atlas/internal/demoseed"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -233,7 +234,7 @@ func (h *Handler) Seed(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
-	if !h.limiter.allow(clientIP(r), h.clock()) {
+	if !h.limiter.allow(ratekey.IP(clientIP(r)), h.clock()) {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
 		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
 		return
@@ -357,7 +358,7 @@ func (h *Handler) Teardown(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusServiceUnavailable, "demo seed not enabled on this deployment")
 		return
 	}
-	if !h.limiter.allow(clientIP(r), h.clock()) {
+	if !h.limiter.allow(ratekey.IP(clientIP(r)), h.clock()) {
 		w.Header().Set("Retry-After", fmt.Sprintf("%d", int(rateLimitWindow.Seconds())))
 		httpresp.WriteError(w, http.StatusTooManyRequests, "rate limit exceeded: one demo invocation per 60 seconds")
 		return

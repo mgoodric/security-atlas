@@ -188,9 +188,39 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 	if b == nil {
 		return UploadResult{}, errors.New("control bundle: nil bundle")
 	}
-
 	var result UploadResult
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var err error
+		result, err = upload(ctx, q, tenantID, b, uploadedBy)
+		return err
+	})
+	return result, err
+}
+
+// UploadTx is Upload inside the caller's transaction, so a caller can commit
+// the control together with its own writes (the control import's approval
+// and audit row, #1782). tx must already carry the caller's tenant
+// (tenancy.ApplyTenant), and ctx names the same tenant. UploadTx neither
+// commits nor rolls back.
+func UploadTx(ctx context.Context, tx pgx.Tx, b *Bundle, uploadedBy string) (UploadResult, error) {
+	if b == nil {
+		return UploadResult{}, errors.New("control bundle: nil bundle")
+	}
+	tenantStr, err := tenancy.TenantFromContext(ctx)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	tenantID, err := uuid.Parse(tenantStr)
+	if err != nil {
+		return UploadResult{}, fmt.Errorf("control: parse tenant id: %w", err)
+	}
+	return upload(ctx, dbx.New(tx), tenantID, b, uploadedBy)
+}
+
+// upload is the body of Upload and UploadTx.
+func upload(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle, uploadedBy string) (UploadResult, error) {
+	var result UploadResult
+	err := func() error {
 		// 1. Resolve scf_anchor_id. Accept either a uuid (FK target) or a
 		//    human-readable SCF code (e.g. "IAC-37") that resolves via the
 		//    slice-006 importer. Both shapes are common: hand-written
@@ -456,7 +486,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		result.Version = nextVersion
 		result.IsNewBundle = isNew
 		return nil
-	})
+	}()
 
 	return result, err
 }

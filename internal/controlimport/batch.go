@@ -69,6 +69,13 @@ type BatchControl struct {
 	// so a reviewer sees which provider the row's text was routed to. It is
 	// empty unless LLMRerank is applied (#2079).
 	LLMProvider string `json:"llm_provider,omitempty"`
+	// The row's decision (#1782): who decided; for an approved row the
+	// control it created and the SCF code it bound, for a duplicate the
+	// existing control, and for a rejected row the reason.
+	DecidedBy       string `json:"decided_by,omitempty"`
+	ControlID       string `json:"control_id,omitempty"`
+	ApprovedSCFID   string `json:"approved_scf_id,omitempty"`
+	RejectionReason string `json:"rejection_reason,omitempty"`
 }
 
 // Batch is one upload: its counts, staged rows and rejected rows. Every

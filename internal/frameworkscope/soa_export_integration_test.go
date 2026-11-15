@@ -154,6 +154,36 @@ func fetchXLSX(t *testing.T, c soaClient, fvID uuid.UUID) (sheet string, rows []
 	return sheets[0], rows, formula
 }
 
+// xlsxHasContradictionNote reports whether the xlsx export's title block
+// carries frameworkscope.ContradictionNote.
+func xlsxHasContradictionNote(t *testing.T, c soaClient, fvID uuid.UUID, extra url.Values) bool {
+	t.Helper()
+	resp, body := doJSON(t, http.MethodGet, exportURL(c, fvID, "xlsx", extra), c.bearer, "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("xlsx export: status %d; body %s", resp.StatusCode, body)
+	}
+	lim := xlsxbound.Limits{MaxDecompressedBytes: 8 << 20, MaxXMLPartBytes: 8 << 20, MaxRows: 100, MaxColumns: 20}
+	wb, err := xlsxbound.Open(body, lim)
+	if err != nil {
+		t.Fatalf("open xlsx: %v", err)
+	}
+	defer func() { _ = wb.Close() }()
+	rows, err := xlsxbound.ReadRows(wb, wb.GetSheetList()[0], lim)
+	if err != nil {
+		t.Fatalf("read rows: %v", err)
+	}
+	for _, r := range rows {
+		if reflect.DeepEqual(r, frameworkscope.SoAHeader) {
+			return false
+		}
+		if len(r) > 0 && r[0] == frameworkscope.ContradictionNote {
+			return true
+		}
+	}
+	t.Fatalf("xlsx has no header row: %q", rows)
+	return false
+}
+
 // The CSV has the header and one row per requirement, matching the fixture
 // field for field; the formula-looking cell is neutralised.
 func TestHTTP_SoAExport_CSV(t *testing.T) {
@@ -259,22 +289,29 @@ func TestHTTP_SoAExport_RevisionAndAsOf(t *testing.T) {
 	revD := d + "|R-01=undecided,R-02=undecided,R-03=undecided,R-04=undecided,R-05=undecided,R-06=undecided,R-07=undecided,R-08=excluded"
 	none := "|R-01=undecided,R-02=undecided,R-03=undecided,R-04=undecided,R-05=undecided,R-06=undecided,R-07=undecided,R-08=undecided"
 
+	// note: the xlsx states that contradictions are evaluated against
+	// current control results (#2048), for any as_of and any revision that
+	// is not the activated one.
 	for _, tc := range []struct {
 		name  string
 		extra url.Values
 		want  string
+		note  bool
 	}{
-		{"default is the activated revision", nil, revB},
-		{"revision A", url.Values{"revision": {a}}, revA},
-		{"revision B", url.Values{"revision": {b}}, revB},
-		{"draft revision", url.Values{"revision": {d}}, revD},
-		{"as_of while A was in force", url.Values{"as_of": {now.Add(-90 * time.Minute).Format(time.RFC3339)}}, revA},
-		{"as_of now", url.Values{"as_of": {now.Format(time.RFC3339)}}, revB},
-		{"as_of before any revision", url.Values{"as_of": {now.Add(-3 * time.Hour).Format(time.RFC3339)}}, none},
+		{"default is the activated revision", nil, revB, false},
+		{"revision A", url.Values{"revision": {a}}, revA, true},
+		{"revision B", url.Values{"revision": {b}}, revB, false},
+		{"draft revision", url.Values{"revision": {d}}, revD, true},
+		{"as_of while A was in force", url.Values{"as_of": {now.Add(-90 * time.Minute).Format(time.RFC3339)}}, revA, true},
+		{"as_of now", url.Values{"as_of": {now.Format(time.RFC3339)}}, revB, true},
+		{"as_of before any revision", url.Values{"as_of": {now.Add(-3 * time.Hour).Format(time.RFC3339)}}, none, true},
 	} {
 		_, rows := fetchCSV(t, c, f.FrameworkVersionID, tc.extra)
 		if got := summary(rows); got != tc.want {
 			t.Fatalf("%s:\n got %s\nwant %s", tc.name, got, tc.want)
+		}
+		if got := xlsxHasContradictionNote(t, c, f.FrameworkVersionID, tc.extra); got != tc.note {
+			t.Fatalf("%s: xlsx contradiction note = %v, want %v", tc.name, got, tc.note)
 		}
 	}
 
