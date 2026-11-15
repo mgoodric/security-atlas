@@ -83,6 +83,7 @@ func All(client *mcp.Client) []mcp.Tool {
 		NewGetControl(client),
 		NewListRisks(client),
 		NewGetRisk(client),
+		NewListRiskCategories(client),
 		NewListEvidence(client),
 		NewListAuditPeriods(client),
 		NewListPolicies(client),

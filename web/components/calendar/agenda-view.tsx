@@ -47,6 +47,7 @@ const TYPE_COLOR: Record<string, string> = {
   risk: "bg-orange-500",
   action_plan: "bg-cyan-500",
   policy_ack: "bg-violet-500",
+  offboarding: "bg-slate-500",
 };
 
 const TYPE_LABEL: Record<string, string> = {
@@ -58,6 +59,7 @@ const TYPE_LABEL: Record<string, string> = {
   risk: "Risk review",
   action_plan: "Action plan",
   policy_ack: "Policy acknowledgement",
+  offboarding: "Offboarding",
 };
 
 function monthKey(iso: string): string {
