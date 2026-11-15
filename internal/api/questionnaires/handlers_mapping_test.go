@@ -13,15 +13,19 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
 const (
@@ -42,11 +46,18 @@ func (f mapReader) QuestionTextForMapping(context.Context, uuid.UUID) (string, e
 	return f.text, f.textErr
 }
 
-func (f mapReader) RetrieveCandidates(context.Context, []string) ([]qmapsuggest.Candidate, error) {
+func (f mapReader) LookupRelease(_ context.Context, label string) (scfrelease.Release, error) {
+	if label != "" && label != "B" {
+		return scfrelease.Release{}, fmt.Errorf("%w %q", scfrelease.ErrUnknownRelease, label)
+	}
+	return scfrelease.Release{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, Version: "B", Status: "current"}, nil
+}
+
+func (f mapReader) RetrieveCandidatesInRelease(context.Context, string, []string) ([]qmapsuggest.Candidate, error) {
 	return f.candidates, nil
 }
 
-func (f mapReader) ResolveAnchor(context.Context, string) (qmapsuggest.Candidate, bool, error) {
+func (f mapReader) ResolveAnchorInRelease(context.Context, string, string) (qmapsuggest.Candidate, bool, error) {
 	return qmapsuggest.Candidate{}, false, nil
 }
 
@@ -193,6 +204,30 @@ func TestMappingSuggest_ManualOnlyOK(t *testing.T) {
 	}
 	if out.SCFAnchorID != "" || out.ProposalID != "" {
 		t.Errorf("manual-only must not name an anchor or proposal: %+v", out)
+	}
+	if out.SCFRelease != "B" {
+		t.Errorf("scf_release = %q; want the current release B named", out.SCFRelease)
+	}
+}
+
+// #1772: ?scf_release= names the release; one that is not loaded is a 404
+// that says so, not a silent fall back to the current release.
+func TestMappingSuggest_SCFReleaseParam(t *testing.T) {
+	t.Parallel()
+	h := mappingHandler(mapReader{text: "some question"}, &mapStore{})
+	w := route(h.MappingSuggest, reqWith(t, "POST", "/x?scf_release=nope", testTenant, grcCred()),
+		map[string]string{"qid": testQID})
+	if w.Code != http.StatusNotFound || !strings.Contains(w.Body.String(), "unknown SCF release") {
+		t.Fatalf("unknown release: got %d %s, want 404 naming the unknown release", w.Code, w.Body.String())
+	}
+	w = route(h.MappingSuggest, reqWith(t, "POST", "/x?scf_release=B", testTenant, grcCred()),
+		map[string]string{"qid": testQID})
+	var out qmapsuggest.Proposal
+	if err := json.Unmarshal(w.Body.Bytes(), &out); err != nil || w.Code != http.StatusOK {
+		t.Fatalf("named release: got %d %s (%v)", w.Code, w.Body.String(), err)
+	}
+	if out.SCFRelease != "B" {
+		t.Errorf("scf_release = %q; want B", out.SCFRelease)
 	}
 }
 

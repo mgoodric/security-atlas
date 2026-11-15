@@ -1,0 +1,152 @@
+{
+  "name": "framework_scope",
+  "title": "Framework scope",
+  "entity": "framework_scopes",
+  "column": "state",
+  "states": [
+    "draft",
+    "review",
+    "approved",
+    "activated",
+    "superseded"
+  ],
+  "initial": [
+    {
+      "state": "draft",
+      "action": "create",
+      "routes": [
+        "POST /v1/framework-scopes"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ]
+    }
+  ],
+  "terminal": [
+    "superseded"
+  ],
+  "transitions": [
+    {
+      "from": "draft",
+      "to": "review",
+      "action": "submit",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/framework-scopes/{id}/submit"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "A scope in review with no recorded submitter, or one recorded as a session id, may be submitted again, so approval has a person to compare."
+    },
+    {
+      "from": "review",
+      "to": "approved",
+      "action": "approve",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/framework-scopes/{id}/approve"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": true,
+      "second_person": true,
+      "self_approval_opt_in": true
+    },
+    {
+      "from": "review",
+      "to": "draft",
+      "action": "edit",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/framework-scopes/{id}",
+        "PUT /v1/framework-scopes/{id}/applicability/{requirement_id}",
+        "POST /v1/framework-scopes/{id}/applicability/bulk",
+        "POST /v1/framework-scopes/{id}/applicability/import",
+        "POST /v1/framework-scopes/{id}/applicability:carry-over"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Changing the predicate or an applicability decision returns the scope to draft and clears its approval (database triggers); it must be submitted and approved again."
+    },
+    {
+      "from": "approved",
+      "to": "draft",
+      "action": "edit",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/framework-scopes/{id}",
+        "PUT /v1/framework-scopes/{id}/applicability/{requirement_id}",
+        "POST /v1/framework-scopes/{id}/applicability/bulk",
+        "POST /v1/framework-scopes/{id}/applicability/import",
+        "POST /v1/framework-scopes/{id}/applicability:carry-over"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Changing the predicate or an applicability decision returns the scope to draft and clears its approval (database triggers); it must be submitted and approved again."
+    },
+    {
+      "from": "approved",
+      "to": "activated",
+      "action": "activate",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/framework-scopes/{id}/activate"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "activated",
+      "to": "superseded",
+      "action": "supersede",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/framework-scopes/{id}/activate"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Activating another revision for the same framework version supersedes the activated one, in the same transaction."
+    }
+  ],
+  "trigger": {
+    "name": "framework_scopes_predicate_frozen",
+    "from": [
+      "activated",
+      "superseded"
+    ]
+  }
+}
