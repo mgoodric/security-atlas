@@ -95,17 +95,22 @@ function renderInline(escaped: string, refs: RefMap): string {
   const held: string[] = [];
   const hold = (html: string) => `\x00${held.push(html) - 1}\x00`;
 
+  // Every pattern below stops scanning at the next opening delimiter
+  // (`[^[\]]`, `[^()\s]`, `[^\s&]`), so a hostile line of repeated `[`,
+  // `](` or `<` is matched in linear time rather than rescanned to the
+  // end of the line from each opener. The price: hrefs cannot contain
+  // parentheses and link text cannot contain brackets.
   let out = escaped.replace(/`([^`]+)`/g, (_m, code: string) =>
     hold(`<code>${code}</code>`),
   );
 
   // Images: alt text only, never an <img> (see header).
-  out = out.replace(/!\[([^\]]*)\]\([^)]*\)/g, "$1");
-  out = out.replace(/!\[([^\]]*)\]\[[^\]]*\]/g, "$1");
+  out = out.replace(/!\[([^[\]]*)\]\([^()]*\)/g, "$1");
+  out = out.replace(/!\[([^[\]]*)\]\[[^[\]]*\]/g, "$1");
 
   // Inline links [text](href). A rejected href leaves the source text.
   out = out.replace(
-    /\[([^\]]+)\]\(([^)\s]+)\)/g,
+    /\[([^[\]]+)\]\(([^()\s]+)\)/g,
     (m, text: string, rawHref: string) => {
       const href = safeHref(unescapeHtml(rawHref));
       return href ? hold(anchor(href, emphasis(text))) : m;
@@ -114,7 +119,7 @@ function renderInline(escaped: string, refs: RefMap): string {
 
   // Reference links [text][label] and [text][] (label = text).
   out = out.replace(
-    /\[([^\]]+)\]\[([^\]]*)\]/g,
+    /\[([^[\]]+)\]\[([^[\]]*)\]/g,
     (m, text: string, label: string) => {
       const target = refs.get((label || text).trim().toLowerCase());
       const href = target === undefined ? null : safeHref(target);
@@ -123,7 +128,9 @@ function renderInline(escaped: string, refs: RefMap): string {
   );
 
   // Autolinks <https://...> / <mailto:...>, escaped to &lt;...&gt; by now.
-  out = out.replace(/&lt;([^\s]+?)&gt;/g, (m, raw: string) => {
+  // The body allows `&amp;` but stops at any other entity, including the
+  // next `&lt;`.
+  out = out.replace(/&lt;((?:[^\s&]|&amp;)+)&gt;/g, (m, raw: string) => {
     const href = safeHref(unescapeHtml(raw));
     return href ? hold(anchor(href, raw)) : m;
   });
@@ -151,11 +158,10 @@ function splitRow(line: string): string[] {
   return row.split(/(?<!\\)\|/).map((c) => c.trim().replace(/\\\|/g, "|"));
 }
 
+// Checked cell by cell rather than with one whole-line pattern, whose
+// adjacent optional whitespace runs backtrack on a long line.
 function isTableSeparator(line: string): boolean {
-  return (
-    /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line) &&
-    line.includes("-")
-  );
+  return splitRow(line).every((cell) => /^:?-+:?$/.test(cell));
 }
 
 function isTableStart(lines: string[], i: number): boolean {
@@ -168,8 +174,14 @@ function isTableStart(lines: string[], i: number): boolean {
 }
 
 // Reference definitions `[label]: url "title"` are collected once over the
-// whole document and removed from the rendered output.
-const REF_DEF = /^\s{0,3}\[([^\]]+)\]:\s*<?([^\s>]+)>?(?:\s+.*)?$/;
+// whole document, outside fenced code, and removed from the rendered
+// output. Inside a fence they are code and stay as written.
+const REF_DEF = /^\s{0,3}\[([^[\]]+)\]:\s*<?([^\s>]+)>?(?:\s+.*)?$/;
+const FENCE = /^\s*```/;
+
+// Longer input renders as escaped preformatted text with no markdown
+// transforms: a cap on the work any one stored field can cost a viewer.
+export const MAX_MARKDOWN_CHARS = 100_000;
 
 // Block quotes nest by recursion; past this depth the remaining `>`
 // markers render as plain text, so a hostile `>>>>…` cannot blow the stack.
@@ -181,11 +193,15 @@ const MAX_QUOTE_DEPTH = 8;
  */
 export function renderMarkdown(md: string): string {
   if (!md) return "";
+  if (md.length > MAX_MARKDOWN_CHARS) return `<pre>${escapeHtml(md)}</pre>`;
   const refs: RefMap = new Map();
+  let inFence = false;
   const lines = md
     .replace(/\r\n?/g, "\n")
     .split("\n")
     .filter((line) => {
+      if (FENCE.test(line)) inFence = !inFence;
+      if (inFence) return true;
       const def = line.match(REF_DEF);
       if (!def) return true;
       const label = def[1].trim().toLowerCase();

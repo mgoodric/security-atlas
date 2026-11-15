@@ -8,7 +8,7 @@
 
 import { describe, expect, test } from "vitest";
 
-import { escapeHtml, renderMarkdown } from "./markdown";
+import { MAX_MARKDOWN_CHARS, escapeHtml, renderMarkdown } from "./markdown";
 
 describe("escapeHtml", () => {
   test("escapes the five HTML-significant characters", () => {
@@ -242,11 +242,12 @@ describe("renderMarkdown — link allow-list (#2094)", () => {
   });
 
   test("a quote in an allowed href cannot break out of the attribute", () => {
-    const html = renderMarkdown(
-      '[x](https://e.example/"onmouseover="alert(1))',
+    const html = renderMarkdown('[x](https://e.example/"onmouseover="alert.x)');
+    // The link forms, and the quote stays an entity inside href, so no
+    // attribute is opened.
+    expect(html).toContain(
+      'href="https://e.example/&quot;onmouseover=&quot;alert.x"',
     );
-    // The quote stays an entity inside href; no attribute is opened.
-    expect(html).toContain('href="https://e.example/&quot;onmouseover=&quot;');
     expect(html).not.toContain('"onmouseover="');
   });
 });
@@ -299,5 +300,87 @@ describe("renderMarkdown — tables and block quotes (#2094)", () => {
     expect(renderMarkdown(">> deep")).toContain("<blockquote><blockquote>");
     const html = renderMarkdown(">".repeat(5000) + " x");
     expect(html.match(/<blockquote>/g)).toHaveLength(8);
+  });
+});
+
+describe("renderMarkdown — more link evasions (#2094 review)", () => {
+  test.each([
+    ["literal tab inside javascript:", "[x](java\tscript:alert(1))"],
+    [
+      "literal tab in a reference target",
+      "[x][r]\n\n[r]: java\tscript:alert(1)",
+    ],
+    ["leading whitespace before javascript:", "[x]( javascript:alert(1))"],
+    [
+      "leading whitespace in a reference target",
+      "[x][r]\n\n[r]:    javascript:alert(1)",
+    ],
+    ["percent-encoded %6Aavascript:", "[x](%6Aavascript:alert(1))"],
+    ["percent-encoded autolink", "<%6Aavascript:alert(1)>"],
+    [
+      "percent-encoded reference target",
+      "[x][r]\n\n[r]: %6Aavascript:alert(1)",
+    ],
+  ])("drops %s", (_name, md) => {
+    const html = renderMarkdown(md);
+    expect(html).not.toContain("<a ");
+    expect(html).not.toMatch(/href=/i);
+  });
+});
+
+describe("renderMarkdown — reference definitions inside code (#2094 review)", () => {
+  test("a definition-shaped line inside a fence stays in the code block", () => {
+    const html = renderMarkdown("```\n[x]: https://example.com/a\n```");
+    expect(html).toBe("<pre><code>[x]: https://example.com/a</code></pre>");
+  });
+
+  test("a definition inside a fence does not resolve a reference link", () => {
+    const html = renderMarkdown(
+      "[go][x]\n\n```\n[x]: https://example.com/a\n```",
+    );
+    expect(html).not.toContain("<a ");
+  });
+
+  test("a definition after a closed fence still applies", () => {
+    const html = renderMarkdown(
+      "```\ncode\n```\n\n[go][x]\n\n[x]: https://example.com/a",
+    );
+    expect(html).toContain('href="https://example.com/a"');
+  });
+});
+
+describe("renderMarkdown — bounded work (#2094 review)", () => {
+  // Each line is just under the size cap and shaped to make a naive
+  // pattern rescan to the end of the line from every opener.
+  const n = 24_000;
+  test.each([
+    ["repeated [", "[".repeat(n * 4)],
+    ["repeated ![", "![".repeat(n * 2)],
+    ["repeated [a](", "[a](".repeat(n)],
+    ["repeated ](", "](".repeat(n * 2)],
+    ["repeated [a][", "[a][".repeat(n)],
+    ["repeated <", "<".repeat(n * 4)],
+    ["repeated <a", "<a".repeat(n * 2)],
+    ["repeated `", "`".repeat(n * 4)],
+    ["repeated **a", "**a".repeat(n)],
+    ["repeated _a", " _a".repeat(n)],
+    [
+      "table separator with a long whitespace run",
+      "a|b\n|-" + " ".repeat(n * 4) + "x",
+    ],
+    ["repeated [x]: in definitions", "[x]:".repeat(n)],
+  ])("%s renders in well under a second", (_name, md) => {
+    expect(md.length).toBeLessThanOrEqual(MAX_MARKDOWN_CHARS);
+    const start = performance.now();
+    renderMarkdown(md);
+    expect(performance.now() - start).toBeLessThan(1000);
+  });
+
+  test("input over the cap renders as escaped preformatted text", () => {
+    const md = "**bold** <script>x</script> " + "a".repeat(MAX_MARKDOWN_CHARS);
+    const html = renderMarkdown(md);
+    expect(html.startsWith("<pre>**bold** &lt;script&gt;")).toBe(true);
+    expect(html).not.toContain("<strong>");
+    expect(html).not.toContain("<script");
   });
 });
