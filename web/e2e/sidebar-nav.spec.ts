@@ -109,9 +109,12 @@ async function sidebarLabels(page: Page): Promise<string[]> {
 // openFromSidebar clicks the entry labelled `label` and checks the page
 // it opens is titled `label`.
 async function openFromSidebar(page: Page, label: string): Promise<void> {
+  // By the label text, not the link's accessible name: the Controls and
+  // Risks rows append a count badge to their name.
   const link = page
     .getByTestId("sidebar-desktop")
-    .getByRole("link", { name: label, exact: true });
+    .getByRole("link")
+    .filter({ has: page.getByText(label, { exact: true }) });
   const href = await link.getAttribute("href");
   expect(href, `${label}: sidebar entry has an href`).toBeTruthy();
   await link.click();
