@@ -3,6 +3,7 @@
 
 import { apiBaseURL, APIError } from "./base";
 import { apiFetch } from "./_shared";
+import { enumLabel } from "../labels/enum-labels";
 
 // ----- Slice 100: /risks list view -----
 //
@@ -386,11 +387,14 @@ export async function createRisk(
 
 // treatmentLabel renders a risk's treatment for display (#1746): an
 // acceptance shows its status, so a pending one never reads as signed off.
+// #2083: the treatment and status read as labels ("Accept (proposed)").
 export function treatmentLabel(
   r: Pick<Risk, "treatment" | "acceptance_status">,
 ): string {
+  const label = enumLabel("RiskTreatment", r.treatment);
   if (r.treatment === "accept" && r.acceptance_status) {
-    return `accept (${r.acceptance_status})`;
+    const status = enumLabel("RiskAcceptanceStatus", r.acceptance_status);
+    return `${label} (${status.toLowerCase()})`;
   }
-  return r.treatment;
+  return label;
 }

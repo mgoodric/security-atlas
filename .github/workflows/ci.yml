@@ -247,6 +247,10 @@ jobs:
               # golden-only change must run both tiers. Any web/ file a Go
               # test reads belongs here.
               - 'web/lib/contracts/**'
+              # Go files a web test reads: web/lib/labels/enum-labels.test.ts
+              # fails when a backend enum value has no display label (#2083).
+              - 'internal/db/dbx/models.go'
+              - 'internal/featureflag/seed.go'
               - 'migrations/**'
               - 'sql/**'
               - 'atlas.hcl'
