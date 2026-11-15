@@ -20,6 +20,7 @@ SELECT
     bundle_gate_mode,
     risk_review_cadence_days,
     allow_self_approval,
+    vendor_initial_review_days,
     created_at,
     updated_at
 FROM tenants
@@ -61,6 +62,7 @@ RETURNING
     bundle_gate_mode,
     risk_review_cadence_days,
     allow_self_approval,
+    vendor_initial_review_days,
     created_at,
     updated_at;
 
@@ -79,6 +81,7 @@ RETURNING
     bundle_gate_mode,
     risk_review_cadence_days,
     allow_self_approval,
+    vendor_initial_review_days,
     created_at,
     updated_at;
 
@@ -97,6 +100,7 @@ RETURNING
     bundle_gate_mode,
     risk_review_cadence_days,
     allow_self_approval,
+    vendor_initial_review_days,
     created_at,
     updated_at;
 
@@ -122,5 +126,26 @@ RETURNING
     bundle_gate_mode,
     risk_review_cadence_days,
     allow_self_approval,
+    vendor_initial_review_days,
+    created_at,
+    updated_at;
+
+-- name: UpdateTenantVendorInitialReviewDays :one
+-- #2201: set the caller-tenant's vendor initial-review window in days. RLS
+-- gates this to the caller's own row; `tenants_vendor_initial_review_days_chk`
+-- bounds it to 1..365 (defense in depth atop the handler's check). The window
+-- is read whenever a never-reviewed vendor is read, so a change moves the
+-- first review date of every vendor that has not been reviewed yet.
+UPDATE tenants
+SET vendor_initial_review_days = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
+    risk_review_cadence_days,
+    allow_self_approval,
+    vendor_initial_review_days,
     created_at,
     updated_at;
