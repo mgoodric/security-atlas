@@ -669,7 +669,7 @@ function RequirementRow({
         {row.code}
         {row.contradiction && (
           <Badge
-            variant="destructive"
+            variant="warning"
             className="ml-2"
             data-testid="soa-contradiction"
             title="Excluded, but an active control behind it is passing"
