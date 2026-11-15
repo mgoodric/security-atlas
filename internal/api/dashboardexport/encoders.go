@@ -372,8 +372,8 @@ func xlsxSheetName(panel string) string {
 //
 // The freshness + drift panels are structured (not list-shaped) —
 // freshness collapses to one row per class bucket, drift to one row
-// per flipped-out control PLUS a summary row at the top giving the
-// since/through/delta/count metadata. This matches the dashboard's
+// per control that started or stopped passing PLUS a summary row at
+// the top giving the since/through/net-change/count metadata. This matches the dashboard's
 // visual rendering: the user sees a metadata header and a list
 // underneath.
 func panelTable(name string, s Snapshot) (header []string, rows [][]string) {
@@ -483,23 +483,30 @@ func freshnessTable(p FreshnessPanel) ([]string, [][]string) {
 	return header, out
 }
 
-// driftTable flattens the flipped-out rows PLUS a summary row at
-// the top carrying the since/through/delta/count window metadata.
-// Same sentinel-row pattern as freshnessTable.
+// driftTable flattens the window's control movement PLUS a summary row at
+// the top carrying the since/through window, the net change in passing
+// controls and both counts. Same sentinel-row pattern as freshnessTable.
+// Each control row names its direction in the trailing `change` column
+// (#2195), so a net gain never sits beside only the losses.
 func driftTable(p DriftPanel) ([]string, [][]string) {
-	header := []string{"control_id", "last_passing", "current_result"}
-	out := make([][]string, 0, len(p.FlippedOut)+1)
+	header := []string{"control_id", "last_passing", "current_result", "change"}
+	out := make([][]string, 0, len(p.FlippedOut)+len(p.StartedPassing)+1)
 	out = append(out, []string{
-		fmt.Sprintf("__window__ since=%s through=%s delta=%d flipped_out_count=%d",
-			p.Since, p.Through, p.Delta, p.FlippedOutCount),
+		fmt.Sprintf("__window__ since=%s through=%s net_change_in_passing=%d started_passing_count=%d flipped_out_count=%d",
+			p.Since, p.Through, p.Delta, p.StartedPassingCount, p.FlippedOutCount),
+		"",
 		"",
 		"",
 	})
+	for _, g := range p.StartedPassing {
+		out = append(out, []string{g.ControlID, "", "pass", "started_passing"})
+	}
 	for _, fr := range p.FlippedOut {
 		out = append(out, []string{
 			fr.ControlID,
 			fr.LastPassing,
 			fr.CurrentResult,
+			"stopped_passing",
 		})
 	}
 	return header, out
