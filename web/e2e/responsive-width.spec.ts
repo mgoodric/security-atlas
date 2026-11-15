@@ -2,17 +2,18 @@
 //
 // The design audit (#2053) was walked at 1,316px and 1,200px; #2068
 // finished it at 390px and 768px. This spec pins what that pass found
-// working, so it can't regress, and records what it found broken as
-// `test.fixme` cases tied to #2213. Fixing #2213 means switching those
-// cases on.
+// working, so it can't regress. What it found broken was recorded as
+// `test.fixme` cases tied to #2213; #2213 fixed them and switched them
+// on.
 //
 // Two measurements, because the app shell has two horizontal scrollers:
 //
 //   - `<main>` is `overflow-y-auto`, which makes its x-axis scroll too.
 //     Content wider than the column scrolls `<main>` sideways, not the
-//     page. That is how the page-header action rows fail (#2213 part 2).
-//   - The document itself. The top bar never collapses, so it widens the
-//     whole page at 390px (#2213 part 1).
+//     page. That is how the page-header action rows failed (#2213 part 2).
+//   - The document itself. The top bar did not collapse, so it widened
+//     the whole page at 390px and 768px (#2213 part 1). It now folds
+//     below `lg`.
 //
 // `slice 277`'s `mobile-baseline.spec.ts` covers the hamburger and
 // drawer; this spec is about width only.
@@ -56,51 +57,74 @@ async function open(
   await page.waitForLoadState("networkidle");
 }
 
-// Pages whose column fits at both widths today.
-const FITS = ["/dashboard", "/questionnaires", "/settings"];
-
-// Pages whose column overflows (#2213), with the widths at which it does.
-// Most are the page-header action row, measured on the demo dataset at
-// #2068. `/evidence` is the Control filter: a native select sizes to its
-// longest option, so one long control title pushes it past 390px (seen
-// with the e2e fixtures, not the demo data).
-const KNOWN_OVERFLOWS: { path: string; at: Viewport[] }[] = [
-  { path: "/controls", at: [PHONE, TABLET] },
-  { path: "/audits", at: [PHONE, TABLET] },
-  { path: "/risks", at: [PHONE] },
-  { path: "/policies", at: [PHONE] },
-  { path: "/vendors", at: [PHONE] },
-  { path: "/evidence", at: [PHONE] },
+// Signed-in pages checked at both widths. The first three fitted before
+// #2213; the rest are the ones #2068 found overflowing. Most of those
+// were the page-header action row; `/evidence` was the Control filter (a
+// native select sizes to its longest option, so one long control title
+// pushed it past 390px with the e2e fixtures); `/action-plans/new` was
+// its linked-entity fieldsets; `/risks/hierarchy` kept three columns at
+// 768px; `/audit-log` rendered outside the app shell.
+const PAGES = [
+  "/dashboard",
+  "/questionnaires",
+  "/settings",
+  "/controls",
+  "/audits",
+  "/risks",
+  "/policies",
+  "/vendors",
+  "/evidence",
+  "/action-plans/new",
+  "/risks/hierarchy",
+  "/audit-log",
 ];
 
 for (const viewport of [PHONE, TABLET]) {
   test.describe(`at ${viewport.width}px`, () => {
-    for (const path of FITS) {
-      test(`${path}: the content column does not scroll sideways`, async ({
+    for (const path of PAGES) {
+      test(`${path}: neither the page nor the content column scrolls sideways`, async ({
         authedPage: page,
       }) => {
         await open(page, path, viewport);
         expect(await mainOverflow(page)).toBeLessThanOrEqual(1);
+        expect(await documentOverflow(page)).toBeLessThanOrEqual(1);
       });
     }
 
-    for (const { path, at } of KNOWN_OVERFLOWS) {
-      const broken = at.includes(viewport);
-      test(`${path}: the content column does not scroll sideways`, async ({
-        authedPage: page,
-      }) => {
-        test.fixme(broken, "#2213: the column overflows at this width");
-        await open(page, path, viewport);
-        expect(await mainOverflow(page)).toBeLessThanOrEqual(1);
-      });
-    }
-
-    test("/dashboard: the page does not scroll sideways", async ({
+    // #2213 — below `lg` the top bar folds search behind an icon and the
+    // avatar + Sign out behind an account button. Both have to work from
+    // the keyboard alone.
+    test("search unfolds from its icon and folds back on Escape", async ({
       authedPage: page,
     }) => {
-      test.fixme(true, "#2213: the top bar doesn't collapse below 1,200px");
       await open(page, "/dashboard", viewport);
+      const toggle = page.getByTestId("global-search-toggle");
+      const input = page.getByTestId("global-search-input");
+      await expect(input).toBeHidden();
+      await toggle.focus();
+      await page.keyboard.press("Enter");
+      await expect(input).toBeFocused();
       expect(await documentOverflow(page)).toBeLessThanOrEqual(1);
+      await page.keyboard.press("Escape");
+      await expect(input).toBeHidden();
+      await expect(toggle).toBeFocused();
+    });
+
+    test("Sign out is reachable through the account menu", async ({
+      authedPage: page,
+    }) => {
+      await open(page, "/dashboard", viewport);
+      const trigger = page.getByTestId("account-menu-trigger");
+      const signOut = page.getByRole("button", { name: "Sign out" });
+      await expect(signOut).toBeHidden();
+      await trigger.focus();
+      await page.keyboard.press("Enter");
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await page.keyboard.press("Tab");
+      await expect(signOut).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(signOut).toBeHidden();
+      await expect(trigger).toBeFocused();
     });
   });
 }

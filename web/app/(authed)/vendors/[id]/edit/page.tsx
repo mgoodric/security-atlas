@@ -8,6 +8,7 @@ import { use, useEffect } from "react";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useToast } from "@/components/ui/toast";
 import { APIError } from "@/lib/api/base";
 import { Vendor } from "@/lib/api/vendors";
 
@@ -32,6 +33,7 @@ export default function VendorEditPage({
   const { id } = use(params);
   const router = useRouter();
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { data, isLoading, error } = useQuery({
     queryKey: ["vendor", id],
     queryFn: () => fetchVendor(id),
@@ -94,6 +96,7 @@ export default function VendorEditPage({
               // not block the navigation.
               void qc.invalidateQueries({ queryKey: ["vendors"] });
               void qc.invalidateQueries({ queryKey: ["vendors-burndown"] });
+              toast("Vendor updated");
               router.push(`/vendors/${id}`);
             }}
             submitLabel="Save changes"

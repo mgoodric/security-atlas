@@ -132,7 +132,7 @@ th { background: #f5f5f5; font-weight: 600; }
 		for i, r := range b.TopRisks {
 			fmt.Fprintf(&w,
 				`<tr><td>%d</td><td>%s</td><td>%s</td><td>%s</td><td>%.1f</td><td>%d</td></tr>`,
-				i+1, html.EscapeString(r.Title), html.EscapeString(r.Category),
+				i+1, html.EscapeString(r.Title), html.EscapeString(r.CategoryLabel()),
 				html.EscapeString(r.Treatment), r.ResidualSeverity, r.AgeDays)
 		}
 		w.WriteString(`</tbody></table>`)

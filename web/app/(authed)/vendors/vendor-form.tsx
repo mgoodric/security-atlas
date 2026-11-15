@@ -103,14 +103,22 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [ownerError, setOwnerError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
 
   function update<K extends keyof VendorWrite>(key: K, value: VendorWrite[K]) {
     setBody((b) => ({ ...b, [key]: value }));
     if (key === "owner_user") setOwnerError(null);
+    if (key === "name") setNameError(null);
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // #2089: required fields are checked here and reported inline (the
+    // form is noValidate, so the browser shows no native bubble).
+    if (body.name.trim() === "") {
+      setNameError("Name is required.");
+      return;
+    }
     // ATLAS-032 (slice 679): the owner field is contractually an email.
     // Reject a non-email (e.g. a role string) before the network call so
     // the invalid value never reaches the store or the export's masker.
@@ -134,9 +142,14 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form
+      onSubmit={handleSubmit}
+      noValidate
+      className="space-y-6"
+      data-testid="vendor-form"
+    >
       {error ? (
-        <Alert variant="destructive">
+        <Alert variant="destructive" data-testid="vendor-form-error">
           <AlertTitle>Could not save vendor</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
@@ -152,7 +165,19 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
               value={body.name}
               onChange={(e) => update("name", e.target.value)}
               required
+              aria-invalid={nameError ? true : undefined}
+              aria-describedby={nameError ? "name-error" : undefined}
+              data-testid="vendor-name-input"
             />
+            {nameError ? (
+              <p
+                id="name-error"
+                className="text-xs text-destructive"
+                data-testid="vendor-name-error"
+              >
+                {nameError}
+              </p>
+            ) : null}
           </Field>
           <Field label="Domain">
             <Input
@@ -379,7 +404,11 @@ export function VendorForm({ initial, onSubmit, submitLabel }: Props) {
       </Card>
 
       <div className="flex justify-end">
-        <Button type="submit" disabled={submitting}>
+        <Button
+          type="submit"
+          disabled={submitting}
+          data-testid="vendor-form-submit"
+        >
           {submitting ? "Saving..." : submitLabel}
         </Button>
       </div>

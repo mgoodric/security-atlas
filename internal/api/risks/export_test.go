@@ -30,6 +30,7 @@ func TestRisksToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		Title:          "title-X",
 		Description:    "desc-X",
 		Category:       "operational",
+		CategoryName:   "Operational Resilience",
 		Methodology:    "nist_800_30",
 		InherentScore:  []byte(`{"likelihood":3,"impact":4}`),
 		Treatment:      "mitigate",
@@ -72,6 +73,7 @@ func TestRisksToRowIter_ColumnOrderMatchesHeader(t *testing.T) {
 		"org_unit_id":          ou.String(),
 		"themes":               "data-protection,access",
 		"parent_risk_ids":      parentA.String() + ";" + parentB.String(),
+		"category_name":        "Operational Resilience",
 	}
 	for col, want := range checks {
 		idx := -1
@@ -176,16 +178,29 @@ func TestRiskExportFilenamePrefix(t *testing.T) {
 // column positions hold.
 func TestRisksToRowIter_NoParentsRendersBlank(t *testing.T) {
 	header := riskExportHeader()
-	if got := header[len(header)-1]; got != "parent_risk_ids" {
-		t.Fatalf("last column = %q; want parent_risk_ids", got)
+	// #1814 appended category_name after parent_risk_ids.
+	if got := header[len(header)-2]; got != "parent_risk_ids" {
+		t.Fatalf("second-to-last column = %q; want parent_risk_ids", got)
 	}
-	if got := header[len(header)-2]; got != "acceptance_status" {
-		t.Fatalf("second-to-last column = %q; want acceptance_status", got)
+	if got := header[len(header)-3]; got != "acceptance_status" {
+		t.Fatalf("third-to-last column = %q; want acceptance_status", got)
 	}
 	for cells := range risksToRowIter([]riskRow{{ID: uuid.New()}}) {
-		if got := cells[len(header)-1]; got != "" {
+		if got := cells[len(header)-2]; got != "" {
 			t.Errorf("parent_risk_ids for a risk with no parents = %q; want empty string", got)
 		}
 		break
+	}
+}
+
+// #1814: the export carries both the category slug and the organisation's
+// name for it, the name appended last so existing column positions hold.
+func TestRiskExportHeader_CategorySlugAndName(t *testing.T) {
+	header := riskExportHeader()
+	if got := header[3]; got != "category" {
+		t.Errorf("header[3] = %q; want category (slug, position unchanged)", got)
+	}
+	if got := header[len(header)-1]; got != "category_name" {
+		t.Errorf("last column = %q; want category_name", got)
 	}
 }
