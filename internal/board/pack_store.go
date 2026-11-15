@@ -82,22 +82,8 @@ func (s *PackStore) ListRisksAsOf(ctx context.Context, asOf time.Time) ([]riskRo
 		if err != nil {
 			return fmt.Errorf("list risks for board pack: %w", err)
 		}
-		out = make([]riskRow, 0, len(rows))
-		for _, r := range rows {
-			rr := riskRow{
-				ID:            uuid.UUID(r.ID.Bytes),
-				Title:         r.Title,
-				Category:      string(r.Category),
-				Treatment:     treatmentLabel(r),
-				ResidualScore: r.ResidualScore,
-				InherentScore: r.InherentScore,
-			}
-			if r.UpdatedAt.Valid {
-				rr.UpdatedAt = r.UpdatedAt.Time
-			}
-			out = append(out, rr)
-		}
-		return nil
+		out, err = riskRowsFromDB(ctx, q, tenantID, rows)
+		return err
 	})
 	if err != nil {
 		return nil, err
