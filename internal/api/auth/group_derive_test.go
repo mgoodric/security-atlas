@@ -56,7 +56,7 @@ func TestOIDCCallback_ForgedTokenDoesNotDerive(t *testing.T) {
 	deriver := &recordingOIDCDeriver{}
 	// nil user/session stores are never reached on the forged path — the
 	// callback returns at the validation guard, well before user upsert.
-	h := New(oidc.New(unknownIdpResolver{}), nil, nil, false, nil)
+	h := New(oidc.New(unknownIdpResolver{}, testStateKey), nil, nil, false, nil)
 	h.AttachGroupDeriver(deriver)
 
 	// A forged callback: state cookie disagrees with the query param (CSRF
@@ -86,7 +86,7 @@ func TestOIDCCallback_ForgedTokenDoesNotDerive(t *testing.T) {
 // opt-in; an un-wired deployment keeps the slice-508 login behavior).
 func TestAttachGroupDeriver_NilByDefault(t *testing.T) {
 	t.Parallel()
-	h := New(oidc.New(unknownIdpResolver{}), nil, nil, false, nil)
+	h := New(oidc.New(unknownIdpResolver{}, testStateKey), nil, nil, false, nil)
 	if h.groupDeriver != nil {
 		t.Fatal("groupDeriver must be nil until AttachGroupDeriver is called")
 	}

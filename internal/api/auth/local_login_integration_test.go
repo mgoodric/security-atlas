@@ -32,7 +32,7 @@ const (
 
 func (h harness) localLoginHandler() *authapi.Handler {
 	handler := authapi.New(
-		oidc.New(stubResolver{}),
+		oidc.New(stubResolver{}, testStateKey),
 		users.NewStoreWithAuthPool(h.app, h.admin),
 		sessions.NewStore(h.app, time.Hour),
 		false,
