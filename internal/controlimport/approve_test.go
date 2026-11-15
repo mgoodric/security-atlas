@@ -32,6 +32,8 @@ func TestBundleIDFor(t *testing.T) {
 		"AB6F2C1E-1111-4222-8333-444455556666":   "c-ab6f2c1e-1111-4222-8333-444455556666",
 		"ab6f2c1e111142228333444455556666":       "c-ab6f2c1e111142228333444455556666",
 		"{ab6f2c1e-1111-4222-8333-444455556666}": "c-ab6f2c1e-1111-4222-8333-444455556666",
+		// Cut back to a uuid by the 64-character truncation.
+		"ab6f2c1e-1111-4222-8333-444455556666" + strings.Repeat(".", 30) + "tail": "c-ab6f2c1e-1111-4222-8333-444455556666",
 	}
 	for in, want := range cases {
 		got := BundleIDFor(in)

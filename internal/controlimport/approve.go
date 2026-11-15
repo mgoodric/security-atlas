@@ -470,14 +470,12 @@ var bundleIDUnsafe = regexp.MustCompile(`[^a-z0-9_.-]+`)
 // BundleIDFor slugs an organisation control ID into a bundle ID matching
 // the control bundle pattern ^[a-z][a-z0-9_.-]{2,63}$: lower-cased, runs of
 // other characters become "-", and an ID that does not start with a letter
-// is prefixed "c-", as is one that would read as a uuid. Two IDs can slug alike ("AC 01", "AC-01"); approval
-// refuses the second (ErrBundleIDTaken).
+// is prefixed "c-", as is one that would read as a uuid. Two IDs can slug
+// alike ("AC 01", "AC-01"); approval refuses the second (ErrBundleIDTaken).
 func BundleIDFor(orgID string) string {
 	s := bundleIDUnsafe.ReplaceAllString(strings.ToLower(strings.TrimSpace(orgID)), "-")
 	s = strings.Trim(s, "-.")
-	// A uuid-shaped bundle ID is refused by the bundle validator (#2255),
-	// and an organisation ID that is a uuid starting a-f would slug to one.
-	if _, err := uuid.Parse(s); err == nil || s == "" || s[0] < 'a' || s[0] > 'z' {
+	if s == "" || s[0] < 'a' || s[0] > 'z' {
 		s = "c-" + s
 	}
 	for len(s) < 3 {
@@ -485,6 +483,12 @@ func BundleIDFor(orgID string) string {
 	}
 	if len(s) > 64 {
 		s = strings.TrimRight(s[:64], "-.")
+	}
+	// A uuid-shaped bundle ID is refused by the bundle validator (#2255).
+	// An organisation ID that is a uuid starting a-f slugs to one, and so can
+	// a longer ID cut back to a uuid above; checked last, on the final slug.
+	if _, err := uuid.Parse(s); err == nil {
+		s = "c-" + s
 	}
 	return s
 }

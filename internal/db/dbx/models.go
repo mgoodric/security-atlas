@@ -2243,6 +2243,7 @@ type EffectiveFwToScfEdge struct {
 	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	Origin                 string                     `json:"origin"`
 }
 
 type EmailChannelOptin struct {

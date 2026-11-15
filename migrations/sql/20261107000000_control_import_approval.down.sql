@@ -1,4 +1,4 @@
--- Reverses 20261104000000_control_import_approval.sql.
+-- Reverses 20261107000000_control_import_approval.sql.
 DROP TABLE IF EXISTS control_import_audit_log;
 DROP FUNCTION IF EXISTS control_import_audit_log_append_only();
 
