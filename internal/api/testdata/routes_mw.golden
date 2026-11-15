@@ -220,6 +220,7 @@ PATCH /v1/decisions/{id} 8
 PATCH /v1/exceptions/{id}/activate 8
 PATCH /v1/exceptions/{id}/approve 8
 PATCH /v1/exceptions/{id}/deny 8
+PATCH /v1/exceptions/{id}/revoke 8
 PATCH /v1/incidents/{id}/transition 8
 PATCH /v1/framework-scopes/{id} 8
 PATCH /v1/framework-scopes/{id}/activate 8

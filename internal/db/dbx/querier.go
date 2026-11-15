@@ -3278,6 +3278,11 @@ type Querier interface {
 	// deprovisioned account loses all access immediately. No keep-id — unlike the
 	// /v1/me "sign out other devices" path, deprovision kills the whole set.
 	RevokeAllSCIMUserSessions(ctx context.Context, arg RevokeAllSCIMUserSessionsParams) (int64, error)
+	// #2113: active -> revoked (terminal). An approver ends an active
+	// exception before its expires_at; the reason lives on the paired audit
+	// row. expires_at is left as granted, so the record shows both the
+	// window that was approved and the moment it was cut short.
+	RevokeException(ctx context.Context, arg RevokeExceptionParams) (Exception, error)
 	// Slice 108: DELETE /v1/me/sessions (no {id}). Revokes every valid session for the
 	// caller EXCEPT the one identified by $3 (the "current" session id). When the caller
 	// has no current-session cookie, pass an empty string to revoke ALL sessions for the

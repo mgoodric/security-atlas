@@ -103,6 +103,21 @@ WHERE tenant_id = $1
   AND status = 'approved'
 RETURNING *;
 
+-- name: RevokeException :one
+-- #2113: active -> revoked (terminal). An approver ends an active
+-- exception before its expires_at; the reason lives on the paired audit
+-- row. expires_at is left as granted, so the record shows both the
+-- window that was approved and the moment it was cut short.
+UPDATE exceptions
+SET status = 'revoked',
+    revoked_by = $3,
+    revoked_at = now(),
+    updated_at = now()
+WHERE tenant_id = $1
+  AND id = $2
+  AND status = 'active'
+RETURNING *;
+
 -- name: ExpireActiveExceptionsBefore :many
 -- AC-5 auto-expiry: marks active rows whose expires_at < threshold as
 -- expired. Returns the affected rows so the cron can write one

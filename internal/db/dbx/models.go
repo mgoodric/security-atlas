@@ -2363,6 +2363,8 @@ type Exception struct {
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 	SelfApproved         bool               `json:"self_approved"`
+	RevokedBy            *string            `json:"revoked_by"`
+	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
 }
 
 type ExceptionAuditLog struct {
