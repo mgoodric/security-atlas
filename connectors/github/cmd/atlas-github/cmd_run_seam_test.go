@@ -529,7 +529,7 @@ func okWebhookFlags() webhookFlags {
 		addr:        ":0", // never bound — serverListenAndServe is seamed
 		path:        "/webhook",
 		environment: "prod",
-		controlID:   "scf:MON-01",
+		controlID:   "scf:MON-02",
 	}
 }
 

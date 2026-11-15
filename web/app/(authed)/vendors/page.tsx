@@ -365,7 +365,7 @@ function formatSpend(amount?: number | null, currency?: string | null): string {
 function CriticalityBadge({ value }: { value: string }) {
   const variant =
     value === "high"
-      ? "destructive"
+      ? "critical"
       : value === "medium"
         ? "secondary"
         : "outline";

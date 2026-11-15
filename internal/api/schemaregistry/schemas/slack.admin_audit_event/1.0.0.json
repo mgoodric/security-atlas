@@ -4,7 +4,7 @@
   "x-evidence-kind": "slack.admin_audit_event.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["MON-01"],
+  "x-default-scf-anchors": ["MON-02"],
   "title": "Slack admin audit-log event",
   "description": "One workspace admin audit-log entry from the Slack audit-logs API. Admin-action METADATA only (what action, who, when, what entity) — never message content or the body of any object Slack acted on (slice 443 threat-model I). One record per audit entry; idempotency anchors on the immutable entry id.",
   "type": "object",
