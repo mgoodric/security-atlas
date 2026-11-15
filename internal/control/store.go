@@ -581,6 +581,24 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 	return rows, total, nil
 }
 
+// ListOnLegacySCFAnchors returns the active tenant's active controls still
+// bound to an anchor of an SCF release that is no longer current (#2176).
+// The query is filtered by the explicit tenant id as well as by RLS. The
+// caller applies the #1971 D3 rule (scfimport.Classify) to decide which
+// rows need a person.
+func (s *Store) ListOnLegacySCFAnchors(ctx context.Context) ([]dbx.ListControlsOnLegacySCFAnchorsRow, error) {
+	var rows []dbx.ListControlsOnLegacySCFAnchorsRow
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var err error
+		rows, err = q.ListControlsOnLegacySCFAnchors(ctx, pgUUID(tenantID))
+		if err != nil {
+			return fmt.Errorf("list controls on legacy scf anchors: %w", err)
+		}
+		return nil
+	})
+	return rows, err
+}
+
 // resolveSCFAnchor accepts either a uuid string or an SCF code (e.g.,
 // "IAC-37") resolved in the current SCF release, and returns the anchor's
 // uuid. Unknown values fail with ErrSCFAnchorUnknown.
