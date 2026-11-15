@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/tls"
 	"fmt"
 	"os"
 	"runtime/debug"
@@ -10,8 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
 	connectorsv1 "github.com/mgoodric/security-atlas/gen/proto/connectors/v1"
@@ -95,13 +92,9 @@ func newRootCmd() *cobra.Command {
 // dialConnectorRegistry opens a gRPC connection scoped to the
 // ConnectorRegistry service. The caller owns the returned conn.
 func dialConnectorRegistry() (connectorsv1.ConnectorRegistryServiceClient, *grpc.ClientConn, error) {
-	var transport grpc.DialOption
-	if common.insecure {
-		transport = grpc.WithTransportCredentials(insecure.NewCredentials())
-	} else {
-		transport = grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{MinVersion: tls.VersionTLS12}))
-	}
-	conn, err := grpc.NewClient(common.endpoint, transport)
+	// #2257: sdk.Dial applies the same loopback-only rule to --insecure as
+	// the push path, so the registry dial cannot go plaintext off-box.
+	conn, err := sdk.Dial(common.endpoint, sdkOpts()...)
 	if err != nil {
 		return nil, nil, fmt.Errorf("dial: %w", err)
 	}
