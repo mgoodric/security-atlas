@@ -2,6 +2,8 @@
 // slice 130/154/162), extracted from the former `web/lib/api.ts`
 // god-file.
 
+import type { Theme } from "@/app/(authed)/settings/theme";
+
 import { APIError } from "./base";
 
 // ===== Slice 108 — /v1/me/* (profile + preferences + sessions) =====
@@ -14,6 +16,9 @@ export type MeProfile = {
   idp_subject: string;
   tenant_role: string;
   time_zone: string | null;
+  // #2142: the stored /settings theme. Null for a credential bearer with no
+  // users row (nowhere to store a choice); the browser cache rules there.
+  theme: Theme | null;
   is_admin: boolean;
   owner_roles: string[];
   // Slice 130 (extended by slice 154): canonical `user_roles` list.
@@ -29,6 +34,7 @@ export type MeProfile = {
 export type MePatchRequest = {
   display_name?: string;
   time_zone?: string;
+  theme?: Theme;
 };
 
 export type MePreferences = Record<string, Record<string, boolean>>;
