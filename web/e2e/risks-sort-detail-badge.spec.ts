@@ -148,7 +148,12 @@ test.describe("/risks sortable columns (slice 681 AC-1)", () => {
 
     const desktop = authedPage.locator('[data-testid="list-table-wrap"]');
     // A new column click sorts descending first (latest first).
-    await desktop.getByTestId("risks-sort-review_due").click();
+    const reviewDue = desktop.getByTestId("risks-sort-review_due");
+    await reviewDue.click();
+    // The default order (severity desc) is the same as review-due desc, so
+    // the row order can't show the first click landed; wait on the header
+    // before the second click, or it can race the first (#2144).
+    await expect(reviewDue).toHaveAttribute("data-dir", "desc");
     await expect
       .poll(() => titleOrder(authedPage))
       .toEqual(["Risk Alpha", "Risk Bravo", "Risk Charlie"]); // Dec, Sep, Jun
