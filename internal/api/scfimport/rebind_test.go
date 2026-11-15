@@ -76,6 +76,12 @@ func TestReanchorNote(t *testing.T) {
 	}{
 		{"remap table", legacy("IAC-21", "Privileged Account Management", "", false, ""),
 			"IAC-21 -> IAC-10 in test-2026.3 (concept)"},
+		// #1975: CLD-09 and TPM-04 merge into one 2026.3 anchor, so a
+		// control on either old code is pointed at TPM-10.
+		{"many-to-one remap, CLD-09", legacy("CLD-09", "Cloud Service Provider Risk Management", "", false, ""),
+			"CLD-09 -> TPM-10 in test-2026.3 (concept)"},
+		{"many-to-one remap, TPM-04", legacy("TPM-04", "Third-Party Risk Assessments", "", false, ""),
+			"TPM-04 -> TPM-10 in test-2026.3 (concept)"},
 		{"SCF legacy id", legacy("ZZZ-01", "Old", "", false, "ZZZ-09"),
 			"ZZZ-01 -> ZZZ-09 in test-2026.3 (SCF lists ZZZ-01 as its legacy ID)"},
 		{"title changed", legacy("ZZZ-02", "Old meaning", "New meaning", true, ""),

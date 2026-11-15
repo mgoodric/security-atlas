@@ -175,6 +175,13 @@
       "from": "TPM-05",
       "to": "TPM-14",
       "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CLD-09",
+      "to": "TPM-10",
+      "basis": "concept"
     }
   ]
 }

@@ -49,12 +49,11 @@ const (
 
 // knownMismatchCeiling caps knownMismatch at its seeded size. Lower it as
 // family groups land; never raise it.
-const knownMismatchCeiling = 47
+const knownMismatchCeiling = 46
 
 // knownMismatch: sample scf_id -> the sample title that does not match the
 // pin. Seeded 2026-11-13 with every mismatching row; drained by family.
 var knownMismatch = map[string]string{
-	"CLD-09": "Cloud Service Provider Risk Management",
 	"CRY-01": "Use of Cryptographic Controls",
 	"CRY-04": "Encryption At Rest",
 	"CRY-08": "Encryption In Transit",

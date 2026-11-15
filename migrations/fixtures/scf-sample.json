@@ -118,12 +118,6 @@
       "title": "Cloud Services",
       "description": "Mechanisms exist to govern the cloud services the organization uses."
     },
-    {
-      "scf_id": "CLD-09",
-      "family": "CLD",
-      "title": "Cloud Service Provider Risk Management",
-      "description": "Mechanisms exist to evaluate and manage cloud service provider risk."
-    },
 
     {
       "scf_id": "CPL-02",
