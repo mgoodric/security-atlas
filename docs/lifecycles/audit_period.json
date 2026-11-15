@@ -1,0 +1,44 @@
+{
+  "name": "audit_period",
+  "title": "Audit period",
+  "entity": "audit_periods",
+  "column": "status",
+  "states": [
+    "open",
+    "frozen"
+  ],
+  "initial": [
+    {
+      "state": "open",
+      "action": "create",
+      "routes": [
+        "POST /v1/audit-periods"
+      ],
+      "roles": [
+        "admin"
+      ]
+    }
+  ],
+  "terminal": [
+    "frozen"
+  ],
+  "transitions": [
+    {
+      "from": "open",
+      "to": "frozen",
+      "action": "freeze",
+      "actor": "person",
+      "routes": [
+        "POST /v1/audit-periods/{id}/freeze"
+      ],
+      "roles": [
+        "admin"
+      ],
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "Freezing is final: sample populations then draw only on evidence observed at or before frozen_at."
+    }
+  ]
+}

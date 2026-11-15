@@ -242,6 +242,13 @@ openapi-generate:
 openapi-drift-check:
     bash scripts/check-openapi-drift.sh
 
+# Export every declared lifecycle transition table (#2146) as JSON, one
+# document per lifecycle, to docs/lifecycles/. The in-app help's diagram
+# check (#2148) reads them. cmd/atlas-lifecycles' TestExport_MatchesCommitted
+# fails `just test` when the committed documents drift from the tables.
+lifecycles-export:
+    go run ./cmd/atlas-lifecycles --out docs/lifecycles
+
 # Reproduce the config-reference drift guard locally. Slice 430 — exits
 # non-zero when docs-site/docs/configuration.md and
 # deploy/docker/.env.example disagree (a key in the template missing from

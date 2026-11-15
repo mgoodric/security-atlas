@@ -80,10 +80,13 @@ covered_now AS (
 ),
 control_passed_then AS (
     -- For each covering control, whether its latest evaluation on/before the
-    -- 90-day cutoff was a pass. DISTINCT ON picks the latest row per control.
+    -- 90-day cutoff counted toward coverage: a pass, or ` + "`" + `excepted` + "`" + ` (#2112).
+    -- The engine writes ` + "`" + `excepted` + "`" + ` only while an exception is in force, so an
+    -- excepted row at the cutoff means the exception was active then.
+    -- DISTINCT ON picks the latest row per control.
     SELECT DISTINCT ON (ce.control_id)
         ce.control_id,
-        (ce.result = 'pass') AS passed_then
+        (ce.result IN ('pass', 'excepted')) AS passed_then
     FROM control_evaluations ce
     WHERE ce.tenant_id = $1
       AND ce.evaluated_at <= $2
@@ -91,11 +94,36 @@ control_passed_then AS (
 ),
 covered_then AS (
     -- Requirements covered 90 days ago: at least one covering control that
-    -- was passing on/before the cutoff.
+    -- was passing (or excepted) on/before the cutoff.
     SELECT DISTINCT cc.framework_version_id, cc.requirement_id
     FROM covering_control cc
     JOIN control_passed_then cpt ON cpt.control_id = cc.control_id
     WHERE cpt.passed_then
+),
+control_excepted_now AS (
+    -- #2112: covering controls whose coverage rests on an exception today:
+    -- the latest evaluation of at least one of their scope cells is
+    -- ` + "`" + `excepted` + "`" + `. DISTINCT ON picks the latest row per (control, cell).
+    SELECT DISTINCT le.control_id
+    FROM (
+        SELECT DISTINCT ON (ce.control_id, ce.scope_cell_id)
+            ce.control_id,
+            ce.result
+        FROM control_evaluations ce
+        WHERE ce.tenant_id = $1
+        ORDER BY ce.control_id, ce.scope_cell_id, ce.evaluated_at DESC, ce.created_at DESC
+    ) le
+    WHERE le.result = 'excepted'
+),
+covered_by_exception AS (
+    -- Requirements covered today only by exception: every covering control
+    -- rests on an exception. A requirement with one covering control that is
+    -- not excepted does not depend on a waiver and is not counted.
+    SELECT cc.framework_version_id, cc.requirement_id
+    FROM covering_control cc
+    LEFT JOIN control_excepted_now cen ON cen.control_id = cc.control_id
+    GROUP BY cc.framework_version_id, cc.requirement_id
+    HAVING BOOL_AND(cen.control_id IS NOT NULL)
 ),
 history_versions AS (
     -- Framework versions with at least one covering control evaluated on or
@@ -133,6 +161,15 @@ SELECT
              100.0 * COUNT(DISTINCT cn.requirement_id)
                    / COUNT(DISTINCT vr.requirement_id), 2)
     END::float8 AS coverage_pct,
+    -- covered_by_exception_pct (#2112): requirements covered only by
+    -- excepted controls / total requirements, 0..100. A subset of
+    -- coverage_pct, reported separately so a waiver never reads as a
+    -- demonstrated control.
+    CASE WHEN COUNT(DISTINCT vr.requirement_id) = 0 THEN 0.0
+         ELSE ROUND(
+             100.0 * COUNT(DISTINCT cbe.requirement_id)
+                   / COUNT(DISTINCT vr.requirement_id), 2)
+    END::float8 AS covered_by_exception_pct,
     -- freshness_composite: fresh covering controls / all covering controls,
     -- 0..100. 0 when the version has no covering controls.
     CASE WHEN COUNT(DISTINCT cf.control_id) = 0 THEN 0.0
@@ -156,6 +193,8 @@ LEFT JOIN covered_now      cn ON cn.framework_version_id = vr.framework_version_
                               AND cn.requirement_id      = vr.requirement_id
 LEFT JOIN covered_then     ct ON ct.framework_version_id = vr.framework_version_id
                               AND ct.requirement_id      = vr.requirement_id
+LEFT JOIN covered_by_exception cbe ON cbe.framework_version_id = vr.framework_version_id
+                                  AND cbe.requirement_id      = vr.requirement_id
 LEFT JOIN control_freshness cf ON cf.framework_version_id = vr.framework_version_id
 LEFT JOIN scoped_versions  sv ON sv.framework_version_id = vr.framework_version_id
 LEFT JOIN history_versions hv ON hv.framework_version_id = vr.framework_version_id
@@ -169,14 +208,15 @@ type FrameworkPostureParams struct {
 }
 
 type FrameworkPostureRow struct {
-	FrameworkID        pgtype.UUID `json:"framework_id"`
-	FrameworkVersion   string      `json:"framework_version"`
-	FrameworkVersionID pgtype.UUID `json:"framework_version_id"`
-	CoveragePct        float64     `json:"coverage_pct"`
-	FreshnessComposite float64     `json:"freshness_composite"`
-	TrendDelta90d      float64     `json:"trend_delta_90d"`
-	ScopeActivated     bool        `json:"scope_activated"`
-	TrendHistory       bool        `json:"trend_history"`
+	FrameworkID           pgtype.UUID `json:"framework_id"`
+	FrameworkVersion      string      `json:"framework_version"`
+	FrameworkVersionID    pgtype.UUID `json:"framework_version_id"`
+	CoveragePct           float64     `json:"coverage_pct"`
+	CoveredByExceptionPct float64     `json:"covered_by_exception_pct"`
+	FreshnessComposite    float64     `json:"freshness_composite"`
+	TrendDelta90d         float64     `json:"trend_delta_90d"`
+	ScopeActivated        bool        `json:"scope_activated"`
+	TrendHistory          bool        `json:"trend_history"`
 }
 
 // Slice 066 — dashboard backend read endpoints.
@@ -229,8 +269,14 @@ type FrameworkPostureRow struct {
 // trend_delta_90d: coverage_pct now minus the coverage_pct as it stood ~90
 // days ago. "As it stood" is reconstructed from the control_evaluations
 // ledger (slice 012): a control counted toward coverage 90 days ago iff its
-// latest evaluation on/before the cutoff had result='pass'. The delta is in
+// latest evaluation on/before the cutoff had result 'pass' or 'excepted'
+// (#2112: excepted counts as covered, now and then). The delta is in
 // percentage points (e.g. +12.5 means coverage rose 12.5 points).
+//
+// covered_by_exception_pct (#2112): the share of requirements covered today
+// only by controls that rest on an active exception (at least one of the
+// control's cells evaluates `excepted`). It is part of coverage_pct, and
+// callers show it beside it so a waiver never reads as a demonstrated control.
 //
 // Statement of Applicability (#1788): a requirement the tenant's ACTIVATED
 // framework-scope revision for the version marks `excluded` leaves the
@@ -267,6 +313,7 @@ func (q *Queries) FrameworkPosture(ctx context.Context, arg FrameworkPosturePara
 			&i.FrameworkVersion,
 			&i.FrameworkVersionID,
 			&i.CoveragePct,
+			&i.CoveredByExceptionPct,
 			&i.FreshnessComposite,
 			&i.TrendDelta90d,
 			&i.ScopeActivated,
