@@ -128,13 +128,19 @@ export type ExpiringExceptionsResponse = {
 // is signed (current coverage minus coverage 90 days ago, in points).
 // `covered_by_exception_pct` (#2112) is the part of `coverage_pct` that
 // rests only on active exceptions, 0-100.
+//
+// `scope_set` (#2114) is false when the tenant has no activated framework
+// scope for the version; every percentage is then null and the tile shows
+// "Scope not set", linking to `/framework-scopes/<framework_version_id>`.
 export type FrameworkPostureRow = {
   framework_id: string;
   framework_version: string;
-  coverage_pct: number;
-  covered_by_exception_pct: number;
-  freshness_composite: number;
-  trend_delta_90d: number;
+  framework_version_id: string;
+  scope_set: boolean;
+  coverage_pct: number | null;
+  covered_by_exception_pct: number | null;
+  freshness_composite: number | null;
+  trend_delta_90d: number | null;
 };
 
 // FrameworkPostureReport mirrors the FrameworkPosture handler's envelope.

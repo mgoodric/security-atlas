@@ -47,6 +47,7 @@ import {
   createCalendarSubscription,
   fetchCalendarEvents,
 } from "@/lib/api/calendar";
+import { pageTitle } from "@/lib/page-titles";
 
 const ALL_TYPES = [
   "audit",
@@ -160,7 +161,7 @@ function CalendarPageInner() {
 
   return (
     <PageShell
-      title="Compliance calendar"
+      title={pageTitle("/calendar")}
       subtitle="Upcoming audits, exception expirations, policy reviews, vendor reviews, periodic control reviews, risk reviews, action-plan due dates and offboarding deadlines — one place for the whole team."
       actions={
         <div className="flex flex-col items-end gap-2">
@@ -257,7 +258,7 @@ export default function CalendarPage() {
   return (
     <Suspense
       fallback={
-        <PageShell title="Compliance calendar">
+        <PageShell title={pageTitle("/calendar")}>
           <Skeleton className="h-32 w-full" />
         </PageShell>
       }

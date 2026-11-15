@@ -36,6 +36,7 @@ import {
   hasErrors,
   validateGenerateForm,
 } from "./validate";
+import { pageTitle } from "@/lib/page-titles";
 
 // Slice 032 — quarterly board pack list + generate.
 //
@@ -112,7 +113,7 @@ export default function BoardPacksPage() {
   // Render the clean disabled panel instead of the raw error state.
   if (packsQuery.isError && isFeatureDisabledError(packsQuery.error)) {
     return (
-      <PageShell width="reading" title="Board packs">
+      <PageShell width="reading" title={pageTitle("/board-packs")}>
         <FeatureDisabledState moduleName="Board packs" />
       </PageShell>
     );
@@ -122,7 +123,7 @@ export default function BoardPacksPage() {
     <PageShell
       width="reading"
       data-testid="board-packs-page"
-      title="Board packs"
+      title={pageTitle("/board-packs")}
       subtitle="Quarterly board-meeting reports — posture, top risks, coverage trend, open findings, operational metrics, investment vs coverage, and asks of the board. Each pack is reviewed and approved section-by-section, then published as a frozen artifact."
     >
       <Card>

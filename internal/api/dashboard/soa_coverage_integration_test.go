@@ -175,11 +175,44 @@ func seedScopeRevision(t *testing.T, admin *pgxpool.Pool, tenant string, f soaCo
 	return scopeID
 }
 
+// postureNumbers is one posture row as the three read paths emit it. The
+// percentages are null when scope_set is false (#2114).
 type postureNumbers struct {
-	Coverage  float64 `json:"coverage_pct"`
-	Freshness float64 `json:"freshness_composite"`
-	Trend     float64 `json:"trend_delta_90d"`
-	Framework string  `json:"framework_id"`
+	Coverage         *float64 `json:"coverage_pct"`
+	ExceptionPct     *float64 `json:"covered_by_exception_pct"`
+	Freshness        *float64 `json:"freshness_composite"`
+	Trend            *float64 `json:"trend_delta_90d"`
+	Framework        string   `json:"framework_id"`
+	FrameworkVersion string   `json:"framework_version_id"`
+	ScopeSet         bool     `json:"scope_set"`
+}
+
+// String renders the row with the pointers dereferenced, so a failure
+// message and an equality check read the values, not the addresses.
+func (p postureNumbers) String() string {
+	f := func(v *float64) string {
+		if v == nil {
+			return "null"
+		}
+		return fmt.Sprint(*v)
+	}
+	return fmt.Sprintf("{framework=%s version=%s scope_set=%v coverage=%s exception=%s freshness=%s trend=%s}",
+		p.Framework, p.FrameworkVersion, p.ScopeSet, f(p.Coverage), f(p.ExceptionPct), f(p.Freshness), f(p.Trend))
+}
+
+// assertScopeNotSet checks a row is in the "scope not set" state: the flag
+// is false and no percentage is carried.
+func assertScopeNotSet(t *testing.T, label string, got postureNumbers, f soaCoverageFixture) {
+	t.Helper()
+	if got.ScopeSet {
+		t.Errorf("%s: scope_set = true, want false", label)
+	}
+	if got.Coverage != nil || got.ExceptionPct != nil || got.Freshness != nil || got.Trend != nil {
+		t.Errorf("%s: scope not set but percentages present: %s", label, got)
+	}
+	if got.FrameworkVersion != f.frameworkVersionID.String() {
+		t.Errorf("%s: framework_version_id = %q, want %s", label, got.FrameworkVersion, f.frameworkVersionID)
+	}
 }
 
 func soaEnv(t *testing.T, tenant string) testEnv {
@@ -258,28 +291,49 @@ func pct(n, d float64) float64 { return math.Round(10000*n/d) / 100 }
 
 func assertPosture(t *testing.T, label string, got postureNumbers, coverage, trend float64) {
 	t.Helper()
-	if got.Coverage != coverage {
-		t.Errorf("%s: coverage_pct = %v, want %v", label, got.Coverage, coverage)
+	if !got.ScopeSet {
+		t.Errorf("%s: scope_set = false, want true", label)
 	}
-	if got.Trend != trend {
-		t.Errorf("%s: trend_delta_90d = %v, want %v", label, got.Trend, trend)
+	if got.Coverage == nil || *got.Coverage != coverage {
+		t.Errorf("%s: coverage_pct = %s, want %v", label, got, coverage)
+	}
+	if got.Trend == nil || *got.Trend != trend {
+		t.Errorf("%s: trend_delta_90d = %s, want %v", label, got, trend)
 	}
 }
 
-// Before activation every requirement counts; once the revision with two
-// exclusions is activated the denominator drops from 8 to 6. The trend is
-// on the same 6-requirement basis for both halves, and the export and MCP
-// tool agree with the dashboard API.
-func TestSoACoverage_ActivatedExclusionsLeaveTheDenominator(t *testing.T) {
+// #2114: with no activated scope the version's posture is "scope not set"
+// on every read path (dashboard API, export, MCP) and carries no
+// percentage; after activation it is a percentage.
+func TestSoACoverage_NoActivatedScopeIsScopeNotSet(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	tenant := soaCoverageTenant(t, admin)
 	f := seedSoACoverageFixture(t, admin, tenant)
 	env := soaEnv(t, tenant)
 
-	// Covered now: R-01, R-04, R-05, R-06, R-07 (5 of 8). Covered 90 days
-	// ago: R-04, R-07 (C2 was the only control passing then).
-	before := dashboardPosture(t, env, f)
-	assertPosture(t, "before activation", before, pct(5, 8), pct(5, 8)-pct(2, 8)) // 62.5, 37.5
+	assertScopeNotSet(t, "dashboard, no scope", dashboardPosture(t, env, f), f)
+	assertScopeNotSet(t, "export, no scope", exportPosture(t, env, f), f)
+	assertScopeNotSet(t, "mcp, no scope", mcpPosture(t, env, f), f)
+
+	seedScopeRevision(t, admin, tenant, f, true)
+
+	after := dashboardPosture(t, env, f)
+	assertPosture(t, "after activation", after, pct(4, 6), 33.33)
+	if after.ExceptionPct == nil || after.Freshness == nil {
+		t.Errorf("after activation: percentages missing: %s", after)
+	}
+}
+
+// Once the revision with two exclusions is activated the denominator is 6
+// of the 8 requirements. The trend is on the same 6-requirement basis for
+// both halves, and the export and MCP tool agree with the dashboard API.
+// (Before activation the version is "scope not set" — see
+// TestSoACoverage_NoActivatedScopeIsScopeNotSet.)
+func TestSoACoverage_ActivatedExclusionsLeaveTheDenominator(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := soaCoverageTenant(t, admin)
+	f := seedSoACoverageFixture(t, admin, tenant)
+	env := soaEnv(t, tenant)
 
 	seedScopeRevision(t, admin, tenant, f, true)
 
@@ -297,26 +351,22 @@ func TestSoACoverage_ActivatedExclusionsLeaveTheDenominator(t *testing.T) {
 		{"export", exportPosture(t, env, f)},
 		{"mcp", mcpPosture(t, env, f)},
 	} {
-		if other.got != after {
-			t.Errorf("%s posture = %+v, dashboard API = %+v", other.name, other.got, after)
+		if other.got.String() != after.String() {
+			t.Errorf("%s posture = %s, dashboard API = %s", other.name, other.got, after)
 		}
 	}
 }
 
-// A draft revision's exclusions don't change coverage.
+// A draft revision is not an activated scope: the version stays "scope not
+// set" and its exclusions don't surface a percentage.
 func TestSoACoverage_DraftExclusionsHaveNoEffect(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	tenant := soaCoverageTenant(t, admin)
 	f := seedSoACoverageFixture(t, admin, tenant)
 	env := soaEnv(t, tenant)
 
-	before := dashboardPosture(t, env, f)
 	seedScopeRevision(t, admin, tenant, f, false)
-	after := dashboardPosture(t, env, f)
-	if after != before {
-		t.Fatalf("draft exclusions changed posture: before %+v, after %+v", before, after)
-	}
-	assertPosture(t, "draft", after, 62.5, 37.5)
+	assertScopeNotSet(t, "draft", dashboardPosture(t, env, f), f)
 }
 
 // Per-requirement coverage returns an excluded requirement as `excluded`

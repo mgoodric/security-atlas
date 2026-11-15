@@ -67,7 +67,7 @@ func TestApprove_SelfApprovalOptIn(t *testing.T) {
 	}
 	var action, actor string
 	if err := s.admin.QueryRow(context.Background(),
-		`SELECT action, actor FROM policy_audit_log WHERE tenant_id = $1 AND policy_id = $2`,
+		`SELECT action, actor FROM policy_audit_log WHERE tenant_id = $1 AND policy_id = $2 AND action = 'self_approved'`,
 		s.tenant, id).Scan(&action, &actor); err != nil {
 		t.Fatalf("read policy_audit_log: %v", err)
 	}

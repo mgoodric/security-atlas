@@ -58,11 +58,33 @@ records the person who re-submits it. Any other `under_review` row still
 answers 409 on submit. No migration was needed: the query changed, and
 sqlc v1.31.1 regenerated `internal/dbx`.
 
+Re-submitting a legacy row makes the re-submitter the submitter of
+record: `submitted_by` is overwritten with the person who re-submits, so
+that person can no longer approve it (unless Allow self-approval is on),
+and the session or key that first submitted it is no longer named on the
+row. The `resubmitted` policy_audit_log row (#2200) keeps both: its actor
+is the re-submitter, and the earlier `submitted` row, where one was
+written, names the original submitter. Rows submitted before #2200 have
+no `submitted` audit row, so for them the original `submitted_by` is not
+retained anywhere after a re-submit.
+
+#2200 extends the same rule to a `submitted_by` recorded as a credential
+id (`key_%`); see D5.
+
 **D5: A pre-#1807 key submitter is still caught.** Before the change, a
 key bound to a user recorded its key id as `submitted_by`. `Approver`
 carries the credential id too, and `checkApprover` refuses when it equals
 the submitter, so that user cannot approve their own in-flight policy
 with the same key.
+
+That left a gap (#2200): the key's owner could approve through a JWT or a
+different key bound to them, since neither carries the key id. A
+`key_%` submitter is therefore now handled like a `jwt:%` one: the same
+key is still refused as the submitter (`ErrSelfApproval`, 403), and any
+other credential gets `ErrSubmitterUnknown` (409) until the policy is
+re-submitted, which `SubmitPolicyForReview` now allows for `key_%` rows
+too. On `/v1` only JWTs authenticate (D7), so no new row records a key
+id as its submitter; the rule only touches rows from before #1807.
 
 **D6: The submitter, not the author, is compared.** The ticket suggested
 the approver should probably also differ from `created_by`. #1807 asks

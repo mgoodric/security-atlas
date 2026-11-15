@@ -4,20 +4,26 @@
 // with PKCE against a per-tenant IdP config, validates the ID token, and
 // upserts a user keyed on (idp_issuer, idp_subject).
 //
-// State + PKCE protection lives in short-lived cookies scoped to /auth/oidc;
-// the callback handler verifies that state cookie matches the query param
-// (CSRF guard) before exchanging the code.
+// State + PKCE protection lives in short-lived flow cookies; the callback
+// handler verifies that state cookie matches the query param (CSRF guard)
+// and that the state's HMAC binds the flow's tenant, IdP and nonce (#2177)
+// before exchanging the code. With secure cookies the flow cookies carry
+// the __Host- prefix, so a sibling subdomain cannot plant them.
 //
 // Library: github.com/coreos/go-oidc/v3 + golang.org/x/oauth2.
 package oidc
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,6 +67,27 @@ const (
 	// is generous for a user to authenticate but short enough that an
 	// abandoned tab does not leave persistent verifier material around.
 	FlowCookieMaxAge = 10 * time.Minute
+
+	// HostPrefix is prepended to every flow cookie name when secure cookies
+	// are on (#2177). Browsers accept a __Host- cookie only when it is
+	// Secure, has Path=/ and no Domain, so a sibling subdomain cannot set
+	// or overwrite one. Plain-HTTP dev (secureCookies=false) cannot use the
+	// prefix and keeps the bare names scoped to FlowCookiePath; the state
+	// HMAC still binds the flow there.
+	HostPrefix = "__Host-"
+
+	// FlowCookiePath scopes the unprefixed flow cookies of a plain-HTTP
+	// deployment. __Host- cookies must use Path=/.
+	FlowCookiePath = "/auth/oidc"
+
+	// StateKeyEnv names the optional dedicated key for the state HMAC
+	// (#2177). When unset, the key is derived from BEARER_HASH_KEY, which
+	// every replica already shares. Either way it is never per-process, so
+	// a callback that lands on another replica verifies.
+	StateKeyEnv = "ATLAS_OIDC_STATE_KEY"
+
+	// StateKeyMinBytes is the shortest state HMAC key accepted.
+	StateKeyMinBytes = 32
 
 	// ProviderCacheTTL bounds how long the RP serves a discovered IdP provider
 	// before re-running OIDC discovery. Slice 335's chaos design expected new
@@ -117,9 +144,16 @@ var ErrNonceMismatch = errors.New("oidc: nonce mismatch (ID-token replay guard)"
 // the tenant cookie is missing. The callback returns 400 when it fires.
 var ErrTenantMismatch = errors.New("oidc: tenant does not match the login flow")
 
+// ErrStateKeyInvalid is returned by BeginLogin and HandleCallback when the
+// Authenticator was built without a state HMAC key of at least
+// StateKeyMinBytes. The flow fails closed rather than issuing an unsigned
+// state.
+var ErrStateKeyInvalid = fmt.Errorf("oidc: state HMAC key must be at least %d bytes", StateKeyMinBytes)
+
 // Authenticator drives the RP-side OIDC flow.
 type Authenticator struct {
 	resolver         IdpResolver
+	stateKey         []byte
 	discoveryTimeout time.Duration
 	mu               sync.Mutex
 	cache            map[string]cachedProvider // keyed by issuer URL
@@ -134,20 +168,24 @@ type cachedProvider struct {
 
 const defaultDiscoveryTimeout = 5 * time.Second
 
-// New constructs an Authenticator over a per-tenant IdP resolver.
-func New(resolver IdpResolver) *Authenticator {
-	return NewWithDiscoveryTimeout(resolver, defaultDiscoveryTimeout)
+// New constructs an Authenticator over a per-tenant IdP resolver. stateKey
+// signs the flow state (#2177); it must be at least StateKeyMinBytes and the
+// same on every replica (see StateKeyFromEnv). The key is borrowed, not
+// copied.
+func New(resolver IdpResolver, stateKey []byte) *Authenticator {
+	return NewWithDiscoveryTimeout(resolver, stateKey, defaultDiscoveryTimeout)
 }
 
 // NewWithDiscoveryTimeout constructs an Authenticator with an explicit OIDC
 // discovery timeout. Tests use this to prove the outage path is bounded without
 // waiting on the production timeout.
-func NewWithDiscoveryTimeout(resolver IdpResolver, discoveryTimeout time.Duration) *Authenticator {
+func NewWithDiscoveryTimeout(resolver IdpResolver, stateKey []byte, discoveryTimeout time.Duration) *Authenticator {
 	if discoveryTimeout <= 0 {
 		discoveryTimeout = defaultDiscoveryTimeout
 	}
 	return &Authenticator{
 		resolver:         resolver,
+		stateKey:         stateKey,
 		discoveryTimeout: discoveryTimeout,
 		cache:            map[string]cachedProvider{},
 		providerCacheTTL: ProviderCacheTTL,
@@ -171,6 +209,9 @@ type LoginResult struct {
 // BeginLogin generates state + PKCE, looks up the IdP, and returns the
 // authorize URL + cookies to set. The handler issues a 302 to AuthURL.
 func (a *Authenticator) BeginLogin(ctx context.Context, in LoginInput, secureCookies bool) (LoginResult, error) {
+	if len(a.stateKey) < StateKeyMinBytes {
+		return LoginResult{}, ErrStateKeyInvalid
+	}
 	cfg, err := a.resolver.ResolveIdp(ctx, in.TenantID, in.IdpName)
 	if err != nil {
 		return LoginResult{}, err
@@ -180,10 +221,6 @@ func (a *Authenticator) BeginLogin(ctx context.Context, in LoginInput, secureCoo
 		return LoginResult{}, err
 	}
 	verifier := oauth2.GenerateVerifier()
-	state, err := randomState()
-	if err != nil {
-		return LoginResult{}, err
-	}
 	// Slice 365 — per-flow OIDC nonce. 16-byte crypto/rand via the same
 	// randomState() helper that backs state (P0-365-5: must use
 	// crypto/rand). The same value is persisted in the NonceCookie and
@@ -193,6 +230,13 @@ func (a *Authenticator) BeginLogin(ctx context.Context, in LoginInput, secureCoo
 	if err != nil {
 		return LoginResult{}, err
 	}
+	// #2177: state = rand "." HMAC(k, rand|tenant|idp|nonce), so the
+	// callback can tell a flow it issued from cookies planted by hand.
+	stateRand, err := randomState()
+	if err != nil {
+		return LoginResult{}, err
+	}
+	state := stateRand + "." + a.stateMAC(stateRand, in.TenantID.String(), in.IdpName, nonce)
 	oa := &oauth2.Config{
 		ClientID:     cfg.ClientID,
 		ClientSecret: cfg.ClientSecret,
@@ -251,19 +295,23 @@ type CallbackResult struct {
 }
 
 // HandleCallback verifies state, exchanges code, validates ID token, and
-// returns the canonical user identifiers. Returns ErrStateMismatch on CSRF
-// failure (400) and an opaque error on any other failure (502 / 401 — let
-// the handler decide).
-func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, tenantID uuid.UUID) (CallbackResult, error) {
-	stateCookie, err := r.Cookie(StateCookie)
+// returns the canonical user identifiers. secureCookies must match the
+// value BeginLogin ran with: it selects the __Host- cookie names. Returns
+// ErrStateMismatch on CSRF failure (400) and an opaque error on any other
+// failure (502 / 401 — let the handler decide).
+func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, tenantID uuid.UUID, secureCookies bool) (CallbackResult, error) {
+	if len(a.stateKey) < StateKeyMinBytes {
+		return CallbackResult{}, ErrStateKeyInvalid
+	}
+	stateCookie, err := r.Cookie(CookieName(StateCookie, secureCookies))
 	if err != nil {
 		return CallbackResult{}, ErrStateMismatch
 	}
-	verifierCookie, err := r.Cookie(VerifierCookie)
+	verifierCookie, err := r.Cookie(CookieName(VerifierCookie, secureCookies))
 	if err != nil {
 		return CallbackResult{}, ErrStateMismatch
 	}
-	idpCookie, err := r.Cookie(IdpCookie)
+	idpCookie, err := r.Cookie(CookieName(IdpCookie, secureCookies))
 	if err != nil {
 		return CallbackResult{}, ErrStateMismatch
 	}
@@ -271,7 +319,7 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 	// every legitimate flow set NonceCookie in BeginLogin. Distinguished
 	// from ErrStateMismatch so audit-log review can tell a CSRF attempt
 	// apart from an ID-token replay attempt (P0-365-4: no bypass path).
-	nonceCookie, err := r.Cookie(NonceCookie)
+	nonceCookie, err := r.Cookie(CookieName(NonceCookie, secureCookies))
 	if err != nil {
 		return CallbackResult{}, ErrNonceMismatch
 	}
@@ -288,12 +336,18 @@ func (a *Authenticator) HandleCallback(ctx context.Context, r *http.Request, ten
 		return CallbackResult{}, ErrStateMismatch
 	}
 	// #1968: the tenant is bound to the flow by the cookie BeginLogin set.
-	tenantCookie, err := r.Cookie(TenantCookie)
+	tenantCookie, err := r.Cookie(CookieName(TenantCookie, secureCookies))
 	if err != nil {
 		return CallbackResult{}, ErrTenantMismatch
 	}
 	if flowTenant, perr := uuid.Parse(tenantCookie.Value); perr != nil || flowTenant != tenantID {
 		return CallbackResult{}, ErrTenantMismatch
+	}
+	// #2177: the state's HMAC must cover the tenant, IdP and nonce cookies
+	// as they arrived. A state the server did not issue, or flow cookies
+	// mixed from two flows, fails here before any IdP lookup.
+	if !a.verifyState(queryState, tenantCookie.Value, idpCookie.Value, nonceCookie.Value) {
+		return CallbackResult{}, ErrStateMismatch
 	}
 
 	cfg, err := a.resolver.ResolveIdp(ctx, tenantID, idpCookie.Value)
@@ -404,20 +458,51 @@ func parseEmailVerified(v any) *bool {
 }
 
 // ClearFlowCookies sets MaxAge=-1 on state/verifier/idp/nonce/tenant
-// cookies. The login success handler calls this after establishing the
-// session. Slice 365 added NonceCookie to the list, #1968 TenantCookie.
+// cookies, under the names and path BeginLogin used for the same secure
+// setting. The callback calls this after establishing the session and on
+// every refusal that ends the flow. Slice 365 added NonceCookie to the
+// list, #1968 TenantCookie.
 func ClearFlowCookies(w http.ResponseWriter, secure bool) {
 	for _, name := range []string{StateCookie, VerifierCookie, IdpCookie, NonceCookie, TenantCookie} {
-		http.SetCookie(w, &http.Cookie{
-			Name:     name,
-			Value:    "",
-			Path:     "/auth/oidc",
-			MaxAge:   -1,
-			HttpOnly: true,
-			Secure:   secure,
-			SameSite: http.SameSiteLaxMode,
-		})
+		c := flowCookie(name, "", secure)
+		c.MaxAge = -1
+		http.SetCookie(w, c)
 	}
+}
+
+// CookieName is the name a flow cookie is set and read under: base with
+// the __Host- prefix when secure cookies are on, bare otherwise (#2177).
+func CookieName(base string, secure bool) string {
+	if secure {
+		return HostPrefix + base
+	}
+	return base
+}
+
+// DeriveStateKey derives the state HMAC key from a root server secret
+// (BEARER_HASH_KEY), domain-separated so the state MAC never equals a
+// bearer-token hash.
+func DeriveStateKey(root []byte) []byte {
+	m := hmac.New(sha256.New, root)
+	m.Write([]byte("atlas-oidc-state-key-v1"))
+	return m.Sum(nil)
+}
+
+// StateKeyFromEnv returns the state HMAC key: ATLAS_OIDC_STATE_KEY when
+// set (at least StateKeyMinBytes), otherwise DeriveStateKey(root). root is
+// the BEARER_HASH_KEY the server already refuses to boot without. A set but
+// short ATLAS_OIDC_STATE_KEY is an error, never a silent fallback.
+func StateKeyFromEnv(root []byte) ([]byte, error) {
+	if v := os.Getenv(StateKeyEnv); v != "" {
+		if len(v) < StateKeyMinBytes {
+			return nil, fmt.Errorf("%s must be at least %d bytes", StateKeyEnv, StateKeyMinBytes)
+		}
+		return []byte(v), nil
+	}
+	if len(root) < StateKeyMinBytes {
+		return nil, ErrStateKeyInvalid
+	}
+	return DeriveStateKey(root), nil
 }
 
 // --- helpers ---
@@ -449,6 +534,32 @@ func (a *Authenticator) provider(ctx context.Context, issuer string) (*coreos.Pr
 	return p, nil
 }
 
+// stateMAC is HMAC-SHA256 over the length-prefixed state random, tenant,
+// IdP name and nonce, base64url-encoded. Length prefixes keep two field
+// lists from encoding to the same bytes.
+func (a *Authenticator) stateMAC(fields ...string) string {
+	m := hmac.New(sha256.New, a.stateKey)
+	m.Write([]byte("atlas-oidc-state-v1"))
+	var n [8]byte
+	for _, f := range fields {
+		binary.BigEndian.PutUint64(n[:], uint64(len(f)))
+		m.Write(n[:])
+		m.Write([]byte(f))
+	}
+	return base64.RawURLEncoding.EncodeToString(m.Sum(nil))
+}
+
+// verifyState checks state = rand "." stateMAC(rand, tenant, idp, nonce)
+// in constant time.
+func (a *Authenticator) verifyState(state, tenant, idp, nonce string) bool {
+	stateRand, mac, ok := strings.Cut(state, ".")
+	if !ok || stateRand == "" {
+		return false
+	}
+	want := a.stateMAC(stateRand, tenant, idp, nonce)
+	return hmac.Equal([]byte(mac), []byte(want))
+}
+
 func randomState() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -458,10 +569,14 @@ func randomState() (string, error) {
 }
 
 func flowCookie(name, value string, secure bool) *http.Cookie {
+	path := FlowCookiePath
+	if secure {
+		path = "/"
+	}
 	return &http.Cookie{
-		Name:     name,
+		Name:     CookieName(name, secure),
 		Value:    value,
-		Path:     "/auth/oidc",
+		Path:     path,
 		MaxAge:   int(FlowCookieMaxAge / time.Second),
 		HttpOnly: true,
 		Secure:   secure,

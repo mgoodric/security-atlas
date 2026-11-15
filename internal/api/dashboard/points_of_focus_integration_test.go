@@ -57,8 +57,14 @@ func TestFrameworkPosture_PointsOfFocusNotInDenominator(t *testing.T) {
 		t.Fatalf("lookup AST-01: %v", err)
 	}
 
+	var versionID uuid.UUID
+	if err := admin.QueryRow(ctx, `SELECT id FROM framework_versions WHERE framework_id = $1 AND status = 'current'`, frameworkID).Scan(&versionID); err != nil {
+		t.Fatalf("lookup framework version: %v", err)
+	}
+
 	tenant := freshTenant(t, admin)
 	seedControlOnAnchor(t, admin, tenant, astAnchor)
+	activateScope(t, admin, tenant, versionID)
 	env := testServer(t, app, tenant)
 
 	resp, body := get(t, env, "/v1/frameworks/posture")
