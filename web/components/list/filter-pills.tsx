@@ -50,7 +50,7 @@ export function FilterPills({ pills, onChange, meta }: FilterPillsProps) {
             aria-label={pill.label}
             value={pill.value}
             onChange={(e) => onChange(pill.id, e.target.value)}
-            className="bg-transparent text-foreground font-medium focus:outline-none"
+            className="rounded-sm bg-transparent text-foreground font-medium focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
           >
             {pill.options.map((opt) => (
               <option key={opt.value} value={opt.value}>
