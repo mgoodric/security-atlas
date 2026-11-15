@@ -48,6 +48,20 @@ func (e *UnknownCategoryError) Error() string {
 		e.Ref, strings.Join(e.Valid, ", "))
 }
 
+// AmbiguousCategoryError is returned when a category named by display name
+// (#1815) matches more than one of the tenant's categories: an archived
+// category can share a name with an active one. Slugs lists every match so
+// the caller can name one by slug instead.
+type AmbiguousCategoryError struct {
+	Ref   string
+	Slugs []string
+}
+
+func (e *AmbiguousCategoryError) Error() string {
+	return fmt.Sprintf("risk: category name %q matches more than one category; name one by slug: %s",
+		e.Ref, strings.Join(e.Slugs, ", "))
+}
+
 // IsUnknownCategory reports whether err is an UnknownCategoryError.
 func IsUnknownCategory(err error) bool {
 	var target *UnknownCategoryError
@@ -105,18 +119,23 @@ func resolveCategory(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, re
 // risks yet. Callers map it to a client error.
 func IsCategoryRefusal(err error) bool {
 	var (
-		archived *ArchivedCategoryError
-		invalid  *InvalidCategoryError
+		archived  *ArchivedCategoryError
+		invalid   *InvalidCategoryError
+		ambiguous *AmbiguousCategoryError
 	)
-	return IsUnknownCategory(err) || errors.As(err, &archived) || errors.As(err, &invalid)
+	return IsUnknownCategory(err) || errors.As(err, &archived) ||
+		errors.As(err, &invalid) || errors.As(err, &ambiguous)
 }
 
-// ResolveCategoryTx resolves ref (a slug or an id) to one of the tenant's
-// categories inside the caller's tenant-scoped transaction, for writers
-// outside Store such as the MCP create_risk applier (#1810). It returns the
-// category with the enum value the risk row still carries, or an error that
-// IsCategoryRefusal recognises when the category is unknown, archived, or
-// cannot hold risks yet.
+// ResolveCategoryTx resolves ref (a slug, an id, or a display name) to one
+// of the tenant's categories inside the caller's tenant-scoped transaction,
+// for writers outside Store such as the MCP create_risk applier (#1810). A
+// slug or id match wins; otherwise ref is matched against display names,
+// case-insensitively on the trimmed value (#1815), and more than one match
+// is an AmbiguousCategoryError. It returns the category with the enum value
+// the risk row still carries, or an error that IsCategoryRefusal recognises
+// when the category is unknown, ambiguous, archived, or cannot hold risks
+// yet.
 func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, dbx.RiskCategory, error) {
 	if err := q.SeedRiskCategories(ctx, pgUUID(tenantID)); err != nil {
 		return Category{}, "", fmt.Errorf("seed risk categories: %w", err)
@@ -125,10 +144,12 @@ func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, 
 		TenantID: pgUUID(tenantID),
 		Ref:      ref,
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		return Category{}, "", unknownCategory(ctx, q, tenantID, ref)
-	}
-	if err != nil {
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		if row, err = resolveCategoryByName(ctx, q, tenantID, ref); err != nil {
+			return Category{}, "", err
+		}
+	case err != nil:
 		return Category{}, "", fmt.Errorf("resolve risk category: %w", err)
 	}
 	if row.Archived {
@@ -145,6 +166,30 @@ func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, 
 			"category %q cannot hold risks until the risk_category enum is retired (#1745)", row.Slug)}
 	}
 	return categoryFromRow(row), enum, nil
+}
+
+// resolveCategoryByName finds the one tenant category whose display name is
+// ref (#1815). No match is an UnknownCategoryError naming the valid slugs;
+// several are an AmbiguousCategoryError naming theirs.
+func resolveCategoryByName(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (dbx.OrgRiskCategory, error) {
+	rows, err := q.ResolveRiskCategoriesByName(ctx, dbx.ResolveRiskCategoriesByNameParams{
+		TenantID: pgUUID(tenantID),
+		Name:     ref,
+	})
+	if err != nil {
+		return dbx.OrgRiskCategory{}, fmt.Errorf("resolve risk category by name: %w", err)
+	}
+	switch len(rows) {
+	case 0:
+		return dbx.OrgRiskCategory{}, unknownCategory(ctx, q, tenantID, ref)
+	case 1:
+		return rows[0], nil
+	}
+	slugs := make([]string, len(rows))
+	for i, r := range rows {
+		slugs[i] = r.Slug
+	}
+	return dbx.OrgRiskCategory{}, &AmbiguousCategoryError{Ref: ref, Slugs: slugs}
 }
 
 func unknownCategory(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) error {
