@@ -103,9 +103,14 @@ test.describe("overlay edges shown as org mapping (#1800)", () => {
     await expect(row).toHaveCount(1);
     await expect(row).toHaveAttribute("data-origin", "overlay");
     await expect(row).toContainText("OM-E2E-A2");
-    await expect(row.getByTestId("org-mapping-badge")).toHaveText(
-      "org mapping",
-    );
+    // The badge is the `org-mapping` <Term>: its button's accessible name is
+    // the label. The badge's own text also holds the tooltip definition,
+    // which <Term> keeps in the DOM.
+    await expect(
+      row
+        .getByTestId("org-mapping-badge")
+        .getByRole("button", { name: "org mapping", exact: true }),
+    ).toBeVisible();
     await expect(row.getByTestId("org-mapping-rationale")).toHaveText(
       RATIONALE,
     );
