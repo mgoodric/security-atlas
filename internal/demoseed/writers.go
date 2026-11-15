@@ -11,6 +11,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"github.com/mgoodric/security-atlas/internal/db/dbx"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
 )
 
 // writeTenantRow inserts the demo tenant row into `tenants`. Pattern
@@ -653,6 +656,13 @@ type demoSCFAnchor struct {
 	Title  string
 }
 
+// DemoSCFRelease is the SCF release the demoSCFAnchors codes are drawn
+// from. The spine adopts global anchors from this release, or from the
+// current one while it is not loaded (#1772); every code below is in SCF
+// 2026.3 (the release pinned in
+// internal/api/scfseed/testdata/scf-pin.json).
+const DemoSCFRelease = "2026.3"
+
 // demoSCFAnchors is the fixed thin-slice SCF anchor set the self-contained
 // spine branch synthesizes. The codes/families are drawn verbatim from the
 // SCF catalog (securecontrolsframework.com) so anchoring to them is anchoring
@@ -686,9 +696,11 @@ var demoSCFAnchors = []demoSCFAnchor{
 // (tenant_id IS NULL framework_versions + scf_anchors) is NOT loaded — that
 // is the state of the CI integration DB and of a fresh self-host before any
 // catalog import. So the seed is SELF-CONTAINED: it builds the whole spine on
-// a tenant-scoped demo framework_version. When the global SCF catalog IS
-// present, the seed ADOPTS its real anchors (same scf_id codes resolve to the
-// global rows) rather than duplicating them; the demo requirements + edges
+// a tenant-scoped demo framework_version. When an SCF release is loaded,
+// the seed ADOPTS its real anchors: the release the slice declares
+// (scfRelease, DemoSCFRelease outside tests), else the current one, and
+// every code resolves in that one release (#1772). It never duplicates
+// them; the demo requirements + edges
 // still hang off the tenant-scoped demo framework_version, so the global
 // catalog is never mutated (AC-4 / invariant #6). See
 // docs/audit-log/682-demo-posture-decisions.md.
@@ -699,7 +711,7 @@ var demoSCFAnchors = []demoSCFAnchor{
 // the spine from scratch with identical cardinality — no duplicate edges.
 //
 // Returns (requirements, edges, controlsAnchored).
-func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, int, int, error) {
+func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet, scfRelease string) (int, int, int, error) {
 	// 1. Find-or-create a tenant-scoped demo framework_version with
 	//    status='current'. writeAuditPeriodsAndSamples may already have
 	//    created one (when the global catalog is absent) OR adopted a global
@@ -745,25 +757,37 @@ func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet) 
 	}
 
 	// 2. For each anchor in the thin SCF slice: resolve the real global
-	//    scf_anchors row by scf_id when the catalog is loaded (ADOPT), else
-	//    synthesize a tenant-scoped demo anchor on the demo framework_version
-	//    (SELF-CONTAINED). Build a requirement + a STRM edge per anchor.
+	//    anchor in one SCF release (ADOPT), else synthesize a tenant-scoped
+	//    demo anchor on the demo framework_version (SELF-CONTAINED). The
+	//    release is the one the slice declares (scfRelease) when it is
+	//    loaded, else the current one (the #1771 D5 fallback; #1774 makes
+	//    it strict); with no current release, every anchor is synthesized.
+	//    Every code resolves in that one release (#1772). Build a
+	//    requirement + a STRM edge per anchor.
+	q := dbx.New(tx)
+	rel, relErr := scfrelease.Lookup(ctx, q, scfRelease)
+	if errors.Is(relErr, scfrelease.ErrUnknownRelease) {
+		rel, relErr = scfrelease.Lookup(ctx, q, "")
+	}
+	if relErr != nil && !errors.Is(relErr, scfrelease.ErrNoCurrentRelease) {
+		return 0, 0, 0, fmt.Errorf("demoseed: spine look up SCF release %s: %w", scfRelease, relErr)
+	}
 	reqCount := 0
 	edgeCount := 0
 	anchorIDs := make([]uuid.UUID, 0, len(demoSCFAnchors))
 	for i, a := range demoSCFAnchors {
-		// ADOPT: a global anchor (tenant_id IS NULL framework_version) with
-		// this scf_id already exists in the catalog.
 		var anchorID uuid.UUID
-		adoptErr := tx.QueryRow(ctx, `
-			SELECT sa.id
-			FROM scf_anchors sa
-			JOIN framework_versions fv ON fv.id = sa.framework_version_id
-			WHERE sa.scf_id = $1 AND fv.tenant_id IS NULL
-			ORDER BY sa.created_at ASC
-			LIMIT 1
-		`, a.SCFID).Scan(&anchorID)
-		if errors.Is(adoptErr, pgx.ErrNoRows) {
+		adopted := false
+		if relErr == nil {
+			row, _, err := scfrelease.Resolve(ctx, q, rel.Version, a.SCFID)
+			switch {
+			case err == nil:
+				anchorID, adopted = uuid.UUID(row.ID.Bytes), true
+			case !errors.Is(err, scfrelease.ErrCodeNotInRelease):
+				return 0, 0, 0, fmt.Errorf("demoseed: spine adopt scf_anchor %s: %w", a.SCFID, err)
+			}
+		}
+		if !adopted {
 			// SELF-CONTAINED: synthesize a demo anchor on the demo version.
 			anchorID = uuid.New()
 			if _, err := tx.Exec(ctx,
@@ -775,8 +799,6 @@ func writeFrameworkPostureSpine(ctx context.Context, tx pgx.Tx, fs *fixtureSet) 
 			); err != nil {
 				return 0, 0, 0, fmt.Errorf("demoseed: spine insert scf_anchor %s: %w", a.SCFID, err)
 			}
-		} else if adoptErr != nil {
-			return 0, 0, 0, fmt.Errorf("demoseed: spine adopt scf_anchor %s: %w", a.SCFID, adoptErr)
 		}
 		anchorIDs = append(anchorIDs, anchorID)
 

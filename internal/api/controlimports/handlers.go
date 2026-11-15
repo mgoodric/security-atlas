@@ -14,6 +14,10 @@
 //	                                 release; creates a control (#1782)
 //	POST /v1/controls/imports/{id}/rows/{row}/reject
 //	                                 reject a staged row with a reason
+//	POST /v1/controls/imports/{id}/approve-clear
+//	                                 approve every pending row whose top
+//	                                 candidate is crosswalk-derived and
+//	                                 reaches all its tested criteria (#1783)
 //	GET  /v1/controls/imports/settings
 //	PUT  /v1/controls/imports/settings
 //	                                 the tenant's import settings: the
@@ -72,6 +76,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	if h.decisions != nil {
 		r.Post("/v1/controls/imports/{id}/rows/{row}/approve", h.Approve)
 		r.Post("/v1/controls/imports/{id}/rows/{row}/reject", h.Reject)
+		r.Post("/v1/controls/imports/{id}/approve-clear", h.ApproveClear)
 	}
 }
 

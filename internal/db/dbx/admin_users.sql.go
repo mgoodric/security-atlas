@@ -11,6 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveTenantAdmins = `-- name: CountActiveTenantAdmins :one
+SELECT COUNT(DISTINCT u.id) AS admin_count
+FROM user_roles ur
+JOIN users u
+  ON u.tenant_id = ur.tenant_id
+ AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+WHERE ur.tenant_id = $1
+  AND ur.role      = 'admin'
+  AND u.status     = 'active'
+  AND u.active
+`
+
+// #2261: the distinct users holding 'admin' in the tenant (any origin) whose
+// membership is active (status='active' AND active). user_roles.user_id is
+// TEXT; a "user:<uuid>" principal is read as its bare uuid (identity.UserID).
+// A role row naming no users row (an API key, bootstrap-admin) is not an
+// admin user and is not counted.
+func (q *Queries) CountActiveTenantAdmins(ctx context.Context, tenantID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveTenantAdmins, tenantID)
+	var admin_count int64
+	err := row.Scan(&admin_count)
+	return admin_count, err
+}
+
 const deleteUserRoles = `-- name: DeleteUserRoles :exec
 DELETE FROM user_roles
 WHERE tenant_id = $1 AND user_id = $2
@@ -210,4 +234,22 @@ func (q *Queries) ListAdminUsers(ctx context.Context, arg ListAdminUsersParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockTenantAdminRoster = `-- name: LockTenantAdminRoster :one
+SELECT id FROM tenants WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// #2261: serialises every change that can remove a tenant's admin. It takes
+// the tenant row FOR NO KEY UPDATE, which conflicts with itself but not with
+// the FOR KEY SHARE that foreign-key checks take, so ordinary tenant-scoped
+// writes are not blocked. A transaction holding it, under READ COMMITTED,
+// sees every admin change committed before it acquired the lock. It returns
+// the row so a caller that cannot see it (wrong id, RLS) fails closed rather
+// than proceeding unlocked.
+func (q *Queries) LockTenantAdminRoster(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockTenantAdminRoster, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }

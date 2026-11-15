@@ -14,6 +14,8 @@ import (
 	"github.com/mgoodric/security-atlas/internal/llm"
 	"github.com/mgoodric/security-atlas/internal/qmapsuggest"
 	"github.com/mgoodric/security-atlas/internal/questionnaire"
+	"github.com/mgoodric/security-atlas/internal/scfrelease"
+	"github.com/mgoodric/security-atlas/internal/scfrelease/scfreleasetest"
 )
 
 type testAnchor struct {
@@ -209,5 +211,52 @@ func TestRLS_TenantBCannotReadOrApproveTenantAProposal(t *testing.T) {
 	}
 	if _, err := svc.Approve(dbtest.WithTenantCtx(t, tenantB), uuid.MustParse(out.ProposalID), "key_grc_b"); !errors.Is(err, qmapsuggest.ErrProposalNotFound) {
 		t.Fatalf("tenant B Approve: want ErrProposalNotFound, got %v", err)
+	}
+}
+
+// #1772: with releases A and B loaded (B current), both carrying IAC-06 as
+// different anchors, a suggestion's candidates and persisted anchor come
+// from the one release the caller names, or the current one, and the
+// output says which.
+func TestSuggest_AnchorsFromOneStatedRelease(t *testing.T) {
+	app := dbtest.NewAppPool(t)
+	admin := dbtest.NewMigratePool(t)
+	scfreleasetest.LoadAB(t, admin)
+	anchorOf := func(release string) string {
+		var id string
+		if err := admin.QueryRow(context.Background(), `
+			SELECT a.id::text FROM scf_anchors a
+			JOIN framework_versions fv ON fv.id = a.framework_version_id
+			WHERE fv.tenant_id IS NULL AND fv.version = $1 AND a.scf_id = 'IAC-06'`,
+			release).Scan(&id); err != nil {
+			t.Fatalf("fixture anchor in %s: %v", release, err)
+		}
+		return id
+	}
+	svc := serviceWith(app, `{"scf_id":"IAC-06","rationale":"The question asks about multi-factor authentication."}`)
+
+	for _, tc := range []struct{ release, wantRelease string }{
+		{"", scfreleasetest.ReleaseB},
+		{scfreleasetest.ReleaseA, scfreleasetest.ReleaseA},
+		{scfreleasetest.ReleaseB, scfreleasetest.ReleaseB},
+	} {
+		tenant := freshTenant(t, admin)
+		qID := seedQuestion(t, admin, tenant, "Do you require multi-factor authentication for remote access?")
+		out, err := svc.Suggest(dbtest.WithTenantCtx(t, tenant),
+			qmapsuggest.SuggestParams{QuestionID: qID, Actor: "key_grc", SCFRelease: tc.release})
+		if err != nil {
+			t.Fatalf("release %q: Suggest: %v", tc.release, err)
+		}
+		if out.SCFRelease != tc.wantRelease || out.SCFAnchorUUID != anchorOf(tc.wantRelease) {
+			t.Errorf("release %q: got release %q anchor %s; want %q %s (%+v)",
+				tc.release, out.SCFRelease, out.SCFAnchorUUID, tc.wantRelease, anchorOf(tc.wantRelease), out)
+		}
+	}
+
+	tenant := freshTenant(t, admin)
+	qID := seedQuestion(t, admin, tenant, "Do you require multi-factor authentication for remote access?")
+	if _, err := svc.Suggest(dbtest.WithTenantCtx(t, tenant),
+		qmapsuggest.SuggestParams{QuestionID: qID, Actor: "key_grc", SCFRelease: "test-1772-not-loaded"}); !errors.Is(err, scfrelease.ErrUnknownRelease) {
+		t.Fatalf("unloaded release: want ErrUnknownRelease, got %v", err)
 	}
 }
