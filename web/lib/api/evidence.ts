@@ -132,3 +132,51 @@ export async function fetchEvidenceList(
   }
   return (await res.json()) as EvidenceListResponse;
 }
+
+// ----- #2137: /evidence/[id] detail view -----
+//
+// Row source: `evidenceDetailWire` in
+// `internal/api/controldetail/evidence_detail.go` (`GET /v1/evidence/{id}`).
+// The payload is already redacted server-side; the browser renders it as
+// served. A caller without access gets a 404, the same as an unknown id.
+
+export type EvidenceDetail = {
+  evidence_id: string;
+  evidence_kind: string | null;
+  schema_version: string | null;
+  observed_at: string;
+  ingested_at: string;
+  result: EvidenceResultEnum;
+  payload: unknown;
+  payload_uri: string | null;
+  source: Record<string, unknown> | null;
+  source_attribution: Record<string, unknown> | null;
+  credential_id: string | null;
+  ingestion_path: string;
+  control_id: string | null;
+  control_ref: string;
+  scope_cell: string | null;
+  content_hash: string;
+  demo?: boolean;
+};
+
+export type EvidenceDetailResponse = { evidence: EvidenceDetail };
+
+// Browser-side fetcher for the detail page. Hits the BFF at
+// `/api/evidence/{id}`, which forwards the bearer cookie upstream.
+export async function fetchEvidenceDetail(
+  id: string,
+): Promise<EvidenceDetailResponse> {
+  const res = await fetch(`/api/evidence/${encodeURIComponent(id)}`);
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      /* body not JSON — keep the status line */
+    }
+    throw new APIError(res.status, msg);
+  }
+  return (await res.json()) as EvidenceDetailResponse;
+}

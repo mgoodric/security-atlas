@@ -149,13 +149,14 @@ func NewListActionPlans(c *mcp.Client) mcp.Tool {
 // NewListFrameworkPosture wraps GET /v1/frameworks/posture. The
 // endpoint's wire shape is `{"frameworks": [...], "count": N}` — a flat
 // list of per-framework-version posture rows (coverage_pct,
-// freshness_composite, trend_delta_90d), so the generic passthrough
+// covered_by_exception_pct, freshness_composite, trend_delta_90d), so the
+// generic passthrough
 // fits; the sibling `count` is derived and re-emitted by the envelope.
 func NewListFrameworkPosture(c *mcp.Client) mcp.Tool {
 	return &programListTool{
 		client:   c,
 		name:     "list_framework_posture",
-		desc:     "List the bearer tenant's per-framework posture (coverage percentage, freshness composite, and 90-day trend delta — one row per active framework version). Returns canonical posture rows.",
+		desc:     "List the bearer tenant's per-framework posture (coverage percentage, the share of requirements covered only by exception, freshness composite, and 90-day trend delta — one row per active framework version; excepted controls count as covered and are never a pass). Returns canonical posture rows.",
 		endpoint: "/v1/frameworks/posture",
 		listKey:  "frameworks",
 	}

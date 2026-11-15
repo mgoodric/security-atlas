@@ -93,6 +93,21 @@ test.describe("/controls list view", () => {
     await expect(page).toHaveURL(/\/controls\/[^/]+$/);
   });
 
+  // #2112 — the fixture's control 3 has an `excepted` evaluation. Its
+  // State pill must read "Excepted" and never show as a pass.
+  test("excepted control shows Excepted, not pass", async ({
+    authedPage: page,
+  }) => {
+    await page.goto("/controls");
+    const row = page
+      .getByTestId("list-table-row")
+      .filter({ hasText: "0E2E743-3" });
+    const state = row.getByTestId("controls-row-state");
+    await expect(state).toHaveText("Excepted");
+    await expect(state).toHaveAttribute("data-result", "excepted");
+    await expect(state).not.toContainText(/pass/i);
+  });
+
   // Slice 224 — Scope filter pill (5th pill, server-side intersection).
   // Pre-conditions the seed harness (slice 082) must establish before
   // these assertions are turned on:

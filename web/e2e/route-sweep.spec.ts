@@ -56,6 +56,7 @@ const PARAM_VALUES: Record<string, string> = {
   "/controls/[id]": seeded.controlId,
   "/csf/[framework_version_id]": seeded.frameworkVersionId,
   "/dashboards/metrics/[id]": NO_ROW_ID,
+  "/evidence/[id]": NO_ROW_ID,
   "/framework-scopes/[framework_version_id]": seeded.frameworkVersionId,
   "/oscal/component-definitions/[id]": NO_ROW_ID,
   "/personnel-security/[id]": NO_ROW_ID,
