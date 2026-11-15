@@ -3092,8 +3092,10 @@ type Querier interface {
 	// the tenant row FOR NO KEY UPDATE, which conflicts with itself but not with
 	// the FOR KEY SHARE that foreign-key checks take, so ordinary tenant-scoped
 	// writes are not blocked. A transaction holding it, under READ COMMITTED,
-	// sees every admin change committed before it acquired the lock.
-	LockTenantAdminRoster(ctx context.Context, id pgtype.UUID) error
+	// sees every admin change committed before it acquired the lock. It returns
+	// the row so a caller that cannot see it (wrong id, RLS) fails closed rather
+	// than proceeding unlocked.
+	LockTenantAdminRoster(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	LockTenantTheme(ctx context.Context, arg LockTenantThemeParams) (OrgTheme, error)
 	// ===== #1811: organisation theme management =====
 	// #1811: serialize a theme rename or delete with every theme assignment in

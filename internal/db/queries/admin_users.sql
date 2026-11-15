@@ -90,13 +90,15 @@ INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (tenant_id, user_id, role) DO NOTHING;
 
--- name: LockTenantAdminRoster :exec
+-- name: LockTenantAdminRoster :one
 -- #2261: serialises every change that can remove a tenant's admin. It takes
 -- the tenant row FOR NO KEY UPDATE, which conflicts with itself but not with
 -- the FOR KEY SHARE that foreign-key checks take, so ordinary tenant-scoped
 -- writes are not blocked. A transaction holding it, under READ COMMITTED,
--- sees every admin change committed before it acquired the lock.
-SELECT 1 FROM tenants WHERE id = $1 FOR NO KEY UPDATE;
+-- sees every admin change committed before it acquired the lock. It returns
+-- the row so a caller that cannot see it (wrong id, RLS) fails closed rather
+-- than proceeding unlocked.
+SELECT id FROM tenants WHERE id = $1 FOR NO KEY UPDATE;
 
 -- name: CountActiveTenantAdmins :one
 -- #2261: the distinct users holding 'admin' in the tenant (any origin) whose

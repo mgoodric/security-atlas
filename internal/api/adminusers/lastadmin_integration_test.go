@@ -217,10 +217,13 @@ func pausedRevoker(t *testing.T) (h *adminusers.Handler, paused <-chan struct{},
 	return h, p, release
 }
 
-// waitLockWaiterOr waits until some backend is waiting on a row lock, or
-// until done fires (the side that should wait finished without waiting). It
-// reports whether it saw the waiter.
-func waitLockWaiterOr(t *testing.T, done <-chan int) bool {
+// waitRosterLockWaiterOr waits until a backend is blocked on the admin-roster
+// lock statement, or until done fires (the side that should wait finished
+// without waiting). It reports whether it saw the waiter. It polls through
+// the app pool: the handlers' sessions run as atlas_app, and a role can read
+// the query text of its own sessions in pg_stat_activity, which atlas_migrate
+// cannot.
+func waitRosterLockWaiterOr(t *testing.T, done <-chan int) bool {
 	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
@@ -228,17 +231,49 @@ func waitLockWaiterOr(t *testing.T, done <-chan int) bool {
 			return false
 		}
 		var n int
-		if err := adminPool.QueryRow(context.Background(),
-			`SELECT count(*) FROM pg_locks WHERE NOT granted AND locktype IN ('transactionid', 'tuple')`).Scan(&n); err != nil {
-			t.Fatalf("poll pg_locks: %v", err)
+		if err := appPool.QueryRow(context.Background(),
+			`SELECT count(*) FROM pg_stat_activity
+			  WHERE wait_event_type = 'Lock'
+			    AND query ILIKE '%FOR NO KEY UPDATE%'
+			    AND pid <> pg_backend_pid()`).Scan(&n); err != nil {
+			t.Fatalf("poll pg_stat_activity: %v", err)
 		}
 		if n > 0 {
 			return true
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatal("no backend waiting on a row lock within 15s")
+	t.Fatal("no backend waiting on the admin-roster lock within 15s")
 	return false
+}
+
+// A tenant row the transaction cannot see means the roster lock cannot be
+// taken. The revoke fails closed with 500 instead of running unlocked, and
+// the role is untouched.
+func TestRevoke_FailsClosedWithoutTenantRow_2261(t *testing.T) {
+	skipIfNoAdminPool(t)
+	tenant := uuid.New() // no tenants row
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = adminPool.Exec(ctx, `DELETE FROM user_roles WHERE tenant_id = $1`, tenant)
+		_, _ = adminPool.Exec(ctx, `DELETE FROM me_audit_log WHERE tenant_id = $1`, tenant)
+		_, _ = adminPool.Exec(ctx, `DELETE FROM users WHERE tenant_id = $1`, tenant)
+	})
+	actor := seedMember2261(t, tenant, "active", "")
+	a := seedMember2261(t, tenant, "active", "admin")
+	_ = seedMember2261(t, tenant, "active", "admin")
+	h := lastAdminRouter(adminusers.New(appPool), tenant, actor)
+
+	rr := doJSON(t, h, http.MethodPost, "/v1/admin/users/revoke", revokeBody(a, tenant, false))
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body = %s", rr.Code, rr.Body.String())
+	}
+	if got := countUserRoles(t, tenant, a); got != 1 {
+		t.Errorf("role rows = %d, want the original 1", got)
+	}
+	if got := revokeAudits2261(t, tenant); got != 0 {
+		t.Errorf("failed revoke wrote %d audit rows", got)
+	}
 }
 
 // Two revokes of the tenant's last two admins. The first has checked (one
@@ -265,7 +300,7 @@ func TestRevoke_ConcurrentLastTwoAdminsLeaveOne_2261(t *testing.T) {
 		second <- doJSON(t, lastAdminRouter(adminusers.New(appPool), tenant, actor), http.MethodPost,
 			"/v1/admin/users/revoke", revokeBody(b, tenant, false)).Code
 	}()
-	if !waitLockWaiterOr(t, second) {
+	if !waitRosterLockWaiterOr(t, second) {
 		t.Error("the second revoke did not wait for the first")
 	}
 	release()

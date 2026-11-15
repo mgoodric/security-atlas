@@ -236,16 +236,20 @@ func (q *Queries) ListAdminUsers(ctx context.Context, arg ListAdminUsersParams) 
 	return items, nil
 }
 
-const lockTenantAdminRoster = `-- name: LockTenantAdminRoster :exec
-SELECT 1 FROM tenants WHERE id = $1 FOR NO KEY UPDATE
+const lockTenantAdminRoster = `-- name: LockTenantAdminRoster :one
+SELECT id FROM tenants WHERE id = $1 FOR NO KEY UPDATE
 `
 
 // #2261: serialises every change that can remove a tenant's admin. It takes
 // the tenant row FOR NO KEY UPDATE, which conflicts with itself but not with
 // the FOR KEY SHARE that foreign-key checks take, so ordinary tenant-scoped
 // writes are not blocked. A transaction holding it, under READ COMMITTED,
-// sees every admin change committed before it acquired the lock.
-func (q *Queries) LockTenantAdminRoster(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, lockTenantAdminRoster, id)
-	return err
+// sees every admin change committed before it acquired the lock. It returns
+// the row so a caller that cannot see it (wrong id, RLS) fails closed rather
+// than proceeding unlocked.
+func (q *Queries) LockTenantAdminRoster(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockTenantAdminRoster, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }

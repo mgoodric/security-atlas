@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
@@ -14,6 +15,12 @@ import (
 // ErrLastAdmin is returned by AdminGuard.Check when a change would leave a
 // tenant that had an active admin with none (#2261). Handlers map it to 409.
 var ErrLastAdmin = errors.New("users: change would leave the tenant with no active admin")
+
+// ErrTenantNotLockable is returned by LockAdmins when the tenant row is not
+// visible to the transaction (an unknown id, or RLS hiding it), so the
+// admin-roster lock cannot be taken. Callers treat it as an internal error:
+// the change does not run unlocked (#2261).
+var ErrTenantNotLockable = errors.New("users: tenant row not visible; admin-roster lock not taken")
 
 // AdminGuard holds the tenant's admin-roster lock for the life of the
 // caller's transaction and remembers how many active admins the tenant had
@@ -34,7 +41,11 @@ type AdminGuard struct {
 // any write to user_roles or users.
 func LockAdmins(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (AdminGuard, error) {
 	tid := pgtype.UUID{Bytes: tenantID, Valid: true}
-	if err := q.LockTenantAdminRoster(ctx, tid); err != nil {
+	// No visible tenant row means no lock; refuse rather than run unlocked.
+	if _, err := q.LockTenantAdminRoster(ctx, tid); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return AdminGuard{}, ErrTenantNotLockable
+		}
 		return AdminGuard{}, fmt.Errorf("users: lock admin roster: %w", err)
 	}
 	n, err := q.CountActiveTenantAdmins(ctx, tid)

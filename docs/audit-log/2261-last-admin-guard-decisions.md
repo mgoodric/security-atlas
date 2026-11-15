@@ -24,6 +24,11 @@ tenant-scoped insert takes; `NO KEY UPDATE` conflicts only with itself and
 tenant updates. Under READ COMMITTED the count after the lock sees every admin
 change committed before the lock was granted.
 
+The lock fails closed: the statement returns the row, and when no row comes
+back (an unknown tenant id, or RLS hiding it) `LockAdmins` returns
+`ErrTenantNotLockable` and the handler answers 500 rather than running the
+change unlocked (`TestRevoke_FailsClosedWithoutTenantRow_2261`).
+
 Locking the admin `user_roles` rows instead was rejected: a disable changes
 `users.status`, not `user_roles`, and a re-check of joined rows under
 EvalPlanQual is subtle to get right. One row per tenant is a plain mutex.

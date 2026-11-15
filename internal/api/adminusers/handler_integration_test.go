@@ -141,12 +141,35 @@ func seedUserRole(t *testing.T, tenantID uuid.UUID, userID, role string) {
 	}
 }
 
+// cleanupUsers seeds the tenant row (the last-admin guard locks it and fails
+// closed without it, #2261) and removes the tenant's users and roles at
+// cleanup.
 func cleanupUsers(t *testing.T, tenantID uuid.UUID) {
 	t.Helper()
+	ctx := context.Background()
+	tx, err := appPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("seed tenant begin: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.current_tenant', $1, true)", tenantID.String()); err != nil {
+		t.Fatalf("seed tenant set_config: %v", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO tenants (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING`,
+		tenantID, "test-users-"+tenantID.String()); err != nil {
+		t.Fatalf("seed tenant: %v", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("seed tenant commit: %v", err)
+	}
 	t.Cleanup(func() {
 		ctx := context.Background()
 		_, _ = appPool.Exec(ctx, "DELETE FROM user_roles WHERE tenant_id = $1", tenantID)
 		_, _ = appPool.Exec(ctx, "DELETE FROM users WHERE tenant_id = $1", tenantID)
+		if adminPool != nil {
+			_, _ = adminPool.Exec(ctx, "DELETE FROM tenants WHERE id = $1", tenantID)
+		}
 	})
 }
 
