@@ -273,12 +273,7 @@ export default function MetricDetailPage({
         <CardHeader>
           <CardTitle>Manual input audit trail</CardTitle>
           <CardDescription>
-            Recent observations recorded via{" "}
-            <code className="font-mono">
-              POST /v1/metrics/{metric.id}/inputs
-            </code>
-            . Filtered to{" "}
-            <code className="font-mono">source LIKE manual:%</code>.
+            Recent values entered by hand for this metric.
           </CardDescription>
         </CardHeader>
         <CardContent className="px-4">
