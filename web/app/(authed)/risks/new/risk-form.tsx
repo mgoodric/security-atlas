@@ -14,7 +14,7 @@
 // `/api/risks/categories` and listed by name. The form posts the slug, so
 // a category renamed while the form is open still resolves. The picker
 // opens on the organisation default. A category the platform refuses
-// (one added before #1745's contract step can hold risks) comes back as
+// (one archived after the form loaded) comes back as
 // a 400 and renders in the error Alert like any other upstream refusal.
 //
 // Enum option lists mirror `internal/db/dbx/models.go`:
