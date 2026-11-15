@@ -99,6 +99,9 @@ type RiskPanelRow struct {
 	Methodology   string `json:"methodology"`
 	ResidualScore string `json:"residual_score,omitempty"`
 	CreatedAt     string `json:"created_at"`
+	// CategoryName is the organisation's name for the category whose slug
+	// is Category (#1814).
+	CategoryName string `json:"category_name"`
 }
 
 // FreshnessPanel mirrors `/v1/evidence/freshness?bucket=class`'s
@@ -264,10 +267,11 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 			ID:            rk.ID.String(),
 			Title:         rk.Title,
 			Treatment:     string(rk.Treatment),
-			Category:      string(rk.Category),
+			Category:      rk.CategorySlug,
 			Methodology:   string(rk.Methodology),
 			ResidualScore: residual,
 			CreatedAt:     rk.CreatedAt.UTC().Format(time.RFC3339),
+			CategoryName:  rk.CategoryName,
 		}
 	}
 
