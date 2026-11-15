@@ -193,6 +193,36 @@ func TestListRisks_ForwardsStatusFilter(t *testing.T) {
 	}
 }
 
+// #2217: list_risks leaves roll-ups to the platform default and forwards
+// include_rollups only when asked; an included roll-up keeps its child_count.
+func TestListRisks_ForwardsIncludeRollUps(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		args, want string
+	}{
+		{`{}`, ""},
+		{`{"include_rollups":false}`, ""},
+		{`{"include_rollups":true}`, "true"},
+	} {
+		client, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+			if got := r.URL.Query().Get("include_rollups"); got != tc.want {
+				t.Errorf("include_rollups = %q, want %q", got, tc.want)
+			}
+			_, _ = fmt.Fprint(w, `{"risks":[{"id":"r1","title":"Parent","child_count":2}],"count":1}`)
+		})
+		got, err := tools.NewListRisks(client).Handle(context.Background(), json.RawMessage(tc.args))
+		srv.Close()
+		if err != nil {
+			t.Fatalf("Handle(%s): %v", tc.args, err)
+		}
+		b, _ := json.Marshal(got)
+		if !strings.Contains(string(b), `"child_count":2`) {
+			t.Errorf("Handle(%s) dropped child_count: %s", tc.args, b)
+		}
+	}
+}
+
 // #1815: list_risk_categories reads GET /v1/risks/categories and forwards
 // include_archived only when asked.
 func TestListRiskCategories_ForwardsIncludeArchived(t *testing.T) {

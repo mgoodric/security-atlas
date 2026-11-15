@@ -35,6 +35,14 @@ count and the MCP `list_risks` tool all agree without each re-implementing the
 rule. A malformed value is a 400, like the other list params. Included
 roll-ups carry `child_count`, which drives the register's marker.
 
+The dashboard snapshot export (`internal/api/dashboardexport/snapshot.go`)
+reads `risk.Store.List` for its risks panel, so it drops roll-ups too, matching
+the live dashboard panel it mirrors.
+`TestRollUps_SnapshotRisksPanelExcludesRollUps` in
+`internal/api/dashboardexport/integration_test.go` pins it (#2217). The MCP
+`list_risks` tool takes an optional `include_rollups` argument that it passes
+through to the API (#2217).
+
 ### D3: pickers ask for roll-ups
 
 The attach-a-child picker on the risk detail page and the action-plan risk
@@ -54,3 +62,9 @@ register for offline review, not a count.
 before the brief's date (`risk_aggregations.created_at <= $2`), the same
 as-of discipline the query already applies to `risks.created_at`. A brief
 dated before the first link still ranks the risk.
+
+The as-of covers links that still exist. Unlinking a child hard-deletes its
+`risk_aggregations` row, and nothing records that it was there, so a brief
+re-dated to a day when the link existed ranks the parent as if it had never
+been a roll-up. Reconstructing removed links would need a link history table;
+that is out of scope here.
