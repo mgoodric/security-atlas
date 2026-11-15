@@ -22,7 +22,8 @@ function storedRisk() {
   return {
     id: RISK_ID,
     title: "Test risk before edit",
-    description: "a neutral description",
+    // Markdown (#2313): the page renders the description through it.
+    description: "A neutral description with **bold** text.",
     category: "operational",
     category_name: "Operational",
     methodology: "nist_800_30",
@@ -112,6 +113,9 @@ test.describe("/risks/[id] edit + history (#2104)", () => {
       { timeout: 30_000 },
     );
     await expect(page.getByTestId("risk-history-empty")).toBeVisible();
+    // The Markdown description (#2313) renders beside the History section.
+    const description = page.getByTestId("risk-detail-description");
+    await expect(description.locator("strong")).toHaveText("bold");
 
     await page.getByTestId("risk-detail-edit").click();
     await expect(page).toHaveURL(new RegExp(`/risks/${RISK_ID}/edit$`), {
@@ -155,6 +159,10 @@ test.describe("/risks/[id] edit + history (#2104)", () => {
     await expect(page.getByTestId("risk-detail-review-due")).toHaveText(
       "2027-06-30",
     );
+
+    await expect(
+      page.getByTestId("risk-detail-description").locator("strong"),
+    ).toHaveText("bold");
 
     const entry = page.getByTestId("risk-history-entry");
     await expect(entry).toHaveCount(1);
