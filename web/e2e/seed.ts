@@ -124,7 +124,11 @@ export type FixtureName =
   | "evidence-detail"
   // #2142 — a user of settings-theme.spec.ts's own, its stored theme
   // reset to never-chosen on each run.
-  | "theme";
+  | "theme"
+  // #1800 — a requirement with a catalog edge and a demo-tenant overlay
+  // edge, a control behind the overlay, and a second tenant
+  // (org-mapping.spec.ts).
+  | "org-mapping";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 
