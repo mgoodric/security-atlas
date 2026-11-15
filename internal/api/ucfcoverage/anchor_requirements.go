@@ -1,10 +1,12 @@
 package ucfcoverage
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
@@ -71,25 +73,19 @@ func (h *Handler) AnchorRequirements(w http.ResponseWriter, r *http.Request) {
 
 			return
 		}
-		got, err := h.q.ListRequirementsForAnchorByFrameworkVersion(ctx, dbx.ListRequirementsForAnchorByFrameworkVersionParams{
-			ScfAnchorID:        anchor.ID,
-			FrameworkVersionID: fv.ID,
-		})
+		got, err := h.listRequirementsForAnchor(ctx, anchor.ID, &fv.ID)
 		if err != nil {
 			httperr.WriteInternal(w, r, "list requirements for anchor (pinned)", err)
 			return
 		}
-		out = mapPinnedRequirements(got)
+		out = got
 	} else {
-		// slice 484 (AC-5 / ADR 0019 §4): absent a pin, default to each
-		// framework's CURRENT version — never bleed a legacy/superseded
-		// version's requirements (P0-484-5).
-		got, err := h.q.ListRequirementsForAnchorCurrentVersions(ctx, anchor.ID)
+		got, err := h.listRequirementsForAnchor(ctx, anchor.ID, nil)
 		if err != nil {
 			httperr.WriteInternal(w, r, "list requirements for anchor (current)", err)
 			return
 		}
-		out = mapCurrentVersionRequirements(got)
+		out = got
 	}
 
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
@@ -111,6 +107,34 @@ func anchorWireFromRow(a dbx.ScfAnchor) anchorWire {
 		Name:        a.Title,
 		Description: a.Description,
 	}
+}
+
+// listRequirementsForAnchor is the reverse traversal both
+// /v1/anchors/{id}/requirements and /v1/controls/{id}/coverage read: every
+// requirement the anchor satisfies, in one framework version when
+// frameworkVersionID is set, else in each framework's CURRENT version
+// (slice 484, AC-5 / ADR 0019 §4: absent a pin, never bleed a
+// legacy/superseded version's requirements, P0-484-5).
+//
+// It reads inside the request's tenant GUC: effective_fw_to_scf_edges
+// carries the caller tenant's active overlay edges (#1798), which RLS
+// hides without it.
+func (h *Handler) listRequirementsForAnchor(ctx context.Context, anchorID pgtype.UUID, frameworkVersionID *pgtype.UUID) ([]requirementForAnchorWire, error) {
+	var out []requirementForAnchorWire
+	err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		if frameworkVersionID != nil {
+			got, err := q.ListRequirementsForAnchorByFrameworkVersion(ctx, dbx.ListRequirementsForAnchorByFrameworkVersionParams{
+				ScfAnchorID:        anchorID,
+				FrameworkVersionID: *frameworkVersionID,
+			})
+			out = mapPinnedRequirements(got)
+			return err
+		}
+		got, err := q.ListRequirementsForAnchorCurrentVersions(ctx, anchorID)
+		out = mapCurrentVersionRequirements(got)
+		return err
+	})
+	return out, err
 }
 
 // mapCurrentVersionRequirements maps the slice-484 default (current-version-only)
@@ -135,6 +159,7 @@ func mapCurrentVersionRequirements(rows []dbx.ListRequirementsForAnchorCurrentVe
 			Strength:               x.Strength,
 			SourceAttribution:      string(x.SourceAttribution),
 			MappingTier:            string(x.MappingTier),
+			Origin:                 x.Origin,
 			Rationale:              x.Rationale,
 		})
 	}
@@ -159,6 +184,7 @@ func mapPinnedRequirements(rows []dbx.ListRequirementsForAnchorByFrameworkVersio
 			Strength:               x.Strength,
 			SourceAttribution:      string(x.SourceAttribution),
 			MappingTier:            string(x.MappingTier),
+			Origin:                 x.Origin,
 			Rationale:              x.Rationale,
 		})
 	}

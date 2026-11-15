@@ -291,7 +291,10 @@ type anchorWire struct {
 	// verified | rejected) — additive, orthogonal to source_attribution. No
 	// reviewer identity on this catalog payload (P0-483-6).
 	MappingTier string `json:"mapping_tier,omitempty"`
-	Rationale   string `json:"rationale,omitempty"`
+	// Origin is where the edge comes from: "catalog", or "overlay" for the
+	// caller tenant's own org mapping (#1798). Omitted on the bare anchor.
+	Origin    string `json:"origin,omitempty"`
+	Rationale string `json:"rationale,omitempty"`
 }
 
 // controlWire is the shape of a control in slice-008 responses.
@@ -367,7 +370,10 @@ type requirementForAnchorWire struct {
 	// MappingTier is the slice-483 trust tier — additive, orthogonal to
 	// source_attribution; no reviewer identity (P0-483-6).
 	MappingTier string `json:"mapping_tier"`
-	Rationale   string `json:"rationale,omitempty"`
+	// Origin is "catalog", or "overlay" when the path runs through the
+	// caller tenant's own org mapping (#1798).
+	Origin    string `json:"origin"`
+	Rationale string `json:"rationale,omitempty"`
 }
 
 // ===== shared write helpers =====
