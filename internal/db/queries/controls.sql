@@ -510,8 +510,10 @@ WHERE tenant_id = sqlc.arg(tenant_id) AND superseded_by IS NULL
 
 -- name: InsertSCFRemapProposal :execrows
 -- Issue #1775: queue one remap proposal for a control on a legacy SCF
--- anchor. Written by the migrate role during `catalog import-scf`; a re-run
--- of the same import leaves the existing proposal alone.
+-- anchor. Written by the migrate role during `catalog import-scf`. A re-run
+-- of the same import leaves the existing proposal alone, except that an
+-- open proposal whose control this run re-bound becomes rebound (#2321: a
+-- stock control flagged before the title-only rule moves on the re-run).
 INSERT INTO scf_remap_proposals (
     tenant_id, control_id, bundle_id, legacy_anchor_id, legacy_scf_id,
     legacy_release, target_framework_version_id, target_release, class,
@@ -523,7 +525,9 @@ INSERT INTO scf_remap_proposals (
     sqlc.arg(target_release), sqlc.arg(class), sqlc.arg(status),
     sqlc.arg(successor_scf_ids)::text[]
 )
-ON CONFLICT (control_id, target_framework_version_id) DO NOTHING;
+ON CONFLICT (control_id, target_framework_version_id) DO UPDATE
+    SET status = 'rebound'
+    WHERE scf_remap_proposals.status = 'open' AND EXCLUDED.status = 'rebound';
 
 -- name: ListSCFRemapProposals :many
 -- Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap

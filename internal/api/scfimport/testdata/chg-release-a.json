@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-2321-a",
+  "release_date": "2026-01-01",
+  "attribution": "Synthetic test catalog for the #2321 stock re-bind; not SCF content.",
+  "controls": [
+    {
+      "scf_id": "CHG-02",
+      "family": "CHG",
+      "title": "Change Control Process",
+      "description": "Changes reach production through a controlled, approved path."
+    }
+  ]
+}
