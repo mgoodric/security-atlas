@@ -2,6 +2,7 @@ package cloud
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 
@@ -90,7 +91,12 @@ func (s *Store) Get(ctx context.Context) (MaskedConfig, error) {
 // plaintext key is ENCRYPTED here and the ciphertext stored; the plaintext is
 // never persisted, returned, or logged (P0-499-4). For local-ollama the key is
 // cleared. Requires the tenant context (RLS scopes the write).
-func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret) (MaskedConfig, error) {
+//
+// The same transaction writes one me_audit_log row naming actor (uuid.Nil
+// for a caller that is not a user) with the before and after routing (#2224).
+// The row carries the provider and whether a key is configured, never the key
+// or its ciphertext.
+func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret, actor uuid.UUID) (MaskedConfig, error) {
 	tenantID, err := tenantUUID(ctx)
 	if err != nil {
 		return MaskedConfig{}, err
@@ -121,6 +127,10 @@ func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret) (Mask
 
 	var row dbx.TenantLlmRouting
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		before, berr := currentRouting(ctx, q, tenantID)
+		if berr != nil {
+			return berr
+		}
 		r, werr := q.UpsertTenantLLMRouting(ctx, dbx.UpsertTenantLLMRoutingParams{
 			TenantID:         pgtype.UUID{Bytes: tenantID, Valid: true},
 			Provider:         provider.String(),
@@ -130,7 +140,9 @@ func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret) (Mask
 			return werr
 		}
 		row = r
-		return nil
+		after := auditRouting(maskRow(r))
+		after.APIKeyWritten = ciphertext != nil
+		return insertRoutingAudit(ctx, q, tenantID, actor, AuditActionRoutingUpdate, before, after)
 	})
 	if err != nil {
 		return MaskedConfig{}, err
@@ -140,19 +152,30 @@ func (s *Store) Set(ctx context.Context, provider Provider, apiKey Secret) (Mask
 
 // Clear removes the tenant's routing config, reverting to the local-ollama
 // default. Returns true when a row was removed, false when none existed.
-func (s *Store) Clear(ctx context.Context) (bool, error) {
+// Removing a row writes one me_audit_log row naming actor in the same
+// transaction (#2224); clearing a tenant that has no row changes nothing and
+// writes none.
+func (s *Store) Clear(ctx context.Context, actor uuid.UUID) (bool, error) {
 	tenantID, err := tenantUUID(ctx)
 	if err != nil {
 		return false, err
 	}
 	var removed int64
 	err = s.inTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		before, berr := currentRouting(ctx, q, tenantID)
+		if berr != nil {
+			return berr
+		}
 		n, derr := q.DeleteTenantLLMRouting(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
 		if derr != nil {
 			return derr
 		}
 		removed = n
-		return nil
+		if n == 0 {
+			return nil
+		}
+		after := auditRouting(MaskedConfig{Provider: ProviderLocalOllama})
+		return insertRoutingAudit(ctx, q, tenantID, actor, AuditActionRoutingClear, before, after)
 	})
 	if err != nil {
 		return false, err
@@ -228,6 +251,64 @@ func maskRow(row dbx.TenantLlmRouting) MaskedConfig {
 		mc.APIKeyMasked = redactedPlaceholder
 	}
 	return mc
+}
+
+// The me_audit_log actions for routing changes (#2224). CHECK constraint
+// extended in migration 20261120000000_llm_settings_audit.sql.
+const (
+	AuditActionRoutingUpdate = "tenant_llm_routing_update"
+	AuditActionRoutingClear  = "tenant_llm_routing_clear"
+)
+
+// routingAudit is the before / after value of a routing audit row. It has no
+// field that can hold a key: the provider and whether a key is configured are
+// all an auditor needs, and a key in the audit log would be a second copy of
+// the secret outside the crypter.
+type routingAudit struct {
+	Provider  string `json:"provider"`
+	IsCloud   bool   `json:"is_cloud"`
+	HasAPIKey bool   `json:"has_api_key"`
+	// APIKeyWritten is set on the after value of a Set that stored a key,
+	// so a key rotation under an unchanged provider still shows as a change.
+	APIKeyWritten bool `json:"api_key_written,omitempty"`
+}
+
+func auditRouting(mc MaskedConfig) routingAudit {
+	return routingAudit{Provider: mc.Provider.String(), IsCloud: mc.IsCloud, HasAPIKey: mc.HasAPIKey}
+}
+
+// currentRouting reads the tenant's routing inside the write transaction, as
+// the before value of an audit row; no row is the local-ollama default.
+func currentRouting(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) (routingAudit, error) {
+	r, err := q.GetTenantLLMRouting(ctx, pgtype.UUID{Bytes: tenantID, Valid: true})
+	if errors.Is(err, pgxNoRows) {
+		return auditRouting(MaskedConfig{Provider: ProviderLocalOllama}), nil
+	}
+	if err != nil {
+		return routingAudit{}, err
+	}
+	return auditRouting(maskRow(r)), nil
+}
+
+func insertRoutingAudit(ctx context.Context, q *dbx.Queries, tenantID, actor uuid.UUID, action string, before, after routingAudit) error {
+	beforeBlob, err := json.Marshal(before)
+	if err != nil {
+		return fmt.Errorf("cloud: audit before: %w", err)
+	}
+	afterBlob, err := json.Marshal(after)
+	if err != nil {
+		return fmt.Errorf("cloud: audit after: %w", err)
+	}
+	if err := q.InsertMeAuditLog(ctx, dbx.InsertMeAuditLogParams{
+		TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
+		UserID:   pgtype.UUID{Bytes: actor, Valid: true},
+		Action:   action,
+		Before:   beforeBlob,
+		After:    afterBlob,
+	}); err != nil {
+		return fmt.Errorf("cloud: audit routing change: %w", err)
+	}
+	return nil
 }
 
 // tenantUUID resolves + parses the tenant id from the context.
