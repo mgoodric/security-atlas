@@ -7,9 +7,8 @@
 //   * a disabled item (one the backend would refuse) never runs, and
 //     carries the reason it is unavailable.
 //
-// The item shape matches #2102's detail-header `OverflowItem` (id,
-// label, destructive, confirmPrompt, confirmLabel, onSelect) so the
-// detail header and a table row share one menu. `row-actions.tsx`
+// The detail-page header (#2102) and table rows share this one menu;
+// the header renders it with `variant="header"`. `row-actions.tsx`
 // renders it.
 
 import type { ReactNode } from "react";

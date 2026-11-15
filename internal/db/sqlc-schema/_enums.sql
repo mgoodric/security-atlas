@@ -114,7 +114,8 @@ CREATE TYPE evidence_result AS ENUM (
     'pass',
     'fail',
     'na',
-    'inconclusive'
+    'inconclusive',
+    'excepted'
 );
 
 CREATE TYPE evidence_freshness_class AS ENUM (

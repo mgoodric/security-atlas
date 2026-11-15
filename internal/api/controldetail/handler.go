@@ -82,6 +82,10 @@ type Handler struct {
 	// (slice 692 per-control + slice 704 tenant-wide); New points it at store,
 	// so production behavior is identical.
 	evidence evidenceWindowReader
+	// detail is the GET /v1/evidence/{id} read seam (#2137); New points it
+	// at store. redaction, when set, re-applies current redaction rules.
+	detail    evidenceDetailReader
+	redaction RedactionLookup
 }
 
 // New constructs a Handler over the application pgx pool. The slice-411
@@ -89,7 +93,7 @@ type Handler struct {
 // the per-control and tenant-wide branches) are wired to the same store — the
 // public signature is unchanged (P0-409-2).
 func New(store *Store) *Handler {
-	return &Handler{store: store, reader: store, evidence: store}
+	return &Handler{store: store, reader: store, evidence: store, detail: store}
 }
 
 // newHandlerWithReader constructs a Handler whose policies/risks/history

@@ -419,6 +419,61 @@ func TestFrameworkPosture_TrendReflectsGrowth(t *testing.T) {
 	t.Fatal("trend: framework posture row missing")
 }
 
+// #2112: an excepted control counts as covered, now and in the 90-day
+// baseline, and the share covered only by exception is reported separately.
+
+func TestFrameworkPosture_ExceptedCountsAsCoveredAndIsReportedSeparately(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	env := testServer(t, app, tenant)
+
+	// Four requirements:
+	//   req0 — one control, excepted then and now: covered, by exception.
+	//   req1 — one control, passing then and now: covered.
+	//   req2 — two controls, one excepted and one passing now: covered, and
+	//          not by exception (the passing control does not need a waiver).
+	//   req3 — no control.
+	fw, anchors := seedFramework(t, admin, "fwexcepted", "2024", 4)
+	old := time.Now().UTC().Add(-120 * 24 * time.Hour)
+	recent := time.Now().UTC().Add(-time.Hour)
+
+	ctrl0 := seedControlOnAnchor(t, admin, tenant, anchors[0])
+	seedEvaluation(t, admin, tenant, ctrl0, "excepted", old)
+	seedEvaluation(t, admin, tenant, ctrl0, "excepted", recent)
+
+	ctrl1 := seedControlOnAnchor(t, admin, tenant, anchors[1])
+	seedEvaluation(t, admin, tenant, ctrl1, "pass", old)
+	seedEvaluation(t, admin, tenant, ctrl1, "pass", recent)
+
+	ctrl2a := seedControlOnAnchor(t, admin, tenant, anchors[2])
+	ctrl2b := seedControlOnAnchor(t, admin, tenant, anchors[2])
+	seedEvaluation(t, admin, tenant, ctrl2a, "excepted", recent)
+	seedEvaluation(t, admin, tenant, ctrl2b, "pass", recent)
+
+	_, body := get(t, env, "/v1/frameworks/posture")
+	rows, _ := body["frameworks"].([]any)
+	for _, r := range rows {
+		m := r.(map[string]any)
+		if m["framework_id"].(string) != fw.frameworkID.String() {
+			continue
+		}
+		if cov := m["coverage_pct"].(float64); cov != 75.0 {
+			t.Fatalf("coverage_pct = %v, want 75.0 (excepted counts as covered)", cov)
+		}
+		if exc := m["covered_by_exception_pct"].(float64); exc != 25.0 {
+			t.Fatalf("covered_by_exception_pct = %v, want 25.0 (req0 only)", exc)
+		}
+		// Then: req0 (excepted) + req1 (pass) = 50%. Now 75%. Delta +25. Were
+		// excepted not counted then, the delta would read +50.
+		if trend := m["trend_delta_90d"].(float64); trend != 25.0 {
+			t.Fatalf("trend_delta_90d = %v, want 25.0 (excepted counts in the baseline)", trend)
+		}
+		return
+	}
+	t.Fatal("framework posture row missing")
+}
+
 // #1755: an edge a reviewer marked mapping_tier='rejected' (ADR 0018) earns no
 // framework credit, now or in the 90-day trend; restoring the tier brings the
 // credit back.
