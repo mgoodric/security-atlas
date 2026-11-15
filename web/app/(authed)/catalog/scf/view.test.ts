@@ -23,7 +23,7 @@ function anchor(
 }
 
 const rows = [
-  anchor("IAC-06", "Multi-Factor Authentication", "IAC"),
+  anchor("IAC-37", "Multi-Factor Authentication", "IAC"),
   anchor("CRY-05", "Encrypting Data At Rest", "CRY"),
   anchor("GOV-01", "Cybersecurity Governance Program", "GOV"),
 ];
@@ -34,8 +34,8 @@ describe("searchAnchors (issue 2066)", () => {
   });
 
   it("finds an anchor by code, ignoring case", () => {
-    expect(searchAnchors(rows, "iac-06").map((a) => a.scf_id)).toEqual([
-      "IAC-06",
+    expect(searchAnchors(rows, "iac-37").map((a) => a.scf_id)).toEqual([
+      "IAC-37",
     ]);
   });
 

@@ -11,6 +11,7 @@
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
@@ -59,26 +60,19 @@ export default function NewPersonnelChecklistPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-xl">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">
-            New personnel checklist
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Creates a manual onboarding or offboarding checklist for one person.
-            Completing items records evidence — nothing here provisions or
-            deprovisions access.
-          </p>
-        </div>
+    <PageShell
+      title="New personnel checklist"
+      subtitle="Creates a manual onboarding or offboarding checklist for one person. Completing items records evidence — nothing here provisions or deprovisions access."
+      actions={
         <Link
           href="/personnel-security"
           className={buttonVariants({ variant: "outline", size: "sm" })}
         >
           Back to list
         </Link>
-      </div>
-
+      }
+      width="reading"
+    >
       <form
         onSubmit={submit}
         className="space-y-4"
@@ -180,6 +174,6 @@ export default function NewPersonnelChecklistPage() {
           {submitting ? "Creating…" : "Create checklist"}
         </Button>
       </form>
-    </div>
+    </PageShell>
   );
 }

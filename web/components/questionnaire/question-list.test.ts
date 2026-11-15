@@ -17,7 +17,7 @@ function makeQuestion(over: Partial<Question> = {}): Question {
     text: "Are users required to use MFA?",
     domain: "IAM",
     answer_type: "yes_no",
-    scf_anchor_id: "IAC-06",
+    scf_anchor_id: "IAC-37",
     sort_order: 1,
     needs_mapping: false,
     ...over,

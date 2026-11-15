@@ -139,6 +139,9 @@ Commands:
                                   only tenant; required with several)
                     --bridge-addr oscal-bridge gRPC address (default %s)
                     --source-label declared vendor / product label (e.g. "Acme Cloud")
+                    --scf-release  SCF release the control ids belong to (or an
+                                   "scf-release" metadata prop); without either
+                                   they bind in the current release, with a warning
                     --imported-by  operator id recorded as provenance (default atlas-oscal)
                     --role         caller role: grc_engineer (default) or admin
                     --json         emit a JSON report instead of text
@@ -454,6 +457,7 @@ func runImportComponentDefinition(args []string) error {
 	sourceLabel := fs.String("source-label", "", "declared vendor / product label")
 	importedBy := fs.String("imported-by", binary, "operator id recorded as provenance")
 	roleStr := fs.String("role", string(authz.RoleGRCEngineer), "caller role: grc_engineer or admin")
+	scfRelease := fs.String("scf-release", "", "SCF release the claims' control ids belong to (or an \"scf-release\" prop on the document's metadata); without either they bind in the current release, with a warning")
 	asJSON := fs.Bool("json", false, "emit a JSON report instead of text")
 
 	file, flagArgs, err := splitPositional(args)
@@ -509,6 +513,7 @@ func runImportComponentDefinition(args []string) error {
 		SourceLabel: *sourceLabel,
 		ImportedBy:  *importedBy,
 		Role:        authz.Role(*roleStr),
+		SCFRelease:  *scfRelease,
 	})
 	if err != nil {
 		switch {
@@ -533,6 +538,8 @@ func runImportComponentDefinition(args []string) error {
 			"component_count": report.ComponentCount,
 			"claim_count":     report.ClaimCount,
 			"mapped_count":    report.MappedCount,
+			"scf_release":     report.SCFRelease,
+			"warnings":        report.Warnings,
 		}, "", "  ")
 		fmt.Println(string(out))
 		return nil
@@ -547,6 +554,10 @@ func runImportComponentDefinition(args []string) error {
 	fmt.Printf("  components:     %d\n", report.ComponentCount)
 	fmt.Printf("  vendor claims:  %d imported (%d mapped to SCF anchors, %d need operator mapping)\n",
 		report.ClaimCount, report.MappedCount, report.ClaimCount-report.MappedCount)
+	fmt.Printf("  SCF release:    %s\n", report.SCFRelease)
+	for _, w := range report.Warnings {
+		fmt.Printf("  warning: %s\n", w)
+	}
 	fmt.Printf("  NOTE: these are VENDOR ASSERTIONS, not platform-verified evidence;\n")
 	fmt.Printf("        they do NOT mark any control satisfied (operator review required).\n")
 	return nil

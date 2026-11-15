@@ -2359,6 +2359,7 @@ type Exception struct {
 	Status               string             `json:"status"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	SelfApproved         bool               `json:"self_approved"`
 }
 
 type ExceptionAuditLog struct {
@@ -2437,6 +2438,8 @@ type FrameworkScope struct {
 	EffectiveFrom            pgtype.Timestamptz `json:"effective_from"`
 	SupersededBy             pgtype.UUID        `json:"superseded_by"`
 	SupersededAt             pgtype.Timestamptz `json:"superseded_at"`
+	SelfApproved             bool               `json:"self_approved"`
+	SubmittedBy              *string            `json:"submitted_by"`
 }
 
 type FrameworkScopeApplicability struct {
@@ -2519,6 +2522,10 @@ type FwToScfEdge struct {
 	CreatedAt              pgtype.Timestamptz         `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz         `json:"updated_at"`
 	MappingTier            CrosswalkMappingTier       `json:"mapping_tier"`
+	// Crosswalk source that wrote this edge (yaml:<file>, scf-workbook:<columns>, scf-olir:<sheet>); NULL = predates #1971. The importer retires only its own source's edges.
+	CrosswalkSource *string `json:"crosswalk_source"`
+	// Set when the crosswalk that wrote this edge stopped listing it (#1971); cleared when it lists it again. Retired edges are excluded from effective_fw_to_scf_edges.
+	RetiredAt pgtype.Timestamptz `json:"retired_at"`
 }
 
 type FwToScfEdgeTierTransition struct {
@@ -2639,6 +2646,7 @@ type ImportedComponentClaim struct {
 	DispositionedBy     *string            `json:"dispositioned_by"`
 	DispositionedAt     pgtype.Timestamptz `json:"dispositioned_at"`
 	DispositionNote     string             `json:"disposition_note"`
+	ScfRelease          *string            `json:"scf_release"`
 }
 
 type ImportedComponentClaimDisposition struct {
@@ -2940,6 +2948,7 @@ type Policy struct {
 	SourceUrl                   *string            `json:"source_url"`
 	ImportedBy                  *string            `json:"imported_by"`
 	ImportedAt                  pgtype.Timestamptz `json:"imported_at"`
+	SelfApproved                bool               `json:"self_approved"`
 }
 
 type PolicyAcknowledgment struct {
@@ -3377,6 +3386,8 @@ type Tenant struct {
 	RiskReviewCadenceDays int32 `json:"risk_review_cadence_days"`
 	// #2061: days after a vendor's creation (UTC date) that its first review is due. A never-reviewed vendor is overdue only after that day. Default 30.
 	VendorInitialReviewDays int32 `json:"vendor_initial_review_days"`
+	// #2101: when true, the requester of a policy, framework-scope or exception approval may approve it themselves. Such approvals are flagged self_approved. Default false; admin-only; changes are written to me_audit_log.
+	AllowSelfApproval bool `json:"allow_self_approval"`
 }
 
 // Slice 499 per-tenant cloud-LLM opt-in routing. Absence of a row => local-ollama (the off-by-default posture). provider is a closed enum (no free-text URL). api_key_ciphertext is AES-256-GCM, never plaintext, never returned/logged.

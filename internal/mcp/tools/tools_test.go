@@ -38,7 +38,7 @@ func TestListControls_HappyPath(t *testing.T) {
 		if r.URL.Path != "/v1/controls" {
 			t.Errorf("path = %q, want /v1/controls", r.URL.Path)
 		}
-		_, _ = fmt.Fprint(w, `{"controls":[{"id":"00000000-0000-0000-0000-000000000001","title":"T","control_family":"IAC","scf_id":"IAC-06","lifecycle_state":"active","bundle_id":"b1"}],"count":1}`)
+		_, _ = fmt.Fprint(w, `{"controls":[{"id":"00000000-0000-0000-0000-000000000001","title":"T","control_family":"IAC","scf_id":"IAC-37","lifecycle_state":"active","bundle_id":"b1"}],"count":1}`)
 	})
 	defer srv.Close()
 
@@ -136,7 +136,7 @@ func TestGetControl_UUIDPath(t *testing.T) {
 		if r.URL.Path != "/v1/controls" {
 			t.Errorf("path = %q, want /v1/controls", r.URL.Path)
 		}
-		_, _ = fmt.Fprintf(w, `{"controls":[{"id":%q,"title":"T","control_family":"IAC","scf_id":"IAC-06","lifecycle_state":"active","bundle_id":"b1"}],"count":1}`, wantID)
+		_, _ = fmt.Fprintf(w, `{"controls":[{"id":%q,"title":"T","control_family":"IAC","scf_id":"IAC-37","lifecycle_state":"active","bundle_id":"b1"}],"count":1}`, wantID)
 	})
 	defer srv.Close()
 
@@ -158,12 +158,12 @@ func TestGetControl_ShortCodePath(t *testing.T) {
 		if !strings.HasPrefix(r.URL.Path, "/v1/anchors/") {
 			t.Errorf("path = %q, want /v1/anchors/ prefix", r.URL.Path)
 		}
-		_, _ = fmt.Fprint(w, `{"anchor":{"id":"a-uuid","short_code":"IAC-06","title":"T","family":"IAC"}}`)
+		_, _ = fmt.Fprint(w, `{"anchor":{"id":"a-uuid","short_code":"IAC-37","title":"T","family":"IAC"}}`)
 	})
 	defer srv.Close()
 
 	tool := tools.NewGetControl(client)
-	out, err := tool.Handle(context.Background(), json.RawMessage(`{"anchor_id":"IAC-06"}`))
+	out, err := tool.Handle(context.Background(), json.RawMessage(`{"anchor_id":"IAC-37"}`))
 	if err != nil {
 		t.Fatalf("Handle: %v", err)
 	}

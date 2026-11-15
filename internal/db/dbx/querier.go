@@ -67,8 +67,10 @@ type Querier interface {
 	// The DB CHECK is the authoritative backstop. updated_at is refreshed.
 	ApproveChecklistSection(ctx context.Context, arg ApproveChecklistSectionParams) (ChecklistSection, error)
 	// AC-3 transition: requested -> approved. The application MUST verify the
-	// caller has IsApprover before invoking this query AND that approved_by
-	// differs from requested_by (segregation of duties). The WHERE
+	// caller has IsApprover before invoking this query AND apply the approval
+	// rule (internal/approval, #2101): approved_by differs from requested_by
+	// unless the organisation allows self-approval, in which case self_approved
+	// is true and exceptions_sod admits the same person. The WHERE
 	// status='requested' clause guards against double-approval / out-of-order
 	// transitions; zero rows returned indicates either a missing row or a wrong
 	// prior state -- the application probes after to disambiguate.
@@ -79,7 +81,8 @@ type Querier interface {
 	// Optional approval-evidence file URL + hash are passed by the handler.
 	ApproveFrameworkScope(ctx context.Context, arg ApproveFrameworkScopeParams) (FrameworkScope, error)
 	// Transition: under_review -> approved. Requires IsApprover at handler
-	// (AC-4). The DB only guards the prior-state.
+	// (AC-4). The DB only guards the prior-state. self_approved is set by the
+	// store after the approval rule allowed a self-approval (#2101).
 	ApprovePolicy(ctx context.Context, arg ApprovePolicyParams) (Policy, error)
 	// Slice 441 — one-click human approval of an AI-suggested draft (AC-6/AC-7).
 	// Sets human_approved=TRUE and records the human_approver; optionally accepts
@@ -895,6 +898,7 @@ type Querier interface {
 	// Look up one edge by (requirement, anchor). Returns ErrNoRows when the
 	// edge doesn't exist yet. Importer calls this first to classify
 	// Created/Updated/Unchanged.
+	// Retired edges (#1971) are excluded.
 	GetFwToScfEdge(ctx context.Context, arg GetFwToScfEdgeParams) (FwToScfEdge, error)
 	// Row-lock one edge by (requirement, anchor) inside the import transaction.
 	// The importer compares source_attribution precedence before it updates
@@ -902,6 +906,8 @@ type Querier interface {
 	// check against the old row would overwrite a just-committed scf_official
 	// edge at READ COMMITTED. Same read-validate-write guard as
 	// GetFwToScfEdgeTierForUpdate. Returns ErrNoRows when the edge doesn't exist.
+	// Unlike every other reader it also returns a RETIRED edge (#1971): a
+	// crosswalk that lists the pair again restores it (RestoreFwToScfEdge).
 	GetFwToScfEdgeForUpdate(ctx context.Context, arg GetFwToScfEdgeForUpdateParams) (FwToScfEdge, error)
 	// ===== slice 483: crosswalk mapping-tier governance =====
 	// Read the current trust tier of one edge by id. The transition store calls
@@ -1008,7 +1014,7 @@ type Querier interface {
 	// the oldest one (#1867).
 	GetRuleMetaRiskByKey(ctx context.Context, arg GetRuleMetaRiskByKeyParams) (Risk, error)
 	GetSCFAnchorByID(ctx context.Context, id pgtype.UUID) (ScfAnchor, error)
-	// Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+	// Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 	// framework version.
 	GetSCFAnchorBySCFID(ctx context.Context, scfID string) (ScfAnchor, error)
 	// Existing-row lookup. Returns ErrNoRows when the anchor doesn't exist yet.
@@ -1053,6 +1059,10 @@ type Querier interface {
 	GetSlackOptIn(ctx context.Context, arg GetSlackOptInParams) (bool, error)
 	// Single-claim lookup by dedup key — used by tests + idempotency assertions.
 	GetStalenessRollupClaim(ctx context.Context, arg GetStalenessRollupClaimParams) (StalenessRollupLog, error)
+	// #2101: the caller-tenant's Allow self-approval setting. RLS scopes the row
+	// to the current tenant. Returns ErrNoRows when no tenants row exists
+	// (bare-UUID tenant); approval.AllowSelf maps that to the default, off.
+	GetTenantAllowSelfApproval(ctx context.Context, id pgtype.UUID) (bool, error)
 	// Slice 608: read the caller-tenant's control-bundle upload gate policy.
 	// RLS scopes the row to the current tenant; the WHERE clause exists only so
 	// the query returns at most one row. Returns ErrNoRows when no tenants row
@@ -1317,7 +1327,8 @@ type Querier interface {
 	// Append one vendor-attributed CLAIM (an implemented-requirement) mapped (or
 	// flagged NULL for mapping) to an SCF anchor. is_vendor_claim defaults TRUE
 	// and claim_status defaults 'asserted' (the table defaults) — the import never
-	// writes anything else (P0-512-1).
+	// writes anything else (P0-512-1). scf_release is the SCF release the code
+	// was bound in (#1771); NULL with an unmapped claim.
 	InsertImportedComponentClaim(ctx context.Context, arg InsertImportedComponentClaimParams) (ImportedComponentClaim, error)
 	// Append one append-only disposition-audit row recording the
 	// from_status -> to_status transition, the actor, and an optional note.
@@ -1712,8 +1723,8 @@ type Querier interface {
 	// atlas_migrate. Returns every row regardless of tenant. Never reachable
 	// through the app role under RLS.
 	ListAllEvidenceKindSchemas(ctx context.Context) ([]EvidenceKindSchema, error)
-	// Slice 174: anchor catalog export edges projection. Returns EVERY
-	// fw_to_scf_edges row whose target anchor is in the current SCF
+	// Slice 174: anchor catalog export edges projection. Returns EVERY live
+	// (not retired) fw_to_scf_edges row whose target anchor is in the current SCF
 	// framework_version, joined to framework_requirements +
 	// framework_versions + frameworks so consumers get the natural-key
 	// (`framework_slug:version:code`) without a second query.
@@ -2004,6 +2015,17 @@ type Querier interface {
 	// is belt-and-suspenders alongside the GUC-driven RLS policy; the
 	// tenancy.ApplyTenant call upstream pins the GUC.
 	ListControlsHistoryForExport(ctx context.Context, arg ListControlsHistoryForExportParams) ([]ListControlsHistoryForExportRow, error)
+	// Issue #1971 (D3): active controls still bound to an anchor of an SCF
+	// release that is no longer current. Coverage joins controls to crosswalk
+	// edges by anchor row, so these controls earn no framework credit until they
+	// move. For each one: the legacy anchor; the current release's anchor with
+	// the same code, if any (current_anchor_id is NULL when the code is gone);
+	// and the current anchor that SCF lists the legacy code as the legacy ID of
+	// (#1769), if any. The upgrade re-binds a control only when the current
+	// anchor has the same code AND the same title; every other row is reported
+	// as needing re-anchoring. tenant_id NULL lists every tenant (the migrate
+	// role, at upgrade); a tenant id lists that tenant's controls.
+	ListControlsOnLegacySCFAnchors(ctx context.Context, tenantID pgtype.UUID) ([]ListControlsOnLegacySCFAnchorsRow, error)
 	// Slice 016 — evidence freshness read-model + control drift snapshot queries.
 	//
 	// `evidence_freshness` is a materialized current-state read model (one row per
@@ -2306,6 +2328,13 @@ type Querier interface {
 	// to with relationship type and strength. Joins through scf_anchors so the
 	// caller gets the scf_id + family + title in one round trip.
 	ListFwToScfEdgesForRequirement(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListFwToScfEdgesForRequirementRow, error)
+	// Every live catalog edge under one framework_version, row-locked, with the
+	// requirement code and anchor scf_id for the import report. The crosswalk
+	// importer reads this after its upsert pass to find edges the crosswalk no
+	// longer lists (#1971): an SCF remap or a new SCF release moves a mapping to
+	// another anchor row, and the edge on the old one would otherwise keep
+	// counting as coverage. Already-retired edges are not returned.
+	ListFwToScfEdgesForVersionForUpdate(ctx context.Context, frameworkVersionID pgtype.UUID) ([]ListFwToScfEdgesForVersionForUpdateRow, error)
 	// ===== user_roles origin-aware reconciliation =====
 	// The user's CURRENT group-derived roles (origin='group-derived') in the
 	// tenant. The resolver diffs this against the freshly-resolved target set to
@@ -3076,6 +3105,7 @@ type Querier interface {
 	// SCF anchor only, invariant #7) — it is NOT a claim -> claim mapping and does
 	// NOT touch control_evaluations or the evidence ledger (the claim stays a
 	// claim; mapping only sets the crosswalk — invariant #2 / P0-512-1).
+	// scf_release records the SCF release the code was validated in (#1771).
 	// is_vendor_claim + claim_status are NOT touched. RLS rides the slice-512
 	// tenant_update policy.
 	MapImportedComponentClaimScfAnchor(ctx context.Context, arg MapImportedComponentClaimScfAnchorParams) (ImportedComponentClaim, error)
@@ -3155,6 +3185,14 @@ type Querier interface {
 	// explicitly so the publish writes the final, operator-reviewed snapshot in
 	// the same UPDATE that flips the status — one atomic transition.
 	PublishBoardPack(ctx context.Context, arg PublishBoardPackParams) (BoardPack, error)
+	// Issue #1971: a re-upload whose manifest names its anchor by SCF code, and
+	// whose code now resolves to a different anchor row because a new SCF
+	// release was imported (#1768 mints new anchor rows per release), moves the
+	// active row to the current release's anchor in place. The manifest itself
+	// is unchanged, so superseding would orphan owners, evidence and links for
+	// nothing; coverage joins controls to edges by anchor row, so leaving the
+	// control on the legacy row would drop it out of coverage.
+	RebindControlAnchorInPlace(ctx context.Context, arg RebindControlAnchorInPlaceParams) (int64, error)
 	// Clears every member of a group (Replace `members`, or Delete soft-disable).
 	// Returns affected-row count.
 	RemoveAllSCIMGroupMembers(ctx context.Context, arg RemoveAllSCIMGroupMembersParams) (int64, error)
@@ -3192,6 +3230,14 @@ type Querier interface {
 	// (P0-509-1 fail-closed). Returns the triggering group alongside the role so
 	// the audit row can record WHICH group granted it (AC-7).
 	ResolveRolesForGroups(ctx context.Context, arg ResolveRolesForGroupsParams) ([]ResolveRolesForGroupsRow, error)
+	// Clear retired_at on an edge a crosswalk lists again (#1971). The importer
+	// writes a transition row recording the restore in the same transaction.
+	RestoreFwToScfEdge(ctx context.Context, id pgtype.UUID) error
+	// Retire one catalog edge the crosswalk no longer lists (#1971). The row and
+	// its append-only tier-transition history stay; effective_fw_to_scf_edges
+	// and the other readers stop seeing it. The importer writes a transition row
+	// recording the retirement in the same transaction.
+	RetireFwToScfEdge(ctx context.Context, id pgtype.UUID) error
 	RetireOverlayEdge(ctx context.Context, arg RetireOverlayEdgeParams) (FwToScfOverlayEdge, error)
 	RevokeAPIKey(ctx context.Context, arg RevokeAPIKeyParams) error
 	// Deprovision (AC-4): revoke EVERY valid session for the user so the
@@ -3333,6 +3379,9 @@ type Querier interface {
 	StartBackupRun(ctx context.Context, arg StartBackupRunParams) (BackupRun, error)
 	// AC-6: draft -> review. Guarded so callers can never re-submit an already
 	// under-review row by accident (would still be valid but masks bugs).
+	// #2101: records the submitter as a person, so approval can compare. Also
+	// re-submits a review row whose submitter is unrecorded (NULL) or a session
+	// id ('jwt:<token id>'), which approval refuses because it names no person.
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
 	// Transition: draft -> under_review. Operator action; no role gate.
 	// Also re-submits an under_review policy whose submitter was recorded
@@ -3470,6 +3519,10 @@ type Querier interface {
 	// Update an existing anchor in place. Touches updated_at; the caller
 	// decides whether to call this based on a content-equality check.
 	UpdateSCFAnchor(ctx context.Context, arg UpdateSCFAnchorParams) (ScfAnchor, error)
+	// #2101: turn the caller-tenant's Allow self-approval on or off. RLS gates
+	// this to the caller's own row; the handler gates it to admins and writes
+	// the me_audit_log row in the same transaction.
+	UpdateTenantAllowSelfApproval(ctx context.Context, arg UpdateTenantAllowSelfApprovalParams) (UpdateTenantAllowSelfApprovalRow, error)
 	// Slice 608: set the caller-tenant's control-bundle upload gate policy.
 	// RLS gates this to the caller's own row. The CHECK constraint
 	// `tenants_bundle_gate_mode_chk` rejects an out-of-enum value at the DB

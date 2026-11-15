@@ -52,7 +52,7 @@ const detailBody = {
       control_id: "ac-2",
       statement: "Acme implements account management via SSO.",
       requirement_uuid: "req-1",
-      scf_anchor_id: "SCF-IAC-06",
+      scf_anchor_id: "SCF-IAC-37",
       unmapped: false,
       is_vendor_claim: true,
       claim_status: "asserted",
@@ -116,7 +116,7 @@ test.describe("OSCAL vendor-claims view", () => {
     // The unmapped claim surfaces the slice-512 NULL-anchor flag.
     await expect(page.getByTestId("claim-unmapped-badge")).toHaveCount(1);
     await expect(page.getByTestId("claim-scf-anchor").first()).toHaveText(
-      "SCF-IAC-06",
+      "SCF-IAC-37",
     );
   });
 

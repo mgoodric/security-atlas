@@ -19,6 +19,7 @@ SELECT
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
     created_at,
     updated_at
 FROM tenants
@@ -59,6 +60,7 @@ RETURNING
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
     created_at,
     updated_at;
 
@@ -76,6 +78,7 @@ RETURNING
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
     created_at,
     updated_at;
 
@@ -93,5 +96,31 @@ RETURNING
     is_bootstrap_tenant,
     bundle_gate_mode,
     risk_review_cadence_days,
+    allow_self_approval,
+    created_at,
+    updated_at;
+
+-- name: GetTenantAllowSelfApproval :one
+-- #2101: the caller-tenant's Allow self-approval setting. RLS scopes the row
+-- to the current tenant. Returns ErrNoRows when no tenants row exists
+-- (bare-UUID tenant); approval.AllowSelf maps that to the default, off.
+SELECT allow_self_approval
+FROM tenants
+WHERE id = $1;
+
+-- name: UpdateTenantAllowSelfApproval :one
+-- #2101: turn the caller-tenant's Allow self-approval on or off. RLS gates
+-- this to the caller's own row; the handler gates it to admins and writes
+-- the me_audit_log row in the same transaction.
+UPDATE tenants
+SET allow_self_approval = $2
+WHERE id = $1
+RETURNING
+    id,
+    name,
+    is_bootstrap_tenant,
+    bundle_gate_mode,
+    risk_review_cadence_days,
+    allow_self_approval,
     created_at,
     updated_at;

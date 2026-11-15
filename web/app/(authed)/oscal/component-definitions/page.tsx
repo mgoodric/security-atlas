@@ -17,6 +17,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
 import { FeatureDisabledState } from "@/components/feature-disabled-state";
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -38,20 +39,19 @@ export default function ComponentDefinitionsPage() {
   // hidden server-side); the gated API returns 404 "feature disabled".
   // Render the clean disabled panel instead of the raw error Alert.
   if (q.isError && isFeatureDisabledError(q.error)) {
-    return <FeatureDisabledState moduleName="Vendor Claims" />;
+    return (
+      <PageShell title="Vendor Claims">
+        <FeatureDisabledState moduleName="Vendor Claims" />
+      </PageShell>
+    );
   }
 
   return (
-    <div className="space-y-6" data-testid="component-definitions-page">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">Vendor Claims</h1>
-        <p className="text-sm text-muted-foreground">
-          Imported vendor component-definitions. Each claim is a vendor
-          assertion, not platform-verified evidence — accept, reject, or ask for
-          more information.
-        </p>
-      </header>
-
+    <PageShell
+      title="Vendor Claims"
+      subtitle="Imported vendor component-definitions. Each claim is a vendor assertion, not platform-verified evidence — accept, reject, or ask for more information."
+      data-testid="component-definitions-page"
+    >
       {q.isLoading && (
         <div className="space-y-3" data-testid="component-definitions-loading">
           <Skeleton className="h-12 w-full" />
@@ -102,6 +102,6 @@ export default function ComponentDefinitionsPage() {
           ))}
         </ul>
       )}
-    </div>
+    </PageShell>
   );
 }

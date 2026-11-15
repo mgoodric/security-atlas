@@ -177,7 +177,23 @@ $COMPOSE exec -T postgres psql -U atlas_migrate -d security_atlas \
 # export survived the migration intact (see Backup and restore, drill).
 atlas oscal-export --period <frozen-period-id> --out ./post-upgrade-bundle
 atlas oscal verify ./post-upgrade-bundle       # expect: signature OK
+
+# Controls left on a previous SCF release's anchors (see below).
+$COMPOSE logs atlas-bootstrap | grep -e 'controls rebound=' -e 'control needs re-anchoring'
 ```
+
+**When the release ships a new SCF catalog.** An imported SCF release is
+frozen, so a changed catalog arrives under a new release label with new
+anchor rows. The SCF import then moves each control to the new release's
+anchor only if that anchor has the same code and the same title.
+
+Every other control stays on its old anchor and earns no framework credit
+until you re-anchor it. Each one is logged as
+`control needs re-anchoring ... anchor=<code>@<old release>: <note>`. The note
+says where the concept went, for example
+`IAC-21 -> IAC-10 in test-2026.3 (concept)`. Re-anchor each listed control:
+edit its bundle's `scf_anchor_id` and re-upload it, or re-anchor it in the
+app.
 
 If `/health` reports `db` not-ok, or the version is wrong, or a verify
 fails, treat the upgrade as failed and roll back.

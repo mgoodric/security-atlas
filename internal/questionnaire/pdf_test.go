@@ -50,7 +50,7 @@ func TestBuildHTML_EscapesHTMLSpecialChars(t *testing.T) {
 				Code:        "Q&A-01",
 				Text:        "Does <vendor> require 'MFA'?",
 				Domain:      "Identity & Access",
-				ScfAnchorID: "IAC-06",
+				ScfAnchorID: "IAC-37",
 				AnswerValue: "yes",
 				Narrative:   "Configured at <provider>.",
 			},
@@ -105,7 +105,7 @@ func TestBuildHTML_AnchorBranch(t *testing.T) {
 			{
 				Code:         "X-02",
 				Text:         "mapped question",
-				ScfAnchorID:  "IAC-06",
+				ScfAnchorID:  "IAC-37",
 				NeedsMapping: false,
 			},
 		},
@@ -114,7 +114,7 @@ func TestBuildHTML_AnchorBranch(t *testing.T) {
 	if !strings.Contains(got, "SCF anchor:") {
 		t.Fatalf("expected SCF anchor line; got: %s", excerpt(got))
 	}
-	if !strings.Contains(got, "IAC-06") {
+	if !strings.Contains(got, "IAC-37") {
 		t.Fatal("expected anchor id in output")
 	}
 	if strings.Contains(got, "needs manual SCF mapping") {
