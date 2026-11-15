@@ -3,9 +3,10 @@
 // the root layout's "%s · security-atlas" template.
 
 import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-titles";
 
 export const metadata: Metadata = {
-  title: "Framework scope",
+  title: pageTitle("/framework-scopes"),
 };
 
 export default function FrameworkScopesLayout({

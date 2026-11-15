@@ -71,6 +71,7 @@ import {
   uniqueControlIDs,
   type ExceptionFilters,
 } from "./filters";
+import { pageTitle } from "@/lib/page-titles";
 
 const FILTER_KEYS: (keyof ExceptionFilters)[] = ["status", "control_id"];
 
@@ -401,7 +402,7 @@ function ExceptionsPageInner() {
   if (exceptionsQ.isLoading) {
     return (
       <ListPage
-        title="Exceptions"
+        title={pageTitle("/exceptions")}
         subtitle="Time-bounded waivers from active controls · approved deviations live here"
         actions={actions}
         filterRow={
@@ -416,7 +417,7 @@ function ExceptionsPageInner() {
   if (exceptionsQ.isError) {
     return (
       <ListPage
-        title="Exceptions"
+        title={pageTitle("/exceptions")}
         subtitle="Time-bounded waivers from active controls · approved deviations live here"
         actions={actions}
       >
@@ -432,7 +433,7 @@ function ExceptionsPageInner() {
 
   return (
     <ListPage
-      title="Exceptions"
+      title={pageTitle("/exceptions")}
       subtitle="Time-bounded waivers from active controls · approved deviations live here"
       actions={actions}
       filterRow={
