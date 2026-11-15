@@ -672,7 +672,7 @@ var demoSCFAnchors = []demoSCFAnchor{
 	{"CRY-05", "Cryptographic Protections", "Encryption of Data at Rest"},
 	{"BCD-24", "Business Continuity & Disaster Recovery", "Data Backups"},
 	{"TDA-09", "Technology Development & Acquisition", "Secure Coding"},
-	{"TPM-03", "Third-Party Management", "Supply Chain Risk Management"},
+	{"TPM-04", "Third-Party Management", "Supply Chain Risk Management (SCRM)"},
 	{"MON-02", "Continuous Monitoring", "Continuous Monitoring"},
 	{"VPM-02", "Vulnerability & Patch Management", "Vulnerability Remediation"},
 	{"IRO-04", "Incident Response", "Incident Handling"},
