@@ -31,6 +31,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { useToast } from "@/components/ui/toast";
 
 import { createRiskFromCookieSession } from "./actions";
@@ -42,14 +43,11 @@ export default function NewRiskPage() {
   const { toast } = useToast();
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Add risk</h1>
-        <p className="text-sm text-muted-foreground">
-          Capture an operational risk against the program register. You can link
-          controls and refine residual scoring later from the risk detail view.
-        </p>
-      </div>
+    <PageShell
+      title="Add risk"
+      subtitle="Capture an operational risk against the program register. You can link controls and refine residual scoring later from the risk detail view."
+      width="reading"
+    >
       <RiskForm
         onSubmit={async (body) => {
           const risk = await createRiskFromCookieSession(body);
@@ -60,6 +58,6 @@ export default function NewRiskPage() {
           router.push(`/risks/${encodeURIComponent(risk.id)}`);
         }}
       />
-    </div>
+    </PageShell>
   );
 }

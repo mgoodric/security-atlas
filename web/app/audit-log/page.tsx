@@ -9,20 +9,22 @@
 // preflight) BEFORE this component renders. By the time this component
 // runs, the caller has cleared the route-level guard.
 
+import type { Metadata } from "next";
+
+import { PageShell } from "@/components/shell/page-shell";
+
 import { AuditLogPageClient } from "./page-client";
+
+export const metadata: Metadata = { title: "Audit log" };
 
 export default function AuditLogPage() {
   return (
-    <div className="mx-auto max-w-screen-2xl space-y-4 p-4 sm:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          Every audit event across the tenant, in one paginated view. Filter by
-          time window, actor, or event kind; expand a row to see its raw
-          payload. Read-only.
-        </p>
-      </div>
+    <PageShell
+      title="Audit log"
+      subtitle="Every audit event across the tenant, in one paginated view. Filter by time window, actor, or event kind; expand a row to see its raw payload. Read-only."
+      bodyClassName="space-y-4"
+    >
       <AuditLogPageClient />
-    </div>
+    </PageShell>
   );
 }

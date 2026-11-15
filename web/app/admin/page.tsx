@@ -26,6 +26,7 @@ import {
   FeatureFlag,
   FeatureFlagListResponse,
 } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);
@@ -65,15 +66,16 @@ export default function AdminOverviewPage() {
         })();
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Admin</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Admin"
+      subtitle={
+        <>
           Self-administer the platform — SSO, users, API keys, feature flags,
           and the audit log live here. Day-to-day program work is outside this
           section.
-        </p>
-      </div>
+        </>
+      }
+    >
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <AdminTile
           href="/admin/sso"
@@ -139,7 +141,7 @@ export default function AdminOverviewPage() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </PageShell>
   );
 }
 

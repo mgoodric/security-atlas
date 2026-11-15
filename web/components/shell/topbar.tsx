@@ -73,14 +73,22 @@ import { UserAvatar } from "@/components/shell/user-avatar";
 // element carries `md:hidden` on its trigger button, so the hamburger
 // is visible only at viewport widths `< 768px`. Desktop UX at `≥ md`
 // is unchanged — the trigger renders as a `display:none` element with
-// no layout cost (P0-277-1). The `v0 · self-host` chip is the only
-// fixed-width text the trigger sits next to; we hide it at `< sm`
-// (640px) so the hamburger + logo + breadcrumb fit on phone widths
-// without horizontal scroll.
+// no layout cost (P0-277-1).
+//
+// #2080 — the `v0 · self-host` chip moved out: the version tag lives in
+// the sidebar footer only. From `md` up the bar stays on one line (it is
+// checked at 1,200px): text never wraps, the right-hand cluster keeps
+// its width, and the left cluster (logo + breadcrumb) is the one that
+// gives way, truncating the breadcrumb rather than pushing the bar
+// wider. Below `md` the slice 277 phone layout is unchanged; pinning
+// the right cluster there would squeeze out the hamburger.
 export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
   return (
-    <header className="flex h-14 shrink-0 items-center justify-between border-b bg-background px-4 md:px-6">
-      <div className="flex items-center gap-2 md:gap-3">
+    <header
+      data-testid="app-topbar"
+      className="flex h-14 shrink-0 items-center justify-between gap-4 border-b bg-background px-4 md:px-6 md:whitespace-nowrap"
+    >
+      <div className="flex items-center gap-2 md:min-w-0 md:gap-3 md:overflow-hidden">
         {/*
           Slice 277 — mobile sidebar trigger. The component carries
           `md:hidden` on its outer button, so this slot collapses to
@@ -97,9 +105,6 @@ export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
           <ThemeAwareLogo width={28} height={28} className="h-7 w-7" alt="" />
           <span className="text-base font-semibold">security-atlas</span>
         </Link>
-        <span className="hidden text-xs text-muted-foreground sm:inline">
-          v0 · self-host
-        </span>
         {/*
           Slice 223 — read-only breadcrumb chip `<tenant> > <page>`.
           Distinct from the TenantSwitcher (which is on the right side
@@ -108,7 +113,7 @@ export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
         */}
         <Breadcrumb />
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 md:shrink-0">
         {/*
           Slice 223 — global ⌘K search input. Calls slice 268's
           /v1/search via the BFF /api/search; popover groups results

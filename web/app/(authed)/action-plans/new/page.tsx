@@ -8,6 +8,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { useToast } from "@/components/ui/toast";
 import { createActionPlan } from "@/lib/api/action-plans";
 
@@ -19,17 +20,11 @@ export default function NewActionPlanPage() {
   const { toast } = useToast();
 
   return (
-    <div className="space-y-6 max-w-3xl">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          New action plan
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          A forward-looking commitment to close a gap. Capture the owner, an
-          optional due date, the triggering event, and link the risks and
-          controls the gap touches.
-        </p>
-      </div>
+    <PageShell
+      width="reading"
+      title="New action plan"
+      subtitle="A forward-looking commitment to close a gap. Capture the owner, an optional due date, the triggering event, and link the risks and controls the gap touches."
+    >
       <ActionPlanForm
         onSubmit={async (body) => {
           const { id } = await createActionPlan(body);
@@ -38,6 +33,6 @@ export default function NewActionPlanPage() {
           router.push(`/action-plans/${encodeURIComponent(id)}`);
         }}
       />
-    </div>
+    </PageShell>
   );
 }
