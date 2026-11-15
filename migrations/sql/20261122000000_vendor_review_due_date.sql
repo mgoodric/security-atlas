@@ -15,7 +15,9 @@
 -- A vendor is overdue only once its due day has ended (strictly after the
 -- UTC due day), the internal/duedate rule: due_date < cutoff_date.
 --
--- STABLE, not IMMUTABLE: AT TIME ZONE on a timestamptz is not immutable.
+-- STABLE is a conservative marking: every operation in the body, including
+-- timezone('UTC', timestamptz), is IMMUTABLE, but nothing indexes on the
+-- function, so nothing needs the stronger promise.
 
 CREATE OR REPLACE FUNCTION vendor_review_due_date(
     last_review         date,

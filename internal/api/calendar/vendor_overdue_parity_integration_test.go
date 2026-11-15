@@ -22,40 +22,71 @@ import (
 	"github.com/mgoodric/security-atlas/internal/vendor"
 )
 
+// parityVendor is a vendor whose review falls due on the group's due day.
+type parityVendor struct {
+	name       string
+	cadence    string
+	lastReview *time.Time
+	createdAt  time.Time
+}
+
+func utcDate(y int, m time.Month, day int) *time.Time {
+	v := time.Date(y, m, day, 0, 0, 0, 0, time.UTC)
+	return &v
+}
+
 func TestVendorOverdue_ListBurndownCalendarAgreeAtMidnight(t *testing.T) {
+	// The tenants have no `tenants` row, so the initial-review window is
+	// the 30-day default.
+	groups := []struct {
+		name   string
+		dueDay time.Time
+		seed   []parityVendor
+	}{
+		{"mid-month", *utcDate(2026, 3, 10), []parityVendor{
+			// The old Go flag (a 30-day Duration compared as a timestamp)
+			// put this one's due at 2026-03-12 00:00.
+			{"monthly", "monthly", utcDate(2026, 2, 10), time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
+			// The old 91-day Duration put it on 2026-03-11.
+			{"quarterly", "quarterly", utcDate(2025, 12, 10), time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
+			{"annual", "annual", utcDate(2025, 3, 10), time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)},
+			// Never reviewed, created late on the day 30 days before: its
+			// first review is due on the UTC date of created_at + 30.
+			{"never reviewed", "annual", nil, time.Date(2026, 2, 8, 22, 0, 0, 0, time.UTC)},
+		}},
+		// Postgres clamps a month-end date to the target month's end; the
+		// Go mirror must land on the same day.
+		{"Jan 31 + 1 month", *utcDate(2026, 2, 28), []parityVendor{
+			{"monthly from Jan 31", "monthly", utcDate(2026, 1, 31), time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)},
+		}},
+		{"Feb 29 + 1 year", *utcDate(2029, 2, 28), []parityVendor{
+			{"annual from Feb 29", "annual", utcDate(2028, 2, 29), time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)},
+		}},
+	}
+	for _, g := range groups {
+		t.Run(g.name, func(t *testing.T) {
+			assertVendorOverdueParity(t, g.dueDay, g.seed)
+		})
+	}
+}
+
+func assertVendorOverdueParity(t *testing.T, dueDay time.Time, seed []parityVendor) {
+	t.Helper()
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
 
-	// Every vendor's review falls due on dueDay. The tenant has no
-	// `tenants` row, so the initial-review window is the 30-day default.
-	dueDay := time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC)
-	seed := func(name, cadence string, lastReview *time.Time, createdAt time.Time) uuid.UUID {
-		t.Helper()
+	ids := map[uuid.UUID]string{}
+	for _, pv := range seed {
 		id := uuid.New()
 		if _, err := admin.Exec(context.Background(), `
 			INSERT INTO vendors (id, tenant_id, name, criticality, review_cadence, last_review_date, created_at)
 			VALUES ($1, $2, $3, 'high', $4, $5, $6)
-		`, id, tenant, name, cadence, lastReview, createdAt); err != nil {
-			t.Fatalf("seed vendor %s: %v", name, err)
+		`, id, tenant, pv.name, pv.cadence, pv.lastReview, pv.createdAt); err != nil {
+			t.Fatalf("seed vendor %s: %v", pv.name, err)
 		}
-		return id
+		ids[id] = pv.name
 	}
-	d := func(y int, m time.Month, day int) *time.Time {
-		v := time.Date(y, m, day, 0, 0, 0, 0, time.UTC)
-		return &v
-	}
-	ids := map[uuid.UUID]string{}
-	// Monthly, reviewed a calendar month before. The old Go flag (a 30-day
-	// Duration compared as a timestamp) put its due at 2026-03-12 00:00.
-	ids[seed("monthly", "monthly", d(2026, 2, 10), dueDay.AddDate(-1, 0, 0))] = "monthly"
-	// Quarterly: Dec 10 + 3 months. The old 91-day Duration put it on Mar 11.
-	ids[seed("quarterly", "quarterly", d(2025, 12, 10), dueDay.AddDate(-1, 0, 0))] = "quarterly"
-	// Annual: reviewed a year before.
-	ids[seed("annual", "annual", d(2025, 3, 10), dueDay.AddDate(-2, 0, 0))] = "annual"
-	// Never reviewed, created late on the day 30 days before: its first
-	// review is due on dueDay (the UTC date of created_at + 30).
-	ids[seed("never reviewed", "annual", nil, dueDay.AddDate(0, 0, -30).Add(22*time.Hour))] = "never reviewed"
 
 	ctx, err := tenancy.WithTenant(context.Background(), tenant)
 	if err != nil {

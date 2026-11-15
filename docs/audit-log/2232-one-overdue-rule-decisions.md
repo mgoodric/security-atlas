@@ -14,7 +14,7 @@ detection_tier_target: integration
 ## D1 — The vendor due date is one SQL function, mirrored in Go
 
 `vendor_review_due_date(last_review_date, review_cadence, created_at,
-initial_review_days) RETURNS date` (migration `20261118000000`) is the only
+initial_review_days) RETURNS date` (migration `20261122000000`) is the only
 definition of the date. It returns `last_review_date` plus the cadence as a
 calendar interval (1/3/6/12 months), or, for a vendor never reviewed, the
 UTC date of `created_at` plus the tenant's initial-review window (#2061).
@@ -27,6 +27,13 @@ and clamps the day to the end of the month, as Postgres `date + interval`
 does. `IsOverdueAsOf` is now `duedate.IsOverdue(ReviewDueDate(), cutoff)`.
 `ReviewCadence.Duration()` (30/91/182/365 days) is replaced by `Months()`,
 and its only caller was `IsOverdueAsOf`.
+
+The two disagree on an unknown cadence. `Months()` treats it as 12 months,
+so it fails closed and the vendor eventually shows as overdue. The SQL
+`CASE` has no `ELSE`, so it returns NULL, and a NULL due date is never
+overdue. That case can't happen: `review_cadence` is the
+`vendor_review_cadence` enum, and the `CASE` covers every value of it. A
+new enum value needs a matching arm in the function and in `Months()`.
 
 A SQL function rather than Go-only status, because the list and the
 burndown filter and count in SQL. Computing the date in two languages is
