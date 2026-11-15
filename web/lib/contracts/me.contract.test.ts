@@ -86,7 +86,9 @@ describe("contract: GET /api/me <-> atlas GET /v1/me", () => {
       // #2142: theme is system | light | dark for a users row, null for a
       // credential with no users row.
       expect(
-        body.theme === null || ["system", "light", "dark"].includes(body.theme),
+        body.theme === null ||
+          (typeof body.theme === "string" &&
+            ["system", "light", "dark"].includes(body.theme)),
         `${name}.theme must be system, light, dark or null`,
       ).toBe(true);
     }
