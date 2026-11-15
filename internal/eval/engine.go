@@ -104,23 +104,26 @@ func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigg
 		if err != nil {
 			return err
 		}
+		exceptions, err := e.store.loadActiveExceptions(ctx, q, tenantID, controlID)
+		if err != nil {
+			return err
+		}
 
 		// One row per applicable cell. When the control resolves to zero
 		// cells we still write one row with a NULL scope_cell_id so the
 		// control has an observable state (AC-1 — every control in the
 		// catalog has a queryable pass/fail).
-		targets := make([]*uuid.UUID, 0, len(cells))
+		targets := make([]*scope.Cell, 0, len(cells))
 		if len(cells) == 0 {
 			targets = append(targets, nil)
 		} else {
 			for i := range cells {
-				id := cells[i].ID
-				targets = append(targets, &id)
+				targets = append(targets, &cells[i])
 			}
 		}
 
-		for _, cellID := range targets {
-			row, err := e.computeRow(ctx, tx, meta, records, cellID, evalRunID, trigger, evaluatedAt)
+		for _, cell := range targets {
+			row, err := e.computeRow(ctx, tx, meta, records, exceptions, cell, evalRunID, trigger, evaluatedAt)
 			if err != nil {
 				return err
 			}
@@ -153,7 +156,7 @@ func (e *Engine) EvaluateControl(ctx context.Context, controlID uuid.UUID, trigg
 // is a documented follow-up (slice 018's effective-scope intersection is the
 // natural home). This is faithful to AC-1's "(control × scope_cell × time)"
 // shape: state is recorded per applicable cell.
-func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, records []allRecord, cellID *uuid.UUID, evalRunID uuid.UUID, trigger string, now time.Time) (evaluationRow, error) {
+func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, records []allRecord, exceptions []activeException, cell *scope.Cell, evalRunID uuid.UUID, trigger string, now time.Time) (evaluationRow, error) {
 	inWindow := inWindowRecords(records, meta.freshnessClass, now)
 	freshness := computeFreshness(records, meta.freshnessClass, now)
 
@@ -170,6 +173,23 @@ func (e *Engine) computeRow(ctx context.Context, tx pgx.Tx, meta controlMeta, re
 		result = ResultInconclusive
 	}
 
+	// #2112: an active exception covering this cell waives the normal
+	// result. It is applied last so it holds whatever the evidence said,
+	// and only while the exception is in force: once it expires or leaves
+	// status 'active', the next evaluation is the normal result again.
+	excepted, err := exceptedIn(exceptions, cell, now)
+	if err != nil {
+		return evaluationRow{}, fmt.Errorf("control %s: %w", meta.id, err)
+	}
+	if excepted {
+		result = ResultExcepted
+	}
+
+	var cellID *uuid.UUID
+	if cell != nil {
+		id := cell.ID
+		cellID = &id
+	}
 	row := evaluationRow{
 		controlID:             meta.id,
 		scopeCellID:           cellID,
