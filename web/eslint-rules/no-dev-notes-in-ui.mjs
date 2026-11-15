@@ -23,7 +23,7 @@ export const VISIBLE_PROPS = new Set([
   "alt",
 ]);
 
-function match(text) {
+export function findDevNote(text) {
   if (typeof text !== "string") return null;
   return PATTERNS.find((p) => p.re.test(text)) ?? null;
 }
@@ -44,7 +44,7 @@ const rule = {
   },
   create(context) {
     function report(node, text) {
-      const hit = match(text);
+      const hit = findDevNote(text);
       if (hit) {
         context.report({
           node,

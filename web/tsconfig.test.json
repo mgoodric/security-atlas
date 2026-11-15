@@ -4,6 +4,6 @@
   "compilerOptions": {
     "noEmit": true
   },
-  "include": ["vitest.config.ts", "**/*.test.ts"],
+  "include": ["vitest.config.ts", "**/*.test.ts", "help/markdown.d.ts"],
   "exclude": ["node_modules", "e2e", ".next"]
 }
