@@ -251,6 +251,7 @@ export const ENUM_LABELS = {
     controls: "Controls",
     integrations: "Integrations",
     policy: "Policies",
+    questionnaire: "Questionnaires",
     risk: "Risk",
     vendor: "Vendors",
     uncategorized: "Other",
