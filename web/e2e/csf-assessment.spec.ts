@@ -107,7 +107,7 @@ test.describe("CSF 2.0 assessment page", () => {
 
   // #2065: the title names the real framework and version, never a
   // hard-coded "CSF 2.0".
-  test("titles the page from the framework name and version", async ({
+  test("names the framework version under the title", async ({
     authedPage,
   }) => {
     await authedPage.route("**/api/csf/gap*", (route) =>
@@ -124,8 +124,12 @@ test.describe("CSF 2.0 assessment page", () => {
 
     await authedPage.goto(`/csf/${FV}`);
 
+    // #2081 — the H1 is the sidebar label; the version names the subtitle.
+    await expect(
+      authedPage.getByRole("heading", { level: 1, name: "CSF assessment" }),
+    ).toBeVisible();
     await expect(authedPage.getByTestId("csf-title")).toHaveText(
-      "NIST CSF 2.1 Assessment",
+      "NIST CSF 2.1",
     );
   });
 

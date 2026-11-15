@@ -77,9 +77,10 @@ import {
   parseSessionMe,
   type SessionMe,
 } from "./admin-prefetch";
+import { pageTitle } from "@/lib/page-titles";
 
 export const metadata: Metadata = {
-  title: "Settings",
+  title: pageTitle("/settings"),
 };
 
 /**

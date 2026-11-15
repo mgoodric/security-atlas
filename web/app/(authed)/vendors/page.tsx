@@ -32,6 +32,7 @@ import {
   VendorBurndown,
   VendorSpendRollupRow,
 } from "@/lib/api/vendors";
+import { pageTitle } from "@/lib/page-titles";
 
 // Slice 024 — vendor lite list view. The filters are query-param-driven so
 // a deep link survives reload and the user can bookmark "high + overdue".
@@ -111,7 +112,7 @@ export default function VendorsPage() {
 
   return (
     <PageShell
-      title="Vendors"
+      title={pageTitle("/vendors")}
       subtitle="Third-party register. Lite scope: contract dates, DPA, review cadence, criticality. Phase 2 adds questionnaire issuance."
       actions={
         <>
