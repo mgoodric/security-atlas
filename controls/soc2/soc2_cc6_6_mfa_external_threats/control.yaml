@@ -9,7 +9,7 @@ description: |
   enforced at sign-in. This is a deliberately narrower test than
   CC6.1's "MFA everywhere" — auditors sample admin paths first.
 
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 control_family: IAC
 implementation_type: automated
 owner_role: security-engineering

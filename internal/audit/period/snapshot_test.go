@@ -62,7 +62,7 @@ func TestActionPlanRef_FieldRoundTrip(t *testing.T) {
 	created := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	ref := ActionPlanRef{
 		ID:            id,
-		Title:         "Close the IAC-06 freshness gap",
+		Title:         "Close the IAC-37 freshness gap",
 		Status:        "in_progress",
 		OwnerID:       owner,
 		DueDate:       &due,

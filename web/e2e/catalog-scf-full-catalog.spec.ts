@@ -22,7 +22,7 @@ function anchorAt(i: number) {
   const controlled = i === 3;
   return {
     id: `a2066000-0000-4000-8000-00000000${n}`,
-    scf_id: i === 3 ? "IAC-06" : `TST-${n}`,
+    scf_id: i === 3 ? "IAC-37" : `TST-${n}`,
     family: i === 3 ? "IAC" : "TST",
     name: i === 3 ? "Multi-Factor Authentication" : `Catalog anchor ${n}`,
     description: "",
@@ -102,13 +102,13 @@ test.describe("/catalog/scf shows the full catalog (issue #2066)", () => {
     const search = page.getByTestId("catalog-scf-search");
     const rows = page.getByTestId("catalog-scf-row");
 
-    await search.fill("iac-06");
+    await search.fill("iac-37");
     await expect(rows).toHaveCount(1);
     await expect(rows.first()).toContainText("Multi-Factor Authentication");
 
     await search.fill("multi-factor");
     await expect(rows).toHaveCount(1);
-    await expect(rows.first()).toContainText("IAC-06");
+    await expect(rows.first()).toContainText("IAC-37");
 
     await search.fill("TST-1590");
     await expect(rows).toHaveCount(1);
@@ -128,6 +128,6 @@ test.describe("/catalog/scf shows the full catalog (issue #2066)", () => {
     const markers = page.getByTestId("catalog-scf-has-control");
     await expect(markers).toHaveCount(1);
     const row = page.getByTestId("catalog-scf-row").filter({ has: markers });
-    await expect(row).toContainText("IAC-06");
+    await expect(row).toContainText("IAC-37");
   });
 });

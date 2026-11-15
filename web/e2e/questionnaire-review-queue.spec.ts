@@ -104,7 +104,7 @@ function detailBody(answers: AnswerMap) {
         text: q.text,
         domain: q.code.slice(0, 3),
         answer_type: "yes_no",
-        scf_anchor_id: q.code === "HRS-01" ? null : "IAC-06",
+        scf_anchor_id: q.code === "HRS-01" ? null : "IAC-37",
         sort_order: i + 1,
         needs_mapping: q.code === "HRS-01",
         answer: a
