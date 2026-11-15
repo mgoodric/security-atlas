@@ -26,8 +26,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  ApplicabilityChange,
   ApplicabilityDiff,
   CHANGE_LABELS,
+  describeReferenceChange,
+  describeReferenceMove,
   describeSide,
   summarizeChanges,
 } from "@/lib/api/applicability";
@@ -141,13 +144,52 @@ function DiffBody({ diff }: { diff: ApplicabilityDiff }) {
                 </TableCell>
                 <TableCell className="text-xs">
                   {describeSide(c.after)}
+                  <ReferenceMove change={c} />
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
+
+      {/* #2214: reference-only edits, informational and muted, outside the
+          counts above. The reference is org-supplied: rendered as text. */}
+      {diff.reference_changes.length > 0 && (
+        <ul
+          className="space-y-1 text-xs text-muted-foreground"
+          data-testid="review-diff-reference-changes"
+        >
+          {diff.reference_changes.map((c) => (
+            <li
+              key={c.requirement_id}
+              data-testid={`review-diff-ref-${c.code}`}
+              data-change={c.change}
+              className="break-all"
+            >
+              <span className="font-mono" title={c.title}>
+                {c.code}
+              </span>{" "}
+              {describeReferenceChange(c)}
+            </li>
+          ))}
+        </ul>
+      )}
     </>
+  );
+}
+
+// A reference move bundled with a decision or justification change: a
+// muted sub-line under the row's after side. Org-supplied text, never a link.
+function ReferenceMove({ change }: { change: ApplicabilityChange }) {
+  const text = describeReferenceMove(change);
+  if (!text) return null;
+  return (
+    <div
+      className="mt-1 break-all text-muted-foreground"
+      data-testid={`review-diff-moved-ref-${change.code}`}
+    >
+      {text}
+    </div>
   );
 }
 
