@@ -7,7 +7,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Questionnaires · security-atlas",
+  title: "Questionnaires",
 };
 
 export default function QuestionnairesLayout({

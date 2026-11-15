@@ -105,6 +105,7 @@ docs-site/docs/terms.md
 ### Slice 069 — Playwright runner artifacts
 web/playwright-report/
 web/test-results/
+web/axe-report/
 
 ### Slice 178 — UI honesty audit harness raw reports.
 ### The harness writes per-run JSON / markdown / screenshots under

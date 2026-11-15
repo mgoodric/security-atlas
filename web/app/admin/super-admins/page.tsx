@@ -55,6 +55,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { SuperAdminRow } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
 
 type SuperAdminListResponse = { items: SuperAdminRow[]; error?: string };
 
@@ -163,16 +164,17 @@ export default function SuperAdminsPage() {
   const grantErrorId = grantError ? "grant-super-admin-error" : undefined;
 
   return (
-    <div className="space-y-6" data-testid="super-admins-page">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Super admins</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Super admins"
+      data-testid="super-admins-page"
+      subtitle={
+        <>
           Platform-global identities authorized to create tenants, rename
           tenants, and grant or demote other super admins. Super admin is NOT a
           per-tenant role; it does not confer tenant-write authority on its own.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       <Alert>
         <AlertTitle>Last super admin safeguard</AlertTitle>
         <AlertDescription>
@@ -393,6 +395,6 @@ export default function SuperAdminsPage() {
           </DialogContent>
         </DialogPortal>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

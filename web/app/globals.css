@@ -170,6 +170,15 @@
   * {
     @apply border-border outline-ring/50;
   }
+  /* #2080 — every interactive control shows a focus ring drawn from the
+     `--ring` token when it has keyboard focus. Components with their own
+     ring (`focus-visible:ring-*` + `outline-none`) override this from the
+     utilities layer; everything else (native selects, bare links,
+     summary toggles) gets this one instead of the browser's default. */
+  :where(a[href], button, input, select, textarea, summary, [tabindex]:not([tabindex="-1"])):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
   body {
     @apply bg-background text-foreground;
   }

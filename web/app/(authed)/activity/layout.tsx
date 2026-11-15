@@ -7,7 +7,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Activity · security-atlas",
+  title: "Activity",
 };
 
 export default function ActivityLayout({

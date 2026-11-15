@@ -220,7 +220,7 @@ export function SavedViewsBar({
           data-testid="controls-saved-views-select"
           value={activeViewId}
           onChange={(e) => onLoadView(e.target.value)}
-          className="bg-transparent font-medium text-foreground focus:outline-none"
+          className="rounded-sm bg-transparent font-medium text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
         >
           <option value={NO_VIEW}>None</option>
           {views.map((v) => (

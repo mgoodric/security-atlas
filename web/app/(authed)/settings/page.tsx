@@ -67,6 +67,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { getSessionMe } from "@/lib/api/board";
 
 import { ApiTokensSection } from "./_tabs/api-tokens";
@@ -84,10 +85,12 @@ export default function SettingsPage() {
   const isAdmin = meQuery.data?.is_admin === true;
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6" data-testid="settings-page">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Settings"
+      width="reading"
+      data-testid="settings-page"
+      subtitle={
+        <>
           Your personal preferences and credentials. Tenant-wide settings live
           in{" "}
           {isAdmin ? (
@@ -104,15 +107,15 @@ export default function SettingsPage() {
             </span>
           )}
           .
-        </p>
-      </header>
-
+        </>
+      }
+    >
       <ProfileSection isAdmin={isAdmin} />
       {isAdmin ? <TenantSection /> : null}
       <AppearanceSection />
       <NotificationsSection />
       <ApiTokensSection isAdmin={isAdmin} />
       <SessionsSection />
-    </div>
+    </PageShell>
   );
 }

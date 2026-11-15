@@ -24,6 +24,7 @@ import {
   TopRisksTable,
 } from "@/components/board-pack/top-risks-table";
 import { VendorBurndownPanel } from "@/components/board-pack/vendor-burndown-panel";
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
@@ -76,16 +77,16 @@ export default function BoardPackDetailPage({
 
   if (packQuery.isLoading) {
     return (
-      <div className="mx-auto max-w-5xl space-y-4 p-8">
+      <PageShell title="Board pack" bodyClassName="space-y-4">
         <Skeleton className="h-10 w-72" />
         <Skeleton className="h-40 w-full" />
         <Skeleton className="h-40 w-full" />
-      </div>
+      </PageShell>
     );
   }
   if (packQuery.isError || !packQuery.data) {
     return (
-      <div className="mx-auto max-w-5xl p-8">
+      <PageShell title="Board pack" bodyClassName="">
         <Alert variant="destructive">
           <AlertTitle>Could not load the board pack</AlertTitle>
           <AlertDescription>
@@ -100,7 +101,7 @@ export default function BoardPackDetailPage({
         >
           Back to board packs
         </Link>
-      </div>
+      </PageShell>
     );
   }
 
