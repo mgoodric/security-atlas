@@ -1,0 +1,95 @@
+{
+  "name": "exception",
+  "title": "Exception",
+  "entity": "exceptions",
+  "column": "status",
+  "states": [
+    "requested",
+    "approved",
+    "denied",
+    "active",
+    "expired"
+  ],
+  "initial": [
+    {
+      "state": "requested",
+      "action": "request",
+      "routes": [
+        "POST /v1/exceptions"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ]
+    }
+  ],
+  "terminal": [
+    "denied",
+    "expired"
+  ],
+  "transitions": [
+    {
+      "from": "requested",
+      "to": "approved",
+      "action": "approve",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/exceptions/{id}/approve"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": true,
+      "second_person": true,
+      "self_approval_opt_in": true
+    },
+    {
+      "from": "requested",
+      "to": "denied",
+      "action": "deny",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/exceptions/{id}/deny"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": false,
+      "second_person": true,
+      "self_approval_opt_in": false,
+      "note": "Allow self-approval does not extend to denial: the requester never denies their own exception."
+    },
+    {
+      "from": "approved",
+      "to": "active",
+      "action": "activate",
+      "actor": "person",
+      "routes": [
+        "PATCH /v1/exceptions/{id}/activate"
+      ],
+      "roles": [
+        "admin",
+        "grc_engineer"
+      ],
+      "requires_approver": true,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false
+    },
+    {
+      "from": "active",
+      "to": "expired",
+      "action": "expire",
+      "actor": "system",
+      "requires_approver": false,
+      "people_only": false,
+      "second_person": false,
+      "self_approval_opt_in": false,
+      "note": "The expiry sweep (daily by default) expires an active exception once its expires_at has passed."
+    }
+  ]
+}
