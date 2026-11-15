@@ -29,7 +29,7 @@ Hand edits on top:
 
 ## D3 — Not changed: the ISO A.5.9 edge
 
-ISO A.5.9 Inventory of information and other associated assets was anchored on `AST-09` Asset Disposal because the sample had nothing closer. It now sits on `AST-22`. The sample now carries `AST-04` Asset Inventories, which is the better anchor, but moving the edge would change the mapping and not just the code. That is a crosswalk change, outside a permutation ticket. Left for a follow-up; the rationale now says the edge covers the asset lifecycle and doesn't claim `AST-22` is the nearest anchor.
+ISO A.5.9 Inventory of information and other associated assets was anchored on `AST-09` Asset Disposal because the sample had nothing closer. It now sits on `AST-22`. The sample now carries `AST-04` Asset Inventories, which is the better anchor, but moving the edge would change the mapping and not just the code. That is a crosswalk change, outside a permutation ticket. Left for #2301; the rationale now says the edge covers the asset lifecycle and doesn't claim `AST-22` is the nearest anchor.
 
 ## D4 — Upgrade effect
 
