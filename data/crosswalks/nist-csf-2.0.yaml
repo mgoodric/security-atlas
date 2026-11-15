@@ -423,10 +423,10 @@ mappings:
     strength: 0.65
     rationale: "Communicating critical objectives and dependent services overlaps SCF Information Security Governance; BIA-style dependency mapping is a residual gap (LOW)."
   - requirement_code: "GV.OC-05"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Understanding the capabilities/services the org depends on overlaps SCF Business Continuity Plan (dependency analysis); broader organizational-context gap (LOW)."
+    rationale: "Understanding the capabilities/services the org depends on overlaps SCF Business Continuity & Disaster Recovery (BC/DR) Plans (dependency analysis); broader organizational-context gap (LOW)."
   - requirement_code: "GV.RM-01"
     scf_anchor: "RSK-01"
     relationship_type: "subset_of"
@@ -560,15 +560,15 @@ mappings:
 
   # ===== IDENTIFY (ID) =====
   - requirement_code: "ID.AM-01"
-    scf_anchor: "AST-03"
+    scf_anchor: "AST-04"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Maintaining a hardware inventory maps directly to SCF Asset Inventory."
+    rationale: "Maintaining a hardware inventory maps directly to SCF Asset Inventories."
   - requirement_code: "ID.AM-02"
-    scf_anchor: "AST-03"
+    scf_anchor: "AST-04"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Maintaining a software inventory maps directly to SCF Asset Inventory."
+    rationale: "Maintaining a software inventory maps directly to SCF Asset Inventories."
   - requirement_code: "ID.AM-03"
     scf_anchor: "NET-01"
     relationship_type: "intersects_with"
@@ -744,10 +744,10 @@ mappings:
     strength: 0.55
     rationale: "Protecting data-in-use overlaps SCF Use of Cryptographic Controls (the broadest crypto-protection anchor); confidential-compute/data-in-use specificity is absent from the sample fixture (LOW)."
   - requirement_code: "PR.DS-11"
-    scf_anchor: "BCD-09"
+    scf_anchor: "BCD-24"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Creating/protecting/maintaining/testing data backups maps directly to SCF Backups."
+    rationale: "Creating/protecting/maintaining/testing data backups maps directly to SCF Data Backups."
   - requirement_code: "PR.PS-01"
     scf_anchor: "CFG-02"
     relationship_type: "equal"
@@ -759,10 +759,10 @@ mappings:
     strength: 0.7
     rationale: "Maintaining/replacing/removing software commensurate with risk overlaps SCF Vulnerability & Patch Management (patch/EOL lifecycle); broader software-lifecycle gap remains."
   - requirement_code: "PR.PS-03"
-    scf_anchor: "AST-09"
+    scf_anchor: "AST-22"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Maintaining/replacing/removing hardware overlaps SCF Asset Disposal (secure decommissioning); hardware-maintenance facet is the residual gap."
+    rationale: "Maintaining/replacing/removing hardware overlaps SCF Secure Disposal, Destruction or Re-Use of Equipment (secure decommissioning); hardware-maintenance facet is the residual gap."
   - requirement_code: "PR.PS-04"
     scf_anchor: "MON-04"
     relationship_type: "subset_of"
@@ -789,15 +789,15 @@ mappings:
     strength: 0.6
     rationale: "Protecting assets from environmental threats overlaps SCF Physical Access Control (the closest physical/environmental anchor in the fixture); environmental-controls specificity is absent (LOW)."
   - requirement_code: "PR.IR-03"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Implementing resilience mechanisms to meet availability requirements is part of the SCF Business Continuity Plan."
+    rationale: "Implementing resilience mechanisms to meet availability requirements is part of the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "PR.IR-04"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Maintaining adequate resource capacity for availability overlaps the SCF Business Continuity Plan; capacity-planning specificity is the residual gap (LOW)."
+    rationale: "Maintaining adequate resource capacity for availability overlaps the SCF Business Continuity & Disaster Recovery (BC/DR) Plans; capacity-planning specificity is the residual gap (LOW)."
 
   # ===== DETECT (DE) =====
   - requirement_code: "DE.CM-01"
@@ -930,40 +930,40 @@ mappings:
 
   # ===== RECOVER (RC) =====
   - requirement_code: "RC.RP-01"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Executing the recovery plan is governed by the SCF Business Continuity Plan."
+    rationale: "Executing the recovery plan is governed by the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "RC.RP-02"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Selecting/scoping/prioritizing/performing recovery actions is part of the SCF Business Continuity Plan."
+    rationale: "Selecting/scoping/prioritizing/performing recovery actions is part of the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "RC.RP-03"
-    scf_anchor: "BCD-11"
+    scf_anchor: "BCD-32"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Verifying backup integrity before restoration maps directly to SCF Backup Testing."
+    rationale: "Verifying backup integrity before restoration maps directly to SCF Testing for Reliability & Integrity."
   - requirement_code: "RC.RP-04"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Prioritizing critical-function restoration overlaps SCF Business Continuity Plan; post-incident-norms specificity gap (LOW)."
+    rationale: "Prioritizing critical-function restoration overlaps SCF Business Continuity & Disaster Recovery (BC/DR) Plans; post-incident-norms specificity gap (LOW)."
   - requirement_code: "RC.RP-05"
-    scf_anchor: "BCD-11"
+    scf_anchor: "BCD-32"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Verifying restored-asset integrity and confirming normal operating status is part of SCF Backup Testing (restore validation)."
+    rationale: "Verifying restored-asset integrity and confirming normal operating status is part of SCF Testing for Reliability & Integrity (restore validation)."
   - requirement_code: "RC.RP-06"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Declaring/documenting the end of recovery is part of the SCF Business Continuity Plan."
+    rationale: "Declaring/documenting the end of recovery is part of the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "RC.CO-03"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Communicating recovery progress overlaps SCF Business Continuity Plan; stakeholder-comms specificity gap (LOW). The fixture has no dedicated recovery-communications anchor (slice-480 D7 revisit; closest covering anchor retained)."
+    rationale: "Communicating recovery progress overlaps SCF Business Continuity & Disaster Recovery (BC/DR) Plans; stakeholder-comms specificity gap (LOW). The fixture has no dedicated recovery-communications anchor (slice-480 D7 revisit; closest covering anchor retained)."
   - requirement_code: "RC.CO-04"
     scf_anchor: "IRO-09"
     relationship_type: "intersects_with"

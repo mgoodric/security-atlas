@@ -20,7 +20,7 @@
 // that exist on `riskWire` (slice 019 + slice 067 additions) are
 // referenced — no invented columns.
 
-import type { Risk } from "@/lib/api/risks";
+import type { Risk, RiskCategory } from "@/lib/api/risks";
 
 /**
  * The "all values" sentinel. Used as the default filter value on every
@@ -154,6 +154,46 @@ export function uniqueOwners(rows: Risk[]): string[] {
   }
   const named = Array.from(seen).sort();
   return hasUnassigned ? [...named, "unassigned"] : named;
+}
+
+/**
+ * #1817 — the Category pill's options: the organisation's categories by
+ * name, matched by slug. Archived categories are listed only when
+ * `showArchived` is on, marked "(archived)". A category the URL already
+ * filters on stays listed even when hidden, so the pill never shows a
+ * value it has no option for.
+ */
+export function categoryOptions(
+  categories: RiskCategory[],
+  showArchived: boolean,
+  selected: string,
+): { value: string; label: string }[] {
+  const listed = categories
+    .filter((c) => !c.archived || showArchived || c.slug === selected)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return [
+    { value: ALL, label: "All categories" },
+    ...listed.map((c) => ({
+      value: c.slug,
+      label: c.archived ? `${c.name} (archived)` : c.name,
+    })),
+  ];
+}
+
+/**
+ * #1817 — how a risk's category reads: the organisation's name for it
+ * (from the risk's `category_name`, else the category list, else the
+ * slug), and whether that category is archived.
+ */
+export function categoryDisplay(
+  row: Pick<Risk, "category" | "category_name">,
+  categories: RiskCategory[],
+): { name: string; archived: boolean } {
+  const cat = categories.find((c) => c.slug === row.category);
+  return {
+    name: row.category_name || cat?.name || row.category,
+    archived: cat?.archived ?? false,
+  };
 }
 
 /**

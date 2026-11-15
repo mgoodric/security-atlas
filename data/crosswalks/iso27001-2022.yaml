@@ -384,10 +384,10 @@ mappings:
     strength: 0.6
     rationale: "Security in project management overlaps with Secure Engineering Principles for project-phase security gates."
   - requirement_code: A.5.9
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Inventory of assets is a subset of SCF Asset Disposal/management family; AST-09 is the nearest sample anchor (asset lifecycle)."
+    rationale: "Inventory of assets is part of the SCF asset management family; AST-22 (Secure Disposal, Destruction or Re-Use of Equipment) carries this edge for the asset lifecycle."
   - requirement_code: A.5.10
     scf_anchor: DCH-01
     relationship_type: intersects_with
@@ -499,15 +499,15 @@ mappings:
     strength: 0.5
     rationale: "Preserved logs and audit records are a primary evidence source; System Generated Event Logs & Security-Relevant Telemetry (MON-04) underpins evidentiary integrity."
   - requirement_code: A.5.29
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Information security during disruption overlaps with Business Continuity Plan — shared with SOC 2 A1.2."
+    rationale: "Information security during disruption overlaps with Business Continuity & Disaster Recovery (BC/DR) Plans — shared with SOC 2 A1.2."
   - requirement_code: A.5.30
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: subset_of
     strength: 0.7
-    rationale: "ICT readiness for business continuity is a subset of the Business Continuity Plan anchor."
+    rationale: "ICT readiness for business continuity is a subset of the Business Continuity & Disaster Recovery (BC/DR) Plans anchor."
   - requirement_code: A.5.31
     scf_anchor: CPL-03
     relationship_type: intersects_with
@@ -641,10 +641,10 @@ mappings:
     strength: 0.5
     rationale: "Physical-threat protection is an extension of physical security controls (PES-04)."
   - requirement_code: A.7.5
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Resilience against environmental threats (disaster) ties to the Business Continuity Plan (BCD-02)."
+    rationale: "Resilience against environmental threats (disaster) ties to the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.7.6
     scf_anchor: PES-04
     relationship_type: subset_of
@@ -676,15 +676,15 @@ mappings:
     strength: 0.5
     rationale: "Off-site devices fall under Endpoint Security (END-04)."
   - requirement_code: A.7.10
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Storage media handling/disposal overlaps with SCF Asset Disposal — shared with SOC 2 CC6.5."
+    rationale: "Storage media handling/disposal overlaps with SCF Secure Disposal, Destruction or Re-Use of Equipment — shared with SOC 2 CC6.5."
   - requirement_code: A.7.11
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Protection from utility failures is a continuity/availability concern under the Business Continuity Plan (BCD-02)."
+    rationale: "Protection from utility failures is a continuity/availability concern under the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.7.12
     scf_anchor: PES-04
     relationship_type: intersects_with
@@ -701,10 +701,10 @@ mappings:
     strength: 0.6
     rationale: "Correct equipment maintenance over the asset lifecycle is governed by the Asset Management Policy (AST-01)."
   - requirement_code: A.7.14
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: equal
     strength: 0.8
-    rationale: "Secure disposal/re-use of equipment with media sanitization maps to Asset Disposal (AST-09)."
+    rationale: "Secure disposal/re-use of equipment with media sanitization maps to Secure Disposal, Destruction or Re-Use of Equipment (AST-22)."
   # --- A.8 Technological ---
   - requirement_code: A.8.1
     scf_anchor: END-04
@@ -747,10 +747,10 @@ mappings:
     strength: 0.6
     rationale: "Monitoring and adjusting resource use ties to Continuous Monitoring (MON-02) of system health."
   - requirement_code: A.8.6
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Capacity planning to sustain availability supports the Business Continuity Plan (BCD-02)."
+    rationale: "Capacity planning to sustain availability supports the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.8.7
     scf_anchor: END-07
     relationship_type: equal
@@ -777,10 +777,10 @@ mappings:
     strength: 0.8
     rationale: "Deletion of information when no longer required is the disposal end of Data Retention (DCH-03)."
   - requirement_code: A.8.10
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Media sanitization on deletion is an Asset Disposal (AST-09) activity."
+    rationale: "Media sanitization on deletion is a Secure Disposal, Destruction or Re-Use of Equipment (AST-22) activity."
   - requirement_code: A.8.11
     scf_anchor: DCH-01
     relationship_type: intersects_with
@@ -802,20 +802,20 @@ mappings:
     strength: 0.5
     rationale: "Egress controls at the network boundary are part of Boundary Protection (NET-04)."
   - requirement_code: A.8.13
-    scf_anchor: BCD-09
+    scf_anchor: BCD-24
     relationship_type: equal
     strength: 0.9
-    rationale: "Information backup maps to SCF Backups — shared with SOC 2 A1.2 backup mapping."
+    rationale: "Information backup maps to SCF Data Backups — shared with SOC 2 A1.2 backup mapping."
   - requirement_code: A.8.14
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: equal
     strength: 0.7
-    rationale: "Redundancy of processing facilities to meet availability targets maps to the Business Continuity Plan (BCD-02)."
+    rationale: "Redundancy of processing facilities to meet availability targets maps to the Business Continuity & Disaster Recovery (BC/DR) Plans (BCD-04)."
   - requirement_code: A.8.14
-    scf_anchor: BCD-09
+    scf_anchor: BCD-24
     relationship_type: intersects_with
     strength: 0.5
-    rationale: "Redundant data copies relate to Backups (BCD-09)."
+    rationale: "Redundant data copies relate to Data Backups (BCD-24)."
   - requirement_code: A.8.15
     scf_anchor: MON-04
     relationship_type: equal
