@@ -26,10 +26,8 @@ import {
 } from "@/components/ui/table";
 import { TONE_CHIP } from "@/components/board-pack/tone";
 import { PageShell } from "@/components/shell/page-shell";
-import { FeatureDisabledState } from "@/components/feature-disabled-state";
 import { APIError } from "@/lib/api/base";
 import { BoardPack, generateBoardPack, listBoardPacks } from "@/lib/api/board";
-import { isFeatureDisabledError } from "@/lib/feature-nav";
 
 import {
   GenerateFieldErrors,
@@ -107,18 +105,8 @@ export default function BoardPacksPage() {
     generate.mutate(periodEnd);
   }
 
-  // Slice 660: the `board.reporting` flag gates this module. A flag-off
-  // tenant reaches here only by direct navigation (the nav entry is
-  // hidden server-side); the gated API returns 404 "feature disabled".
-  // Render the clean disabled panel instead of the raw error state.
-  if (packsQuery.isError && isFeatureDisabledError(packsQuery.error)) {
-    return (
-      <PageShell width="reading" title={pageTitle("/board-packs")}>
-        <FeatureDisabledState moduleName="Board packs" />
-      </PageShell>
-    );
-  }
-
+  // The `board.reporting` flag is checked server-side by FeatureGate in
+  // ./layout.tsx (#2092); this page only mounts when the module is on.
   return (
     <PageShell
       width="reading"

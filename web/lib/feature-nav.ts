@@ -61,3 +61,25 @@ export function isFeatureDisabledError(err: unknown): boolean {
     err.message === FEATURE_DISABLED_MESSAGE
   );
 }
+
+// FeatureGateState is what a gated route renders: the module itself, or
+// one of two calm off states. Only an admin (`is_admin`, the super-admin
+// bit) is told where to switch the module on; everyone else is told to
+// ask one, and never sees the Admin link.
+export type FeatureGateState = "on" | "off-admin" | "off-member";
+
+/**
+ * resolveFeatureGate decides a gated route's render from the caller's
+ * enabled-modules read and their `is_admin` bit. Fail-closed like
+ * gateNavItems: a missing key reads as off.
+ */
+export function resolveFeatureGate(
+  modules: EnabledModules,
+  flag: string,
+  isAdmin: boolean,
+): FeatureGateState {
+  if (modules[flag] === true) {
+    return "on";
+  }
+  return isAdmin ? "off-admin" : "off-member";
+}
