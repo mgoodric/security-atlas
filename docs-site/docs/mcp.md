@@ -55,6 +55,11 @@ Once connected, the assistant can answer questions from your **live data**:
 Every list tool returns up to 100 rows by default; pass `limit=N` (max 500) to
 widen. There is no "return everything" option — a request over 500 is rejected.
 
+`list_risks` leaves out roll-ups (risks with at least one child risk linked) by
+default, so a parent and the children it summarises are not counted twice. Pass
+`include_rollups=true` to list them too; each roll-up then carries
+`child_count`.
+
 ### Write tools (human-approved)
 
 | Tool                    | Proposes…                                                    |

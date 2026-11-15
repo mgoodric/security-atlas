@@ -39,7 +39,7 @@ to the rest of the program (see `docs-site/docs/mcp.md`).
 | ---------------------- | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `list_controls`        | `GET /v1/controls`                                          | Tenant's active controls (canonical row shape)                                                                           |
 | `get_control`          | `GET /v1/anchors/{shortcode}` or list-then-filter for UUIDs | One control row                                                                                                          |
-| `list_risks`           | `GET /v1/risks`                                             | Tenant risks; status filter forwarded as `?treatment=`, category slug as `?category=`                                    |
+| `list_risks`           | `GET /v1/risks`                                             | Tenant risks, roll-ups excluded; `status`→`?treatment=`, `category`→`?category=`, `include_rollups`→`?include_rollups=`  |
 | `get_risk`             | `GET /v1/risks/{id}`                                        | One risk + linked controls + (optional) residual derive                                                                  |
 | `list_risk_categories` | `GET /v1/risks/categories`                                  | The organisation's own risk categories: valid `category` values for `create_risk` (slug or name) and `list_risks` (slug) |
 | `list_evidence`        | `GET /v1/evidence`                                          | Evidence ledger window; **never includes `payload_json`**                                                                |
