@@ -255,7 +255,7 @@ test.describe("neutral treatment tones", () => {
   }) => {
     await page.goto("/dashboard");
     const pill = page.getByTestId("top-risk-treatment").first();
-    await expect(pill).toHaveText("mitigate");
+    await expect(pill).toHaveText("Mitigate");
     await expect(pill).not.toHaveClass(/(^|\s)text-destructive(\s|$)/);
   });
 });

@@ -136,6 +136,8 @@ export type FrameworkPostureRow = {
   framework_id: string;
   framework_version: string;
   framework_version_id: string;
+  // framework_name (#2083): label the tile with frameworkLabel(name, version).
+  framework_name: string;
   scope_set: boolean;
   coverage_pct: number | null;
   covered_by_exception_pct: number | null;

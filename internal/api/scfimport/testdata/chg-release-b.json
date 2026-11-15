@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-2321-b",
+  "release_date": "2026-03-01",
+  "attribution": "Synthetic test catalog for the #2321 stock re-bind; not SCF content. CHG-02 keeps its code and takes a new title, as in SCF 2026.3.",
+  "controls": [
+    {
+      "scf_id": "CHG-02",
+      "family": "CHG",
+      "title": "Change Management Program",
+      "description": "A change management program governs how changes reach production."
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+// #2113 — /exceptions/[id] BFF: GET /v1/exceptions/{id} proxy.
+//
+// Forwards the bearer cookie; the platform scopes the read to the
+// caller's tenant via RLS (invariant #6). Upstream status and body pass
+// through, so a 404 reaches the page as "not found".
+
+import { forwardJSON, rejectNonUUID } from "@/lib/api/bff";
+
+export async function GET(
+  _req: Request,
+  ctx: { params: Promise<{ id: string }> },
+) {
+  const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
+  return forwardJSON(`/v1/exceptions/${encodeURIComponent(id)}`);
+}
