@@ -549,3 +549,15 @@ WHERE p.tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.narg(class)::text IS NULL OR p.class = sqlc.narg(class)::text)
   AND (sqlc.narg(status)::text IS NULL OR p.status = sqlc.narg(status)::text)
 ORDER BY p.created_at DESC, p.bundle_id, p.id;
+
+-- name: IsApprovedRemapRevision :one
+-- Issue #1776: whether a control row is the revision a person's approved SCF
+-- remap decision created. The upload path keeps such a revision when the
+-- boot seed re-uploads the stock manifest it replaced, so a reviewed
+-- re-anchor is never undone silently.
+SELECT EXISTS (
+    SELECT 1 FROM scf_remap_decisions
+    WHERE tenant_id = sqlc.arg(tenant_id)
+      AND new_control_id = sqlc.arg(control_id)
+      AND decision = 'approved'
+) AS approved;

@@ -1453,6 +1453,11 @@ type Querier interface {
 	// composite PK; conflicts are silently no-op so concurrent admins
 	// granting the same role don't fail.
 	InsertUserRole(ctx context.Context, arg InsertUserRoleParams) error
+	// Issue #1776: whether a control row is the revision a person's approved SCF
+	// remap decision created. The upload path keeps such a revision when the
+	// boot seed re-uploads the stock manifest it replaced, so a reviewed
+	// re-anchor is never undone silently.
+	IsApprovedRemapRevision(ctx context.Context, arg IsApprovedRemapRevisionParams) (bool, error)
 	// The most recent successful backup run — what restore-verification restores.
 	LatestSucceededBackup(ctx context.Context) (BackupRun, error)
 	// The most-recent reviewed_at for a vendor, used to keep vendors.last_review_date

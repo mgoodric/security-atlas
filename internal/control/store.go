@@ -40,6 +40,11 @@ var ErrSCFCodeNotInRelease = scfrelease.ErrCodeNotInRelease
 // SCF release; the field becomes required in a later release.
 const SCFReleaseDeprecationWarning = "control.yaml has no scf_release, so scf_anchor_id was bound in the current SCF release; declare scf_release, which will become required"
 
+// KeptReviewedAnchorWarning is returned on an upload of a stock manifest
+// that was not applied because a person re-anchored the control through an
+// approved SCF remap proposal (#1776).
+const KeptReviewedAnchorWarning = "kept the reviewed SCF re-anchor of this stock control: a person approved its remap, so the shipped manifest was not applied; update the bundle to change the anchor"
+
 // ErrControlChangedConcurrently is returned when the active version a
 // description-only upload was about to update in place was superseded by a
 // concurrent upload in the meantime. The HTTP layer maps this to 409; the
@@ -75,6 +80,10 @@ type UploadResult struct {
 	// so the control was left on its legacy anchor (#1971 D3). It earns no
 	// framework credit until it is re-anchored.
 	NeedsReanchoring bool
+	// KeptReviewedAnchor is true when the upload was the shipped stock
+	// manifest of a control whose active revision is a person's approved SCF
+	// re-anchor (#1776): nothing changed, and Warnings says why.
+	KeptReviewedAnchor bool
 	// AnchorID is the SCF anchor the bundle's scf_anchor_id resolved to;
 	// zero for an unanchored (anchor_fit: none) control.
 	AnchorID uuid.UUID
@@ -260,8 +269,57 @@ func UploadTx(ctx context.Context, tx pgx.Tx, b *Bundle, uploadedBy string) (Upl
 	return upload(ctx, dbx.New(tx), tenantID, b, uploadedBy)
 }
 
+// keepReviewedAnchor guards the boot seed (#1776). Bootstrap re-uploads
+// every stock manifest under controls/soc2/ on each boot. When a person
+// approved an SCF remap of that stock control, its active revision is the
+// approved re-anchor, and superseding it with the shipped manifest would
+// silently undo the decision every boot, or fail outright when the shipped
+// code is gone from the current release (a split or withdrawn anchor). The
+// upload is kept as a no-op with a warning instead. It runs before the
+// manifest's anchor is resolved for that reason. ok is false for every other
+// upload, which proceeds as before.
+func keepReviewedAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle) (UploadResult, bool, error) {
+	if !scfimport.IsStockManifest(b.Manifest.BundleID, string(b.ManifestYAMLRaw)) {
+		return UploadResult{}, false, nil
+	}
+	prior, err := q.LockActiveControlByBundleID(ctx, dbx.LockActiveControlByBundleIDParams{
+		TenantID: pgUUID(tenantID),
+		BundleID: b.Manifest.BundleID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return UploadResult{}, false, nil
+	}
+	if err != nil {
+		return UploadResult{}, false, fmt.Errorf("lookup prior version: %w", err)
+	}
+	if prior.BundleManifestHash == b.ManifestHashHex {
+		return UploadResult{}, false, nil
+	}
+	approved, err := q.IsApprovedRemapRevision(ctx, dbx.IsApprovedRemapRevisionParams{
+		TenantID:  pgUUID(tenantID),
+		ControlID: prior.ID,
+	})
+	if err != nil {
+		return UploadResult{}, false, fmt.Errorf("check approved SCF remap: %w", err)
+	}
+	if !approved {
+		return UploadResult{}, false, nil
+	}
+	return UploadResult{
+		ControlID:          uuid.UUID(prior.ID.Bytes),
+		BundleID:           b.Manifest.BundleID,
+		Version:            prior.Version,
+		KeptReviewedAnchor: true,
+		AnchorID:           uuid.UUID(prior.ScfAnchorID.Bytes),
+		Warnings:           []string{KeptReviewedAnchorWarning},
+	}, true, nil
+}
+
 // upload is the body of Upload and UploadTx.
 func upload(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, b *Bundle, uploadedBy string) (UploadResult, error) {
+	if kept, ok, err := keepReviewedAnchor(ctx, q, tenantID, b); err != nil || ok {
+		return kept, err
+	}
 	var result UploadResult
 	err := func() error {
 		// 1. Resolve scf_anchor_id. Accept either a uuid (FK target) or a

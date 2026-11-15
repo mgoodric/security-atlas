@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-decide-b",
+  "release_date": "2026-06-01",
+  "attribution": "Synthetic test catalog for #1776 remap decisions; not SCF content. Against test-decide-a: DEC-01 renumbered DEC-10 and DEC-05 renumbered DEC-50, titles kept (unchanged); DEC-02 renamed as DEC-20; DEC-03 split into DEC-30 and DEC-31; DEC-04 withdrawn.",
+  "controls": [
+    {
+      "scf_id": "DEC-10",
+      "family": "DEC",
+      "title": "Asset Inventory",
+      "description": "Keep a list of assets.",
+      "legacy_scf_id": "DEC-01"
+    },
+    {
+      "scf_id": "DEC-20",
+      "family": "DEC",
+      "title": "Change Control",
+      "description": "Review changes.",
+      "legacy_scf_id": "DEC-02"
+    },
+    {
+      "scf_id": "DEC-30",
+      "family": "DEC",
+      "title": "Security Event Logging",
+      "description": "Log security events.",
+      "legacy_scf_id": "DEC-03"
+    },
+    {
+      "scf_id": "DEC-31",
+      "family": "DEC",
+      "title": "Log Retention",
+      "description": "Keep logs.",
+      "legacy_scf_id": "DEC-03"
+    },
+    {
+      "scf_id": "DEC-50",
+      "family": "DEC",
+      "title": "Key Management",
+      "description": "Manage keys.",
+      "legacy_scf_id": "DEC-05"
+    }
+  ]
+}

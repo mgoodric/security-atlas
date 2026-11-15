@@ -3169,6 +3169,25 @@ type ScfAnchor struct {
 	LegacyScfID        *string            `json:"legacy_scf_id"`
 }
 
+type ScfRemapDecision struct {
+	ID              pgtype.UUID        `json:"id"`
+	TenantID        pgtype.UUID        `json:"tenant_id"`
+	ProposalID      pgtype.UUID        `json:"proposal_id"`
+	Decision        string             `json:"decision"`
+	Bulk            bool               `json:"bulk"`
+	LegacyControlID pgtype.UUID        `json:"legacy_control_id"`
+	LegacyAnchorID  pgtype.UUID        `json:"legacy_anchor_id"`
+	LegacyScfID     string             `json:"legacy_scf_id"`
+	LegacyRelease   string             `json:"legacy_release"`
+	NewControlID    pgtype.UUID        `json:"new_control_id"`
+	NewAnchorID     pgtype.UUID        `json:"new_anchor_id"`
+	NewScfID        *string            `json:"new_scf_id"`
+	NewRelease      *string            `json:"new_release"`
+	Reason          *string            `json:"reason"`
+	DecidedBy       string             `json:"decided_by"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+}
+
 type ScfRemapProposal struct {
 	ID                       pgtype.UUID        `json:"id"`
 	TenantID                 pgtype.UUID        `json:"tenant_id"`

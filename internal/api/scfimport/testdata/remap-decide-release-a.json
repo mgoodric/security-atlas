@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-decide-a",
+  "release_date": "2026-01-01",
+  "attribution": "Synthetic test catalog for #1776 remap decisions; not SCF content.",
+  "controls": [
+    {
+      "scf_id": "DEC-01",
+      "family": "DEC",
+      "title": "Asset Inventory",
+      "description": "Keep a list of assets."
+    },
+    {
+      "scf_id": "DEC-02",
+      "family": "DEC",
+      "title": "Change Management",
+      "description": "Review changes."
+    },
+    {
+      "scf_id": "DEC-03",
+      "family": "DEC",
+      "title": "Logging",
+      "description": "Log security events."
+    },
+    {
+      "scf_id": "DEC-04",
+      "family": "DEC",
+      "title": "Fax Security",
+      "description": "Protect fax machines."
+    },
+    {
+      "scf_id": "DEC-05",
+      "family": "DEC",
+      "title": "Key Management",
+      "description": "Manage keys."
+    }
+  ]
+}

@@ -134,6 +134,7 @@ sql:
       # #2113: exceptions gain revoked_by / revoked_at.
       - "migrations/sql/20261127000000_exception_revoke.sql"
       - "migrations/sql/20261128000000_scf_remap_proposals_rebind_record.sql"
+      - "migrations/sql/20261201000000_scf_remap_decisions.sql"
     queries: "internal/db/queries"
     gen:
       go:
