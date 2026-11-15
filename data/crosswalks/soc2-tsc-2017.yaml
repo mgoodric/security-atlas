@@ -343,10 +343,10 @@ mappings:
     strength: 1.0
     rationale: "Physical Access Control is the direct STRM equivalent of CC6.4."
   - tsc_code: CC6.5
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: equal
     strength: 0.9
-    rationale: "Asset Disposal covers data sanitization before discontinuing protections."
+    rationale: "Secure Disposal, Destruction or Re-Use of Equipment covers data sanitization before discontinuing protections."
   - tsc_code: CC6.6
     scf_anchor: NET-04
     relationship_type: subset_of
@@ -432,10 +432,10 @@ mappings:
     strength: 0.7
     rationale: "Recovery activities are part of the IR Plan; BCD anchors also intersect."
   - tsc_code: CC7.5
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Business Continuity Plan covers recovery infrastructure."
+    rationale: "Business Continuity & Disaster Recovery (BC/DR) Plans cover recovery infrastructure."
 
   # =====================================================================
   # CC8 — Change Management — anchors to CHG-* + CFG-*
@@ -455,10 +455,10 @@ mappings:
   # CC9 — Risk Mitigation — anchors to BCD-*, TPM-*
   # =====================================================================
   - tsc_code: CC9.1
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: subset_of
     strength: 0.8
-    rationale: "Business Continuity Plan addresses risks arising from disruptions."
+    rationale: "Business Continuity & Disaster Recovery (BC/DR) Plans address risks arising from disruptions."
   - tsc_code: CC9.2
     scf_anchor: TPM-01
     relationship_type: equal
@@ -479,20 +479,20 @@ mappings:
     strength: 0.5
     rationale: "Capacity monitoring is a special case of continuous monitoring. LOW CONFIDENCE — review."
   - tsc_code: A1.2
-    scf_anchor: BCD-09
+    scf_anchor: BCD-24
     relationship_type: subset_of
     strength: 0.9
-    rationale: "Backups fully cover the data backup half of A1.2."
+    rationale: "Data Backups fully cover the data backup half of A1.2."
   - tsc_code: A1.2
-    scf_anchor: BCD-02
+    scf_anchor: BCD-04
     relationship_type: subset_of
     strength: 0.8
     rationale: "BCP covers environmental protections + recovery infrastructure."
   - tsc_code: A1.3
-    scf_anchor: BCD-11
+    scf_anchor: BCD-32
     relationship_type: equal
     strength: 1.0
-    rationale: "Backup Testing is the direct STRM equivalent of A1.3 recovery testing."
+    rationale: "Testing for Reliability & Integrity is the direct STRM equivalent of A1.3 recovery testing."
 
   # =====================================================================
   # C1 — Confidentiality — anchors to DCH-* + AST-*
@@ -503,10 +503,10 @@ mappings:
     strength: 1.0
     rationale: "Data Classification & Handling is the direct STRM equivalent of C1.1."
   - tsc_code: C1.2
-    scf_anchor: AST-09
+    scf_anchor: AST-22
     relationship_type: equal
     strength: 0.9
-    rationale: "Asset Disposal covers secure disposal of confidential information."
+    rationale: "Secure Disposal, Destruction or Re-Use of Equipment covers secure disposal of confidential information."
   - tsc_code: C1.2
     scf_anchor: DCH-03
     relationship_type: intersects_with

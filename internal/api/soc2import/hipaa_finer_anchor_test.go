@@ -56,7 +56,7 @@ var hipaaResidualRows = []hipaaResidualRow{
 	{"164.316(b)(2)(iii)", "GOV-03", "subset_of", 0.8, "re-point"},          // Updates
 
 	// --- Checked against the grown palette, deliberately NOT re-pointed (3) ---
-	{"164.310(a)(2)(i)", "BCD-02", "intersects_with", 0.6, "left as-is"},   // Contingency Operations
+	{"164.310(a)(2)(i)", "BCD-04", "intersects_with", 0.6, "left as-is"},   // Contingency Operations
 	{"164.314(b)(2)(ii)", "TPM-01", "intersects_with", 0.55, "left as-is"}, // Adequate Separation
 	{"164.316(b)(2)(i)", "DCH-03", "intersects_with", 0.6, "left as-is"},   // Time Limit
 

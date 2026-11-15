@@ -114,7 +114,7 @@ func writePOFWorkbook(t *testing.T) string {
 	set("SCF 2026.3", [][]any{
 		{"SCF #", "AICPA\nTSC 2017"},
 		{"AST-01", "CC1.1"},
-		{"BCD-02", "CC1.1-POF1\nCC2.1-POF1"},
+		{"BCD-04", "CC1.1-POF1\nCC2.1-POF1"},
 		{"IAC-01", "CC1.1-POF2"},
 	})
 	path := filepath.Join(t.TempDir(), "pof.xlsx")

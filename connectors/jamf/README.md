@@ -164,7 +164,7 @@ accuracy recheck:
   Baseline Configurations) — consistent with the existing
   `osquery.host_posture.v1` anchors.
 - `endpoint.software_inventory.v1` → `VPM-04` (Vulnerability Remediation
-  Process), `AST-03` (Asset Inventory) — a deliberately different anchor set
+  Process), `AST-04` (Asset Inventories) — a deliberately different anchor set
   (the kind answers a different control question than posture).
 - `endpoint.config_profile.v1` → `CFG-02` (Secure Baseline Configurations),
   `CFG-04` (Configuration Change Control) — configuration-management evidence at
