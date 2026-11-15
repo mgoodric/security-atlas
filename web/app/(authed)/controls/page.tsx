@@ -118,10 +118,6 @@ import {
   VIEW_PARAM,
 } from "./view";
 import {
-  NEW_CONTROL_FUTURE_REASON,
-  NEW_CONTROL_FUTURE_TESTID,
-} from "./new-control-future";
-import {
   BulkAssignMessage,
   SavedViewsBar,
   SelectionBar,
@@ -1065,20 +1061,6 @@ function ControlsPageInner() {
           Export History {CONTROLS_HISTORY_EXPORT_FORMAT_LABELS[format]}
         </a>
       ))}
-      {/* Slice 225 — replaces the formerly-disabled "New control"
-          `<Button>`, which was a permanently-disabled action with no
-          signposting (UI-honesty gap per slice 178's heuristic). The
-          create-control flow is a non-trivial mutation surface (SCF
-          anchor pick + applicability_expr + framework satisfactions +
-          optional policy attach) deferred to a future slice; the
-          route `/controls/new` does not exist on `main`. Replaced
-          with a non-button `<span>` carrying `title` + `aria-label` +
-          a stable test-id, mirroring the slice 217 audits pattern
-          (see `../audits/oscal-export-future.ts`). Visible copy +
-          tooltip + aria-label all read the same line; the disclosure
-          IS the affordance. When the create-control flow ships, this
-          surface flips back to a routing `<Link>` per slice 247's
-          enable-pattern and `new-control-future.ts` deletes. */}
       {/* #1785 — upload a control sheet; the upload opens the batch's
           review page. */}
       <Link
@@ -1088,14 +1070,6 @@ function ControlsPageInner() {
       >
         Import controls
       </Link>
-      <span
-        title={NEW_CONTROL_FUTURE_REASON}
-        aria-label={NEW_CONTROL_FUTURE_REASON}
-        data-testid={NEW_CONTROL_FUTURE_TESTID}
-        className="inline-flex items-center px-2.5 text-[0.8rem] text-muted-foreground italic cursor-help"
-      >
-        {NEW_CONTROL_FUTURE_REASON}
-      </span>
     </>
   );
 

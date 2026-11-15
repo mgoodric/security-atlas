@@ -30,8 +30,8 @@ metrics:
     category: posture
     name: Control passing rate
     description: |
-      Rolling 30-day fraction of (control, scope_cell) evaluations whose
-      worst-cell result is "pass" with "fresh" evidence.
+      Over the last 30 days, the share of control evaluations that
+      passed on fresh evidence in every scope.
     unit: percent
     cadence: daily
     compute_strategy: manual_input
@@ -49,10 +49,9 @@ metrics:
     category: posture
     name: Risk-weighted pass rate
     description: |
-      Control-pass rate weighted by the residual risk score of each
-      control's linked risks (slice 020). High pass rate on
-      protect-nothing controls scores lower than lower pass rate on
-      protect-top-residuals controls.
+      Control pass rate weighted by the residual risk of the risks each
+      control treats. Passing controls that protect little score lower
+      than slightly weaker controls that protect your highest risks.
     unit: percent
     cadence: weekly
     compute_strategy: manual_input
@@ -69,9 +68,8 @@ metrics:
     category: posture
     name: Open findings by control owner
     description: |
-      Count of audit findings (slice 027 audit_notes severity=finding)
-      not yet closed, grouped by control owner. Surfaces where the
-      review attention is currently underweight.
+      Audit findings not yet closed, grouped by control owner. Shows
+      where review attention is currently too thin.
     unit: count
     cadence: daily
     compute_strategy: manual_input

@@ -32,21 +32,15 @@
 
 import { useMemo, useState } from "react";
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  PanelCard,
-  MissingEndpointPanel,
-  type PanelState,
-} from "@/components/dashboard/panel-card";
+import { ComingSoon } from "@/components/coming-soon";
+import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import type {
   AggregationRule,
   OrgUnit,
   RiskTheme,
 } from "@/lib/api/risk-hierarchy";
-
-const MISSING_HEATMAP_ENDPOINT = "GET /v1/risks/theme-heatmap";
 
 // orderThemes puts built-in themes (source=default) before tenant-private
 // ones, each group alphabetised — AC-3.
@@ -110,15 +104,9 @@ function HeatmapCellSidePanel({
           Close
         </Button>
       </div>
-      <Alert className="mt-3">
-        <AlertTitle>Contributing risks not yet wired</AlertTitle>
-        <AlertDescription>
-          The per-cell contributing-risk list binds to{" "}
-          <span className="font-mono">{MISSING_HEATMAP_ENDPOINT}</span>, which
-          does not exist on main yet. No risk rows are shown until the endpoint
-          ships — the heatmap never fabricates a contributing-risk list.
-        </AlertDescription>
-      </Alert>
+      <div className="mt-3">
+        <ComingSoon what="The list of risks behind each cell" />
+      </div>
       {rule ? (
         <p
           className="mt-3 text-xs text-muted-foreground"
@@ -196,12 +184,9 @@ export function ThemeHeatmapPanel({
           {/* Cell counts + severity colors await a backend aggregation
               endpoint — the axes below are real, the cells are
               data-free until it ships. */}
-          <MissingEndpointPanel
-            title="Heatmap cell counts"
-            endpoint={MISSING_HEATMAP_ENDPOINT}
-            detail="The themes-by-org_units count + severity aggregation is a follow-up backend slice. The axes below are real (org_units + theme vocabulary); cells render data-free until the endpoint ships."
-            testid="theme-heatmap-missing"
-          />
+          <div data-testid="theme-heatmap-missing">
+            <ComingSoon what="Risk counts and severity per cell" />
+          </div>
           {/* #2080: `relative` makes this scroll container the containing
               block of the cells' absolutely-positioned `sr-only` labels;
               without it they escape the clip and widen the page. */}
