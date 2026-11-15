@@ -58,6 +58,8 @@ export const EVERYTHING: Predicate = { op: "true" };
 /**
  * The predicate for a picker state, or null when "choose by dimension" has
  * no values picked yet (an incomplete choice, not a silent Everything).
+ * Callers block submit on null and never persist it: the backend reads a
+ * stored null predicate as matching every cell.
  */
 export function toPredicate(state: PickerState): Predicate | null {
   if (state.mode === "everything") return EVERYTHING;
@@ -90,6 +92,22 @@ function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
+// The keys each operator the picker reads may carry. Anything else is
+// Advanced-only: Go's encoding/json matches keys case-insensitively, so a
+// stray "Dim" or "Value" would change what scope.Evaluate does while the
+// picker showed something else.
+const ALLOWED_KEYS: Record<string, readonly string[]> = {
+  true: ["op"],
+  eq: ["op", "dim", "value"],
+  in: ["op", "dim", "values"],
+  and: ["op", "args"],
+};
+
+function unknownKey(node: Record<string, unknown>): string | undefined {
+  const allowed = ALLOWED_KEYS[String(node.op)] ?? [];
+  return Object.keys(node).find((k) => !allowed.includes(k));
+}
+
 // One eq/in clause on a built-in dimension, as [dim, values]; otherwise a
 // reason the picker cannot show it.
 function clauseOf(
@@ -99,6 +117,10 @@ function clauseOf(
   const { op, dim } = node;
   if (op !== "eq" && op !== "in") {
     return { reason: `uses "${String(op)}", which the picker cannot show` };
+  }
+  const extra = unknownKey(node);
+  if (extra !== undefined) {
+    return { reason: `has a key "${extra}" the picker does not read` };
   }
   if (!isBuiltin(dim)) {
     return { reason: `filters on "${String(dim)}", not a built-in dimension` };
@@ -121,8 +143,9 @@ function clauseOf(
 /**
  * Loads an existing predicate back into the picker, or reports it as
  * Advanced-only (any-of, negation, nesting, a custom dimension, a dimension
- * named twice, or an empty value list). The always-true spellings the
- * evaluator accepts (null, {}, {"op":"true"}) load as Everything.
+ * named twice, an empty value list, or a key the picker does not read). The
+ * always-true spellings the evaluator accepts (null, {}, {"op":"true"}) load
+ * as Everything.
  */
 export function fromPredicate(predicate: unknown): LoadResult {
   if (
@@ -134,6 +157,15 @@ export function fromPredicate(predicate: unknown): LoadResult {
   }
   if (!isPlainObject(predicate)) {
     return { kind: "advanced", reason: "is not a predicate object" };
+  }
+  if (predicate.op === "true" || predicate.op === "and") {
+    const extra = unknownKey(predicate);
+    if (extra !== undefined) {
+      return {
+        kind: "advanced",
+        reason: `has a key "${extra}" the picker does not read`,
+      };
+    }
   }
   if (predicate.op === "true") {
     return { kind: "picker", state: { mode: "everything" } };
@@ -158,6 +190,32 @@ export function fromPredicate(predicate: unknown): LoadResult {
     selections[c.dim] = c.values;
   }
   return { kind: "picker", state: { mode: "dimensions", selections } };
+}
+
+/** A stable key for a predicate value; undefined and null share one. */
+export function predicateKey(value: unknown): string {
+  return JSON.stringify(value ?? null);
+}
+
+/**
+ * What the picker does when it renders with `value`. It re-derives its
+ * state only when the `value` prop itself changed (a record that finished
+ * loading after the picker mounted) and the new value is not the picker's
+ * own last emission echoed back by a controlled parent. A parent that never
+ * echoes leaves `value` unchanged, so edits are kept.
+ *
+ * Returns null when `value` is unchanged; otherwise the new value key to
+ * remember and, when the state must be re-derived, the load result.
+ */
+export function resyncFromValue(
+  lastValueKey: string,
+  lastEmittedKey: string | null,
+  value: unknown,
+): { valueKey: string; loaded: LoadResult | null } | null {
+  const valueKey = predicateKey(value);
+  if (valueKey === lastValueKey) return null;
+  if (valueKey === lastEmittedKey) return { valueKey, loaded: null };
+  return { valueKey, loaded: fromPredicate(value) };
 }
 
 /** A dimension row as `GET /v1/scopes/dimensions` returns it. */

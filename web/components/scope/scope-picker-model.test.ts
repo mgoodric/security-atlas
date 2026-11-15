@@ -7,6 +7,8 @@ import { describe, expect, it } from "vitest";
 import {
   dimensionOptions,
   fromPredicate,
+  predicateKey,
+  resyncFromValue,
   toPredicate,
   toggleValue,
   type PickerState,
@@ -120,6 +122,48 @@ describe("fromPredicate", () => {
       kind: "advanced",
       reason: 'filters on "region_tier", not a built-in dimension',
     });
+  });
+});
+
+describe("resyncFromValue", () => {
+  const scoped = { op: "eq", dim: "environment", value: "prod" };
+
+  it("re-derives when the record loads after the picker mounted", () => {
+    // Mounted with no value yet (Everything), then the scoped record arrives.
+    const got = resyncFromValue(predicateKey(undefined), null, scoped);
+    expect(got).toEqual({
+      valueKey: predicateKey(scoped),
+      loaded: {
+        kind: "picker",
+        state: { mode: "dimensions", selections: { environment: ["prod"] } },
+      },
+    });
+  });
+
+  it("does nothing while the value is unchanged", () => {
+    expect(resyncFromValue(predicateKey(scoped), null, scoped)).toBeNull();
+    // undefined and null are the same value.
+    expect(resyncFromValue(predicateKey(null), null, undefined)).toBeNull();
+  });
+
+  it("keeps the picker's state when a controlled parent echoes its emission", () => {
+    const emitted = predicateKey(scoped);
+    expect(resyncFromValue(predicateKey(null), emitted, scoped)).toEqual({
+      valueKey: emitted,
+      loaded: null,
+    });
+    // An incomplete choice emits null; the echo must not reset it to Everything.
+    expect(
+      resyncFromValue(predicateKey(scoped), predicateKey(null), null),
+    ).toEqual({ valueKey: predicateKey(null), loaded: null });
+  });
+
+  it("re-derives an Advanced-only value", () => {
+    const got = resyncFromValue(predicateKey(null), null, {
+      op: "not",
+      arg: scoped,
+    });
+    expect(got?.loaded?.kind).toBe("advanced");
   });
 });
 

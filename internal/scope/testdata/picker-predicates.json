@@ -181,6 +181,41 @@
       "want": ["prod-restricted", "prod-public"],
       "picker": "advanced",
       "generates": false
+    },
+    {
+      "name": "an unknown key in a clause is Advanced-only (Go reads \"Dim\" as dim)",
+      "predicate": {
+        "op": "eq",
+        "dim": "environment",
+        "value": "prod",
+        "Dim": "data_classification"
+      },
+      "want": [],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "an unknown key on the top-level all-of is Advanced-only (Go reads \"Args\" as args)",
+      "predicate": {
+        "op": "and",
+        "args": [{ "op": "eq", "dim": "environment", "value": "prod" }],
+        "Args": [{ "op": "eq", "dim": "environment", "value": "dev" }]
+      },
+      "want": ["dev-internal"],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "an unknown key on the always-true form is Advanced-only",
+      "predicate": { "op": "true", "note": "everything" },
+      "want": [
+        "prod-restricted",
+        "prod-public",
+        "staging-confidential",
+        "dev-internal"
+      ],
+      "picker": "advanced",
+      "generates": false
     }
   ]
 }

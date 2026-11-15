@@ -24,28 +24,55 @@ import {
   DIMENSION_LABELS,
   dimensionOptions,
   fromPredicate,
+  predicateKey,
+  resyncFromValue,
   toPredicate,
   toggleValue,
+  type LoadResult,
   type PickerState,
   type Predicate,
 } from "./scope-picker-model";
+
+function stateOf(loaded: LoadResult): PickerState {
+  return loaded.kind === "picker" ? loaded.state : { mode: "everything" };
+}
 
 export function ScopePicker({
   value,
   onChange,
   readOnly = false,
 }: {
-  /** The predicate to start from; null or undefined starts at Everything. */
+  /**
+   * The predicate to show; null or undefined shows Everything. When it
+   * changes (say, the record loads after the picker mounted) the picker
+   * re-derives from it, except when it is the picker's own last emission.
+   */
   value?: unknown;
-  /** Called with the new predicate, or null while no value is picked yet. */
+  /**
+   * Called with the new predicate, or with null while "choose by
+   * dimension" has no value picked yet. Null means incomplete: block
+   * submit and never persist it, because the backend treats a stored null
+   * predicate as matching every cell (internal/scope isEmptyExpr).
+   */
   onChange?: (predicate: Predicate | null) => void;
   readOnly?: boolean;
 }) {
-  const [loaded] = useState(() => fromPredicate(value));
-  const [state, setState] = useState<PickerState>(() =>
-    loaded.kind === "picker" ? loaded.state : { mode: "everything" },
-  );
+  const [loaded, setLoaded] = useState(() => fromPredicate(value));
+  const [state, setState] = useState<PickerState>(() => stateOf(loaded));
+  const [valueKey, setValueKey] = useState(() => predicateKey(value));
+  const [emittedKey, setEmittedKey] = useState<string | null>(null);
   const groupId = useId();
+
+  // Adjust state during render when `value` changes (React's documented
+  // alternative to an effect for deriving state from props).
+  const resync = resyncFromValue(valueKey, emittedKey, value);
+  if (resync) {
+    setValueKey(resync.valueKey);
+    if (resync.loaded) {
+      setLoaded(resync.loaded);
+      setState(stateOf(resync.loaded));
+    }
+  }
 
   const dims = useQuery({
     queryKey: ["scope-dimensions"],
@@ -70,8 +97,10 @@ export function ScopePicker({
   }
 
   const update = (next: PickerState) => {
+    const p = toPredicate(next);
     setState(next);
-    onChange?.(toPredicate(next));
+    setEmittedKey(predicateKey(p));
+    onChange?.(p);
   };
 
   const selections = state.mode === "dimensions" ? state.selections : {};
