@@ -322,6 +322,7 @@ type anchorEdge struct {
 	mappingTier       string
 	origin            string
 	rationale         string
+	overlay           *overlayWire
 }
 
 // listAnchorsForRequirement runs either the unpinned or pinned variant
@@ -351,6 +352,7 @@ func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UU
 					mappingTier:       string(r.MappingTier),
 					origin:            r.Origin,
 					rationale:         r.Rationale,
+					overlay:           overlayFrom(r.Origin, r.OverlaySourceRef, r.OverlayCreatedBy, r.OverlayCreatedAt),
 				}
 			}
 			return nil
@@ -377,6 +379,7 @@ func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UU
 				mappingTier:       string(r.MappingTier),
 				origin:            r.Origin,
 				rationale:         r.Rationale,
+				overlay:           overlayFrom(r.Origin, r.OverlaySourceRef, r.OverlayCreatedBy, r.OverlayCreatedAt),
 			}
 		}
 		return nil
@@ -447,6 +450,7 @@ func anchorWiresFromAnchors(anchors []anchorEdge) []anchorWire {
 			MappingTier:       a.mappingTier,
 			Origin:            a.origin,
 			Rationale:         a.rationale,
+			Overlay:           a.overlay,
 		})
 	}
 	return out

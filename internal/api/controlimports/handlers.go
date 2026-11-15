@@ -18,6 +18,10 @@
 //	                                 approve every pending row whose top
 //	                                 candidate is crosswalk-derived and
 //	                                 reaches all its tested criteria (#1783)
+//	GET  /v1/controls/imports/{id}/export
+//	                                 the approved rows' controls as a
+//	                                 gzip-tar of <bundle_id>/control.yaml
+//	                                 bundles (#1784)
 //	GET  /v1/controls/imports/settings
 //	PUT  /v1/controls/imports/settings
 //	                                 the tenant's import settings: the
@@ -59,6 +63,7 @@ type Handler struct {
 	stager    *controlimport.Stager
 	settings  SettingsStore
 	decisions controlimport.DecisionStore
+	exporter  BundleExporter
 }
 
 func New(stager *controlimport.Stager) *Handler { return &Handler{stager: stager} }
@@ -73,6 +78,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Post("/v1/controls/imports", h.Create)
 	r.Get("/v1/controls/imports/{id}", h.Get)
 	r.Get("/v1/controls/imports/{id}/rows", h.ListRows)
+	if h.exporter != nil {
+		r.Get("/v1/controls/imports/{id}/export", h.Export)
+	}
 	if h.decisions != nil {
 		r.Post("/v1/controls/imports/{id}/rows/{row}/approve", h.Approve)
 		r.Post("/v1/controls/imports/{id}/rows/{row}/reject", h.Reject)

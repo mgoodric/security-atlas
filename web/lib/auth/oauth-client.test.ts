@@ -19,6 +19,7 @@ import {
   generateCodeChallenge,
   generateCodeVerifier,
   generateState,
+  RETURN_TO_STORAGE_KEY,
   STATE_STORAGE_KEY,
   VERIFIER_STORAGE_KEY,
 } from "./oauth-client";
@@ -195,5 +196,94 @@ describe("initLoginFlow + completeLoginFlow sessionStorage discipline", () => {
     const url = new URL(assignSpy.mock.calls[0][0] as string);
     expect(url.pathname).toBe("/oauth/authorize");
     expect(url.searchParams.has("tenant_id")).toBe(false);
+  });
+
+  // #2211 — returnTo is sanitised where the key is written and again
+  // where the callback reads it back.
+  const unsafeReturnTo: Array<[string, string]> = [
+    ["absolute URL", "https://evil.example"],
+    ["protocol-relative", "//evil.example"],
+    ["backslash", "/\\evil.example"],
+    ["javascript: scheme", "javascript:alert(1)"],
+    ["encoded slashes", "%2F%2Fevil.example"],
+    ["tab prefix", "\t//evil.example"],
+    ["newline prefix", "\n//evil.example"],
+    ["tab inside the slashes", "/\t/evil.example"],
+  ];
+
+  it.each(unsafeReturnTo)(
+    "initLoginFlow stores /dashboard for an unsafe returnTo (%s)",
+    async (_name, returnTo) => {
+      const { initLoginFlow } = await import("./oauth-client");
+      await initLoginFlow({
+        issuer: "https://atlas.example.test",
+        clientId: "client-rt",
+        redirectUri: "https://atlas.example.test/oauth/callback",
+        returnTo,
+      });
+      expect(sessionStore.getItem(RETURN_TO_STORAGE_KEY)).toBe("/dashboard");
+    },
+  );
+
+  it("initLoginFlow keeps a same-origin returnTo", async () => {
+    const { initLoginFlow } = await import("./oauth-client");
+    await initLoginFlow({
+      issuer: "https://atlas.example.test",
+      clientId: "client-rt",
+      redirectUri: "https://atlas.example.test/oauth/callback",
+      returnTo: "/risks/123?tab=open",
+    });
+    expect(sessionStore.getItem(RETURN_TO_STORAGE_KEY)).toBe(
+      "/risks/123?tab=open",
+    );
+  });
+
+  async function completeWithStoredReturnTo(
+    stored: string | null,
+  ): Promise<string> {
+    sessionStore.setItem(STATE_STORAGE_KEY, "state-1");
+    sessionStore.setItem(VERIFIER_STORAGE_KEY, "verifier-1");
+    if (stored !== null) sessionStore.setItem(RETURN_TO_STORAGE_KEY, stored);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          access_token: "jwt",
+          token_type: "Bearer",
+          expires_in: 3600,
+        }),
+      }),
+    );
+    try {
+      const { completeLoginFlow } = await import("./oauth-client");
+      const result = await completeLoginFlow({
+        issuer: "https://atlas.example.test",
+        clientId: "client-rt",
+        redirectUri: "https://atlas.example.test/oauth/callback",
+        code: "code-1",
+        state: "state-1",
+      });
+      return result.returnTo;
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  }
+
+  it.each(unsafeReturnTo)(
+    "completeLoginFlow resolves a tampered stored returnTo to /dashboard (%s)",
+    async (_name, stored) => {
+      expect(await completeWithStoredReturnTo(stored)).toBe("/dashboard");
+    },
+  );
+
+  it("completeLoginFlow keeps a same-origin stored returnTo", async () => {
+    expect(await completeWithStoredReturnTo("/risks/123?tab=open")).toBe(
+      "/risks/123?tab=open",
+    );
+  });
+
+  it("completeLoginFlow defaults a missing returnTo to /dashboard", async () => {
+    expect(await completeWithStoredReturnTo(null)).toBe("/dashboard");
   });
 });
