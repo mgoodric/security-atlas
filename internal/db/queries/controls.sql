@@ -510,23 +510,30 @@ WHERE tenant_id = sqlc.arg(tenant_id) AND superseded_by IS NULL
 
 -- name: InsertSCFRemapProposal :execrows
 -- Issue #1775: queue one remap proposal for a control on a legacy SCF
--- anchor. Written by the migrate role during `catalog import-scf`. A re-run
--- of the same import leaves the existing proposal alone, except that an
--- open proposal whose control this run re-bound becomes rebound (#2321: a
--- stock control flagged before the title-only rule moves on the re-run).
+-- anchor. Written by the migrate role during `catalog import-scf` (source
+-- 'boot') and by the app role when an upload re-binds or flags a control in
+-- place (source 'upload', #2236). A re-run leaves the existing proposal
+-- alone, except that an open proposal whose control this run re-bound
+-- becomes rebound, taking the run's target anchor and source (#2321: a stock
+-- control flagged before the title-only rule moves on the re-run).
+-- target_anchor_id is the anchor a 'rebound' control moved to, NULL for an
+-- 'open' one.
 INSERT INTO scf_remap_proposals (
     tenant_id, control_id, bundle_id, legacy_anchor_id, legacy_scf_id,
     legacy_release, target_framework_version_id, target_release, class,
-    status, successor_scf_ids
+    status, successor_scf_ids, target_anchor_id, source
 ) VALUES (
     sqlc.arg(tenant_id), sqlc.arg(control_id), sqlc.arg(bundle_id),
     sqlc.arg(legacy_anchor_id), sqlc.arg(legacy_scf_id),
     sqlc.arg(legacy_release), sqlc.arg(target_framework_version_id),
     sqlc.arg(target_release), sqlc.arg(class), sqlc.arg(status),
-    sqlc.arg(successor_scf_ids)::text[]
+    sqlc.arg(successor_scf_ids)::text[], sqlc.narg(target_anchor_id),
+    sqlc.arg(source)
 )
 ON CONFLICT (control_id, target_framework_version_id) DO UPDATE
-    SET status = 'rebound'
+    SET status = 'rebound',
+        target_anchor_id = EXCLUDED.target_anchor_id,
+        source = EXCLUDED.source
     WHERE scf_remap_proposals.status = 'open' AND EXCLUDED.status = 'rebound';
 
 -- name: ListSCFRemapProposals :many
