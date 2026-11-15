@@ -98,6 +98,7 @@ import {
   PUSH_CTA_LABEL,
   PUSH_CTA_SUBTITLE_PREFIX,
 } from "./push-cta";
+import { pageTitle } from "@/lib/page-titles";
 
 // URL parameter names mirror the upstream + BFF FORWARD_PARAMS so the
 // browser URL is a faithful echo of the request that the BFF will
@@ -727,7 +728,7 @@ function EvidencePageInner() {
   if (anchorsQ.isLoading) {
     return (
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
@@ -742,7 +743,7 @@ function EvidencePageInner() {
   if (anchorsQ.isError) {
     return (
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
       >
@@ -760,7 +761,7 @@ function EvidencePageInner() {
   if (evidenceQ.isLoading) {
     return (
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
@@ -775,7 +776,7 @@ function EvidencePageInner() {
   if (evidenceQ.isError) {
     return (
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
         filterRow={
@@ -795,7 +796,7 @@ function EvidencePageInner() {
   return (
     <>
       <ListPage
-        title="Evidence ledger"
+        title={pageTitle("/evidence")}
         subtitle={subtitleNode}
         actions={actions}
         filterRow={

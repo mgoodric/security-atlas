@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
 import type { ComponentDefinitionList } from "@/lib/api/oscal-components";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function ComponentDefinitionsPage() {
   const q = useQuery({
@@ -36,7 +37,7 @@ export default function ComponentDefinitionsPage() {
   // ./layout.tsx (#2092); this page only mounts when the module is on.
   return (
     <PageShell
-      title="Vendor Claims"
+      title={pageTitle("/oscal/component-definitions")}
       subtitle="Imported vendor component-definitions. Each claim is a vendor assertion, not platform-verified evidence — accept, reject, or ask for more information."
       data-testid="component-definitions-page"
     >

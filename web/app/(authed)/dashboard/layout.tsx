@@ -58,12 +58,13 @@ import { cookies } from "next/headers";
 import type { Metadata } from "next";
 
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { pageTitle } from "@/lib/page-titles";
 import { getQueryClient } from "@/lib/queryClient";
 
 // ATLAS-010 / AC-7 — page-specific `<title>` for /dashboard, matching the
 // "<Page> · security-atlas" convention /settings established (slice 248).
 export const metadata: Metadata = {
-  title: "Dashboard",
+  title: pageTitle("/dashboard"),
 };
 
 import {

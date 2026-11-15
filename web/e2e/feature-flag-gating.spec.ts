@@ -137,10 +137,10 @@ test.describe("slice 660 — feature-flag nav gating", () => {
     const sidebar = page.getByTestId("sidebar-desktop");
     await expect(sidebar).toBeVisible();
     await expect(
-      sidebar.getByRole("link", { name: "Board Packs" }),
+      sidebar.getByRole("link", { name: "Board packs" }),
     ).toHaveCount(0);
     await expect(
-      sidebar.getByRole("link", { name: "Vendor Claims" }),
+      sidebar.getByRole("link", { name: "Vendor claims" }),
     ).toHaveCount(0);
     // A non-gated entry still renders (sanity: the nav itself works).
     await expect(

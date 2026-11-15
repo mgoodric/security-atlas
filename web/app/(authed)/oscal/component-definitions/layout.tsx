@@ -13,11 +13,12 @@
 // mounts.
 
 import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-titles";
 
 import { FeatureGate } from "@/components/feature-gate";
 
 export const metadata: Metadata = {
-  title: "Vendor Claims",
+  title: pageTitle("/oscal/component-definitions"),
 };
 
 export default function VendorClaimsLayout({
@@ -26,7 +27,10 @@ export default function VendorClaimsLayout({
   children: React.ReactNode;
 }) {
   return (
-    <FeatureGate flag="oscal.export" moduleName="Vendor Claims">
+    <FeatureGate
+      flag="oscal.export"
+      moduleName={pageTitle("/oscal/component-definitions")}
+    >
       {children}
     </FeatureGate>
   );

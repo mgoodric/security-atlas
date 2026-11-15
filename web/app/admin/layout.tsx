@@ -35,11 +35,12 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { fetchAdminMe, fetchDemoSeedEnabled } from "@/lib/api/self.server";
+import { pageTitle } from "@/lib/page-titles";
 
 // A plain `title` string here would also stop the root template applying
 // to the admin subpages' own titles, so the section repeats the template.
 export const metadata: Metadata = {
-  title: { default: "Admin", template: "%s · security-atlas" },
+  title: { default: pageTitle("/admin"), template: "%s · security-atlas" },
 };
 
 // OE-549: both probes below used to self-fetch this app's own BFF routes

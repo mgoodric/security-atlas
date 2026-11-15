@@ -50,6 +50,7 @@ import {
   fetchHierarchyOverdueDecisions,
   fetchHierarchyThemes,
 } from "@/lib/api/risk-hierarchy";
+import { pageTitle } from "@/lib/page-titles";
 
 // ----- URL <-> filter-state codec -----
 
@@ -151,7 +152,7 @@ function HierarchyView() {
   return (
     <PageShell
       data-testid="risk-hierarchy-dashboard"
-      title="Risk hierarchy"
+      title={pageTitle("/risks/hierarchy")}
       subtitle="Navigate risks by org_unit and level, watch theme patterns emerge, and track decision-revisit dates."
       actions={
         // Slice 100 AC-8: reciprocal page-header link to the flat list. The
@@ -236,7 +237,7 @@ export default function RiskHierarchyPage() {
   return (
     <Suspense
       fallback={
-        <PageShell title="Risk hierarchy">
+        <PageShell title={pageTitle("/risks/hierarchy")}>
           <div
             className="text-sm text-muted-foreground"
             data-testid="risk-hierarchy-loading"

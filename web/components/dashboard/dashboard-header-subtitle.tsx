@@ -95,7 +95,7 @@ export function formatFreshnessSubtitle(pct: number | null): string {
 /**
  * formatTenantContext returns the tenant context string for the H1 row
  * (AC-1). Trims whitespace and treats blank/undefined as silent absence
- * (returns null so the H1 row collapses to just "Program").
+ * (returns null so the H1 row collapses to just "Dashboard").
  */
 export function formatTenantContext(name: string | undefined): string | null {
   if (typeof name !== "string") return null;

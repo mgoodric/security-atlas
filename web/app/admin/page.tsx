@@ -23,6 +23,7 @@ import {
   FeatureFlagListResponse,
 } from "@/lib/api/admin";
 import { PageShell } from "@/components/shell/page-shell";
+import { pageTitle } from "@/lib/page-titles";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);
@@ -63,7 +64,7 @@ export default function AdminOverviewPage() {
 
   return (
     <PageShell
-      title="Admin"
+      title={pageTitle("/admin")}
       subtitle={
         <>
           Self-administer the platform — SSO, users, API keys, feature flags,
