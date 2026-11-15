@@ -310,7 +310,7 @@ func TestListAnchors_IncludeStateExceptedOutranksPass(t *testing.T) {
 	ts, bearer := setupHTTPServer(t)
 	admin := dbtest.NewMigratePool(t)
 
-	anchorUUID := anchorIDBySCFID(t, admin, "IAC-06")
+	anchorUUID := anchorIDBySCFID(t, admin, "IAC-37")
 	cleanupTenantState(t, admin, tenantA)
 	t.Cleanup(func() { cleanupTenantState(t, admin, tenantA) })
 	seedAnchorState(t, admin, tenantA, anchorUUID, "excepted", "fresh", time.Now().Add(-2*time.Hour))
@@ -330,18 +330,18 @@ func TestListAnchors_IncludeStateExceptedOutranksPass(t *testing.T) {
 		t.Fatalf("unmarshal: %v\nbody=%s", err, body)
 	}
 	for _, a := range got.Anchors {
-		if a.SCFID != "IAC-06" {
+		if a.SCFID != "IAC-37" {
 			continue
 		}
 		if a.State == nil {
-			t.Fatal("IAC-06 state should be populated")
+			t.Fatal("IAC-37 state should be populated")
 		}
 		if r := (*a.State)["result"]; r != "excepted" {
-			t.Fatalf("IAC-06 rolled-up result = %v; want excepted", r)
+			t.Fatalf("IAC-37 rolled-up result = %v; want excepted", r)
 		}
 		return
 	}
-	t.Fatal("IAC-06 not present in response")
+	t.Fatal("IAC-37 not present in response")
 }
 
 // AC-1 + AC-2 — the wire shape MUST include the slice 098 design-doc-
