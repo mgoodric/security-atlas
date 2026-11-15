@@ -28,7 +28,7 @@ func TestImport_WorkbookPointsOfFocusRollUp(t *testing.T) {
 
 	xlsx := writeSOC2WideWorkbook(t, map[string]string{
 		"AST-01": "CC1.1",
-		"BCD-02": "CC1.1-POF1\nCC2.1-POF1",
+		"BCD-04": "CC1.1-POF1\nCC2.1-POF1",
 		"IAC-01": "CC1.1-POF2",
 	})
 	cw, err := soc2import.LoadSCFWorkbook(xlsx, soc2import.SCFWorkbookOptions{FrameworkSlug: pofTestSlug, FrameworkVersion: "2017", AllowCodeTitles: true})
@@ -69,7 +69,7 @@ func TestImport_WorkbookPointsOfFocusRollUp(t *testing.T) {
 		t.Fatalf("decode points_of_focus %s: %v", stored, err)
 	}
 	want := []soc2import.PointOfFocus{
-		{Code: "CC1.1-POF1", SCFAnchors: []string{"BCD-02"}},
+		{Code: "CC1.1-POF1", SCFAnchors: []string{"BCD-04"}},
 		{Code: "CC1.1-POF2", SCFAnchors: []string{"IAC-01"}},
 	}
 	if !reflect.DeepEqual(got, want) || edges != 3 {

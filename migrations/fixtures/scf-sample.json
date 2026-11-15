@@ -55,34 +55,34 @@
       "description": "Mechanisms exist to facilitate the implementation of asset management."
     },
     {
-      "scf_id": "AST-03",
+      "scf_id": "AST-04",
       "family": "AST",
-      "title": "Asset Inventory",
+      "title": "Asset Inventories",
       "description": "Mechanisms exist to maintain an authoritative inventory of technology assets."
     },
     {
-      "scf_id": "AST-09",
+      "scf_id": "AST-22",
       "family": "AST",
-      "title": "Asset Disposal",
+      "title": "Secure Disposal, Destruction or Re-Use of Equipment",
       "description": "Mechanisms exist to securely dispose of, destroy, or repurpose system components."
     },
 
     {
-      "scf_id": "BCD-02",
+      "scf_id": "BCD-04",
       "family": "BCD",
-      "title": "Business Continuity Plan",
+      "title": "Business Continuity & Disaster Recovery (BC/DR) Plans",
       "description": "Mechanisms exist to document and assign roles and responsibilities for the continuity of operations."
     },
     {
-      "scf_id": "BCD-09",
+      "scf_id": "BCD-24",
       "family": "BCD",
-      "title": "Backups",
+      "title": "Data Backups",
       "description": "Mechanisms exist to create recurring backups of data, software, and system configurations."
     },
     {
-      "scf_id": "BCD-11",
+      "scf_id": "BCD-32",
       "family": "BCD",
-      "title": "Backup Testing",
+      "title": "Testing for Reliability & Integrity",
       "description": "Mechanisms exist to routinely test backups to verify recoverability."
     },
 
