@@ -1079,6 +1079,15 @@ function ControlsPageInner() {
           IS the affordance. When the create-control flow ships, this
           surface flips back to a routing `<Link>` per slice 247's
           enable-pattern and `new-control-future.ts` deletes. */}
+      {/* #1785 — upload a control sheet; the upload opens the batch's
+          review page. */}
+      <Link
+        href="/controls/imports"
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+        data-testid="controls-import"
+      >
+        Import controls
+      </Link>
       <span
         title={NEW_CONTROL_FUTURE_REASON}
         aria-label={NEW_CONTROL_FUTURE_REASON}

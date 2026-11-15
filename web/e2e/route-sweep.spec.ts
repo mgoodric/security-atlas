@@ -54,6 +54,7 @@ const PARAM_VALUES: Record<string, string> = {
   "/board-packs/[id]": NO_ROW_ID,
   "/catalog/scf/[id]": NO_ROW_ID,
   "/controls/[id]": seeded.controlId,
+  "/controls/imports/[id]": NO_ROW_ID,
   "/csf/[framework_version_id]": seeded.frameworkVersionId,
   "/dashboards/metrics/[id]": NO_ROW_ID,
   "/evidence/[id]": NO_ROW_ID,
