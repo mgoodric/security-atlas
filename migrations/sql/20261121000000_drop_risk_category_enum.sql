@@ -13,14 +13,19 @@
 -- so the migration checks rather than trusts. It runs as atlas_migrate
 -- (BYPASSRLS), so the check sees every tenant's rows, and it locks `risks`
 -- first so no write can slip in between the check and the drop.
-
-LOCK TABLE risks IN ACCESS EXCLUSIVE MODE;
+--
+-- The lock, the check and the drops are one DO statement, so they are
+-- atomic whether the runner wraps the file in a transaction (migrate.sh's
+-- --single-transaction) or applies it in autocommit (plain `psql -f`, as
+-- some CI jobs do), where a bare LOCK TABLE is an error.
 
 DO $$
 DECLARE
     v_bad   BIGINT;
     v_first TEXT;
 BEGIN
+    LOCK TABLE risks IN ACCESS EXCLUSIVE MODE;
+
     -- Re-applied after a successful run: nothing left to check or drop.
     IF NOT EXISTS (
         SELECT 1 FROM information_schema.columns
@@ -46,8 +51,16 @@ BEGIN
             USING ERRCODE = 'check_violation',
                   HINT = 'Set each listed risk''s category_id to the tenant category whose slug equals its category, then re-run.';
     END IF;
+
+    DROP TRIGGER IF EXISTS risks_category_sync_trg ON risks;
+    DROP FUNCTION IF EXISTS risks_category_sync();
+    ALTER TABLE risks DROP COLUMN category;
+    DROP TYPE IF EXISTS risk_category;
 END $$;
 
+-- No-ops at runtime (the DO block above already dropped these). They stay
+-- as top-level statements because sqlc reads the schema from these files
+-- and cannot see DDL inside a DO block.
 DROP TRIGGER IF EXISTS risks_category_sync_trg ON risks;
 DROP FUNCTION IF EXISTS risks_category_sync();
 
