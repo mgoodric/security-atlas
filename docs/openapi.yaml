@@ -3314,6 +3314,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/exceptions/{id}/revoke:
+    patch:
+      summary: PATCH /v1/exceptions/{id}/revoke
+      tags: [exceptions]
+      operationId: patch-v1-exceptions-id-revoke
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes:
     get:
       summary: GET /v1/framework-scopes

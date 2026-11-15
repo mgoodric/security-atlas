@@ -4,11 +4,12 @@
 // evaluation. Canvas §6.3 sets the rules; GLOSSARY.md captures the precise
 // domain definition.
 //
-// The state machine has five states:
+// The state machine has six states:
 //
 //	requested -> approved -> active -> expired   (happy path)
 //	requested -> denied                          (terminal; file a new exception to retry)
 //	active    -> expired                         (system; daily auto-expiry tick)
+//	active    -> revoked                         (terminal; an approver ends it early, #2113)
 //
 // Every transition writes one row to exception_audit_log (append-only). The
 // auto-expiry tick is NOT silent (anti-criterion P0).
@@ -76,6 +77,9 @@ const (
 	StateDenied    = "denied"
 	StateActive    = "active"
 	StateExpired   = "expired"
+	// StateRevoked is an active exception an approver ended before its
+	// expires_at (#2113). Terminal: file a new exception to waive again.
+	StateRevoked = "revoked"
 )
 
 // Audit-log action vocabulary.
@@ -85,6 +89,7 @@ const (
 	ActionDenied    = "denied"
 	ActionActivated = "activated"
 	ActionExpired   = "expired"
+	ActionRevoked   = "revoked"
 )
 
 // SystemActor is the actor name used when the auto-expiry cron writes audit
@@ -115,6 +120,9 @@ var (
 	ErrJustificationRequired = errors.New("exception: justification is required")
 	// ErrRequesterRequired is returned when create input lacks requested_by.
 	ErrRequesterRequired = errors.New("exception: requested_by is required")
+	// ErrReasonRequired is returned when a revoke carries no reason. The
+	// reason is the audit row's record of why the waiver ended early.
+	ErrReasonRequired = errors.New("exception: a reason is required")
 	// ErrSegregationOfDuties is returned when the approver/denier credential
 	// matches the requester. Same credential cannot file and adjudicate.
 	ErrSegregationOfDuties = errors.New("exception: approver must differ from requester (segregation of duties)")
@@ -167,6 +175,8 @@ type Exception struct {
 	EffectiveFrom *time.Time
 	ExpiresAt     time.Time
 	ExpiredAt     *time.Time
+	RevokedBy     *string
+	RevokedAt     *time.Time
 	Status        string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
@@ -390,6 +400,39 @@ func (s *Store) Activate(ctx context.Context, id uuid.UUID, activator string, ef
 				ID:            pgUUID(id),
 				ActivatedBy:   stringPtr(activator),
 				EffectiveFrom: pgTimestamptz(effectiveFrom),
+			})
+		},
+	})
+}
+
+// Revoke transitions active -> revoked (terminal, #2113). An approver
+// ends an active exception before it expires; the handler checks the
+// approver role. reason is required and is written as the audit row's
+// reason. revoker is who stands behind the credential
+// (credstore.PrincipalOf), recorded as revoked_by.
+//
+// Revoking narrows what is waived, so it carries no segregation-of-duties
+// check: the requester, if they are an approver, may withdraw their own
+// exception.
+func (s *Store) Revoke(ctx context.Context, id uuid.UUID, revoker, reason string) (Exception, error) {
+	if revoker == "" {
+		return Exception{}, ErrRequesterRequired
+	}
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		return Exception{}, ErrReasonRequired
+	}
+	return s.transition(ctx, id, transitionParams{
+		expectedPrior: StateActive,
+		newState:      StateRevoked,
+		actor:         revoker,
+		action:        ActionRevoked,
+		reason:        reason,
+		run: func(q *dbx.Queries, tenantID uuid.UUID, _ bool) (dbx.Exception, error) {
+			return q.RevokeException(ctx, dbx.RevokeExceptionParams{
+				TenantID:  pgUUID(tenantID),
+				ID:        pgUUID(id),
+				RevokedBy: stringPtr(revoker),
 			})
 		},
 	})
@@ -732,6 +775,14 @@ func exceptionFromRow(r dbx.Exception) Exception {
 	if r.ExpiredAt.Valid {
 		t := r.ExpiredAt.Time
 		out.ExpiredAt = &t
+	}
+	if r.RevokedBy != nil {
+		v := *r.RevokedBy
+		out.RevokedBy = &v
+	}
+	if r.RevokedAt.Valid {
+		t := r.RevokedAt.Time
+		out.RevokedAt = &t
 	}
 	if r.CreatedAt.Valid {
 		out.CreatedAt = r.CreatedAt.Time

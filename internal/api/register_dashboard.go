@@ -77,7 +77,7 @@ func (s *Server) registerDashboard(root *chi.Mux, risksStore *risk.Store, freshn
 		driftStore,
 		calendarapi.NewStore(s.dbPool),
 	)
-	dashboardExportH := dashboardexportapi.NewHandler(s.dbPool, dashboardExportSource)
+	dashboardExportH := dashboardexportapi.NewHandler(s.dbPool, dashboardExportSource).WithAuthz(s.authzEngine)
 	root.Get("/v1/dashboard/export", dashboardExportH.ExportDashboard)
 	// Slice 268: unified cross-domain search (`/v1/search`). Aggregates
 	// lexical ILIKE matches across controls, risks, and evidence into a

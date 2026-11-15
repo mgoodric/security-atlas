@@ -231,6 +231,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "PATCH", Path: "/v1/aggregation-rules/{id}/deactivate", Tag: "risks", Tier: "bearer", Internal: false, Summary: "PATCH /v1/aggregation-rules/{id}/deactivate"},
 	{Method: "PATCH", Path: "/v1/decisions/{id}", Tag: "decisions", Tier: "bearer", Internal: false, Summary: "PATCH /v1/decisions/{id}"},
 	{Method: "PATCH", Path: "/v1/exceptions/{id}/activate", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "PATCH /v1/exceptions/{id}/activate"},
+	{Method: "PATCH", Path: "/v1/exceptions/{id}/revoke", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "PATCH /v1/exceptions/{id}/revoke"},
 	{Method: "PATCH", Path: "/v1/exceptions/{id}/approve", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "PATCH /v1/exceptions/{id}/approve"},
 	{Method: "PATCH", Path: "/v1/exceptions/{id}/deny", Tag: "exceptions", Tier: "bearer", Internal: false, Summary: "PATCH /v1/exceptions/{id}/deny"},
 	{Method: "PATCH", Path: "/v1/incidents/{id}/transition", Tag: "incidents", Tier: "bearer", Internal: false, Summary: "PATCH /v1/incidents/{id}/transition"},

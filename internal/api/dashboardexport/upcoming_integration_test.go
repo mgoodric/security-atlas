@@ -7,6 +7,7 @@ package dashboardexport_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -50,14 +51,14 @@ func TestUpcomingPanel_CarriesLapsingPolicyAck(t *testing.T) {
 		dashboard.NewStore(app), risk.NewStore(app), freshness.NewStore(app), drift.NewStore(app),
 		calendar.NewStore(app),
 	)
-	snap, err := src.Snapshot(dbtest.WithTenantCtx(t, tenant))
+	snap, err := src.Snapshot(dbtest.WithTenantCtx(t, tenant), dashboardexport.UpcomingTypes{})
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	for _, row := range snap.Panels.Upcoming {
-		if row.ResourceID == ackID.String() {
-			if row.Category != "policy_ack" || row.Title != "Policy acknowledgement due: Export ack policy" {
-				t.Errorf("ack row: category=%q title=%q", row.Category, row.Title)
+		if row.Category == "policy_ack" && row.ResourceID == policyID.String() {
+			if !strings.HasPrefix(row.Title, "Export ack policy: 1 acknowledgement lapses on ") || row.ResourceType != "policy" {
+				t.Errorf("ack row: title=%q resource_type=%q", row.Title, row.ResourceType)
 			}
 			return
 		}

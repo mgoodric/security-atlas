@@ -59,6 +59,8 @@ const PARAM_VALUES: Record<string, string> = {
   "/csf/[framework_version_id]": seeded.frameworkVersionId,
   "/dashboards/metrics/[id]": NO_ROW_ID,
   "/evidence/[id]": NO_ROW_ID,
+  "/exceptions/[id]": NO_ROW_ID,
+  "/exceptions/[id]/[action]": "revoke",
   "/framework-scopes/[framework_version_id]": seeded.frameworkVersionId,
   "/oscal/component-definitions/[id]": NO_ROW_ID,
   "/personnel-security/[id]": NO_ROW_ID,

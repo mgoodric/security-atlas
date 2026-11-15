@@ -217,6 +217,7 @@ PATCH /v1/decisions/{id}
 PATCH /v1/exceptions/{id}/activate
 PATCH /v1/exceptions/{id}/approve
 PATCH /v1/exceptions/{id}/deny
+PATCH /v1/exceptions/{id}/revoke
 PATCH /v1/framework-scopes/{id}
 PATCH /v1/framework-scopes/{id}/activate
 PATCH /v1/framework-scopes/{id}/approve

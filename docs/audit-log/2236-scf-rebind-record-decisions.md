@@ -7,7 +7,7 @@ Every SCF re-bind now leaves a row in `scf_remap_proposals`, in the transaction 
 
 ## D1 — Extend `scf_remap_proposals`, no second table
 
-#1775 (#2293) already writes one row per non-pinned control per target release from `RebindControls`, in its transaction, with the tenant, control, legacy anchor, both releases and `status` (`rebound` or `open`). That is the record the ticket asks for, short of three things, which migration `20261124000000` adds:
+#1775 (#2293) already writes one row per non-pinned control per target release from `RebindControls`, in its transaction, with the tenant, control, legacy anchor, both releases and `status` (`rebound` or `open`). That is the record the ticket asks for, short of three things, which migration `20261128000000` adds:
 
 | Gap                                  | Fix                                                                                           |
 | ------------------------------------ | --------------------------------------------------------------------------------------------- |

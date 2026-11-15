@@ -88,6 +88,7 @@ import {
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { type AnchorDetail } from "@/lib/api/anchors";
 import { APIError } from "@/lib/api/base";
+import { enumLabel } from "@/lib/labels/enum-labels";
 
 import { classifyControlDetailError } from "../error-classifier";
 import { anchorFitLabel } from "../filters";
@@ -440,12 +441,8 @@ function ControlDetailPageInner() {
                   unanchored
                 </span>
               )}
-              <Badge
-                variant="secondary"
-                data-testid="lifecycle-badge"
-                className="capitalize"
-              >
-                {control.lifecycle_state}
+              <Badge variant="secondary" data-testid="lifecycle-badge">
+                {enumLabel("ControlLifecycleState", control.lifecycle_state)}
               </Badge>
               {control.demo ? (
                 <DemoBadge className="ml-0" testId="control-demo-badge" />
@@ -461,14 +458,20 @@ function ControlDetailPageInner() {
               </span>
               <span className="text-muted-foreground">
                 Implementation{" "}
-                <span className="text-foreground">
-                  {control.implementation_type}
+                <span
+                  className="text-foreground"
+                  data-testid="control-implementation-type"
+                >
+                  {enumLabel(
+                    "ControlImplementationType",
+                    control.implementation_type,
+                  )}
                 </span>
               </span>
               <span className="text-muted-foreground">
                 Freshness class{" "}
-                <span className="font-mono text-foreground">
-                  {control.freshness_class ?? "—"}
+                <span className="text-foreground">
+                  {enumLabel("EvidenceFreshnessClass", control.freshness_class)}
                 </span>
               </span>
               <span
