@@ -199,6 +199,7 @@ PATCH /v1/themes/{ref} 8
 POST /v1/themes 8
 GET /v1/vendors 8
 GET /v1/vendors/burndown 8
+GET /v1/vendors/initial-review-window 8
 GET /v1/vendors/spend 8
 GET /v1/vendors/{id} 8
 GET /v1/vendors/{id}/reviews 8

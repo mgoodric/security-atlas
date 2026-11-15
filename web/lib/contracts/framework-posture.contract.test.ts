@@ -17,8 +17,10 @@
 // web/lib/api/dashboard.ts):
 //   * frameworks is always an array (never null) — empty set is []
 //   * count is a number
-//   * each row carries string framework_id/framework_version + numeric
-//     coverage_pct/freshness_composite/trend_delta_90d
+//   * each row carries string framework_id/framework_version/
+//     framework_version_id + boolean scope_set; the percentages
+//     (coverage_pct/covered_by_exception_pct/freshness_composite/
+//     trend_delta_90d) are numbers when scope_set, null when not (#2114)
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -73,9 +75,20 @@ describe("contract: GET /api/dashboard/framework-posture <-> atlas GET /v1/frame
       for (const row of body.frameworks as Record<string, unknown>[]) {
         expect(typeof row.framework_id).toBe("string");
         expect(typeof row.framework_version).toBe("string");
-        expect(typeof row.coverage_pct).toBe("number");
-        expect(typeof row.freshness_composite).toBe("number");
-        expect(typeof row.trend_delta_90d).toBe("number");
+        expect(typeof row.framework_version_id).toBe("string");
+        expect(typeof row.scope_set).toBe("boolean");
+        // #2114: a scoped row carries numbers; a scope-not-set row carries
+        // null for every percentage, never a zero.
+        const pctType = row.scope_set ? "number" : "object";
+        for (const key of [
+          "coverage_pct",
+          "covered_by_exception_pct",
+          "freshness_composite",
+          "trend_delta_90d",
+        ]) {
+          expect(typeof row[key], `${name}.${key}`).toBe(pctType);
+          if (!row.scope_set) expect(row[key], `${name}.${key}`).toBeNull();
+        }
       }
     }
   });
