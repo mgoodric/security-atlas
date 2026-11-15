@@ -89,3 +89,27 @@ WHERE tenant_id = $1 AND user_id = $2;
 INSERT INTO user_roles (tenant_id, user_id, role, granted_by)
 VALUES ($1, $2, $3, $4)
 ON CONFLICT (tenant_id, user_id, role) DO NOTHING;
+
+-- name: LockTenantAdminRoster :exec
+-- #2261: serialises every change that can remove a tenant's admin. It takes
+-- the tenant row FOR NO KEY UPDATE, which conflicts with itself but not with
+-- the FOR KEY SHARE that foreign-key checks take, so ordinary tenant-scoped
+-- writes are not blocked. A transaction holding it, under READ COMMITTED,
+-- sees every admin change committed before it acquired the lock.
+SELECT 1 FROM tenants WHERE id = $1 FOR NO KEY UPDATE;
+
+-- name: CountActiveTenantAdmins :one
+-- #2261: the distinct users holding 'admin' in the tenant (any origin) whose
+-- membership is active (status='active' AND active). user_roles.user_id is
+-- TEXT; a "user:<uuid>" principal is read as its bare uuid (identity.UserID).
+-- A role row naming no users row (an API key, bootstrap-admin) is not an
+-- admin user and is not counted.
+SELECT COUNT(DISTINCT u.id) AS admin_count
+FROM user_roles ur
+JOIN users u
+  ON u.tenant_id = ur.tenant_id
+ AND u.id::text  = regexp_replace(ur.user_id, '^user:', '')
+WHERE ur.tenant_id = $1
+  AND ur.role      = 'admin'
+  AND u.status     = 'active'
+  AND u.active;

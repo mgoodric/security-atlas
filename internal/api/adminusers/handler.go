@@ -53,6 +53,7 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -78,6 +79,11 @@ type Handler struct {
 	pool     *pgxpool.Pool
 	authPool *pgxpool.Pool
 	creds    CredentialRevoker
+
+	// beforeRevokeCommit, when set, runs in Revoke after the last-admin
+	// check passes and before the transaction commits. Nil in production;
+	// tests set it (export_test.go) to hold a revoke there (#2261).
+	beforeRevokeCommit func()
 }
 
 // CredentialRevoker drops a user's API keys from the in-memory credstore.
@@ -293,6 +299,12 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 	// caller's tenant GUC; user_roles RLS policies fire on every
 	// statement).
 	err = h.inTx(r.Context(), func(ctx context.Context, q *dbx.Queries) error {
+		// A replacement that drops admin can strand the tenant; lock the
+		// roster first and recount after (#2261).
+		guard, gErr := users.LockAdmins(ctx, q, tenantID)
+		if gErr != nil {
+			return gErr
+		}
 		if dErr := q.DeleteUserRoles(ctx, dbx.DeleteUserRolesParams{
 			TenantID: pgtype.UUID{Bytes: tenantID, Valid: true},
 			UserID:   targetID.String(),
@@ -313,8 +325,12 @@ func (h *Handler) PatchRoles(w http.ResponseWriter, r *http.Request) {
 				return fmt.Errorf("insert role %s: %w", role, iErr)
 			}
 		}
-		return nil
+		return guard.Check(ctx, q)
 	})
+	if errors.Is(err, users.ErrLastAdmin) {
+		httpresp.WriteError(w, http.StatusConflict, lastAdminReason)
+		return
+	}
 	if err != nil {
 		httperr.WriteInternal(w, r, "patch roles", err)
 		return

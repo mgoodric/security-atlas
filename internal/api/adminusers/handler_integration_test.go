@@ -281,6 +281,9 @@ func TestPatchRolesAllowsSelfDemotionWithConfirm(t *testing.T) {
 	cleanupUsers(t, tenant)
 	uID := seedUser(t, tenant, "selfdemo-ok@example.com", "Self Demo OK")
 	seedUserRole(t, tenant, uID.String(), "admin")
+	// A second active admin, so the demotion does not strand the tenant (#2261).
+	other := seedUser(t, tenant, "selfdemo-ok-other@example.com", "Self Demo Other")
+	seedUserRole(t, tenant, other.String(), "admin")
 
 	r := newRouter(t, tenant, uID.String(), true)
 	body, _ := json.Marshal(adminusers.PatchRolesRequest{
