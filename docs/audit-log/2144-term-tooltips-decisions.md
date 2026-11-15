@@ -109,13 +109,11 @@ that the new tab lands on the page at the term's anchor. `docs-publish.yml` now
 also runs when `web/help/terms.json` changes, so the published page tracks the
 list.
 
-## D7 — new devDependency `@axe-core/playwright`
+## D7 — `@axe-core/playwright` (now on main through #2226)
 
-The ticket requires an axe pass, and the repo had no axe binding. The version
-(`^4.14.0`) matches the one #2226 (#2080's route sweep) adds, so the two
-lockfile diffs agree. It moves the workspace's `axe-core` from 4.11.4 to 4.14.0
-(also used by `eslint-plugin-jsx-a11y`). The lockfile diff is only those two
-entries.
+The ticket requires an axe pass, and the repo had no axe binding. This branch
+added `^4.14.0`, the version #2226 (#2080's route sweep) also adds. #2226 merged
+first, so after merging main this PR adds no dependency of its own.
 
 ## D8 — a race in `risks-sort-detail-badge.spec.ts`
 
