@@ -108,6 +108,7 @@ nav:
       - Scope: primitives/scope.md
       - Framework: primitives/framework.md
       - Policy: primitives/policy.md
+  - Terms: terms.md
   - Audit logs: audit-logs.md
   - Operations:
       - Backup and restore: backup-restore.md
@@ -142,6 +143,10 @@ nav:
 # (P0-A8); this hook produces a derived filtered view.
 hooks:
   - hooks/openapi_pipeline.py
+  # #2144 — generate the Terms page (terms.md, gitignored) from the app's
+  # user term list at web/help/terms.json, so the <Term> tooltips and this
+  # page publish from one file.
+  - hooks/terms_page.py
 
 extra:
   social:

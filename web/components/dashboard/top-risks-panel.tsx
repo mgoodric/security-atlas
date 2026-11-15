@@ -67,7 +67,12 @@ export function TopRisksPanel({
                   </div>
                 </div>
                 <div className="col-span-2">
-                  <Badge variant={badge.variant}>{badge.label}</Badge>
+                  <Badge
+                    variant={badge.variant}
+                    data-testid="top-risk-treatment"
+                  >
+                    {badge.label}
+                  </Badge>
                 </div>
                 <div className="col-span-3 truncate text-xs text-muted-foreground">
                   {risk.treatment_owner || "unassigned"}
