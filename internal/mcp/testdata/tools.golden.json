@@ -48,7 +48,7 @@
         "additionalProperties": false,
         "properties": {
           "category": {
-            "description": "Filter by risk category (free-form string matching the platform's risk_categories list). Optional.",
+            "description": "Filter by risk category slug, one of the organisation's own categories (call list_risk_categories for the valid slugs; archived ones are filterable). An unknown slug is an error naming the valid ones. Optional.",
             "type": "string"
           },
           "limit": {
@@ -83,6 +83,20 @@
         "required": [
           "risk_id"
         ],
+        "type": "object"
+      }
+    },
+    {
+      "name": "list_risk_categories",
+      "description": "List the bearer tenant's own risk categories (slug, name, default flag, usage counts). These are the valid values for create_risk's category (by slug or name) and list_risks' category filter (by slug).",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "include_archived": {
+            "description": "Also list archived categories. They stay on the risks that have them and are filterable, but cannot be given to a new risk. Default false.",
+            "type": "boolean"
+          }
+        },
         "type": "object"
       }
     },
@@ -244,7 +258,8 @@
             "type": "string"
           },
           "category": {
-            "description": "Risk category slug (e.g., operational, technical, legal).",
+            "description": "One of the organisation's own risk categories, by slug or by display name (case-insensitive). Call list_risk_categories for the valid values; archived categories cannot be given to a new risk. An unknown category is refused with the list of valid slugs.",
+            "minLength": 1,
             "type": "string"
           },
           "description": {

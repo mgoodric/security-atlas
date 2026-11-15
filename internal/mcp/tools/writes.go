@@ -94,7 +94,8 @@ const createRiskInputSchema = `{
     },
     "category": {
       "type": "string",
-      "description": "Risk category slug (e.g., operational, technical, legal)."
+      "minLength": 1,
+      "description": "One of the organisation's own risk categories, by slug or by display name (case-insensitive). Call list_risk_categories for the valid values; archived categories cannot be given to a new risk. An unknown category is refused with the list of valid slugs."
     },
     "methodology": {
       "type": "string",
