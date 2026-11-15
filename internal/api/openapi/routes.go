@@ -150,7 +150,7 @@ var RouteSpecs = []RouteSpec{
 	{Method: "GET", Path: "/v1/framework-scopes/{id}/applicability", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}/applicability — list a revision's applicability decisions"},
 	{Method: "GET", Path: "/v1/framework-scopes/{id}/applicability/diff", Tag: "framework-scopes", Tier: "bearer", Internal: false, Summary: "GET /v1/framework-scopes/{id}/applicability/diff — applicability and predicate changes against the activated revision"},
 	{Method: "GET", Path: "/v1/frameworks", Tag: "frameworks", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks"},
-	{Method: "GET", Path: "/v1/frameworks/posture", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks/posture"},
+	{Method: "GET", Path: "/v1/frameworks/posture", Tag: "dashboard", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks/posture — per-version coverage, freshness and 90-day trend; scope_set=false with null percentages when no framework scope is activated (#2114)"},
 	{Method: "GET", Path: "/v1/frameworks/scf/versions", Tag: "frameworks", Tier: "bearer", Internal: false, Summary: "GET /v1/frameworks/scf/versions"},
 	{Method: "GET", Path: "/v1/install-state", Tag: "system", Tier: "none", Internal: true, Summary: "GET /v1/install-state"},
 	{Method: "GET", Path: "/v1/mcp/write-proposals", Tag: "mcp", Tier: "bearer", Internal: false, Summary: "GET /v1/mcp/write-proposals"},

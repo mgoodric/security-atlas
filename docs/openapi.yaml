@@ -3517,7 +3517,7 @@ paths:
                 $ref: "#/components/schemas/Ack"
   /v1/frameworks/posture:
     get:
-      summary: GET /v1/frameworks/posture
+      summary: GET /v1/frameworks/posture — per-version coverage, freshness and 90-day trend; scope_set=false with null percentages when no framework scope is activated (#2114)
       tags: [dashboard]
       operationId: get-v1-frameworks-posture
       security:

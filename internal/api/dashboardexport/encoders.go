@@ -399,6 +399,8 @@ func frameworkPostureTable(rows []FrameworkPosturePanelRow) ([]string, [][]strin
 	header := []string{
 		"framework_id",
 		"framework_version",
+		"framework_version_id",
+		"scope_set",
 		"coverage_pct",
 		"covered_by_exception_pct",
 		"freshness_composite",
@@ -409,13 +411,24 @@ func frameworkPostureTable(rows []FrameworkPosturePanelRow) ([]string, [][]strin
 		out[i] = []string{
 			r.FrameworkID,
 			r.FrameworkVersion,
-			strconv.FormatFloat(r.CoveragePct, 'f', -1, 64),
-			strconv.FormatFloat(r.CoveredByExceptionPct, 'f', -1, 64),
-			strconv.FormatFloat(r.FreshnessComposite, 'f', -1, 64),
-			strconv.FormatFloat(r.TrendDelta90d, 'f', -1, 64),
+			r.FrameworkVersionID,
+			strconv.FormatBool(r.ScopeSet),
+			formatOptionalPct(r.CoveragePct),
+			formatOptionalPct(r.CoveredByExceptionPct),
+			formatOptionalPct(r.FreshnessComposite),
+			formatOptionalPct(r.TrendDelta90d),
 		}
 	}
 	return header, out
+}
+
+// formatOptionalPct renders a posture percentage, or an empty cell when
+// the version's scope is not set (#2114).
+func formatOptionalPct(v *float64) string {
+	if v == nil {
+		return ""
+	}
+	return strconv.FormatFloat(*v, 'f', -1, 64)
 }
 
 func risksTable(rows []RiskPanelRow) ([]string, [][]string) {

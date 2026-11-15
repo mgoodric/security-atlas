@@ -56,15 +56,41 @@ func newHandlerWithReader(r reader) *Handler { return &Handler{store: r} }
 // calendar (GET /v1/calendar) is the one list of what is due.
 
 // postureWire is the AC-1 row shape: one framework version's posture.
+//
+// ScopeSet (#2114) is false when the tenant has no ACTIVATED framework
+// scope for the version. Nothing has been decided out of scope then, so a
+// percentage would be over the whole requirement set: every percentage is
+// null and callers show "Scope not set" instead of a number.
 type postureWire struct {
-	FrameworkID      string  `json:"framework_id"`
-	FrameworkVersion string  `json:"framework_version"`
-	CoveragePct      float64 `json:"coverage_pct"`
+	FrameworkID        string   `json:"framework_id"`
+	FrameworkVersion   string   `json:"framework_version"`
+	FrameworkVersionID string   `json:"framework_version_id"`
+	ScopeSet           bool     `json:"scope_set"`
+	CoveragePct        *float64 `json:"coverage_pct"`
 	// CoveredByExceptionPct is the part of CoveragePct that rests only on
 	// active exceptions (#2112), 0-100.
-	CoveredByExceptionPct float64 `json:"covered_by_exception_pct"`
-	FreshnessComposite    float64 `json:"freshness_composite"`
-	TrendDelta90d         float64 `json:"trend_delta_90d"`
+	CoveredByExceptionPct *float64 `json:"covered_by_exception_pct"`
+	FreshnessComposite    *float64 `json:"freshness_composite"`
+	TrendDelta90d         *float64 `json:"trend_delta_90d"`
+}
+
+// postureWireFromRow projects one posture row onto the wire, leaving the
+// percentages null when the version has no activated scope (#2114).
+func postureWireFromRow(p dbx.FrameworkPostureRow) postureWire {
+	out := postureWire{
+		FrameworkID:        uuidString(p.FrameworkID),
+		FrameworkVersion:   p.FrameworkVersion,
+		FrameworkVersionID: uuidString(p.FrameworkVersionID),
+		ScopeSet:           p.ScopeActivated,
+	}
+	if !p.ScopeActivated {
+		return out
+	}
+	out.CoveragePct = &p.CoveragePct
+	out.CoveredByExceptionPct = &p.CoveredByExceptionPct
+	out.FreshnessComposite = &p.FreshnessComposite
+	out.TrendDelta90d = &p.TrendDelta90d
+	return out
 }
 
 // activityWire is the AC-2 row shape: one evidence-ingest activity event.
@@ -102,14 +128,7 @@ func (h *Handler) FrameworkPosture(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]postureWire, len(rows))
 	for i, p := range rows {
-		out[i] = postureWire{
-			FrameworkID:           uuidString(p.FrameworkID),
-			FrameworkVersion:      p.FrameworkVersion,
-			CoveragePct:           p.CoveragePct,
-			CoveredByExceptionPct: p.CoveredByExceptionPct,
-			FreshnessComposite:    p.FreshnessComposite,
-			TrendDelta90d:         p.TrendDelta90d,
-		}
+		out[i] = postureWireFromRow(p)
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{
 		"frameworks": out,

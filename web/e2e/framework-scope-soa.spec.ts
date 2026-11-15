@@ -2,8 +2,9 @@
 //
 // Seeded by fixtures/e2e/framework-scope-soa.sql: an ISO/IEC 27001 version
 // (`2022-soa-e2e`) with eight requirements SOA-01..SOA-08. SOA-01, SOA-02
-// and SOA-03 have controls behind them (C1 and C2 passing, C3 failing), so
-// dashboard coverage starts at 3/8 = 37.5%. The fixture deletes every scope
+// and SOA-03 have controls behind them (C1 and C2 passing, C3 failing). With
+// no activated scope the dashboard tile reads "Scope not set" (#2114) rather
+// than 3/8 = 37.5%. The fixture deletes every scope
 // revision of the version; beforeAll creates a fresh draft through the API
 // and excludes SOA-01, which passing C1 sits behind: the contradiction.
 //
@@ -13,8 +14,9 @@
 //   2. the contradiction filter shows SOA-01 alone
 //   3. a CSV import applies its good row and reports the two bad ones
 //   4. export downloads the CSV and the xlsx
-//   5. submit, approve and activate on the Scopes tab; dashboard coverage
-//      moves from 37.5% to 2/4 = 50.0% (SOA-01, 06, 07, 08 excluded), and
+//   5. the dashboard tile says "Scope not set" and links to the scope page;
+//      submit, approve and activate on the Scopes tab; the tile then reads
+//      2/4 = 50.0% (SOA-01, 06, 07, 08 excluded), and
 //      the tab turns read-only.
 //
 // #2101: the e2e user submits and approves, which the fixture allows by
@@ -186,13 +188,24 @@ test.describe("framework scope · Statement of Applicability tab (#1794)", () =>
   test("submitting, approving and activating the scope changes dashboard coverage", async ({
     authedPage: page,
   }) => {
-    const coverage = page
+    const tile = page
       .getByTestId("framework-tile")
-      .filter({ hasText: VERSION_LABEL })
-      .getByTestId("framework-tile-coverage");
+      .filter({ hasText: VERSION_LABEL });
+    const coverage = tile.getByTestId("framework-tile-coverage");
 
+    // #2114: with only a draft revision, the version has no activated
+    // scope, so the tile shows "Scope not set" (no percentage) and links
+    // to the framework-scope page.
     await page.goto("/dashboard");
-    await expect(coverage).toHaveText("37.5%");
+    const scopeNotSet = tile.getByTestId("framework-tile-scope-not-set");
+    await expect(scopeNotSet).toHaveText("Scope not set");
+    await expect(scopeNotSet).toHaveAttribute(
+      "href",
+      `/framework-scopes/${FV}`,
+    );
+    await expect(coverage).toHaveCount(0);
+    await scopeNotSet.click();
+    await expect(page).toHaveURL(new RegExp(`/framework-scopes/${FV}$`));
 
     await page.goto(`/framework-scopes/${FV}`);
     await page
