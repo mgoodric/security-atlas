@@ -444,30 +444,30 @@ mappings:
     strength: 0.9
     rationale: "Provision/review/remove access rights maps to SCF User Provisioning & De-Provisioning — shared with SOC 2 CC6.2/CC6.3."
   - requirement_code: A.5.19
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 0.9
     rationale: "Information security in supplier relationships maps to SCF Third-Party Management — shared with SOC 2 CC9.2."
   - requirement_code: A.5.20
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 0.8
-    rationale: "Embedding security requirements into supplier agreements is a core Third-Party Management (TPM-01) activity."
+    rationale: "Embedding security requirements into supplier agreements is a core Third-Party Management (TPM-02) activity."
   - requirement_code: A.5.21
-    scf_anchor: TPM-04
+    scf_anchor: TPM-10
     relationship_type: equal
     strength: 0.8
-    rationale: "ICT supply-chain risk management maps to Third-Party Risk Assessments (TPM-04)."
+    rationale: "ICT supply-chain risk management maps to Third-Party Risk Assessments & Approvals (TPM-10)."
   - requirement_code: A.5.22
-    scf_anchor: TPM-04
+    scf_anchor: TPM-10
     relationship_type: equal
     strength: 0.8
-    rationale: "Monitoring/review of supplier services maps to SCF Third-Party Risk Assessments."
+    rationale: "Monitoring/review of supplier services maps to SCF Third-Party Risk Assessments & Approvals."
   - requirement_code: A.5.23
-    scf_anchor: CLD-01
+    scf_anchor: CLD-02
     relationship_type: equal
     strength: 0.9
-    rationale: "Information security for cloud services maps to SCF Cloud Infrastructure Governance."
+    rationale: "Information security for cloud services maps to SCF Cloud Services."
   - requirement_code: A.5.24
     scf_anchor: IRO-04
     relationship_type: equal
@@ -509,15 +509,15 @@ mappings:
     strength: 0.7
     rationale: "ICT readiness for business continuity is a subset of the Business Continuity & Disaster Recovery (BC/DR) Plans anchor."
   - requirement_code: A.5.31
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: intersects_with
     strength: 0.6
     rationale: "Legal/regulatory/contractual requirements overlap with the Internal Audit/Compliance function anchor."
   - requirement_code: A.5.32
-    scf_anchor: CPL-01
+    scf_anchor: CPL-02
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "IP-rights protection is a legal/regulatory compliance obligation tracked under Compliance Management (CPL-01)."
+    rationale: "IP-rights protection is a legal/regulatory compliance obligation tracked under Statutory, Regulatory & Contractual Compliance (CPL-02)."
   - requirement_code: A.5.33
     scf_anchor: DCH-03
     relationship_type: equal
@@ -539,20 +539,20 @@ mappings:
     strength: 0.6
     rationale: "Honoring data-subject requests is the Data Subject Rights (PRI-04) facet of PII protection."
   - requirement_code: A.5.35
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: equal
     strength: 0.8
     rationale: "Independent review of information security maps to SCF Internal Audit Function — shared with SOC 2 CC4.1."
   - requirement_code: A.5.36
-    scf_anchor: CPL-01
+    scf_anchor: CPL-02
     relationship_type: equal
     strength: 0.8
-    rationale: "Regular review of policy compliance maps to Compliance Management (CPL-01)."
+    rationale: "Regular review of policy compliance maps to Statutory, Regulatory & Contractual Compliance (CPL-02)."
   - requirement_code: A.5.36
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Independent verification of compliance is performed by the Internal Audit Function (CPL-03)."
+    rationale: "Independent verification of compliance is performed by the Internal Audit Function (CPL-07.1)."
   - requirement_code: A.5.37
     scf_anchor: CFG-04
     relationship_type: intersects_with
@@ -937,10 +937,10 @@ mappings:
     strength: 0.6
     rationale: "Pre-release security testing that drives remediation relates to the Vulnerability Remediation Process (VPM-04)."
   - requirement_code: A.8.30
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 0.7
-    rationale: "Governing outsourced development providers maps to Third-Party Management (TPM-01)."
+    rationale: "Governing outsourced development providers maps to Third-Party Management (TPM-02)."
   - requirement_code: A.8.30
     scf_anchor: SEA-05
     relationship_type: intersects_with
@@ -972,7 +972,7 @@ mappings:
     strength: 0.6
     rationale: "Protection and handling of test information (especially when derived from production data) is a Data Classification & Handling (DCH-01) concern."
   - requirement_code: A.8.34
-    scf_anchor: CPL-03
+    scf_anchor: CPL-07.1
     relationship_type: equal
     strength: 0.7
-    rationale: "Planning and controlling audit testing against operational systems maps to the Internal Audit Function (CPL-03)."
+    rationale: "Planning and controlling audit testing against operational systems maps to the Internal Audit Function (CPL-07.1)."

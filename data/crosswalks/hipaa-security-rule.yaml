@@ -464,17 +464,17 @@ mappings:
     strength: 0.85
     rationale: "Slice 567 re-point (was BCD-02 @ 0.60; BCD-04 since the SCF 2026.3 remap). Applications and Data Criticality Analysis (assess the relative criticality of specific applications and data in support of the other contingency components) IS a Business Impact Analysis; mapping it to the continuity PLAN conflated the analysis input with the plan artifact it feeds. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 4."
   - requirement_code: "164.308(a)(8)"
-    scf_anchor: "CPL-01"
+    scf_anchor: "CPL-02"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Slice 516 D7 re-map (was CPL-03 @ 0.65 in slice 481). Periodic technical AND nontechnical Evaluation of how well policies/procedures meet the Security Rule is the self-assessment facet of SCF Compliance Management — a closer covering anchor in the palette than Internal Audit (CPL-03), whose scope is narrower than the nontechnical-evaluation requirement. Lift 0.65 -> 0.75 (LOW -> MEDIUM)."
+    rationale: "Slice 516 D7 re-map (was CPL-03 @ 0.65 in slice 481). Periodic technical AND nontechnical Evaluation of how well policies/procedures meet the Security Rule is the self-assessment facet of SCF Statutory, Regulatory & Contractual Compliance — a closer covering anchor in the palette than Internal Audit (CPL-07.1), whose scope is narrower than the nontechnical-evaluation requirement. Lift 0.65 -> 0.75 (LOW -> MEDIUM)."
   - requirement_code: "164.308(b)(1)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Business Associate Contracts (satisfactory-assurance safeguards) are governed by SCF Third-Party Management."
   - requirement_code: "164.308(b)(4)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Written Contract or Other Arrangement (document the BA satisfactory assurances) is the contracting facet of SCF Third-Party Management."
@@ -610,45 +610,45 @@ mappings:
   # SCF expresses as third-party management. CATALOG nodes only; the BAA workflow
   # is the deferred slice 517.
   - requirement_code: "164.314(a)(1)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Business Associate Contracts or Other Arrangements (the contract/arrangement must meet applicable requirements) is governed by SCF Third-Party Management."
   - requirement_code: "164.314(a)(2)(i)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "equal"
     strength: 0.8
     rationale: "Business Associate Contracts (BA complies, binds subcontractors, reports incidents) map directly to the SCF Third-Party Management contracting requirements."
   - requirement_code: "164.314(a)(2)(ii)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Other Arrangements (a governmental-entity memorandum of understanding in place of a business associate contract) is an alternative legal instrument, not a security control; no control catalog carries an anchor for it. TPM-01 is and remains the correct covering anchor at 0.65 (LOW). See decisions log D6 row 14."
+    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Other Arrangements (a governmental-entity memorandum of understanding in place of a business associate contract) is an alternative legal instrument, not a security control; no control catalog carries an anchor for it. TPM-02 is and remains the correct covering anchor at 0.65 (LOW). See decisions log D6 row 14."
   - requirement_code: "164.314(a)(2)(iii)"
-    scf_anchor: "TPM-04"
+    scf_anchor: "TPM-10"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Business Associate Contracts with Subcontractors (flow-down satisfactory assurances) is the subcontractor-assurance facet of SCF Third-Party Risk Assessments."
+    rationale: "Business Associate Contracts with Subcontractors (flow-down satisfactory assurances) is the subcontractor-assurance facet of SCF Third-Party Risk Assessments & Approvals."
   - requirement_code: "164.314(b)(1)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
     strength: 0.55
-    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Requirements for Group Health Plans (plan documents must require the plan sponsor to safeguard ePHI) is a plan-document amendment obligation on a HIPAA-specific regulatory relationship, not a security control; there is no SCF analog to find. TPM-01 as covering anchor at a deliberately low 0.55 is the honest mapping. See decisions log D6 row 15."
+    rationale: "Slice 567 HOLD — final, no dependency on a larger catalog. Requirements for Group Health Plans (plan documents must require the plan sponsor to safeguard ePHI) is a plan-document amendment obligation on a HIPAA-specific regulatory relationship, not a security control; there is no SCF analog to find. TPM-02 as covering anchor at a deliberately low 0.55 is the honest mapping. See decisions log D6 row 15."
   - requirement_code: "164.314(b)(2)(i)"
-    scf_anchor: "TPM-05"
+    scf_anchor: "TPM-14"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Slice 567 re-point (was TPM-01 @ 0.55). Unlike 164.314(a)(2)(ii) and 164.314(b)(1), this row has a generic shape: require a counterparty to implement safeguards that protect data handled on your behalf. That is a contractual-security-requirements control, so TPM-05 fits better than the third-party-management head — but the plan-sponsor framing keeps it a modest lift. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 16."
+    rationale: "Slice 567 re-point (was TPM-01 @ 0.55). Unlike 164.314(a)(2)(ii) and 164.314(b)(1), this row has a generic shape: require a counterparty to implement safeguards that protect data handled on your behalf. That is a contractual-security-requirements control, so TPM-14 fits better than the third-party-management head — but the plan-sponsor framing keeps it a modest lift. Lift 0.55 -> 0.65 (LOW). See decisions log D6 row 16."
   - requirement_code: "164.314(b)(2)(ii)"
-    scf_anchor: "TPM-01"
+    scf_anchor: "TPM-02"
     relationship_type: "intersects_with"
     strength: 0.55
-    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Ensure Adequate Separation is ENTITY-level firewalling between the group health plan and its sponsor; the nearest finer concept, separation of duties, is ROLE-level within one organization. Re-pointing would trade a correct coarse anchor for a wrong-altitude finer one. TPM-01 stays at 0.55 (LOW). See decisions log D6 row 17."
+    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Ensure Adequate Separation is ENTITY-level firewalling between the group health plan and its sponsor; the nearest finer concept, separation of duties, is ROLE-level within one organization. Re-pointing would trade a correct coarse anchor for a wrong-altitude finer one. TPM-02 stays at 0.55 (LOW). See decisions log D6 row 17."
   - requirement_code: "164.314(b)(2)(iii)"
-    scf_anchor: "TPM-05"
+    scf_anchor: "TPM-14"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Slice 567 re-point (was TPM-04 @ 0.60). Ensure Agents Safeguard requires that agents and subcontractors agree to the same protections — contractual flow-down, which is a different control from third-party risk ASSESSMENT. TPM-05 Third-Party Contract Requirements carries the flow-down obligation. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 18."
+    rationale: "Slice 567 re-point (was TPM-04 @ 0.60). Ensure Agents Safeguard requires that agents and subcontractors agree to the same protections — contractual flow-down, which is a different control from third-party risk ASSESSMENT. TPM-14 Third-Party Contract Requirements carries the flow-down obligation. Lift 0.60 -> 0.80 (LOW -> MEDIUM). See decisions log D6 row 18."
 
   # ===== POLICIES, PROCEDURES, AND DOCUMENTATION (§164.316) → SCF =====
   # New in slice 516. Program-governance + documentation-retention obligations.
@@ -658,10 +658,10 @@ mappings:
     strength: 0.7
     rationale: "Policies and Procedures (implement policies/procedures to comply with the Security Rule) is the policy-framework facet of SCF Information Security Governance."
   - requirement_code: "164.316(b)(1)"
-    scf_anchor: "CPL-01"
+    scf_anchor: "CPL-02"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Documentation (maintain policies/procedures and document required actions/assessments in writing) is the recordkeeping facet of SCF Compliance Management."
+    rationale: "Documentation (maintain policies/procedures and document required actions/assessments in writing) is the recordkeeping facet of SCF Statutory, Regulatory & Contractual Compliance."
   - requirement_code: "164.316(b)(2)(i)"
     scf_anchor: "DCH-03"
     relationship_type: "intersects_with"
