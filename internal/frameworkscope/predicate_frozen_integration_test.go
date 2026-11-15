@@ -35,6 +35,8 @@ type scopeResp struct {
 		Name               string          `json:"name"`
 		State              string          `json:"state"`
 		Predicate          json.RawMessage `json:"predicate"`
+		SubmittedBy        *string         `json:"submitted_by"`
+		SelfApproved       bool            `json:"self_approved"`
 	} `json:"framework_scope"`
 }
 
@@ -108,6 +110,11 @@ func TestHTTP_PredicateFrozen_NewRevisionAndAsOf(t *testing.T) {
 		b.FrameworkScope.FrameworkVersionID != f.FrameworkVersionID.String() ||
 		!sameJSON(t, b.FrameworkScope.Predicate, []byte(prodPredicate)) {
 		t.Fatalf("revision B = %+v", b.FrameworkScope)
+	}
+	// A fork carries none of the source's approval provenance (#2101).
+	if b.FrameworkScope.SelfApproved || b.FrameworkScope.SubmittedBy != nil {
+		t.Fatalf("revision B provenance: self_approved %v submitted_by %v, want false and null",
+			b.FrameworkScope.SelfApproved, b.FrameworkScope.SubmittedBy)
 	}
 	bID := b.FrameworkScope.ID
 	bList := c.mustList(bID)
@@ -205,6 +212,11 @@ func TestHTTP_PredicateFrozen_NewRevisionAndAsOf(t *testing.T) {
 	}{
 		{"predicate", []string{`UPDATE framework_scopes SET predicate = '{"op":"false"}'::jsonb, predicate_hash = 'x' WHERE id = $1`}},
 		{"effective_from", []string{`UPDATE framework_scopes SET effective_from = effective_from - interval '1 day' WHERE id = $1`}},
+		{"framework_version_id", []string{`UPDATE framework_scopes SET framework_version_id = gen_random_uuid() WHERE id = $1`}},
+		{"tenant_id", []string{`UPDATE framework_scopes SET tenant_id = gen_random_uuid() WHERE id = $1`}},
+		{"approved_at", []string{`UPDATE framework_scopes SET approved_at = approved_at - interval '1 day' WHERE id = $1`}},
+		{"approver_user_id", []string{`UPDATE framework_scopes SET approver_user_id = NULL WHERE id = $1`}},
+		{"self_approved", []string{`UPDATE framework_scopes SET self_approved = NOT self_approved WHERE id = $1`}},
 		{"back to draft", []string{`UPDATE framework_scopes SET state = 'draft' WHERE id = $1`}},
 		{"back to approved", []string{`UPDATE framework_scopes SET state = 'approved' WHERE id = $1`}},
 		{"draft then predicate", []string{
@@ -233,13 +245,21 @@ func TestHTTP_PredicateFrozen_NewRevisionAndAsOf(t *testing.T) {
 		}
 	}
 
-	// superseded_by and superseded_at stay writable on a frozen row: the
-	// supersede path writes them.
+	// The allow-list: superseded_by, superseded_at and updated_at (the
+	// supersede path writes them) and name stay writable on a frozen row.
 	if err := withAppTenant(ctx, app, func(tx pgx.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE framework_scopes SET superseded_by = $2, superseded_at = now() WHERE id = $1`, a, bID)
+		_, err := tx.Exec(ctx, `UPDATE framework_scopes SET superseded_by = $2, superseded_at = now(), updated_at = now() WHERE id = $1`, a, bID)
 		return err
 	}); err != nil {
 		t.Fatalf("superseded_by write on superseded A: %v", err)
+	}
+	for _, id := range []string{a, bID} {
+		if err := withAppTenant(ctx, app, func(tx pgx.Tx) error {
+			_, err := tx.Exec(ctx, `UPDATE framework_scopes SET name = name || ' (renamed)' WHERE id = $1`, id)
+			return err
+		}); err != nil {
+			t.Fatalf("name write on %s: %v", id, err)
+		}
 	}
 
 	// Nothing above changed A or B.

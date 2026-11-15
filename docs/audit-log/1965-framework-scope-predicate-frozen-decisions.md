@@ -10,26 +10,41 @@
 > predicate columns. Review on #2227 caught that a write could set
 > `state = 'draft'` on an activated row and then edit the predicate, and the
 > decisions too, because the applicability guard reads the scope's current
-> state. `effective_from` was also writable. The fix (D1) and the
-> integration cases for each bypass landed in the same PR; with the
-> predicate-only trigger those cases fail.
+> state. `effective_from` was also writable. A second review found more
+> writable columns: `framework_version_id`, `tenant_id` and the approval
+> provenance. The fix (D1) and integration cases for each bypass landed in
+> the same PR, and each set of cases fails on the trigger version before it.
 
 ## Decisions
 
-**D1 — What the trigger freezes.** `framework_scopes_predicate_frozen`
-(BEFORE UPDATE) acts only when `OLD.state` is `activated` or `superseded`,
-and refuses:
+**D1 — The freeze is an allow-list (Matt, second review on #2227).**
+`framework_scopes_predicate_frozen` (BEFORE UPDATE) acts only when
+`OLD.state` is `activated` or `superseded`. On such a row it refuses a change
+to any column except:
 
-- a change to `predicate` or `predicate_hash`;
-- a change to `effective_from`, which decides which revision an `as_of` read
-  picks;
-- any `state` change except `activated → superseded`. A step back to
-  `draft` would otherwise reopen the predicate and, through the
-  applicability guard, the decisions.
+- `name`, a label that plays no part in `as_of` reads;
+- `superseded_by`, `superseded_at` and `updated_at`, which the supersede
+  path (`SupersedePreviousActivated`) writes;
+- `state`, and only `activated → superseded`. A step back to `draft` would
+  otherwise reopen the predicate and, through the applicability guard, the
+  decisions.
 
-`superseded_by`, `superseded_at` and `updated_at` stay writable, because the
-supersede path (`SupersedePreviousActivated`) writes them. `name` is not
-frozen: no API edits it, and it plays no part in `as_of` reads.
+The trigger compares `to_jsonb(NEW)` with `to_jsonb(OLD)`, after removing
+the allowed columns, so a column added to `framework_scopes` later is frozen
+by default. The refusal names the changed columns. Today the freeze covers
+the predicate, `effective_from`, `framework_version_id`, `tenant_id`, the
+approval provenance (`approver_user_id`, `approved_at`,
+`predicate_hash_at_approval`, `approval_evidence_file_url`/`_hash`) and
+#2101's `submitted_by` and `self_approved`. The first two versions of this
+trigger froze named columns one by one, and each review found another
+column left writable. That is why the list is now of what may change.
+
+#2101 redefined the bounce trigger (`framework_scopes_bounce_on_predicate_change`)
+and the reset trigger (`framework_scope_applicability_reset_approval`) to
+also clear `self_approved`. Both act only on `review` and `approved` rows,
+so neither writes to a frozen row. A `from_scope_id` fork inserts with the
+column defaults, so it starts with `self_approved = false` and
+`submitted_by` NULL. The test asserts both.
 
 **D6 — DELETE is not guarded.** This follows the decision guard (#1787 D4).
 No API deletes a scope, and the FK cascades and the operator purge
