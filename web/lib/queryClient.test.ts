@@ -14,6 +14,11 @@ describe("shouldRetryQuery", () => {
     expect(shouldRetryQuery(0, err)).toBe(false);
   });
 
+  it("retries a 404 that is not the feature-disabled answer", () => {
+    // Only the gate's exact body is final; any other 404 keeps the retry.
+    expect(shouldRetryQuery(0, new APIError(404, "not found"))).toBe(true);
+  });
+
   it("retries any other error once", () => {
     const err = new APIError(500, "boom");
     expect(shouldRetryQuery(0, err)).toBe(true);
