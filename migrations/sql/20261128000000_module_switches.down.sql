@@ -1,4 +1,4 @@
--- Reverses 20261126000000_module_switches.sql where it can without losing
+-- Reverses 20261128000000_module_switches.sql where it can without losing
 -- a tenant's stored switch:
 --
 -- - `vendor.claims` rows move back to `oscal.export` (category
@@ -12,7 +12,7 @@
 --
 -- The up migration's reset of four no-op module switches from off to on is
 -- not undone: which rows were off is kept only in feature_flag_audit_log
--- (actor 'migration:20261126000000'), and those switches hid nothing before
+-- (actor 'migration:20261128000000'), and those switches hid nothing before
 -- the up migration.
 
 DO $$
@@ -24,7 +24,7 @@ BEGIN
         OR category = 'personnel';
     IF n > 0 THEN
         RAISE EXCEPTION 'feature_flags holds % personnel.enabled / audit.oscal_export row(s); refusing to delete tenant switches', n
-            USING HINT = 'Remove those rows deliberately before reversing 20261126000000.';
+            USING HINT = 'Remove those rows deliberately before reversing 20261128000000.';
     END IF;
 END
 $$;
