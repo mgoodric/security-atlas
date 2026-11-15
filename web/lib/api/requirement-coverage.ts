@@ -24,6 +24,9 @@ export type RequirementAnchorWire = {
   relationship_type?: string;
   strength?: number;
   source_attribution?: string;
+  // "catalog", or "overlay" when the path is the tenant's own org mapping
+  // (#1798).
+  origin?: "catalog" | "overlay";
   rationale?: string;
 };
 
