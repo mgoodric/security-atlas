@@ -288,7 +288,7 @@ function FreshSecretCallout({
       ? "API key issued — copy it now"
       : "API key rotated — copy the new bearer now";
   return (
-    <Alert variant="destructive" data-testid="fresh-secret-callout">
+    <Alert variant="info" data-testid="fresh-secret-callout">
       <AlertTitle>{title}</AlertTitle>
       <AlertDescription className="space-y-2">
         <p className="font-medium">

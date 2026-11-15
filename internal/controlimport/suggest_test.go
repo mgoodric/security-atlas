@@ -34,12 +34,12 @@ func TestBuildCandidatesRanksCrosswalkByCriteriaReachedThenStrength(t *testing.T
 	}
 	keyword := []AnchorCandidate{
 		{AnchorID: "a-both", SCFID: "IAC-37"},
-		{AnchorID: "k-1", SCFID: "MON-01"},
-		{AnchorID: "k-2", SCFID: "MON-02"},
+		{AnchorID: "k-1", SCFID: "MON-02"},
+		{AnchorID: "k-2", SCFID: "MON-03"},
 	}
 	got := buildCandidates(row, edges, keyword, 4)
 
-	if s := sources(got.Candidates); s != "IAC-37/crosswalk IAC-12/crosswalk IAC-01/crosswalk MON-01/keyword" {
+	if s := sources(got.Candidates); s != "IAC-37/crosswalk IAC-12/crosswalk IAC-01/crosswalk MON-02/keyword" {
 		t.Fatalf("candidates = %s", s)
 	}
 	top := got.Candidates[0]
@@ -73,11 +73,11 @@ func TestBuildCandidatesFlagsUnreachedCriteria(t *testing.T) {
 	t.Parallel()
 	row := BatchControl{ID: "row-1", TestedUnder: []Requirement{req71}}
 	got := buildCandidates(row, []CrosswalkEdge{{RequirementID: "r-61", AnchorID: "a", SCFID: "IAC-37"}},
-		[]AnchorCandidate{{AnchorID: "k-1", SCFID: "MON-01"}}, 8)
+		[]AnchorCandidate{{AnchorID: "k-1", SCFID: "MON-02"}}, 8)
 	if !got.NoCandidateReaches {
 		t.Error("row whose criteria nothing reaches is not flagged")
 	}
-	if s := sources(got.Candidates); s != "MON-01/keyword" {
+	if s := sources(got.Candidates); s != "MON-02/keyword" {
 		t.Errorf("candidates = %s, want the keyword fill", s)
 	}
 }

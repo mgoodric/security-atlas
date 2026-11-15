@@ -38,12 +38,12 @@ import { renderMarkdown } from "@/lib/markdown";
 
 function statusPillVariant(
   status: string,
-): "default" | "secondary" | "destructive" | "outline" {
+): "default" | "secondary" | "outline" {
   switch (status) {
     case "published":
       return "default";
     case "retired":
-      return "destructive";
+      return "outline";
     default:
       return "secondary";
   }

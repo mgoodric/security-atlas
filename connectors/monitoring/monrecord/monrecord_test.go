@@ -31,7 +31,7 @@ func scopeValue(dims []*evidencev1.ScopeDimension, key string) string {
 
 func TestBuild_Shape(t *testing.T) {
 	t.Parallel()
-	rec, err := Build(sampleRule(), "scf:MON-01", "connector:datadog:monitors@dev", "datadog", "prod")
+	rec, err := Build(sampleRule(), "scf:MON-02", "connector:datadog:monitors@dev", "datadog", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestBuild_OmitsEmptyOptionals(t *testing.T) {
 	r := sampleRule()
 	r.Folder = ""
 	r.Targets = nil
-	rec, _ := Build(r, "scf:MON-01", "connector:grafana:alerts@dev", "grafana", "prod")
+	rec, _ := Build(r, "scf:MON-02", "connector:grafana:alerts@dev", "grafana", "prod")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"folder", "notification_targets"} {
 		if _, ok := pl[k]; ok {
@@ -90,7 +90,7 @@ func TestBuild_PayloadIsConfigOnly(t *testing.T) {
 	// A target whose NAME is a real channel name is fine; assert no top-level
 	// key is a secret container.
 	banned := []string{"url", "secret", "token", "password", "webhook", "email", "recipient", "query", "dashboard", "metric"}
-	rec, _ := Build(sampleRule(), "scf:MON-01", "a", "datadog", "prod")
+	rec, _ := Build(sampleRule(), "scf:MON-02", "a", "datadog", "prod")
 	for k := range rec.GetPayload().AsMap() {
 		if !allowed[k] {
 			t.Errorf("non-allow-listed payload key %q", k)
