@@ -45,7 +45,9 @@ treatment, owner, and review due date.
 The register supports a hierarchy view (slice 113): roll risks up by
 business unit, by category, or by parent risk. The hierarchy is also
 exportable (slice 136) as CSV / JSON / XLSX for board reporting; the
-`parent_risk_ids` column lists the risks each row rolls up to.
+`parent_risk_ids` column lists the risks each row rolls up to. The
+`category` column carries the category's slug and `category_name` your
+organisation's name for it, so a renamed category still round-trips.
 
 ## Rolling risks up into a parent risk
 

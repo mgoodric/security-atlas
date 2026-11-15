@@ -153,8 +153,12 @@ type RiskAging struct {
 	ID string `json:"id"`
 	// Title is the risk title.
 	Title string `json:"title"`
-	// Category is the risk category.
+	// Category is the slug of the risk's category.
 	Category string `json:"category"`
+	// CategoryName is the organisation's display name for the category
+	// (#1814). Briefs and packs stored before it existed lack it; render
+	// through Label, which falls back to the slug.
+	CategoryName string `json:"category_name,omitempty"`
 	// Treatment is the current treatment status.
 	Treatment string `json:"treatment"`
 	// ResidualSeverity is the residual-severity scalar used for ranking.
@@ -164,6 +168,16 @@ type RiskAging struct {
 	// AgeDays is the age-since-treatment proxy: now - updated_at, in days
 	// (decisions log D4 — risks have no treatment-applied timestamp).
 	AgeDays int `json:"age_days"`
+}
+
+// CategoryLabel is the category as a reader sees it: the organisation's
+// name, or the slug for a brief or pack stored before names were frozen
+// into it.
+func (r RiskAging) CategoryLabel() string {
+	if r.CategoryName != "" {
+		return r.CategoryName
+	}
+	return r.Category
 }
 
 // StoredBrief is a frozen brief as it lives in the `board_briefs` table —

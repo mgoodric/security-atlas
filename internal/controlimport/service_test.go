@@ -49,7 +49,7 @@ func (s *fakeStore) ApproveProposal(_ context.Context, proposalID, humanApprover
 	if humanApprover == "" {
 		return ApprovedMapping{}, ErrApproverRequired
 	}
-	scfID := "IAC-06"
+	scfID := "IAC-37"
 	if editedSCFID != nil {
 		scfID = *editedSCFID
 	}
@@ -95,7 +95,7 @@ func testControl() StagedControl {
 func testService(result string) (*Service, *fakeRetriever, *fakeStore) {
 	tenant := "00000000-0000-0000-0000-000000000001"
 	anchor := AnchorCandidate{
-		SCFID:       "IAC-06",
+		SCFID:       "IAC-37",
 		Title:       "Multi-Factor Authentication",
 		Description: "Multi-factor authentication is required for privileged access.",
 	}
@@ -114,12 +114,12 @@ func testService(result string) (*Service, *fakeRetriever, *fakeStore) {
 }
 
 func TestSuggestPersistsAIProposedSCFMappingWithResolvedCitation(t *testing.T) {
-	svc, _, store := testService(`{"scf_id":"IAC-06","confidence":0.86,"rationale":"The imported MFA control aligns to Multi-Factor Authentication."}`)
+	svc, _, store := testService(`{"scf_id":"IAC-37","confidence":0.86,"rationale":"The imported MFA control aligns to Multi-Factor Authentication."}`)
 	got, err := svc.Suggest(tenantCtx(t, "00000000-0000-0000-0000-000000000001"), testControl())
 	if err != nil {
 		t.Fatalf("Suggest: %v", err)
 	}
-	if got.ID == "" || got.SuggestedSCFID != "IAC-06" || got.Citation == nil {
+	if got.ID == "" || got.SuggestedSCFID != "IAC-37" || got.Citation == nil {
 		t.Fatalf("proposal missing match/citation: %+v", got)
 	}
 	if got.HumanApproved || got.HumanApprover != "" {
@@ -159,7 +159,7 @@ func TestSuggestLeavesLowConfidenceUnmapped(t *testing.T) {
 }
 
 func TestApproveRequiresHumanApprover(t *testing.T) {
-	svc, _, store := testService(`{"scf_id":"IAC-06","confidence":0.86,"rationale":"MFA."}`)
+	svc, _, store := testService(`{"scf_id":"IAC-37","confidence":0.86,"rationale":"MFA."}`)
 	ctx := tenantCtx(t, "00000000-0000-0000-0000-000000000001")
 	_, err := svc.Approve(ctx, ApproveParams{ProposalID: "p1"})
 	if !errors.Is(err, ErrApproverRequired) {
@@ -178,7 +178,7 @@ func TestApproveRequiresHumanApprover(t *testing.T) {
 }
 
 func TestApproveRequiresTenantContext(t *testing.T) {
-	svc, _, store := testService(`{"scf_id":"IAC-06","confidence":0.86,"rationale":"MFA."}`)
+	svc, _, store := testService(`{"scf_id":"IAC-37","confidence":0.86,"rationale":"MFA."}`)
 	_, err := svc.Approve(context.Background(), ApproveParams{
 		ProposalID:    "p1",
 		HumanApprover: "user:security-lead",
@@ -192,7 +192,7 @@ func TestApproveRequiresTenantContext(t *testing.T) {
 }
 
 func TestApproveRejectsUnresolvedEditedSCFID(t *testing.T) {
-	svc, _, store := testService(`{"scf_id":"IAC-06","confidence":0.86,"rationale":"MFA."}`)
+	svc, _, store := testService(`{"scf_id":"IAC-37","confidence":0.86,"rationale":"MFA."}`)
 	edited := "DNE-99"
 	_, err := svc.Approve(tenantCtx(t, "00000000-0000-0000-0000-000000000001"), ApproveParams{
 		ProposalID:    "p1",
@@ -210,8 +210,8 @@ func TestApproveRejectsUnresolvedEditedSCFID(t *testing.T) {
 func TestSuggestTenantIsolationInputs(t *testing.T) {
 	tenantA := uuid.MustParse("00000000-0000-0000-0000-00000000000a").String()
 	tenantB := uuid.MustParse("00000000-0000-0000-0000-00000000000b").String()
-	anchorA := AnchorCandidate{SCFID: "IAC-06", Title: "Multi-Factor Authentication", Description: "MFA for privileged access"}
-	anchorB := AnchorCandidate{SCFID: "CFG-01", Title: "MFA configuration baseline", Description: "Configuration baselines mention MFA but are not IAC-06"}
+	anchorA := AnchorCandidate{SCFID: "IAC-37", Title: "Multi-Factor Authentication", Description: "MFA for privileged access"}
+	anchorB := AnchorCandidate{SCFID: "CFG-01", Title: "MFA configuration baseline", Description: "Configuration baselines mention MFA but are not IAC-37"}
 	retriever := &fakeRetriever{
 		candidatesByTenant: map[string][]AnchorCandidate{
 			tenantA: {anchorA},
@@ -221,7 +221,7 @@ func TestSuggestTenantIsolationInputs(t *testing.T) {
 	}
 	store := &fakeStore{}
 	client := &llm.StubClient{Result: llm.GenerateResult{
-		Text:          `{"scf_id":"IAC-06","confidence":0.8,"rationale":"MFA."}`,
+		Text:          `{"scf_id":"IAC-37","confidence":0.8,"rationale":"MFA."}`,
 		ModelName:     "anthropic",
 		ModelVersion:  "claude",
 		ModelProvider: "anthropic",
@@ -231,7 +231,7 @@ func TestSuggestTenantIsolationInputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Suggest A: %v", err)
 	}
-	if gotA.SuggestedSCFID != "IAC-06" || !gotA.CloudRouted {
+	if gotA.SuggestedSCFID != "IAC-37" || !gotA.CloudRouted {
 		t.Fatalf("tenant A/cloud banner mismatch: %+v", gotA)
 	}
 	gotB, err := svc.Suggest(tenantCtx(t, tenantB), testControl())

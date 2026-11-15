@@ -101,7 +101,7 @@ describe("evidence filters", () => {
     const anchors: Anchor[] = [
       {
         id: "11111111-1111-1111-1111-111111111111",
-        scf_id: "SCF:IAC-06",
+        scf_id: "SCF:IAC-37",
         family: "IAC",
         name: "Multi-factor authentication",
         description: "",

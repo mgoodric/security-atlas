@@ -12,14 +12,14 @@
 
 import { expect, test } from "./fixtures";
 
-const ANCHOR_ID = "IAC-06";
+const ANCHOR_ID = "IAC-37";
 
 // The unpinned (current-versions) payload: SOC 2 2017 (current) carries CC6.1.
 function currentPayload() {
   return {
     anchor: {
       id: "00000000-0000-4000-8000-0000000000a1",
-      scf_id: "IAC-06",
+      scf_id: "IAC-37",
       family: "IAC",
       name: "Multi-Factor Authentication",
       description: "Mock anchor for slice 484 e2e.",

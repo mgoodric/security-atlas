@@ -17,7 +17,7 @@ import (
 const passingControlYAML = `bundle_schema_version: "1"
 bundle_id: cli_pass_test
 title: "CLI runner pass bundle"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:

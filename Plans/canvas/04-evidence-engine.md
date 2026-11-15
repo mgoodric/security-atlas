@@ -115,9 +115,9 @@ Security questionnaires are the dominant inbound demand on a security-product st
 Every question is a first-class node in the same UCF graph that holds framework requirements (see [`UCF_GRAPH_MODEL.md`](../UCF_GRAPH_MODEL.md)). Questions are mapped to **SCF anchors** with STRM-typed edges, exactly like framework requirements:
 
 ```
-QuestionnaireQuestion[CAIQ-IAM-02] --equal/1.0--> SCF:IAC-06 (MFA)
-QuestionnaireQuestion[SIG-G.1.1]   --equal/0.9--> SCF:IAC-06
-QuestionnaireQuestion[HECVAT-AAAI-04] --subset_of/1.0--> SCF:IAC-06
+QuestionnaireQuestion[CAIQ-IAM-02] --equal/1.0--> SCF:IAC-37 (MFA)
+QuestionnaireQuestion[SIG-G.1.1]   --equal/0.9--> SCF:IAC-37
+QuestionnaireQuestion[HECVAT-AAAI-04] --subset_of/1.0--> SCF:IAC-37
 ```
 
 Once mapped, **answering one question generates a candidate answer for every equivalent question across questionnaires**. A CAIQ answer about MFA pre-fills the SIG question and the HECVAT question. The UCF graph's payoff extends from "one control satisfies six frameworks" to "one answer pre-populates six questionnaires."
@@ -193,7 +193,7 @@ This is the highest-risk feature in the entire platform. Practitioner research i
 | Allowed                                                                                                         | Not allowed                                                            |
 | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
 | AI suggests a draft answer with **mandatory citations** to specific evidence IDs and/or policy IDs.             | AI publishes any answer without one-click human approval.              |
-| AI explains gaps ("evidence covers SCF:IAC-06 but freshness is 95 days, consider re-running before answering"). | AI fabricates control coverage that has no evidence backing.           |
+| AI explains gaps ("evidence covers SCF:IAC-37 but freshness is 95 days, consider re-running before answering"). | AI fabricates control coverage that has no evidence backing.           |
 | AI suggests SCF mapping for an unmapped question; human approves once, mapping is canonical thereafter.         | AI auto-approves its own mappings.                                     |
 | AI summarizes prior responses for similarity matching.                                                          | AI uses Tenant A's confidential prior answer to seed Tenant B's draft. |
 

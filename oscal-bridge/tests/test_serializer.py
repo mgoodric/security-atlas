@@ -48,7 +48,7 @@ def _ssp_input() -> oscal_pb2.SspInput:
         control_implementations=[
             oscal_pb2.ControlImplementation(
                 control_id="ctrl-1",
-                scf_id="IAC-06",
+                scf_id="IAC-37",
                 title="Multi-factor authentication",
                 statement="MFA is enforced for all administrative access via Okta.",
                 evaluation_result="pass",
@@ -114,7 +114,7 @@ def test_serialize_ssp_marks_excluded_requirements_not_applicable():
     assert not any(p["name"] == "evaluation-result" for p in na["props"])
 
     # The per-control entry is unchanged.
-    ctrl = by_id["iac-06"]
+    ctrl = by_id["iac-37"]
     assert {p["name"]: p["value"] for p in ctrl["props"]}["evaluation-result"] == "pass"
     assert not any(p["name"] == "implementation-status" for p in ctrl["props"])
 
@@ -153,7 +153,7 @@ def _ssp_input_with_vendor_claim() -> oscal_pb2.SspInput:
         oscal_pb2.VendorAttestedImplementation(
             claim_id="claim-aaaa",
             control_id="AC-2",
-            scf_id="IAC-07",
+            scf_id="IAC-04",
             component_uuid="vendor-uuid-1",
             component_title="AcmeVault",
             component_type="service",

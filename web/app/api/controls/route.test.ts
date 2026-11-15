@@ -111,7 +111,7 @@ describe("GET /api/controls", () => {
           anchors: [
             {
               id: "00000000-0000-0000-0000-000000000002",
-              scf_id: "IAC-06",
+              scf_id: "IAC-37",
               family: "IAC",
               name: "Multi-Factor Authentication (MFA)",
               description: "",
@@ -211,7 +211,7 @@ describe("GET /api/controls", () => {
           anchors: [
             {
               id: "00000000-0000-0000-0000-000000000226",
-              scf_id: "IAC-06",
+              scf_id: "IAC-37",
               family: "IAC",
               name: "MFA enforcement",
               description: "",
@@ -221,7 +221,7 @@ describe("GET /api/controls", () => {
                 last_observed_at: "2026-05-15T09:30:00Z",
                 evaluated_at: "2026-05-16T10:00:00Z",
               },
-              // Mockup row IAC-06 example.
+              // Mockup row IAC-37 example.
               frameworks: ["CSF", "ISO", "SOC2"],
             },
             {
