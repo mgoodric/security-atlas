@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -66,7 +67,7 @@ func NewClient(endpoint, bearer string, opts ...Option) (*Client, error) {
 	var transport grpc.DialOption
 	switch {
 	case o.insecure:
-		if !isLoopback(endpoint) {
+		if !IsLoopbackEndpoint(endpoint) {
 			return nil, fmt.Errorf("sdk: WithInsecure refuses non-loopback endpoint %q", endpoint)
 		}
 		transport = grpc.WithTransportCredentials(insecure.NewCredentials())
@@ -123,16 +124,21 @@ func NewClientFromConn(conn *grpc.ClientConn, bearer string) *Client {
 	}
 }
 
-// isLoopback returns true for the loopback hosts WithInsecure accepts. Uses
-// net.SplitHostPort so IPv6 brackets are handled correctly.
-func isLoopback(endpoint string) bool {
+// IsLoopbackEndpoint reports whether a host:port gRPC endpoint names a
+// loopback host: "localhost" (exactly, case-insensitive), any address in
+// 127.0.0.0/8, or ::1. An empty host (":50051") dials the local system and
+// is accepted too. The host is parsed, never prefix-matched, so
+// "localhost.example.com" and "127.0.0.1.example.com" are refused. Uses
+// net.SplitHostPort so IPv6 brackets are handled correctly. WithInsecure and
+// the CLI's --insecure accept only endpoints for which this is true.
+func IsLoopbackEndpoint(endpoint string) bool {
 	host, _, err := net.SplitHostPort(endpoint)
 	if err != nil {
-		host = endpoint
+		host = strings.TrimSuffix(strings.TrimPrefix(endpoint, "["), "]")
 	}
-	switch host {
-	case "", "localhost", "127.0.0.1", "::1":
+	if host == "" || strings.EqualFold(host, "localhost") {
 		return true
 	}
-	return false
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }

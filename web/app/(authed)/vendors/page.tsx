@@ -486,7 +486,7 @@ function ListSkeleton() {
 function ExportButtons() {
   return (
     <div
-      className="flex items-center gap-1"
+      className="flex flex-wrap items-center gap-1"
       data-testid="vendors-export-buttons"
     >
       <span className="text-xs text-muted-foreground">Export:</span>

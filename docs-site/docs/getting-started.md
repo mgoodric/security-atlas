@@ -369,11 +369,14 @@ atlas-cli evidence push --insecure \
   --payload @attestation.json \
   --idempotency-key "attest-$CONTROL_ID-$(date -u +%F)" \
   --actor-type human --actor-id jane.doe@example.com
-# { "recordId": "…", "hash": "…", "ingestedAt": "…", "credentialId": "key_…" }
+# { "recordId": "…", "hash": "…", "ingestedAt": "…", "credentialId": "key_…", "linkedControlId": "470d1eb3-…" }
 ```
 
 `--control` takes the control's UUID or its bundle ID
-(`acme_mfa_all_staff`); either links the record to the control.
+(`acme_mfa_all_staff`); either links the record to the control, and
+`linkedControlId` in the receipt names it. A bundle ID that matches no
+active control is stored unlinked, without `linkedControlId`, and the CLI
+warns on stderr.
 
 The key exists for this first push. Keep it in this shell, never in a
 shell rc file, and revoke it once the push has landed:

@@ -226,6 +226,11 @@ type Receipt struct {
 	IngestedAt   time.Time
 	CredentialID string
 	Deduplicated bool
+	// LinkedControlID is the UUID of the control the stored record links
+	// to, or "" when control_id stayed a free-form, unlinked reference
+	// (#2165). Read from the stored row, so a deduplicated push reports the
+	// original record's linkage.
+	LinkedControlID string
 }
 
 // ReceiptStatus is the pusher-visible terminal status for a publish receipt.
@@ -889,13 +894,17 @@ func (s *Service) auditPersistFailure(ctx context.Context, p *prepared, err erro
 }
 
 func receiptFor(cred credstore.Credential, rec dbx.EvidenceRecord, deduped bool) Receipt {
-	return Receipt{
+	r := Receipt{
 		RecordID:     uuid.UUID(rec.ID.Bytes).String(),
 		Hash:         rec.Hash,
 		IngestedAt:   rec.IngestedAt.Time,
 		CredentialID: cred.ID,
 		Deduplicated: deduped,
 	}
+	if rec.ControlID.Valid {
+		r.LinkedControlID = uuid.UUID(rec.ControlID.Bytes).String()
+	}
+	return r
 }
 
 // writeAudit lands one row in evidence_audit_log. Best-effort: a failure
@@ -1083,10 +1092,11 @@ func protoResultToEnum(r evidencev1.Result) (dbx.EvidenceResult, bool) {
 // ReceiptToProto returns the proto-shaped receipt the API handler returns.
 func ReceiptToProto(r Receipt) *evidencev1.EvidenceReceipt {
 	return &evidencev1.EvidenceReceipt{
-		RecordId:     r.RecordID,
-		Hash:         r.Hash,
-		IngestedAt:   timestamppb.New(r.IngestedAt),
-		CredentialId: r.CredentialID,
+		RecordId:        r.RecordID,
+		Hash:            r.Hash,
+		IngestedAt:      timestamppb.New(r.IngestedAt),
+		CredentialId:    r.CredentialID,
+		LinkedControlId: r.LinkedControlID,
 	}
 }
 
