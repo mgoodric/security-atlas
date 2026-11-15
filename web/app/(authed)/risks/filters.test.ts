@@ -9,11 +9,13 @@
 
 import { describe, expect, test } from "vitest";
 
-import type { Risk } from "@/lib/api/risks";
+import type { Risk, RiskCategory } from "@/lib/api/risks";
 
 import {
   ALL,
   applyFilters,
+  categoryDisplay,
+  categoryOptions,
   clearFilters,
   DEFAULT_FILTERS,
   fairScore,
@@ -92,6 +94,61 @@ describe("DEFAULT_FILTERS / isDefault / clearFilters", () => {
     const cleared = clearFilters();
     expect(cleared).toEqual(DEFAULT_FILTERS);
     expect(cleared).not.toBe(DEFAULT_FILTERS);
+  });
+});
+
+describe("categoryOptions / categoryDisplay (#1817)", () => {
+  function cat(slug: string, name: string, archived = false): RiskCategory {
+    return {
+      id: `id-${slug}`,
+      slug,
+      name,
+      description: "",
+      archived,
+      is_default: false,
+      risk_count: 0,
+      rule_count: 0,
+    };
+  }
+  const cats = [
+    cat("operational", "Operational"),
+    cat("legacy", "Legacy", true),
+    cat("cloud", "Cloud posture"),
+  ];
+
+  test("lists active categories by name, matched by slug", () => {
+    expect(categoryOptions(cats, false, ALL)).toEqual([
+      { value: ALL, label: "All categories" },
+      { value: "cloud", label: "Cloud posture" },
+      { value: "operational", label: "Operational" },
+    ]);
+  });
+
+  test("show archived adds archived categories, marked", () => {
+    expect(categoryOptions(cats, true, ALL)).toContainEqual({
+      value: "legacy",
+      label: "Legacy (archived)",
+    });
+  });
+
+  test("keeps a selected archived category listed when hidden", () => {
+    expect(
+      categoryOptions(cats, false, "legacy").map((o) => o.value),
+    ).toContain("legacy");
+  });
+
+  test("categoryDisplay prefers category_name and marks archived", () => {
+    expect(
+      categoryDisplay({ category: "legacy", category_name: "Old name" }, cats),
+    ).toEqual({ name: "Old name", archived: true });
+    expect(categoryDisplay({ category: "cloud" }, cats)).toEqual({
+      name: "Cloud posture",
+      archived: false,
+    });
+    expect(categoryDisplay({ category: "unknown" }, [])).toEqual({
+      name: "unknown",
+      archived: false,
+    });
   });
 });
 

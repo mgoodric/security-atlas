@@ -3415,8 +3415,9 @@ type Querier interface {
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
 	// Transition: draft -> under_review. Operator action; no role gate.
 	// Also re-submits an under_review policy whose submitter was recorded
-	// before #1807 as a session id ('jwt:<token id>'), which approval refuses
-	// because it names no person: re-submitting records the person.
+	// before #1807 as a session id ('jwt:<token id>') or a credential id
+	// ('key_<id>'), which approval refuses because it names no person:
+	// re-submitting records the person (#2200).
 	SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyForReviewParams) (Policy, error)
 	// Slice 055: mark a decision superseded and point superseded_by at the
 	// replacement. The WHERE status = 'active' guard means a non-active (already

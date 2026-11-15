@@ -13,6 +13,8 @@
 // endpoint, and slice 147 closed the loop by re-pointing the panel.
 // See `docs/audit-log/147-dashboard-placeholders-decisions.md` D1+D2.
 
+import Link from "next/link";
+
 import { PanelCard, type PanelState } from "@/components/dashboard/panel-card";
 import { Term } from "@/components/help/term";
 import type {
@@ -43,7 +45,44 @@ function coverageBadgeClass(pct: number): string {
   return "text-destructive";
 }
 
+// ScopeNotSetTile (#2114): the version has no activated framework scope,
+// so nothing has been decided out of scope and a percentage would mean
+// nothing. The tile says so and links to the framework-scope page.
+function ScopeNotSetTile({ row }: { row: FrameworkPostureRow }) {
+  return (
+    <div
+      data-testid="framework-tile"
+      className="rounded-xl bg-muted/40 p-4 ring-1 ring-foreground/5"
+    >
+      <div className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+        {row.framework_version}
+      </div>
+      <Link
+        href={`/framework-scopes/${encodeURIComponent(
+          row.framework_version_id,
+        )}`}
+        className="mt-2 inline-block text-sm font-semibold underline underline-offset-2"
+        data-testid="framework-tile-scope-not-set"
+      >
+        Scope not set
+      </Link>
+      <div className="mt-1 text-xs text-muted-foreground">
+        Activate a <Term id="framework-scope">framework scope</Term> to see
+        coverage.
+      </div>
+    </div>
+  );
+}
+
 function PostureTile({ row }: { row: FrameworkPostureRow }) {
+  if (
+    !row.scope_set ||
+    row.coverage_pct === null ||
+    row.trend_delta_90d === null ||
+    row.freshness_composite === null
+  ) {
+    return <ScopeNotSetTile row={row} />;
+  }
   return (
     <div
       data-testid="framework-tile"
@@ -78,7 +117,8 @@ function PostureTile({ row }: { row: FrameworkPostureRow }) {
         <Term id="evidence-freshness">freshness</Term>{" "}
         {row.freshness_composite.toFixed(1)}%
       </div>
-      {row.covered_by_exception_pct > 0 ? (
+      {row.covered_by_exception_pct !== null &&
+      row.covered_by_exception_pct > 0 ? (
         <div
           className="mt-1 text-xs text-muted-foreground"
           data-testid="framework-tile-exception"

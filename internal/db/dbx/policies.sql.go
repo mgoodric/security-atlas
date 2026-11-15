@@ -388,15 +388,17 @@ INSERT INTO policy_audit_log (
     tenant_id, policy_id, action, actor, source_file,
     historical_approver_name, historical_approved_at, source_url,
     previous_next_review_at, new_next_review_at,
-    policy_title, policy_version
+    policy_title, policy_version,
+    previous_state, new_state
 )
 VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8,
     $9, $10,
-    $11, $12
+    $11, $12,
+    $13, $14
 )
-RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version
+RETURNING id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state
 `
 
 type InsertPolicyAuditLogParams struct {
@@ -412,6 +414,8 @@ type InsertPolicyAuditLogParams struct {
 	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
 	PolicyTitle            *string            `json:"policy_title"`
 	PolicyVersion          *string            `json:"policy_version"`
+	PreviousState          *string            `json:"previous_state"`
+	NewState               *string            `json:"new_state"`
 }
 
 // #1747 — append one row to the policy audit log.
@@ -429,6 +433,8 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		arg.NewNextReviewAt,
 		arg.PolicyTitle,
 		arg.PolicyVersion,
+		arg.PreviousState,
+		arg.NewState,
 	)
 	var i PolicyAuditLog
 	err := row.Scan(
@@ -447,6 +453,8 @@ func (q *Queries) InsertPolicyAuditLog(ctx context.Context, arg InsertPolicyAudi
 		&i.NewNextReviewAt,
 		&i.PolicyTitle,
 		&i.PolicyVersion,
+		&i.PreviousState,
+		&i.NewState,
 	)
 	return i, err
 }
@@ -705,7 +713,7 @@ func (q *Queries) ListPoliciesWithAckRate(ctx context.Context, arg ListPoliciesW
 }
 
 const listPolicyAuditLog = `-- name: ListPolicyAuditLog :many
-SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version
+SELECT id, tenant_id, policy_id, action, actor, source_file, historical_approver_name, historical_approved_at, source_url, subject_module, created_at, previous_next_review_at, new_next_review_at, policy_title, policy_version, previous_state, new_state
 FROM policy_audit_log
 WHERE tenant_id = $1 AND policy_id = $2
 ORDER BY created_at ASC, id ASC
@@ -742,6 +750,8 @@ func (q *Queries) ListPolicyAuditLog(ctx context.Context, arg ListPolicyAuditLog
 			&i.NewNextReviewAt,
 			&i.PolicyTitle,
 			&i.PolicyVersion,
+			&i.PreviousState,
+			&i.NewState,
 		); err != nil {
 			return nil, err
 		}
@@ -968,7 +978,8 @@ SET status = 'under_review',
 WHERE tenant_id = $1
   AND id = $2
   AND (status = 'draft'
-       OR (status = 'under_review' AND submitted_by LIKE 'jwt:%'))
+       OR (status = 'under_review'
+           AND (submitted_by LIKE 'jwt:%' OR submitted_by LIKE 'key\_%')))
 RETURNING id, tenant_id, title, version, effective_date, body_md, acknowledgment_required_roles, status, created_at, updated_at, predecessor_id, owner_role, approver_role, linked_control_ids, source_attribution, created_by, submitted_at, submitted_by, approved_at, approved_by, published_at, published_by, superseded_at, next_review_at, historical_approver_name, historical_approved_at, source_url, imported_by, imported_at, self_approved
 `
 
@@ -980,8 +991,9 @@ type SubmitPolicyForReviewParams struct {
 
 // Transition: draft -> under_review. Operator action; no role gate.
 // Also re-submits an under_review policy whose submitter was recorded
-// before #1807 as a session id ('jwt:<token id>'), which approval refuses
-// because it names no person: re-submitting records the person.
+// before #1807 as a session id ('jwt:<token id>') or a credential id
+// ('key_<id>'), which approval refuses because it names no person:
+// re-submitting records the person (#2200).
 func (q *Queries) SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyForReviewParams) (Policy, error) {
 	row := q.db.QueryRow(ctx, submitPolicyForReview, arg.TenantID, arg.ID, arg.SubmittedBy)
 	var i Policy

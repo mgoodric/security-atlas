@@ -758,7 +758,15 @@ func main() {
 		// pre-slice-198 behaviour of erroring on "tenant_id required").
 		userStore := users.NewStoreWithAuthPool(pool, authPool)
 		sessionStore := sessions.NewStore(pool, 0)
-		oidcAuth := oidc.New(localModeIdpResolver{})
+		// #2177: the OIDC state HMAC key. ATLAS_OIDC_STATE_KEY when set,
+		// else derived from BEARER_HASH_KEY, so every replica signs and
+		// verifies with the same key.
+		oidcStateKey, err := oidc.StateKeyFromEnv(bearerHashKey)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "atlas: oidc state key: %v\n", err)
+			os.Exit(1)
+		}
+		oidcAuth := oidc.New(localModeIdpResolver{}, oidcStateKey)
 		secureCookies := os.Getenv("ATLAS_SECURE_COOKIES") == "true"
 		// Slice 209: bundle the local-AS deps when OAuth wiring exists.
 		// nil when ATLAS_ISSUER_URL is unset OR pool is nil; LocalLogin

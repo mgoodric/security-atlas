@@ -95,6 +95,29 @@ func newCoverageFixture(t *testing.T) coverageFixture {
 		f.controlB, f.tenantB.tenant, "ovl-b-"+f.framework, f.anchorID); err != nil {
 		t.Fatalf("seed tenant B control: %v", err)
 	}
+	// Posture reports a percentage only for a version with an activated
+	// framework scope (#2114), so both tenants get one, with no exclusions.
+	var versionID uuid.UUID
+	if err := f.admin.QueryRow(ctx, `SELECT id FROM framework_versions WHERE framework_id = $1 AND status = 'current'`,
+		f.frameworkID).Scan(&versionID); err != nil {
+		t.Fatalf("read framework version id: %v", err)
+	}
+	for _, tenant := range []string{f.tenantA.tenant, f.tenantB.tenant} {
+		scopeID := uuid.New()
+		if _, err := f.admin.Exec(ctx, `
+			INSERT INTO framework_scopes (id, tenant_id, framework_version_id, name, predicate, predicate_hash, state)
+			VALUES ($1, $2, $3, 'ISMS', '{"op":"true"}'::jsonb, 'h0', 'draft')`, scopeID, tenant, versionID); err != nil {
+			t.Fatalf("seed framework scope: %v", err)
+		}
+		if _, err := f.admin.Exec(ctx, `UPDATE framework_scopes SET state = 'activated', effective_from = now() WHERE id = $1`, scopeID); err != nil {
+			t.Fatalf("activate framework scope: %v", err)
+		}
+		t.Cleanup(func() {
+			if _, err := f.admin.Exec(context.Background(), `DELETE FROM framework_scopes WHERE id = $1`, scopeID); err != nil {
+				t.Logf("cleanup framework scope: %v", err)
+			}
+		})
+	}
 	return f
 }
 
