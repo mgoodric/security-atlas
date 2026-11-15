@@ -67,17 +67,56 @@ type Props = {
 const LABEL_CLASS = "block text-sm font-medium text-foreground mb-1.5";
 const HELP_CLASS = "mt-1 text-xs text-muted-foreground";
 
+type FieldErrors = Partial<Record<keyof FormState, string>>;
+
+const REQUIRED_MESSAGES: Record<keyof FormState, string> = {
+  name: "Name is required.",
+  framework_version_id: "Framework version is required.",
+  period_start: "Period start is required.",
+  period_end: "Period end is required.",
+};
+
+// #2089: required fields are checked here and shown inline beside each
+// field; the form is noValidate so the browser shows no native bubble.
+function validate(s: FormState): FieldErrors {
+  const errs: FieldErrors = {};
+  for (const key of Object.keys(REQUIRED_MESSAGES) as (keyof FormState)[]) {
+    if (s[key].trim() === "") errs[key] = REQUIRED_MESSAGES[key];
+  }
+  return errs;
+}
+
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} className="mt-1 text-sm text-destructive" data-testid={id}>
+      {message}
+    </p>
+  );
+}
+
+function errorProps(id: string, message?: string) {
+  return message
+    ? { "aria-invalid": true as const, "aria-describedby": id }
+    : {};
+}
+
 export function AuditPeriodForm({ onSubmit }: Props) {
   const [state, setState] = useState<FormState>(initialState());
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   function update<K extends keyof FormState>(key: K, value: FormState[K]) {
     setState((s) => ({ ...s, [key]: value }));
+    setFieldErrors((errs) => ({ ...errs, [key]: undefined }));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    const errs = validate(state);
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
     setSubmitting(true);
     setError(null);
     try {
@@ -93,6 +132,7 @@ export function AuditPeriodForm({ onSubmit }: Props) {
   return (
     <form
       onSubmit={handleSubmit}
+      noValidate
       className="space-y-6"
       data-testid="audits-create-form"
     >
@@ -115,7 +155,9 @@ export function AuditPeriodForm({ onSubmit }: Props) {
           onChange={(e) => update("name", e.target.value)}
           placeholder="e.g. Q3 2026 SOC 2 Type II"
           data-testid="audits-create-name"
+          {...errorProps("audits-create-name-error", fieldErrors.name)}
         />
+        <FieldError id="audits-create-name-error" message={fieldErrors.name} />
         <p className={HELP_CLASS}>
           Short, scannable label for the period. Appears in the audits list
           header and on every artifact exported from this period.
@@ -135,6 +177,14 @@ export function AuditPeriodForm({ onSubmit }: Props) {
           placeholder="00000000-0000-0000-0000-000000000000"
           className="font-mono"
           data-testid="audits-create-framework-version-id"
+          {...errorProps(
+            "audits-create-framework-version-id-error",
+            fieldErrors.framework_version_id,
+          )}
+        />
+        <FieldError
+          id="audits-create-framework-version-id-error"
+          message={fieldErrors.framework_version_id}
         />
         <p className={HELP_CLASS}>
           Paste the FrameworkVersion UUID. Copy it from the audits list (the
@@ -157,6 +207,14 @@ export function AuditPeriodForm({ onSubmit }: Props) {
             value={state.period_start}
             onChange={(e) => update("period_start", e.target.value)}
             data-testid="audits-create-period-start"
+            {...errorProps(
+              "audits-create-period-start-error",
+              fieldErrors.period_start,
+            )}
+          />
+          <FieldError
+            id="audits-create-period-start-error"
+            message={fieldErrors.period_start}
           />
         </div>
 
@@ -172,6 +230,14 @@ export function AuditPeriodForm({ onSubmit }: Props) {
             value={state.period_end}
             onChange={(e) => update("period_end", e.target.value)}
             data-testid="audits-create-period-end"
+            {...errorProps(
+              "audits-create-period-end-error",
+              fieldErrors.period_end,
+            )}
+          />
+          <FieldError
+            id="audits-create-period-end-error"
+            message={fieldErrors.period_end}
           />
           <p className={HELP_CLASS}>
             Must be on or after period_start. Treated as UTC; the platform uses

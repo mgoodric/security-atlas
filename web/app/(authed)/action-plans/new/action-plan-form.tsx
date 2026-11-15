@@ -110,6 +110,7 @@ export function ActionPlanForm({ onSubmit }: Props) {
   return (
     <form
       onSubmit={submit}
+      noValidate
       className="space-y-4"
       data-testid="action-plan-form"
     >
@@ -124,9 +125,11 @@ export function ActionPlanForm({ onSubmit }: Props) {
           maxLength={200}
           data-testid="action-plan-title"
           aria-invalid={errors.title ? true : undefined}
+          aria-describedby={errors.title ? "ap-title-error" : undefined}
         />
         {errors.title ? (
           <p
+            id="ap-title-error"
             className="text-xs text-rose-600"
             data-testid="action-plan-title-error"
           >
@@ -146,9 +149,11 @@ export function ActionPlanForm({ onSubmit }: Props) {
           placeholder="00000000-0000-0000-0000-000000000000"
           data-testid="action-plan-owner"
           aria-invalid={errors.ownerId ? true : undefined}
+          aria-describedby={errors.ownerId ? "ap-owner-error" : undefined}
         />
         {errors.ownerId ? (
           <p
+            id="ap-owner-error"
             className="text-xs text-rose-600"
             data-testid="action-plan-owner-error"
           >
@@ -168,9 +173,11 @@ export function ActionPlanForm({ onSubmit }: Props) {
           onChange={(e) => setDueDate(e.target.value)}
           data-testid="action-plan-due-date"
           aria-invalid={errors.dueDate ? true : undefined}
+          aria-describedby={errors.dueDate ? "ap-due-error" : undefined}
         />
         {errors.dueDate ? (
           <p
+            id="ap-due-error"
             className="text-xs text-rose-600"
             data-testid="action-plan-due-error"
           >
