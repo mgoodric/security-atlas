@@ -326,9 +326,10 @@ One control, anchored once, reaches both frameworks.
 
 If a criterion your auditor tested the control under is missing, the
 anchor does not map to it. Choose a closer anchor, or record the gap
-with `anchor_fit`. Mapping a requirement directly for your organisation
-is planned as tenant overlay edges
-([#1735](https://github.com/mgoodric/security-atlas/issues/1735)).
+with `anchor_fit`. To map the criterion to the anchor for your
+organisation only, add a tenant overlay edge
+(`atlas-cli mappings overlay add`). Coverage counts it, and coverage
+responses mark that path `"origin": "overlay"`.
 
 ## 7. Evidence
 
