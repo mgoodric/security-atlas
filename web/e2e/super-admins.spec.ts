@@ -5,8 +5,13 @@
 //
 //   (a) Page loads, lists the seeded super_admins, and a grant POST
 //       through the form refreshes the list with the new row.
-//   (b) Per-row Demote → confirmation dialog → 409 last-super_admin
-//       error surfaces inline (load-bearing UX for P0-SA-1).
+//   (b) Per-row menu → Demote → confirmation dialog → a 409
+//       last-super_admin error surfaces inline (load-bearing UX for
+//       P0-SA-1). The list shows two rows (a stale list: the other was
+//       demoted elsewhere), so the UI offers Demote and the backend's
+//       refusal is what the operator sees.
+//   (c) With one super admin listed, Demote is withheld in the row
+//       menu with its reason (#2090).
 //
 // We mock the BFF rather than seed real super_admins because the
 // slice-142 spec doc is platform-tier work; e2e here is the
@@ -94,16 +99,16 @@ test.describe("super_admin management page", () => {
   test("demote dialog surfaces 409 last-super_admin error inline", async ({
     authedPage,
   }) => {
-    // LOAD-BEARING UX scenario: the only super_admin attempts to
-    // self-demote. Backend returns 409 with the safety-rail message;
-    // the UI must surface that inline rather than throwing a generic
-    // red toast.
+    // LOAD-BEARING UX scenario: a demote the backend refuses as the
+    // last super_admin. The list is stale (two rows), so the UI offers
+    // Demote; the backend returns 409 with the safety-rail message and
+    // the UI must surface that inline rather than a generic red toast.
     await authedPage.route("**/api/admin/super-admins", async (route) => {
       if (route.request().method() === "GET") {
         await route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ items: [SEED_BOOTSTRAP] }),
+          body: JSON.stringify({ items: [SEED_BOOTSTRAP, SEED_MANUAL] }),
         });
         return;
       }
@@ -134,7 +139,10 @@ test.describe("super_admin management page", () => {
     );
     await expect(row).toBeVisible();
 
-    // Open the demote dialog.
+    // Open the demote dialog from the row menu.
+    await authedPage
+      .getByTestId(`super-admin-actions-${SEED_BOOTSTRAP.user_id}`)
+      .click();
     await authedPage
       .getByTestId(`demote-button-${SEED_BOOTSTRAP.user_id}`)
       .click();
@@ -151,5 +159,37 @@ test.describe("super_admin management page", () => {
 
     // The dialog stays open so the operator can cancel and reconsider.
     await expect(dialog).toBeVisible();
+  });
+
+  test("the last super admin is not offered Demote, and the reason is shown", async ({
+    authedPage,
+  }) => {
+    let deletes = 0;
+    await authedPage.route("**/api/admin/super-admins", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [SEED_BOOTSTRAP] }),
+      });
+    });
+    await authedPage.route("**/api/admin/super-admins/*", async (route) => {
+      if (route.request().method() === "DELETE") deletes++;
+      await route.fulfill({ status: 204, body: "" });
+    });
+
+    await authedPage.goto("/admin/super-admins");
+    await authedPage
+      .getByTestId(`super-admin-actions-${SEED_BOOTSTRAP.user_id}`)
+      .click();
+    const item = authedPage.getByTestId(
+      `demote-button-${SEED_BOOTSTRAP.user_id}`,
+    );
+    await expect(item).toHaveAttribute("aria-disabled", "true");
+    await expect(
+      authedPage.getByTestId(`demote-button-${SEED_BOOTSTRAP.user_id}-reason`),
+    ).toHaveText("This is the last super admin. Grant a successor first.");
+    await item.click({ force: true });
+    await expect(authedPage.getByTestId("demote-dialog")).toHaveCount(0);
+    expect(deletes).toBe(0);
   });
 });

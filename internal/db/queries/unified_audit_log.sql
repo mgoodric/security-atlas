@@ -275,6 +275,24 @@ WITH unified AS (
         (to_jsonb(ov) - 'tenant_id' - 'occurred_at' - 'actor'
             - 'action' - 'overlay_edge_id' - 'subject_module')::jsonb AS payload_json
     FROM fw_to_scf_overlay_edge_audit_log ov
+
+    UNION ALL
+
+    -- 13. control_import_audit_log (#1782): import approvals, rejections
+    -- and duplicates, one per staged row decided.
+    SELECT
+        occurred_at,
+        actor          AS actor_id,
+        tenant_id,
+        'control_import'::text AS kind,
+        'control_import_row'::text AS target_type,
+        row_id::text   AS target_id,
+        action,
+        id             AS row_id,
+        subject_module,
+        (to_jsonb(ci) - 'tenant_id' - 'occurred_at' - 'actor'
+            - 'action' - 'row_id' - 'subject_module')::jsonb AS payload_json
+    FROM control_import_audit_log ci
 )
 -- Slice 129 — LEFT JOIN onto users to resolve human-readable actor_name.
 --

@@ -4,8 +4,9 @@
 // unthrottled endpoint is both a password-guessing surface and a CPU and
 // memory sink. Two token buckets run before any of that work:
 //
-//   - per client IP (clientIP, which honors TRUSTED_PROXY_CIDRS): caps the
-//     argon2id cost one source can impose;
+//   - per client IP (clientIP, which honors TRUSTED_PROXY_CIDRS, keyed by
+//     ratekey.IP so an IPv6 /64 is one source — #2047): caps the argon2id
+//     cost one source can impose;
 //   - per account, keyed on tenant + lowercased email as submitted: caps
 //     guesses against one account however many sources they come from.
 //
@@ -44,7 +45,9 @@ const (
 
 // loginLimiter is an in-memory token bucket keyed on a string. v1 is a
 // single-process platform; the OAuth token endpoint's limiter makes the
-// same trade-off.
+// same trade-off. Each replica keeps its own buckets, so behind N replicas
+// (HA compose, Helm replicaCount) the effective limits are N times the
+// constants below (#2047; docs/audit-log/1913-login-throttling-decisions.md).
 type loginLimiter struct {
 	mu        sync.Mutex
 	burst     float64

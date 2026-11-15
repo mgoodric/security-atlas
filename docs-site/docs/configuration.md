@@ -102,11 +102,16 @@ a deployment vulnerability, not a convenience.
     - **`TRUST_FORWARDED_HEADERS`** — **deprecated** boolean predecessor
       of `TRUSTED_PROXY_CIDRS`. When set to `1` (and `TRUSTED_PROXY_CIDRS`
       is unset) it is mapped to **trust any proxy** (`0.0.0.0/0` + `::/0`)
-      for back-compat and the server logs a deprecation warning at boot.
-      `X-Forwarded-For` is a plain request header any client can set, so
-      trusting any proxy without a header-scrubbing reverse proxy in front
-      is a **client-IP spoofing vector**. **Off by default** (shipped
-      commented out). Prefer `TRUSTED_PROXY_CIDRS`.
+      for back-compat and the server logs a warning at every boot.
+      With every address trusted, the walk never reaches an untrusted
+      hop and returns the **left-most** `X-Forwarded-For` entry, which
+      is whatever the client wrote unless your proxy **replaces** the
+      header rather than appending to it. Any client can then choose
+      the IP recorded on its session and the key of every per-IP rate
+      limit (login, OAuth client authentication, demo seed), and so
+      sidestep those limits. **Off by default** (shipped commented
+      out). Set `TRUSTED_PROXY_CIDRS` to your proxy's address instead
+      and remove this.
     - **`ATLAS_ENABLE_DEMO_SEED`** — when set to exactly `true`, exposes
       the admin demo-seed surface (`POST /v1/admin/demo/{seed,teardown}`
       and the `/admin/demo` page). Teardown **deletes demo data**: the
@@ -163,7 +168,7 @@ JetStream is the durable event substrate. Their host ports are in the
 | `ATLAS_BFF_SUBNET`        | `10.125.0.0/29`                             | no        | server | Subnet of the private web ↔ atlas compose network `bffnet` (#2040). Change it, `WEB_BFF_IP` and `ATLAS_BFF_IP` together, and only if the default collides with a network on the host (`docker compose up` then fails with a pool-overlap error).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `WEB_BFF_IP`              | `10.125.0.2`                                | no        | web    | The web container's fixed address on `bffnet`. atlas's default `TRUSTED_PROXY_CIDRS` is this address `/32`. Must be inside `ATLAS_BFF_SUBNET` and not its first address.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `ATLAS_BFF_IP`            | `10.125.0.3`                                | no        | server | atlas's fixed address on `bffnet`, pinned so atlas, which starts first, cannot take `WEB_BFF_IP`. Must be inside `ATLAS_BFF_SUBNET`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| `TRUST_FORWARDED_HEADERS` | _(unset → off)_                             | no        | server | **Deprecated** boolean predecessor of `TRUSTED_PROXY_CIDRS` (slice 465 → 466). When set to `1` and `TRUSTED_PROXY_CIDRS` is unset, it is mapped to **trust any proxy** (`0.0.0.0/0` + `::/0`) for back-compat and the server logs a deprecation warning at boot; `TRUSTED_PROXY_CIDRS` takes precedence when both are set. Shipped commented out; **off by default**. Trusting any proxy without a header-scrubbing reverse proxy in front is a client-IP spoofing vector — prefer `TRUSTED_PROXY_CIDRS`. See the [security-critical](#security-critical-variables) note.                                                                                                                                                                                                                   |
+| `TRUST_FORWARDED_HEADERS` | _(unset → off)_                             | no        | server | **Deprecated** boolean predecessor of `TRUSTED_PROXY_CIDRS` (slice 465 → 466). When set to `1` and `TRUSTED_PROXY_CIDRS` is unset, it is mapped to **trust any proxy** (`0.0.0.0/0` + `::/0`) for back-compat and the server logs a warning at every boot; `TRUSTED_PROXY_CIDRS` takes precedence when both are set. Shipped commented out; **off by default**. Trusting every address makes the server take the left-most `X-Forwarded-For` entry, which the client wrote unless the proxy replaces the header, so any client chooses its own session IP and per-IP rate-limit key. Set `TRUSTED_PROXY_CIDRS` instead. See the [security-critical](#security-critical-variables) note.                                                                                                     |
 
 ## Observability
 
@@ -350,6 +355,22 @@ firewall or reverse proxy rather than binding them to `0.0.0.0`.
 | `ATLAS_OAUTH_TOKEN_RATE_PER_MIN`          | `600`                                       | no        | server    | OAuth token-endpoint rate limit, per `client_id`, per minute (slice 187). Raised above the 60/min library default so the bootstrap container's idempotent control-bundle re-runs (up to ~100 token acquisitions/min) do not exhaust the budget. The envelope is per-`client_id`; other clients are unaffected. Tune to taste.                                                                                                                                                                 |
 | `ATLAS_OAUTH_CLIENT_AUTH_RATE_PER_MIN`    | `60`                                        | no        | server    | Rate limit, per `client_id`, per minute, on client authentication at `/oauth/introspect` and `/oauth/revoke` (#2041). Counted before the secret lookup, so an unknown `client_id` is throttled the same as a registered one. Over the limit the endpoint answers 429 with `Retry-After`. Each endpoint keeps its own buckets.                                                                                                                                                                 |
 | `ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN` | `120`                                       | no        | server    | Rate limit, per caller IP, per minute, on the same two endpoints (#2041). The IP is resolved through `TRUSTED_PROXY_CIDRS`, never a raw `X-Forwarded-For`. Self-revocation with a bearer token presents no `client_id` and is not counted.                                                                                                                                                                                                                                                    |
+
+### Rate limits are per replica
+
+Every rate limit above, and the fixed local-login throttle (60 attempts
+per client IP, then 60/min; 10 per account, then 5/min), is kept in
+memory by each atlas process. Nothing is shared between replicas. Behind
+a load balancer with N atlas replicas (an HA compose setup, or a Helm
+`replicaCount` above 1), a client spread across them gets up to N times
+each configured limit. Divide the `*_RATE_PER_MIN` values by your replica
+count if you need the stated limit cluster-wide. The login throttle's
+limits are not configurable.
+
+Per-IP limits key IPv4 clients on the full address and IPv6 clients on
+their `/64` prefix, since one IPv6 customer allocation holds far more
+addresses than any limiter could track. An IPv4-mapped IPv6 address
+(`::ffff:198.51.100.7`) counts as its IPv4 address.
 
 ## Related references
 
