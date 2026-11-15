@@ -749,7 +749,7 @@ mappings:
     strength: 0.85
     rationale: "Creating/protecting/maintaining/testing data backups maps directly to SCF Data Backups."
   - requirement_code: "PR.PS-01"
-    scf_anchor: "CFG-02"
+    scf_anchor: "CFG-04"
     relationship_type: "equal"
     strength: 0.85
     rationale: "Configuration management practices map directly to SCF Secure Baseline Configurations."
@@ -769,7 +769,7 @@ mappings:
     strength: 0.8
     rationale: "Generating log records for monitoring is part of SCF System Generated Event Logs & Security-Relevant Telemetry."
   - requirement_code: "PR.PS-05"
-    scf_anchor: "CFG-02"
+    scf_anchor: "CFG-04"
     relationship_type: "intersects_with"
     strength: 0.7
     rationale: "Preventing unauthorized software install/execution overlaps SCF Secure Baseline Configurations (allow-listing/hardening); application-control specificity is the residual gap."

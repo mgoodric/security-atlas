@@ -423,7 +423,7 @@ func TestBuildAKSRecord_Shape(t *testing.T) {
 		OIDCIssuerEnabled: true, NodePoolCount: 2,
 		Result: aks.ResultPass, ObservedAt: time.Date(2026, 6, 7, 12, 30, 0, 0, time.UTC),
 	}
-	rec, err := buildAKSRecord(c, "prod", "scf:CFG-02")
+	rec, err := buildAKSRecord(c, "prod", "scf:CFG-04")
 	if err != nil {
 		t.Fatalf("buildAKSRecord: %v", err)
 	}
@@ -477,7 +477,7 @@ func TestBuildAKSRecord_OmitsEmptyOptionals(t *testing.T) {
 		RBACEnabled: true, PrivateCluster: true, AuthorizedIPRanges: true,
 		Result: aks.ResultPass, ObservedAt: time.Now().UTC(),
 	}
-	rec, _ := buildAKSRecord(c, "prod", "scf:CFG-02")
+	rec, _ := buildAKSRecord(c, "prod", "scf:CFG-04")
 	pl := rec.GetPayload().AsMap()
 	for _, k := range []string{"resource_group", "location", "kubernetes_version", "network_policy"} {
 		if _, ok := pl[k]; ok {

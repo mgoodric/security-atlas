@@ -256,7 +256,7 @@ No other transitions. `superseded` is terminal for that row; revisions continue 
 | `access-control-policy.md`       | Access Control Policy       | `IAC-01`, `IAC-04`, `IAC-22` |
 | `vendor-management-policy.md`    | Vendor Management Policy    | `TPM-01`, `TPM-03`, `TPM-04` |
 | `incident-response-plan.md`      | Incident Response Plan      | `IRO-04`, `IRO-01`, `IRO-02` |
-| `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-02`, `CHG-04` |
+| `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-04`, `CHG-04` |
 
 Exactly 5 — never 6, never 4 (constitutional anti-pattern: "policy template libraries dressed as a feature"). The CLI `atlas-cli policy seed-stock --tenant-id=...` loads these markdown files, resolves the SCF anchor codes in the SCF release each file declares (`scf_release`, #1772) to the controls bound to those anchors, and INSERTs them as `draft` rows with `source_attribution = 'community_draft'`. Missing anchors warn + drop the link (the warning surfaces under AC-7 if all links resolve empty).
 

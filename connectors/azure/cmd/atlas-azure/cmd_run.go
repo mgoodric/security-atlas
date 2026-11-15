@@ -156,7 +156,7 @@ a log line or an evidence record.`,
 	cmd.Flags().StringVar(&f.clientID, "client-id", "", "Entra app-registration client id (env: AZURE_CLIENT_ID)")
 	cmd.Flags().StringVar(&f.entraControl, "entra-control", "scf:IAC-10", "control_id to attach to azure.entra_role_assignment.v1 records")
 	cmd.Flags().StringVar(&f.storageControl, "storage-control", "scf:CRY-04", "control_id to attach to azure.storage_account_config.v1 records")
-	cmd.Flags().StringVar(&f.aksControl, "aks-control", "scf:CFG-02", "control_id to attach to azure.aks_cluster_config.v1 records")
+	cmd.Flags().StringVar(&f.aksControl, "aks-control", "scf:CFG-04", "control_id to attach to azure.aks_cluster_config.v1 records")
 	cmd.Flags().StringVar(&f.nsgControl, "nsg-control", "scf:NET-04", "control_id to attach to azure.nsg_rules.v1 records")
 	cmd.Flags().StringVar(&f.keyvaultControl, "keyvault-control", "scf:CRY-09", "control_id to attach to azure.keyvault_access_config.v1 records")
 	cmd.Flags().StringVar(&f.firewallControl, "firewall-control", "scf:NET-04", "control_id to attach to azure.firewall_rules.v1 records")

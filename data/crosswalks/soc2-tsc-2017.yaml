@@ -269,9 +269,9 @@ mappings:
     scf_anchor: RSK-04
     relationship_type: intersects_with
     strength: 0.7
-    rationale: "Change-based risk reassessment is part of RSK-04; also overlaps CFG-04 change control."
+    rationale: "Change-based risk reassessment is part of RSK-04; also overlaps CHG-03 change control."
   - tsc_code: CC3.4
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: intersects_with
     strength: 0.5
     rationale: "Configuration change control assesses change-related risk. LOW CONFIDENCE — overlap is partial."
@@ -446,7 +446,7 @@ mappings:
     strength: 1.0
     rationale: "Change Control Process is the direct STRM equivalent of CC8.1."
   - tsc_code: CC8.1
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: intersects_with
     strength: 0.8
     rationale: "Configuration Change Control is the technical half of CC8.1."
