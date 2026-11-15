@@ -75,7 +75,7 @@ crosswalk's mapping table).
 | CC5 — Control activities        | 3      | CC5.1, CC5.2, CC5.3                  |
 | CC6 — Logical & physical access | 11     | CC6.1–CC6.8 (CC6.3 and CC6.6 have 2) |
 | CC7 — System operations         | 6      | CC7.1, CC7.2, CC7.3, CC7.4, CC7.5    |
-| CC8 — Change management         | 2      | CC8.1 (CHG-02 + CFG-04)              |
+| CC8 — Change management         | 2      | CC8.1 (CHG-02 + CHG-03)              |
 | CC9 — Risk mitigation           | 3      | CC9.1, CC9.2                         |
 | A1 — Availability               | 3      | A1.1, A1.2, A1.3                     |
 | C1 — Confidentiality            | 2      | C1.1, C1.2                           |

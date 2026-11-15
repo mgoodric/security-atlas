@@ -4,7 +4,7 @@
   "x-evidence-kind": "azure.aks_cluster_config.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["CFG-02", "NET-04"],
+  "x-default-scf-anchors": ["CFG-04", "NET-04"],
   "title": "Azure Kubernetes Service (AKS) managed-cluster configuration",
   "description": "Per-AKS-managed-cluster hardening posture captured read-only from Azure Resource Manager (ARM Reader role): Kubernetes RBAC enabled, network-policy plugin, private-cluster / authorized-IP-range API-server isolation, managed-identity vs service-principal, local-accounts-disabled, OIDC issuer, node-pool count, and Kubernetes version. Management-plane CLUSTER configuration only — NEVER admin kubeconfig / cluster-admin credentials (listClusterAdminCredential is not called), service-principal secrets, workload/pod manifests, container images, or container contents. The platform evaluator decides pass/fail per (control, cluster); the connector emits a descriptive default verdict. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
   "type": "object",

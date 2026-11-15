@@ -43,7 +43,7 @@ export function FindingsList({
     <div data-testid="findings-list">
       <p className="mb-3 text-sm text-muted-foreground">
         {count} open finding{count === 1 ? "" : "s"} as of period end. A finding
-        is a failing control evaluation (slice 032 decision D4).
+        is a control that failed its evaluation.
       </p>
       <ul className="divide-y divide-border rounded-lg border border-border">
         {findings.map((f) => (
