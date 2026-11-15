@@ -17,7 +17,9 @@ Every SCF re-bind now leaves a row in `scf_remap_proposals`, in the transaction 
 
 A control-revision row (`control_manifest_revisions`) was the other option the ticket named. It records manifest text, which a re-bind does not change, so it would carry the anchor ids in a table built for something else. An audit event in `audit_log` would duplicate what the proposals row already holds.
 
-`UPDATE` is granted because #2321 turns the upsert into `ON CONFLICT ... DO UPDATE` (open to rebound), which needs it once the upload path shares the query.
+`UPDATE` is granted on `status`, `target_anchor_id` and `source` only, because #2321 turns the upsert into `ON CONFLICT ... DO UPDATE` (open to rebound), which needs it once the upload path shares the query.
+
+Once the app role can write, the plain `control_id` FK is not enough: tenant T could insert a row naming tenant U's control, take U's `(control_id, target)` slot, and U's real record would be dropped by `ON CONFLICT`. The migration adds the composite FK `(tenant_id, control_id) REFERENCES controls (tenant_id, id)`, as `control_evaluations` has. `TestRebindRecord_AppRoleCannotWriteAnotherTenantsRecord` checks both refusals (RLS for `tenant_id = U`, the FK for T naming U's control) and fails with the FK dropped. (#2336 review B1/B2.)
 
 ## D2 — The backfill of `target_anchor_id`
 
@@ -29,7 +31,7 @@ The ticket's test line says a pinned or flagged control writes no record, and it
 
 ## D4 — The upload path classifies with the boot path's reader
 
-The upload path reads the control's row of `ListControlsOnLegacySCFAnchors` before it moves anything and records it through `scfimport.RecordRemapProposal`, the same function `RebindControls` uses, so the `class` and successor codes cannot disagree between paths. It filters the tenant's legacy-anchor list in Go rather than adding a control filter to that query; the list is only read when an upload actually re-binds or flags, which is rare.
+The upload path reads the control's row of `ListControlsOnLegacySCFAnchors` before it moves anything and records it through `scfimport.RecordRemapProposal`, the same function `RebindControls` uses, so the `class` and successor codes cannot disagree between paths. It filters the tenant's legacy-anchor list in Go rather than adding a control filter to that query; the list is only read when an upload actually re-binds or flags, which is rare. If the control has no row there (not expected, since its bound anchor is outside the current release), the upload logs a warning and goes ahead without the record rather than failing.
 
 ## D5 — History across imports
 

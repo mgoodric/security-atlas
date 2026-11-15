@@ -14,7 +14,8 @@
 --                     manifest in place).
 --
 -- The upload path runs as the app role, so atlas_app may now insert its own
--- tenant's rows, and update them for the open-to-rebound upsert.
+-- tenant's rows, and update the upsert's columns for the open-to-rebound
+-- upsert; a composite FK keeps each row's control in its own tenant.
 
 ALTER TABLE scf_remap_proposals
     ADD COLUMN IF NOT EXISTS target_anchor_id UUID REFERENCES scf_anchors(id) ON DELETE CASCADE,
@@ -51,6 +52,18 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
+-- The app role may now write rows, so a row's control must belong to the
+-- row's tenant: with only the plain control_id FK, tenant T could insert a
+-- row naming tenant U's control, take U's (control_id, target) slot, and
+-- U's real record would be silently dropped by ON CONFLICT.
+DO $$
+BEGIN
+    ALTER TABLE scf_remap_proposals
+        ADD CONSTRAINT scf_remap_proposals_tenant_control_fk
+        FOREIGN KEY (tenant_id, control_id) REFERENCES controls (tenant_id, id) ON DELETE CASCADE;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
 DO $$
 BEGIN
     CREATE POLICY tenant_insert ON scf_remap_proposals
@@ -66,4 +79,6 @@ BEGIN
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
-GRANT INSERT, UPDATE ON scf_remap_proposals TO atlas_app;
+-- UPDATE only on what the open-to-rebound upsert changes.
+GRANT INSERT ON scf_remap_proposals TO atlas_app;
+GRANT UPDATE (status, target_anchor_id, source) ON scf_remap_proposals TO atlas_app;

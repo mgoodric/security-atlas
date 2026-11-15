@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"strings"
 
@@ -138,12 +139,24 @@ func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior
 	}
 	// #2236: record the move or the flag in this transaction, read before
 	// the move, while the control is still on its legacy anchor.
-	legacy, err := legacyAnchorRow(ctx, q, tenantID, prior.ID)
+	legacy, found, err := legacyAnchorRow(ctx, q, tenantID, prior.ID)
 	if err != nil {
 		return rebindNone, err
 	}
+	record := func(status string) error {
+		if !found {
+			// Not expected: the bound anchor is outside the current
+			// release. The re-bind itself is still right, so the upload
+			// goes ahead without its record rather than failing.
+			slog.WarnContext(ctx, "control: scf re-bind not recorded; control not on a legacy anchor",
+				"control_id", uuid.UUID(prior.ID.Bytes).String(), "status", status)
+			return nil
+		}
+		_, err := scfimport.RecordRemapProposal(ctx, q, legacy, status, scfimport.SourceUpload)
+		return err
+	}
 	if oldRow.ScfID != newRow.ScfID || oldRow.Title != newRow.Title {
-		if _, err := scfimport.RecordRemapProposal(ctx, q, legacy, scfimport.ProposalOpen, scfimport.SourceUpload); err != nil {
+		if err := record(scfimport.ProposalOpen); err != nil {
 			return rebindNone, err
 		}
 		return rebindNeedsReanchor, nil
@@ -160,7 +173,7 @@ func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior
 	if n != 1 {
 		return rebindNone, ErrControlChangedConcurrently
 	}
-	if _, err := scfimport.RecordRemapProposal(ctx, q, legacy, scfimport.ProposalRebound, scfimport.SourceUpload); err != nil {
+	if err := record(scfimport.ProposalRebound); err != nil {
 		return rebindNone, err
 	}
 	return rebindMoved, nil
@@ -169,18 +182,18 @@ func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior
 // legacyAnchorRow reads the control's row of ListControlsOnLegacySCFAnchors:
 // its legacy anchor and where SCF says the anchor's concept went, which the
 // re-bind record (#2236) carries. rebindAnchor calls it only for a control
-// whose anchor is not in the current release, so the row must exist.
-func legacyAnchorRow(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, controlID pgtype.UUID) (dbx.ListControlsOnLegacySCFAnchorsRow, error) {
+// whose anchor is not in the current release, so found should be true.
+func legacyAnchorRow(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, controlID pgtype.UUID) (row dbx.ListControlsOnLegacySCFAnchorsRow, found bool, err error) {
 	rows, err := q.ListControlsOnLegacySCFAnchors(ctx, pgUUID(tenantID))
 	if err != nil {
-		return dbx.ListControlsOnLegacySCFAnchorsRow{}, fmt.Errorf("rebind control anchor: list controls on legacy anchors: %w", err)
+		return dbx.ListControlsOnLegacySCFAnchorsRow{}, false, fmt.Errorf("rebind control anchor: list controls on legacy anchors: %w", err)
 	}
 	for _, r := range rows {
 		if r.ControlID == controlID {
-			return r, nil
+			return r, true, nil
 		}
 	}
-	return dbx.ListControlsOnLegacySCFAnchorsRow{}, fmt.Errorf("rebind control anchor: control %s is not on a legacy SCF anchor", uuid.UUID(controlID.Bytes))
+	return dbx.ListControlsOnLegacySCFAnchorsRow{}, false, nil
 }
 
 // apply records a rebind outcome on the upload result.

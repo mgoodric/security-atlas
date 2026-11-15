@@ -10,15 +10,18 @@ package control_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/mgoodric/security-atlas/internal/api/scfimport"
 	"github.com/mgoodric/security-atlas/internal/control"
 	"github.com/mgoodric/security-atlas/internal/dbtest"
 	"github.com/mgoodric/security-atlas/internal/scfrelease/scfreleasetest"
+	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
 // rebindRecord is one scf_remap_proposals row, as the re-bind wrote it.
@@ -190,4 +193,79 @@ func TestRebindRecord_UploadInPlaceRebindAndFlagAreRecorded(t *testing.T) {
 	}
 	wantMoved(t, admin, "upload-moved control after boot", tenant, moved.ControlID, mfaA, mfaB, scfimport.SourceUpload)
 	wantFlagged(t, admin, "upload-flagged control after boot", flagged.ControlID, govA, scfimport.SourceUpload)
+}
+
+// insertRecordAsApp inserts a re-bind record through the app role, scoped to
+// tenant, and returns the database error, if any.
+func insertRecordAsApp(t *testing.T, app *pgxpool.Pool, tenant, rowTenant string, controlID, legacyAnchor, target uuid.UUID) error {
+	t.Helper()
+	ctx := dbtest.WithTenantCtx(t, tenant)
+	tx, err := app.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(context.Background()) }()
+	if err := tenancy.ApplyTenant(ctx, tx); err != nil {
+		t.Fatalf("ApplyTenant: %v", err)
+	}
+	_, err = tx.Exec(ctx, `
+		INSERT INTO scf_remap_proposals (tenant_id, control_id, bundle_id, legacy_anchor_id,
+			legacy_scf_id, legacy_release, target_framework_version_id, target_release,
+			class, status, successor_scf_ids, source)
+		VALUES ($1, $2, 'forged', $3, 'IAC-06', $4,
+			(SELECT framework_version_id FROM scf_anchors WHERE id = $5), $6,
+			'no_successor', 'open', '{}', 'upload')`,
+		rowTenant, controlID, legacyAnchor, scfreleasetest.ReleaseA, target, scfreleasetest.ReleaseB)
+	if err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+func pgCode(err error) string {
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code
+	}
+	return ""
+}
+
+// The app role may write re-bind records only for its own tenant's
+// controls: a row naming another tenant, or another tenant's control, is
+// refused, so no tenant can take another's (control, release) slot and
+// drop its real record.
+func TestRebindRecord_AppRoleCannotWriteAnotherTenantsRecord(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	scfreleasetest.LoadAB(t, admin) // A legacy, B current
+	tenantT := freshTenant(t, admin)
+	tenantU := freshTenant(t, admin)
+	store := control.NewStore(app)
+	ctx := context.Background()
+
+	mfaA := anchorIDIn(t, admin, scfreleasetest.ReleaseA, "IAC-06")
+	mfaB := anchorIDIn(t, admin, scfreleasetest.ReleaseB, "IAC-06")
+	res, err := uploadYAML(t, store, tenantU, releaseBundleYAML("rec_victim", "IAC-06", ""))
+	if err != nil {
+		t.Fatalf("upload in U: %v", err)
+	}
+	victim := res.ControlID
+	if _, err := admin.Exec(ctx, `UPDATE controls SET scf_anchor_id = $2 WHERE id = $1`, victim, mfaA); err != nil {
+		t.Fatalf("bind U's control to release A: %v", err)
+	}
+
+	// 42501: the RLS WITH CHECK refuses a row for tenant U.
+	if err := insertRecordAsApp(t, app, tenantT, tenantU, victim, mfaA, mfaB); pgCode(err) != "42501" {
+		t.Fatalf("insert as T with tenant_id=U: err = %v; want an RLS violation (42501)", err)
+	}
+	// 23503: the composite FK refuses T's row naming U's control.
+	if err := insertRecordAsApp(t, app, tenantT, tenantT, victim, mfaA, mfaB); pgCode(err) != "23503" {
+		t.Fatalf("insert as T naming U's control: err = %v; want a foreign-key violation (23503)", err)
+	}
+
+	// U's own re-bind still writes U's record.
+	if _, err := scfimport.RebindControls(ctx, admin); err != nil {
+		t.Fatalf("RebindControls: %v", err)
+	}
+	wantMoved(t, admin, "U's control", tenantU, victim, mfaA, mfaB, scfimport.SourceBoot)
 }
