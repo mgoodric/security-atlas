@@ -145,49 +145,60 @@ func (h *Handler) Patch(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// EnabledResponse is the GET /v1/features/enabled shape — a flat map of
-// the slice 660 GATING flag keys to their effective per-tenant boolean.
-// Slice 660: this is the NON-admin, tenant-scoped read the web shell
-// consults to gate nav for ALL users. It deliberately exposes ONLY the
-// gating keys (featureflag.GatingKeys), never the full inventory + audit
-// metadata that the admin GET /v1/admin/features surface returns — a
-// non-admin caller learns nothing beyond "is this module navigable for
-// me", which is exactly what the shell renders anyway.
-type EnabledResponse struct {
-	Modules map[string]bool `json:"modules"`
+// Module states reported by GET /v1/me/modules.
+const (
+	// ModuleOn means the module is switched on for the caller's tenant.
+	ModuleOn = "on"
+	// ModuleSwitchedOff means the tenant switched the module off: its
+	// routes answer 404 with the switched-off marker, and the web app
+	// hides it.
+	ModuleSwitchedOff = "switched_off"
+)
+
+// EffectiveModule is one optional module in the GET /v1/me/modules
+// response: its state for the caller, and the web app pages it owns, so
+// the web app gates nav entries and pages from the server's registry
+// rather than a map of its own.
+type EffectiveModule struct {
+	Key   string   `json:"key"`
+	Name  string   `json:"name"`
+	State string   `json:"state"`
+	Pages []string `json:"pages"`
 }
 
-// Enabled handles GET /v1/features/enabled. Authed but NOT admin-only:
-// every signed-in caller may read the gating-flag booleans for their own
-// tenant so the shell can hide flag-off nav entries. Tenant scope comes
-// from the credential + RLS via the Store (constitutional invariant #6);
-// the caller cannot read another tenant's flag state.
-//
-// The response is the slice 660 GatingKeys set only. We do NOT widen the
-// admin toggle surface to non-admins (anti-criterion): there is no write
-// path here and no per-flag audit metadata, just the booleans the shell
-// needs.
-func (h *Handler) Enabled(w http.ResponseWriter, r *http.Request) {
+// ModulesResponse is the GET /v1/me/modules shape.
+type ModulesResponse struct {
+	Modules []EffectiveModule `json:"modules"`
+}
+
+// Modules handles GET /v1/me/modules: the caller's effective modules
+// (#2166). Every signed-in role may read it for its own tenant; the flag
+// reads are tenant-scoped under RLS (invariant #6). It reports each
+// optional module in featureflag.Modules, never the full flag inventory
+// or its audit metadata, which stay on the admin-only
+// GET /v1/admin/features.
+func (h *Handler) Modules(w http.ResponseWriter, r *http.Request) {
 	if _, ok := authctx.CredentialFromContext(r.Context()); !ok {
 		httpresp.WriteError(w, http.StatusUnauthorized, "missing credential")
 		return
 	}
-	modules := make(map[string]bool, len(featureflag.GatingKeys))
-	for _, key := range featureflag.GatingKeys {
-		// Enabled() falls open to the Seed default on a DB error and never
-		// fails closed (anti-criterion P0 in internal/featureflag). The
-		// store read is tenant-scoped under RLS.
-		on, err := featureflag.Enabled(r.Context(), h.store, key)
+	out := make([]EffectiveModule, 0, len(featureflag.Modules))
+	for _, m := range featureflag.Modules {
+		// Enabled() falls open to the Seed default on a DB error; only an
+		// unknown FlagKey (a registry code bug) surfaces an error.
+		on, err := featureflag.Enabled(r.Context(), h.store, m.FlagKey)
 		if err != nil {
-			// Only an unknown-key (code-bug) lookup surfaces an error here;
-			// a GatingKey not in Seed is a programming error worth a 500.
 			httperr.WriteInternal(w, r, "feature flag read failed", err)
 			return
 		}
-		modules[key] = on
+		state := ModuleOn
+		if !on {
+			state = ModuleSwitchedOff
+		}
+		out = append(out, EffectiveModule{Key: m.Key, Name: m.Name, State: state, Pages: m.Pages})
 	}
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(EnabledResponse{Modules: modules})
+	_ = json.NewEncoder(w).Encode(ModulesResponse{Modules: out})
 }
 
 // --- helpers ---
