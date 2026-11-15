@@ -182,15 +182,26 @@ func Seed(ctx context.Context, pool *pgxpool.Pool, tenantID uuid.UUID, policies 
 				sp.FrontMatter.Title))
 		}
 		linkedIDs, missing, err := anchorResolver.Resolve(ctx, release, sp.FrontMatter.LinkedControlIDs)
+		if release != "" && errors.Is(err, scfrelease.ErrUnknownRelease) {
+			// The declared release is not loaded: bind in the current
+			// release, as today, and say so (the #1771 D5 pattern). #1774
+			// makes the declared release strict.
+			if cur, lerr := scfrelease.Lookup(ctx, q, ""); lerr == nil {
+				report.SCFReleaseWarnings = append(report.SCFReleaseWarnings, fmt.Sprintf(
+					"%s declares SCF release %q, which is not loaded; its linked_control_ids bound in the current SCF release %q instead. Load %s with `atlas-cli catalog import-scf`, then re-seed.",
+					sp.FrontMatter.Title, release, cur.Version, release))
+			}
+			linkedIDs, missing, err = anchorResolver.Resolve(ctx, "", sp.FrontMatter.LinkedControlIDs)
+		}
 		switch {
-		case errors.Is(err, scfrelease.ErrUnknownRelease), errors.Is(err, scfrelease.ErrNoCurrentRelease):
+		case errors.Is(err, scfrelease.ErrNoCurrentRelease):
+			// No SCF release is current, so there is nothing to bind in.
 			// Links are best-effort here (a missing anchor drops the link),
-			// so a release that is not loaded leaves every link missing and
-			// says why, rather than refusing the seed. It never binds in
-			// another release.
+			// so every link is missing and the report says why, rather than
+			// refusing the seed.
 			report.SCFReleaseWarnings = append(report.SCFReleaseWarnings, fmt.Sprintf(
-				"%s: %v; its linked_control_ids are not linked. Load the release with `atlas-cli catalog import-scf`, then re-seed.",
-				sp.FrontMatter.Title, err))
+				"%s: no SCF release is loaded; its linked_control_ids are not linked. Load one with `atlas-cli catalog import-scf`, then re-seed.",
+				sp.FrontMatter.Title))
 			linkedIDs, missing = nil, append([]string{}, sp.FrontMatter.LinkedControlIDs...)
 		case err != nil:
 			return Report{}, fmt.Errorf("seed: resolve anchors for %s: %w", sp.FrontMatter.Title, err)

@@ -66,9 +66,9 @@ func TestApply_PostureSpineAdoptsFromTheDeclaredRelease(t *testing.T) {
 		// code" would also pick A; B shows the release decides.
 		{"declares A", "demo-it-1772-a", scfreleasetest.ReleaseA, true, false},
 		{"declares B", "demo-it-1772-b", scfreleasetest.ReleaseB, false, true},
-		// DemoSCFRelease is not loaded here: nothing is adopted from A or
-		// B, the spine synthesizes its own anchors.
-		{"declares an unloaded release", "demo-it-1772-default", demoseed.DemoSCFRelease, false, false},
+		// DemoSCFRelease is not loaded here: the spine adopts from the
+		// current release, B.
+		{"declares an unloaded release", "demo-it-1772-default", demoseed.DemoSCFRelease, false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cleanupTenant(t, tc.slug)
@@ -90,5 +90,46 @@ func TestApply_PostureSpineAdoptsFromTheDeclaredRelease(t *testing.T) {
 				t.Error("no demo control is anchored")
 			}
 		})
+	}
+}
+
+// With no SCF release current, nothing is adopted: the spine synthesizes
+// its own tenant-scoped anchors, as it does on an install with no catalog.
+func TestApply_PostureSpineSynthesizesWithNoCurrentRelease(t *testing.T) {
+	scfreleasetest.LoadAB(t, adminPool)
+	code := demoseed.FirstDemoSCFAnchorCode()
+	anchorA := addFixtureAnchor(t, scfreleasetest.ReleaseA, code)
+	anchorB := addFixtureAnchor(t, scfreleasetest.ReleaseB, code)
+	// LoadAB already demoted every other release; demoting B leaves none
+	// current. LoadAB's cleanup deletes B and restores the originals.
+	if _, err := adminPool.Exec(context.Background(),
+		`UPDATE framework_versions SET status = 'legacy' WHERE tenant_id IS NULL AND version = $1`,
+		scfreleasetest.ReleaseB); err != nil {
+		t.Fatalf("demote B: %v", err)
+	}
+
+	const slug = "demo-it-1772-none"
+	cleanupTenant(t, slug)
+	seeder, err := demoseed.NewSeeder(adminPool, demoseed.DefaultScale)
+	if err != nil {
+		t.Fatalf("NewSeeder: %v", err)
+	}
+	res, err := seeder.Apply(context.Background(), demoseed.ApplyInput{Slug: slug})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if controlsOn(t, res.TenantID, anchorA) != 0 || controlsOn(t, res.TenantID, anchorB) != 0 {
+		t.Error("a control was bound to a fixture anchor; want only synthesized anchors")
+	}
+	var synthesized int
+	if err := adminPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM controls c
+		JOIN scf_anchors a ON a.id = c.scf_anchor_id
+		JOIN framework_versions fv ON fv.id = a.framework_version_id
+		WHERE c.tenant_id = $1 AND fv.tenant_id = $1`, res.TenantID).Scan(&synthesized); err != nil {
+		t.Fatalf("count synthesized: %v", err)
+	}
+	if anchored := controlsAnchored(t, res.TenantID); synthesized == 0 || synthesized != anchored {
+		t.Errorf("synthesized-anchor controls = %d of %d anchored; want all", synthesized, anchored)
 	}
 }

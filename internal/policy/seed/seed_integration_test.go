@@ -29,7 +29,8 @@
 //
 //   - #1772: with the two #1770 fixture releases loaded (B current), a
 //     policy binds in the release it declares; an undeclared one binds in
-//     the current release with a warning; an unloaded declared release
+//     the current release with a warning; so does an unloaded declared
+//     release, with a warning naming both; with no release current, it
 //     links nothing and says so.
 //
 // These tests run only with `-tags=integration`. The slice 297 PR
@@ -567,28 +568,74 @@ func TestSeed_BindsInTheDeclaredRelease(t *testing.T) {
 	}
 }
 
-// A declared release that is not loaded links nothing and says so; it
-// never falls back to the current release.
-func TestSeed_UnloadedDeclaredReleaseLinksNothing(t *testing.T) {
+// A declared release that is not loaded falls back to the current release
+// (B), with a warning naming the declared release, the release used and
+// the remedy (the #1771 D5 pattern; #1774 makes it strict).
+func TestSeed_UnloadedDeclaredReleaseFallsBackWarned(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	scfreleasetest.LoadAB(t, admin)
 	tenant := freshTenant(t, admin)
-	_ = seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseB, "IAC-06")
+	_ = seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseA, "IAC-06")
+	ctrlB := seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseB, "IAC-06")
 
 	report, err := seed.Seed(context.Background(), app, tenant,
 		validStockPoliciesIn(t, "test-1772-not-loaded", []string{"IAC-06"}), seed.NewSQLAnchorResolver(admin))
 	if err != nil {
 		t.Fatalf("Seed: %v", err)
 	}
-	if len(report.SCFReleaseWarnings) != seed.StockPolicyCount ||
-		!strings.Contains(report.SCFReleaseWarnings[0], "test-1772-not-loaded") {
-		t.Errorf("release warnings = %v; want one per policy naming the release", report.SCFReleaseWarnings)
+	if len(report.SCFReleaseWarnings) != seed.StockPolicyCount {
+		t.Fatalf("release warnings = %v; want one per policy", report.SCFReleaseWarnings)
 	}
-	if len(report.MissingAnchors) != seed.StockPolicyCount || len(report.OrphanWarnings) != seed.StockPolicyCount {
-		t.Errorf("want every link missing: missing %v orphans %v", report.MissingAnchors, report.OrphanWarnings)
+	for _, want := range []string{"test-1772-not-loaded", scfreleasetest.ReleaseB, "catalog import-scf"} {
+		if !strings.Contains(report.SCFReleaseWarnings[0], want) {
+			t.Errorf("warning %q does not name %q", report.SCFReleaseWarnings[0], want)
+		}
 	}
-	if linked := linkedOf(t, admin, tenant, "a"); len(linked) != 0 {
-		t.Fatalf("linked_control_ids = %v; want none", linked)
+	if len(report.MissingAnchors) != 0 {
+		t.Errorf("missing anchors = %v; want none", report.MissingAnchors)
+	}
+	if linked := linkedOf(t, admin, tenant, "a"); len(linked) != 1 || linked[0] != ctrlB {
+		t.Fatalf("linked_control_ids = %v; want [%s], the current release's control", linked, ctrlB)
+	}
+}
+
+// With no SCF release current at all, there is nothing to bind in: every
+// link is missing and the report says why; the seed itself succeeds.
+func TestSeed_NoCurrentReleaseLinksNothingWarned(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	scfreleasetest.LoadAB(t, admin)
+	tenant := freshTenant(t, admin)
+	_ = seedControlOnAnchor(t, admin, tenant, scfreleasetest.ReleaseB, "IAC-06")
+	// LoadAB already demoted every other release; demoting B leaves none
+	// current. LoadAB's cleanup deletes B and restores the originals.
+	if _, err := admin.Exec(context.Background(),
+		`UPDATE framework_versions SET status = 'legacy' WHERE tenant_id IS NULL AND version = $1`,
+		scfreleasetest.ReleaseB); err != nil {
+		t.Fatalf("demote B: %v", err)
+	}
+
+	for _, release := range []string{"test-1772-not-loaded", ""} {
+		report, err := seed.Seed(context.Background(), app, tenant,
+			validStockPoliciesIn(t, release, []string{"IAC-06"}), seed.NewSQLAnchorResolver(admin))
+		if err != nil {
+			t.Fatalf("release %q: Seed: %v", release, err)
+		}
+		var noRelease int
+		for _, w := range report.SCFReleaseWarnings {
+			if strings.Contains(w, "no SCF release is loaded") {
+				noRelease++
+			}
+		}
+		if noRelease != seed.StockPolicyCount {
+			t.Errorf("release %q: warnings = %v; want one 'no SCF release' per policy", release, report.SCFReleaseWarnings)
+		}
+		if len(report.MissingAnchors) != seed.StockPolicyCount || len(report.OrphanWarnings) != seed.StockPolicyCount {
+			t.Errorf("release %q: want every link missing: missing %v orphans %v", release, report.MissingAnchors, report.OrphanWarnings)
+		}
+		if _, err := admin.Exec(context.Background(), `DELETE FROM policies WHERE tenant_id = $1`, tenant); err != nil {
+			t.Fatalf("reset policies: %v", err)
+		}
 	}
 }

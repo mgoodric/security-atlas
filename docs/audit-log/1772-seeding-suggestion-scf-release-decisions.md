@@ -16,10 +16,16 @@ one named release:
 
 The bug the work exposed: the demo seed adopted "the oldest global anchor with
 this code" across every loaded release. With two releases loaded it bound
-release A's anchor for a code even when the demo data meant B's, and it adopted A's even
-when its own release was not loaded at all. The new
+release A's anchor for a code even when the demo data meant B's, and even
+when B was the current release. The new
 `TestApply_PostureSpineAdoptsFromTheDeclaredRelease` fails on the old query
 (two of three cases) and passes on the new one.
+
+A second bug was caught in review (`detection_tier_actual`: manual_review,
+`detection_tier_target`: integration): the first version linked nothing when
+a declared release was not loaded. On a default install (only the sample
+catalog, `test-2026.3`, current) the stock policies declaring `2026.3` then
+linked zero controls where `main` linked nine. D2 and D3 are the fix.
 
 ## D1 — The stock content declares SCF 2026.3
 
@@ -30,37 +36,41 @@ when its own release was not loaded at all. The new
 **Why.** The ticket says the seed binds in "the release their seed data
 declares", so the data has to declare one, and the only real release the repo
 pins is 2026.3. #1773 pins the stock control bundles, crosswalks and sample
-catalog label to the same release; until it lands, a database holding only
-the sample catalog (labelled `test-…`) does not have 2026.3 loaded, and both
-seeds behave as D2 and D3 describe.
+catalog label to the same release. It is blocked by #1717, so until it lands a
+default install does not have 2026.3 loaded, and both seeds fall back as D2
+and D3 describe.
 
-## D2 — Policy seed: an unloaded declared release links nothing, and says so
+## D2 — Policy seed: an unloaded declared release falls back to current, warned
 
-**Decision.** When a policy's declared release is not loaded, the seed still
-inserts the policy, links none of its controls, records every code as
-missing, and adds a `SCFReleaseWarnings` entry naming the release and the
-remedy (`atlas-cli catalog import-scf`, then re-seed). It never binds in
-another release. A policy with no `scf_release` binds in the current release
-with a deprecation warning, as bundles and crosswalks do (#1770, #1771).
+**Decision.** When a policy's declared release is not loaded, its codes bind
+in the current release, and `SCFReleaseWarnings` names the declared release,
+the release used and the remedy (`atlas-cli catalog import-scf`, then
+re-seed). A policy with no `scf_release` binds in the current release with a
+deprecation warning, as bundles and crosswalks do (#1770, #1771). With no SCF
+release current at all, the seed still inserts the policies, links none of
+their controls, records every code as missing, and warns.
 
-**Why.** #1771 refuses an import whose declared release is not loaded. The
-policy seed has always treated links as best-effort: a missing anchor drops
-the link and the policy is flagged orphan (slice 297 AC-7). Refusing the whole
-seed would stop `policy seed-stock` on every install that has not loaded
-2026.3, which is a regression in an expand step. Dropping the links keeps the
-seed working and keeps the binding honest.
+**Why.** This is #1771 D5's rule for a workbook sheet release that is not
+loaded: in the expand step nothing that works today may stop working. The
+stock policies are the platform's own content, and until #1773 lands their
+declared release is not on a default install; refusing, or linking nothing,
+would regress `policy seed-stock` there. The warning makes the fallback
+visible, and #1774, the contract step, makes the declared release strict.
+The no-release case keeps the slice 297 best-effort contract: a missing
+anchor drops the link and the policy is flagged orphan.
 
-## D3 — Demo seed: an unloaded declared release synthesizes, as before
+## D3 — Demo seed: an unloaded declared release adopts from current
 
-**Decision.** The spine adopts a global anchor only when `DemoSCFRelease` is
-loaded and has the code. Otherwise it synthesizes the tenant-scoped demo
-anchor, which is what it already did when no catalog was loaded.
+**Decision.** The spine adopts from `DemoSCFRelease` when it is loaded,
+else from the current release, and every code resolves in that one release.
+A code the chosen release lacks, or every code when no SCF release is
+current, gets the tenant-scoped synthesized anchor.
 
-**Why.** The demo seed is self-contained by design (slice 682 AC-4); the
-synthesize branch is its existing answer to "the catalog is not there". The
-only change is which catalog counts. The existing demo tests run against a
-database without 2026.3 and take the synthesize branch, as they did before
-any catalog was loaded, and pass unchanged.
+**Why.** It is the same fallback as D2, for the same reason: a default install
+adopts the sample catalog's anchors today, and the demo must keep doing so
+until #1773 lands. Synthesis stays the answer to "no catalog", which is what
+the demo seed was built for (slice 682 AC-4). The existing demo tests pass
+unchanged.
 
 ## D4 — Policy links go through the anchor, not `controls.scf_id`
 
