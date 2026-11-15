@@ -37,11 +37,16 @@ export type FrameworkScope = {
   updated_at: string;
 };
 
-export type FrameworkScopeCreate = {
-  framework_version_id: string;
-  name: string;
-  predicate: unknown;
-};
+// With from_scope_id the new draft is a revision of that scope (#1965): the
+// other fields default to the source's, and its decisions are copied.
+export type FrameworkScopeCreate =
+  | { framework_version_id: string; name: string; predicate: unknown }
+  | {
+      from_scope_id: string;
+      framework_version_id?: string;
+      name?: string;
+      predicate?: unknown;
+    };
 
 export type FrameworkScopePatchResponse = {
   framework_scope: FrameworkScope;
