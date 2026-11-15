@@ -120,9 +120,14 @@ requested → approved   (approver-role required; segregation of duties: approve
 requested → denied     (approver-role required; segregation of duties: approver != requester)
 approved  → active     (operator action; sets effective_from)
 active    → expired    (system; daily cron tick)
+active    → revoked    (approver-role required; a reason is required; #2113)
 ```
 
-No other transitions. `denied` and `expired` are terminal.
+No other transitions. `denied`, `expired` and `revoked` are terminal.
+
+- `revoked` — terminal. An approver ended the active exception before `expires_at`, with a reason recorded on its audit row (`revoked_by`, `revoked_at` on the exception). `expires_at` keeps the window that was granted. The engine reads only `active` exceptions, so the control returns to its normal result on its next evaluation.
+
+In the app, an exception is requested from its control (`/exceptions/new?control_id=…`) and carried through its life on `/exceptions/{id}`. The request's scope is never a null predicate: the scope picker's null means an unfinished choice, and the API refuses it, because a stored null would match every cell. The whole control is `{"op":"true"}`.
 
 **`compensating_controls`** is a `TEXT[]` — free-form descriptions of what's being done instead. NOT an FK to `controls` (because compensating mitigations are often informal: "weekly manual review by SRE on-call until IAM federation lands"). A future slice can add `compensating_control_ids UUID[]` if a structured link becomes useful.
 
