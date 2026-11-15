@@ -33,11 +33,17 @@ SELECT
     e.mapping_tier,
     e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     a.scf_id,
     a.family,
     a.title            AS anchor_title,
     a.description      AS anchor_description
 FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
@@ -59,11 +65,17 @@ SELECT
     e.mapping_tier,
     e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     a.scf_id,
     a.family,
     a.title            AS anchor_title,
     a.description      AS anchor_description
 FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN scf_anchors a ON a.id = e.scf_anchor_id
 WHERE e.framework_requirement_id = $1
   AND e.relationship_type <> 'no_relationship'
@@ -114,6 +126,9 @@ SELECT
     e.mapping_tier,
     e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     r.code,
     r.title            AS requirement_title,
     r.body             AS requirement_body,
@@ -123,6 +138,9 @@ SELECT
     f.slug             AS framework_slug,
     f.name             AS framework_name
 FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
@@ -149,6 +167,9 @@ SELECT
     e.mapping_tier,
     e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     r.code,
     r.title            AS requirement_title,
     r.body             AS requirement_body,
@@ -158,6 +179,9 @@ SELECT
     f.slug             AS framework_slug,
     f.name             AS framework_name
 FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
@@ -180,6 +204,9 @@ SELECT
     e.mapping_tier,
     e.origin,
     e.rationale,
+    o.source_ref       AS overlay_source_ref,
+    o.created_by       AS overlay_created_by,
+    o.created_at       AS overlay_created_at,
     r.code,
     r.title            AS requirement_title,
     r.body             AS requirement_body,
@@ -189,6 +216,9 @@ SELECT
     f.slug             AS framework_slug,
     f.name             AS framework_name
 FROM effective_fw_to_scf_edges e
+-- #1800: an overlay row's source, author and date, for the "org mapping"
+-- entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
+LEFT JOIN fw_to_scf_overlay_edges o ON e.origin = 'overlay' AND o.id = e.id
 JOIN framework_requirements r ON r.id = e.framework_requirement_id
 JOIN framework_versions fv    ON fv.id = r.framework_version_id
 JOIN frameworks f             ON f.id = fv.framework_id
