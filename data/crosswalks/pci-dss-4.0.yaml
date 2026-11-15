@@ -176,7 +176,7 @@ requirements:
 mappings:
   # --- Req 1: Network security controls ---
   - requirement_code: 1.2.1
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: intersects_with
     strength: 0.7
     rationale: "NSC configuration standards overlap with SCF Configuration Change Control; the firewall-rule baseline is the configuration-management surface."
@@ -192,12 +192,12 @@ mappings:
     rationale: "Controls between trusted and untrusted networks map to SCF Network Segmentation; CDE segmentation is the PCI scope-reduction lever."
   # --- Req 2: Secure configurations ---
   - requirement_code: 2.2.1
-    scf_anchor: CFG-02
+    scf_anchor: CFG-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Hardening configuration standards map to SCF System Hardening Through Baseline Configurations."
+    rationale: "Hardening configuration standards map to SCF Secure Baseline Configurations."
   - requirement_code: 2.2.4
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: subset_of
     strength: 0.7
     rationale: "Disabling unnecessary services is a subset of the broader Configuration Change Control anchor (least-functionality facet)."

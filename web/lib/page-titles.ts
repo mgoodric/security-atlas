@@ -25,6 +25,7 @@ export const PAGE_TITLES = {
   "/controls/checklist": "Implementation checklist",
   "/risks": "Risk register",
   "/risks/hierarchy": "Risk hierarchy",
+  "/risks/taxonomy": "Risk taxonomy",
   "/action-plans": "Action plans",
   "/audits": "Audit periods",
   "/framework-scopes": "Framework scopes",

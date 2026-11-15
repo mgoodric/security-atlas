@@ -407,9 +407,7 @@ export function RiskForm(props: Props) {
             ))}
           </select>
           <p className={HELP_CLASS}>
-            Default <span className="font-mono">nist_800_30</span> per canvas
-            §6.2. FAIR uses annualized dollar exposure; CIS RAM and ISO 27005
-            are not yet supported.
+            NIST 800-30 is the default. FAIR uses annualized dollar exposure.
           </p>
         </div>
       </div>

@@ -2,7 +2,7 @@
 -- shown as "org mapping" in the web UI.
 --
 -- A synthetic framework version (slug `om-e2e`, current) with one
--- requirement OM-01, and two SCF anchors on a legacy spine version:
+-- requirement OM-01, and two SCF anchors in the current SCF release:
 --
 --   OM-01 -> OM-E2E-A1   catalog edge (global, every tenant sees it)
 --   OM-01 -> OM-E2E-A2   overlay edge, demo tenant only, with a rationale
@@ -47,8 +47,6 @@ ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO framework_versions (id, tenant_id, framework_id, version, effective_from, status)
 VALUES
-    ('e2e18000-0000-0000-0000-0000000f0002', NULL,
-     'e2e18000-0000-0000-0000-0000000f0001', 'scf-om-e2e', '2026-01-01', 'legacy'),
     ('e2e18000-0000-0000-0000-0000000f0003', NULL,
      'e2e18000-0000-0000-0000-0000000f0001', '2026-om-e2e', '2026-01-01', 'current')
 ON CONFLICT (id) DO NOTHING;
@@ -57,12 +55,42 @@ UPDATE frameworks
    SET latest_version_id = 'e2e18000-0000-0000-0000-0000000f0003'
  WHERE id = 'e2e18000-0000-0000-0000-0000000f0001';
 
+-- The anchors live in the current SCF release: requirement coverage reads
+-- pin to it by default (#2203), so an anchor in any other release is not
+-- read. The CI e2e database imports no SCF catalog, so when no release is
+-- current this seeds the same synthetic one controls-list.sql does (same
+-- ids, so the two fixtures converge in either order). The anchors then go
+-- in the release scfrelease.Lookup picks: the current one, ordered as
+-- ListFrameworkVersionsBySlug orders it.
+INSERT INTO frameworks (id, tenant_id, name, slug, issuer, description)
+SELECT 'e2e74300-0000-0000-0000-0000000f0001', NULL, 'Secure Controls Framework', 'scf',
+       'Secure Controls Framework Council',
+       'Slice 743 e2e synthetic SCF spine — current version for the controls-list spec.'
+WHERE NOT EXISTS (
+    SELECT 1 FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+    WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.tenant_id IS NULL AND fv.status = 'current')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO framework_versions (id, tenant_id, framework_id, version, effective_from, status, oscal_catalog_uri)
+SELECT 'e2e74300-0000-0000-0000-0000000f0002', NULL, 'e2e74300-0000-0000-0000-0000000f0001',
+       '2026.1-e2e', '2026-01-01', 'current', 'urn:scf:e2e:2026.1'
+WHERE NOT EXISTS (
+    SELECT 1 FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+    WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.tenant_id IS NULL AND fv.status = 'current')
+ON CONFLICT (id) DO NOTHING;
+
 INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description)
-VALUES
-    ('e2e18000-0000-0000-0000-00000000a001', 'e2e18000-0000-0000-0000-0000000f0002',
-     'OM-E2E-A1', 'HRS', 'Org mapping e2e catalog anchor', ''),
-    ('e2e18000-0000-0000-0000-00000000a002', 'e2e18000-0000-0000-0000-0000000f0002',
-     'OM-E2E-A2', 'HRS', 'Org mapping e2e overlay anchor', '')
+SELECT a.id::uuid, cur.id, a.scf_id, 'HRS', a.title, ''
+FROM (VALUES
+    ('e2e18000-0000-0000-0000-00000000a001', 'OM-E2E-A1', 'Org mapping e2e catalog anchor'),
+    ('e2e18000-0000-0000-0000-00000000a002', 'OM-E2E-A2', 'Org mapping e2e overlay anchor')
+) AS a (id, scf_id, title)
+CROSS JOIN (
+    SELECT fv.id FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+    WHERE f.slug = 'scf' AND fv.tenant_id IS NULL AND fv.status = 'current'
+    ORDER BY fv.effective_from DESC NULLS LAST, fv.version DESC
+    LIMIT 1
+) AS cur
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO framework_requirements (id, framework_version_id, code, title, body)

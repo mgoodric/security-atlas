@@ -408,8 +408,7 @@ export function RisksPanel({
       <CardHeader className="border-b">
         <CardTitle>Risks treated</CardTitle>
         <CardDescription>
-          Risks this control treats via the risk_control_links table (slice
-          020).
+          Risks this control is linked to as a treatment.
         </CardDescription>
       </CardHeader>
       <CardContent>
