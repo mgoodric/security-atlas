@@ -65,7 +65,7 @@ func TestControlsImportShow_PrintsCandidatesWithSourceAndFit(t *testing.T) {
 				RowNumber: 8, ExternalID: "ORG-OP-01", Title: "Incident monitoring", Status: "pending",
 				TestedUnder: []controlimport.Requirement{cc71}, NoCandidateReaches: true,
 				Candidates: []controlimport.Candidate{
-					{Rank: 1, SCFID: "MON-01", Title: "Continuous Monitoring", Source: controlimport.SourceKeyword,
+					{Rank: 1, SCFID: "MON-02", Title: "Continuous Monitoring", Source: controlimport.SourceKeyword,
 						Reaches: []controlimport.Requirement{}, TestedCount: 1},
 				},
 			},
@@ -89,7 +89,7 @@ func TestControlsImportShow_PrintsCandidatesWithSourceAndFit(t *testing.T) {
 		"  1. HRS-04  Personnel Screening  (keyword)",
 		"row 8  ORG-OP-01  Incident monitoring  [pending]",
 		"  flag: no candidate reaches a tested criterion",
-		"  1. MON-01  Continuous Monitoring  (keyword; reaches 0 of 1)",
+		"  1. MON-02  Continuous Monitoring  (keyword; reaches 0 of 1)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("output missing %q:\n%s", want, out)

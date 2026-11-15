@@ -300,12 +300,12 @@ mappings:
     rationale: "Physically securing media containing cardholder data overlaps with SCF Media & Physical Storage handling."
   # --- Req 10: Log and monitor ---
   - requirement_code: 10.2.1
-    scf_anchor: AAA-01
+    scf_anchor: MON-04
     relationship_type: equal
     strength: 0.9
-    rationale: "Audit logs capturing access events map to SCF Auditing & Accountability — shared with SOC 2 CC7.2 and ISO A.8.15."
+    rationale: "Audit logs capturing access events map to SCF System Generated Event Logs & Security-Relevant Telemetry — shared with SOC 2 CC7.2 and ISO A.8.15."
   - requirement_code: 10.4.1
-    scf_anchor: MON-01
+    scf_anchor: MON-02
     relationship_type: equal
     strength: 0.8
     rationale: "Reviewing audit logs for anomalies maps to SCF Continuous Monitoring — shared with SOC 2 CC7.2 and ISO A.8.16."

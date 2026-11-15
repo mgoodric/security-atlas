@@ -8,7 +8,7 @@ description: |
   endpoint; the query asserts every managed endpoint has the engine
   running and reporting healthy.
 
-scf_anchor_id: MON-08
+scf_anchor_id: MON-16
 control_family: MON
 implementation_type: automated
 owner_role: security-engineering

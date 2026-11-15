@@ -1979,6 +1979,104 @@ type ControlEvaluation struct {
 	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 }
 
+type ControlImportAuditLog struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	BatchID       pgtype.UUID        `json:"batch_id"`
+	RowID         pgtype.UUID        `json:"row_id"`
+	RowNumber     int32              `json:"row_number"`
+	OrgControlID  string             `json:"org_control_id"`
+	Action        string             `json:"action"`
+	Actor         string             `json:"actor"`
+	ScfAnchorID   pgtype.UUID        `json:"scf_anchor_id"`
+	ScfID         *string            `json:"scf_id"`
+	ScfRelease    *string            `json:"scf_release"`
+	ControlID     pgtype.UUID        `json:"control_id"`
+	BundleID      *string            `json:"bundle_id"`
+	Reason        *string            `json:"reason"`
+	OccurredAt    pgtype.Timestamptz `json:"occurred_at"`
+	SubjectModule string             `json:"subject_module"`
+}
+
+type ControlImportBatch struct {
+	ID                    pgtype.UUID        `json:"id"`
+	TenantID              pgtype.UUID        `json:"tenant_id"`
+	FrameworkSlug         string             `json:"framework_slug"`
+	FrameworkVersionID    pgtype.UUID        `json:"framework_version_id"`
+	FrameworkVersion      string             `json:"framework_version"`
+	SourceFilename        string             `json:"source_filename"`
+	SourceFormat          string             `json:"source_format"`
+	UploadedBy            string             `json:"uploaded_by"`
+	Status                string             `json:"status"`
+	TotalRows             int32              `json:"total_rows"`
+	StagedCount           int32              `json:"staged_count"`
+	RejectedCount         int32              `json:"rejected_count"`
+	UnmappedColumns       []byte             `json:"unmapped_columns"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
+	ScfFrameworkVersionID pgtype.UUID        `json:"scf_framework_version_id"`
+	ScfRelease            *string            `json:"scf_release"`
+	SuggestionsStatus     string             `json:"suggestions_status"`
+}
+
+type ControlImportCandidate struct {
+	ID            pgtype.UUID        `json:"id"`
+	TenantID      pgtype.UUID        `json:"tenant_id"`
+	BatchID       pgtype.UUID        `json:"batch_id"`
+	RowID         pgtype.UUID        `json:"row_id"`
+	Rank          int32              `json:"rank"`
+	ScfAnchorID   pgtype.UUID        `json:"scf_anchor_id"`
+	ScfID         string             `json:"scf_id"`
+	Title         string             `json:"title"`
+	Source        string             `json:"source"`
+	Reaches       []byte             `json:"reaches"`
+	Strength      float64            `json:"strength"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	Rationale     *string            `json:"rationale"`
+	AiAssisted    bool               `json:"ai_assisted"`
+	HumanApproved bool               `json:"human_approved"`
+	HumanApprover *string            `json:"human_approver"`
+}
+
+type ControlImportRejectedRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	TenantID     pgtype.UUID        `json:"tenant_id"`
+	BatchID      pgtype.UUID        `json:"batch_id"`
+	RowNumber    int32              `json:"row_number"`
+	OrgControlID string             `json:"org_control_id"`
+	Reason       string             `json:"reason"`
+	Detail       string             `json:"detail"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type ControlImportRow struct {
+	ID                 pgtype.UUID        `json:"id"`
+	TenantID           pgtype.UUID        `json:"tenant_id"`
+	BatchID            pgtype.UUID        `json:"batch_id"`
+	RowNumber          int32              `json:"row_number"`
+	OrgControlID       string             `json:"org_control_id"`
+	Title              string             `json:"title"`
+	Description        string             `json:"description"`
+	TestedUnder        []byte             `json:"tested_under"`
+	ImplementationType *string            `json:"implementation_type"`
+	Applicability      *string            `json:"applicability"`
+	Status             string             `json:"status"`
+	RejectionReason    *string            `json:"rejection_reason"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	NoCandidateReaches bool               `json:"no_candidate_reaches"`
+	LlmRerank          string             `json:"llm_rerank"`
+	DecidedBy          *string            `json:"decided_by"`
+	DecidedAt          pgtype.Timestamptz `json:"decided_at"`
+	ControlID          pgtype.UUID        `json:"control_id"`
+	BundleID           *string            `json:"bundle_id"`
+	ScfAnchorID        pgtype.UUID        `json:"scf_anchor_id"`
+	ScfID              *string            `json:"scf_id"`
+	AiAssisted         bool               `json:"ai_assisted"`
+	HumanApproved      bool               `json:"human_approved"`
+	HumanApprover      *string            `json:"human_approver"`
+}
+
 type ControlManifestRevision struct {
 	ID                 pgtype.UUID        `json:"id"`
 	TenantID           pgtype.UUID        `json:"tenant_id"`
