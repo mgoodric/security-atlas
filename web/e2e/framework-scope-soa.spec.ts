@@ -232,5 +232,21 @@ test.describe("framework scope · Statement of Applicability tab (#1794)", () =>
       await page.goto("/dashboard");
       await expect(coverage).toHaveText("50.0%", { timeout: 2_000 });
     }).toPass({ timeout: 15_000 });
+
+    // #2095: posture has no target (#2341), so 50% coverage, red under the
+    // old 70% cut-off, is neutral, and the tile says "No target set" as
+    // plain text: there is nowhere to set a posture target yet.
+    await expect(coverage).toHaveAttribute("data-tone", "neutral");
+    await expect(coverage).not.toHaveClass(/destructive|emerald|amber/);
+    const trend = tile.getByTestId("framework-tile-trend");
+    await expect(trend).toHaveAttribute("data-tone", "neutral");
+    await expect(trend).not.toHaveClass(/destructive|emerald/);
+    await expect(trend).toHaveAttribute("aria-label", /no target set/);
+    await expect(tile.getByTestId("framework-tile-no-target")).toHaveText(
+      "No target set",
+    );
+    await expect(tile.locator("a", { hasText: "No target set" })).toHaveCount(
+      0,
+    );
   });
 });
