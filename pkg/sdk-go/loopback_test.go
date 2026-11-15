@@ -69,7 +69,7 @@ func TestIsLoopbackURL(t *testing.T) {
 		{"http://127.3.2.1", true},
 		{"http://[::1]:8080/path", true},
 		{"http://[::ffff:127.0.0.1]:8080", true},
-		{"http://user:pass@localhost:8080", true}, // userinfo is not the host; localhost is
+		{"http://operator@localhost:8080", true}, // userinfo is not the host; localhost is
 
 		{"http://localhost@evil.com", false},
 		{"http://localhost:8443@evil.com", false},
