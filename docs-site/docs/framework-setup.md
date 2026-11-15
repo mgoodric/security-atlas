@@ -36,10 +36,11 @@ The `atlas-bootstrap` container imported the SCF catalog on first boot
 (see [Install](install.md#whats-seeded-for-you)). You can confirm:
 
 ```sh
-curl -fsS http://localhost:8080/v1/anchors | jq '.items[0]'
+curl -fsS http://localhost:8080/v1/anchors \
+  -H "Authorization: Bearer $ATLAS_TOKEN" | jq '.anchors[0]'
 ```
 
-You should see a JSON anchor row with `scf_id`, `domain`, and
+You should see a JSON anchor row with `scf_id`, `family`, `name` and
 `description`. If the response is empty, re-run bootstrap:
 
 ```sh
