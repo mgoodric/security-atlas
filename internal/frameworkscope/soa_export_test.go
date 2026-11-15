@@ -62,3 +62,36 @@ func TestSoAExportRows(t *testing.T) {
 		t.Fatalf("no-scope row = %q, want empty revision and approval", got)
 	}
 }
+
+func TestQuoteFormulaCell(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"":                 "",
+		"plain":            "plain",
+		"=SUM(A1)":         "'=SUM(A1)",
+		"+1":               "'+1",
+		"-1":               "'-1",
+		"@cmd":             "'@cmd",
+		"\tx":              "'\tx",
+		"\rx":              "'\rx",
+		"https://x/=y":     "https://x/=y",
+		"'":                "'",
+		"'plain":           "'plain",
+		"'=already quoted": "''=already quoted",
+		"''-twice":         "'''-twice",
+	} {
+		if got := QuoteFormulaCell(in); got != want {
+			t.Errorf("QuoteFormulaCell(%q) = %q, want %q", in, got, want)
+		}
+		if got := UnquoteFormulaCell(want); got != in {
+			t.Errorf("UnquoteFormulaCell(%q) = %q, want %q", want, got, in)
+		}
+	}
+	// A leading quote the export could not have written is the operator's
+	// own text and is kept.
+	for _, in := range []string{"'", "'plain", "'' plain"} {
+		if got := UnquoteFormulaCell(in); got != in {
+			t.Errorf("UnquoteFormulaCell(%q) = %q, want unchanged", in, got)
+		}
+	}
+}
