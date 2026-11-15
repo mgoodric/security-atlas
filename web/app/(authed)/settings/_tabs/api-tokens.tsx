@@ -416,7 +416,7 @@ function FreshTokenCallout(props: FreshTokenCalloutProps) {
       ? "This is the only time you'll see this token. The platform does not store it in plaintext; if you lose it, issue a new one."
       : `This is the only time you'll see this token. The predecessor ending in ${props.predecessorLast4} keeps working until the timestamp below; rotate again or revoke it once your clients have switched over.`;
   return (
-    <Alert variant="destructive" data-testid="settings-fresh-token-callout">
+    <Alert variant="info" data-testid="settings-fresh-token-callout">
       <AlertTitle data-testid="settings-fresh-token-title">{title}</AlertTitle>
       <AlertDescription className="space-y-2">
         <p className="font-medium">{helperParagraph}</p>

@@ -103,7 +103,7 @@ export function SessionsSection() {
                     ) : (
                       <Button
                         size="sm"
-                        variant="destructive"
+                        variant="outline"
                         onClick={() => revokeMut.mutate(s.id)}
                         disabled={revokeMut.isPending}
                         data-testid="settings-session-revoke"

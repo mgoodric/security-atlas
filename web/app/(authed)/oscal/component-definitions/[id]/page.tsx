@@ -46,12 +46,12 @@ import type {
 
 function statusBadgeVariant(
   status: ClaimStatus,
-): "default" | "secondary" | "destructive" | "outline" {
+): "default" | "secondary" | "outline" {
   switch (status) {
     case "accepted":
       return "default";
     case "rejected":
-      return "destructive";
+      return "outline";
     case "needs_info":
       return "outline";
     default:
@@ -334,7 +334,7 @@ export default function ComponentDefinitionDetailPage({
                 </Button>
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant="outline"
                   data-testid="claim-reject"
                   disabled={dispositionM.isPending}
                   onClick={() =>
