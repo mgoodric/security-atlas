@@ -955,12 +955,12 @@ mappings:
     scf_anchor: CHG-02
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Controlled promotion between separated environments is part of the Change Control Process (CHG-02)."
+    rationale: "Controlled promotion between separated environments is part of the Change Management Program (CHG-02)."
   - requirement_code: A.8.32
     scf_anchor: CHG-02
     relationship_type: equal
     strength: 0.9
-    rationale: "System and facility changes under formal procedure map to the Change Control Process (CHG-02)."
+    rationale: "System and facility changes under formal procedure map to the Change Management Program (CHG-02)."
   - requirement_code: A.8.32
     scf_anchor: CHG-03
     relationship_type: subset_of

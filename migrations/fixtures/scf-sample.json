@@ -102,8 +102,8 @@
     {
       "scf_id": "CHG-02",
       "family": "CHG",
-      "title": "Change Control Process",
-      "description": "Mechanisms exist to govern the technical configuration change control processes."
+      "title": "Change Management Program",
+      "description": "Mechanisms exist to run a change management program that governs how changes to technology assets are requested, reviewed, approved and tracked."
     },
     {
       "scf_id": "CHG-03",

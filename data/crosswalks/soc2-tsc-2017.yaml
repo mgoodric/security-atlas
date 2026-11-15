@@ -444,7 +444,7 @@ mappings:
     scf_anchor: CHG-02
     relationship_type: equal
     strength: 1.0
-    rationale: "Change Control Process is the direct STRM equivalent of CC8.1."
+    rationale: "Change Management Program is the direct STRM equivalent of CC8.1."
   - tsc_code: CC8.1
     scf_anchor: CHG-03
     relationship_type: intersects_with

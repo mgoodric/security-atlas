@@ -12,7 +12,7 @@ The fourth #1717 family group. It follows #1972 and #1973 (`1973-scf-ast-bcd-rem
 | `CFG-02`  | `CFG-04`  | Secure Baseline Configurations | legacy                 |
 | `CFG-04`  | `CHG-03`  | Configuration Change Control   | concept                |
 
-Both come from D5 in `1717-scf-pin-ratchet-decisions.md`. Neither is a `low` pick. Both sample titles already matched their 2026.3 titles verbatim, so only the IDs move. `CHG-02` (a `low` pick) is held for Matt's confirmation; see D4.
+Both come from D5 in `1717-scf-pin-ratchet-decisions.md`. Neither is a `low` pick. Both sample titles already matched their 2026.3 titles verbatim, so only the IDs move. The third row, `CHG-02`, keeps its ID and changes title; see D4.
 
 ## D2 — The chain, applied as one substitution
 
@@ -27,10 +27,18 @@ Hand edits on top:
 
 PCI 2.2.4 (disabling unnecessary services) sits on Configuration Change Control as its "least-functionality facet". SCF has a closer control (`CFG-03` Least Functionality), but it is not in the sample, and moving the edge changes the mapping, not just the code. The remap keeps the meaning the edge already had.
 
-## D4 — CHG-02 (pending Matt)
+## D4 — CHG-02: title only (low pick, Matt confirmed)
 
-The sample's `CHG-02` "Change Control Process" has no same-titled 2026.3 control. D5 picks `CHG-02` Change Management Program with `low` confidence. The candidates sent to Matt are `CHG-01` Change Management Policy, `CHG-02` Change Management Program, and `CHG-03` Configuration Change Control. `CHG-03` is the closest in meaning, but it would merge with the sample `CFG-04` row. The recommendation is the D5 pick.
+The sample's `CHG-02` "Change Control Process" has no same-titled 2026.3 control. D5 picks `CHG-02` Change Management Program with `low` confidence. The candidates sent to Matt were:
+
+- `CHG-01` Change Management Policy
+- `CHG-02` Change Management Program
+- `CHG-03` Configuration Change Control. This is closest in meaning, but it would merge with the sample `CFG-04` row.
+
+Matt confirmed the D5 pick on 2026-11-15. The ID stays, so no reference moves. The title becomes Change Management Program verbatim. The description is reworded in our own words to the program concept: "run a change management program that governs how changes to technology assets are requested, reviewed, approved and tracked". The four crosswalk rationales that quoted "Change Control Process" (ISO A.8.31 and A.8.32, NIST ID.RA-07, SOC 2 CC8.1) now quote the new title. Their edges stay: each describes governed change, which the program covers.
+
+There is no `remaps.json` row, because `from` would equal `to`. `rebind.go`'s title-changed branch already covers this case: it reports `CHG-02 is "Change Management Program" in test-2026.3, was "Change Control Process"`.
 
 ## D5 — Upgrade effect
 
-Two stock SOC 2 controls change anchor code from `CFG-04` to `CHG-03`, so on the next boot they are superseded, not re-bound: `soc2_cc3_4_change_risk_reassessment` and `soc2_cc8_1_configuration_change_control`. A tenant control on old `CFG-02` or `CFG-04` in `test-2026.1` is flagged and not re-bound. `RebindControls` moves only rows with the same code and the same title, and in `test-2026.3` those codes carry different titles. The control's note names the new code from `remaps.json`. The k8s connector's four `scf:CFG-02` default control flags become `scf:CFG-04`.
+Two stock SOC 2 controls change anchor code from `CFG-04` to `CHG-03`, so on the next boot they are superseded, not re-bound: `soc2_cc3_4_change_risk_reassessment` and `soc2_cc8_1_configuration_change_control`. A tenant control on old `CFG-02`, `CFG-04` or `CHG-02` in `test-2026.1` is flagged and not re-bound. `RebindControls` moves only rows with the same code and the same title, and in `test-2026.3` those codes carry different titles. The control's note names the new code from `remaps.json`. The stock `soc2_cc8_1_change_management` control keeps `CHG-02`, so it is not superseded, but it is flagged like any `CHG-02` control. The k8s connector's four `scf:CFG-02` default control flags become `scf:CFG-04`.
