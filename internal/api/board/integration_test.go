@@ -181,6 +181,21 @@ func seedFramework(t *testing.T, admin *pgxpool.Pool, tenant, slug, name string)
 	`, id, tenant, name, slug); err != nil {
 		t.Fatalf("seed framework: %v", err)
 	}
+	// The brief lists framework versions with requirements, from the posture
+	// query (#2210).
+	fvID := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO framework_versions (id, tenant_id, framework_id, version, status)
+		VALUES ($1, $2, $3, '2026', 'current')
+	`, fvID, tenant, id); err != nil {
+		t.Fatalf("seed framework version: %v", err)
+	}
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO framework_requirements (id, framework_version_id, code, title, body)
+		VALUES ($1, $2, 'R-01', 'requirement', '')
+	`, uuid.New(), fvID); err != nil {
+		t.Fatalf("seed framework requirement: %v", err)
+	}
 	t.Cleanup(func() {
 		_, _ = admin.Exec(context.Background(), `DELETE FROM frameworks WHERE id = $1`, id)
 	})
