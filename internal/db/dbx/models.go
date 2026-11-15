@@ -3107,6 +3107,22 @@ type ScfAnchor struct {
 	LegacyScfID        *string            `json:"legacy_scf_id"`
 }
 
+type ScfRemapProposal struct {
+	ID                       pgtype.UUID        `json:"id"`
+	TenantID                 pgtype.UUID        `json:"tenant_id"`
+	ControlID                pgtype.UUID        `json:"control_id"`
+	BundleID                 string             `json:"bundle_id"`
+	LegacyAnchorID           pgtype.UUID        `json:"legacy_anchor_id"`
+	LegacyScfID              string             `json:"legacy_scf_id"`
+	LegacyRelease            string             `json:"legacy_release"`
+	TargetFrameworkVersionID pgtype.UUID        `json:"target_framework_version_id"`
+	TargetRelease            string             `json:"target_release"`
+	Class                    string             `json:"class"`
+	Status                   string             `json:"status"`
+	SuccessorScfIds          []string           `json:"successor_scf_ids"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+}
+
 type ScimAuditLog struct {
 	ID                pgtype.UUID        `json:"id"`
 	TenantID          pgtype.UUID        `json:"tenant_id"`
