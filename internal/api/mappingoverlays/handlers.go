@@ -3,6 +3,8 @@
 //	POST /v1/mapping-overlays              create
 //	GET  /v1/mapping-overlays              list (?framework, ?requirement, ?anchor, ?status)
 //	POST /v1/mapping-overlays/{id}/retire  retire with a reason
+//	POST /v1/mapping-overlays/import       bulk import from CSV or YAML (#1799, bulk.go)
+//	GET  /v1/mapping-overlays/export       CSV export (#1799, bulk.go)
 //
 // The tenant comes from the credential (tenancy middleware); RLS binds every
 // read and write. Writes need admin or grc_engineer: the OPA middleware is
@@ -24,7 +26,6 @@ import (
 	"github.com/mgoodric/security-atlas/internal/api/httperr"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/mappingoverlay"
-	"github.com/mgoodric/security-atlas/internal/scfrelease"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
 
@@ -174,43 +175,34 @@ func (h *Handler) Retire(w http.ResponseWriter, r *http.Request) {
 // writeErr maps the store's errors. Each refusal carries a `code` so a
 // client (and the CLI) can tell them apart without parsing the message.
 func writeErr(w http.ResponseWriter, r *http.Request, op string, err error) {
-	var (
-		invalid *mappingoverlay.InvalidEdgeError
-		catalog *mappingoverlay.CatalogEdgeExistsError
-	)
-	refuse := func(status int, code string) {
-		httpresp.WriteJSON(w, status, map[string]any{"error": err.Error(), "code": code})
-	}
-	switch {
-	case errors.As(err, &invalid):
-		refuse(http.StatusBadRequest, "invalid_overlay_edge")
-	case errors.Is(err, mappingoverlay.ErrUnknownFrameworkVersion):
-		refuse(http.StatusUnprocessableEntity, "unknown_framework_version")
-	case errors.Is(err, mappingoverlay.ErrUnknownRequirement):
-		refuse(http.StatusUnprocessableEntity, "unknown_requirement")
-	case errors.Is(err, scfrelease.ErrUnknownRelease), errors.Is(err, scfrelease.ErrNoCurrentRelease):
-		refuse(http.StatusUnprocessableEntity, "unknown_scf_release")
-	case errors.Is(err, scfrelease.ErrCodeNotInRelease):
-		refuse(http.StatusUnprocessableEntity, "unknown_anchor")
-	case errors.As(err, &catalog):
-		httpresp.WriteJSON(w, http.StatusConflict, map[string]any{
-			"error": err.Error(),
-			"code":  "catalog_edge_exists",
-			"catalog_edge": map[string]any{
-				"id":                catalog.EdgeID.String(),
-				"relationship_type": catalog.RelationshipType,
-				"mapping_tier":      catalog.MappingTier,
-			},
-		})
-	case errors.Is(err, mappingoverlay.ErrDuplicateOverlay):
-		refuse(http.StatusConflict, "overlay_edge_exists")
-	case errors.Is(err, mappingoverlay.ErrAlreadyRetired):
-		refuse(http.StatusConflict, "already_retired")
-	case errors.Is(err, mappingoverlay.ErrNotFound):
-		refuse(http.StatusNotFound, "not_found")
-	default:
+	code, _, ok := mappingoverlay.Classify(err)
+	if !ok {
 		httperr.WriteInternal(w, r, op, err)
+		return
 	}
+	body := map[string]any{"error": err.Error(), "code": code}
+	var catalog *mappingoverlay.CatalogEdgeExistsError
+	if errors.As(err, &catalog) {
+		body["catalog_edge"] = map[string]any{
+			"id":                catalog.EdgeID.String(),
+			"relationship_type": catalog.RelationshipType,
+			"mapping_tier":      catalog.MappingTier,
+		}
+	}
+	httpresp.WriteJSON(w, refusalStatus[code], body)
+}
+
+// refusalStatus is the HTTP status of each mappingoverlay.Classify code.
+var refusalStatus = map[string]int{
+	"invalid_overlay_edge":      http.StatusBadRequest,
+	"unknown_framework_version": http.StatusUnprocessableEntity,
+	"unknown_requirement":       http.StatusUnprocessableEntity,
+	"unknown_scf_release":       http.StatusUnprocessableEntity,
+	"unknown_anchor":            http.StatusUnprocessableEntity,
+	"catalog_edge_exists":       http.StatusConflict,
+	"overlay_edge_exists":       http.StatusConflict,
+	"already_retired":           http.StatusConflict,
+	"not_found":                 http.StatusNotFound,
 }
 
 // hasOverlayWrite reports whether the credential may change the tenant's

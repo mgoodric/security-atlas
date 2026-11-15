@@ -4,7 +4,7 @@
   "x-evidence-kind": "monitoring.alert_config.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["MON-01"],
+  "x-default-scf-anchors": ["MON-02"],
   "title": "Monitoring / alerting configuration inventory",
   "description": "One record per monitor / alert rule across a monitoring vendor (Datadog monitor, Grafana alert rule): the rule's name, type, enabled state, and the NAMES/HANDLES of the notification targets it routes to. Pulled read-only from the vendor API (Datadog monitors_read; Grafana Viewer service-account). Configuration + routing-target metadata only — never secret webhook URLs, integration tokens, recipient email addresses (PII), dashboard JSON, metric time-series, or log query results. The connector reports a descriptive enabled/disabled posture; the platform evaluator owns the final pass/fail per (control, scope). Shared across the Datadog + Grafana connectors because the two vendors' alert-configuration field set is identical at the config-inventory altitude; the source_vendor field preserves provenance.",
   "type": "object",
