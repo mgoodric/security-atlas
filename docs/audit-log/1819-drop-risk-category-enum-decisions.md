@@ -1,7 +1,7 @@
 # #1819 — drop the risk_category enum: decisions log
 
 Contract step of #1745 (expand -> migrate -> contract). Migration
-`20261121000000_drop_risk_category_enum` drops `risks.category`, the
+`20261125000000_drop_risk_category_enum` drops `risks.category`, the
 `risks_category_sync` dual-write trigger and the `risk_category` type.
 `risks.category_id`, the reference to the tenant's own category, is the only
 record of a risk's category from here. The calls below were made at build

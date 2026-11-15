@@ -39,8 +39,8 @@ import (
 const (
 	riskCategoriesUp   = "../../migrations/sql/20260923000000_risk_categories.sql"
 	riskCategoriesDown = "../../migrations/sql/20260923000000_risk_categories.down.sql"
-	dropEnumUp         = "../../migrations/sql/20261121000000_drop_risk_category_enum.sql"
-	dropEnumDown       = "../../migrations/sql/20261121000000_drop_risk_category_enum.down.sql"
+	dropEnumUp         = "../../migrations/sql/20261125000000_drop_risk_category_enum.sql"
+	dropEnumDown       = "../../migrations/sql/20261125000000_drop_risk_category_enum.down.sql"
 )
 
 func readMigration(t *testing.T, path string) string {
