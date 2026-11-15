@@ -120,6 +120,7 @@ sql:
       - "migrations/sql/20261031000000_self_approval.sql"
       - "migrations/sql/20261101000000_control_evaluation_excepted.sql"
       - "migrations/sql/20261106000000_effective_edges_overlay_union.sql"
+      - "migrations/sql/20261108000000_policy_transition_audit.sql"
       # The control import tables (#1779-#1781), which the #1782 approval
       # migration alters; the unified audit log reads its audit table.
       - "migrations/sql/20260907000000_control_import_batches.sql"

@@ -222,9 +222,17 @@ func fixtureSnapshot() Snapshot {
 				{
 					FrameworkID:        "fw-1",
 					FrameworkVersion:   "v1",
-					CoveragePct:        0.87,
-					FreshnessComposite: 0.92,
-					TrendDelta90d:      0.05,
+					FrameworkVersionID: "fv-1",
+					ScopeSet:           true,
+					CoveragePct:        ptrFloat(0.87),
+					FreshnessComposite: ptrFloat(0.92),
+					TrendDelta90d:      ptrFloat(0.05),
+				},
+				{
+					// No activated scope (#2114): no percentages.
+					FrameworkID:        "fw-2",
+					FrameworkVersion:   "v2",
+					FrameworkVersionID: "fv-2",
 				},
 			},
 			Risks: []RiskPanelRow{
@@ -541,7 +549,7 @@ func TestSlice269_PanelTable_PerPanelShape(t *testing.T) {
 		wantCols int
 		minRows  int
 	}{
-		{"framework_posture", 6, 1}, // #2112 adds covered_by_exception_pct
+		{"framework_posture", 8, 2}, // #2112 covered_by_exception_pct; #2114 framework_version_id + scope_set
 		{"risks", 8, 1},
 		{"freshness", 4, 2}, // 1 summary + 1 class row
 		{"drift", 3, 2},     // 1 window summary + 1 flipped-out row
@@ -567,6 +575,42 @@ func TestSlice269_PanelTable_PerPanelShape(t *testing.T) {
 		})
 	}
 }
+
+// #2114: a version with no activated scope exports scope_set=false and
+// empty percentage cells, never a zero.
+func TestFrameworkPostureTable_ScopeNotSetHasEmptyPercentages(t *testing.T) {
+	header, rows := panelTable("framework_posture", fixtureSnapshot())
+	want := []string{"framework_id", "framework_version", "framework_version_id", "scope_set",
+		"coverage_pct", "covered_by_exception_pct", "freshness_composite", "trend_delta_90d"}
+	if strings.Join(header, ",") != strings.Join(want, ",") {
+		t.Fatalf("header = %v; want %v", header, want)
+	}
+	if got := strings.Join(rows[0], ","); got != "fw-1,v1,fv-1,true,0.87,,0.92,0.05" {
+		t.Errorf("scoped row = %q", got)
+	}
+	if got := strings.Join(rows[1], ","); got != "fw-2,v2,fv-2,false,,,," {
+		t.Errorf("scope-not-set row = %q", got)
+	}
+}
+
+// A snapshot row written before #2114 (plain numbers, no scope_set or
+// framework_version_id key) still decodes.
+func TestFrameworkPosturePanelRow_DecodesPre2114Snapshot(t *testing.T) {
+	old := `{"framework_id":"fw-1","framework_version":"v1","coverage_pct":87.5,` +
+		`"covered_by_exception_pct":12.5,"freshness_composite":0.92,"trend_delta_90d":3}`
+	var row FrameworkPosturePanelRow
+	if err := json.Unmarshal([]byte(old), &row); err != nil {
+		t.Fatalf("decode pre-#2114 row: %v", err)
+	}
+	if row.CoveragePct == nil || *row.CoveragePct != 87.5 ||
+		row.CoveredByExceptionPct == nil || *row.CoveredByExceptionPct != 12.5 ||
+		row.FreshnessComposite == nil || *row.FreshnessComposite != 0.92 ||
+		row.TrendDelta90d == nil || *row.TrendDelta90d != 3 {
+		t.Errorf("pre-#2114 percentages not decoded: %+v", row)
+	}
+}
+
+func ptrFloat(v float64) *float64 { return &v }
 
 // Unknown panel name yields a 1-cell single-row table (defensive).
 func TestSlice269_PanelTable_UnknownPanel(t *testing.T) {

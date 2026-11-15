@@ -2982,6 +2982,8 @@ type PolicyAuditLog struct {
 	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
 	PolicyTitle            *string            `json:"policy_title"`
 	PolicyVersion          *string            `json:"policy_version"`
+	PreviousState          *string            `json:"previous_state"`
+	NewState               *string            `json:"new_state"`
 }
 
 type Population struct {
