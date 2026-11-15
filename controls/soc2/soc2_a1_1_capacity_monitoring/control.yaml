@@ -8,7 +8,7 @@ description: |
   hosts; the query asserts each reports values within healthy thresholds
   on the most recent sample.
 
-scf_anchor_id: MON-01
+scf_anchor_id: MON-02
 control_family: MON
 implementation_type: automated
 owner_role: it-operations

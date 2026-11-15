@@ -184,7 +184,7 @@ func TestISOImport_FullAnnexA_PreservesSlice438Subset(t *testing.T) {
 		"A.8.2":  "IAC-10",
 		"A.8.8":  "VPM-01",
 		"A.8.13": "BCD-09",
-		"A.8.15": "AAA-01",
+		"A.8.15": "MON-04",
 		"A.8.25": "SEA-05",
 	}
 	for code, wantAnchor := range subset {

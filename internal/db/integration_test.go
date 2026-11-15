@@ -287,7 +287,7 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 
 	withTenantTx(t, tenant, true, func(ctx context.Context, tx pgx.Tx) {
 		// Parent rows first (FK dependencies).
-		mustInsertControl(ctx, t, tx, tenant, controlID, "AAA-01")
+		mustInsertControl(ctx, t, tx, tenant, controlID, "MON-04")
 
 		if _, err := tx.Exec(ctx, `
 			INSERT INTO frameworks (id, tenant_id, name, slug, issuer)
@@ -328,7 +328,7 @@ func TestSchema_TenantScopedTablesAcceptInserts(t *testing.T) {
 				(id, tenant_id, control_id, control_ref, scope_id, observed_at, provenance, result, hash)
 			VALUES
 				($1, $2, $3, $4, $5, now(), '{"connector_id":"aws"}'::jsonb, 'pass', 'sha-abc')
-		`, uuid.NewString(), tenant, controlID, "scf:AAA-01", scopeID); err != nil {
+		`, uuid.NewString(), tenant, controlID, "scf:MON-04", scopeID); err != nil {
 			t.Fatalf("INSERT evidence_records: %v", err)
 		}
 
