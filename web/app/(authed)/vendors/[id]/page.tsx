@@ -32,9 +32,9 @@ import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
 import { PageShell } from "@/components/shell/page-shell";
+import { DetailHeader } from "@/components/detail/detail-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
-import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
@@ -141,56 +141,51 @@ export default function VendorDetailPage({
   const mailto = ownerMailto(vendor.owner_user);
 
   return (
-    <PageShell
+    // #2102: the shared detail-page header. Record review is the vendor's
+    // lifecycle action; there are no overflow items yet.
+    <DetailHeader
       data-testid="vendor-detail"
-      title={<span data-testid="vendor-detail-name">{vendor.name}</span>}
-      subtitle={
-        <div className="mt-2 space-y-2" data-testid="vendor-detail-header">
-          <div className="flex flex-wrap items-center gap-2">
-            <CriticalityBadge value={vendor.criticality} />
-            {vendor.overdue ? (
-              <Badge variant="destructive" data-testid="vendor-detail-status">
-                overdue
-              </Badge>
-            ) : vendor.first_review_due ? (
-              <Badge variant="outline" data-testid="vendor-detail-status">
-                First review due {formatDetailDate(vendor.first_review_due)}
-              </Badge>
-            ) : (
-              <Badge variant="secondary" data-testid="vendor-detail-status">
-                on time
-              </Badge>
-            )}
-          </div>
-          {vendor.domain ? (
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="vendor-detail-domain"
-            >
-              {vendor.domain}
-            </p>
-          ) : null}
-        </div>
-      }
-      actions={
+      titleTestId="vendor-detail-name"
+      headerTestId="vendor-detail-header"
+      title={vendor.name}
+      status={
         <>
-          <BackLink />
-          <Link
-            href={`/vendors/${id}/reviews/new`}
-            className={buttonVariants({ variant: "secondary" })}
-            data-testid="vendor-detail-record-review"
-          >
-            Record review
-          </Link>
-          <Link
-            href={`/vendors/${id}/edit`}
-            className={buttonVariants()}
-            data-testid="vendor-detail-edit"
-          >
-            Edit
-          </Link>
+          <CriticalityBadge value={vendor.criticality} />
+          {vendor.overdue ? (
+            <Badge variant="destructive" data-testid="vendor-detail-status">
+              overdue
+            </Badge>
+          ) : vendor.first_review_due ? (
+            <Badge variant="outline" data-testid="vendor-detail-status">
+              First review due {formatDetailDate(vendor.first_review_due)}
+            </Badge>
+          ) : (
+            <Badge variant="secondary" data-testid="vendor-detail-status">
+              on time
+            </Badge>
+          )}
         </>
       }
+      subtitle={
+        vendor.domain ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="vendor-detail-domain"
+          >
+            {vendor.domain}
+          </p>
+        ) : null
+      }
+      back={<BackLink />}
+      primaryAction={{
+        label: "Record review",
+        href: `/vendors/${id}/reviews/new`,
+        "data-testid": "vendor-detail-record-review",
+      }}
+      edit={{
+        href: `/vendors/${id}/edit`,
+        "data-testid": "vendor-detail-edit",
+      }}
     >
       {/* ============ SUMMARY ============ */}
       <Card data-testid="vendor-detail-summary-card">
@@ -356,7 +351,7 @@ export default function VendorDetailPage({
           )}
         </CardContent>
       </Card>
-    </PageShell>
+    </DetailHeader>
   );
 }
 

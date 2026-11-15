@@ -116,7 +116,9 @@ export type FixtureName =
   | "attest"
   // #2081 — a dedicated tenant with `board.reporting` + `oscal.export`
   // on, for the sidebar's flag-on case (sidebar-nav.spec.ts).
-  | "sidebar-nav";
+  | "sidebar-nav"
+  // #2137 — one manual attestation for evidence-detail.spec.ts.
+  | "evidence-detail";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

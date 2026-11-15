@@ -51,14 +51,6 @@ import { DemoBadge } from "@/components/demo-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogPortal,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   fetchAuditPeriods,
   type AuditPeriodsListResponse,
 } from "@/lib/api/audit-periods";
@@ -97,7 +89,6 @@ import {
   hashPrefix,
   ledgerSubtitleSuffix,
   observedAtLabel,
-  prettyJSON,
   recordCountMeta,
   scopeLabel,
   sourceSummary,
@@ -417,13 +408,14 @@ function EvidencePageInner() {
       ? `${filters.sourceActorType}${SOURCE_DELIM}${filters.sourceActorId}`
       : ALL;
 
-  // Row drawer state — clicking a row opens an inline Dialog showing
-  // the full record JSON pretty-printed (slice 099 AC-7, decision D3).
-  const [drawerRecord, setDrawerRecord] = useState<EvidenceRecord | null>(null);
-  const openDrawer = useCallback((row: EvidenceRecord) => {
-    setDrawerRecord(row);
-  }, []);
-  const closeDrawer = useCallback(() => setDrawerRecord(null), []);
+  // #2137 — a row click opens the evidence detail page, which reads the
+  // full record (payload included) from GET /v1/evidence/{id}.
+  const openDetail = useCallback(
+    (row: EvidenceRecord) => {
+      router.push(`/evidence/${encodeURIComponent(row.evidence_id)}`);
+    },
+    [router],
+  );
 
   // Hash-copy feedback. Tracks the recently-copied content_hash so the
   // cell can show a brief "Copied!" affordance.
@@ -831,16 +823,16 @@ function EvidencePageInner() {
           columns={columns}
           rows={records}
           rowKey={(row) => row.evidence_id}
-          onRowClick={openDrawer}
+          onRowClick={openDetail}
           emptyFallback={noRecordsEmptyState}
           // Slice 281 — collapse to a card stack at `< md`. The
           // evidence ledger renders 6 columns (observed / kind /
           // result / source / scope / hash) which horizontal-scrolls
           // at 375px. The card variant stacks the provenance label/
           // value pairs vertically so the operator can scan the
-          // ledger one-handed on mobile. The row-click `openDrawer`
+          // ledger one-handed on mobile. The row-click `openDetail`
           // handler still fires (the card carries the same handler)
-          // so the full-record dialog continues to work. Desktop UX
+          // so the row still opens the evidence detail page. Desktop UX
           // is unchanged at `≥ md` (P0-281-1).
           mobileMode="cards"
         />
@@ -860,84 +852,6 @@ function EvidencePageInner() {
           />
         ) : null}
       </ListPage>
-
-      {/* Row-detail drawer — opens on row click, shows the full record
-          JSON pretty-printed. Per slice 099 AC-7 / decision D3: simpler
-          than a per-record page stub, no orphan route. */}
-      <Dialog
-        open={drawerRecord !== null}
-        onOpenChange={(open) => {
-          if (!open) closeDrawer();
-        }}
-      >
-        <DialogPortal>
-          <DialogContent
-            className="max-w-3xl"
-            data-testid="evidence-row-drawer"
-          >
-            <DialogHeader>
-              <DialogTitle>
-                Evidence record
-                {drawerRecord?.demo ? (
-                  <DemoBadge testId="evidence-drawer-demo" />
-                ) : null}
-              </DialogTitle>
-              <DialogDescription>
-                {drawerRecord
-                  ? `${drawerRecord.evidence_kind ?? "(no kind)"} · observed ${
-                      drawerRecord.observed_at
-                    }`
-                  : ""}
-              </DialogDescription>
-            </DialogHeader>
-            {drawerRecord ? (
-              <div className="mt-2 space-y-3">
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Full content hash
-                  </div>
-                  <div
-                    className="font-mono text-xs break-all"
-                    data-testid="evidence-drawer-full-hash"
-                  >
-                    {drawerRecord.content_hash}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Result
-                  </div>
-                  <div
-                    className="font-mono text-xs"
-                    data-testid="evidence-drawer-result"
-                  >
-                    {drawerRecord.result}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Scope cell
-                  </div>
-                  <div className="font-mono text-xs break-all">
-                    {drawerRecord.scope_cell ?? "—"}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground mb-1">
-                    Source provenance
-                  </div>
-                  <pre
-                    className="font-mono text-xs bg-muted/40 rounded p-3 overflow-x-auto"
-                    data-testid="evidence-drawer-source-json"
-                  >
-                    {prettyJSON(drawerRecord.source)}
-                  </pre>
-                </div>
-              </div>
-            ) : null}
-          </DialogContent>
-        </DialogPortal>
-      </Dialog>
     </>
   );
 }
