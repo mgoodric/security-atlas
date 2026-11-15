@@ -36,47 +36,35 @@ func TestNeedsReanchoring2176_SameAdmitSetAsControlList(t *testing.T) {
 		t.Fatalf("needs-reanchoring derives %s on %s, want read on controls", flagged.Action, flagged.Resource.Type)
 	}
 
+	// Each role gets the same answer as the control list, and the explicit
+	// answer below: every role that reads controls (auditor and viewer
+	// included) is admitted; no role is denied.
 	for _, c := range []struct {
 		name  string
 		roles []authz.Role
+		want  bool
 	}{
-		{"admin", []authz.Role{authz.RoleAdmin}},
-		{"grc_engineer", []authz.Role{authz.RoleGRCEngineer}},
-		{"auditor", []authz.Role{authz.RoleAuditor}},
-		{"control_owner", []authz.Role{authz.RoleControlOwner}},
-		{"viewer", []authz.Role{authz.RoleViewer}},
-		{"no_role", []authz.Role{}},
+		{"admin", []authz.Role{authz.RoleAdmin}, true},
+		{"grc_engineer", []authz.Role{authz.RoleGRCEngineer}, true},
+		{"auditor", []authz.Role{authz.RoleAuditor}, true},
+		{"control_owner", []authz.Role{authz.RoleControlOwner}, true},
+		{"viewer", []authz.Role{authz.RoleViewer}, true},
+		{"no_role", []authz.Role{}, false},
 	} {
-		decide := func(in authz.Input) bool {
+		decide := func(in authz.Input) authz.Decision {
 			in.User.Roles = c.roles
 			d, err := e.Decide(context.Background(), in)
 			if err != nil {
 				t.Fatalf("%s: Decide: %v", c.name, err)
 			}
-			return d.Allow
+			return d
 		}
-		if got, want := decide(flagged), decide(list); got != want {
-			t.Errorf("%s: needs-reanchoring allow=%v, control list allow=%v; want the same", c.name, got, want)
+		got, listed := decide(flagged), decide(list)
+		if got.Allow != listed.Allow {
+			t.Errorf("%s: needs-reanchoring allow=%v, control list allow=%v; want the same", c.name, got.Allow, listed.Allow)
 		}
-	}
-	// The read roles named in the ticket review are admitted; no role is not.
-	for _, c := range []struct {
-		role authz.Role
-		want bool
-	}{{authz.RoleAuditor, true}, {authz.RoleViewer, true}} {
-		in := flagged
-		in.User.Roles = []authz.Role{c.role}
-		d, err := e.Decide(context.Background(), in)
-		if err != nil {
-			t.Fatal(err)
+		if got.Allow != c.want {
+			t.Errorf("%s: allow=%v, want %v (reason=%s)", c.name, got.Allow, c.want, got.Reason)
 		}
-		if d.Allow != c.want {
-			t.Errorf("%s: allow=%v, want %v (reason=%s)", c.role, d.Allow, c.want, d.Reason)
-		}
-	}
-	none := flagged
-	none.User.Roles = []authz.Role{}
-	if d, _ := e.Decide(context.Background(), none); d.Allow {
-		t.Error("no role: allowed, want denied")
 	}
 }

@@ -9,7 +9,9 @@
 //   * an empty list (every control re-anchored) -> no banner, and the list
 //     page says nothing needs re-anchoring;
 //   * a 403 (a role that cannot read controls) -> no banner, the same role
-//     filter as the control list.
+//     filter as the control list;
+//   * any other failure (500) -> an inline error on the dashboard and the
+//     list page, never an empty state (#2222).
 //
 // The Postgres-backed path (RLS, pinned and rebindable controls excluded,
 // re-uploading on a current anchor clears the row) is covered by
@@ -17,11 +19,15 @@
 
 import type { Page } from "@playwright/test";
 
+import type { NeedsReanchoringResponse } from "../lib/api/reanchoring";
+
 import { expect, test } from "./fixtures";
 
 const ROUTE = "**/api/controls/needs-reanchoring";
 
-const flagged = {
+const empty: NeedsReanchoringResponse = { controls: [], count: 0 };
+
+const flagged: NeedsReanchoringResponse = {
   controls: [
     {
       id: "00000000-0000-4000-8000-000000002176",
@@ -94,7 +100,7 @@ test.describe("SCF re-anchoring warning", () => {
   test("nothing left to re-anchor: no banner, and the list says so", async ({
     authedPage: page,
   }) => {
-    await mockList(page, 200, { controls: [], count: 0 });
+    await mockList(page, 200, empty);
     const read = page.waitForResponse(
       (r) => r.url().includes("/api/controls/needs-reanchoring") && r.ok(),
     );
@@ -118,5 +124,22 @@ test.describe("SCF re-anchoring warning", () => {
     expect((await read).status()).toBe(403);
     await expect(page.getByTestId("program-dashboard")).toBeVisible();
     await expect(page.getByTestId("reanchoring-banner")).toHaveCount(0);
+    await expect(page.getByTestId("reanchoring-banner-error")).toHaveCount(0);
+  });
+
+  test("a failed read (500) shows an inline error, not an empty state", async ({
+    authedPage: page,
+  }) => {
+    await mockList(page, 500, { error: "upstream error" });
+    await page.goto("/dashboard");
+    await expect(page.getByTestId("reanchoring-banner-error")).toBeVisible();
+    await expect(page.getByTestId("reanchoring-banner-error")).toContainText(
+      "upstream error",
+    );
+    await expect(page.getByTestId("reanchoring-banner")).toHaveCount(0);
+
+    await page.goto("/controls/needs-reanchoring");
+    await expect(page.getByTestId("needs-reanchoring-error")).toBeVisible();
+    await expect(page.getByTestId("needs-reanchoring-empty")).toHaveCount(0);
   });
 });

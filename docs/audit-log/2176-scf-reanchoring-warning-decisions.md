@@ -20,7 +20,8 @@ A separate "pinned" list was not added: no ticket asks for it, and the upgrade o
 - **Route:** `GET /v1/controls/needs-reanchoring`, a literal segment registered next to `/v1/controls/export`, ahead of the `/v1/controls/{id}/...` patterns.
 - **Authz:** `BuildInput` derives `read` on `controls`, the same OPA decision as `GET /v1/controls`. `internal/authz/needs_reanchoring_2176_test.go` checks that every role (admin, grc_engineer, auditor, control_owner, viewer, none) gets the same answer for both paths. Auditors and viewers are admitted, and a caller with no role is denied. No new rego.
 - **Tenancy:** RLS through `control.Store.inTx` (the tenant GUC), plus the explicit `tenant_id` argument the query already takes. The integration test drives the handler through the non-owner app role. It checks that one tenant's flagged control is not in another tenant's list.
-- **Role filter on the count:** the banner's count is the length of the list this same read returns, so it goes through the same gate. A 403 hides the banner (`retry: false`, no error state), the same way a role that cannot read controls sees no control list.
+- **What an auditor or viewer can see:** `GET /v1/controls` filters by tenant and by nothing else. No role sees a subset of the tenant's controls; ownership checks gate writes such as attestations, not reads. So the same OPA decision on `read`/`controls` plus the same RLS gives every admitted role exactly the controls it can already read. That is why the authz test checks the decision for each role, auditor and viewer included, and does not run a per-role row test. If a role-scoped row filter is ever added to the control list, this endpoint has to adopt it too.
+- **Role filter on the count:** the banner's count is the length of the list this same read returns, so it goes through the same gate. A 401 or 403 hides the banner, the same way a role that cannot read controls sees no control list. Any other failure shows an inline error (#2222), on the dashboard and on the list page, so a failed read never passes for "nothing to re-anchor".
 
 ## D4 — The BFF is `/api/controls/needs-reanchoring`, not `/api/dashboard/...`
 
@@ -30,7 +31,8 @@ The dashboard's first load is prefetched server-side, and `dashboard-server-comp
 
 - **Placement and role:** the banner sits at the top of the dashboard's PageShell body, above framework posture. It renders as an `Alert` with `role="status"` rather than the component's default `role="alert"`. It is a standing condition seen on page load, not an interruption, so it is announced politely.
 - **Copy:** the title is "N control(s) need re-anchoring". The description says why it matters (no framework credit) and names the target release when there is one. The link reads "Review the control(s)".
-- **When it shows:** never during loading, on an error, or at zero.
+- **When it shows:** never during loading, at zero, or on a 401/403. Any other error renders a destructive inline Alert instead of the banner. Both reads use `retry: false`, so the error shows at once rather than after the default retries.
+- **Kept as is after review:** the response carries `count` next to `controls`, matching `GET /v1/controls`'s envelope; the web reads the array length. The BFF reuses `dashboardProxy`, a generic cookie-to-bearer forwarder, rather than adding a second copy of it.
 - **List page:** `/controls/needs-reanchoring` (PageShell) shows the control (linked to its detail page), its bundle, its legacy anchor `code@release` with that anchor's title, and the remap note. It has its own document title for the route sweep.
 
 ## D6 — "Cleared once re-anchored" needs no new state

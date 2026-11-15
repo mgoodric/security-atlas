@@ -30,6 +30,9 @@ export default function NeedsReanchoringPage() {
   const q = useQuery({
     queryKey: ["controls", "needs-reanchoring"],
     queryFn: fetchControlsNeedingReanchoring,
+    // Same query as the dashboard banner; a failed read shows the inline
+    // error at once rather than after the default retries.
+    retry: false,
   });
 
   return (

@@ -128,9 +128,11 @@ func legacyRow(r dbx.ListControlsOnLegacySCFAnchorsRow) ControlOnLegacyAnchor {
 type Outcome int
 
 const (
+	// outcomeUnknown is the zero value, returned only with an error.
+	outcomeUnknown Outcome = iota
 	// OutcomeRebindable: the current release has the same code with the
 	// same title, so the control can move there in place.
-	OutcomeRebindable Outcome = iota
+	OutcomeRebindable
 	// OutcomeNeedsReanchoring: the code is gone or now means something
 	// else, or the stored manifest does not parse; a person re-anchors it.
 	OutcomeNeedsReanchoring
@@ -162,7 +164,7 @@ func Classify(r dbx.ListControlsOnLegacySCFAnchorsRow) (ControlOnLegacyAnchor, O
 	}
 	note, err := ReanchorNote(r)
 	if err != nil {
-		return ControlOnLegacyAnchor{}, 0, err
+		return ControlOnLegacyAnchor{}, outcomeUnknown, err
 	}
 	row.Note = note
 	return row, OutcomeNeedsReanchoring, nil
