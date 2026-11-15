@@ -29,6 +29,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { use, useMemo, useState } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -199,44 +200,47 @@ export default function ComponentDefinitionDetailPage({
 
   if (detailQ.isLoading) {
     return (
-      <div className="space-y-3" data-testid="component-definition-loading">
-        <Skeleton className="h-8 w-1/3" />
+      <PageShell
+        title={<Skeleton className="inline-block h-8 w-64 align-middle" />}
+        bodyClassName="space-y-3"
+        data-testid="component-definition-loading"
+      >
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-24 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (detailQ.isError || !detailQ.data) {
     return (
-      <Alert variant="destructive" data-testid="component-definition-error">
-        Could not load this component-definition.
-      </Alert>
+      <PageShell title="Vendor Claims">
+        <Alert variant="destructive" data-testid="component-definition-error">
+          Could not load this component-definition.
+        </Alert>
+      </PageShell>
     );
   }
 
   const d = detailQ.data;
 
   return (
-    <div className="space-y-6" data-testid="component-definition-detail">
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold">
-          {d.source_label || d.catalog_title || d.id}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {d.catalog_title} · OSCAL {d.oscal_version} · imported by{" "}
-          {d.imported_by}
-        </p>
-        <p
-          className="text-xs text-muted-foreground"
-          data-testid="vendor-claim-disclaimer"
-        >
-          Every row below is a vendor assertion, not platform-verified evidence.
-          Accepting a claim credits the vendor&apos;s statement; it does not
-          satisfy a control on its own.
-        </p>
-      </header>
-
+    <PageShell
+      title={d.source_label || d.catalog_title || d.id}
+      subtitle={
+        <>
+          <p>
+            {d.catalog_title} · OSCAL {d.oscal_version} · imported by{" "}
+            {d.imported_by}
+          </p>
+          <p className="mt-1 text-xs" data-testid="vendor-claim-disclaimer">
+            Every row below is a vendor assertion, not platform-verified
+            evidence. Accepting a claim credits the vendor&apos;s statement; it
+            does not satisfy a control on its own.
+          </p>
+        </>
+      }
+      data-testid="component-definition-detail"
+    >
       {actionError && (
         <Alert variant="destructive" data-testid="disposition-error">
           {actionError}
@@ -377,7 +381,7 @@ export default function ComponentDefinitionDetailPage({
           ))}
         </ul>
       )}
-    </div>
+    </PageShell>
   );
 }
 

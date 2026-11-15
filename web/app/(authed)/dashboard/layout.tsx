@@ -63,7 +63,7 @@ import { getQueryClient } from "@/lib/queryClient";
 // ATLAS-010 / AC-7 — page-specific `<title>` for /dashboard, matching the
 // "<Page> · security-atlas" convention /settings established (slice 248).
 export const metadata: Metadata = {
-  title: "Dashboard · security-atlas",
+  title: "Dashboard",
 };
 
 import {

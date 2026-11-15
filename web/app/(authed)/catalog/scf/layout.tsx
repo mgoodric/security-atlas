@@ -8,7 +8,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Catalog · security-atlas",
+  title: "Catalog",
 };
 
 export default function CatalogScfLayout({

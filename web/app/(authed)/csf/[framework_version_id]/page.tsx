@@ -16,6 +16,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "next/navigation";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -79,33 +80,30 @@ export default function CsfAssessmentPage() {
 
   if (error instanceof NotCsfVersion) {
     return (
-      <div className="space-y-2" data-testid="csf-not-found">
-        <h1 className="text-2xl font-semibold">Assessment not found</h1>
-        <p className="text-muted-foreground text-sm">
-          This framework version is not a NIST CSF version, so it has no CSF
-          assessment.
-        </p>
-      </div>
+      <PageShell
+        title="Assessment not found"
+        subtitle="This framework version is not a NIST CSF version, so it has no CSF assessment."
+        data-testid="csf-not-found"
+      />
     );
   }
 
   return (
-    <div className="space-y-6" data-testid="csf-assessment">
-      <div>
-        {data ? (
-          <h1 className="text-2xl font-semibold" data-testid="csf-title">
+    <PageShell
+      title={
+        data ? (
+          <span data-testid="csf-title">
             {data.framework_name} {data.framework_version} Assessment
-          </h1>
+          </span>
         ) : isLoading ? (
-          <Skeleton className="h-8 w-64" />
+          <Skeleton className="inline-block h-8 w-64 align-middle" />
         ) : (
-          <h1 className="text-2xl font-semibold">CSF Assessment</h1>
-        )}
-        <p className="text-muted-foreground text-sm">
-          Tier rating and Current-vs-Target profile gap for this CSF version.
-        </p>
-      </div>
-
+          "CSF Assessment"
+        )
+      }
+      subtitle="Tier rating and Current-vs-Target profile gap for this CSF version."
+      data-testid="csf-assessment"
+    >
       <Card data-testid="csf-tier-card">
         <CardHeader>
           <CardTitle>Tier rating</CardTitle>
@@ -200,6 +198,6 @@ export default function CsfAssessmentPage() {
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }

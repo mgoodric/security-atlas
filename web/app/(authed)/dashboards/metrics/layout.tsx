@@ -8,7 +8,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Metrics · security-atlas",
+  title: "Metrics",
 };
 
 export default function MetricsLayout({
