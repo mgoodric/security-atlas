@@ -33,14 +33,16 @@ function dateParts(iso: string): { month: string; day: string } {
 }
 
 // typeVariant maps a calendar event onto the shadcn Badge variants. An
-// overdue item or an expiring exception (an open accepted-risk window)
-// is destructive; an audit milestone is secondary; the rest are neutral
+// overdue item is destructive (#2091: red is kept for failing and overdue
+// states); an expiring exception (an open accepted-risk window) is a
+// warning; an audit milestone is secondary; the rest are neutral
 // "outline" to keep visual weight even across the feed.
 function typeVariant(
   type: string,
   status: string,
-): "destructive" | "secondary" | "outline" {
-  if (status === "overdue" || type === "exception") return "destructive";
+): "destructive" | "warning" | "secondary" | "outline" {
+  if (status === "overdue") return "destructive";
+  if (type === "exception") return "warning";
   if (type === "audit") return "secondary";
   return "outline";
 }
