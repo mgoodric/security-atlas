@@ -34,9 +34,9 @@ export default function AdminDemoPage() {
       width="reading"
       subtitle={
         <>
-          Reseed and tear down the demo tenant on this deployment. Backed by
-          slice 205&apos;s <code className="rounded bg-muted px-1">demo</code>{" "}
-          CLI; surfaced here for one-click operator access.
+          Reseed and tear down the demo tenant on this deployment. These do the
+          same as the <code className="rounded bg-muted px-1">demo</code>{" "}
+          command-line tool, in one click.
         </>
       }
     >
