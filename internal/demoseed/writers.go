@@ -195,6 +195,12 @@ func writeControls(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) 
 
 // writeRisks bulk-inserts the risks fixture set + their risk_control_links.
 func writeRisks(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
+	// An in-place seed writes into an existing tenant, which may predate its
+	// categories. Seeding them is idempotent, and the category_id lookup
+	// below needs them.
+	if _, err := tx.Exec(ctx, `SELECT seed_risk_categories($1)`, fs.tenant.ID); err != nil {
+		return 0, fmt.Errorf("demoseed: seed risk categories: %w", err)
+	}
 	for _, r := range fs.risks {
 		// org_unit_id + themes are slice-052 columns the slice-678 seed
 		// populates so /risks/hierarchy renders (org tree needs the
@@ -202,14 +208,19 @@ func writeRisks(ctx context.Context, tx pgx.Tx, fs *fixtureSet) (int, error) {
 		// non-NULL org_unit_id AND a non-empty themes array). org_unit_id
 		// is nil-safe: nullableUUID passes NULL when the org tree is empty.
 		if _, err := tx.Exec(ctx,
+			// category_id is the tenant's own category, looked up by slug
+			// (#1816). The enum is still dual-written until the contract
+			// step drops it; the sync trigger rejects a mismatched pair.
 			`INSERT INTO risks
-			 (id, tenant_id, title, description, category, treatment, treatment_owner,
+			 (id, tenant_id, title, description, category, category_id, treatment, treatment_owner,
 			  inherent_score, residual_score, review_due_at, org_unit_id, themes)
-			 VALUES ($1, $2, $3, $4, $5::risk_category, $6::risk_treatment, $7, $8::jsonb, $9::jsonb, $10, $11, $12)`,
+			 VALUES ($1, $2, $3, $4, $5::risk_category,
+			         (SELECT id FROM org_risk_categories WHERE tenant_id = $2 AND slug = $13),
+			         $6::risk_treatment, $7, $8::jsonb, $9::jsonb, $10, $11, $12)`,
 			r.ID, fs.tenant.ID, r.Title, r.Description,
 			r.Category, r.Treatment, r.TreatmentOwner,
 			r.InherentScoreJ, r.ResidualScoreJ, r.ReviewDueAt,
-			nullableUUID(r.OrgUnitID), r.Themes,
+			nullableUUID(r.OrgUnitID), r.Themes, r.Category,
 		); err != nil {
 			return 0, fmt.Errorf("demoseed: insert risk %s: %w", r.Title, err)
 		}

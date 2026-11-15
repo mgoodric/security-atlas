@@ -33,6 +33,7 @@ The graph-traversal result that answers "what is the relationship between a fram
 - **Strength-aware** — each `(requirement, anchor)` row carries the STRM `relationship_type` + `strength` from `fw_to_scf_edges` (canvas §3.2). The handler returns these verbatim; weighted-sum coverage is computed upstream (slice 012's dashboard/eval territory).
 - **Effectiveness-free in v1** — the `effectiveness` field that canvas §3.3 mentions for the dashboard is **deferred to slice 012**. Slice 008 returns anchors + controls, not effectiveness numbers. The wire format omits the field rather than emitting null, so slice 012 can add it without a breaking change.
 - **`no_relationship` edges filtered out** — STRM stores "confirmed no overlap" as data (canvas §3.2). Coverage responses exclude these; they're surfaced only in the mapping-inspector UI (canvas §10), not the coverage view.
+- **Catalog edges plus the tenant's overlay edges** — edges are read through `effective_fw_to_scf_edges`: the catalog's `fw_to_scf_edges` plus the caller tenant's **active** `fw_to_scf_overlay_edges` (#1798). Every coverage view (dashboard posture and trend, dashboard export, MCP program reads, the three routes below) counts a requirement reached through an overlay edge. Each edge row says where it came from in `origin`: `catalog`, or `overlay` for the organisation's own mapping. A retired overlay edge, or another tenant's, never counts.
 
 Coverage queries hit three routes:
 
@@ -54,7 +55,7 @@ How well a control's SCF anchor covers what the control does. Stored on the cont
 - **`partial`** — the anchor covers the control's intent only in part.
 - **`none`** — no SCF control fits. The anchor is the nearest catch-all (SOC 2 CC1 audit committee independence on GOV-09, for example), or the control has no anchor at all. This is ADR 0013's honest "unmapped", and the only case where `scf_anchor_id` may be absent.
 
-A non-exact fit requires **`anchor_fit_note`**, which says what the anchor misses. The fit is a label, not a coverage input: framework credit still flows only through the anchor (see Coverage above), so an unanchored `none` control satisfies no framework requirement until tenant overlay edges (#1735) exist. The user-guide handling is in `docs-site/docs/framework-setup.md` ("Controls with no SCF equivalent").
+A non-exact fit requires **`anchor_fit_note`**, which says what the anchor misses. The fit is a label, not a coverage input: framework credit still flows only through the anchor (see Coverage above), so an unanchored `none` control satisfies no framework requirement. An anchored control can be credited for a requirement its anchor misses through a tenant overlay edge (#1735, #1798). The user-guide handling is in `docs-site/docs/framework-setup.md` ("Controls with no SCF equivalent").
 
 ## Active control (two definitions, on purpose)
 
