@@ -165,8 +165,9 @@ ORDER BY chain.created_at ASC, chain.id ASC;
 -- name: SubmitPolicyForReview :one
 -- Transition: draft -> under_review. Operator action; no role gate.
 -- Also re-submits an under_review policy whose submitter was recorded
--- before #1807 as a session id ('jwt:<token id>'), which approval refuses
--- because it names no person: re-submitting records the person.
+-- before #1807 as a session id ('jwt:<token id>') or a credential id
+-- ('key_<id>'), which approval refuses because it names no person:
+-- re-submitting records the person (#2200).
 UPDATE policies
 SET status = 'under_review',
     submitted_at = now(),
@@ -175,7 +176,8 @@ SET status = 'under_review',
 WHERE tenant_id = $1
   AND id = $2
   AND (status = 'draft'
-       OR (status = 'under_review' AND submitted_by LIKE 'jwt:%'))
+       OR (status = 'under_review'
+           AND (submitted_by LIKE 'jwt:%' OR submitted_by LIKE 'key\_%')))
 RETURNING *;
 
 -- name: ApprovePolicy :one
@@ -277,13 +279,15 @@ INSERT INTO policy_audit_log (
     tenant_id, policy_id, action, actor, source_file,
     historical_approver_name, historical_approved_at, source_url,
     previous_next_review_at, new_next_review_at,
-    policy_title, policy_version
+    policy_title, policy_version,
+    previous_state, new_state
 )
 VALUES (
     sqlc.arg('tenant_id'), sqlc.arg('policy_id'), sqlc.arg('action'), sqlc.arg('actor'), sqlc.arg('source_file'),
     sqlc.narg('historical_approver_name'), sqlc.narg('historical_approved_at'), sqlc.narg('source_url'),
     sqlc.narg('previous_next_review_at'), sqlc.narg('new_next_review_at'),
-    sqlc.narg('policy_title'), sqlc.narg('policy_version')
+    sqlc.narg('policy_title'), sqlc.narg('policy_version'),
+    sqlc.narg('previous_state'), sqlc.narg('new_state')
 )
 RETURNING *;
 
