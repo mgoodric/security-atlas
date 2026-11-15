@@ -149,7 +149,23 @@ export type ApplicabilityDiff = {
   baseline: FrameworkScope | null;
   predicate: { changed: boolean; before: unknown; after: unknown };
   changes: ApplicabilityChange[];
+  // #2214: requirements whose implementation reference alone changed.
+  // Informational, listed apart so the four kinds' counts are unchanged.
+  reference_changes: ReferenceChange[];
 };
+
+export type ReferenceChange = Omit<ApplicabilityChange, "change"> & {
+  change: "reference_changed";
+};
+
+// describeReferenceChange renders a reference-only change as one line:
+// "reference changed: <before> → <after>", "(none)" for an empty side. The
+// reference is org-supplied text and is rendered as text, never a link.
+export function describeReferenceChange(c: ReferenceChange): string {
+  const ref = (side: DecisionSide | null) =>
+    side?.implementation_ref || "(none)";
+  return `reference changed: ${ref(c.before)} → ${ref(c.after)}`;
+}
 
 export const CHANGE_LABELS: Record<ApplicabilityChangeKind, string> = {
   added: "Added",

@@ -28,6 +28,7 @@ import {
 import {
   ApplicabilityDiff,
   CHANGE_LABELS,
+  describeReferenceChange,
   describeSide,
   summarizeChanges,
 } from "@/lib/api/applicability";
@@ -146,6 +147,29 @@ function DiffBody({ diff }: { diff: ApplicabilityDiff }) {
             ))}
           </TableBody>
         </Table>
+      )}
+
+      {/* #2214: reference-only edits, informational and muted, outside the
+          counts above. The reference is org-supplied: rendered as text. */}
+      {diff.reference_changes.length > 0 && (
+        <ul
+          className="space-y-1 text-xs text-muted-foreground"
+          data-testid="review-diff-reference-changes"
+        >
+          {diff.reference_changes.map((c) => (
+            <li
+              key={c.requirement_id}
+              data-testid={`review-diff-ref-${c.code}`}
+              data-change={c.change}
+              className="break-all"
+            >
+              <span className="font-mono" title={c.title}>
+                {c.code}
+              </span>{" "}
+              {describeReferenceChange(c)}
+            </li>
+          ))}
+        </ul>
       )}
     </>
   );

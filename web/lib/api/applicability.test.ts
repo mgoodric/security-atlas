@@ -4,6 +4,7 @@ import {
   applicabilityQuery,
   buildSoAExportURL,
   defaultRevision,
+  describeReferenceChange,
   describeSide,
   isFrozen,
   soaTitle,
@@ -110,6 +111,35 @@ describe("summarizeChanges", () => {
       decision_changed: 1,
       justification_changed: 0,
     });
+  });
+});
+
+describe("describeReferenceChange", () => {
+  const change = (before: string, after: string) => ({
+    requirement_id: "r",
+    code: "A.5.1",
+    title: "",
+    change: "reference_changed" as const,
+    before: {
+      decision: "applicable" as const,
+      justification: "",
+      implementation_ref: before,
+    },
+    after: {
+      decision: "applicable" as const,
+      justification: "",
+      implementation_ref: after,
+    },
+  });
+  it("names the reference before and after", () => {
+    expect(describeReferenceChange(change("wiki/a", "wiki/b"))).toBe(
+      "reference changed: wiki/a → wiki/b",
+    );
+  });
+  it("marks an empty side as none", () => {
+    expect(describeReferenceChange(change("", "wiki/b"))).toBe(
+      "reference changed: (none) → wiki/b",
+    );
   });
 });
 
