@@ -115,7 +115,7 @@ func okEnv(t *testing.T) {
 func okFlags() runFlags {
 	return runFlags{
 		environment:       "prod",
-		monitorControl:    "scf:MON-01",
+		monitorControl:    "scf:MON-02",
 		siemControl:       "scf:THR-01",
 		siemSignalControl: "scf:IRO-09",
 		firingControl:     "scf:IRO-09",

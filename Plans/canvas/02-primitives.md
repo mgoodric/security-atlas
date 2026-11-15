@@ -32,7 +32,7 @@ erDiagram
 | `scf_id`                              | string          | Canonical SCF code (e.g. `IAC-01`). Optional but strongly recommended.    |
 | `title`                               | string          |                                                                           |
 | `description`                         | text            |                                                                           |
-| `control_family`                      | enum            | SCF taxonomy: AAA, AST, BCD, CFG, CHG, CLD, CPL, CRY, ...                 |
+| `control_family`                      | enum            | SCF taxonomy: AST, BCD, CFG, CHG, CLD, CPL, CRY, ...                      |
 | `implementation_type`                 | enum            | `automated` \| `semi_automated` \| `manual_attested` \| `manual_periodic` |
 | `owner_role`                          | string          | Who owns it (RACI).                                                       |
 | `lifecycle_state`                     | enum            | `draft` → `proposed` → `active` → `deprecated` → `retired`                |

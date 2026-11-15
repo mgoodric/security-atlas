@@ -36,10 +36,11 @@ The `atlas-bootstrap` container imported the SCF catalog on first boot
 (see [Install](install.md#whats-seeded-for-you)). You can confirm:
 
 ```sh
-curl -fsS http://localhost:8080/v1/anchors | jq '.items[0]'
+curl -fsS http://localhost:8080/v1/anchors \
+  -H "Authorization: Bearer $ATLAS_TOKEN" | jq '.anchors[0]'
 ```
 
-You should see a JSON anchor row with `scf_id`, `domain`, and
+You should see a JSON anchor row with `scf_id`, `family`, `name` and
 `description`. If the response is empty, re-run bootstrap:
 
 ```sh
@@ -66,8 +67,9 @@ The import is idempotent — re-running the same file is a no-op.
 Confirm the framework is registered:
 
 ```sh
-curl -fsS http://localhost:8080/v1/frameworks
-# { "frameworks": [ { "slug": "soc2", "name": "SOC 2 (System and Organization Controls 2)", ... } ] }
+curl -fsS http://localhost:8080/v1/frameworks \
+  -H "Authorization: Bearer $ATLAS_TOKEN"
+# { "frameworks": [ { "slug": "soc2", "name": "SOC 2 (System and Organization Controls 2)", "issuer": "AICPA", ... } ] }
 ```
 
 The import registers framework version `2017` with 43 requirements: the
@@ -81,28 +83,40 @@ Pick a SOC 2 requirement and traverse to its SCF anchors + your tenant's
 controls:
 
 ```sh
-curl -fsS http://localhost:8080/v1/requirements/soc2:2017:CC6.1/coverage | jq
+curl -fsS http://localhost:8080/v1/requirements/soc2:2017:CC6.1/coverage \
+  -H "Authorization: Bearer $ATLAS_TOKEN" | jq
 ```
 
 A shape you should see:
 
 ```json
 {
-  "requirement": { "framework_version_id": "...", "code": "CC6.1" },
+  "requirement": { "id": "...", "code": "CC6.1", "title": "Logical access controls", ... },
   "anchors": [
     {
-      "scf_id": "IAC-37",
-      "edge": { "relationship_type": "subset_of", "strength": 8 },
-      "controls": [
-        { "id": "...", "title": "Identity and access management baseline" }
-      ]
+      "scf_id": "IAC-01",
+      "name": "Identification & Authentication Policy",
+      "relationship_type": "subset_of",
+      "strength": 0.9,
+      "origin": "catalog",
+      ...
     }
-  ]
+  ],
+  "controls": [
+    {
+      "id": "...",
+      "bundle_id": "soc2_cc6_1_logical_access_baseline",
+      "scf_id": "IAC-01",
+      "title": "Identity provider enforces MFA on all org-managed applications",
+      ...
+    }
+  ],
+  ...
 }
 ```
 
-Read this as: **CC6.1** is a subset of **IAC-37**; your tenant has one
-control anchored to IAC-37; therefore CC6.1 is satisfied through that
+Read this as: **CC6.1** is a subset of **IAC-01**; your tenant has one
+control anchored to IAC-01; therefore CC6.1 is satisfied through that
 control. No CC6.1-specific control was ever needed.
 
 ## What "no relationship" means
@@ -142,6 +156,10 @@ Recommended handling:
    control satisfies none. For an anchored control, a tenant overlay
    edge (`atlas-cli mappings overlay add`) maps a requirement its anchor
    misses to that anchor for your organisation, and coverage counts it.
+   Many edges at once load from a CSV or YAML file with
+   `atlas-cli mappings overlay import <file>` (nothing is written if
+   any row is bad unless you pass `--partial`), and
+   `atlas-cli mappings overlay export` writes them back out as CSV.
 
 ```yaml
 bundle_schema_version: "1"

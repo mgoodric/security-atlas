@@ -87,7 +87,7 @@ func okRunFlags() runFlags {
 	return runFlags{
 		slackToken:         "xoxb-test-token",
 		memberControlID:    "scf:IAC-01",
-		auditControlID:     "scf:MON-01",
+		auditControlID:     "scf:MON-02",
 		retentionControlID: "scf:DCH-01",
 	}
 }
@@ -238,7 +238,7 @@ func TestDoRun_PushError(t *testing.T) {
 func TestBuildAuditRecord_UsesEventTimestamp(t *testing.T) {
 	t.Parallel()
 	e := slackcollect.AuditEvent{ID: "e9", Action: "role_change", DateCreate: 1700000000}
-	rec, err := buildAuditRecord(e, slackauth.Identity{TeamID: "T1"}, "scf:MON-01")
+	rec, err := buildAuditRecord(e, slackauth.Identity{TeamID: "T1"}, "scf:MON-02")
 	if err != nil {
 		t.Fatalf("buildAuditRecord: %v", err)
 	}
