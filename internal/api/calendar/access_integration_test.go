@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/calendar"
@@ -223,4 +224,56 @@ func TestCalendar_PolicyAckExpiries(t *testing.T) {
 	comingUp := calendarEvents(t, testServer(t, app, fx.A.ID),
 		"/v1/calendar?from="+ymd(now)+"&to="+ymd(now.AddDate(0, 0, 13)))
 	wantEvent(t, comingUp, fx.A.AckDueSoon.String(), "policy_ack", "due-soon")
+}
+
+// TestCalendar_OffboardingEventsFollowOPA (#2215): an open offboarding
+// checklist is a calendar event of type `offboarding` linked to the
+// checklist, the type filter can name it, and it reaches only roles that
+// may read personnel security, since its title carries the departing
+// person's work email.
+func TestCalendar_OffboardingEventsFollowOPA(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	now := time.Now().UTC()
+	tenant := dbtest.SeedTenant(t, admin, "personnel_security_checklists")
+	checklist := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO personnel_security_checklists (
+			id, tenant_id, workflow_kind, source, person_external_id,
+			person_work_email, due_at, status
+		)
+		VALUES ($1, $2, 'offboarding', 'manual', 'emp-2215',
+		        'departing-2215@test.example', $3, 'open')
+	`, checklist, tenant, now.Add(3*24*time.Hour)); err != nil {
+		t.Fatalf("seed offboarding checklist: %v", err)
+	}
+	window := "from=" + ymd(now.AddDate(0, 0, -7)) + "&to=" + ymd(now.AddDate(0, 0, 14))
+
+	cases := []struct {
+		role authz.Role
+		want int
+	}{
+		{authz.RoleAuditor, 0},
+		{authz.RoleControlOwner, 0},
+		{authz.RoleViewer, 0},
+		{authz.RoleGRCEngineer, 1},
+		{authz.RoleAdmin, 1},
+	}
+	for _, tc := range cases {
+		t.Run(string(tc.role), func(t *testing.T) {
+			for _, q := range []string{"?" + window, "?types=offboarding&" + window} {
+				events := calendarAs(t, tenant, tc.role, q)
+				if got := countType(events, "offboarding"); got != tc.want {
+					t.Fatalf("%s: offboarding events = %d, want %d", q, got, tc.want)
+				}
+				if tc.want == 0 {
+					continue
+				}
+				ev := events[checklist.String()]
+				if ev["related_entity_kind"] != "personnel_security_checklist" ||
+					ev["related_entity_id"] != checklist.String() {
+					t.Errorf("%s: offboarding event = %v", q, ev)
+				}
+			}
+		})
+	}
 }
