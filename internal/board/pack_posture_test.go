@@ -258,6 +258,42 @@ func TestBuildPackHTML_ScopeNotSetCard(t *testing.T) {
 	}
 }
 
+// #2112: the share covered only by exception is carried from the posture
+// row and reported beside the coverage, in the narrative and the PDF card.
+// A framework with no exception coverage says nothing about exceptions.
+func TestPackPostures_CoveredByExceptionIsReportedSeparately(t *testing.T) {
+	t.Parallel()
+	sp := newDraftPack()
+	posture := sp.Content.Sections[SectionPosture]
+	posture.Data.Frameworks = packPostures([]frameworkPostureRow{
+		{Name: "SOC 2", Version: "2017", CoveragePct: 75, ExceptionPct: 25, TrendDelta90d: 25, ScopeActivated: true, TrendHistory: true},
+		{Name: "ISO 27001", Version: "2022", CoveragePct: 50, TrendDelta90d: 0, ScopeActivated: true, TrendHistory: true},
+	})
+	if got := posture.Data.Frameworks[0].CoveredByExceptionPct; got != 25 {
+		t.Fatalf("CoveredByExceptionPct = %v, want 25", got)
+	}
+	sp.Content.Sections[SectionPosture] = posture
+
+	text, err := renderSectionNarrative(posture, "2026-09-30")
+	if err != nil {
+		t.Fatalf("renderSectionNarrative: %v", err)
+	}
+	if want := "SOC 2 2017 at 75% coverage (25% of requirements covered by exception, in-progress"; !strings.Contains(text, want) {
+		t.Errorf("posture narrative missing %q:\n%s", want, text)
+	}
+	if want := "ISO 27001 2022 at 50% coverage (at-risk,"; !strings.Contains(text, want) {
+		t.Errorf("posture narrative missing %q:\n%s", want, text)
+	}
+
+	html := buildPackHTML(sp)
+	if !strings.Contains(html, `<div class="muted">25% covered by exception</div>`) {
+		t.Errorf("PDF HTML missing the covered-by-exception line")
+	}
+	if strings.Count(html, "covered by exception</div>") != 1 {
+		t.Errorf("PDF HTML reports exception coverage on a framework that has none")
+	}
+}
+
 // Top-risk residuals in the pack are the register's: the same field order
 // (score, then severity, then likelihood x impact — risk.residualMagnitude
 // and web/app/(authed)/risks/filters.ts residualSeverity), on the 1..25

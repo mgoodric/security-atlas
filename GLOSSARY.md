@@ -108,8 +108,10 @@ States (canvas §6.3):
 - `requested` — initial state. Set by `POST /v1/exceptions`.
 - `approved` — governance approval recorded. `approved_by` populated. **Approval is not the same as activation** — the effect doesn't take hold until `active`.
 - `denied` — terminal. To revisit, file a new exception.
-- `active` — the effect is in force. A control × scope cell with an active exception evaluates as `excepted` (not `fail`) in downstream dashboards (slice 020 consumer).
-- `expired` — terminal. Set by daily auto-expiry job when `expires_at < now()` for a row in `active`. Reverts control evaluation to normal.
+- `active` — the effect is in force from `effective_from` until `expires_at`. The evaluation engine records the result `excepted` for every control × scope cell the predicate covers, whatever the evidence says (#2112). The whole-tenant evaluation (a control that resolves to no scope cells) is covered only by a predicate that matches every cell.
+- `expired` — terminal. Set by daily auto-expiry job when `expires_at < now()` for a row in `active`. The engine stops honouring an exception at `expires_at` without waiting for the job, so the next evaluation is the normal result.
+
+**`excepted`** is a control evaluation result beside `pass`, `fail`, `na` and `inconclusive`. It is never a pass: it is not displayed as one (the controls list reads "Excepted") and it is not counted as one in drift, effectiveness, residual risk or any pass count. In a worst-state rollup across cells or controls it ranks below `fail` and `inconclusive` and above `pass`. Framework posture counts an excepted control as covered (now and in the 90-day baseline) and reports the share of requirements covered only by exception separately, as `covered_by_exception_pct`. Evidence can never carry it (`evidence_records_result_not_excepted`).
 
 Allowed transitions:
 
@@ -256,7 +258,7 @@ No other transitions. `superseded` is terminal for that row; revisions continue 
 | `incident-response-plan.md`      | Incident Response Plan      | `IRO-04`, `IRO-01`, `IRO-02` |
 | `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-02`, `CHG-04` |
 
-Exactly 5 — never 6, never 4 (constitutional anti-pattern: "policy template libraries dressed as a feature"). The CLI `atlas-cli policy seed-stock --tenant-id=...` loads these markdown files, resolves the SCF anchor codes to UUIDs via `scf_anchors`, and INSERTs them as `draft` rows with `source_attribution = 'community_draft'`. Missing anchors warn + drop the link (the warning surfaces under AC-7 if all links resolve empty).
+Exactly 5 — never 6, never 4 (constitutional anti-pattern: "policy template libraries dressed as a feature"). The CLI `atlas-cli policy seed-stock --tenant-id=...` loads these markdown files, resolves the SCF anchor codes in the SCF release each file declares (`scf_release`, #1772) to the controls bound to those anchors, and INSERTs them as `draft` rows with `source_attribution = 'community_draft'`. Missing anchors warn + drop the link (the warning surfaces under AC-7 if all links resolve empty).
 
 ## AuditPeriod (slice 028)
 

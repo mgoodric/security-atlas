@@ -259,6 +259,36 @@ VALUES (
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================
+-- #2112 — an excepted evaluation for control 3
+-- ============================================================
+-- The engine writes `excepted` when an active exception covers the cell;
+-- this row is the shape it writes for a control with no evidence (the
+-- whole-tenant NULL cell, no_evidence, zero in-window records). The spec
+-- asserts the State pill reads "Excepted" and never "pass". Fixed id and
+-- evaluated_at keep the fixture idempotent; no other controls-list
+-- assertion reads the State column.
+INSERT INTO control_evaluations (
+    id, tenant_id, control_id, scope_cell_id, eval_run_id, evaluated_at,
+    result, freshness_status, evidence_count_in_window, last_observed_at,
+    freshness_class, trigger
+)
+VALUES (
+    'e2e21120-0000-0000-0000-0000000e0001',
+    '00000000-0000-0000-0000-00000000d3a0',
+    'e2e74300-0000-0000-0000-00000000a003',
+    NULL,
+    'e2e21120-0000-0000-0000-0000000e0002',
+    '2026-11-01T00:00:00Z',
+    'excepted',
+    'no_evidence',
+    0,
+    NULL,
+    'monthly',
+    'manual'
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- ============================================================
 -- Determinism reset — saved_views + control_owner_assignments
 -- ============================================================
 -- NOT ON CONFLICT DO NOTHING: these DELETEs are the reset that makes the

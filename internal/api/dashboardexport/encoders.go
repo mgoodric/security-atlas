@@ -400,6 +400,7 @@ func frameworkPostureTable(rows []FrameworkPosturePanelRow) ([]string, [][]strin
 		"framework_id",
 		"framework_version",
 		"coverage_pct",
+		"covered_by_exception_pct",
 		"freshness_composite",
 		"trend_delta_90d",
 	}
@@ -409,6 +410,7 @@ func frameworkPostureTable(rows []FrameworkPosturePanelRow) ([]string, [][]strin
 			r.FrameworkID,
 			r.FrameworkVersion,
 			strconv.FormatFloat(r.CoveragePct, 'f', -1, 64),
+			strconv.FormatFloat(r.CoveredByExceptionPct, 'f', -1, 64),
 			strconv.FormatFloat(r.FreshnessComposite, 'f', -1, 64),
 			strconv.FormatFloat(r.TrendDelta90d, 'f', -1, 64),
 		}
