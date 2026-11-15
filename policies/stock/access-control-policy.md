@@ -5,7 +5,7 @@ owner_role: tenant_admin
 approver_role: security_lead
 linked_control_ids:
   - IAC-01
-  - IAC-07
+  - IAC-04
   - IAC-22
 acknowledgment_required_roles:
   - employee

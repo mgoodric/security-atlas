@@ -132,7 +132,7 @@ func seedControlPairForHistory(t *testing.T, tenant uuid.UUID, bundleID, baseTit
 			bundle_uploaded_at, bundle_uploaded_by
 		)
 		VALUES (
-			$1, $2, $3, 2, 'IAC-06', $4,
+			$1, $2, $3, 2, 'IAC-37', $4,
 			$5, 'slice 175 v2 active', 'identity-access-management', 'automated',
 			'platform-eng', 'active', 'BU=eng AND env=prod',
 			'fresh', '', 'sha256:slice175-v2',
@@ -153,7 +153,7 @@ func seedControlPairForHistory(t *testing.T, tenant uuid.UUID, bundleID, baseTit
 		)
 		VALUES (
 			$1, $2, $3, 1, $4,
-			'IAC-06', $5, $6, 'slice 175 v1 superseded', 'identity-access-management',
+			'IAC-37', $5, $6, 'slice 175 v1 superseded', 'identity-access-management',
 			'automated', 'platform-eng', 'active', 'BU=eng AND env=prod',
 			'fresh', '', 'sha256:slice175-v1',
 			now() - interval '30 days', 'test-author'

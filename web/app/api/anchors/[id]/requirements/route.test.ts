@@ -33,7 +33,7 @@ import { GET } from "./route";
 const ANCHOR_DETAIL = {
   anchor: {
     id: "00000000-0000-0000-0000-0000000000a1",
-    scf_id: "IAC-06",
+    scf_id: "IAC-37",
     family: "IAC",
     name: "Multi-Factor Authentication",
     description: "",
@@ -44,7 +44,7 @@ const ANCHOR_DETAIL = {
 function reqFor(query: string) {
   return {
     nextUrl: new URL(
-      `http://localhost/api/anchors/IAC-06/requirements${query}`,
+      `http://localhost/api/anchors/IAC-37/requirements${query}`,
     ),
   };
 }
@@ -68,7 +68,7 @@ describe("GET /api/anchors/[id]/requirements", () => {
 
   test("401 when bearer cookie missing", async () => {
     mockCookieGet.mockReturnValue(undefined);
-    const res = await GET(reqFor("") as never, ctxFor("IAC-06") as never);
+    const res = await GET(reqFor("") as never, ctxFor("IAC-37") as never);
     expect(res.status).toBe(401);
     const body = (await res.json()) as { error?: string };
     expect(body.error).toBe("unauthenticated");
@@ -82,11 +82,11 @@ describe("GET /api/anchors/[id]/requirements", () => {
         new Response(JSON.stringify(ANCHOR_DETAIL), { status: 200 }),
       );
 
-    const res = await GET(reqFor("") as never, ctxFor("IAC-06") as never);
+    const res = await GET(reqFor("") as never, ctxFor("IAC-37") as never);
     expect(res.status).toBe(200);
 
     const calledURL = String(fetchSpy.mock.calls[0]?.[0] ?? "");
-    expect(calledURL).toContain("/v1/anchors/IAC-06/requirements");
+    expect(calledURL).toContain("/v1/anchors/IAC-37/requirements");
     expect(calledURL).not.toContain("framework_version");
 
     const init = fetchSpy.mock.calls[0]?.[1] as RequestInit | undefined;
@@ -104,7 +104,7 @@ describe("GET /api/anchors/[id]/requirements", () => {
 
     const res = await GET(
       reqFor("?framework_version=soc2:2017") as never,
-      ctxFor("IAC-06") as never,
+      ctxFor("IAC-37") as never,
     );
     expect(res.status).toBe(200);
 
@@ -122,7 +122,7 @@ describe("GET /api/anchors/[id]/requirements", () => {
 
     const res = await GET(
       reqFor("?framework_version=not-a-valid-pin%20OR%201=1") as never,
-      ctxFor("IAC-06") as never,
+      ctxFor("IAC-37") as never,
     );
     expect(res.status).toBe(200);
 

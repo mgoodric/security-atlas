@@ -78,7 +78,7 @@ func Lookup(ctx context.Context, q Querier, label string) (Release, error) {
 }
 
 // Resolve turns (release, ref) into an anchor. ref is an SCF code such as
-// "IAC-06", or an anchor uuid. An empty release means the current one,
+// "IAC-37", or an anchor uuid. An empty release means the current one,
 // except for a uuid ref with no release, which resolves to that anchor in
 // whichever release holds it (the pre-#1770 behaviour for machine-written
 // bundles). A uuid ref with a named release must belong to that release.
