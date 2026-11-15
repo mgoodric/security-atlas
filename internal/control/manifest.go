@@ -21,6 +21,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/google/uuid"
 )
 
 // BundleSchemaVersion is the only accepted manifest schema version in slice
@@ -188,6 +190,14 @@ func (m *Manifest) ValidateStructural() error {
 	}
 	if !bundleIDPattern.MatchString(m.BundleID) {
 		return fmt.Errorf("control bundle: bundle_id %q must match pattern %s", m.BundleID, bundleIDPattern.String())
+	}
+	// #2165: evidence push resolves --control as a control UUID first and
+	// only then as a bundle ID, so a bundle_id uuid.Parse accepts (e.g.
+	// "deadbeef-0000-4000-8000-000000000000" or its 32-hex form) could
+	// never be linked to by bundle ID. Refuse it here rather than let the
+	// evidence land unlinked.
+	if _, err := uuid.Parse(m.BundleID); err == nil {
+		return fmt.Errorf("control bundle: bundle_id %q is UUID-shaped; evidence push reads a UUID as a control id, so this bundle could never be referenced by bundle_id: choose a non-UUID bundle_id", m.BundleID)
 	}
 
 	if m.Title == "" {

@@ -107,6 +107,8 @@ func TestParseDurationDays(t *testing.T) {
 		{in: "90m", want: 90 * time.Minute},
 		{in: "30d", want: 30 * 24 * time.Hour},
 		{in: "1d", want: 24 * time.Hour},
+		{in: "0d", want: 0}, // #2165: zero days is no expiry, like "0"
+		{in: "0h", want: 0},
 		{in: "d", wantErr: true},
 		{in: "1.5d", wantErr: true},
 		{in: "-1d", wantErr: true},
