@@ -393,6 +393,10 @@ func TestFrameworkPosture_AggregatesAcrossVersions(t *testing.T) {
 	if rowA["framework_version"].(string) != "2024" {
 		t.Fatalf("ISC-18: framework A version = %v, want 2024", rowA["framework_version"])
 	}
+	// #2083: the row names its framework, so tiles show name plus version.
+	if rowA["framework_name"] != "Framework fwa" {
+		t.Fatalf("framework A name = %v, want %q", rowA["framework_name"], "Framework fwa")
+	}
 	if cov := rowA["coverage_pct"].(float64); cov != 50.0 {
 		t.Fatalf("ISC-18: framework A coverage_pct = %v, want 50.0", cov)
 	}

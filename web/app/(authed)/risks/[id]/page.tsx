@@ -56,6 +56,7 @@ import {
   severityBand,
   severityClasses,
 } from "../filters";
+import { enumLabel } from "@/lib/labels/enum-labels";
 import { SeverityPill } from "../severity-pill";
 
 function formatDate(iso: string | null | undefined): string {
@@ -155,11 +156,7 @@ export default function RiskDetailPage({
       subtitle={
         <div className="mt-2 space-y-3" data-testid="risk-detail-header">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge
-              variant="secondary"
-              data-testid="risk-detail-treatment"
-              className="capitalize"
-            >
+            <Badge variant="secondary" data-testid="risk-detail-treatment">
               {treatmentLabel(risk)}
             </Badge>
             <span
@@ -190,7 +187,12 @@ export default function RiskDetailPage({
             </div>
             <div>
               <dt className="inline text-muted-foreground">Methodology </dt>
-              <dd className="inline text-foreground">{risk.methodology}</dd>
+              <dd
+                className="inline text-foreground"
+                data-testid="risk-detail-methodology"
+              >
+                {enumLabel("RiskMethodology", risk.methodology)}
+              </dd>
             </div>
             <div>
               <dt className="inline text-muted-foreground">Review due </dt>
