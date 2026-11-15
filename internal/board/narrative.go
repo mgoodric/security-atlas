@@ -50,7 +50,7 @@ Over {{ .Drift.Since }} to {{ .Drift.Through }}, the program drift count is {{ s
 
 {{ if .TopRisks -}}
 {{ range $i, $r := .TopRisks -}}
-{{ add1 $i }}. **{{ $r.Title }}** ({{ $r.Category }}, treatment: {{ $r.Treatment }}) — residual severity {{ printf "%.1f" $r.ResidualSeverity }}, open {{ $r.AgeDays }} day(s).
+{{ add1 $i }}. **{{ $r.Title }}** ({{ $r.CategoryLabel }}, treatment: {{ $r.Treatment }}) — residual severity {{ printf "%.1f" $r.ResidualSeverity }}, open {{ $r.AgeDays }} day(s).
 {{ end -}}
 {{ else -}}
 No open risks in the register.
