@@ -118,7 +118,11 @@ export type FixtureName =
   // on, for the sidebar's flag-on case (sidebar-nav.spec.ts).
   | "sidebar-nav"
   // #2137 — one manual attestation for evidence-detail.spec.ts.
-  | "evidence-detail";
+  | "evidence-detail"
+  // #1800 — a requirement with a catalog edge and a demo-tenant overlay
+  // edge, a control behind the overlay, and a second tenant
+  // (org-mapping.spec.ts).
+  | "org-mapping";
 
 const REPO_ROOT_FROM_WEB = resolve(__dirname, "..", "..");
 

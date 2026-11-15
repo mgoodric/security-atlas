@@ -8,6 +8,7 @@ import {
   gateNavItems,
   isFeatureDisabledError,
   NAV_FEATURE_GATES,
+  resolveFeatureGate,
 } from "@/lib/feature-nav";
 
 type Item = { href: string; label: string };
@@ -94,5 +95,32 @@ describe("isFeatureDisabledError", () => {
     expect(isFeatureDisabledError(new Error("feature disabled"))).toBe(false);
     expect(isFeatureDisabledError(null)).toBe(false);
     expect(isFeatureDisabledError(undefined)).toBe(false);
+  });
+});
+
+describe("resolveFeatureGate", () => {
+  test("flag on renders the module for anyone", () => {
+    const modules = { "board.reporting": true };
+    expect(resolveFeatureGate(modules, "board.reporting", true)).toBe("on");
+    expect(resolveFeatureGate(modules, "board.reporting", false)).toBe("on");
+  });
+
+  test("flag off tells an admin where to enable it", () => {
+    const modules = { "board.reporting": false };
+    expect(resolveFeatureGate(modules, "board.reporting", true)).toBe(
+      "off-admin",
+    );
+  });
+
+  test("flag off tells a non-admin to ask an administrator", () => {
+    const modules = { "board.reporting": false };
+    expect(resolveFeatureGate(modules, "board.reporting", false)).toBe(
+      "off-member",
+    );
+  });
+
+  test("a missing key reads as off (fail-closed)", () => {
+    expect(resolveFeatureGate({}, "oscal.export", false)).toBe("off-member");
+    expect(resolveFeatureGate({}, "oscal.export", true)).toBe("off-admin");
   });
 });

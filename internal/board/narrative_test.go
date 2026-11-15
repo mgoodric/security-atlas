@@ -69,7 +69,7 @@ func TestRenderNarrative_IncludesDriftSection(t *testing.T) {
 	if !strings.Contains(md, "Control drift — last 30 days") {
 		t.Errorf("AC-2: narrative missing drift heading\ngot:\n%s", md)
 	}
-	if !strings.Contains(md, "drift count is -1") {
+	if !strings.Contains(md, "net change in passing controls is -1") {
 		t.Errorf("AC-2: narrative missing signed drift delta\ngot:\n%s", md)
 	}
 	if !strings.Contains(md, "1 control(s) drifted out of passing") {

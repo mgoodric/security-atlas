@@ -8,14 +8,14 @@
 //      the page it opens carries an H1 equal to the entry's label. That
 //      includes the pages that used to be URL-only: Exceptions,
 //      Framework scopes, the Implementation checklist, Risk hierarchy.
-//   2. With the board-reporting flag off (the demo tenant's seed
-//      default), Board packs is not listed; with no NIST CSF framework
-//      in the catalog (the CI database loads none), CSF assessment is
-//      not listed.
-//   3. With the flag on, Board packs is listed and opens. The flag is on
-//      only for a dedicated tenant (fixtures/e2e/sidebar-nav.sql), so the
-//      flag-off assertions here and in feature-flag-gating.spec.ts keep
-//      holding for the demo tenant in parallel workers.
+//   2. With the board-reporting flag off, Board packs is not listed;
+//      with no NIST CSF framework in the catalog (the CI database loads
+//      none), CSF assessment is not listed. global-setup turns the gated
+//      modules ON for the demo tenant (#2092: their route layouts gate
+//      server-side), so this runs in FLAGS_OFF_TENANT, which no spec
+//      toggles and so keeps the seed defaults.
+//   3. With the flag on, Board packs is listed and opens, in a dedicated
+//      tenant (fixtures/e2e/sidebar-nav.sql).
 //
 // The CSF-loaded case (entry listed, links to the version) is covered at
 // the vitest tier (lib/nav.test.ts): loading a global NIST CSF framework
@@ -27,6 +27,9 @@ import { expect, test } from "./fixtures";
 import { seedFromFixture } from "./seed";
 
 const NAV_TENANT = "00000000-0000-0000-0000-000000002081";
+// No feature_flags rows: every gate reads its seed default (off). Shared
+// with feature-flag-gating.spec.ts; neither spec writes to it.
+const FLAGS_OFF_TENANT = "00000000-0000-0000-0000-0000000020f0";
 
 // What the demo tenant's sidebar lists: everything but the flag-gated
 // entries and CSF assessment. Admin depends on the caller's `/v1/me`, so
@@ -58,15 +61,20 @@ function atlasBaseURL(): string {
   return process.env.ATLAS_HTTP_URL ?? "http://localhost:8080";
 }
 
-// mintJWT mints a bearer for the dedicated tenant through the env-gated
-// /v1/test/issue-jwt (slice 201). Throws on anything but a token.
-async function mintJWT(roles: string[], superAdmin: boolean): Promise<string> {
+// mintJWT mints a bearer for `tenant` (default: the dedicated flags-on
+// tenant) through the env-gated /v1/test/issue-jwt (slice 201). Throws on
+// anything but a token.
+async function mintJWT(
+  roles: string[],
+  superAdmin: boolean,
+  tenant: string = NAV_TENANT,
+): Promise<string> {
   const url = `${atlasBaseURL()}/v1/test/issue-jwt`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      tenant_id: NAV_TENANT,
+      tenant_id: tenant,
       roles,
       super_admin: superAdmin,
     }),
@@ -144,6 +152,7 @@ test.describe("#2081 — sidebar lists every page, labels match titles", () => {
   test("flag off: no Board packs; no CSF framework: no CSF assessment", async ({
     authedPage: page,
   }) => {
+    await signInAs(page, await mintJWT(["admin"], true, FLAGS_OFF_TENANT));
     await page.goto("/dashboard");
     const labels = await sidebarLabels(page);
     expect(labels).not.toContain("Board packs");

@@ -1,10 +1,8 @@
 // Slice 060 — /admin overview (AC-1).
 //
-// Five sub-area tiles with current-state summaries. SSO + Users + Audit
-// surface the backend-gap state because the corresponding endpoints
-// don't exist on main as of slice 060 — see docs/audit-log/admin-ui-review.md
-// and the slice 060 PR description. API keys + Features pull live counts
-// from the BFF.
+// Five sub-area tiles. API keys + Features carry a live count from the
+// BFF; SSO, Users and Audit log carry no summary (#2092 dropped their
+// stale backend-status badges and the slice-status card).
 
 "use client";
 
@@ -13,12 +11,10 @@ import Link from "next/link";
 
 import {
   Card,
-  CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   AdminCredential,
@@ -81,21 +77,11 @@ export default function AdminOverviewPage() {
         <AdminTile
           href="/admin/sso"
           title="SSO"
-          summary={
-            <span className="text-muted-foreground">
-              backend WIP — slice&nbsp;060.5
-            </span>
-          }
           description="OIDC identity-provider configuration · discovery preflight · test login."
         />
         <AdminTile
           href="/admin/users"
           title="Users"
-          summary={
-            <span className="text-muted-foreground">
-              backend WIP — slice&nbsp;060.5
-            </span>
-          }
           description="List users, assign roles, manage local + SSO-provisioned accounts."
         />
         <AdminTile
@@ -117,30 +103,8 @@ export default function AdminOverviewPage() {
         <AdminTile
           href="/admin/audit"
           title="Audit log"
-          summary={
-            <span className="text-muted-foreground">
-              backend WIP — slice&nbsp;060.5
-            </span>
-          }
           description="Paginated read across the union of audit log tables. Filter by actor, event, time."
         />
-        <Card>
-          <CardHeader>
-            <CardTitle>Slice 060 status</CardTitle>
-            <CardDescription>
-              What ships in this UI vs. what depends on backend work.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="text-sm">
-            <p className="mb-2">
-              <Badge variant="secondary">live</Badge> API keys · Features
-            </p>
-            <p>
-              <Badge variant="outline">stub</Badge> SSO · Users · Audit log — UI
-              rendered, awaiting backend slice 060.5.
-            </p>
-          </CardContent>
-        </Card>
       </div>
     </PageShell>
   );
@@ -154,7 +118,7 @@ function AdminTile({
 }: {
   href: string;
   title: string;
-  summary: React.ReactNode;
+  summary?: React.ReactNode;
   description: string;
 }) {
   return (

@@ -908,6 +908,49 @@ func (q *Queries) ListFrameworkVersionMigrationsInto(ctx context.Context, toVers
 	return items, nil
 }
 
+const lockOpenFrameworkScope = `-- name: LockOpenFrameworkScope :one
+SELECT id, tenant_id, framework_version_id, name, created_at, updated_at, state, predicate, predicate_hash, approver_user_id, approved_at, predicate_hash_at_approval, approval_evidence_file_url, approval_evidence_file_hash, effective_from, superseded_by, superseded_at, self_approved, submitted_by
+FROM framework_scopes
+WHERE tenant_id = $1 AND id = $2
+  AND state IN ('draft', 'review')
+FOR UPDATE
+`
+
+type LockOpenFrameworkScopeParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+// The applicability carry-over's target (#2179): a draft or review revision
+// of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
+// (approved, activated, superseded) or unknown revision.
+func (q *Queries) LockOpenFrameworkScope(ctx context.Context, arg LockOpenFrameworkScopeParams) (FrameworkScope, error) {
+	row := q.db.QueryRow(ctx, lockOpenFrameworkScope, arg.TenantID, arg.ID)
+	var i FrameworkScope
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.FrameworkVersionID,
+		&i.Name,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.State,
+		&i.Predicate,
+		&i.PredicateHash,
+		&i.ApproverUserID,
+		&i.ApprovedAt,
+		&i.PredicateHashAtApproval,
+		&i.ApprovalEvidenceFileUrl,
+		&i.ApprovalEvidenceFileHash,
+		&i.EffectiveFrom,
+		&i.SupersededBy,
+		&i.SupersededAt,
+		&i.SelfApproved,
+		&i.SubmittedBy,
+	)
+	return i, err
+}
+
 const submitFrameworkScope = `-- name: SubmitFrameworkScope :one
 UPDATE framework_scopes
 SET state = 'review',

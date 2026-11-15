@@ -4,6 +4,7 @@
 // `AnchorWithState` from here, decision D6).
 
 import { apiFetch } from "./_shared";
+import type { CoverageRequirement } from "./control-detail";
 
 export type Anchor = {
   id: string;
@@ -19,23 +20,21 @@ export type FrameworkVersion = {
   version: string;
 };
 
-export type Requirement = {
-  id: string;
-  framework_version_id: string;
-  code: string;
-  text: string;
-};
-
-export type RequirementWithMapping = {
-  requirement: Requirement;
-  framework_version: FrameworkVersion;
-  strm_type: "equal" | "subset_of" | "intersects";
-  strength: number;
-};
+// AnchorRequirement is one row of GET /v1/anchors/{id}/requirements. The
+// platform serves the same `requirementForAnchorWire` shape on that route and
+// on GET /v1/controls/{id}/coverage (internal/api/ucfcoverage/handlers.go), so
+// it is the control-coverage row type. `coverage` is always null here (not
+// computed on this surface).
+//
+// #1800 — this replaced a nested `{requirement, framework_version,
+// strm_type}` shape the platform never served: the anchor detail page now
+// reads the real fields, including `origin` and the overlay provenance.
+export type AnchorRequirement = CoverageRequirement;
 
 export type AnchorDetail = {
   anchor: Anchor;
-  requirements: RequirementWithMapping[];
+  requirements: AnchorRequirement[];
+  scf_release?: string;
 };
 
 export async function listAnchors(bearer: string): Promise<Anchor[]> {
