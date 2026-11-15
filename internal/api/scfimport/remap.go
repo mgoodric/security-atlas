@@ -10,6 +10,12 @@ package scfimport
 // rule's call (Classify), recorded as the proposal's status.
 
 import (
+	"context"
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 )
 
@@ -45,6 +51,48 @@ const (
 	// same title), so the proposal is a record, not a to-do.
 	ProposalRebound = "rebound"
 )
+
+// Proposal sources: which path re-bound or flagged the control (#2236).
+const (
+	// SourceBoot: RebindControls, during `atlas-cli catalog import-scf`.
+	SourceBoot = "boot"
+	// SourceUpload: control.Store.Upload, re-binding or flagging an
+	// unchanged manifest in place.
+	SourceUpload = "upload"
+)
+
+// RecordRemapProposal writes the durable record of what a re-bind did with
+// one control on a legacy anchor (#2236): the tenant, the control, the
+// legacy anchor and release, the target release, the anchor it moved to
+// (for status rebound; none for open), and the path that did it. Call it in
+// the transaction that moves or flags the control. A record for the same
+// control and target release is left alone. It returns the proposal's
+// class.
+func RecordRemapProposal(ctx context.Context, q *dbx.Queries, r dbx.ListControlsOnLegacySCFAnchorsRow, status, source string) (RemapClass, error) {
+	class, successors := RemapClassFor(r)
+	var target pgtype.UUID
+	if status == ProposalRebound {
+		target = r.CurrentAnchorID
+	}
+	if _, err := q.InsertSCFRemapProposal(ctx, dbx.InsertSCFRemapProposalParams{
+		TenantID:                 r.TenantID,
+		ControlID:                r.ControlID,
+		BundleID:                 r.BundleID,
+		LegacyAnchorID:           r.LegacyAnchorID,
+		LegacyScfID:              r.LegacyScfID,
+		LegacyRelease:            r.LegacyRelease,
+		TargetFrameworkVersionID: r.CurrentFrameworkVersionID,
+		TargetRelease:            r.CurrentRelease,
+		Class:                    string(class),
+		Status:                   status,
+		SuccessorScfIds:          successors,
+		TargetAnchorID:           target,
+		Source:                   source,
+	}); err != nil {
+		return "", fmt.Errorf("scfimport: queue remap proposal for control %s: %w", uuid.UUID(r.ControlID.Bytes), err)
+	}
+	return class, nil
+}
 
 // RemapClassFor classifies one row of ListControlsOnLegacySCFAnchors and
 // returns the successor codes it proposes, sorted.

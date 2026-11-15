@@ -172,8 +172,8 @@ func TestRebind_StockControlRebindsOnTitleOnlyChangeAndKeepsCC81Coverage(t *test
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO scf_remap_proposals (tenant_id, control_id, bundle_id, legacy_anchor_id,
 			legacy_scf_id, legacy_release, target_framework_version_id, target_release,
-			class, status, successor_scf_ids)
-		VALUES ($1, $2, $3, $4, 'CHG-02', $5, $6, $7, 'no_successor', 'open', '{}')
+			class, status, successor_scf_ids, source)
+		VALUES ($1, $2, $3, $4, 'CHG-02', $5, $6, $7, 'no_successor', 'open', '{}', 'boot')
 		RETURNING id`,
 		tenant, stock, stockCC81Bundle, legacyCHG02, a.ReleaseVersion, target, b.ReleaseVersion).Scan(&priorID); err != nil {
 		t.Fatalf("seed the pre-#2321 open proposal: %v", err)
@@ -218,6 +218,14 @@ func TestRebind_StockControlRebindsOnTitleOnlyChangeAndKeepsCC81Coverage(t *test
 	// open; the pinned control gets none.
 	if p, ok := proposalOf(t, pool, stock); !ok || p.id != priorID || p.status != scfimport.ProposalRebound {
 		t.Errorf("stock proposal = %+v (found %v); want %s rebound", p, ok, priorID)
+	}
+	// #2236: the upgraded record names the anchor the control moved to.
+	var upgradedTarget *uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT target_anchor_id FROM scf_remap_proposals WHERE id = $1`, priorID).Scan(&upgradedTarget); err != nil {
+		t.Fatalf("read upgraded proposal: %v", err)
+	}
+	if upgradedTarget == nil || *upgradedTarget != currentCHG02 {
+		t.Errorf("upgraded proposal target_anchor_id = %v; want %s", upgradedTarget, currentCHG02)
 	}
 	if p, ok := proposalOf(t, pool, authored); !ok || p.status != scfimport.ProposalOpen {
 		t.Errorf("authored proposal = %+v (found %v); want open", p, ok)
