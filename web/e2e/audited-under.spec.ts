@@ -20,6 +20,8 @@ import type {
   AuditedUnderReport,
   AuditedUnderRow,
 } from "../lib/api/audited-under";
+import { enumLabel } from "../lib/labels/enum-labels";
+import { anchorFitLabel } from "../app/(authed)/controls/filters";
 
 import { expect, test } from "./fixtures";
 
@@ -120,7 +122,9 @@ test.describe("Audited under report", () => {
     await expect(rows).toHaveCount(2);
     const gap = rows.filter({ hasText: "CC1.4" });
     await expect(gap).toContainText("IAC-06@test-2026.3");
-    await expect(gap.getByTestId("audited-under-fit")).toHaveText("Partial");
+    await expect(gap.getByTestId("audited-under-fit")).toHaveText(
+      anchorFitLabel(GAP.anchor_fit),
+    );
     await expect(gap).toContainText("IAC-06 covers MFA, not NDAs.");
 
     await gap.getByTestId("audited-under-add-edge").click();
@@ -198,8 +202,14 @@ test.describe("Audited under report", () => {
     const candidates = gap.getByTestId("audited-under-candidate");
     await expect(candidates).toHaveCount(2);
     await expect(candidates.nth(0)).toContainText("HRS-06");
+    // The label comes from the shared module (#2330), so a label change
+    // moves the page and this assertion together.
+    const top = GAP.candidate_anchors[0];
     await expect(candidates.nth(0)).toContainText(
-      "Confidentiality agreements (subset of, 0.7)",
+      `${top.anchor_title} (${enumLabel(
+        "StrmRelationshipType",
+        top.relationship_type,
+      )}, ${top.strength})`,
     );
     await expect(
       candidates.nth(0).getByRole("link", { name: "HRS-06" }),
