@@ -33,7 +33,7 @@ The dashboard's first load is prefetched server-side, and `dashboard-server-comp
 - **Copy:** the title is "N control(s) need re-anchoring". The description says why it matters (no framework credit) and names the target release when there is one. The link reads "Review the control(s)".
 - **When it shows:** never during loading, at zero, or on a 401/403. Any other error renders a destructive inline Alert instead of the banner. Both reads use `retry: false`, so the error shows at once rather than after the default retries.
 - **Kept as is after review:** the response carries `count` next to `controls`, matching `GET /v1/controls`'s envelope; the web reads the array length. The BFF reuses `dashboardProxy`, a generic cookie-to-bearer forwarder, rather than adding a second copy of it.
-- **List page:** `/controls/needs-reanchoring` (PageShell) shows the control (linked to its detail page), its bundle, its legacy anchor `code@release` with that anchor's title, and the remap note. It has its own document title for the route sweep.
+- **List page:** `/controls/needs-reanchoring` (PageShell) shows the control (linked to its detail page), its bundle, its legacy anchor `code@release` with that anchor's title, and the remap note. It has no layout of its own, so it takes the `/controls` layout's title, "Controls · security-atlas", the same as `/controls/checklist` and `/action-plans/new`. A nested layout with a plain `title` string is not templated, because the `/controls` layout in between sets a plain title with no template. The route sweep caught exactly that on the first CI run. A page-specific title waits for #2260's shared title map.
 
 ## D6 — "Cleared once re-anchored" needs no new state
 
