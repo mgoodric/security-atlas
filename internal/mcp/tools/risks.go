@@ -39,6 +39,10 @@ const listRisksInputSchema = `{
       "type": "string",
       "description": "Filter by risk category slug, one of the organisation's own categories (call list_risk_categories for the valid slugs; archived ones are filterable). An unknown slug is an error naming the valid ones. Optional."
     },
+    "include_rollups": {
+      "type": "boolean",
+      "description": "Also list roll-ups (risks with at least one child risk linked). Default false: a roll-up summarises its children, so listing both would count the same exposure twice. Included roll-ups carry child_count."
+    },
     "limit": {
       "type": "integer",
       "minimum": 1,
@@ -49,10 +53,11 @@ const listRisksInputSchema = `{
 }`
 
 type listRisksArgs struct {
-	Scope    string `json:"scope"`
-	Status   string `json:"status"`
-	Category string `json:"category"`
-	Limit    int    `json:"limit"`
+	Scope          string `json:"scope"`
+	Status         string `json:"status"`
+	Category       string `json:"category"`
+	IncludeRollUps bool   `json:"include_rollups"`
+	Limit          int    `json:"limit"`
 }
 
 // ListRisksTool wraps GET /v1/risks.
@@ -67,7 +72,7 @@ func NewListRisks(c *mcp.Client) *ListRisksTool { return &ListRisksTool{client: 
 func (t *ListRisksTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name:        "list_risks",
-		Description: "List risks from the bearer tenant's risk register. Optional filters: status (treatment), category. RLS scopes to the caller's tenant.",
+		Description: "List risks from the bearer tenant's risk register. Roll-ups (risks with at least one child linked) are left out unless include_rollups is true. Optional filters: status (treatment), category. RLS scopes to the caller's tenant.",
 		InputSchema: json.RawMessage(listRisksInputSchema),
 	}
 }
@@ -93,6 +98,9 @@ func (t *ListRisksTool) Handle(ctx context.Context, args json.RawMessage) (any, 
 	}
 	if in.Category != "" {
 		q.Set("category", in.Category)
+	}
+	if in.IncludeRollUps {
+		q.Set("include_rollups", "true")
 	}
 
 	var resp struct {
@@ -142,6 +150,7 @@ type riskRow struct {
 	OrgUnitID           *string         `json:"org_unit_id,omitempty"`
 	Themes              []string        `json:"themes"`
 	Severity            int             `json:"severity"`
+	ChildCount          int             `json:"child_count,omitempty"`
 	CreatedAt           time.Time       `json:"created_at"`
 	UpdatedAt           time.Time       `json:"updated_at"`
 }

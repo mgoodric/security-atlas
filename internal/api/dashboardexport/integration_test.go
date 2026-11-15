@@ -280,6 +280,46 @@ func TestSlice269_HappyPathPerFormat(t *testing.T) {
 	}
 }
 
+// #2060 D2: the snapshot's risks panel reads risk.Store.List, which leaves
+// out roll-ups (a risk with at least one child linked), so the exported panel
+// never ranks a parent beside the child it summarises.
+func TestRollUps_SnapshotRisksPanelExcludesRollUps(t *testing.T) {
+	tenant := freshExportTenant(t)
+	parentID, parentTitle := seedRisk(t, tenant, "roll-up-parent")
+	childID, childTitle := seedRisk(t, tenant, "roll-up-child")
+	admin := dbtest.NewMigratePool(t)
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO risk_aggregations (parent_risk_id, child_risk_id, tenant_id)
+		VALUES ($1, $2, $3)
+	`, parentID, childID, tenant); err != nil {
+		t.Fatalf("link child: %v", err)
+	}
+
+	r := newExportRouter(t, tenant, true, false)
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/dashboard/export?format=json", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var snap struct {
+		Panels struct {
+			Risks []struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"risks"`
+		} `json:"panels"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snap); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(snap.Panels.Risks) != 1 {
+		t.Fatalf("risks panel has %d rows, want 1 (the child): %+v", len(snap.Panels.Risks), snap.Panels.Risks)
+	}
+	if got := snap.Panels.Risks[0].Title; got != childTitle {
+		t.Fatalf("risks panel row = %q, want the child %q (roll-up %q must be left out)", got, childTitle, parentTitle)
+	}
+}
+
 // ===== AC-6: role gate =====
 
 // A role lacking both IsAdmin and IsApprover is denied 403.

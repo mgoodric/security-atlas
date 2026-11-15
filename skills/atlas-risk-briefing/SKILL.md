@@ -18,7 +18,9 @@ The [atlas-mcp server](../../docs-site/docs/mcp.md) must be connected. If the
 ## Steps
 
 1. Call `list_risks` to get the register. If the operator asked specifically for
-   risks being actively worked, pass `treatment=mitigate`; otherwise list all.
+   risks being actively worked, pass `status=mitigate`; otherwise list all.
+   Leave `include_rollups` off: a roll-up summarises children that are already
+   in the list, so ranking it beside them reports the same exposure twice.
 2. Rank the risks by **residual severity** (severity after controls) descending,
    then by **inherent severity**, then by age in treatment. Residual is the number
    that matters for "what could still hurt us"; lead with it.
