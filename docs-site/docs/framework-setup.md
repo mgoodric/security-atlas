@@ -91,7 +91,7 @@ A shape you should see:
   "requirement": { "framework_version_id": "...", "code": "CC6.1" },
   "anchors": [
     {
-      "scf_id": "IAC-06",
+      "scf_id": "IAC-37",
       "edge": { "relationship_type": "subset_of", "strength": 8 },
       "controls": [
         { "id": "...", "title": "Identity and access management baseline" }
@@ -101,8 +101,8 @@ A shape you should see:
 }
 ```
 
-Read this as: **CC6.1** is a subset of **IAC-06**; your tenant has one
-control anchored to IAC-06; therefore CC6.1 is satisfied through that
+Read this as: **CC6.1** is a subset of **IAC-37**; your tenant has one
+control anchored to IAC-37; therefore CC6.1 is satisfied through that
 control. No CC6.1-specific control was ever needed.
 
 ## What "no relationship" means

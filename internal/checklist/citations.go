@@ -17,7 +17,7 @@ var uuidPattern = regexp.MustCompile(
 	`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
 )
 
-// scfPattern matches an SCF anchor id token (e.g. IAC-06, GOV-01, AST-04) — a
+// scfPattern matches an SCF anchor id token (e.g. IAC-37, GOV-01, AST-04) — a
 // 2-4 letter family, a dash, then digits. Used to extract an scf_anchor
 // citation from a task line. Anchored to a word boundary so it does not match
 // inside a longer token.

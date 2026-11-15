@@ -13,6 +13,7 @@ import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { gateNavItems } from "@/lib/feature-nav";
 import { fetchEnabledModules } from "@/lib/feature-nav.server";
 import { cn } from "@/lib/utils";
+import { VersionFooter } from "@/components/version-footer";
 
 // Canonical order per Plans/canvas/12-ui-fill-in-design-decisions.md §1:
 // Dashboard · Controls · Evidence · Risks · Audits · Policies · Vendors ·
@@ -167,7 +168,7 @@ export async function Sidebar({ active }: { active?: string }) {
   // from the authed layout and takes over below the breakpoint.
   return (
     <aside
-      className="hidden w-56 shrink-0 border-r bg-muted/30 p-4 md:block"
+      className="hidden w-56 shrink-0 flex-col gap-4 overflow-y-auto border-r bg-muted/30 p-4 md:flex"
       data-testid="sidebar-desktop"
     >
       <nav className="flex flex-col gap-1">
@@ -196,6 +197,12 @@ export async function Sidebar({ active }: { active?: string }) {
           );
         })}
       </nav>
+      {/* #2080 — the version tag lives here and nowhere else on an
+        authenticated page (it was a fixed bottom-right overlay plus a
+        "v0 · self-host" chip in the top bar). */}
+      <div className="mt-auto pt-2">
+        <VersionFooter placement="sidebar" />
+      </div>
     </aside>
   );
 }

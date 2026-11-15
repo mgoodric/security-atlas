@@ -43,7 +43,7 @@ describe("POST mapping ai-suggest BFF", () => {
   test("forwards bearer to upstream mapping suggest route", async () => {
     mockCookieGet.mockReturnValue({ value: TEST_BEARER_263 });
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
-      new Response(JSON.stringify({ scf_anchor_id: "IAC-06" }), {
+      new Response(JSON.stringify({ scf_anchor_id: "IAC-37" }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
       }),

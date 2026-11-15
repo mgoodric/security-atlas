@@ -257,12 +257,12 @@ mappings:
     rationale: "Protecting public-facing web apps (WAF / review) overlaps with Secure Engineering Principles; SCF sample lacks a dedicated WAF anchor (LOW CONFIDENCE)."
   # --- Req 7: Need-to-know access ---
   - requirement_code: 7.2.1
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: equal
     strength: 0.9
-    rationale: "An access-control model based on need-to-know/least-privilege maps to SCF User Provisioning & Lifecycle — shared with SOC 2 CC6.2/CC6.3 and ISO A.5.18."
+    rationale: "An access-control model based on need-to-know/least-privilege maps to SCF User Provisioning & De-Provisioning — shared with SOC 2 CC6.2/CC6.3 and ISO A.5.18."
   - requirement_code: 7.2.2
-    scf_anchor: IAC-15
+    scf_anchor: IAC-12
     relationship_type: equal
     strength: 0.8
     rationale: "Assigning access by job classification/function maps to SCF Role-Based Access Control."
@@ -278,12 +278,12 @@ mappings:
     strength: 0.7
     rationale: "Authenticating all users with at least one factor is a subset of the broader I&A policy anchor."
   - requirement_code: 8.4.1
-    scf_anchor: IAC-06
+    scf_anchor: IAC-37
     relationship_type: equal
     strength: 0.9
     rationale: "MFA into the CDE maps to SCF Multi-Factor Authentication — shared with SOC 2 CC6.1 MFA mapping and ISO A.8.5."
   - requirement_code: 8.5.1
-    scf_anchor: IAC-06
+    scf_anchor: IAC-37
     relationship_type: subset_of
     strength: 0.7
     rationale: "MFA replay/bypass resistance is a subset/hardening facet of the SCF Multi-Factor Authentication anchor."

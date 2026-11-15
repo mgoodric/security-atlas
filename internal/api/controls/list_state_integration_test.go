@@ -72,7 +72,7 @@ func TestListWithState_PagesTenantControlsOnly(t *testing.T) {
 
 	tenantA := dbtest.SeedTenant(t, admin, "controls")
 	tenantB := dbtest.SeedTenant(t, admin, "controls")
-	anchor := insertAnchor(t, admin, "IAC-06", "Identity & Access Mgmt")
+	anchor := insertAnchor(t, admin, "IAC-37", "Identity & Access Mgmt")
 	want := map[string]bool{
 		insertControl(t, admin, tenantA, anchor, "A one", "IAC", "ctrl-1741-a1").String():   true,
 		insertControl(t, admin, tenantA, anchor, "A two", "IAC", "ctrl-1741-a2").String():   true,

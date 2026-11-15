@@ -7,7 +7,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Exceptions · security-atlas",
+  title: "Exceptions",
 };
 
 export default function ExceptionsLayout({

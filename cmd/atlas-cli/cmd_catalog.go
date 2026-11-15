@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -78,6 +79,14 @@ func newCatalogImportSCFCmd() *cobra.Command {
 				report.ReleaseVersion, report.FrameworkVersionID, report.IsNewVersion)
 			fmt.Printf("created=%d updated=%d unchanged=%d\n",
 				report.Created, report.Updated, report.Unchanged)
+
+			// #1971 D3: after a new release, move controls whose anchor kept
+			// its code and title; list the rest for re-anchoring.
+			rebind, err := scfimport.RebindControls(ctx, pool)
+			if err != nil {
+				return err
+			}
+			printRebindReport(os.Stdout, rebind)
 			return nil
 		},
 	}
@@ -186,8 +195,29 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 			for _, line := range cw.PointsOfFocusRollUp.Summary() {
 				fmt.Println(line)
 			}
-			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d\n",
-				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped))
+			fmt.Printf("edges        created=%d updated=%d unchanged=%d skipped=%d retired=%d restored=%d\n",
+				report.EdgesCreated, report.EdgesUpdated, report.EdgesUnchanged, len(report.EdgesSkipped), len(report.EdgesRetired), len(report.EdgesRestored))
+			for _, re := range report.EdgesRetired {
+				fmt.Printf("edge retired %s->%s: no longer in the crosswalk (source=%s source_attribution=%s mapping_tier=%s)\n",
+					re.RequirementCode, re.SCFAnchor, re.Source, re.Attribution, re.Tier)
+			}
+			retired := report.RetiredBySource()
+			sources := make([]string, 0, len(retired))
+			for s := range retired {
+				sources = append(sources, s)
+			}
+			sort.Strings(sources)
+			for _, s := range sources {
+				fmt.Printf("edges retired by source[%s]=%d\n", s, retired[s])
+			}
+			for _, rs := range report.EdgesRestored {
+				fmt.Printf("edge restored %s->%s: listed again (mapping_tier=%s)\n",
+					rs.RequirementCode, rs.SCFAnchor, rs.Tier)
+			}
+			for _, un := range report.EdgesUnlisted {
+				fmt.Printf("edge kept %s->%s: not in the crosswalk, but written by another source (source=%s source_attribution=%s)\n",
+					un.RequirementCode, un.SCFAnchor, un.Source, un.Attribution)
+			}
 			for _, sk := range report.EdgesSkipped {
 				fmt.Printf("edge skipped %s->%s: existing source_attribution=%s outranks incoming %s\n",
 					sk.RequirementCode, sk.SCFAnchor, sk.ExistingAttribution, sk.IncomingAttribution)
@@ -222,4 +252,15 @@ func newCatalogImportCrosswalkCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&allowCodeTitles, "allow-code-titles", false, "let SCF workbook requirements that no title source covers import titled with their code")
 	cmd.Flags().StringVar(&scfRelease, "scf-release", "", "SCF release the crosswalk's SCF codes belong to; the only way to declare it for an OLIR STRM workbook, which names none (a wide workbook takes it from its \"SCF <release>\" sheet, a YAML file from scf_release)")
 	return cmd
+}
+
+// printRebindReport writes the control re-binding outcome of an SCF import
+// (#1971 D3): a count, then one line per control left needing re-anchoring,
+// so the bootstrap log names every control that lost framework coverage.
+func printRebindReport(w io.Writer, r scfimport.RebindReport) {
+	_, _ = fmt.Fprintf(w, "controls rebound=%d needs_reanchoring=%d pinned=%d superseded_mid_run=%d\n", len(r.Rebound), len(r.NeedsReanchoring), len(r.Pinned), r.SupersededMidRun)
+	for _, c := range r.NeedsReanchoring {
+		_, _ = fmt.Fprintf(w, "control needs re-anchoring tenant=%s bundle=%s anchor=%s@%s: %s\n",
+			c.TenantID, c.BundleID, c.LegacySCFID, c.LegacyRelease, c.Note)
+	}
 }

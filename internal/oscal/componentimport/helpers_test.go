@@ -271,7 +271,7 @@ func TestImport_SCFReleaseConflictSkipsBridge(t *testing.T) {
 
 func TestReleaseOf(t *testing.T) {
 	t.Parallel()
-	code, rel := "IAC-06", "2026.3"
+	code, rel := "IAC-37", "2026.3"
 	if got := releaseOf(nil, &rel); got != nil {
 		t.Fatalf("unmapped claim release = %v; want nil", *got)
 	}

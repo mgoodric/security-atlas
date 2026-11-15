@@ -87,7 +87,7 @@ func postGateTarball(t *testing.T, s setupResult, tarBytes []byte) (int, []byte)
 const gateJSONPathManifest = `bundle_schema_version: "1"
 bundle_id: gate_it_jsonpath
 title: "Encrypted buckets (gate IT)"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:
@@ -333,7 +333,7 @@ func TestGate_SQLFixtureRunsOnUploadPath(t *testing.T) {
 	const sqlManifest = `bundle_schema_version: "1"
 bundle_id: gate_it_sql
 title: "SQL fixture (gate IT)"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:
@@ -361,7 +361,7 @@ evidence_queries:
 	const sqlManifestFail = `bundle_schema_version: "1"
 bundle_id: gate_it_sql_fail
 title: "SQL fixture fail (gate IT)"
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: automated
 freshness_class: daily
 evidence_queries:

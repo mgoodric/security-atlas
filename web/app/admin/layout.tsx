@@ -1,8 +1,9 @@
 // Slice 060 — admin section shell + RBAC gate.
 //
-// AC-7: all /admin/* routes are gated by slice 035's `admin` role (which
-// for the purposes of slice 060 binds to slice 034's `cred.IsAdmin` flag
-// — the user-role grant table is not yet wired into the admin section).
+// AC-7: all /admin/* routes are gated on `is_admin`, which the JWT
+// middleware maps from `atlas:super_admin` only. A tenant `admin` role
+// grant does not open this section: /admin is super-admin only (#2216,
+// Matt 2026-11-14; docs/audit-log/2216-admin-gate-decisions.md).
 // Non-admin signed-in users see a 403 explanation page, NOT a 404, so
 // they can tell "this exists, I just can't reach it." Per the slice spec.
 //
@@ -14,15 +15,16 @@
 // Why two layouts (this + (authed)/layout.tsx)? Because the admin pages
 // live OUTSIDE the (authed) route group — the slice spec calls the path
 // `/admin/*` literally, not `/(authed)/admin/*`. We re-use the same
-// TopBar + Sidebar shell here.
+// `<AppShell>` here (#2080 — previously a hand-rolled TopBar + Sidebar
+// copy without the skip link or the mobile drawer).
 
+import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 
 import { AdminSectionNav } from "@/components/admin/admin-section-nav";
-import { Sidebar } from "@/components/shell/sidebar";
-import { TopBar } from "@/components/shell/topbar";
+import { AppShell } from "@/components/shell/app-shell";
 import {
   Card,
   CardContent,
@@ -33,6 +35,12 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { fetchAdminMe, fetchDemoSeedEnabled } from "@/lib/api/self.server";
+
+// A plain `title` string here would also stop the root template applying
+// to the admin subpages' own titles, so the section repeats the template.
+export const metadata: Metadata = {
+  title: { default: "Admin", template: "%s · security-atlas" },
+};
 
 // OE-549: both probes below used to self-fetch this app's own BFF routes
 // at an origin rebuilt from the request Host header. That address does
@@ -75,21 +83,13 @@ export default async function AdminLayout({
   const demoEnabled = admin ? await isDemoSeedEnabled(bearer) : false;
 
   return (
-    <div className="flex h-screen flex-col">
-      <TopBar />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          {admin ? (
-            <AdminBreadcrumb demoEnabled={demoEnabled}>
-              {children}
-            </AdminBreadcrumb>
-          ) : (
-            <ForbiddenPanel />
-          )}
-        </main>
-      </div>
-    </div>
+    <AppShell>
+      {admin ? (
+        <AdminBreadcrumb demoEnabled={demoEnabled}>{children}</AdminBreadcrumb>
+      ) : (
+        <ForbiddenPanel />
+      )}
+    </AppShell>
   );
 }
 
@@ -117,11 +117,12 @@ function ForbiddenPanel() {
       <Alert variant="destructive">
         <AlertTitle>This section is admin-only</AlertTitle>
         <AlertDescription>
-          Your account is signed in but does not carry the{" "}
+          Your account is signed in but is not a platform super-admin, which
+          this section requires; a tenant{" "}
           <code className="rounded bg-muted px-1 py-0.5 text-xs">admin</code>{" "}
-          role. Contact your tenant admin to request access. The admin section
-          covers SSO setup, user role assignment, API key lifecycle, feature
-          flag toggles, and the unified audit log.
+          role is not enough. Contact your platform operator to request access.
+          The admin section covers SSO setup, user role assignment, API key
+          lifecycle, feature flag toggles, and the unified audit log.
         </AlertDescription>
       </Alert>
       <Card>
