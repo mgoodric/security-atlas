@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-remap-a",
+  "release_date": "2026-01-01",
+  "attribution": "Synthetic test catalog for the #1775 remap queue; not SCF content.",
+  "controls": [
+    {
+      "scf_id": "TRM-01",
+      "family": "TRM",
+      "title": "Asset Inventory",
+      "description": "Keep a list of assets."
+    },
+    {
+      "scf_id": "TRM-02",
+      "family": "TRM",
+      "title": "Change Management",
+      "description": "Review changes."
+    },
+    {
+      "scf_id": "TRM-03",
+      "family": "TRM",
+      "title": "Logging",
+      "description": "Log security events."
+    },
+    {
+      "scf_id": "TRM-04",
+      "family": "TRM",
+      "title": "Data Backup",
+      "description": "Back up data."
+    },
+    {
+      "scf_id": "TRM-05",
+      "family": "TRM",
+      "title": "Fax Security",
+      "description": "Protect fax machines."
+    }
+  ]
+}
