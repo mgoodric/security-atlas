@@ -4,7 +4,7 @@ import { treatmentBadge } from "./treatment-badge";
 
 describe("treatmentBadge", () => {
   it.each([
-    [{ treatment: "mitigate" }, "mitigate", "destructive"],
+    [{ treatment: "mitigate" }, "mitigate", "progress"],
     [
       { treatment: "accept", acceptance_status: "approved" as const },
       "accept (approved)",

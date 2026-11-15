@@ -21,6 +21,7 @@ import (
 	"github.com/google/uuid"
 
 	oauthapi "github.com/mgoodric/security-atlas/internal/api/oauth"
+	"github.com/mgoodric/security-atlas/internal/api/ratekey"
 	"github.com/mgoodric/security-atlas/internal/auth/jwt"
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 	"github.com/mgoodric/security-atlas/internal/auth/sessions"
@@ -183,7 +184,7 @@ func loginTenant(ctx context.Context, raw string, resolver ImplicitTenantResolve
 // attached (#1727).
 func (h *Handler) LocalLogin(w http.ResponseWriter, r *http.Request) {
 	// #1913: the per-IP bucket runs first, before the body is read.
-	if ok, retry := h.loginThrottle.ip.Allow(clientIP(r)); !ok {
+	if ok, retry := h.loginThrottle.ip.Allow(ratekey.IP(clientIP(r))); !ok {
 		writeLoginThrottled(w, retry)
 		return
 	}

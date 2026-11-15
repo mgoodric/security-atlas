@@ -184,3 +184,23 @@ func TestLocalLogin_PerIPThrottleKeysOnBFFForwardedIP(t *testing.T) {
 		t.Fatalf("forging client rotating X-Forwarded-For: status %d, want 429 on its own peer bucket", rec.Code)
 	}
 }
+
+// #2047: every address in one IPv6 /64 shares the per-IP bucket, so
+// rotating through the /64 cannot mint fresh buckets. A neighbouring /64
+// is a different source.
+func TestLocalLogin_PerIPThrottleKeysIPv6OnSlash64(t *testing.T) {
+	t.Parallel()
+	h := throttledHandler(newFakeClock())
+	for i := range loginIPBurst {
+		remote := fmt.Sprintf("[2001:db8:0:1::%x]:1234", i+1)
+		if rec := postLogin(h, remote, "{"); rec.Code != http.StatusBadRequest {
+			t.Fatalf("attempt %d: status %d, want 400", i+1, rec.Code)
+		}
+	}
+	if rec := postLogin(h, "[2001:db8:0:1:ffff::1]:1234", "{"); rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("same /64, fresh address: status %d, want 429", rec.Code)
+	}
+	if rec := postLogin(h, "[2001:db8:0:2::1]:1234", "{"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("neighbouring /64: status %d, want 400", rec.Code)
+	}
+}

@@ -9,7 +9,8 @@ package frameworkscopes
 // revision by default, the named revision with ?revision=, or the revision in
 // force at ?as_of= (RFC3339). With no revision selected, every requirement is
 // exported undecided. Contradiction flags are computed against current control
-// evaluations, as on the decision list (#1789 D6).
+// evaluations, as on the decision list (#1789 D6), even for an as_of or a
+// non-activated revision; the xlsx says so in its title block (#2048).
 //
 // CSV is the bare table, header first, so it reads back through the decision
 // import (#1790). The xlsx carries the title ("Statement of Applicability" for
@@ -135,7 +136,8 @@ func soaFilename(e frameworkscope.SoAExport, format string) string {
 }
 
 // writeSoACSV writes the header and one row per requirement, every cell
-// neutralised against spreadsheet formula injection.
+// neutralised against spreadsheet formula injection. The import strips the
+// quote again (frameworkscope.UnquoteFormulaCell).
 func writeSoACSV(buf *bytes.Buffer, e frameworkscope.SoAExport) error {
 	cw := csv.NewWriter(buf)
 	if err := cw.Write(frameworkscope.SoAHeader); err != nil {
@@ -143,7 +145,7 @@ func writeSoACSV(buf *bytes.Buffer, e frameworkscope.SoAExport) error {
 	}
 	for _, row := range e.Rows() {
 		for i, cell := range row {
-			row[i] = neutraliseFormula(cell)
+			row[i] = frameworkscope.QuoteFormulaCell(cell)
 		}
 		if err := cw.Write(row); err != nil {
 			return err
@@ -153,22 +155,9 @@ func writeSoACSV(buf *bytes.Buffer, e frameworkscope.SoAExport) error {
 	return cw.Error()
 }
 
-// neutraliseFormula prefixes a cell that a spreadsheet would read as a
-// formula with a single quote (OWASP CSV injection), the same rule as
-// internal/export.
-func neutraliseFormula(cell string) string {
-	if cell == "" {
-		return cell
-	}
-	switch cell[0] {
-	case '=', '+', '-', '@', '\t', '\r':
-		return "'" + cell
-	}
-	return cell
-}
-
 // writeSoAXLSX writes one sheet named for the title: the title, the
-// framework and version, the revision and the counts, then the table. Every cell is written as a string, never a formula, so a
+// framework and version, the revision and the counts, the contradiction note
+// for a past revision, then the table. Every cell is written as a string, never a formula, so a
 // justification beginning with `=` stays text.
 func writeSoAXLSX(buf *bytes.Buffer, e frameworkscope.SoAExport) (err error) {
 	f := excelize.NewFile()
@@ -195,8 +184,11 @@ func writeSoAXLSX(buf *bytes.Buffer, e frameworkscope.SoAExport) (err error) {
 		{revision},
 		{fmt.Sprintf("Requirements: %d · applicable: %d · excluded: %d · undecided: %d · contradictions: %d",
 			c.Total, c.Applicable, c.Excluded, c.Undecided, c.Contradictions)},
-		frameworkscope.SoAHeader,
 	}
+	if e.PastRevision {
+		rows = append(rows, []string{frameworkscope.ContradictionNote})
+	}
+	rows = append(rows, frameworkscope.SoAHeader)
 	rows = append(rows, e.Rows()...)
 	for i, row := range rows {
 		for j, cell := range row {
