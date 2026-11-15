@@ -158,4 +158,11 @@ message EvidenceReceipt {
   // the server saw matches the credential I used" without an extra round
   // trip. Empty when the request was unauthenticated (rejected anyway).
   string credential_id = 4;
+
+  // UUID of the control the stored record links to. The server resolves
+  // EvidenceRecord.control_id as a control UUID, then as the bundle ID of
+  // the tenant's active control (#2100). Empty when neither matched and the
+  // record keeps control_id only as a free-form, unlinked reference, so a
+  // pusher can tell a mistyped bundle ID from a linked push (#2165).
+  string linked_control_id = 5;
 }

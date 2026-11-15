@@ -56,13 +56,15 @@ var (
 )
 
 // carrySource is recorded under `carried_over_from` in the workflow-log
-// after image of each carried decision.
+// after image of each carried decision. A decision copied into a new
+// revision on the same framework version (CreateRequest.FromScopeID, #1965)
+// has no version label or migration row, so those keys are omitted.
 type carrySource struct {
-	FrameworkVersionID     uuid.UUID `json:"framework_version_id"`
-	FrameworkVersion       string    `json:"framework_version"`
-	FrameworkScopeID       uuid.UUID `json:"framework_scope_id"`
-	FrameworkRequirementID uuid.UUID `json:"framework_requirement_id"`
-	MigrationID            uuid.UUID `json:"migration_id"`
+	FrameworkVersionID     uuid.UUID  `json:"framework_version_id"`
+	FrameworkVersion       string     `json:"framework_version,omitempty"`
+	FrameworkScopeID       uuid.UUID  `json:"framework_scope_id"`
+	FrameworkRequirementID uuid.UUID  `json:"framework_requirement_id"`
+	MigrationID            *uuid.UUID `json:"migration_id,omitempty"`
 }
 
 // CarryOverItem is one queue row that was not copied, with the reason.
@@ -213,7 +215,7 @@ func (s *Store) CarryOverDecisions(ctx context.Context, scopeID uuid.UUID, actor
 					FrameworkVersion:       out.SourceVersion,
 					FrameworkScopeID:       uuid.UUID(source.ID.Bytes),
 					FrameworkRequirementID: uuid.UUID(m.FromRequirementID.Bytes),
-					MigrationID:            uuid.UUID(m.ID.Bytes),
+					MigrationID:            migrationID(m.ID),
 				},
 			})
 		}
@@ -260,4 +262,9 @@ func optUUID(u pgtype.UUID) *uuid.UUID {
 	}
 	v := uuid.UUID(u.Bytes)
 	return &v
+}
+
+func migrationID(id pgtype.UUID) *uuid.UUID {
+	u := uuid.UUID(id.Bytes)
+	return &u
 }

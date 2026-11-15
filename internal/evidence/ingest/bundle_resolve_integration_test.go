@@ -74,6 +74,44 @@ func TestPushBundleIDResolvesToControl(t *testing.T) {
 	if ref != bundleID {
 		t.Fatalf("control_ref = %q, want the wire value %q", ref, bundleID)
 	}
+	// #2165: the receipt says which control the record linked to.
+	if receipt.LinkedControlID != want.String() {
+		t.Fatalf("receipt.LinkedControlID = %q, want %s", receipt.LinkedControlID, want)
+	}
+}
+
+// #2165: one bundle with a superseded version and an active one. The push
+// links to the active version, never the superseded row.
+func TestPushBundleIDPrefersActiveOverSuperseded(t *testing.T) {
+	svc, _, _ := boot(t)
+	admin := dbtest.NewMigratePool(t)
+
+	bundleID := "bundle_supersede_" + uuid.NewString()[:8]
+	active := seedBundleControl(t, admin, tenantA, bundleID)
+	superseded := uuid.New()
+	if _, err := admin.Exec(context.Background(), `
+		INSERT INTO controls (id, tenant_id, title, control_family, implementation_type, bundle_id, superseded_by)
+		VALUES ($1, $2, 'bundle-resolve superseded', 'IAC', 'manual_attested', $3, $4)
+	`, superseded, tenantA, bundleID, active); err != nil {
+		t.Fatalf("seed superseded control: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM controls WHERE id = $1`, superseded)
+	})
+
+	receipt, _, err := svc.Process(context.Background(),
+		record(t, func(r *evidencev1.EvidenceRecord) { r.ControlId = bundleID }),
+		mkCred(tenantA, nil, ""))
+	if err != nil {
+		t.Fatalf("Process: %v", err)
+	}
+	got, _ := ledgerControl(t, admin, receipt.RecordID)
+	if !got.Valid || uuid.UUID(got.Bytes) != active {
+		t.Fatalf("control_id = %v, want the active version %s (superseded is %s)", got, active, superseded)
+	}
+	if receipt.LinkedControlID != active.String() {
+		t.Fatalf("receipt.LinkedControlID = %q, want %s", receipt.LinkedControlID, active)
+	}
 }
 
 // A control_id that names no bundle stays a free-form control_ref, as it
@@ -92,5 +130,9 @@ func TestPushUnknownRefStaysUnlinked(t *testing.T) {
 	}
 	if ref != "scf:VPM-04" {
 		t.Fatalf("control_ref = %q, want scf:VPM-04", ref)
+	}
+	// #2165: an unlinked record reports no linked control.
+	if receipt.LinkedControlID != "" {
+		t.Fatalf("receipt.LinkedControlID = %q, want empty for an unlinked ref", receipt.LinkedControlID)
 	}
 }
