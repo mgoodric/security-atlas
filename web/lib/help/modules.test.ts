@@ -75,6 +75,14 @@ describe("parseHelpModule", () => {
       "a diagram without alt text",
       "---\nid: a\ntitle: A\ndiagrams:\n  - src: a.svg\n---\n",
     ],
+    [
+      "a diagram path that leaves the diagrams directory",
+      "---\nid: a\ntitle: A\ndiagrams:\n  - src: ../x.svg\n    alt: X\n---\n",
+    ],
+    [
+      "a diagram that is not an svg or png",
+      "---\nid: a\ntitle: A\ndiagrams:\n  - src: x.html\n    alt: X\n---\n",
+    ],
     ["a flow-list diagram", "---\nid: a\ntitle: A\ndiagrams: [a.svg]\n---\n"],
     ["a line it cannot read", "---\nid: a\ntitle: A\n  stray\n---\n"],
   ])("rejects %s", (_name, source) => {

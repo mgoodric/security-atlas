@@ -150,6 +150,11 @@ function diagrams(fm: FrontMatter): HelpDiagram[] {
     if (!d.src || !d.alt) {
       throw new Error('each diagram needs a "src" and an "alt"');
     }
+    // A bare file name only, the same rule the docs hook applies, so no
+    // `src` can point outside public/help/diagrams/.
+    if (!/^[a-z0-9-]+\.(svg|png)$/.test(d.src)) {
+      throw new Error(`bad diagram file name "${d.src}"`);
+    }
     return { src: d.src, alt: d.alt };
   });
 }

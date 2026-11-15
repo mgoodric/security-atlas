@@ -18,6 +18,7 @@ parses; PyYAML (an mkdocs dependency) reads it here.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,7 @@ _SRC_DIR = _REPO_ROOT / "web" / "help" / "modules"
 _SRC_DIAGRAMS = _REPO_ROOT / "web" / "public" / "help" / "diagrams"
 _SRC_TERMS = _REPO_ROOT / "web" / "help" / "terms.json"
 _DEST_DIR = _REPO_ROOT / "docs-site" / "docs" / "help"
+_DIAGRAM_NAME = re.compile(r"[a-z0-9-]+\.(svg|png)")
 
 
 def on_pre_build(config: dict[str, Any], **kwargs: Any) -> None:
@@ -48,7 +50,15 @@ def on_pre_build(config: dict[str, Any], **kwargs: Any) -> None:
     (_DEST_DIR / "diagrams").mkdir(parents=True)
     for src in sources:
         meta, body = split_front_matter(src.read_text(encoding="utf-8"))
+        if meta.get("id") != src.stem:
+            raise ValueError(f"#2143 help file {src.name}: id must equal the file name")
         for diagram in meta.get("diagrams") or []:
+            # A bare file name only, so a crafted `src` cannot leave either
+            # diagrams directory (`../`, an absolute path).
+            if not _DIAGRAM_NAME.fullmatch(str(diagram.get("src", ""))):
+                raise ValueError(
+                    f"#2143 help file {src.name}: bad diagram file name {diagram.get('src')!r}"
+                )
             shutil.copyfile(_SRC_DIAGRAMS / diagram["src"], _DEST_DIR / "diagrams" / diagram["src"])
         (_DEST_DIR / f"{meta['id']}.md").write_text(
             render_help_page(meta, body, terms), encoding="utf-8"

@@ -36,19 +36,21 @@ described:
 2. Each evaluation reads the control's current evidence and works out a
    state: **pass**, **fail**, **insufficient_evidence** or
    **not_applicable**. Any failing check makes the control fail.
-3. Evidence ages from fresh to stale to expired. Expired evidence no
-   longer counts, so a control without current evidence cannot keep
-   passing on old results.
+3. Evidence is fresh while it is inside the window its control's
+   freshness class sets, and stale once it is older. Stale evidence no
+   longer counts, so a control cannot keep passing on old results. A
+   control with no evidence yet has no result, which is not the same as
+   failing.
 
 A control covered by an approved exception shows **Excepted** instead.
 
 Manual controls work the same way as automated ones. The only difference
-is where the evidence comes from: the control's owner uploads it or
-attests to it on the control's page.
+is where the evidence comes from: someone who holds the control's owner
+role uploads it or attests to it on the control's page.
 
 ## Common tasks
 
 - **Open a control** to see its evidence, the frameworks it satisfies,
   its owner and its history.
-- **Attest to a manual control** from its page when you are its owner.
+- **Attest to a manual control** from its page when you hold its owner role.
 - **Select several controls** to act on them together.
