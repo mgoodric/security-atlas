@@ -25,6 +25,12 @@ const (
 	ChangeJustificationChanged = "justification_changed"
 )
 
+// ChangeReferenceChanged is a requirement whose decision and justification
+// are unchanged but whose implementation reference moved (#2214). It is
+// informational: listed apart from the four kinds above, so their counts
+// stay what the approver signs.
+const ChangeReferenceChanged = "reference_changed"
+
 // DecisionChange is one requirement whose decision differs between the
 // baseline and the revision. Before is nil for added, After nil for removed.
 type DecisionChange struct {
@@ -39,17 +45,20 @@ type DecisionChange struct {
 // ApplicabilityDiff compares a revision against the activated revision of
 // its framework version. Baseline is nil when no other revision is
 // activated; every decision on the revision is then added.
+// ReferenceChanges holds the reference-only edits, kept out of Changes.
 type ApplicabilityDiff struct {
 	Scope            FrameworkScope
 	Baseline         *FrameworkScope
 	PredicateChanged bool
 	Changes          []DecisionChange
+	ReferenceChanges []DecisionChange
 }
 
 // DiffDecisions lists the requirements whose decision differs between base
 // and target, in target's (requirement) order. A requirement undecided on
 // both sides is unchanged. Only decision and justification count: an edit
-// to the implementation reference alone is not a change the approver signs.
+// to the implementation reference alone is not a change the approver signs;
+// DiffReferences lists those.
 func DiffDecisions(base, target []RequirementApplicability) []DecisionChange {
 	before := make(map[uuid.UUID]*Decision, len(base))
 	for _, r := range base {
@@ -85,9 +94,39 @@ func DiffDecisions(base, target []RequirementApplicability) []DecisionChange {
 	return out
 }
 
+// DiffReferences lists the requirements decided the same way on both sides,
+// with the same justification, whose implementation reference differs, in
+// target's order. Each row is ChangeReferenceChanged with both sides.
+func DiffReferences(base, target []RequirementApplicability) []DecisionChange {
+	before := make(map[uuid.UUID]*Decision, len(base))
+	for _, r := range base {
+		before[r.RequirementID] = r.Decision
+	}
+	out := []DecisionChange{}
+	for _, r := range target {
+		b, a := before[r.RequirementID], r.Decision
+		if b == nil || a == nil || b.Decision != a.Decision ||
+			b.Justification != a.Justification || b.ImplementationRef == a.ImplementationRef {
+			continue
+		}
+		out = append(out, DecisionChange{
+			RequirementID: r.RequirementID,
+			Code:          r.Code,
+			Title:         r.Title,
+			Kind:          ChangeReferenceChanged,
+			Before:        b,
+			After:         a,
+		})
+	}
+	return out
+}
+
 // DiffAgainstActivated returns the applicability and predicate diff between
 // the revision and the activated revision of its framework version. When
-// the revision is itself the activated one, there is no baseline.
+// the revision is itself the activated one, there is no baseline. The
+// baseline is always the revision activated now, whatever the state of the
+// one asked about: a superseded revision is compared against the current
+// activated revision, not against the one it replaced.
 func (s *Store) DiffAgainstActivated(ctx context.Context, scopeID uuid.UUID) (ApplicabilityDiff, error) {
 	var out ApplicabilityDiff
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
@@ -127,6 +166,7 @@ func (s *Store) DiffAgainstActivated(ctx context.Context, scopeID uuid.UUID) (Ap
 			return fmt.Errorf("get activated: %w", aerr)
 		}
 		out.Changes = DiffDecisions(baseReqs, target.Requirements)
+		out.ReferenceChanges = DiffReferences(baseReqs, target.Requirements)
 		return nil
 	})
 	return out, err

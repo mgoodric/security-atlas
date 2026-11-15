@@ -136,6 +136,8 @@ GET /v1/incidents 9
 GET /v1/incidents/{id} 9
 GET /v1/install-state 9
 GET /v1/mapping-overlays 9
+GET /v1/mapping-overlays/audited-under 9
+GET /v1/mapping-overlays/audited-under/export 9
 GET /v1/mapping-overlays/export 9
 GET /v1/mcp/write-proposals 9
 GET /v1/mcp/write-proposals/{id} 9
