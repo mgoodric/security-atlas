@@ -3181,6 +3181,8 @@ type ScfRemapProposal struct {
 	Status                   string             `json:"status"`
 	SuccessorScfIds          []string           `json:"successor_scf_ids"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	TargetAnchorID           pgtype.UUID        `json:"target_anchor_id"`
+	Source                   string             `json:"source"`
 }
 
 type ScimAuditLog struct {

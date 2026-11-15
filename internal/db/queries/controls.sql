@@ -510,18 +510,22 @@ WHERE tenant_id = sqlc.arg(tenant_id) AND superseded_by IS NULL
 
 -- name: InsertSCFRemapProposal :execrows
 -- Issue #1775: queue one remap proposal for a control on a legacy SCF
--- anchor. Written by the migrate role during `catalog import-scf`; a re-run
--- of the same import leaves the existing proposal alone.
+-- anchor. Written by the migrate role during `catalog import-scf` (source
+-- 'boot') and by the app role when an upload re-binds or flags a control in
+-- place (source 'upload', #2236); a re-run leaves the existing proposal
+-- alone. target_anchor_id is the anchor a 'rebound' control moved to, NULL
+-- for an 'open' one.
 INSERT INTO scf_remap_proposals (
     tenant_id, control_id, bundle_id, legacy_anchor_id, legacy_scf_id,
     legacy_release, target_framework_version_id, target_release, class,
-    status, successor_scf_ids
+    status, successor_scf_ids, target_anchor_id, source
 ) VALUES (
     sqlc.arg(tenant_id), sqlc.arg(control_id), sqlc.arg(bundle_id),
     sqlc.arg(legacy_anchor_id), sqlc.arg(legacy_scf_id),
     sqlc.arg(legacy_release), sqlc.arg(target_framework_version_id),
     sqlc.arg(target_release), sqlc.arg(class), sqlc.arg(status),
-    sqlc.arg(successor_scf_ids)::text[]
+    sqlc.arg(successor_scf_ids)::text[], sqlc.narg(target_anchor_id),
+    sqlc.arg(source)
 )
 ON CONFLICT (control_id, target_framework_version_id) DO NOTHING;
 

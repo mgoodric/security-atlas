@@ -214,21 +214,9 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 	// queue records the #1775 remap proposal for a control the D3 rule did
 	// not leave pinned.
 	queue := func(r dbx.ListControlsOnLegacySCFAnchorsRow, status string) error {
-		class, successors := RemapClassFor(r)
-		if _, err := q.InsertSCFRemapProposal(ctx, dbx.InsertSCFRemapProposalParams{
-			TenantID:                 r.TenantID,
-			ControlID:                r.ControlID,
-			BundleID:                 r.BundleID,
-			LegacyAnchorID:           r.LegacyAnchorID,
-			LegacyScfID:              r.LegacyScfID,
-			LegacyRelease:            r.LegacyRelease,
-			TargetFrameworkVersionID: r.CurrentFrameworkVersionID,
-			TargetRelease:            r.CurrentRelease,
-			Class:                    string(class),
-			Status:                   status,
-			SuccessorScfIds:          successors,
-		}); err != nil {
-			return fmt.Errorf("scfimport: queue remap proposal for control %s: %w", uuid.UUID(r.ControlID.Bytes), err)
+		class, err := RecordRemapProposal(ctx, q, r, status, SourceBoot)
+		if err != nil {
+			return err
 		}
 		report.Proposals[class]++
 		return nil
