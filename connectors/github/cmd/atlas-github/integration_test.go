@@ -229,7 +229,7 @@ func TestWebhook_AcceptsSignedDeliveryAndPushesAuditEvent(t *testing.T) {
 	_, conn, bearer := newBufconnPlatform(t)
 	client := sdk.NewClientFromConn(conn, bearer)
 
-	pusher := &sdkPusher{client: client, env: "prod", controlID: "scf:MON-01"}
+	pusher := &sdkPusher{client: client, env: "prod", controlID: "scf:MON-02"}
 	secret := []byte("integration-test-secret")
 	handler, err := githubwebhook.NewHandler(secret, pusher, func() time.Time {
 		return time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC)
@@ -277,11 +277,11 @@ func TestWebhook_DedupesByDeliveryID(t *testing.T) {
 		CreatedAt:      now(),
 	}
 	r2 := *r
-	rec1, err := buildAuditEventRecord(r, "prod", "scf:MON-01")
+	rec1, err := buildAuditEventRecord(r, "prod", "scf:MON-02")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	rec2, err := buildAuditEventRecord(&r2, "prod", "scf:MON-01")
+	rec2, err := buildAuditEventRecord(&r2, "prod", "scf:MON-02")
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}

@@ -600,15 +600,15 @@ mappings:
     strength: 0.8
     rationale: "Identifying and recording asset vulnerabilities is part of SCF Vulnerability & Patch Management."
   - requirement_code: "ID.RA-02"
-    scf_anchor: "MON-08"
+    scf_anchor: "MON-16"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Receiving/analyzing cyber threat intelligence overlaps SCF Anomalous Behavior Detection (the closest threat-analysis anchor in the sample fixture); a dedicated threat-intelligence anchor is absent (LOW)."
+    rationale: "Receiving/analyzing cyber threat intelligence overlaps SCF Anomalous Behavior (the closest threat-analysis anchor in the sample fixture); a dedicated threat-intelligence anchor is absent (LOW)."
   - requirement_code: "ID.RA-02"
     scf_anchor: "THR-03"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "ID.RA-02 'cyber threat intelligence is received from information-sharing sources and analyzed' is the direct STRM match for Threat Intelligence Feeds (slice 641 THR-03) — the dedicated threat-intel-feed anchor the slice-480 row's '(LOW)' note flagged as absent. The MON-08 placeholder above stays as a secondary anomaly-detection overlap; THR-03 is now the primary dedicated anchor. Added by slice 646."
+    rationale: "ID.RA-02 'cyber threat intelligence is received from information-sharing sources and analyzed' is the direct STRM match for Threat Intelligence Feeds (slice 641 THR-03) — the dedicated threat-intel-feed anchor the slice-480 row's '(LOW)' note flagged as absent. The MON-16 placeholder above stays as a secondary anomaly-detection overlap; THR-03 is now the primary dedicated anchor. Added by slice 646."
   - requirement_code: "ID.RA-03"
     scf_anchor: "RSK-04"
     relationship_type: "subset_of"
@@ -675,7 +675,7 @@ mappings:
     strength: 0.6
     rationale: "Improvements from security tests/exercises overlap the SCF Vulnerability Remediation Process (pentest/exercise findings feed remediation); a dedicated test-exercise anchor is absent (LOW)."
   - requirement_code: "ID.IM-03"
-    scf_anchor: "MON-01"
+    scf_anchor: "MON-02"
     relationship_type: "intersects_with"
     strength: 0.6
     rationale: "Improvements from operational-process execution overlap SCF Continuous Monitoring; operational-improvement specificity is the residual gap (LOW)."
@@ -764,10 +764,10 @@ mappings:
     strength: 0.7
     rationale: "Maintaining/replacing/removing hardware overlaps SCF Asset Disposal (secure decommissioning); hardware-maintenance facet is the residual gap."
   - requirement_code: "PR.PS-04"
-    scf_anchor: "AAA-01"
+    scf_anchor: "MON-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Generating log records for monitoring is part of SCF Auditing & Accountability."
+    rationale: "Generating log records for monitoring is part of SCF System Generated Event Logs & Security-Relevant Telemetry."
   - requirement_code: "PR.PS-05"
     scf_anchor: "CFG-02"
     relationship_type: "intersects_with"
@@ -801,7 +801,7 @@ mappings:
 
   # ===== DETECT (DE) =====
   - requirement_code: "DE.CM-01"
-    scf_anchor: "MON-01"
+    scf_anchor: "MON-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Network monitoring for adverse events is part of SCF Continuous Monitoring."
@@ -811,30 +811,30 @@ mappings:
     strength: 0.6
     rationale: "Monitoring the physical environment for adverse events overlaps SCF Physical Access Control (the closest physical anchor); physical-environment-monitoring specificity is a residual gap (LOW)."
   - requirement_code: "DE.CM-03"
-    scf_anchor: "MON-08"
+    scf_anchor: "MON-16"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Monitoring personnel activity overlaps SCF Anomalous Behavior Detection."
+    rationale: "Monitoring personnel activity overlaps SCF Anomalous Behavior."
   - requirement_code: "DE.CM-06"
     scf_anchor: "TPM-04"
     relationship_type: "intersects_with"
     strength: 0.6
     rationale: "Monitoring external service-provider activity overlaps SCF Third-Party Risk Assessments; continuous-provider-monitoring specificity is a residual gap (LOW)."
   - requirement_code: "DE.CM-09"
-    scf_anchor: "MON-01"
+    scf_anchor: "MON-02"
     relationship_type: "subset_of"
     strength: 0.8
     rationale: "Monitoring computing hardware/software/runtime is part of SCF Continuous Monitoring."
   - requirement_code: "DE.AE-02"
-    scf_anchor: "MON-08"
+    scf_anchor: "MON-16"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "Analyzing adverse events overlaps SCF Anomalous Behavior Detection; broader correlation gap (MEDIUM)."
+    rationale: "Analyzing adverse events overlaps SCF Anomalous Behavior; broader correlation gap (MEDIUM)."
   - requirement_code: "DE.AE-03"
-    scf_anchor: "AAA-12"
+    scf_anchor: "MON-05.1"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Correlating event information from multiple sources is part of SCF Audit Log Review (multi-source log analysis)."
+    rationale: "Correlating event information from multiple sources is part of SCF Centralized Event Log & Security-Relevant Telemetry Review & Analysis (multi-source log analysis)."
   - requirement_code: "DE.AE-04"
     scf_anchor: "IRO-04"
     relationship_type: "intersects_with"
@@ -846,15 +846,15 @@ mappings:
     strength: 0.7
     rationale: "Providing adverse-event information to authorized staff/tools is part of SCF Incident Reporting."
   - requirement_code: "DE.AE-07"
-    scf_anchor: "MON-08"
+    scf_anchor: "MON-16"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Integrating cyber threat intelligence into event analysis overlaps SCF Anomalous Behavior Detection; a dedicated threat-intelligence anchor is absent from the fixture (LOW)."
+    rationale: "Integrating cyber threat intelligence into event analysis overlaps SCF Anomalous Behavior; a dedicated threat-intelligence anchor is absent from the fixture (LOW)."
   - requirement_code: "DE.AE-07"
     scf_anchor: "THR-01"
     relationship_type: "intersects_with"
     strength: 0.7
-    rationale: "DE.AE-07 'cyber threat intelligence and other contextual information are integrated into event analysis' is the program-level threat-intel function; Threat Intelligence Program (THR-01, reconciled in slice 641 to name monitoring/hunting/response as program outputs) is the dedicated anchor for integrating intelligence into analysis — supersedes the MON-08 '(LOW)' placeholder above as the primary anchor. Added by slice 646."
+    rationale: "DE.AE-07 'cyber threat intelligence and other contextual information are integrated into event analysis' is the program-level threat-intel function; Threat Intelligence Program (THR-01, reconciled in slice 641 to name monitoring/hunting/response as program outputs) is the dedicated anchor for integrating intelligence into analysis — supersedes the MON-16 '(LOW)' placeholder above as the primary anchor. Added by slice 646."
   - requirement_code: "DE.AE-08"
     scf_anchor: "IRO-04"
     relationship_type: "subset_of"
@@ -893,15 +893,15 @@ mappings:
     strength: 0.65
     rationale: "Incident root-cause analysis overlaps SCF Incident Response Plan; forensic-analysis specificity gap (LOW). The sample fixture has no dedicated forensic-analysis anchor (slice-480 D7 revisit; closest covering anchor retained)."
   - requirement_code: "RS.AN-06"
-    scf_anchor: "AAA-01"
+    scf_anchor: "MON-04"
     relationship_type: "intersects_with"
     strength: 0.65
-    rationale: "Recording investigation actions with preserved integrity overlaps SCF Auditing & Accountability (tamper-evident audit records); chain-of-custody specificity is the residual gap (LOW)."
+    rationale: "Recording investigation actions with preserved integrity overlaps SCF System Generated Event Logs & Security-Relevant Telemetry (tamper-evident audit records); chain-of-custody specificity is the residual gap (LOW)."
   - requirement_code: "RS.AN-07"
-    scf_anchor: "AAA-10"
+    scf_anchor: "MON-13"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Collecting incident data/metadata with preserved integrity/provenance overlaps SCF Event Log Retention; forensic-preservation specificity is absent from the fixture (LOW)."
+    rationale: "Collecting incident data/metadata with preserved integrity/provenance overlaps SCF Event Log & Security-Relevant Telemetry Retention; forensic-preservation specificity is absent from the fixture (LOW)."
   - requirement_code: "RS.AN-08"
     scf_anchor: "IRO-04"
     relationship_type: "subset_of"

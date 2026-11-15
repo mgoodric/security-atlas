@@ -652,7 +652,7 @@ var demoSCFAnchors = []demoSCFAnchor{
 	{"BCD-11", "Business Continuity & Disaster Recovery", "Data Backups"},
 	{"TDA-09", "Technology Development & Acquisition", "Secure Coding"},
 	{"TPM-03", "Third-Party Management", "Supply Chain Risk Management"},
-	{"MON-01", "Continuous Monitoring", "Continuous Monitoring"},
+	{"MON-02", "Continuous Monitoring", "Continuous Monitoring"},
 	{"VPM-02", "Vulnerability & Patch Management", "Vulnerability Remediation"},
 	{"IRO-04", "Incident Response", "Incident Handling"},
 }

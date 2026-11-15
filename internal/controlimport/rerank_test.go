@@ -14,22 +14,22 @@ func threeCands() []Candidate {
 	return []Candidate{
 		{Rank: 1, AnchorID: "a", SCFID: "IAC-37", Title: "MFA", Source: SourceCrosswalk, Reaches: []Requirement{req61}, TestedCount: 1},
 		{Rank: 2, AnchorID: "b", SCFID: "IAC-12", Title: "Review", Source: SourceCrosswalk},
-		{Rank: 3, AnchorID: "c", SCFID: "MON-01", Title: "Monitoring", Source: SourceKeyword},
+		{Rank: 3, AnchorID: "c", SCFID: "MON-02", Title: "Monitoring", Source: SourceKeyword},
 	}
 }
 
 func TestApplyRerankReordersWithinTheSet(t *testing.T) {
 	t.Parallel()
 	text := `{"ranking":[
-		{"scf_id":"mon-01","rationale":"  watches   events "},
+		{"scf_id":"mon-02","rationale":"  watches   events "},
 		{"scf_id":"ZZZ-99","rationale":"invented"},
 		{"scf_id":"IAC-37","rationale":"mfa"},
-		{"scf_id":"MON-01","rationale":"repeat"}]}`
+		{"scf_id":"MON-02","rationale":"repeat"}]}`
 	got, ok := applyRerank(threeCands(), text)
 	if !ok {
 		t.Fatal("applyRerank rejected a usable answer")
 	}
-	if s := sources(got); s != "MON-01/keyword IAC-37/crosswalk IAC-12/crosswalk" {
+	if s := sources(got); s != "MON-02/keyword IAC-37/crosswalk IAC-12/crosswalk" {
 		t.Fatalf("order = %s", s)
 	}
 	for i, c := range got {

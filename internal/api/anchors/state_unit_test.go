@@ -128,7 +128,7 @@ func TestLatestRowsToStateWire_RendersSQLAggregatedResultVerbatim(t *testing.T) 
 	// the SQL says.
 	rows := []dbx.ListSCFAnchorsLatestWithStateRow{
 		{
-			ID: pgtype.UUID{Bytes: [16]byte{0x11}, Valid: true}, ScfID: "AAA-01",
+			ID: pgtype.UUID{Bytes: [16]byte{0x11}, Valid: true}, ScfID: "MON-04",
 			Family: "AAA", Title: "first anchor",
 			StateResult:          ptrEvidenceResult("fail"),
 			StateFreshnessStatus: ptrString("fresh"),
@@ -168,7 +168,7 @@ func TestLatestRowsToStateWire_RendersSQLAggregatedResultVerbatim(t *testing.T) 
 	if wire[2].State != nil {
 		t.Errorf("row[2] state = %+v; want nil (no control instantiated)", wire[2].State)
 	}
-	if wire[0].SCFID != "AAA-01" || wire[1].SCFID != "AAA-02" || wire[2].SCFID != "AAA-03" {
+	if wire[0].SCFID != "MON-04" || wire[1].SCFID != "AAA-02" || wire[2].SCFID != "AAA-03" {
 		t.Errorf("scf_id ordering not preserved: %+v", []string{wire[0].SCFID, wire[1].SCFID, wire[2].SCFID})
 	}
 

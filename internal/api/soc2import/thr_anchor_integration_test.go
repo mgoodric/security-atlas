@@ -19,10 +19,10 @@ import (
 // seeded catalog.
 //
 // Slice 533 shipped datadog.siem_rule.v1 with
-// x-default-scf-anchors=[MON-01, THR-01]. MON-01 resolved against the seeded
+// x-default-scf-anchors=[MON-02, THR-01]. MON-02 resolved against the seeded
 // sample catalog, but THR-01 (the SCF Threat-Management / threat-intelligence
 // domain) did NOT exist in the sample catalog — it carried the MON domain
-// (incl. MON-08 "Anomalous Behavior Detection") but no THR-domain anchor, so
+// (incl. MON-16 "Anomalous Behavior") but no THR-domain anchor, so
 // the connector's advisory detection anchor pointed at no catalog row (see
 // slice 533 decisions-log D2). Slice 635 seeds THR-01 into
 // migrations/fixtures/scf-sample.json with its STRM crosswalk edges to
@@ -122,7 +122,7 @@ func TestTHRAnchor_DetectionCrosswalkEdgesExist(t *testing.T) {
 	}
 
 	// A.5.7 (Threat intelligence) is the direct STRM equal of THR-01 — the
-	// slice-635 upgrade from the slice-438 LOW-CONFIDENCE MON-08 placeholder.
+	// slice-635 upgrade from the slice-438 LOW-CONFIDENCE MON-16 placeholder.
 	// Assert the relationship type is `equal`, not the old intersects_with.
 	var rel string
 	if err := pool.QueryRow(context.Background(), `
