@@ -1,4 +1,4 @@
--- security-atlas — reverse 20261121000000_exception_revoke.sql.
+-- security-atlas — reverse 20261127000000_exception_revoke.sql.
 --
 -- exception_audit_log is append-only audit evidence, so this reversal
 -- refuses to run while any revoked exception or 'revoked' audit row
@@ -14,7 +14,7 @@ BEGIN
       INTO n;
     IF n > 0 THEN
         RAISE EXCEPTION 'exceptions hold % revoked row(s); refusing to delete audit evidence', n
-            USING HINT = 'Archive and remove those rows deliberately before reversing 20261121000000.';
+            USING HINT = 'Archive and remove those rows deliberately before reversing 20261127000000.';
     END IF;
 END
 $$;
