@@ -21,10 +21,14 @@ on:
     paths:
       - "docs-site/**"
       - ".github/workflows/docs-publish.yml"
+      # #2144 — the Terms page is generated from the app's term list.
+      - "web/help/terms.json"
   pull_request:
     paths:
       - "docs-site/**"
       - ".github/workflows/docs-publish.yml"
+      # #2144 — the Terms page is generated from the app's term list.
+      - "web/help/terms.json"
       # Slice 430 — the config-reference drift guard must also fire when
       # the env template or the guard script changes, not only the page.
       - "deploy/docker/.env.example"

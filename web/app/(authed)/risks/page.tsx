@@ -67,6 +67,7 @@ import {
   type FilterPill,
   type ListColumn,
 } from "@/components/list";
+import { Term } from "@/components/help/term";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
@@ -618,7 +619,11 @@ function RisksPageInner() {
       header: (
         <SortableHeader
           sortKey="residual"
-          label="Residual (after controls)"
+          term={{
+            node: <Term id="residual-risk">Residual</Term>,
+            text: "Residual",
+          }}
+          label="(after controls)"
           title={RESIDUAL_HEADER_TOOLTIP}
           state={sortState}
           onSort={updateSort}
