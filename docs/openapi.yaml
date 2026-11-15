@@ -2367,6 +2367,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/controls/remap-proposals:
+    get:
+      summary: GET /v1/controls/remap-proposals — the tenant's SCF remap proposals, one per control left on an older SCF release's anchor, filterable by class and status (#1775)
+      tags: [controls]
+      operationId: get-v1-controls-remap-proposals
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/controls/{id}/action-plans:
     get:
       summary: GET /v1/controls/{id}/action-plans
