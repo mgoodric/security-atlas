@@ -10,6 +10,7 @@ import { Breadcrumb } from "@/components/shell/breadcrumb";
 import { GlobalSearch } from "@/components/shell/global-search";
 import { InProgressAuditPill } from "@/components/shell/in-progress-audit-pill";
 import { ThemeAwareLogo } from "@/components/shell/theme-aware-logo";
+import { ThemeServerSync } from "@/components/shell/theme-server-sync";
 import { UserAvatar, fetchUserIdentity } from "@/components/shell/user-avatar";
 
 // Slice 075 — the top-nav header. Replaces the slice-005 text placeholder
@@ -182,6 +183,12 @@ export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
         >
           {signOutForm}
         </AccountMenu>
+        {/*
+          #2142 — the stored theme rides the same /v1/me read; the
+          component renders nothing and re-applies it when it differs
+          from this browser's cached choice.
+        */}
+        <ThemeServerSync theme={identity?.theme ?? null} />
       </div>
     </header>
   );

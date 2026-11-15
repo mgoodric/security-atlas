@@ -72,15 +72,22 @@ type Panels struct {
 
 // FrameworkPosturePanelRow mirrors the wire shape of
 // `/v1/frameworks/posture`'s rows.
+//
+// ScopeSet (#2114) is false when the tenant has no activated framework
+// scope for the version; the percentages are then nil (JSON null, an empty
+// CSV/XLSX cell). The percentages are pointers so a snapshot written before
+// #2114, with plain numbers and no scope_set key, still decodes.
 type FrameworkPosturePanelRow struct {
-	FrameworkID      string  `json:"framework_id"`
-	FrameworkVersion string  `json:"framework_version"`
-	CoveragePct      float64 `json:"coverage_pct"`
+	FrameworkID        string   `json:"framework_id"`
+	FrameworkVersion   string   `json:"framework_version"`
+	FrameworkVersionID string   `json:"framework_version_id"`
+	ScopeSet           bool     `json:"scope_set"`
+	CoveragePct        *float64 `json:"coverage_pct"`
 	// CoveredByExceptionPct is the part of CoveragePct that rests only on
 	// active exceptions (#2112).
-	CoveredByExceptionPct float64 `json:"covered_by_exception_pct"`
-	FreshnessComposite    float64 `json:"freshness_composite"`
-	TrendDelta90d         float64 `json:"trend_delta_90d"`
+	CoveredByExceptionPct *float64 `json:"covered_by_exception_pct"`
+	FreshnessComposite    *float64 `json:"freshness_composite"`
+	TrendDelta90d         *float64 `json:"trend_delta_90d"`
 }
 
 // RiskPanelRow mirrors the relevant subset of `/v1/risks`'s rows
@@ -125,12 +132,18 @@ type FreshnessClassBucket struct {
 }
 
 // DriftPanel mirrors `/v1/controls/drift?since=7d`'s payload.
+//
+// Delta is the net change in passing controls (latest snapshot minus
+// earliest), not started-passing minus flipped-out: a control can fail and
+// recover inside the window. Read it beside both lists.
 type DriftPanel struct {
-	Since           string     `json:"since"`
-	Through         string     `json:"through"`
-	Delta           int        `json:"delta"`
-	FlippedOutCount int        `json:"flipped_out_count"`
-	FlippedOut      []DriftRow `json:"flipped_out"`
+	Since               string         `json:"since"`
+	Through             string         `json:"through"`
+	Delta               int            `json:"delta"`
+	FlippedOutCount     int            `json:"flipped_out_count"`
+	FlippedOut          []DriftRow     `json:"flipped_out"`
+	StartedPassingCount int            `json:"started_passing_count"`
+	StartedPassing      []DriftGainRow `json:"started_passing"`
 }
 
 // DriftRow is one flipped-out-of-passing control.
@@ -138,6 +151,11 @@ type DriftRow struct {
 	ControlID     string `json:"control_id"`
 	LastPassing   string `json:"last_passing"`
 	CurrentResult string `json:"current_result"`
+}
+
+// DriftGainRow is one control that started passing in the window (#2195).
+type DriftGainRow struct {
+	ControlID string `json:"control_id"`
 }
 
 // UpcomingPanelRow is one compliance-calendar event in the export's
@@ -242,14 +260,19 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	out.Panels.FrameworkPosture = make([]FrameworkPosturePanelRow, len(postureRows))
 	for i, p := range postureRows {
-		out.Panels.FrameworkPosture[i] = FrameworkPosturePanelRow{
-			FrameworkID:           uuidStringFromPgtype(p.FrameworkID),
-			FrameworkVersion:      p.FrameworkVersion,
-			CoveragePct:           p.CoveragePct,
-			CoveredByExceptionPct: p.CoveredByExceptionPct,
-			FreshnessComposite:    p.FreshnessComposite,
-			TrendDelta90d:         p.TrendDelta90d,
+		row := FrameworkPosturePanelRow{
+			FrameworkID:        uuidStringFromPgtype(p.FrameworkID),
+			FrameworkVersion:   p.FrameworkVersion,
+			FrameworkVersionID: uuidStringFromPgtype(p.FrameworkVersionID),
+			ScopeSet:           p.ScopeActivated,
 		}
+		if p.ScopeActivated {
+			row.CoveragePct = &p.CoveragePct
+			row.CoveredByExceptionPct = &p.CoveredByExceptionPct
+			row.FreshnessComposite = &p.FreshnessComposite
+			row.TrendDelta90d = &p.TrendDelta90d
+		}
+		out.Panels.FrameworkPosture[i] = row
 	}
 
 	// 2. Risks — same filter the dashboard's risks panel uses
@@ -300,12 +323,18 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 			CurrentResult: fr.CurrentResult,
 		}
 	}
+	gains := make([]DriftGainRow, len(driftReport.StartedPassing))
+	for i, g := range driftReport.StartedPassing {
+		gains[i] = DriftGainRow{ControlID: g.ControlID.String()}
+	}
 	out.Panels.Drift = DriftPanel{
-		Since:           driftReport.SinceDate.UTC().Format("2006-01-02"),
-		Through:         driftReport.ThroughDate.UTC().Format("2006-01-02"),
-		Delta:           driftReport.Delta,
-		FlippedOutCount: len(flips),
-		FlippedOut:      flips,
+		Since:               driftReport.SinceDate.UTC().Format("2006-01-02"),
+		Through:             driftReport.ThroughDate.UTC().Format("2006-01-02"),
+		Delta:               driftReport.Delta,
+		FlippedOutCount:     len(flips),
+		FlippedOut:          flips,
+		StartedPassingCount: len(gains),
+		StartedPassing:      gains,
 	}
 
 	// 5. Upcoming — the calendar's next 14 days, the window the

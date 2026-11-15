@@ -5,22 +5,24 @@ import { describe, expect, test } from "vitest";
 
 import { ALL_CURRENT, buildVersionOptions, pinFor } from "./version-options";
 
-function detailWith(versions: Array<{ framework: string; version: string }>) {
+function detailWith(
+  versions: Array<{ slug?: string; framework: string; version: string }>,
+) {
   return {
     requirements: versions.map((v, i) => ({
-      requirement: {
-        id: `r${i}`,
-        framework_version_id: `fv${i}`,
-        code: "X",
-        text: "",
-      },
-      framework_version: {
-        id: `fv-${v.framework}-${v.version}`,
-        framework: v.framework,
-        version: v.version,
-      },
-      strm_type: "equal" as const,
+      edge_id: `e${i}`,
+      requirement_id: `r${i}`,
+      code: "X",
+      title: "",
+      framework_slug: v.slug ?? v.framework.toLowerCase(),
+      framework_name: v.framework,
+      framework_version: v.version,
+      framework_version_id: `fv-${v.framework}-${v.version}`,
+      framework_version_status: "current",
+      relationship_type: "equal",
       strength: 1,
+      coverage: null,
+      source_attribution: "scf-strm",
     })),
   };
 }
@@ -52,19 +54,11 @@ describe("buildVersionOptions", () => {
     ]);
   });
 
-  test("reconstructs slug:version pin value, honoring slugFor override", () => {
+  test("the pin value is the row's framework_slug:version", () => {
     const opts = buildVersionOptions(
-      detailWith([{ framework: "SOC 2", version: "2017" }]),
-      { "SOC 2": "soc2" },
+      detailWith([{ slug: "soc2", framework: "SOC 2", version: "2017" }]),
     );
-    expect(opts[1].value).toBe("soc2:2017");
-  });
-
-  test("falls back to lowercased framework as slug when no override", () => {
-    const opts = buildVersionOptions(
-      detailWith([{ framework: "iso", version: "2022" }]),
-    );
-    expect(opts[1].value).toBe("iso:2022");
+    expect(opts[1]).toEqual({ value: "soc2:2017", label: "SOC 2 — 2017" });
   });
 
   test("empty / null detail yields only the default", () => {

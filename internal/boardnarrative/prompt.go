@@ -36,7 +36,7 @@ Rules you MUST follow:
 ## Control coverage summary
 1. <one sentence stating the program control-coverage percentage>
 2. <one sentence stating the evidence-freshness percentage>
-3. <one sentence stating the 30-day drift: the net change and how many controls drifted out of passing>
+3. <one sentence stating the 30-day drift: the net change in passing controls, how many controls started passing (when the rollup gives controls_started_passing) and how many drifted out of passing>
 4. <one sentence stating how many frameworks the program runs against, citing one or more control/evidence ids from the rollup>
 
 Emit the heading verbatim, then exactly four numbered items, numbered 1 through 4 in order.
@@ -71,8 +71,7 @@ func buildPrompt(r Rollup) string {
 	fmt.Fprintf(&b, "  - period_end: %s\n", r.PeriodEnd)
 	fmt.Fprintf(&b, "  - control_coverage_pct: %s\n", itoa(r.CoveragePct))
 	fmt.Fprintf(&b, "  - evidence_freshness_pct: %s\n", itoa(r.FreshnessPct))
-	fmt.Fprintf(&b, "  - drift_delta_30d: %s\n", itoa(r.Delta))
-	fmt.Fprintf(&b, "  - controls_drifted_out: %s\n", itoa(r.FlippedOutCount))
+	writeDriftMovement(&b, r)
 	fmt.Fprintf(&b, "  - drift_window_days: %s\n", itoa(r.WindowDays))
 	fmt.Fprintf(&b, "  - framework_count: %s\n", itoa(r.FrameworkCount))
 	if len(r.FrameworkNames) > 0 {
@@ -86,6 +85,19 @@ func buildPrompt(r Rollup) string {
 		}
 	}
 	return b.String()
+}
+
+// writeDriftMovement writes the drift rollup lines both drift-bearing
+// sections share. The delta is named as a net change, because gains minus
+// losses is not the delta in general (a control can fail and recover inside
+// the window). A brief stored before #2195 has no started-passing count, and
+// the line is left out rather than stated as zero.
+func writeDriftMovement(b *strings.Builder, r Rollup) {
+	fmt.Fprintf(b, "  - net_change_in_passing_controls_30d: %s\n", itoa(r.Delta))
+	if r.StartedPassingCount != nil {
+		fmt.Fprintf(b, "  - controls_started_passing: %s\n", itoa(*r.StartedPassingCount))
+	}
+	fmt.Fprintf(b, "  - controls_drifted_out: %s\n", itoa(r.FlippedOutCount))
 }
 
 // sectionContextInputs builds the structured forensic context map recorded on
@@ -112,6 +124,7 @@ func sectionContextInputs(section SectionKey, r Rollup) map[string]any {
 		base["drift_window_days"] = r.WindowDays
 		base["drift_delta_30d"] = r.Delta
 		base["controls_drifted_out"] = r.FlippedOutCount
+		addStartedPassing(base, r)
 	case SectionExceptionStatus:
 		base["exceptions_in_force"] = r.ExceptionsActive
 		base["exceptions_past_expiry"] = r.ExceptionsPastDue
@@ -121,9 +134,16 @@ func sectionContextInputs(section SectionKey, r Rollup) map[string]any {
 		base["evidence_freshness_pct"] = r.FreshnessPct
 		base["drift_delta_30d"] = r.Delta
 		base["controls_drifted_out"] = r.FlippedOutCount
+		addStartedPassing(base, r)
 		base["framework_count"] = r.FrameworkCount
 	}
 	return base
+}
+
+func addStartedPassing(base map[string]any, r Rollup) {
+	if r.StartedPassingCount != nil {
+		base["controls_started_passing"] = *r.StartedPassingCount
+	}
 }
 
 // oneLine collapses whitespace so a multi-line excerpt does not break the

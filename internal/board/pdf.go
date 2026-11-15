@@ -113,14 +113,10 @@ th { background: #f5f5f5; font-weight: 600; }
 
 	// Drift summary.
 	w.WriteString(`<h2>Control drift</h2>`)
-	flipped := "no controls drifted out of passing"
-	if b.Drift.FlippedOutCount > 0 {
-		flipped = fmt.Sprintf("%d control(s) drifted out of passing", b.Drift.FlippedOutCount)
-	}
 	fmt.Fprintf(&w,
-		`<div class="drift">Last %d days (%s to %s): drift count %s — %s.</div>`,
+		`<div class="drift">Last %d days (%s to %s): net change in passing controls %s — %s.</div>`,
 		b.Drift.WindowDays, html.EscapeString(b.Drift.Since), html.EscapeString(b.Drift.Through),
-		html.EscapeString(signedInt(b.Drift.Delta)), html.EscapeString(flipped))
+		html.EscapeString(signedInt(b.Drift.Delta)), html.EscapeString(b.Drift.MovementClause()))
 
 	// Top risks table.
 	w.WriteString(`<h2>Top risks aging</h2>`)

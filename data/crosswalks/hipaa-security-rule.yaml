@@ -434,35 +434,35 @@ mappings:
     strength: 0.85
     rationale: "Response and Reporting (respond, mitigate, document) maps directly to SCF Incident Response Plan execution."
   - requirement_code: "164.308(a)(7)(i)"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "The HIPAA Contingency Plan standard is covered by the SCF Business Continuity Plan."
+    rationale: "The HIPAA Contingency Plan standard is covered by the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "164.308(a)(7)(ii)(A)"
-    scf_anchor: "BCD-09"
+    scf_anchor: "BCD-24"
     relationship_type: "equal"
     strength: 0.9
-    rationale: "Data Backup Plan (retrievable exact copies) maps directly to SCF Backups."
+    rationale: "Data Backup Plan (retrievable exact copies) maps directly to SCF Data Backups."
   - requirement_code: "164.308(a)(7)(ii)(B)"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Disaster Recovery Plan (restore data after an emergency) is the recovery facet of the SCF Business Continuity Plan."
+    rationale: "Disaster Recovery Plan (restore data after an emergency) is the recovery facet of the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "164.308(a)(7)(ii)(C)"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "subset_of"
     strength: 0.7
-    rationale: "Emergency Mode Operation Plan (continue critical processes in emergency mode) is the continuity-operations facet of the SCF Business Continuity Plan."
+    rationale: "Emergency Mode Operation Plan (continue critical processes in emergency mode) is the continuity-operations facet of the SCF Business Continuity & Disaster Recovery (BC/DR) Plans."
   - requirement_code: "164.308(a)(7)(ii)(D)"
-    scf_anchor: "BCD-11"
+    scf_anchor: "BCD-32"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Testing and Revision Procedures (periodic contingency testing) map directly to SCF Backup Testing."
+    rationale: "Testing and Revision Procedures (periodic contingency testing) map directly to SCF Testing for Reliability & Integrity."
   - requirement_code: "164.308(a)(7)(ii)(E)"
     scf_anchor: "RSK-08"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Slice 567 re-point (was BCD-02 @ 0.60). Applications and Data Criticality Analysis (assess the relative criticality of specific applications and data in support of the other contingency components) IS a Business Impact Analysis; mapping it to the continuity PLAN conflated the analysis input with the plan artifact it feeds. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 4."
+    rationale: "Slice 567 re-point (was BCD-02 @ 0.60; BCD-04 since the SCF 2026.3 remap). Applications and Data Criticality Analysis (assess the relative criticality of specific applications and data in support of the other contingency components) IS a Business Impact Analysis; mapping it to the continuity PLAN conflated the analysis input with the plan artifact it feeds. Lift 0.60 -> 0.85 (LOW -> HIGH). See decisions log D6 row 4."
   - requirement_code: "164.308(a)(8)"
     scf_anchor: "CPL-01"
     relationship_type: "subset_of"
@@ -486,10 +486,10 @@ mappings:
     strength: 0.9
     rationale: "Facility Access Controls map directly to SCF Physical Access Control."
   - requirement_code: "164.310(a)(2)(i)"
-    scf_anchor: "BCD-02"
+    scf_anchor: "BCD-04"
     relationship_type: "intersects_with"
     strength: 0.6
-    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Contingency Operations (facility access supporting data restoration in an emergency) genuinely straddles continuity and physical access, and neither family carries a control at that intersection worth minting: an emergency-facility-access anchor would exist only to serve this one row. BCD-02 remains the honest covering anchor at 0.60 (LOW). See decisions log D6 row 5."
+    rationale: "Slice 567 LEFT AS-IS (checked against the grown palette, not re-pointed). Contingency Operations (facility access supporting data restoration in an emergency) genuinely straddles continuity and physical access, and neither family carries a control at that intersection worth minting: an emergency-facility-access anchor would exist only to serve this one row. BCD-04 remains the honest covering anchor at 0.60 (LOW). See decisions log D6 row 5."
   - requirement_code: "164.310(a)(2)(ii)"
     scf_anchor: "PES-04"
     relationship_type: "subset_of"
@@ -521,25 +521,25 @@ mappings:
     strength: 0.7
     rationale: "Device and Media Controls (receipt/removal of hardware and media) overlap the SCF Asset Management Policy; the media-tracking facet is broader (MEDIUM)."
   - requirement_code: "164.310(d)(2)(i)"
-    scf_anchor: "AST-09"
+    scf_anchor: "AST-22"
     relationship_type: "equal"
     strength: 0.85
-    rationale: "Media Disposal (final disposition of ePHI and storage media) maps directly to SCF Asset Disposal."
+    rationale: "Media Disposal (final disposition of ePHI and storage media) maps directly to SCF Secure Disposal, Destruction or Re-Use of Equipment."
   - requirement_code: "164.310(d)(2)(ii)"
-    scf_anchor: "AST-09"
+    scf_anchor: "AST-22"
     relationship_type: "subset_of"
     strength: 0.8
-    rationale: "Media Re-use (remove ePHI from media before re-use) is the sanitization facet of SCF Asset Disposal."
+    rationale: "Media Re-use (remove ePHI from media before re-use) is the sanitization facet of SCF Secure Disposal, Destruction or Re-Use of Equipment."
   - requirement_code: "164.310(d)(2)(iii)"
     scf_anchor: "DCH-07"
     relationship_type: "subset_of"
     strength: 0.75
     rationale: "Slice 567 re-point (was AST-01 @ 0.65). Accountability (record the movements of hardware and electronic media and any person responsible therefor) is media chain-of-custody, a specific control beneath the asset-management policy head rather than the head itself. DCH-07 Media Transportation & Custody carries the movement-and-accountability record. Lift 0.65 -> 0.75 (LOW -> MEDIUM). See decisions log D6 row 8."
   - requirement_code: "164.310(d)(2)(iv)"
-    scf_anchor: "BCD-09"
+    scf_anchor: "BCD-24"
     relationship_type: "subset_of"
     strength: 0.75
-    rationale: "Data Backup and Storage (retrievable exact copy before moving equipment) is the pre-move-backup facet of SCF Backups."
+    rationale: "Data Backup and Storage (retrievable exact copy before moving equipment) is the pre-move-backup facet of SCF Data Backups."
 
   # ===== TECHNICAL SAFEGUARDS (§164.312) → SCF =====
   # 164.312(a)(1) → IAC-01 is the FIVE-FRAMEWORK shared anchor (invariant #1, AC-4).

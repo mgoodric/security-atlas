@@ -37,6 +37,7 @@ import {
 import { EvidenceFreshnessPanel } from "@/components/dashboard/evidence-freshness-panel";
 import { FrameworkPosturePanel } from "@/components/dashboard/framework-posture-panel";
 import { PortfolioSummaryPanel } from "@/components/dashboard/portfolio-summary-panel";
+import { ReanchoringBanner } from "@/components/dashboard/reanchoring-banner";
 import { RecentDriftPanel } from "@/components/dashboard/recent-drift-panel";
 import { TopRisksPanel } from "@/components/dashboard/top-risks-panel";
 import { UpcomingPanel } from "@/components/dashboard/upcoming-panel";
@@ -49,6 +50,7 @@ import {
   fetchDashboardRisks,
   fetchDashboardComingUp,
 } from "@/lib/api/dashboard";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -110,11 +112,14 @@ export default function DashboardPage() {
     // shape exposes a `received_at` — see slice header comment in
     // `dashboard-header-subtitle.tsx` for the JUDGMENT note.
     <PageShell
-      title="Program"
+      title={pageTitle("/dashboard")}
       titleAdornment={<TenantContext />}
       subtitle={<DashboardHeaderSubtitle />}
       data-testid="program-dashboard"
     >
+      {/* ============ SCF RE-ANCHORING WARNING (#2176) ============ */}
+      <ReanchoringBanner />
+
       {/* ============ FRAMEWORK POSTURE TILES ============ */}
       <FrameworkPosturePanel
         report={postureQ.data}

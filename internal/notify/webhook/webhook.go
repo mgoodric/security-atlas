@@ -153,13 +153,21 @@ func NewHTTPTransport(cfg Config, policy notify.SSRFPolicy) (*HTTPTransport, err
 	if !cfg.Enabled() {
 		// Inert transport: Post returns ErrNotConfigured. We still return a
 		// non-nil transport so the channel can be wired uniformly.
-		return &HTTPTransport{cfg: cfg, client: &http.Client{}}, nil
+		return &HTTPTransport{cfg: cfg, client: newClient()}, nil
 	}
 	validated, err := policy.ValidateWebhookURL(cfg.URL)
 	if err != nil {
 		return nil, fmt.Errorf("webhook: target rejected: %w", err)
 	}
-	return &HTTPTransport{cfg: cfg, url: validated, client: &http.Client{}}, nil
+	return &HTTPTransport{cfg: cfg, url: validated, client: newClient()}, nil
+}
+
+// newClient returns a client with its own connection pool. A bare
+// &http.Client{} shares http.DefaultTransport, so any CloseIdleConnections
+// on it elsewhere in the process (httptest.Server.Close does this) can cut
+// a webhook POST in flight (#2202).
+func newClient() *http.Client {
+	return &http.Client{Transport: http.DefaultTransport.(*http.Transport).Clone()}
 }
 
 // Post delivers the JSON body. Bearer + HMAC secret are revealed ONLY here

@@ -184,6 +184,12 @@ type Querier interface {
 	// Issue #1741 — total for the paged ListActiveControlsWithState read.
 	// The optional anchor_fit filter matches the list's (issue #1736).
 	CountActiveControls(ctx context.Context, arg CountActiveControlsParams) (int64, error)
+	// #2261: the distinct users holding 'admin' in the tenant (any origin) whose
+	// membership is active (status='active' AND active). user_roles.user_id is
+	// TEXT; a "user:<uuid>" principal is read as its bare uuid (identity.UserID).
+	// A role row naming no users row (an API key, bootstrap-admin) is not an
+	// admin user and is not counted.
+	CountActiveTenantAdmins(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Count of all checklist sections visible to the caller's tenant. Used by the
 	// cross-tenant isolation integration test to prove tenant B sees zero of
 	// tenant A's rows (AC-8).
@@ -269,11 +275,6 @@ type Querier interface {
 	CountSinkFailures(ctx context.Context) (int64, error)
 	// Count claims for a recipient (tests assert no duplicate rows after a re-run).
 	CountStalenessRollupClaims(ctx context.Context, arg CountStalenessRollupClaimsParams) (int64, error)
-	// Counts the DISTINCT users holding the 'admin' role in the tenant (regardless
-	// of origin). The resolver's last-admin guard (AC-5 / P0-509-3) reads this
-	// before revoking an admin role: it refuses to drop the final admin so a group
-	// re-derivation can never lock the tenant out.
-	CountTenantAdmins(ctx context.Context, tenantID pgtype.UUID) (int64, error)
 	// Used by the /v1/me/notifications response to surface the unread count
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
@@ -1802,12 +1803,16 @@ type Querier interface {
 	// non-`no_relationship` STRM edge to an SCF anchor, joined to scf_anchors
 	// so callers get scf_id + family + title in one round-trip. Sorted by
 	// strength DESC (strongest matches first) then scf_id (stable order).
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListAnchorsForRequirementWithEdges(ctx context.Context, frameworkRequirementID pgtype.UUID) ([]ListAnchorsForRequirementWithEdgesRow, error)
 	// AC-1 + AC-4 (historical pinning arm). Same as
 	// ListAnchorsForRequirementWithEdges, but additionally filtered by the
 	// SCF framework_version_id so callers can pin to a specific SCF
 	// release. When no SCF release is pinned, callers use the unfiltered
 	// variant above.
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx context.Context, arg ListAnchorsForRequirementWithEdgesByFrameworkVersionParams) ([]ListAnchorsForRequirementWithEdgesByFrameworkVersionRow, error)
 	// All answers for a questionnaire, joined to the questions table so
 	// callers can render the questionnaire end-to-end in a single read.
@@ -2621,10 +2626,14 @@ type Querier interface {
 	// callers see the full natural key (slug + version + code) in one
 	// round-trip. Sorted by framework slug + version + code for stable
 	// output. `no_relationship` edges excluded.
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListRequirementsForAnchor(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorRow, error)
 	// AC-2 + AC-4 (framework_version pinning). Same as
 	// ListRequirementsForAnchor but filtered to a specific framework
 	// version id. Used when the caller passes ?framework_version=slug:version.
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListRequirementsForAnchorByFrameworkVersion(ctx context.Context, arg ListRequirementsForAnchorByFrameworkVersionParams) ([]ListRequirementsForAnchorByFrameworkVersionRow, error)
 	// slice 484 (AC-5 / ADR 0019 §4). The DEFAULT (no ?framework_version pin)
 	// reverse traversal: identical to ListRequirementsForAnchor but restricted to
@@ -2634,6 +2643,8 @@ type Querier interface {
 	// A pinned read (ListRequirementsForAnchorByFrameworkVersion) can still reach a
 	// legacy version when explicitly requested (ADR 0019 §4 — legacy readable when
 	// pinned).
+	// #1800: an overlay row's source, author and date, for the "org mapping"
+	// entry. RLS on fw_to_scf_overlay_edges binds as it does on the view.
 	ListRequirementsForAnchorCurrentVersions(ctx context.Context, scfAnchorID pgtype.UUID) ([]ListRequirementsForAnchorCurrentVersionsRow, error)
 	// All child risks rolled up under this parent.
 	ListRiskAggregationChildren(ctx context.Context, arg ListRiskAggregationChildrenParams) ([]ListRiskAggregationChildrenRow, error)
@@ -3083,6 +3094,10 @@ type Querier interface {
 	// committed meta-risk. hashtextextended maps the hex key to the BIGINT
 	// lock space; a hash collision only over-serializes, never under-.
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// The applicability carry-over's target (#2179): a draft or review revision
+	// of the tenant, held FOR UPDATE until the tx ends. No row for a frozen
+	// (approved, activated, superseded) or unknown revision.
+	LockOpenFrameworkScope(ctx context.Context, arg LockOpenFrameworkScopeParams) (FrameworkScope, error)
 	LockOverlayEdge(ctx context.Context, arg LockOverlayEdgeParams) (FwToScfOverlayEdge, error)
 	// #1867: read a risk and hold its row against concurrent theme writes and
 	// deletes until the transaction ends, so a theme write or delete sees the
@@ -3101,6 +3116,14 @@ type Querier interface {
 	// lock (LockAggregationKey) so the two locks are always acquired in the
 	// same order.
 	LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error
+	// #2261: serialises every change that can remove a tenant's admin. It takes
+	// the tenant row FOR NO KEY UPDATE, which conflicts with itself but not with
+	// the FOR KEY SHARE that foreign-key checks take, so ordinary tenant-scoped
+	// writes are not blocked. A transaction holding it, under READ COMMITTED,
+	// sees every admin change committed before it acquired the lock. It returns
+	// the row so a caller that cannot see it (wrong id, RLS) fails closed rather
+	// than proceeding unlocked.
+	LockTenantAdminRoster(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	LockTenantTheme(ctx context.Context, arg LockTenantThemeParams) (OrgTheme, error)
 	// ===== #1811: organisation theme management =====
 	// #1811: serialize a theme rename or delete with every theme assignment in
@@ -3404,8 +3427,9 @@ type Querier interface {
 	SubmitFrameworkScope(ctx context.Context, arg SubmitFrameworkScopeParams) (FrameworkScope, error)
 	// Transition: draft -> under_review. Operator action; no role gate.
 	// Also re-submits an under_review policy whose submitter was recorded
-	// before #1807 as a session id ('jwt:<token id>'), which approval refuses
-	// because it names no person: re-submitting records the person.
+	// before #1807 as a session id ('jwt:<token id>') or a credential id
+	// ('key_<id>'), which approval refuses because it names no person:
+	// re-submitting records the person (#2200).
 	SubmitPolicyForReview(ctx context.Context, arg SubmitPolicyForReviewParams) (Policy, error)
 	// Slice 055: mark a decision superseded and point superseded_by at the
 	// replacement. The WHERE status = 'active' guard means a non-active (already
@@ -3560,10 +3584,17 @@ type Querier interface {
 	// their review dates: the cadence is read only when a risk is inserted.
 	UpdateTenantRiskReviewCadence(ctx context.Context, arg UpdateTenantRiskReviewCadenceParams) (UpdateTenantRiskReviewCadenceRow, error)
 	UpdateTenantTheme(ctx context.Context, arg UpdateTenantThemeParams) (OrgTheme, error)
+	// #2201: set the caller-tenant's vendor initial-review window in days. RLS
+	// gates this to the caller's own row; `tenants_vendor_initial_review_days_chk`
+	// bounds it to 1..365 (defense in depth atop the handler's check). The window
+	// is read whenever a never-reviewed vendor is read, so a change moves the
+	// first review date of every vendor that has not been reviewed yet.
+	UpdateTenantVendorInitialReviewDays(ctx context.Context, arg UpdateTenantVendorInitialReviewDaysParams) (UpdateTenantVendorInitialReviewDaysRow, error)
 	// Slice 108: PATCH /v1/me. Updates display_name + time_zone only (email + idp_subject
 	// are read-only — managed by the IdP). Empty-string sentinel pattern: pass the existing
 	// value to leave the column unchanged. The handler builds the diff from the request
 	// body before calling this query.
+	// #2142: theme (system | light | dark) rides the same PATCH; CHECK-constrained.
 	UpdateUserProfile(ctx context.Context, arg UpdateUserProfileParams) (User, error)
 	// Full-row update. Caller is responsible for sending every field; partial
 	// updates are not supported in lite (no PATCH semantics merge). updated_at

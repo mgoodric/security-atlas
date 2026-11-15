@@ -157,6 +157,17 @@ func TestProfileWireFrom(t *testing.T) {
 		if w.TimeZone != nil {
 			t.Fatalf("empty TimeZone should map to nil, got %v", *w.TimeZone)
 		}
+		if w.Theme != nil {
+			t.Fatalf("never-chosen Theme should map to nil, got %q", *w.Theme)
+		}
+	})
+	t.Run("stored theme carried", func(t *testing.T) {
+		t.Parallel()
+		u2 := u
+		u2.Theme = "dark"
+		if w := profileWireFrom(u2, credstore.Credential{}); w.Theme == nil || *w.Theme != "dark" {
+			t.Fatalf("Theme = %v, want dark", w.Theme)
+		}
 	})
 }
 

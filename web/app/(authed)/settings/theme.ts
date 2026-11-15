@@ -6,9 +6,10 @@
 // the page component on mount; this module owns ONLY the persistence
 // contract.
 //
-// localStorage is the v1 fallback per slice 103 AC-2 narrative -- no
-// server-side theme persistence endpoint exists. The spillover slice
-// covers adding `PATCH /v1/me` for cross-device theme sync.
+// #2142: the choice is now stored per user via `PATCH /v1/me` (the
+// `theme` field). localStorage stays as the first-paint cache the inline
+// script in `web/app/layout.tsx` reads; `<ThemeServerSync>` refreshes it
+// from the account copy.
 
 export type Theme = "light" | "dark" | "system";
 

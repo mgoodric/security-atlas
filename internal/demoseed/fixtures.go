@@ -1090,7 +1090,7 @@ func buildQuestionnaire(authoredBy string) questionnaireFixture {
 			Code: "BCR-03", Domain: "Business Continuity",
 			Text:        "Do you test disaster recovery at least annually?",
 			AnswerType:  "yes/no",
-			SCFAnchorID: anchor("BCD-11"), SortOrder: 3,
+			SCFAnchorID: anchor("BCD-24"), SortOrder: 3,
 			AnswerValue: "Yes",
 			Narrative:   "A full DR restore drill is run quarterly; the annual tabletop exercise validates the runbook end to end.",
 			AuthoredBy:  authoredBy,

@@ -129,6 +129,68 @@ func legacyRow(r dbx.ListControlsOnLegacySCFAnchorsRow) ControlOnLegacyAnchor {
 	}
 }
 
+// Outcome is what the D3 rule makes of one control on a legacy anchor.
+type Outcome int
+
+const (
+	// outcomeUnknown is the zero value, returned only with an error.
+	outcomeUnknown Outcome = iota
+	// OutcomeRebindable: the current release has the same code with the
+	// same title, so the control can move there in place.
+	OutcomeRebindable
+	// OutcomeNeedsReanchoring: the code is gone or now means something
+	// else, or the stored manifest does not parse; a person re-anchors it.
+	OutcomeNeedsReanchoring
+	// OutcomePinned: the bundle binds its anchor to one release on purpose
+	// (#1770), so it is neither moved nor flagged.
+	OutcomePinned
+)
+
+// Classify applies the D3 rule to one row of ListControlsOnLegacySCFAnchors.
+// The upgrade (RebindControls) and the tenant read (GET
+// /v1/controls/needs-reanchoring, #2176) both call it, so the dashboard
+// warning and the upgrade output cannot disagree about which controls need
+// a person. The returned row carries a Note only for
+// OutcomeNeedsReanchoring.
+func Classify(r dbx.ListControlsOnLegacySCFAnchorsRow) (ControlOnLegacyAnchor, Outcome, error) {
+	row := legacyRow(r)
+	// A bundle pinned to an SCF release (#1770) is bound there on purpose:
+	// moving it would be the silent re-point D3 forbids. A manifest whose
+	// pin cannot be read is not moved either.
+	pinned, parsed := IsPinned(r.BundleManifestYaml)
+	switch {
+	case !parsed:
+		row.Note = unparseableNote
+		return row, OutcomeNeedsReanchoring, nil
+	case pinned:
+		return row, OutcomePinned, nil
+	case Rebindable(r):
+		return row, OutcomeRebindable, nil
+	}
+	note, err := ReanchorNote(r)
+	if err != nil {
+		return ControlOnLegacyAnchor{}, outcomeUnknown, err
+	}
+	row.Note = note
+	return row, OutcomeNeedsReanchoring, nil
+}
+
+// NeedsReanchoring returns the rows the D3 rule flags for a person, in
+// input order, each with its note. Pinned and rebindable rows are left out.
+func NeedsReanchoring(rows []dbx.ListControlsOnLegacySCFAnchorsRow) ([]ControlOnLegacyAnchor, error) {
+	out := []ControlOnLegacyAnchor{}
+	for _, r := range rows {
+		row, outcome, err := Classify(r)
+		if err != nil {
+			return nil, err
+		}
+		if outcome == OutcomeNeedsReanchoring {
+			out = append(out, row)
+		}
+	}
+	return out, nil
+}
+
 // RebindControls runs across every tenant, so db must be the migrate (owner)
 // role, as for Import. Run it after Import; with a single SCF release it
 // finds nothing.
@@ -172,27 +234,15 @@ func RebindControls(ctx context.Context, db DBTX) (RebindReport, error) {
 		return nil
 	}
 	for _, r := range rows {
-		row := legacyRow(r)
-		// A bundle pinned to an SCF release (#1770) is bound there on
-		// purpose: moving it would be the silent re-point D3 forbids. A
-		// manifest whose pin cannot be read is not moved either.
-		pinned, parsed := IsPinned(r.BundleManifestYaml)
-		if !parsed {
-			row.Note = unparseableNote
-			report.NeedsReanchoring = append(report.NeedsReanchoring, row)
-			if err := queue(r, ProposalOpen); err != nil {
-				return RebindReport{}, err
-			}
-			continue
+		row, outcome, err := Classify(r)
+		if err != nil {
+			return RebindReport{}, err
 		}
-		if pinned {
+		switch outcome {
+		case OutcomePinned:
 			report.Pinned = append(report.Pinned, row)
 			continue
-		}
-		if !Rebindable(r) {
-			if row.Note, err = ReanchorNote(r); err != nil {
-				return RebindReport{}, err
-			}
+		case OutcomeNeedsReanchoring:
 			report.NeedsReanchoring = append(report.NeedsReanchoring, row)
 			if err := queue(r, ProposalOpen); err != nil {
 				return RebindReport{}, err

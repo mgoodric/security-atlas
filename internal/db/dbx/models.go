@@ -2982,6 +2982,8 @@ type PolicyAuditLog struct {
 	NewNextReviewAt        pgtype.Timestamptz `json:"new_next_review_at"`
 	PolicyTitle            *string            `json:"policy_title"`
 	PolicyVersion          *string            `json:"policy_version"`
+	PreviousState          *string            `json:"previous_state"`
+	NewState               *string            `json:"new_state"`
 }
 
 type Population struct {
@@ -3432,6 +3434,7 @@ type User struct {
 	Active         bool               `json:"active"`
 	ScimExternalID *string            `json:"scim_external_id"`
 	ScimManaged    bool               `json:"scim_managed"`
+	Theme          string             `json:"theme"`
 }
 
 type UserNotificationPreference struct {

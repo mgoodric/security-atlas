@@ -16,14 +16,13 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 
-import { FeatureDisabledState } from "@/components/feature-disabled-state";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bffControlFetch } from "@/lib/api/_shared";
 import type { ComponentDefinitionList } from "@/lib/api/oscal-components";
-import { isFeatureDisabledError } from "@/lib/feature-nav";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function ComponentDefinitionsPage() {
   const q = useQuery({
@@ -34,21 +33,11 @@ export default function ComponentDefinitionsPage() {
       ),
   });
 
-  // Slice 660: the `oscal.export` flag gates this module. A flag-off
-  // tenant reaches here only by direct navigation (the nav entry is
-  // hidden server-side); the gated API returns 404 "feature disabled".
-  // Render the clean disabled panel instead of the raw error Alert.
-  if (q.isError && isFeatureDisabledError(q.error)) {
-    return (
-      <PageShell title="Vendor Claims">
-        <FeatureDisabledState moduleName="Vendor Claims" />
-      </PageShell>
-    );
-  }
-
+  // The `oscal.export` flag is checked server-side by FeatureGate in
+  // ./layout.tsx (#2092); this page only mounts when the module is on.
   return (
     <PageShell
-      title="Vendor Claims"
+      title={pageTitle("/oscal/component-definitions")}
       subtitle="Imported vendor component-definitions. Each claim is a vendor assertion, not platform-verified evidence — accept, reject, or ask for more information."
       data-testid="component-definitions-page"
     >

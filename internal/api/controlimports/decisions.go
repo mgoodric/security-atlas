@@ -142,7 +142,8 @@ func writeDecisionError(w http.ResponseWriter, r *http.Request, err error) {
 		httpresp.WriteError(w, http.StatusNotFound, "staged row not found in this import batch")
 	case errors.Is(err, controlimport.ErrRowDecided),
 		errors.Is(err, controlimport.ErrBundleIDTaken),
-		errors.Is(err, controlimport.ErrNoBatchRelease):
+		errors.Is(err, controlimport.ErrNoBatchRelease),
+		errors.Is(err, controlimport.ErrApproveClearRunning):
 		httpresp.WriteError(w, http.StatusConflict, msg)
 	case errors.Is(err, controlimport.ErrApproverRequired):
 		httpresp.WriteError(w, http.StatusForbidden, msg)
@@ -155,4 +156,29 @@ func writeDecisionError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		httperr.WriteInternal(w, r, "controlimports", err)
 	}
+}
+
+// ApproveClear approves every pending row of the batch whose top candidate
+// is crosswalk-derived and reaches all of the row's tested criteria, with
+// that candidate. It takes no body. The response reports the rows approved,
+// marked duplicate and skipped with their reasons; every other row is left
+// pending.
+func (h *Handler) ApproveClear(w http.ResponseWriter, r *http.Request) {
+	approver, ok := decidingPerson(w, r)
+	if !ok {
+		return
+	}
+	res, err := h.decisions.ApproveClear(r.Context(), controlimport.ApproveClearInput{
+		BatchID:  chi.URLParam(r, "id"),
+		Approver: approver,
+	})
+	if err != nil {
+		if errors.Is(err, controlimport.ErrBatchNotFound) {
+			httpresp.WriteError(w, http.StatusNotFound, "import batch not found")
+			return
+		}
+		writeDecisionError(w, r, err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, res)
 }

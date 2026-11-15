@@ -12,6 +12,9 @@ import (
 	"github.com/google/uuid"
 )
 
+// testStateKey signs the OIDC flow state in tests (#2177).
+var testStateKey = []byte("test-oidc-state-key-0123456789abcdef")
+
 type cacheStubResolver struct{ cfg IdpConfig }
 
 func (s cacheStubResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (IdpConfig, error) {
@@ -58,7 +61,7 @@ func TestBeginLoginRefreshesExpiredProviderCacheAndRecovers(t *testing.T) {
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
-	}})
+	}}, testStateKey)
 	now := time.Unix(1783200000, 0)
 	a.now = func() time.Time { return now }
 	a.providerCacheTTL = time.Second

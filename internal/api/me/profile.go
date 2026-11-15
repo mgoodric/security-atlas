@@ -76,6 +76,7 @@ type profileWire struct {
 	IdpSubject  string   `json:"idp_subject"`
 	TenantRole  string   `json:"tenant_role"`
 	TimeZone    *string  `json:"time_zone"`
+	Theme       *string  `json:"theme"`
 	IsAdmin     bool     `json:"is_admin"`
 	OwnerRoles  []string `json:"owner_roles"`
 	Roles       []string `json:"roles"`
@@ -87,7 +88,13 @@ type profileWire struct {
 type patchProfileRequest struct {
 	DisplayName *string `json:"display_name,omitempty"`
 	TimeZone    *string `json:"time_zone,omitempty"`
+	Theme       *string `json:"theme,omitempty"`
 }
+
+// validThemes is what PATCH /v1/me accepts for theme (#2142). It mirrors the
+// users_theme_check constraint in migrations/sql/20261117000000_users_theme.sql,
+// whose extra empty-string value means "never chosen" and cannot be written back.
+var validThemes = map[string]bool{"system": true, "light": true, "dark": true}
 
 // ----- handlers -----
 
@@ -122,7 +129,7 @@ func (h *ProfileHandler) GetMe(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, wire)
 }
 
-// PatchMe handles PATCH /v1/me. Accepts display_name + time_zone (both optional);
+// PatchMe handles PATCH /v1/me. Accepts display_name, time_zone and theme (all optional);
 // other fields are read-only and rejected silently (not echoed back). Writes a
 // me_audit_log entry when the diff is non-empty.
 func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
@@ -161,6 +168,10 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if req.Theme != nil && !validThemes[*req.Theme] {
+		httpresp.WriteError(w, http.StatusBadRequest, "theme must be one of system, light, dark")
+		return
+	}
 	// Load current profile to compute diff.
 	current, err := h.users.GetByID(ctx, tenantUUID, userUUID)
 	if err != nil {
@@ -179,8 +190,12 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	if req.TimeZone != nil {
 		newTZ = *req.TimeZone
 	}
+	newTheme := current.Theme
+	if req.Theme != nil {
+		newTheme = *req.Theme
+	}
 	// Empty-diff path: skip the UPDATE + skip the audit-log INSERT (ISC-A5).
-	if newDisplay == current.DisplayName && newTZ == current.TimeZone {
+	if newDisplay == current.DisplayName && newTZ == current.TimeZone && newTheme == current.Theme {
 		wire := profileWireFrom(current, cred)
 		roles, rerr := h.resolveRoles(ctx, cred)
 		if rerr != nil {
@@ -196,6 +211,7 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 		ID:          userUUID,
 		DisplayName: newDisplay,
 		TimeZone:    newTZ,
+		Theme:       newTheme,
 	})
 	if err != nil {
 		httperr.WriteInternal(w, r, "update profile", err)
@@ -206,8 +222,8 @@ func (h *ProfileHandler) PatchMe(w http.ResponseWriter, r *http.Request) {
 	// later observation of the data state. We deliberately do not roll back the
 	// UPDATE on audit-log failure (would create a worse failure mode where the
 	// user thinks the PATCH failed when in fact only the audit row failed).
-	before := map[string]any{"display_name": current.DisplayName, "time_zone": current.TimeZone}
-	after := map[string]any{"display_name": updated.DisplayName, "time_zone": updated.TimeZone}
+	before := map[string]any{"display_name": current.DisplayName, "time_zone": current.TimeZone, "theme": current.Theme}
+	after := map[string]any{"display_name": updated.DisplayName, "time_zone": updated.TimeZone, "theme": updated.Theme}
 	_ = h.writeAuditLog(ctx, tenantUUID, userUUID, "profile.update", before, after)
 	wire := profileWireFrom(updated, cred)
 	roles, rerr := h.resolveRoles(ctx, cred)
@@ -291,6 +307,7 @@ func (h *ProfileHandler) buildProfile(ctx context.Context, cred credstore.Creden
 		IdpSubject:  "",
 		TenantRole:  role,
 		TimeZone:    tz,
+		Theme:       nil, // no users row: nowhere to store a choice
 		IsAdmin:     cred.IsAdmin,
 		OwnerRoles:  append([]string(nil), cred.OwnerRoles...),
 	}, nil
@@ -314,9 +331,20 @@ func profileWireFrom(u users.User, cred credstore.Credential) profileWire {
 		IdpSubject:  u.IdpSubject,
 		TenantRole:  role,
 		TimeZone:    tz,
+		Theme:       storedTheme(u.Theme),
 		IsAdmin:     cred.IsAdmin,
 		OwnerRoles:  append([]string(nil), cred.OwnerRoles...),
 	}
+}
+
+// storedTheme maps the users.theme column to the wire: nil when the user has
+// never chosen (the empty string), so the browser keeps its cached choice rather than having
+// one invented for it (P0-A1).
+func storedTheme(t string) *string {
+	if !validThemes[t] {
+		return nil
+	}
+	return &t
 }
 
 // writeAuditLog is the shared me_audit_log INSERT primitive used by every PATCH +

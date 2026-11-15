@@ -66,15 +66,21 @@ function atlasBaseURL(): string {
  * almost certainly means `ATLAS_TEST_MODE=1` is unset on the atlas
  * server; the error message surfaces that hypothesis to the operator.
  */
-async function issueTestJWT(): Promise<string> {
+//
+// #2142: exported with a `userId` parameter so a spec whose writes would
+// leak into the shared demo user (settings-theme.spec.ts) can sign in as
+// a user of its own.
+export async function issueTestJWT(
+  // Default DEMO_USER_ID so PATCH /v1/me + /v1/me/preferences resolve to
+  // the real users row inserted by fixtures/e2e/settings.sql (slice 164 —
+  // required for AC-3 round-trip + AC-8 timezone + the broader settings
+  // spec body).
+  userId: string = DEMO_USER_ID,
+): Promise<string> {
   const url = `${atlasBaseURL()}/v1/test/issue-jwt`;
   const body = {
     tenant_id: DEMO_TENANT_ID,
-    // Subject = DEMO_USER_ID so PATCH /v1/me + /v1/me/preferences
-    // resolve to the real users row inserted by
-    // fixtures/e2e/settings.sql (slice 164 — required for AC-3
-    // round-trip + AC-8 timezone + the broader settings spec body).
-    user_id: DEMO_USER_ID,
+    user_id: userId,
     // Admin + grc_engineer roles cover both AC-10 multi-role tail
     // badge (settings) AND every admin-gated route the dashboard
     // suite touches.
@@ -130,4 +136,37 @@ async function issueTestJWT(): Promise<string> {
 export default async function globalSetup(_config: FullConfig): Promise<void> {
   const token = await issueTestJWT();
   process.env.TEST_BEARER = token;
+  await enableGatedModules(token);
+}
+
+/**
+ * GATED_MODULES are the slice 660 gating flags (internal/featureflag
+ * GatingKeys). Both ship OFF, and since #2092 the route layout checks
+ * them server-side — a check `page.route` cannot mock. The board-pack and
+ * vendor-claims specs need the module rendered, so the demo tenant turns
+ * both on here, through the real admin API. The off state is covered
+ * against a separate tenant that keeps the defaults
+ * (feature-flag-gating.spec.ts).
+ */
+const GATED_MODULES = ["board.reporting", "oscal.export"];
+
+async function enableGatedModules(token: string): Promise<void> {
+  for (const key of GATED_MODULES) {
+    const url = `${atlasBaseURL()}/v1/admin/features/${key}`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ enabled: true, reason: "e2e global-setup" }),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `#2092 global-setup: PATCH ${url} returned ${
+          res.status
+        }: ${await res.text()}`,
+      );
+    }
+  }
 }

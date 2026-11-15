@@ -72,10 +72,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { fetchHierarchyOrgUnits, type OrgUnit } from "@/lib/api/risk-hierarchy";
 import {
+  fetchRiskCategories,
   fetchRisksList,
   fetchRisksListWithRollUps,
   treatmentLabel,
   type Risk,
+  type RiskCategory,
   type RisksListResponse,
 } from "@/lib/api/risks";
 import {
@@ -88,6 +90,8 @@ import { risksCountLabel } from "./count-label";
 import {
   ALL,
   applyFilters,
+  categoryDisplay,
+  categoryOptions,
   clearFilters,
   DEFAULT_FILTERS,
   fairScore,
@@ -116,6 +120,7 @@ import {
 } from "./sort";
 import { SeverityPill } from "./severity-pill";
 import { SortableHeader } from "./sortable-header";
+import { pageTitle } from "@/lib/page-titles";
 
 // Slice 244 — six filter keys. Order mirrors the mockup
 // (Plans/_archive/mockups/risks.html lines 126-173) with one local deviation:
@@ -161,6 +166,12 @@ const SORT_PARAM = "sort";
 // already in the register, so it is left out of the rows and the count
 // unless the toggle is on (`?rollups=1`).
 const ROLLUPS_PARAM = "rollups";
+
+// #1817 — URL query-string key for the "Show archived" toggle. The
+// Category pill lists the organisation's active categories; with the
+// toggle on (`?archived=1`) it lists archived ones too. It narrows only
+// the pill's options, so it composes with the roll-ups toggle.
+const ARCHIVED_PARAM = "archived";
 
 // Slice 680 / ATLAS-038 — column-header clarity copy.
 //
@@ -215,27 +226,6 @@ const SEVERITY_OPTIONS: { value: string; label: string }[] = [
   { value: "medium", label: "medium (8-14)" },
   { value: "low", label: "low (1-7)" },
   { value: "none", label: "none (0)" },
-];
-
-// Slice 244 — wire-enum-backed option lists.
-//
-// Decision D1 (see docs/audit-log/244-decisions.md): the mockup
-// labels for the Category pill (Operational / Compliance /
-// Third-party / Strategic) do not match the wire enum `risk_category`,
-// which is the CIA-Privacy-axis seven-value enum below. The wire is
-// the source of truth — exact-string match (AC-3) against any mockup
-// label would never hit because no risk row carries those strings.
-// The mockup is non-canonical and the discrepancy is captured as a
-// follow-up item in the slice's decision log.
-const CATEGORY_OPTIONS: { value: string; label: string }[] = [
-  { value: ALL, label: "All categories" },
-  { value: "confidentiality", label: "confidentiality" },
-  { value: "integrity", label: "integrity" },
-  { value: "availability", label: "availability" },
-  { value: "privacy", label: "privacy" },
-  { value: "regulatory", label: "regulatory" },
-  { value: "operational", label: "operational" },
-  { value: "financial", label: "financial" },
 ];
 
 // Decision D2: the mockup shows `five_by_five` but the wire enum
@@ -356,6 +346,28 @@ function RisksPageInner() {
     router.replace(`/risks?${sp.toString()}`);
   };
 
+  const showArchived = search.get(ARCHIVED_PARAM) === "1";
+  const toggleArchived = () => {
+    const sp = new URLSearchParams(search.toString());
+    if (showArchived) {
+      sp.delete(ARCHIVED_PARAM);
+    } else {
+      sp.set(ARCHIVED_PARAM, "1");
+    }
+    sp.delete(PAGE_PARAM);
+    router.replace(`/risks?${sp.toString()}`);
+  };
+
+  // #1817 — the organisation's categories, archived included, so a risk
+  // on an archived category still reads by name with its archived mark.
+  // The pill hides archived ones unless "Show archived" is on.
+  const categoriesQ = useQuery<RiskCategory[]>({
+    queryKey: ["risks", "categories", "with-archived"],
+    queryFn: () => fetchRiskCategories(true),
+    staleTime: 60_000,
+  });
+  const categories = useMemo(() => categoriesQ.data ?? [], [categoriesQ.data]);
+
   const risksQ = useQuery<RisksListResponse>({
     queryKey: showRollUps
       ? ["risks", "list", "with-rollups"]
@@ -438,7 +450,7 @@ function RisksPageInner() {
       id: "category",
       label: "Category",
       value: filters.category,
-      options: CATEGORY_OPTIONS,
+      options: categoryOptions(categories, showArchived, filters.category),
     },
     {
       id: "treatment",
@@ -516,6 +528,15 @@ function RisksPageInner() {
         />
         Show roll-ups
       </label>
+      <label className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={showArchived}
+          onChange={toggleArchived}
+          data-testid="risks-show-archived"
+        />
+        Show archived categories
+      </label>
     </span>
   );
 
@@ -577,9 +598,26 @@ function RisksPageInner() {
     {
       id: "category",
       header: "Category",
-      cell: (row) => (
-        <span className="text-xs text-muted-foreground">{row.category}</span>
-      ),
+      cell: (row) => {
+        const cat = categoryDisplay(row, categories);
+        return (
+          <span
+            className="text-xs text-muted-foreground"
+            data-testid="risks-row-category"
+          >
+            {cat.name}
+            {cat.archived ? (
+              <span
+                className="ml-1.5 rounded border px-1 py-0.5 text-[10px]"
+                data-testid="risks-row-category-archived"
+                title="This category is archived. It stays on the risks that have it but takes no new risks."
+              >
+                archived
+              </span>
+            ) : null}
+          </span>
+        );
+      },
     },
     {
       id: "treatment",
@@ -845,7 +883,7 @@ function RisksPageInner() {
   if (risksQ.isLoading) {
     return (
       <ListPage
-        title="Risk register"
+        title={pageTitle("/risks")}
         subtitle={subtitle}
         actions={actions}
         filterRow={
@@ -859,7 +897,11 @@ function RisksPageInner() {
 
   if (risksQ.isError) {
     return (
-      <ListPage title="Risk register" subtitle={subtitle} actions={actions}>
+      <ListPage
+        title={pageTitle("/risks")}
+        subtitle={subtitle}
+        actions={actions}
+      >
         <Alert variant="destructive" data-testid="risks-load-error">
           <AlertTitle>Could not load risks</AlertTitle>
           <AlertDescription>{(risksQ.error as Error).message}</AlertDescription>
@@ -928,7 +970,7 @@ function RisksPageInner() {
 
   return (
     <ListPage
-      title="Risk register"
+      title={pageTitle("/risks")}
       subtitle={subtitle}
       actions={actions}
       filterRow={

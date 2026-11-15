@@ -57,8 +57,14 @@ func TestFrameworkPosture_PointsOfFocusNotInDenominator(t *testing.T) {
 		t.Fatalf("lookup AST-01: %v", err)
 	}
 
+	var versionID uuid.UUID
+	if err := admin.QueryRow(ctx, `SELECT id FROM framework_versions WHERE framework_id = $1 AND status = 'current'`, frameworkID).Scan(&versionID); err != nil {
+		t.Fatalf("lookup framework version: %v", err)
+	}
+
 	tenant := freshTenant(t, admin)
 	seedControlOnAnchor(t, admin, tenant, astAnchor)
+	activateScope(t, admin, tenant, versionID)
 	env := testServer(t, app, tenant)
 
 	resp, body := get(t, env, "/v1/frameworks/posture")
@@ -108,7 +114,7 @@ func writePOFWorkbook(t *testing.T) string {
 	set("SCF 2026.3", [][]any{
 		{"SCF #", "AICPA\nTSC 2017"},
 		{"AST-01", "CC1.1"},
-		{"BCD-02", "CC1.1-POF1\nCC2.1-POF1"},
+		{"BCD-04", "CC1.1-POF1\nCC2.1-POF1"},
 		{"IAC-01", "CC1.1-POF2"},
 	})
 	path := filepath.Join(t.TempDir(), "pof.xlsx")
