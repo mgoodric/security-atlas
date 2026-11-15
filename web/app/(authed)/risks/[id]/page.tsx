@@ -37,9 +37,14 @@ import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans
 import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
 import { PageShell } from "@/components/shell/page-shell";
 import { APIError } from "@/lib/api/base";
-import { fetchRiskDetail, treatmentLabel } from "@/lib/api/risks";
+import {
+  fetchRiskCategories,
+  fetchRiskDetail,
+  treatmentLabel,
+} from "@/lib/api/risks";
 
 import {
+  categoryDisplay,
   formatResidualScore,
   fairScore,
   formatDollars,
@@ -76,6 +81,14 @@ export default function RiskDetailPage({
         err instanceof APIError &&
         (err.status === 404 || err.status === 401)
       ) && count < 2,
+  });
+
+  // #1817 — archived included, so a risk on an archived category shows
+  // that category by name, marked archived. Same query as the register.
+  const categoriesQ = useQuery({
+    queryKey: ["risks", "categories", "with-archived"],
+    queryFn: () => fetchRiskCategories(true),
+    staleTime: 60_000,
   });
 
   useEffect(() => {
@@ -117,6 +130,7 @@ export default function RiskDetailPage({
   }
 
   const { risk } = data;
+  const category = categoryDisplay(risk, categoriesQ.data ?? []);
   const band = severityBand(risk.severity);
   const fairInherent =
     risk.methodology === "fair" ? fairScore(risk.inherent_score) : null;
@@ -149,11 +163,20 @@ export default function RiskDetailPage({
               {treatmentLabel(risk)}
             </Badge>
             <span
-              className="font-mono text-xs text-muted-foreground"
+              className="text-xs text-muted-foreground"
               data-testid="risk-detail-category"
             >
-              {risk.category}
+              {category.name}
             </span>
+            {category.archived ? (
+              <Badge
+                variant="outline"
+                data-testid="risk-detail-category-archived"
+                title="This category is archived. It stays on the risks that have it but takes no new risks."
+              >
+                archived category
+              </Badge>
+            ) : null}
           </div>
           <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
             <div>
