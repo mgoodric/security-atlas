@@ -11,6 +11,7 @@ import {
   batchProgress,
   effectiveImplementationType,
   fitLabel,
+  initialApplicability,
   parseApplicability,
   rowPath,
   rowsQuery,
@@ -182,5 +183,26 @@ describe("rowPath", () => {
     expect(rowPath("b 1", "r/2", "approve")).toBe(
       "/api/controls/imports/b%201/rows/r%2F2/approve",
     );
+  });
+});
+
+describe("initialApplicability", () => {
+  it("is Everything for a missing or unparseable sheet value", () => {
+    expect(initialApplicability(undefined)).toEqual({ op: "true" });
+    expect(initialApplicability("")).toEqual({ op: "true" });
+    expect(initialApplicability("prod only")).toEqual({ op: "true" });
+  });
+  it("is the sheet's predicate when the picker can show it", () => {
+    expect(initialApplicability('{"op":"true"}')).toEqual({ op: "true" });
+    expect(
+      initialApplicability('{"op":"eq","dim":"environment","value":"prod"}'),
+    ).toEqual({ op: "eq", dim: "environment", value: "prod" });
+  });
+  it("is undefined for a predicate the picker shows as advanced", () => {
+    expect(
+      initialApplicability(
+        '{"op":"or","args":[{"op":"eq","dim":"environment","value":"prod"},{"op":"eq","dim":"geography","value":"us"}]}',
+      ),
+    ).toBeUndefined();
   });
 });

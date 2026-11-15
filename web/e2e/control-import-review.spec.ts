@@ -42,6 +42,7 @@ type Row = {
   description: string;
   tested_under: Req[];
   implementation_type?: string;
+  applicability?: string;
   status: string;
   candidates: Cand[];
   no_candidate_reaches: boolean;
@@ -132,6 +133,7 @@ function freshRows(): Row[] {
       title: "Incident monitoring (1785)",
       description: "Security events are monitored and triaged daily.",
       tested_under: [CC71],
+      applicability: "production systems only",
       status: "pending",
       candidates: [cand(1, "IRO-02", "Incident handling", "keyword", [], 1)],
       no_candidate_reaches: true,
@@ -341,6 +343,9 @@ async function mockImport(
   await page.route("**/api/scope-cells**", (route) =>
     json(route, 200, { cells: [] }),
   );
+  await page.route("**/api/scope-dimensions**", (route) =>
+    json(route, 200, { dimensions: [] }),
+  );
 
   return captured;
 }
@@ -540,5 +545,57 @@ test.describe("control import review (#1785)", () => {
       "data-status",
       "pending",
     );
+  });
+  test("applicability: a visible Everything is sent, and an incomplete choice blocks approval", async ({
+    authedPage: page,
+  }) => {
+    const captured = await mockImport(page);
+    await page.goto(`/controls/imports/${BATCH_ID}`);
+    await expect(page.getByTestId("control-import-row")).toHaveCount(4, {
+      timeout: 30_000,
+    });
+
+    // (b) "Choose by dimension" with nothing picked disables approval.
+    const mfa = rowCard(page, "ORG-AC-01");
+    await mfa.getByTestId("control-import-set-applicability").click();
+    await mfa.getByTestId("scope-picker-dimensions").check();
+    await expect(
+      mfa.getByTestId("control-import-approve-candidate").first(),
+    ).toBeDisabled();
+
+    // (a) No sheet value: opening the picker shows Everything, and
+    // approving sends it rather than omitting the field.
+    const review = rowCard(page, "ORG-AC-02");
+    await review.getByTestId("control-import-set-applicability").click();
+    await expect(review.getByTestId("scope-picker-everything")).toBeChecked();
+    await review
+      .getByTestId("control-import-approve-candidate")
+      .first()
+      .click();
+    await expect(review).toHaveAttribute("data-status", "approved");
+
+    // (c) An unparseable sheet value shows Everything and is approvable
+    // with it.
+    const monitoring = rowCard(page, "ORG-OP-01");
+    await monitoring.getByTestId("control-import-set-applicability").click();
+    await expect(
+      monitoring.getByTestId("scope-picker-everything"),
+    ).toBeChecked();
+    await monitoring
+      .getByTestId("control-import-approve-candidate")
+      .first()
+      .click();
+    await expect(monitoring).toHaveAttribute("data-status", "approved");
+
+    expect(captured.approvals).toEqual([
+      {
+        row: "r1785-2",
+        body: { candidate_rank: 1, applicability_expr: { op: "true" } },
+      },
+      {
+        row: "r1785-3",
+        body: { candidate_rank: 1, applicability_expr: { op: "true" } },
+      },
+    ]);
   });
 });

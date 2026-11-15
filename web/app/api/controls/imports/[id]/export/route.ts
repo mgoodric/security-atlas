@@ -9,6 +9,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { rejectNonUUID } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 const PASSTHROUGH_HEADERS = [
@@ -28,8 +29,10 @@ export async function GET(
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   const { id } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   const upstream = await fetch(
-    `${apiBaseURL()}/v1/controls/imports/${encodeURIComponent(id)}/export`,
+    `${apiBaseURL()}/v1/controls/imports/${id}/export`,
     { headers: { Authorization: `Bearer ${bearer}` }, cache: "no-store" },
   );
   if (!upstream.ok) {

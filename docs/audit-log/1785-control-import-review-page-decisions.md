@@ -40,8 +40,13 @@ returns its error inline if they differ.
 **D4: Applicability at approval reuses `ScopePicker` (#2103), behind "Set
 applicability".** Left closed, the approval sends no `applicability_expr`,
 so the platform applies the sheet's value or every cell. Opened, the picker
-starts from the sheet's predicate. While the picker is incomplete
-(`null`), approval stays disabled. Implementation type is a select whose
+starts from the sheet's predicate, and the approval sends the predicate the
+picker shows, without waiting for a change: `{op: "true"}` for a missing or
+unparseable sheet value, never an omitted field (the backend stores an
+omitted one as null). Only a predicate the picker shows read-only as
+advanced is omitted, so the sheet's value stands. While the picker is
+incomplete (`null`), approval stays disabled. (Review of #2318, B1: the
+first version sent nothing until the reviewer changed the picker.) Implementation type is a select whose
 blank option names the effective value ("from sheet" or "default").
 
 **D5: Approve-clear and reject use `ConfirmInline`.** Approve-clear creates
@@ -50,7 +55,18 @@ approve-clear of the batch is running) is a toast, not an inline error, and
 the batch refreshes afterwards. Reject's confirm stays disabled until a
 reason is typed. The platform requires one too.
 
-**D6: The Playwright spec is hermetic (slice 594), with stateful mocks.**
+**D6: The BFF routes refuse non-UUID path ids, check the upload before
+buffering it, and allow-list decision bodies.** `rejectNonUUID` in
+`lib/api/bff.ts` returns 400 for an `[id]` or `[row]` that is not a UUID,
+since `encodeURIComponent` keeps `..` and the upstream path would otherwise
+normalise past the batch (#2312). It is a shared helper; the three existing
+inline UUID regexes (admin users, revoke, switch-tenant) are left for
+#2312. The upload route checks the bearer, a declared size over the
+platform cap (413) and `multipart/form-data` before reading the body.
+Approve forwards only `candidate_rank`, `scf_id`, `implementation_type` and
+`applicability_expr`; reject forwards only `reason`.
+
+**D7: The Playwright spec is hermetic (slice 594), with stateful mocks.**
 One in-memory batch backs the batch, rows, approve, reject, approve-clear
 and controls-list mocks. A decision made on the review page is therefore
 what the Controls page then lists. This pins the page's request bodies and

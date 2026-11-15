@@ -3,6 +3,12 @@
 // Candidate, RowList, RowDecision, ApproveClearResult); the helpers are
 // node-testable so the page stays a renderer.
 
+import {
+  fromPredicate,
+  toPredicate,
+  type Predicate,
+} from "@/components/scope/scope-picker-model";
+
 import { APIError } from "./base";
 
 export type Requirement = { code: string; requirement_id: string };
@@ -210,6 +216,25 @@ export function parseApplicability(raw: string | undefined): unknown {
     return undefined;
   }
 }
+
+/** initialApplicability is what an approval sends as applicability_expr
+ *  when the reviewer opens the scope picker and changes nothing: the
+ *  predicate the picker is showing. A missing or unparseable sheet value
+ *  shows Everything, so it is `{op: "true"}`, never an omitted field (the
+ *  backend stores an omitted one as null). A predicate the picker cannot
+ *  represent is shown read-only as advanced; that yields undefined, so the
+ *  approval omits the field and the platform keeps the sheet's value. */
+export function initialApplicability(
+  raw: string | undefined,
+): Predicate | undefined {
+  const parsed = parseApplicability(raw);
+  if (parsed === undefined) return EVERYTHING;
+  const loaded = fromPredicate(parsed);
+  if (loaded.kind === "advanced") return undefined;
+  return toPredicate(loaded.state) ?? EVERYTHING;
+}
+
+const EVERYTHING: Predicate = { op: "true" };
 
 export function batchPath(id: string): string {
   return `/api/controls/imports/${encodeURIComponent(id)}`;

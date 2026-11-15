@@ -53,6 +53,7 @@ import {
   batchProgress,
   effectiveImplementationType,
   fitLabel,
+  initialApplicability,
   parseApplicability,
   postJSON,
   rowPath,
@@ -371,8 +372,11 @@ function ImportRow({
   const { toast } = useToast();
   const [implType, setImplType] = useState("");
   const [settingScope, setSettingScope] = useState(false);
-  // undefined: not set here, so the sheet's applicability (or every cell)
-  // applies. null: the picker is mid-choice and approval must wait.
+  // While the picker is open, the predicate it shows. Seeded on open from
+  // the sheet (initialApplicability), so a visible Everything is sent as
+  // {op: "true"}. undefined: nothing is sent and the platform keeps the
+  // sheet's value (picker closed, or a predicate shown as advanced).
+  // null: the picker is mid-choice and approval must wait.
   const [appl, setAppl] = useState<Predicate | null | undefined>(undefined);
   const [searching, setSearching] = useState(false);
   const [query, setQuery] = useState("");
@@ -393,7 +397,7 @@ function ImportRow({
       postJSON<{ scf_id?: string }>(rowPath(batchID, row.id, "approve"), {
         ...choice,
         ...(implType ? { implementation_type: implType } : {}),
-        ...(settingScope && appl ? { applicability_expr: appl } : {}),
+        ...(settingScope && appl != null ? { applicability_expr: appl } : {}),
       }),
     onSuccess: (d) => {
       toast(`Approved ${row.external_id} with ${d.scf_id ?? "the anchor"}`);
@@ -508,8 +512,11 @@ function ImportRow({
               variant="outline"
               size="sm"
               onClick={() => {
-                setSettingScope((v) => !v);
-                setAppl(undefined);
+                const opening = !settingScope;
+                setSettingScope(opening);
+                setAppl(
+                  opening ? initialApplicability(row.applicability) : undefined,
+                );
               }}
               data-testid="control-import-set-applicability"
             >
