@@ -73,6 +73,7 @@ var beforeControlUpload func(ctx context.Context, bundleID string)
 type DecisionStore interface {
 	ApproveRow(ctx context.Context, in ApproveRowInput) (RowDecision, error)
 	RejectRow(ctx context.Context, in RejectRowInput) (RowDecision, error)
+	ApproveClear(ctx context.Context, in ApproveClearInput) (ApproveClearResult, error)
 }
 
 // ApproveRowInput approves one staged row with one of its candidates
