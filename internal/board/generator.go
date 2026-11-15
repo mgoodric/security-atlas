@@ -311,6 +311,7 @@ func rankTopRisks(rows []riskRow, now time.Time, n int) []RiskAging {
 			ID:               r.ID.String(),
 			Title:            r.Title,
 			Category:         r.Category,
+			CategoryName:     r.CategoryName,
 			Treatment:        r.Treatment,
 			ResidualSeverity: severity,
 			AgeDays:          ageDays,

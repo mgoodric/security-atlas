@@ -27,7 +27,7 @@
             "implemented-requirements": [
               {
                 "uuid": "78787878-7878-4787-8787-787878787878",
-                "control-id": "IAC-06",
+                "control-id": "IAC-37",
                 "description": "Claims to implement MFA; references an external catalog source.",
                 "links": [
                   {

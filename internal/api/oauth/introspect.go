@@ -50,6 +50,7 @@ type IntrospectionEndpoint struct {
 	clients *oauthclient.Store
 	issuer  string
 	now     func() time.Time
+	limiter *clientAuthLimiter
 
 	// superAdmins re-reads super_admins for a token claiming
 	// super_admin (#1870). Nil fails closed: the claim reports false.
@@ -69,6 +70,17 @@ type IntrospectionEndpointConfig struct {
 	// user's live token introspects as super_admin until it expires.
 	// Nil fails closed.
 	SuperAdmins superadmin.Checker
+
+	// ClientRatePerMinute and IPRatePerMinute throttle inspector
+	// authentication before the argon2id verify (#2041). Zero falls
+	// back to DefaultClientAuthRatePerMin / DefaultClientAuthIPRatePerMin.
+	ClientRatePerMinute int
+	IPRatePerMinute     int
+
+	// ClientIP resolves the caller IP for the per-IP bucket. Production
+	// wires auth.ClientIP (TRUSTED_PROXY_CIDRS); nil uses the direct
+	// TCP peer.
+	ClientIP func(*http.Request) string
 }
 
 // NewIntrospectionEndpoint builds an IntrospectionEndpoint. signer +
@@ -97,6 +109,7 @@ func NewIntrospectionEndpoint(signer *tokensign.Signer, revoked *revocation.Stor
 		clients: clients,
 		issuer:  cfg.Issuer,
 		now:     now,
+		limiter: newClientAuthLimiter(cfg.ClientRatePerMinute, cfg.IPRatePerMinute, cfg.ClientIP, now),
 
 		superAdmins: cfg.SuperAdmins,
 	}
@@ -110,6 +123,7 @@ func (e *IntrospectionEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request
 			"Content-Type must be application/x-www-form-urlencoded")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxFormBytes)
 	if err := r.ParseForm(); err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "malformed form body")
 		return
@@ -118,6 +132,12 @@ func (e *IntrospectionEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request
 	tokenIn := strings.TrimSpace(r.FormValue("token"))
 	if tokenIn == "" {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "token is required")
+		return
+	}
+
+	// Throttle inspector authentication before the argon2id verify
+	// (#2041). Writes the 429 itself.
+	if !e.limiter.allow(w, r) {
 		return
 	}
 

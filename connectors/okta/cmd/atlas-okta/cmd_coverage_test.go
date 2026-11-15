@@ -619,8 +619,8 @@ func TestDoRun_FailsOnMissingOktaToken(t *testing.T) {
 		org:              "example",
 		environment:      "prod",
 		oktaBaseURL:      "https://example.okta.com",
-		mfaPolicyControl: "scf:IAC-06",
-		appAssignControl: "scf:IAC-21",
+		mfaPolicyControl: "scf:IAC-37",
+		appAssignControl: "scf:IAC-10",
 		userLifeControl:  "scf:IAC-22",
 	})
 	if err == nil {

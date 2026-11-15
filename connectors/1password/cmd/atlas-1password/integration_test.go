@@ -136,7 +136,7 @@ func TestRun_PushesOrgPolicy(t *testing.T) {
 		t.Fatalf("unexpected inspect result: %+v", state)
 	}
 
-	rec, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-10")
+	rec, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-14")
 	if err != nil {
 		t.Fatalf("buildOrgPolicyRecord: %v", err)
 	}
@@ -178,11 +178,11 @@ func TestRun_OrgPolicyDedupes(t *testing.T) {
 		Result:                    opaccount.ResultPass,
 		ObservedAt:                time.Date(2026, 5, 11, 12, 0, 0, 0, time.UTC),
 	}
-	r1, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-10")
+	r1, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-14")
 	if err != nil {
 		t.Fatalf("build r1: %v", err)
 	}
-	r2, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-10")
+	r2, err := buildOrgPolicyRecord(state, "prod", "scf:IAC-14")
 	if err != nil {
 		t.Fatalf("build r2: %v", err)
 	}
@@ -212,8 +212,8 @@ func TestRun_OrgPolicyRotatesAcrossHour(t *testing.T) {
 	hourB := time.Date(2026, 5, 11, 13, 0, 0, 0, time.UTC)
 	stateA := &opaccount.PolicyState{OrgID: "acme-corp", TwoFactorRequired: true, MinimumPasswordLength: 14, Result: opaccount.ResultPass, ObservedAt: hourA}
 	stateB := &opaccount.PolicyState{OrgID: "acme-corp", TwoFactorRequired: true, MinimumPasswordLength: 14, Result: opaccount.ResultPass, ObservedAt: hourB}
-	rA, _ := buildOrgPolicyRecord(stateA, "prod", "scf:IAC-10")
-	rB, _ := buildOrgPolicyRecord(stateB, "prod", "scf:IAC-10")
+	rA, _ := buildOrgPolicyRecord(stateA, "prod", "scf:IAC-14")
+	rB, _ := buildOrgPolicyRecord(stateB, "prod", "scf:IAC-14")
 	if rA.GetIdempotencyKey() == rB.GetIdempotencyKey() {
 		t.Fatal("idempotency_key identical across hour boundary; freshness lost")
 	}

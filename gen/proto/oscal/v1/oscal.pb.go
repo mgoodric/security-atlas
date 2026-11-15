@@ -124,7 +124,7 @@ func (x *Metadata) GetFrozenAt() string {
 type ControlImplementation struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	ControlId string                 `protobuf:"bytes,1,opt,name=control_id,json=controlId,proto3" json:"control_id,omitempty"`
-	// SCF anchor code, e.g. "IAC-06".
+	// SCF anchor code, e.g. "IAC-37".
 	ScfId string `protobuf:"bytes,2,opt,name=scf_id,json=scfId,proto3" json:"scf_id,omitempty"`
 	Title string `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
 	// Human-authored implementation narrative (control bundle description).

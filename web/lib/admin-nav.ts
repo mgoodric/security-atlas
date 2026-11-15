@@ -34,13 +34,12 @@
 //   * `roles` contains only non-admin strings (viewer, control_owner,
 //     grc_engineer, auditor, etc.)
 //
-// Why the three admin variants? The slice-035 OPA role grant table +
-// slice-051 + slice-164 stack defines three role grants that map to
-// the platform's admin scope. `admin` is the canonical role in the
-// current single-tenant deployment; `tenant_admin` is the v2 SaaS
-// shape; `super_admin` is the platform-operator role. The spec's AC-2
-// names all three explicitly. Adding a fourth variant requires a new
-// slice — do NOT widen this list locally.
+// Why only `super_admin`? Slice 186's AC-2 named three variants
+// (`admin`, `tenant_admin`, `super_admin`), but the /admin layout gate
+// admits on `is_admin`, which is super-admin only. Once /v1/me began
+// returning real roles (#2216), listing the tenant variants would show
+// tenant admins an entry that only leads to the denial page. Do NOT
+// widen this list locally; a change to who /admin is for is a decision.
 //
 // Located in `web/lib/` rather than `web/components/shell/` so the
 // existing vitest config (`web/vitest.config.ts` include pattern
@@ -49,11 +48,11 @@
 // `canReachAuditLog` predicate exactly.
 
 // ADMIN_NAV_ROLES — the canonical set of role strings that grant the
-// sidebar's "Admin" entry. MUST match the platform's user_roles table
-// values for any role that maps to admin scope. A divergence between
-// this constant and the platform's admin-role set is a silent UI gap
-// (chrome hides an entry the user actually has access to).
-const ADMIN_NAV_ROLES = ["admin", "super_admin", "tenant_admin"] as const;
+// sidebar's "Admin" entry. MUST match who the /admin layout gate admits.
+// #2216 (Matt, 2026-11-14): /admin is super-admin only, so a tenant
+// `admin` / `tenant_admin` grant does NOT show the entry; it would only
+// lead to the denial page. See docs/audit-log/2216-admin-gate-decisions.md.
+const ADMIN_NAV_ROLES = ["super_admin"] as const;
 type AdminNavRole = (typeof ADMIN_NAV_ROLES)[number];
 
 /**

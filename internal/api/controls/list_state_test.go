@@ -52,7 +52,7 @@ func TestListPagination(t *testing.T) {
 func TestControlWithStateWireFrom(t *testing.T) {
 	t.Parallel()
 	id, anchor := uuid.New(), uuid.New()
-	scf := "IAC-06"
+	scf := "IAC-37"
 	result := dbx.EvidenceResultFail
 	fresh := "stale"
 	at := time.Date(2026, 11, 12, 10, 0, 0, 0, time.UTC)
