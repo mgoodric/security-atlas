@@ -242,6 +242,11 @@ jobs:
         with:
           filters: |
             shared:
+              # Contract-tier goldens: recorded by Go provider tests under
+              # internal/api/** and asserted by web consumer tests, so a
+              # golden-only change must run both tiers. Any web/ file a Go
+              # test reads belongs here.
+              - 'web/lib/contracts/**'
               - 'migrations/**'
               - 'sql/**'
               - 'atlas.hcl'
@@ -4135,6 +4140,7 @@ jobs:
               cache-path-guard)               echo "cache-path-guard" ;;
               integration-enrolment-check)    echo "integration-enrolment-check" ;;
               merge-gate-needs-check)         echo "merge-gate-needs-check" ;;
+              stub-twin-check)                echo "stub-twin-check" ;;
               *)                              echo "$1" ;;
             esac
           }
@@ -4167,6 +4173,26 @@ jobs:
             esac
           }
           echo "tiers: code='${CODE:-}' go='${TIER_GO:-}' web='${TIER_WEB:-}'"
+          if [ -z "$tiers" ]; then
+            echo "WARNING: tier parse of .github/workflows/ci.yml returned nothing;" >&2
+            echo "every leg falls back to tier 'code', so no go/web skip is forgiven." >&2
+          fi
+
+          # #2099: with code='true' the tiers must be well-formed, and at
+          # least one must be on. Anything else means `resolve` misbehaved,
+          # and forgiving skips against it would be unsafe.
+          if [ "${CODE:-}" = "true" ]; then
+            for tv in "${TIER_GO:-}" "${TIER_WEB:-}"; do
+              if [ "$tv" != "true" ] && [ "$tv" != "false" ]; then
+                echo "merge-gate is RED: code='true' but tiers are go='${TIER_GO:-}' web='${TIER_WEB:-}' (each must be true or false)." >&2
+                exit 1
+              fi
+            done
+            if [ "${TIER_GO}" != "true" ] && [ "${TIER_WEB}" != "true" ]; then
+              echo "merge-gate is RED: code='true' but both go and web tiers are false." >&2
+              exit 1
+            fi
+          fi
 
           fail=0
           while IFS="$(printf '\t')" read -r job result; do

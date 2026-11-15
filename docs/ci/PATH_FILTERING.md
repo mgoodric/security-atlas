@@ -109,7 +109,16 @@ Only which twin fires changes.
   `sqlc.yaml`, `proto/**`, `gen/**`, `buf*.yaml`, `policies/**`,
   `schemas/**`, `fixtures/**`, `deploy/**`, Dockerfiles, compose files,
   `.github/**`, `justfile`, `scripts/**`, `.golangci.yml`,
-  `.pre-commit-config.yaml`, `.nvmrc`, `codecov.yml`.
+  `.pre-commit-config.yaml`, `.nvmrc`, `codecov.yml`, and
+  `web/lib/contracts/**`.
+- **A web file a Go test reads is shared.** The contract-tier goldens in
+  `web/lib/contracts/*.golden.json` are recorded by Go provider tests
+  under `internal/api/**` (e.g. `internal/api/version_contract_test.go`)
+  and asserted by web consumer tests. If a golden counted as web-only, a
+  golden-only PR would skip `Go · build + test` and break `main`. When a
+  Go test starts reading another file under `web/`, add that path to the
+  `shared` filter in the same PR (and the same for any Go-tier file a web
+  test reads).
 
 ### The skip rule: every file, or nothing
 
