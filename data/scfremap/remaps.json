@@ -133,6 +133,48 @@
       "from": "CFG-04",
       "to": "CHG-03",
       "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CLD-01",
+      "to": "CLD-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CPL-01",
+      "to": "CPL-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "CPL-03",
+      "to": "CPL-07.1",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "TPM-01",
+      "to": "TPM-02",
+      "basis": "legacy"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "TPM-04",
+      "to": "TPM-10",
+      "basis": "concept"
+    },
+    {
+      "from_release": "test-2026.1",
+      "to_release": "test-2026.3",
+      "from": "TPM-05",
+      "to": "TPM-14",
+      "basis": "legacy"
     }
   ]
 }
