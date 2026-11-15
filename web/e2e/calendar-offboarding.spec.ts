@@ -54,7 +54,7 @@ test.describe("compliance calendar — offboarding events (#2215)", () => {
     await calendarResp;
 
     await expect(
-      page.getByRole("heading", { name: /Compliance calendar/ }),
+      page.getByRole("heading", { level: 1, name: "Calendar" }),
     ).toBeVisible({ timeout: 30_000 });
     await expect(page.getByText("This page couldn't load")).toHaveCount(0);
 

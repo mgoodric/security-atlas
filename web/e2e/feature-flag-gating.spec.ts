@@ -36,10 +36,10 @@ test.describe("slice 660 — feature-flag nav gating", () => {
     await expect(sidebar).toBeVisible();
     // The two pre-GA modules are gated OFF by Seed default -> hidden.
     await expect(
-      sidebar.getByRole("link", { name: "Board Packs" }),
+      sidebar.getByRole("link", { name: "Board packs" }),
     ).toHaveCount(0);
     await expect(
-      sidebar.getByRole("link", { name: "Vendor Claims" }),
+      sidebar.getByRole("link", { name: "Vendor claims" }),
     ).toHaveCount(0);
     // A non-gated entry still renders (sanity: the nav itself works).
     await expect(

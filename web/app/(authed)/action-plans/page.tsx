@@ -36,6 +36,7 @@ import {
 } from "@/lib/api/action-plans";
 
 import { dateLabel, statusLabel, statusPillClass } from "./status";
+import { pageTitle } from "@/lib/page-titles";
 
 const ALL = "__all__";
 
@@ -180,7 +181,7 @@ function ActionPlansPageInner() {
   if (plansQ.isLoading) {
     return (
       <ListPage
-        title="Action Plans"
+        title={pageTitle("/action-plans")}
         subtitle={subtitle}
         actions={actions}
         filterRow={
@@ -194,7 +195,11 @@ function ActionPlansPageInner() {
 
   if (plansQ.isError) {
     return (
-      <ListPage title="Action Plans" subtitle={subtitle} actions={actions}>
+      <ListPage
+        title={pageTitle("/action-plans")}
+        subtitle={subtitle}
+        actions={actions}
+      >
         <Alert variant="destructive" data-testid="action-plans-load-error">
           <AlertTitle>Could not load action plans</AlertTitle>
           <AlertDescription>{(plansQ.error as Error).message}</AlertDescription>
@@ -205,7 +210,7 @@ function ActionPlansPageInner() {
 
   return (
     <ListPage
-      title="Action Plans"
+      title={pageTitle("/action-plans")}
       subtitle={subtitle}
       actions={actions}
       filterRow={
