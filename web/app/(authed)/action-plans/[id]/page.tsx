@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 
+import { Markdown } from "@/components/markdown";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
@@ -102,12 +103,11 @@ export default function ActionPlanDetailPage() {
       </Section>
 
       <Section title="Description">
-        <p
-          className="whitespace-pre-wrap text-sm text-foreground/80"
+        <Markdown
+          source={plan.description || "—"}
+          className="text-foreground/80"
           data-testid="action-plan-detail-description"
-        >
-          {plan.description || "—"}
-        </p>
+        />
       </Section>
 
       <Section title={`Linked risks (${linkage.risks.length})`}>

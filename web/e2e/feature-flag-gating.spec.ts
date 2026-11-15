@@ -1,4 +1,5 @@
-// Slice 660 + #2092 — Playwright e2e for feature-flag nav + route gating.
+// Slice 660 + #2092 + #2170 — Playwright e2e for module nav + route
+// gating.
 //
 // Both gating flags (`board.reporting`, `oscal.export`) ship OFF. The
 // demo tenant has them turned ON by global-setup so the module specs can
@@ -28,6 +29,11 @@ import { ATLAS_JWT_COOKIE } from "../lib/auth";
 // default. "20f0" ties the id to #2092 (FeatureGate off state).
 const FLAGS_OFF_TENANT = "00000000-0000-0000-0000-0000000020f0";
 
+// A tenant whose admin switches Questionnaires (on by default) off in
+// beforeAll, through the real admin API. Its own tenant, so no other spec
+// races it over the flag row. "2170" ties the id to #2170.
+const QUESTIONNAIRES_OFF_TENANT = "00000000-0000-0000-0000-000000002170";
+
 function atlasBaseURL(): string {
   return process.env.ATLAS_HTTP_URL ?? "http://localhost:8080";
 }
@@ -35,18 +41,21 @@ function atlasBaseURL(): string {
 type Audience = "admin" | "viewer";
 
 // mintJWT asks the ATLAS_TEST_MODE-gated issuer for a token in the
-// flags-off tenant. The admin is a super-admin (`is_admin` on /v1/me);
-// the viewer is not.
-async function mintJWT(audience: Audience): Promise<string> {
+// given tenant (the flags-off one by default). The admin is a
+// super-admin (`is_admin` on /v1/me); the viewer is not.
+async function mintJWT(
+  audience: Audience,
+  tenant: string = FLAGS_OFF_TENANT,
+): Promise<string> {
   const url = `${atlasBaseURL()}/v1/test/issue-jwt`;
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(
       audience === "admin"
-        ? { tenant_id: FLAGS_OFF_TENANT, roles: ["admin"], super_admin: true }
+        ? { tenant_id: tenant, roles: ["admin"], super_admin: true }
         : {
-            tenant_id: FLAGS_OFF_TENANT,
+            tenant_id: tenant,
             roles: ["viewer"],
             super_admin: false,
           },
@@ -70,12 +79,13 @@ async function signIn(
   page: Page,
   baseURL: string | undefined,
   audience: Audience,
+  tenant: string = FLAGS_OFF_TENANT,
 ): Promise<void> {
   const url = new URL(baseURL ?? "http://localhost:3000");
   await page.context().addCookies([
     {
       name: ATLAS_JWT_COOKIE,
-      value: await mintJWT(audience),
+      value: await mintJWT(audience, tenant),
       domain: url.hostname,
       path: "/",
       httpOnly: true,
@@ -120,6 +130,12 @@ const BOARD_PACK_UI = [
   "board-packs-page",
   "board-pack-generate-form",
   "board-pack-period-end",
+];
+const QUESTIONNAIRES_UI = [
+  "questionnaires-upload-button",
+  "questionnaires-loading",
+  "questionnaires-error",
+  "questionnaires-empty",
 ];
 const VENDOR_CLAIMS_UI = [
   "component-definitions-page",
@@ -210,5 +226,83 @@ test.describe("#2092 — FeatureGate off state", () => {
     await expect(page.getByText("Could not load")).toHaveCount(0);
     await expect(page.getByText("feature disabled")).toHaveCount(0);
     expect(await flashSeen(page)).toEqual([]);
+  });
+});
+
+test.describe("#2170 — Questionnaires switched off", () => {
+  test.beforeAll(async () => {
+    const token = await mintJWT("admin", QUESTIONNAIRES_OFF_TENANT);
+    const url = `${atlasBaseURL()}/v1/admin/features/questionnaires.enabled`;
+    const res = await fetch(url, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ enabled: false, reason: "#2170 e2e" }),
+    });
+    if (!res.ok) {
+      throw new Error(
+        `#2170: PATCH ${url} returned ${res.status}: ${await res.text()}`,
+      );
+    }
+  });
+
+  for (const audience of ["admin", "viewer"] as const) {
+    test(`${audience}: not in the sidebar`, async ({ page, baseURL }) => {
+      await signIn(page, baseURL, audience, QUESTIONNAIRES_OFF_TENANT);
+      await page.goto("/dashboard");
+      const sidebar = page.getByTestId("sidebar-desktop");
+      await expect(
+        sidebar.getByRole("link", { name: "Dashboard" }),
+      ).toBeVisible();
+      await expect(
+        sidebar.getByRole("link", { name: "Questionnaires" }),
+      ).toHaveCount(0);
+    });
+  }
+
+  test("admin: the off state links to Admin › Features, no flash", async ({
+    page,
+    baseURL,
+  }) => {
+    await signIn(page, baseURL, "admin", QUESTIONNAIRES_OFF_TENANT);
+    await watchForFlash(page, QUESTIONNAIRES_UI);
+    await page.goto("/questionnaires");
+    const panel = page.getByTestId("feature-off-state");
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute("data-audience", "off-admin");
+    await expect(panel).toContainText("This feature is off.");
+    await expect(panel.getByTestId("feature-off-admin-link")).toHaveAttribute(
+      "href",
+      "/admin/features",
+    );
+    expect(await flashSeen(page)).toEqual([]);
+  });
+
+  test("viewer: ask an administrator, no Admin link, no flash", async ({
+    page,
+    baseURL,
+  }) => {
+    await signIn(page, baseURL, "viewer", QUESTIONNAIRES_OFF_TENANT);
+    await watchForFlash(page, QUESTIONNAIRES_UI);
+    await page.goto("/questionnaires");
+    const panel = page.getByTestId("feature-off-state");
+    await expect(panel).toBeVisible();
+    await expect(panel).toHaveAttribute("data-audience", "off-member");
+    await expect(panel).toContainText(
+      "This feature isn't turned on for your organisation. Ask an administrator.",
+    );
+    await expect(page.locator('a[href="/admin/features"]')).toHaveCount(0);
+    expect(await flashSeen(page)).toEqual([]);
+  });
+
+  test("a questionnaire's own URL shows the off state too", async ({
+    page,
+    baseURL,
+  }) => {
+    await signIn(page, baseURL, "viewer", QUESTIONNAIRES_OFF_TENANT);
+    await page.goto(`/questionnaires/${QUESTIONNAIRES_OFF_TENANT}`);
+    await expect(page.getByTestId("feature-off-state")).toBeVisible();
   });
 });

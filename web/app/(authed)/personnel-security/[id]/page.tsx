@@ -14,6 +14,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { Markdown } from "@/components/markdown";
 import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -228,7 +229,7 @@ function ItemRow({
             </p>
           ) : null}
           {item.notes ? (
-            <p data-testid="personnel-item-notes">{item.notes}</p>
+            <Markdown source={item.notes} data-testid="personnel-item-notes" />
           ) : null}
         </div>
       ) : null}

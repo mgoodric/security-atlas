@@ -2,7 +2,6 @@ package featureflag
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"sync"
@@ -140,10 +139,7 @@ func Gate(looker Looker, key string) func(http.Handler) http.Handler {
 				}
 			}
 			if !on {
-				w.Header().Set("Content-Type", "application/json")
-				w.Header().Set("X-Feature-Disabled", key)
-				w.WriteHeader(http.StatusNotFound)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "feature disabled"})
+				writeFeatureDisabled(w, key)
 				return
 			}
 			next.ServeHTTP(w, r)

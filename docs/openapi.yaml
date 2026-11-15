@@ -3260,20 +3260,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
-  /v1/features/enabled:
-    get:
-      summary: GET /v1/features/enabled — non-admin enabled-modules read (slice 660 gating flags)
-      tags: [feature-flags]
-      operationId: get-v1-features-enabled
-      security:
-        - bearer: []
-      responses:
-        default:
-          description: Default response envelope.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Ack"
   /v1/framework-scopes:
     get:
       summary: GET /v1/framework-scopes
@@ -4014,6 +4000,20 @@ paths:
       summary: PUT /v1/me/email-channel
       tags: [me]
       operationId: put-v1-me-email-channel
+      security:
+        - bearer: []
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+  /v1/me/modules:
+    get:
+      summary: GET /v1/me/modules — the caller's effective optional modules (#2170)
+      tags: [feature-flags]
+      operationId: get-v1-me-modules
       security:
         - bearer: []
       responses:
@@ -5283,7 +5283,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     post:
-      summary: POST /v1/risks
+      summary: POST /v1/risks — create a risk; category is a slug, id or display name, refused when unknown, ambiguous or archived
       tags: [risks]
       operationId: post-v1-risks
       security:
@@ -5531,7 +5531,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?, category?}; category is a slug or id, refused when unknown or archived
+      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?, category?}; category is a slug, id or display name, refused when unknown, ambiguous or archived
       tags: [risks]
       operationId: patch-v1-risks-id
       security:
