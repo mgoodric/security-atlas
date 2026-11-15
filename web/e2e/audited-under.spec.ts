@@ -7,8 +7,9 @@
 //   * candidate anchors are shown for the row;
 //   * the CSV export downloads, carrying the framework filter.
 //
-// HERMETIC: the report, overlay POST and export BFFs are route-mocked
-// (slice 594 convention), so the spec pins the page. The report's rule
+// HERMETIC except the export: the report and overlay POST BFFs are
+// route-mocked (slice 594 convention), so the spec pins the page; the CSV
+// download goes through the real BFF and platform. The report's rule
 // (which criteria are reached, candidate release, RLS) is pinned by
 // internal/api/mappingoverlays/audited_under_integration_test.go, and the
 // overlay POST's role guard and validation by that package's tests.
@@ -23,7 +24,6 @@ import type {
 import { expect, test } from "./fixtures";
 
 const REPORT = "**/api/mapping-overlays/audited-under";
-const EXPORT = "**/api/mapping-overlays/audited-under/export**";
 const OVERLAY = "**/api/mapping-overlays";
 
 // Neutral test strings only (P0-A9 / GitGuardian).
@@ -217,18 +217,6 @@ test.describe("Audited under report", () => {
     authedPage: page,
   }) => {
     await mockReport(page, new Set());
-    const exportURLs: string[] = [];
-    await page.route(EXPORT, async (route: Route) => {
-      exportURLs.push(route.request().url());
-      await route.fulfill({
-        status: 200,
-        headers: {
-          "Content-Type": "text/csv; charset=utf-8",
-          "Content-Disposition": 'attachment; filename="audited-under-e2e.csv"',
-        },
-        body: "framework,requirement_code,anchor_code\nsoc2,CC1.4,IAC-06\n",
-      });
-    });
 
     await page.goto("/catalog/audited-under");
     await expect(page.getByTestId("audited-under-row")).toHaveCount(2);
@@ -236,17 +224,25 @@ test.describe("Audited under report", () => {
     await expect(page.getByTestId("audited-under-row")).toHaveCount(1);
     await expect(page.getByTestId("audited-under-row")).toContainText("CC1.4");
 
+    const link = page.getByTestId("audited-under-export-csv");
+    await expect(link).toHaveAttribute(
+      "href",
+      "/api/mapping-overlays/audited-under/export?framework=soc2",
+    );
+
+    // The export is not mocked: page.route does not intercept the download
+    // an <a download> starts, so the platform answers through the BFF. The
+    // seeded tenant may have no gaps, so the body is checked for the header.
     const download = page.waitForEvent("download");
-    await page.getByTestId("audited-under-export-csv").click();
+    await link.click();
     const csv = await download;
-    expect(csv.suggestedFilename()).toBe("audited-under-e2e.csv");
+    expect(csv.suggestedFilename()).toMatch(/^audited-under_\d{8}\.csv$/);
     const chunks: Buffer[] = [];
     for await (const chunk of await csv.createReadStream()) {
       chunks.push(chunk as Buffer);
     }
-    expect(Buffer.concat(chunks).toString("utf8")).toContain(
-      "soc2,CC1.4,IAC-06",
+    expect(Buffer.concat(chunks).toString("utf8")).toMatch(
+      /^﻿?framework,framework_version,requirement_code,/,
     );
-    expect(new URL(exportURLs[0]).searchParams.get("framework")).toBe("soc2");
   });
 });

@@ -1,12 +1,14 @@
 // #1802 — BFF for GET /v1/mapping-overlays/audited-under/export: the
 // report as CSV. Streams the body with the platform's Content-Type and
 // Content-Disposition (it names the file); an error passes through as
-// JSON. Only the `framework` filter is forwarded. Same posture as the
+// JSON. Only the `framework` filter is forwarded, and only when it is
+// shaped like a slug. Same posture as the
 // anchors export BFF (../../../anchors/export).
 
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
+import { isFrameworkSlug } from "@/lib/api/audited-under";
 import { apiBaseURL } from "@/lib/api/base";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
@@ -24,6 +26,12 @@ export async function GET(req: Request): Promise<Response> {
     return NextResponse.json({ error: "unauthenticated" }, { status: 401 });
   }
   const framework = new URL(req.url).searchParams.get("framework");
+  if (framework && !isFrameworkSlug(framework)) {
+    return NextResponse.json(
+      { error: "framework must be a framework slug" },
+      { status: 400 },
+    );
+  }
   const qs = framework ? `?framework=${encodeURIComponent(framework)}` : "";
   const upstream = await fetch(
     `${apiBaseURL()}/v1/mapping-overlays/audited-under/export${qs}`,

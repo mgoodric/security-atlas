@@ -8,6 +8,7 @@ import {
   edgeFor,
   frameworksOf,
   groupRows,
+  isFrameworkSlug,
   type AuditedUnderRow,
 } from "./audited-under";
 
@@ -105,6 +106,17 @@ describe("defaultSourceRef", () => {
     expect(defaultSourceRef(row({ tested_under_note: " " }))).toBe(
       "Tested under soc2 CC6.1",
     );
+  });
+});
+
+describe("isFrameworkSlug", () => {
+  test("accepts slugs and refuses anything else", () => {
+    for (const ok of ["soc2", "iso27001", "nist-csf", "pci_dss", "hipaa.v2"]) {
+      expect(isFrameworkSlug(ok)).toBe(true);
+    }
+    for (const bad of ["", "-soc2", "a&b", "../x", "a b", "x".repeat(65)]) {
+      expect(isFrameworkSlug(bad)).toBe(false);
+    }
   });
 });
 

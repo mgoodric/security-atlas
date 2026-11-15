@@ -85,7 +85,7 @@ describe("mapping overlay BFF routes", () => {
       "Content-Type": "text/csv; charset=utf-8",
       "Content-Disposition": 'attachment; filename="audited-under.csv"',
     });
-    const res = await exportReport(new Request("http://t/?framework=a%26b"));
+    const res = await exportReport(new Request("http://t/?framework=nist-csf"));
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("text/csv; charset=utf-8");
     expect(res.headers.get("content-disposition")).toBe(
@@ -93,8 +93,18 @@ describe("mapping overlay BFF routes", () => {
     );
     expect(await res.text()).toBe("control_id,framework\n");
     expect(call(spy).url).toBe(
-      "http://atlas:8080/v1/mapping-overlays/audited-under/export?framework=a%26b",
+      "http://atlas:8080/v1/mapping-overlays/audited-under/export?framework=nist-csf",
     );
+  });
+
+  test("a framework that is not a slug is refused before calling upstream", async () => {
+    const spy = vi.spyOn(globalThis, "fetch");
+    for (const bad of ["a%26b", "..%2Fx", "soc2%3Fx%3D1", "a%20b"]) {
+      const req = new Request(`http://t/?framework=${bad}`);
+      expect((await getReport(req)).status).toBe(400);
+      expect((await exportReport(req)).status).toBe(400);
+    }
+    expect(spy).not.toHaveBeenCalled();
   });
 
   test("an export error passes through as JSON", async () => {

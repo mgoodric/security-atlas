@@ -89,6 +89,15 @@ export function fetchAuditedUnder(): Promise<AuditedUnderReport> {
   );
 }
 
+const FRAMEWORK_SLUG_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+/** isFrameworkSlug reports whether `v` is shaped like a framework slug
+ *  ("soc2", "iso27001", "nist-csf"). The BFFs refuse any other value
+ *  rather than forward it upstream. */
+export function isFrameworkSlug(v: string): boolean {
+  return FRAMEWORK_SLUG_RE.test(v);
+}
+
 /** The CSV export link; `framework` narrows it like the page filter. */
 export function auditedUnderExportURL(framework: string): string {
   const base = "/api/mapping-overlays/audited-under/export";
