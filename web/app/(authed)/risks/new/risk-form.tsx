@@ -228,7 +228,9 @@ export function RiskForm({ onSubmit }: Props) {
     queryFn: () => fetchRiskCategories(false),
     staleTime: 60_000,
   });
-  const categories = categoriesQ.data ?? [];
+  // Upstream already leaves archived categories out without
+  // include_archived; filter again so the picker never offers one.
+  const categories = (categoriesQ.data ?? []).filter((c) => !c.archived);
   // Until the user picks one, the picker shows the organisation default
   // (else the first listed category) and that is what gets posted.
   const defaultCategory =

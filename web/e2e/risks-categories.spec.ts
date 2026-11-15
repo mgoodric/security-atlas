@@ -12,8 +12,8 @@
 //     archived, in the register and on the risk detail.
 //
 // Mocked per the `route.fulfill` convention: `/api/risks/categories`
-// answers like upstream, archived categories only with
-// `include_archived=true`. No sleeps: every assertion auto-waits.
+// always includes the archived category, so hiding it is the page's
+// doing. No sleeps: every assertion auto-waits.
 //
 // Hard rule (P0-A9): neutral test strings only.
 
@@ -93,12 +93,12 @@ async function json(route: Route, status: number, body: unknown) {
 }
 
 async function mockCategories(page: Page) {
-  await page.route(/\/api\/risks\/categories(\?.*)?$/, (route, req) => {
-    const withArchived =
-      new URL(req.url()).searchParams.get("include_archived") === "true";
-    const categories = CATEGORIES.filter((c) => withArchived || !c.archived);
-    return json(route, 200, { categories, count: categories.length });
-  });
+  // Always returns the archived category, whatever include_archived says,
+  // so each assertion that it is hidden proves the page hides it, not
+  // the mock.
+  await page.route(/\/api\/risks\/categories(\?.*)?$/, (route) =>
+    json(route, 200, { categories: CATEGORIES, count: CATEGORIES.length }),
+  );
 }
 
 test.describe("/risks organisation categories (#1817)", () => {
