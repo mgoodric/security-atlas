@@ -189,6 +189,7 @@ func (t *TokenEndpoint) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"Content-Type must be application/x-www-form-urlencoded")
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, MaxFormBytes)
 	if err := r.ParseForm(); err != nil {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request", "malformed form body")
 		return
@@ -219,6 +220,13 @@ func (t *TokenEndpoint) handleClientCredentials(w http.ResponseWriter, r *http.R
 	if clientID == "" || clientSecret == "" {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_request",
 			"client_id and client_secret are required")
+		return
+	}
+	// An over-long client_id is never a real one; refuse it before it
+	// becomes a limiter key (#2041).
+	if len(clientID) > MaxClientIDBytes {
+		writeOAuthError(w, http.StatusUnauthorized, "invalid_client",
+			"client authentication failed")
 		return
 	}
 	// Rate-limit BEFORE any expensive work (DB lookup, argon2id verify,
@@ -564,7 +572,15 @@ type tokenBucketLimiter struct {
 	rate    int // tokens per minute
 	buckets map[string]*tokenBucketState
 	now     func() time.Time
+	// pruneAt is the bucket count that triggers a sweep of refilled
+	// buckets (#2041). Callers pick the keys, so without the sweep the
+	// map grows with every distinct key ever seen.
+	pruneAt int
 }
+
+// tokenBucketPruneFloor is the smallest map size that triggers a
+// prune, matching the login throttle's floor.
+const tokenBucketPruneFloor = 4096
 
 type tokenBucketState struct {
 	tokens    float64
@@ -576,6 +592,7 @@ func newTokenBucketLimiter(rate int, nowFn func() time.Time) *tokenBucketLimiter
 		rate:    rate,
 		buckets: make(map[string]*tokenBucketState),
 		now:     nowFn,
+		pruneAt: tokenBucketPruneFloor,
 	}
 }
 
@@ -587,6 +604,7 @@ func (l *tokenBucketLimiter) Allow(key string) bool {
 	now := l.now()
 	state, ok := l.buckets[key]
 	if !ok {
+		l.maybePrune(now)
 		l.buckets[key] = &tokenBucketState{
 			tokens:    float64(l.rate) - 1, // first call consumes one
 			lastCheck: now,
@@ -605,6 +623,23 @@ func (l *tokenBucketLimiter) Allow(key string) bool {
 	}
 	state.tokens -= 1.0
 	return true
+}
+
+// maybePrune drops buckets that have refilled to full: they hold no
+// state a fresh bucket would not. The threshold doubles with the
+// surviving count so a map of live buckets is not rescanned on every
+// new key. Caller holds l.mu.
+func (l *tokenBucketLimiter) maybePrune(now time.Time) {
+	if len(l.buckets) < l.pruneAt {
+		return
+	}
+	full := float64(l.rate)
+	for k, b := range l.buckets {
+		if b.tokens+now.Sub(b.lastCheck).Seconds()*(full/60.0) >= full {
+			delete(l.buckets, k)
+		}
+	}
+	l.pruneAt = max(tokenBucketPruneFloor, 2*len(l.buckets))
 }
 
 // WindowSeconds reports the retry-after value the 429 response
