@@ -159,12 +159,18 @@ func ParseCSV(r io.Reader) ([]ImportRow, error) {
 // ParseYAML reads an import file in YAML form: a list of mappings whose
 // keys are ImportColumns.
 func ParseYAML(r io.Reader) ([]ImportRow, error) {
+	dec := yaml.NewDecoder(r)
 	var doc yaml.Node
-	if err := yaml.NewDecoder(r).Decode(&doc); err != nil {
+	if err := dec.Decode(&doc); err != nil {
 		if errors.Is(err, io.EOF) {
 			return nil, &FileError{Reason: "the file is empty"}
 		}
 		return nil, &FileError{Reason: "the file is not valid YAML"}
+	}
+	// One document only: a second one would otherwise be silently dropped.
+	var extra yaml.Node
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		return nil, &FileError{Reason: "the YAML file must hold exactly one document"}
 	}
 	if doc.Kind != yaml.DocumentNode || len(doc.Content) != 1 || doc.Content[0].Kind != yaml.SequenceNode {
 		return nil, &FileError{Reason: "the YAML file must be a list of overlay edges"}

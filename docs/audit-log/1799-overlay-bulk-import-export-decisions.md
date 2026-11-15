@@ -60,8 +60,11 @@ anchor_code, relationship_type, strength, rationale, source_ref`. The
 - The export carries more columns than the import accepts (id, status,
   author, dates), so an export does not re-import as-is. Re-importing a
   retired edge as active would be wrong anyway.
-- YAML is a list of mappings with the same keys. A non-scalar value is a row
-  error, and `~` counts as blank.
+- YAML is one document holding a list of mappings with the same keys. A
+  second document refuses the file rather than being dropped. A non-scalar
+  value is a row error, and `~` counts as blank. Aliases are never
+  expanded: an aliased row or value is a row error, and a `<<` merge key
+  is an unknown column.
 - Cells are trimmed. A UTF-8 BOM on the CSV header is dropped.
 - `strength` must parse as a finite float. `NaN` would pass the `0 <= s <= 1`
   check (every comparison with NaN is false), so the parser refuses it

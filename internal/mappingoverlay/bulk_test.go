@@ -136,6 +136,9 @@ func TestParseYAML_RowsAndRefusals(t *testing.T) {
 		{"empty", "", "the file is empty"},
 		{"not yaml", "- [", "the file is not valid YAML"},
 		{"not a list", "framework: soc2\n", "must be a list"},
+		{"two documents", "- framework: soc2\n---\n- framework: soc2\n", "exactly one document"},
+		{"bad second document", "- framework: soc2\n---\n- [\n", "exactly one document"},
+		{"merge key", "- &a {framework: soc2}\n- <<: *a\n", "row 2 (line 2): the file has a column that is not one of"},
 		{"tenant key", "- tenant_id: x\n  framework: soc2\n", "row 1 (line 1): the file names a tenant"},
 		{"unknown key", "- framework: soc2\n  evil: x\n", "row 1 (line 1): the file has a column that is not one of"},
 	} {
@@ -144,6 +147,47 @@ func TestParseYAML_RowsAndRefusals(t *testing.T) {
 		if !errors.As(err, &fe) || !strings.Contains(fe.Reason, tc.reason) {
 			t.Errorf("%s: err = %v; want FileError containing %q", tc.name, err, tc.reason)
 		}
+	}
+}
+
+// Aliases are never expanded into rows or values: an aliased row is not a
+// mapping and an aliased value is not a single value, so a file cannot
+// reuse (or multiply) content through anchors.
+func TestParseYAML_AliasesAreRowErrors(t *testing.T) {
+	t.Parallel()
+	in := `
+- &edge
+  framework: soc2
+  requirement_code: CC1.1
+  anchor_code: &code HRS-07.1
+  relationship_type: equal
+  strength: 1
+  rationale: r
+  source_ref: s
+- *edge
+- framework: soc2
+  requirement_code: CC1.2
+  anchor_code: *code
+  relationship_type: equal
+  strength: 1
+  rationale: r
+  source_ref: s
+`
+	rows, err := ParseYAML(strings.NewReader(in))
+	if err != nil {
+		t.Fatalf("ParseYAML: %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("rows = %d; want 3", len(rows))
+	}
+	if rows[0].Err != nil || rows[0].Edge.AnchorCode != "HRS-07.1" {
+		t.Errorf("row 1 (the anchored original) = %+v", rows[0])
+	}
+	if rows[1].Err == nil || rows[1].Err.Reason != "the row is not a mapping" {
+		t.Errorf("row 2 (an aliased row) err = %+v", rows[1].Err)
+	}
+	if rows[2].Err == nil || rows[2].Err.Reason != "anchor_code must be a single value" {
+		t.Errorf("row 3 (an aliased value) err = %+v", rows[2].Err)
 	}
 }
 
