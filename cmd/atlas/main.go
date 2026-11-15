@@ -475,17 +475,31 @@ func main() {
 			// /oauth/introspect (RFC 7662) endpoints, the JWT
 			// validation middleware on /v1/*, and the revocation-
 			// list sweeper goroutine.
+			//
+			// #2041: both endpoints run an argon2id client-secret verify
+			// unauthenticated, so each throttles per client_id and per
+			// caller IP (resolved through TRUSTED_PROXY_CIDRS) first.
 			revokedStore := revocation.New(pool)
+			clientAuthRate := positiveIntEnv(logger, "ATLAS_OAUTH_CLIENT_AUTH_RATE_PER_MIN", oauthapi.DefaultClientAuthRatePerMin)
+			clientAuthIPRate := positiveIntEnv(logger, "ATLAS_OAUTH_CLIENT_AUTH_IP_RATE_PER_MIN", oauthapi.DefaultClientAuthIPRatePerMin)
 			revokeEP := oauthapi.NewRevocationEndpoint(signer, revokedStore, clients, oauthapi.RevocationEndpointConfig{
-				Issuer: issuer,
+				Issuer:              issuer,
+				ClientRatePerMinute: clientAuthRate,
+				IPRatePerMinute:     clientAuthIPRate,
+				ClientIP:            authapi.ClientIP,
 			})
 			introspectEP := oauthapi.NewIntrospectionEndpoint(signer, revokedStore, clients, oauthapi.IntrospectionEndpointConfig{
-				Issuer:      issuer,
-				SuperAdmins: superAdmins,
+				Issuer:              issuer,
+				SuperAdmins:         superAdmins,
+				ClientRatePerMinute: clientAuthRate,
+				IPRatePerMinute:     clientAuthIPRate,
+				ClientIP:            authapi.ClientIP,
 			})
 			oauthHandler.AttachRevocationEndpoint(revokeEP)
 			oauthHandler.AttachIntrospectionEndpoint(introspectEP)
-			logger.Info("atlas: OAuth revocation + introspection endpoints wired")
+			logger.Info("atlas: OAuth revocation + introspection endpoints wired",
+				"client_auth_rate_per_min", clientAuthRate,
+				"client_auth_ip_rate_per_min", clientAuthIPRate)
 
 			// Slice 190: attach the JWT validator to the HTTP server
 			// so it prepends jwtmw to the /v1/* chain.
@@ -1472,6 +1486,22 @@ func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
 	}
+	return fallback
+}
+
+// positiveIntEnv reads a positive integer from key, falling back when
+// it is unset, malformed or not positive. A set-but-unusable value is
+// logged so the operator learns their setting was ignored.
+func positiveIntEnv(logger *slog.Logger, key string, fallback int) int {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallback
+	}
+	if v, err := strconv.Atoi(raw); err == nil && v > 0 {
+		return v
+	}
+	logger.Warn("atlas: ignoring invalid env value; using default",
+		"key", key, "value", raw, "default", fallback)
 	return fallback
 }
 

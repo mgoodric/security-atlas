@@ -151,3 +151,20 @@ func ExportLimiterWindowSeconds(l *ExportTokenBucketLimiter) int {
 // ExportTokenBucketLimiter aliases the unexported limiter so the
 // external test package can hold a typed handle.
 type ExportTokenBucketLimiter = tokenBucketLimiter
+
+// ExportLimiterLen reports how many buckets the limiter holds (#2041
+// pruning).
+func ExportLimiterLen(l *ExportTokenBucketLimiter) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.buckets)
+}
+
+// ExportTokenBucketPruneFloor re-exports the prune threshold.
+const ExportTokenBucketPruneFloor = tokenBucketPruneFloor
+
+// ExportIntrospectLimiterLens reports the per-client and per-IP bucket
+// counts of an introspection endpoint's client-auth limiter (#2041).
+func ExportIntrospectLimiterLens(e *IntrospectionEndpoint) (perClient, perIP int) {
+	return ExportLimiterLen(e.limiter.perClient), ExportLimiterLen(e.limiter.perIP)
+}

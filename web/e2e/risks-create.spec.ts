@@ -143,15 +143,11 @@ test.describe("/risks/new risk-create form", () => {
     await createResp;
     expect(postedAcceptanceStatus).toBe("proposed");
 
-    // AC: routed back to /risks and the new row appears (cache
-    // invalidation + re-fetch).
-    await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
-    await expect(
-      page
-        .getByTestId("risks-row-title")
-        .filter({ hasText: NEW_RISK_TITLE })
-        .first(),
-    ).toBeVisible({ timeout: 30_000 });
+    // #2089 create convention: land on the new risk with a toast.
+    await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {
+      timeout: 30_000,
+    });
+    await expect(page.getByTestId("toast")).toHaveText(/Risk created/);
   });
 
   test("AC-1: a fresh tenant (zero controls) creates a risk through the default flow without linking a control", async ({
@@ -249,30 +245,22 @@ test.describe("/risks/new risk-create form", () => {
     await createResp;
 
     // The default-flow submit posts treatment=untreated (#1746) and
-    // routes back with the new row.
+    // lands on the new risk (#2089).
     expect(postedTreatment).toBe("untreated");
-    await expect(page).toHaveURL(/\/risks(\?|$)/, { timeout: 30_000 });
-    await expect(
-      page
-        .getByTestId("risks-row-title")
-        .filter({ hasText: NEW_RISK_TITLE })
-        .first(),
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(page).toHaveURL(new RegExp(`/risks/${CREATED_RISK_ID}$`), {
+      timeout: 30_000,
+    });
   });
 
   test("empty title is gated client-side: no server round-trip, input preserved", async ({
     authedPage: page,
   }) => {
-    // HONEST behaviour (verified locally): the title <input> carries the
-    // native HTML5 `required` attribute, so the browser blocks the form
-    // submit BEFORE React's `handleSubmit` runs when title is empty.
-    // That means: no POST /api/risks fires, the page stays on
-    // /risks/new, and the user's other input is preserved. (The
-    // React-level `risks-create-title-error` testid only renders when
-    // native validation is bypassed — it is the belt to native
-    // validation's suspenders; this spec asserts the gate that actually
-    // fires first.) If a POST DID fire on an empty title, that would be
-    // the bug this spec guards against.
+    // #2089: the form is noValidate, so the browser shows no native
+    // bubble; validateRiskForm renders `risks-create-title-error` inline
+    // beside the field, linked by aria-describedby. No POST /api/risks
+    // fires, the page stays on /risks/new, and the user's other input is
+    // preserved. If a POST DID fire on an empty title, that would be the
+    // bug this spec guards against.
     let postFired = false;
     await page.route("**/api/risks", async (route, req) => {
       if (req.method() === "POST") {
@@ -295,13 +283,22 @@ test.describe("/risks/new risk-create form", () => {
     await page.getByTestId("risks-create-treatment").selectOption("accept");
     await page.getByTestId("risks-create-submit").click();
 
-    // The title input is flagged invalid by native validation; the form
-    // did not submit. Assert the form did not navigate and no POST went
-    // out. The title input reports the native invalid state.
-    const titleInvalid = await page
-      .getByTestId("risks-create-title")
-      .evaluate((el) => (el as HTMLInputElement).validity.valueMissing);
-    expect(titleInvalid).toBe(true);
+    // The inline error renders beside the title and is wired to it.
+    const titleError = page.getByTestId("risks-create-title-error");
+    await expect(titleError).toHaveText(/required/i);
+    const title = page.getByTestId("risks-create-title");
+    await expect(title).toHaveAttribute("aria-invalid", "true");
+    await expect(title).toHaveAttribute(
+      "aria-describedby",
+      (await titleError.getAttribute("id"))!,
+    );
+    // No native bubble: the form opts out of constraint validation, so
+    // the browser never blocked the submit itself.
+    expect(
+      await page
+        .getByTestId("risks-create-form")
+        .evaluate((f) => (f as HTMLFormElement).noValidate),
+    ).toBe(true);
 
     // Form state preserved (owner not cleared) — honest UX.
     await expect(page.getByTestId("risks-create-treatment-owner")).toHaveValue(
