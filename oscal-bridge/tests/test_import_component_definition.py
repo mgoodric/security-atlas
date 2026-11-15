@@ -53,14 +53,14 @@ def test_import_component_definition_parses_components_and_claims():
     assert titles == {"Acme Identity Service", "Acme Audit Logger"}
     # Three vendor claims across the two components.
     all_control_ids = {cl.control_id for comp in result.components for cl in comp.claims}
-    assert all_control_ids == {"IAC-06", "ac-2", "au-2"}
+    assert all_control_ids == {"IAC-37", "ac-2", "au-2"}
     # The vendor's implementation narrative is flattened (description +
     # statement prose).
     by_id = {cl.control_id: cl for comp in result.components for cl in comp.claims}
-    assert "phishing-resistant mfa" in by_id["IAC-06"].statement.lower()
-    assert "fido2/webauthn" in by_id["IAC-06"].statement.lower()
+    assert "phishing-resistant mfa" in by_id["IAC-37"].statement.lower()
+    assert "fido2/webauthn" in by_id["IAC-37"].statement.lower()
     # The requirement uuid is echoed for provenance.
-    assert by_id["IAC-06"].requirement_uuid == "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+    assert by_id["IAC-37"].requirement_uuid == "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
 
 def test_import_component_definition_external_href_is_never_fetched(monkeypatch):
@@ -83,7 +83,7 @@ def test_import_component_definition_external_href_is_never_fetched(monkeypatch)
     assert result.valid, result.errors
     claims = [cl for comp in result.components for cl in comp.claims]
     assert len(claims) == 1
-    assert claims[0].control_id == "IAC-06"
+    assert claims[0].control_id == "IAC-37"
     # No external content leaked into the statement (only in-document prose).
     assert "attacker.example.com" not in claims[0].statement
     assert "implement mfa" in claims[0].statement.lower()
@@ -173,7 +173,7 @@ def test_grpc_import_component_definition_valid(_bridge_channel):
     titles = {c.title for c in resp.components}
     assert titles == {"Acme Identity Service", "Acme Audit Logger"}
     control_ids = {cl.control_id for comp in resp.components for cl in comp.claims}
-    assert control_ids == {"IAC-06", "ac-2", "au-2"}
+    assert control_ids == {"IAC-37", "ac-2", "au-2"}
 
 
 def test_grpc_import_component_definition_malformed_rejected(_bridge_channel):

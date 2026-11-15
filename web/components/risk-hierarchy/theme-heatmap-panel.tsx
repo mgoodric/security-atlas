@@ -202,7 +202,10 @@ export function ThemeHeatmapPanel({
             detail="The themes-by-org_units count + severity aggregation is a follow-up backend slice. The axes below are real (org_units + theme vocabulary); cells render data-free until the endpoint ships."
             testid="theme-heatmap-missing"
           />
-          <div className="mt-4 overflow-x-auto">
+          {/* #2080: `relative` makes this scroll container the containing
+              block of the cells' absolutely-positioned `sr-only` labels;
+              without it they escape the clip and widen the page. */}
+          <div className="relative mt-4 overflow-x-auto">
             <div
               className="grid gap-px bg-border"
               style={{

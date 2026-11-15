@@ -76,7 +76,7 @@ func startBridge(t *testing.T) (string, func()) {
 
 // seedCurrentSCFAnchor seeds a minimal 'scf'-slug framework with a CURRENT
 // version carrying one anchor whose scf_id matches a control id in the
-// valid fixture ("IAC-06"). This proves the deterministic requirement ->
+// valid fixture ("IAC-37"). This proves the deterministic requirement ->
 // SCF-anchor mapping (D1) without depending on a full SCF catalog import.
 // scf_anchors is global (no tenant) — seeded once, idempotently.
 func seedCurrentSCFAnchor(t *testing.T, admin *pgxpool.Pool, scfID string) {
@@ -131,7 +131,7 @@ func TestImport_ValidCatalogEndToEnd(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
 	tenant := freshTenant(t, admin)
-	seedCurrentSCFAnchor(t, admin, "IAC-06")
+	seedCurrentSCFAnchor(t, admin, "IAC-37")
 
 	addr, stop := startBridge(t)
 	defer stop()
@@ -154,9 +154,9 @@ func TestImport_ValidCatalogEndToEnd(t *testing.T) {
 	if report.ControlCount != 3 {
 		t.Errorf("ControlCount = %d, want 3", report.ControlCount)
 	}
-	// IAC-06 deterministically matched the seeded SCF anchor (D1).
+	// IAC-37 deterministically matched the seeded SCF anchor (D1).
 	if report.MappedCount != 1 {
-		t.Errorf("MappedCount = %d, want 1 (IAC-06 -> SCF anchor)", report.MappedCount)
+		t.Errorf("MappedCount = %d, want 1 (IAC-37 -> SCF anchor)", report.MappedCount)
 	}
 	if report.OSCALVersion == "" {
 		t.Error("OSCALVersion must be echoed from the validated document")
@@ -184,7 +184,7 @@ func TestImport_ValidCatalogEndToEnd(t *testing.T) {
 		t.Errorf("source_sha256 = %q (report %q)", sha, report.SourceSha256)
 	}
 
-	// IAC-06 control mapped to the SCF anchor; the other two are NULL.
+	// IAC-37 control mapped to the SCF anchor; the other two are NULL.
 	var mapped, total int
 	if err := admin.QueryRow(ctx,
 		`SELECT count(*) FILTER (WHERE scf_anchor_id IS NOT NULL), count(*)
@@ -198,12 +198,12 @@ func TestImport_ValidCatalogEndToEnd(t *testing.T) {
 	var anchorID *string
 	if err := admin.QueryRow(ctx,
 		`SELECT scf_anchor_id FROM imported_catalog_controls
-		 WHERE imported_catalog_id = $1 AND source_control_id = 'IAC-06'`,
+		 WHERE imported_catalog_id = $1 AND source_control_id = 'IAC-37'`,
 		report.CatalogID).Scan(&anchorID); err != nil {
-		t.Fatalf("read IAC-06 mapping: %v", err)
+		t.Fatalf("read IAC-37 mapping: %v", err)
 	}
-	if anchorID == nil || *anchorID != "IAC-06" {
-		t.Errorf("IAC-06 scf_anchor_id = %v, want IAC-06 (requirement -> SCF anchor)", anchorID)
+	if anchorID == nil || *anchorID != "IAC-37" {
+		t.Errorf("IAC-37 scf_anchor_id = %v, want IAC-37 (requirement -> SCF anchor)", anchorID)
 	}
 
 	// AC-7: a success audit row exists.

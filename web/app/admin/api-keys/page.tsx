@@ -46,6 +46,7 @@ import {
   AdminCredentialListResponse,
   AdminCredentialRotateResponse,
 } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
 
 async function fetchCreds(): Promise<AdminCredential[]> {
   const res = await fetch(`/api/admin/credentials`);
@@ -143,16 +144,16 @@ export default function APIKeysPage() {
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">API keys</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="API keys"
+      subtitle={
+        <>
           Issue, rotate, and revoke bearer credentials for connectors and the
           CLI. The bearer plaintext is returned exactly once at issue and
           rotate; this UI shows it and discards it.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       <FreshSecretCallout
         value={freshSecret}
         onDismiss={() => setFreshSecret({ kind: "none" })}
@@ -261,7 +262,7 @@ export default function APIKeysPage() {
           submitting={revokeMut.isPending}
         />
       ) : null}
-    </div>
+    </PageShell>
   );
 }
 

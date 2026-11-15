@@ -31,6 +31,7 @@ import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -112,23 +113,22 @@ export default function VendorDetailPage({
 
   if (isLoading) {
     return (
-      <div className="space-y-6" data-testid="vendor-detail-loading">
+      <PageShell title="Vendor" data-testid="vendor-detail-loading">
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (error && !(error instanceof APIError && error.status === 401)) {
     return (
-      <div className="space-y-6">
-        <BackLink />
+      <PageShell title="Vendor" actions={<BackLink />}>
         <Alert variant="destructive" data-testid="vendor-detail-error">
           <AlertTitle>Could not load vendor</AlertTitle>
           <AlertDescription>{(error as Error).message}</AlertDescription>
         </Alert>
-      </div>
+      </PageShell>
     );
   }
 
@@ -141,15 +141,11 @@ export default function VendorDetailPage({
   const mailto = ownerMailto(vendor.owner_user);
 
   return (
-    <div className="space-y-6" data-testid="vendor-detail">
-      <BackLink />
-
-      {/* ============ HEADER ============ */}
-      <header
-        className="flex flex-wrap items-start justify-between gap-4"
-        data-testid="vendor-detail-header"
-      >
-        <div className="space-y-2">
+    <PageShell
+      data-testid="vendor-detail"
+      title={<span data-testid="vendor-detail-name">{vendor.name}</span>}
+      subtitle={
+        <div className="mt-2 space-y-2" data-testid="vendor-detail-header">
           <div className="flex flex-wrap items-center gap-2">
             <CriticalityBadge value={vendor.criticality} />
             {vendor.overdue ? (
@@ -166,12 +162,6 @@ export default function VendorDetailPage({
               </Badge>
             )}
           </div>
-          <h1
-            className="text-2xl font-semibold tracking-tight"
-            data-testid="vendor-detail-name"
-          >
-            {vendor.name}
-          </h1>
           {vendor.domain ? (
             <p
               className="text-sm text-muted-foreground"
@@ -181,7 +171,10 @@ export default function VendorDetailPage({
             </p>
           ) : null}
         </div>
-        <div className="flex items-center gap-2">
+      }
+      actions={
+        <>
+          <BackLink />
           <Link
             href={`/vendors/${id}/reviews/new`}
             className={buttonVariants({ variant: "secondary" })}
@@ -196,9 +189,9 @@ export default function VendorDetailPage({
           >
             Edit
           </Link>
-        </div>
-      </header>
-
+        </>
+      }
+    >
       {/* ============ SUMMARY ============ */}
       <Card data-testid="vendor-detail-summary-card">
         <CardHeader className="border-b">
@@ -363,7 +356,7 @@ export default function VendorDetailPage({
           )}
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }
 

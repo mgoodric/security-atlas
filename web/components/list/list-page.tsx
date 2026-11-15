@@ -7,16 +7,15 @@
 // (098/099/100/101/102) so /controls, /evidence, /risks, /policies,
 // /audits share the same visual rhythm.
 //
-// Layout:
-//   <header>: title (h1) + subtitle (p) on the left; actions slot on
-//             the right.
-//   <main>:   filter row (slot) + content (slot).
+// #2080 — the header and width now come from `<PageShell width="full">`;
+// this component adds only the filter row and the content slot.
 //
 // The page wires the actual data fetching, filter state, and table
 // rendering. This shell only does layout.
 
 import type { ReactNode } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 export type ListPageProps = {
   title: string;
   subtitle?: ReactNode;
@@ -49,23 +48,19 @@ export function ListPage({
   children,
 }: ListPageProps) {
   return (
-    <div data-testid="list-page" className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-baseline gap-3 flex-wrap">
-            <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-            {titleAdornment}
-          </div>
-          {subtitle ? (
-            <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>
-          ) : null}
-        </div>
-        {actions ? (
-          <div className="flex items-center gap-2">{actions}</div>
-        ) : null}
-      </div>
+    <PageShell
+      data-testid="list-page"
+      width="full"
+      title={title}
+      subtitle={subtitle}
+      titleAdornment={titleAdornment}
+      actions={actions}
+      bodyClassName="space-y-4"
+    >
       {filterRow ? <div className="mb-1">{filterRow}</div> : null}
-      <div data-testid="list-page-content">{children}</div>
-    </div>
+      <div data-testid="list-page-content" className="min-w-0">
+        {children}
+      </div>
+    </PageShell>
   );
 }

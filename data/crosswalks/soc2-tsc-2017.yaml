@@ -323,17 +323,17 @@ mappings:
     strength: 0.9
     rationale: "IAC-01 (I&A Policy) fully covers logical access security software/infrastructure."
   - tsc_code: CC6.2
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: equal
     strength: 1.0
-    rationale: "User Provisioning & Lifecycle is the direct STRM equivalent."
+    rationale: "User Provisioning & De-Provisioning is the direct STRM equivalent."
   - tsc_code: CC6.3
-    scf_anchor: IAC-07
+    scf_anchor: IAC-04
     relationship_type: equal
     strength: 0.9
     rationale: "Authorize/modify/remove access is the user lifecycle."
   - tsc_code: CC6.3
-    scf_anchor: IAC-15
+    scf_anchor: IAC-12
     relationship_type: intersects_with
     strength: 0.7
     rationale: "Account Review enforces the 'remove access' half of CC6.3."
@@ -353,7 +353,7 @@ mappings:
     strength: 0.8
     rationale: "Boundary Protection fully covers external-threat logical access measures."
   - tsc_code: CC6.6
-    scf_anchor: IAC-06
+    scf_anchor: IAC-37
     relationship_type: intersects_with
     strength: 0.7
     rationale: "MFA is the canonical external-threat authentication control."

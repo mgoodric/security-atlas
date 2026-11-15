@@ -38,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { PageShell } from "@/components/shell/page-shell";
 
 const SOURCE_TABLES: Array<{
   table: string;
@@ -86,15 +87,15 @@ export default function AuditLogPage() {
   const [eventFilter, setEventFilter] = useState("");
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Audit log</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Audit log"
+      subtitle={
+        <>
           A single paginated view across every audit-log surface. Filter by
           actor or event type; each row links to the relevant entity.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       <Alert>
         <AlertTitle>Unified read endpoint not yet shipped</AlertTitle>
         <AlertDescription>
@@ -200,6 +201,6 @@ export default function AuditLogPage() {
           </pre>
         </CardContent>
       </Card>
-    </div>
+    </PageShell>
   );
 }

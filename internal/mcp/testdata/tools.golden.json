@@ -31,7 +31,7 @@
         "additionalProperties": false,
         "properties": {
           "anchor_id": {
-            "description": "The control identifier. Accepts either the tenant control UUID OR the SCF anchor short code (e.g., \"IAC-06\"). Required.",
+            "description": "The control identifier. Accepts either the tenant control UUID OR the SCF anchor short code (e.g., \"IAC-37\"). Required.",
             "type": "string"
           }
         },

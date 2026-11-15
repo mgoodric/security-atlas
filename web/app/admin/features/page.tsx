@@ -28,6 +28,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FeatureFlag, FeatureFlagListResponse } from "@/lib/api/admin";
+import { PageShell } from "@/components/shell/page-shell";
 
 async function fetchFlags(): Promise<FeatureFlag[]> {
   const res = await fetch(`/api/admin/features`);
@@ -73,16 +74,16 @@ export default function FeaturesPage() {
   const grouped = groupByCategory(list.data ?? []);
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Features</h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Features"
+      subtitle={
+        <>
           Per-tenant feature flags. Disabling a gated module hides its nav entry
           and makes its routes unreachable; data is preserved and you can
           re-enable at any time.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       {list.isLoading ? <ListSkeleton /> : null}
       {list.error ? (
         <Alert variant="destructive">
@@ -129,7 +130,7 @@ export default function FeaturesPage() {
           submitting={mut.isPending}
         />
       ) : null}
-    </div>
+    </PageShell>
   );
 }
 

@@ -79,7 +79,7 @@ import {
 } from "./admin-prefetch";
 
 export const metadata: Metadata = {
-  title: "Settings · security-atlas",
+  title: "Settings",
 };
 
 /**

@@ -15,11 +15,15 @@
 // The only URL-supplied value is the controlId, which is just the
 // control the auditor wants to look at WITHIN their assigned period.
 
+import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { AuditShell } from "@/components/audit/audit-shell";
+import { PageShell } from "@/components/shell/page-shell";
 import { resolveAuditPeriod } from "@/lib/api/audit-server";
+
+export const metadata: Metadata = { title: "Audit workspace" };
 
 export default async function ControlWorkspacePage({
   params,
@@ -35,28 +39,32 @@ export default async function ControlWorkspacePage({
 
   if (resolution.kind === "no-period") {
     return (
-      <div className="mx-auto max-w-xl py-12">
-        <Alert>
-          <AlertTitle>No audit period assigned</AlertTitle>
-          <AlertDescription>
-            You are signed in but not assigned to any audit period, so this
-            control cannot be opened for testing.
-          </AlertDescription>
-        </Alert>
+      <div className="overflow-y-auto p-4 sm:p-6">
+        <PageShell title="Audit workspace" width="reading">
+          <Alert>
+            <AlertTitle>No audit period assigned</AlertTitle>
+            <AlertDescription>
+              You are signed in but not assigned to any audit period, so this
+              control cannot be opened for testing.
+            </AlertDescription>
+          </Alert>
+        </PageShell>
       </div>
     );
   }
 
   if (resolution.kind === "error") {
     return (
-      <div className="mx-auto max-w-xl py-12">
-        <Alert variant="destructive">
-          <AlertTitle>Could not load the audit workspace</AlertTitle>
-          <AlertDescription>
-            The platform returned an unexpected status ({resolution.status})
-            resolving your assigned audit period.
-          </AlertDescription>
-        </Alert>
+      <div className="overflow-y-auto p-4 sm:p-6">
+        <PageShell title="Audit workspace" width="reading">
+          <Alert variant="destructive">
+            <AlertTitle>Could not load the audit workspace</AlertTitle>
+            <AlertDescription>
+              The platform returned an unexpected status ({resolution.status})
+              resolving your assigned audit period.
+            </AlertDescription>
+          </Alert>
+        </PageShell>
       </div>
     );
   }
