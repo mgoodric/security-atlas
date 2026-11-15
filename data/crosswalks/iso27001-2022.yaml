@@ -554,10 +554,10 @@ mappings:
     strength: 0.6
     rationale: "Independent verification of compliance is performed by the Internal Audit Function (CPL-03)."
   - requirement_code: A.5.37
-    scf_anchor: CFG-02
+    scf_anchor: CFG-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Documented, repeatable operating procedures align with Secure Baseline Configurations (CFG-02) as the documented-standard-state anchor."
+    rationale: "Documented, repeatable operating procedures align with Secure Baseline Configurations (CFG-04) as the documented-standard-state anchor."
   # --- A.6 People ---
   - requirement_code: A.6.1
     scf_anchor: HRS-01
@@ -767,7 +767,7 @@ mappings:
     strength: 0.6
     rationale: "A.8.8 'the organization's exposure is evaluated' is the threat-exposure facet of vulnerability management; Indicators of Exposure (slice 641 THR-02) covers the exposure-evaluation concept directly, a subset of the broader A.8.8 obtain/evaluate/remediate cycle (VPM-01 carries the equal). Added by slice 646."
   - requirement_code: A.8.9
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: equal
     strength: 0.8
     rationale: "Configuration management maps to SCF Configuration Change Control — shared with SOC 2 CC8.1."
@@ -847,15 +847,15 @@ mappings:
     strength: 0.8
     rationale: "Restricting privileged utility programs maps to Privileged Account Management (IAC-10)."
   - requirement_code: A.8.19
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: equal
     strength: 0.7
-    rationale: "Controlled software installation on operational systems is a Configuration Change Control (CFG-04) activity."
+    rationale: "Controlled software installation on operational systems is a Configuration Change Control (CHG-03) activity."
   - requirement_code: A.8.19
-    scf_anchor: CFG-02
+    scf_anchor: CFG-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Approved-software baselines are governed by Secure Baseline Configurations (CFG-02)."
+    rationale: "Approved-software baselines are governed by Secure Baseline Configurations (CFG-04)."
   - requirement_code: A.8.20
     scf_anchor: NET-04
     relationship_type: equal
@@ -947,25 +947,25 @@ mappings:
     strength: 0.6
     rationale: "Outsourced work must still meet Secure Software Development (SEA-05) standards."
   - requirement_code: A.8.31
-    scf_anchor: CFG-02
+    scf_anchor: CFG-04
     relationship_type: intersects_with
     strength: 0.6
-    rationale: "Environment separation is a baseline-configuration/segregation control (CFG-02)."
+    rationale: "Environment separation is a baseline-configuration/segregation control (CFG-04)."
   - requirement_code: A.8.31
     scf_anchor: CHG-02
     relationship_type: subset_of
     strength: 0.6
-    rationale: "Controlled promotion between separated environments is part of the Change Control Process (CHG-02)."
+    rationale: "Controlled promotion between separated environments is part of the Change Management Program (CHG-02)."
   - requirement_code: A.8.32
     scf_anchor: CHG-02
     relationship_type: equal
     strength: 0.9
-    rationale: "System and facility changes under formal procedure map to the Change Control Process (CHG-02)."
+    rationale: "System and facility changes under formal procedure map to the Change Management Program (CHG-02)."
   - requirement_code: A.8.32
-    scf_anchor: CFG-04
+    scf_anchor: CHG-03
     relationship_type: subset_of
     strength: 0.7
-    rationale: "Configuration-level change control is the Configuration Change Control (CFG-04) facet."
+    rationale: "Configuration-level change control is the Configuration Change Control (CHG-03) facet."
   - requirement_code: A.8.33
     scf_anchor: DCH-01
     relationship_type: intersects_with
