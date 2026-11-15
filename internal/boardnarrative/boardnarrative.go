@@ -79,7 +79,7 @@ const (
 // llm.GenerateRequest + the persisted record + the ai_generations audit row for
 // forensic reconstruction (slice-182 schema contract). Bump on any material
 // change to the system prompt, the rollup shape, or the section template.
-const promptVersion = "boardnarrative-coverage-v0"
+const promptVersion = "boardnarrative-coverage-v1"
 
 // MaxSectionTokens bounds the generation. One coverage-summary section is a
 // few short numbered paragraphs — well under internal/llm's MaxTokenBudget

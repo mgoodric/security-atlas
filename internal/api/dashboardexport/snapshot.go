@@ -132,12 +132,18 @@ type FreshnessClassBucket struct {
 }
 
 // DriftPanel mirrors `/v1/controls/drift?since=7d`'s payload.
+//
+// Delta is the net change in passing controls (latest snapshot minus
+// earliest), not started-passing minus flipped-out: a control can fail and
+// recover inside the window. Read it beside both lists.
 type DriftPanel struct {
-	Since           string     `json:"since"`
-	Through         string     `json:"through"`
-	Delta           int        `json:"delta"`
-	FlippedOutCount int        `json:"flipped_out_count"`
-	FlippedOut      []DriftRow `json:"flipped_out"`
+	Since               string         `json:"since"`
+	Through             string         `json:"through"`
+	Delta               int            `json:"delta"`
+	FlippedOutCount     int            `json:"flipped_out_count"`
+	FlippedOut          []DriftRow     `json:"flipped_out"`
+	StartedPassingCount int            `json:"started_passing_count"`
+	StartedPassing      []DriftGainRow `json:"started_passing"`
 }
 
 // DriftRow is one flipped-out-of-passing control.
@@ -145,6 +151,11 @@ type DriftRow struct {
 	ControlID     string `json:"control_id"`
 	LastPassing   string `json:"last_passing"`
 	CurrentResult string `json:"current_result"`
+}
+
+// DriftGainRow is one control that started passing in the window (#2195).
+type DriftGainRow struct {
+	ControlID string `json:"control_id"`
 }
 
 // UpcomingPanelRow is one compliance-calendar event in the export's
@@ -312,12 +323,18 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 			CurrentResult: fr.CurrentResult,
 		}
 	}
+	gains := make([]DriftGainRow, len(driftReport.StartedPassing))
+	for i, g := range driftReport.StartedPassing {
+		gains[i] = DriftGainRow{ControlID: g.ControlID.String()}
+	}
 	out.Panels.Drift = DriftPanel{
-		Since:           driftReport.SinceDate.UTC().Format("2006-01-02"),
-		Through:         driftReport.ThroughDate.UTC().Format("2006-01-02"),
-		Delta:           driftReport.Delta,
-		FlippedOutCount: len(flips),
-		FlippedOut:      flips,
+		Since:               driftReport.SinceDate.UTC().Format("2006-01-02"),
+		Through:             driftReport.ThroughDate.UTC().Format("2006-01-02"),
+		Delta:               driftReport.Delta,
+		FlippedOutCount:     len(flips),
+		FlippedOut:          flips,
+		StartedPassingCount: len(gains),
+		StartedPassing:      gains,
 	}
 
 	// 5. Upcoming — the calendar's next 14 days, the window the
