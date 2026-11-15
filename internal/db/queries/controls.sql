@@ -370,7 +370,23 @@ SELECT
     -- '' when SCF lists no current anchor with this legacy code.
     COALESCE((SELECT s.scf_id FROM scf_anchors s
       WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
-      ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id
+      ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id,
+    -- #1775 remap queue: the current release's id, the legacy ID of the
+    -- current anchor with this code ('' when it lists none, or the code is
+    -- gone), every current anchor that SCF lists the legacy code as the
+    -- legacy ID of (codes and titles in the same order), and whether the
+    -- current release carries any legacy IDs at all.
+    cfv.id                AS current_framework_version_id,
+    COALESCE(ca.legacy_scf_id, '')::text AS current_anchor_legacy_scf_id,
+    ARRAY(SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_scf_ids,
+    ARRAY(SELECT s.title FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_titles,
+    EXISTS (SELECT 1 FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id
+        AND COALESCE(btrim(s.legacy_scf_id), '') <> '') AS current_release_has_legacy_ids
 FROM controls c
 JOIN scf_anchors la            ON la.id = c.scf_anchor_id
 JOIN framework_versions lfv    ON lfv.id = la.framework_version_id
@@ -491,3 +507,34 @@ SELECT count(*)::bigint AS total
 FROM controls
 WHERE tenant_id = sqlc.arg(tenant_id) AND superseded_by IS NULL
   AND (sqlc.narg('anchor_fit')::text IS NULL OR anchor_fit = sqlc.narg('anchor_fit')::text);
+
+-- name: InsertSCFRemapProposal :execrows
+-- Issue #1775: queue one remap proposal for a control on a legacy SCF
+-- anchor. Written by the migrate role during `catalog import-scf`; a re-run
+-- of the same import leaves the existing proposal alone.
+INSERT INTO scf_remap_proposals (
+    tenant_id, control_id, bundle_id, legacy_anchor_id, legacy_scf_id,
+    legacy_release, target_framework_version_id, target_release, class,
+    status, successor_scf_ids
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(control_id), sqlc.arg(bundle_id),
+    sqlc.arg(legacy_anchor_id), sqlc.arg(legacy_scf_id),
+    sqlc.arg(legacy_release), sqlc.arg(target_framework_version_id),
+    sqlc.arg(target_release), sqlc.arg(class), sqlc.arg(status),
+    sqlc.arg(successor_scf_ids)::text[]
+)
+ON CONFLICT (control_id, target_framework_version_id) DO NOTHING;
+
+-- name: ListSCFRemapProposals :many
+-- Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap
+-- proposals, newest target release first, optionally filtered by class and
+-- status. RLS (tenant_read) and the explicit tenant id both bind the read.
+SELECT p.id, p.control_id, p.bundle_id, c.title AS control_title,
+       p.legacy_scf_id, p.legacy_release, p.target_release, p.class,
+       p.status, p.successor_scf_ids, p.created_at
+FROM scf_remap_proposals p
+JOIN controls c ON c.id = p.control_id
+WHERE p.tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.narg(class)::text IS NULL OR p.class = sqlc.narg(class)::text)
+  AND (sqlc.narg(status)::text IS NULL OR p.status = sqlc.narg(status)::text)
+ORDER BY p.created_at DESC, p.bundle_id, p.id;

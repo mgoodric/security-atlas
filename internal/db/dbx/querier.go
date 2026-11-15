@@ -1422,6 +1422,10 @@ type Querier interface {
 	// Insert a fresh anchor (use after GetSCFAnchorByVersionAndSCFID returned
 	// ErrNoRows). Uniqueness is enforced by (framework_version_id, scf_id).
 	InsertSCFAnchor(ctx context.Context, arg InsertSCFAnchorParams) (ScfAnchor, error)
+	// Issue #1775: queue one remap proposal for a control on a legacy SCF
+	// anchor. Written by the migrate role during `catalog import-scf`; a re-run
+	// of the same import leaves the existing proposal alone.
+	InsertSCFRemapProposal(ctx context.Context, arg InsertSCFRemapProposalParams) (int64, error)
 	// Append-only audit row for a SCIM provision/deprovision mutation (AC-5).
 	InsertSCIMAuditLog(ctx context.Context, arg InsertSCIMAuditLogParams) error
 	// Slice 508: persist a new SCIM provisioning credential. token_hash is
@@ -2822,6 +2826,10 @@ type Querier interface {
 	// (hand-maintained to keep the rest of the dbx tree HEAD-blessed per the
 	// regen-on-rebase note in MEMORY.md). Keep the two in sync.
 	ListSCFAnchorsLatestWithState(ctx context.Context, arg ListSCFAnchorsLatestWithStateParams) ([]ListSCFAnchorsLatestWithStateRow, error)
+	// Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap
+	// proposals, newest target release first, optionally filtered by class and
+	// status. RLS (tenant_read) and the explicit tenant id both bind the read.
+	ListSCFRemapProposals(ctx context.Context, arg ListSCFRemapProposalsParams) ([]ListSCFRemapProposalsRow, error)
 	// Read-only: SCIM audit rows for a tenant, newest first. Backs integration
 	// assertions (AC-5) and any future admin surface.
 	ListSCIMAuditLogByTenant(ctx context.Context, arg ListSCIMAuditLogByTenantParams) ([]ScimAuditLog, error)

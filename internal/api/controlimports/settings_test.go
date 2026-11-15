@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
 	"github.com/mgoodric/security-atlas/internal/api/credstore"
@@ -22,7 +23,7 @@ type memSettings struct {
 
 func (m *memSettings) GetSettings(context.Context) (controlimport.Settings, error) { return m.s, nil }
 
-func (m *memSettings) SetSettings(_ context.Context, in controlimport.Settings, by string) (controlimport.Settings, error) {
+func (m *memSettings) SetSettings(_ context.Context, in controlimport.Settings, by string, _ uuid.UUID) (controlimport.Settings, error) {
 	m.s, m.by = in, by
 	return in, nil
 }
