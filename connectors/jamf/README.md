@@ -21,7 +21,7 @@ follow-on: the `APPLICATIONS` section excluded from the posture summary is
 collected here as a separate, scoped kind for patch-/vulnerability-management.
 The config-profile kind (slice 556) reports WHICH configuration / compliance
 profiles are deployed + their compliance-relevant settings, as evidence for
-configuration-management controls (SCF `CFG-02` / `CFG-04`) — with a structural
+configuration-management controls (SCF `CFG-04` / `CHG-03`) — with a structural
 secret-redaction boundary that keeps Wi-Fi PSKs, VPN shared secrets, certificate
 private keys, SCEP challenges, and raw payload blobs out of every record.
 
@@ -131,7 +131,7 @@ only the page loop was added.
 The `run-config-profiles` subcommand reads configuration-profile DETAIL (the
 `CONFIGURATION_PROFILES` inventory section, plus the posture sections
 `OPERATING_SYSTEM` / `DISK_ENCRYPTION` / `SECURITY`) for configuration-management
-evidence (SCF `CFG-02` / `CFG-04`). Each literal profile carries the **name** +
+evidence (SCF `CFG-04` / `CHG-03`). Each literal profile carries the **name** +
 **identifier** + **type** + assigned **scope** + **uuid** + **last-modified**;
 per-setting enrichment (slice 595) adds a synthetic **Enforced Configuration
 Summary** profile whose `settings` are the device's effective enforced hardening
@@ -160,14 +160,14 @@ posture; the platform evaluator owns the final pass/fail per `(control, scope)`.
 The bundled schema carries default SCF-anchor hints, flagged for maintainer
 accuracy recheck:
 
-- `endpoint.device_posture.v1` → `END-04` (Endpoint Security), `CFG-02` (Secure
+- `endpoint.device_posture.v1` → `END-04` (Endpoint Security), `CFG-04` (Secure
   Baseline Configurations) — consistent with the existing
   `osquery.host_posture.v1` anchors.
 - `endpoint.software_inventory.v1` → `VPM-04` (Vulnerability Remediation
   Process), `AST-04` (Asset Inventories) — a deliberately different anchor set
   (the kind answers a different control question than posture).
-- `endpoint.config_profile.v1` → `CFG-02` (Secure Baseline Configurations),
-  `CFG-04` (Configuration Change Control) — configuration-management evidence at
+- `endpoint.config_profile.v1` → `CFG-04` (Secure Baseline Configurations),
+  `CHG-03` (Configuration Change Control) — configuration-management evidence at
   a finer grain than the posture verdict.
 
 ## Follow-ons (out of v0 scope)

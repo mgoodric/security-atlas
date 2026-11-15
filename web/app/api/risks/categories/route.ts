@@ -11,7 +11,26 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
+import { forwardJSON, noStore } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+
+// #1818 — POST adds a category (the Taxonomy settings page). The body is
+// forwarded as-is; upstream validates it and refuses a caller without
+// risk-taxonomy rights (403).
+export async function POST(req: Request): Promise<Response> {
+  let body: unknown;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
+  }
+  return noStore(
+    await forwardJSON("/v1/risks/categories", {
+      method: "POST",
+      jsonBody: body,
+    }),
+  );
+}
 
 export async function GET(req: Request): Promise<Response> {
   const jar = await cookies();

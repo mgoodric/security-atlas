@@ -345,8 +345,7 @@ export default function UsersPage() {
           <CardDescription>
             {crossTenant
               ? "One row per user-in-tenant membership across the platform."
-              : "Users in your tenant, with their roles."}{" "}
-            Bound to <code>GET /v1/admin/users</code> (slice 478).
+              : "Users in your tenant, with their roles."}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -470,9 +469,8 @@ export default function UsersPage() {
         <CardHeader>
           <CardTitle>Role-permission matrix</CardTitle>
           <CardDescription>
-            Five canonical RBAC roles per{" "}
-            <code>Plans/canvas/09-tech-stack.md</code> §9.5. Permissions noted
-            at the coarse level; fine cuts layer on via ABAC predicates.
+            What each of the five roles can do. Finer rules can narrow a role
+            further.
           </CardDescription>
         </CardHeader>
         <CardContent>

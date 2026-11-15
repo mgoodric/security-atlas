@@ -34,6 +34,10 @@ type themeWire struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Source      string `json:"source"` // "default" | "tenant"
+	// RiskCount and RuleCount are the theme's usage (#1818), so a settings
+	// page can disable delete on a theme still in use.
+	RiskCount int64 `json:"risk_count"`
+	RuleCount int64 `json:"rule_count"`
 }
 
 type assignReq struct {
@@ -53,7 +57,10 @@ func (h *Handler) ListVisible(w http.ResponseWriter, r *http.Request) {
 	}
 	out := make([]themeWire, len(rows))
 	for i, t := range rows {
-		out[i] = themeWire{Name: t.Name, Description: t.Description, Source: string(t.Source)}
+		out[i] = themeWire{
+			Name: t.Name, Description: t.Description, Source: string(t.Source),
+			RiskCount: t.RiskCount, RuleCount: t.RuleCount,
+		}
 	}
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"themes": out, "count": len(out)})
 }

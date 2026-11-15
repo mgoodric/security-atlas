@@ -9,10 +9,10 @@ metrics:
     category: posture
     name: Evidence freshness
     description: |
-      Fraction of (control, scope_cell) tuples whose latest evidence is
-      inside the control's freshness window (slice 016). The most
-      load-bearing leading indicator — when this dips the audit-readiness
-      lag follows in 30-60 days.
+      Share of controls, per scope, whose latest evidence is still
+      inside the control's freshness window. The strongest leading
+      indicator: when this dips, audit readiness follows within 30-60
+      days.
     unit: percent
     cadence: realtime
     compute_strategy: computed
@@ -29,8 +29,7 @@ metrics:
     category: posture
     name: Drift events (7d)
     description: |
-      Count of controls that flipped from passing to failing in the
-      last 7 days (slice 016 drift snapshots, day-over-day delta).
+      Controls that went from passing to failing in the last 7 days.
     unit: count
     cadence: daily
     compute_strategy: manual_input

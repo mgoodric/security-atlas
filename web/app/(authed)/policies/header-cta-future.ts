@@ -130,13 +130,11 @@ export const POLICIES_NEW_POLICY_FUTURE_TESTID = "policies-new-policy-future";
  *   * Future-tense framing — "ships with a future slice".
  *   * Names the capability ("policy-create form") rather than a
  *     specific tracking issue number.
- *   * Names the operator's next concrete action — drafting
- *     policies via the platform API (`POST /v1/policies`).
+ *   * Names the operator's next concrete action — asking an
+ *     administrator, who can add policies (#2082: no API paths in UI copy).
  *   * Sentence-shaped (capitalized, ends with a period).
  *   * The substring "policy-create form" is load-bearing — AC-4's
- *     Playwright spec asserts on it. The substring "POST /v1/
- *     policies" is load-bearing — vitest asserts the API endpoint
- *     is named so the disclosure is a signpost, not a dead end.
+ *     Playwright spec asserts on it.
  */
 export const POLICIES_NEW_POLICY_FUTURE_REASON =
-  "The in-app policy-create form is not available yet — until then, policies can be drafted via the platform API (POST /v1/policies).";
+  "The in-app policy-create form is not available yet. An administrator can add policies for you in the meantime.";
