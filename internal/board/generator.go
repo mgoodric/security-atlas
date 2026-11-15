@@ -122,12 +122,14 @@ func (g *Generator) assemble(ctx context.Context, periodEnd, generatedAt time.Ti
 	if err != nil {
 		return Brief{}, fmt.Errorf("board: drift report: %w", err)
 	}
+	startedPassing := len(report.StartedPassing)
 	driftSummary := DriftSummary{
-		WindowDays:      int(DriftWindow.Hours() / 24),
-		Since:           report.SinceDate.UTC().Format("2006-01-02"),
-		Through:         report.ThroughDate.UTC().Format("2006-01-02"),
-		Delta:           report.Delta,
-		FlippedOutCount: len(report.FlippedToOut),
+		WindowDays:          int(DriftWindow.Hours() / 24),
+		Since:               report.SinceDate.UTC().Format("2006-01-02"),
+		Through:             report.ThroughDate.UTC().Format("2006-01-02"),
+		Delta:               report.Delta,
+		FlippedOutCount:     len(report.FlippedToOut),
+		StartedPassingCount: &startedPassing,
 	}
 
 	// --- freshness: program coverage + freshness percentages ---

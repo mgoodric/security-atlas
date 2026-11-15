@@ -44,7 +44,7 @@ _Generated {{ .GeneratedAt }}. Pinned snapshot — posture as of the report date
 {{ end }}
 ## Control drift — last {{ .Drift.WindowDays }} days
 
-Over {{ .Drift.Since }} to {{ .Drift.Through }}, the program drift count is {{ signed .Drift.Delta }}{{ if gt .Drift.FlippedOutCount 0 }} — {{ .Drift.FlippedOutCount }} control(s) drifted out of passing{{ else }} — no controls drifted out of passing{{ end }}.
+Over {{ .Drift.Since }} to {{ .Drift.Through }}, the net change in passing controls is {{ signed .Drift.Delta }} — {{ .Drift.MovementClause }}.
 
 ## Top risks aging
 
