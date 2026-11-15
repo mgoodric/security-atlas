@@ -154,7 +154,7 @@ func TestStateMachine_Transitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	submitted, err := store.SubmitForReview(ctx, created.ID, "key_author")
+	submitted, err := store.SubmitForReview(ctx, created.ID, submitterPerson)
 	if err != nil {
 		t.Fatalf("SubmitForReview: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestPublish_FirstVersion(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate([]uuid.UUID{ctrl}, "key_author"))
-	if _, err := store.SubmitForReview(ctx, created.ID, "key_author"); err != nil {
+	if _, err := store.SubmitForReview(ctx, created.ID, submitterPerson); err != nil {
 		t.Fatalf("SubmitForReview: %v", err)
 	}
 	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
@@ -218,7 +218,7 @@ func TestPublish_OrphanRejected(t *testing.T) {
 
 	// Create orphan -> submit -> approve.
 	created, _ := store.Create(ctx, validCreate(nil, "key_author"))
-	if _, err := store.SubmitForReview(ctx, created.ID, "key_author"); err != nil {
+	if _, err := store.SubmitForReview(ctx, created.ID, submitterPerson); err != nil {
 		t.Fatalf("SubmitForReview: %v", err)
 	}
 	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
@@ -259,6 +259,11 @@ func TestApprove_RejectsFromDraft(t *testing.T) {
 // second person every approval needs.
 var approverPerson = policy.Approver{UserID: "6f1c2a7e-0000-4000-8000-00000000a001", CredentialID: "key_approver"}
 
+// submitterPerson is the person who submits in tests that are not about
+// who submitted. A "key_..." submitter would read as a pre-#1807 key
+// submitter that only its own key may be compared against (#2200).
+const submitterPerson = "6f1c2a7e-0000-4000-8000-00000000a004"
+
 func TestApprove_RefusesSubmitter(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
 	app := dbtest.NewAppPool(t)
@@ -297,7 +302,7 @@ func TestApprove_RefusesCredentialWithNoUser(t *testing.T) {
 	ctx := ctxFor(t, tenant)
 
 	created, _ := store.Create(ctx, validCreate([]uuid.UUID{ctrl}, "key_author"))
-	if _, err := store.SubmitForReview(ctx, created.ID, "key_author"); err != nil {
+	if _, err := store.SubmitForReview(ctx, created.ID, submitterPerson); err != nil {
 		t.Fatalf("SubmitForReview: %v", err)
 	}
 	_, err := store.Approve(ctx, created.ID, policy.Approver{CredentialID: "key_machine"})
@@ -340,6 +345,114 @@ func TestApprove_LegacySessionSubmitter(t *testing.T) {
 	}
 	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
 		t.Fatalf("a second person approving after re-submit: %v", err)
+	}
+}
+
+// A policy submitted before #1807 by a key bound to a user recorded the
+// key's id ("key_<id>"). The same key is still refused as the submitter,
+// whoever it now names; any other credential is refused with
+// ErrSubmitterUnknown, since it may be the key's owner through a JWT or
+// another key. Re-submitting records the person (#2200).
+func TestApprove_LegacyKeySubmitter(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctrl := seedControl(t, admin, tenant)
+	store := policy.NewStore(app)
+	ctx := ctxFor(t, tenant)
+
+	created, _ := store.Create(ctx, validCreate([]uuid.UUID{ctrl}, "key_author"))
+	if _, err := store.SubmitForReview(ctx, created.ID, "key_X"); err != nil {
+		t.Fatalf("SubmitForReview: %v", err)
+	}
+	other := "6f1c2a7e-0000-4000-8000-00000000a005"
+	if _, err := store.Approve(ctx, created.ID, policy.Approver{UserID: other, CredentialID: "key_X"}); !errors.Is(err, policy.ErrSelfApproval) {
+		t.Fatalf("approving with the submitting key: expected ErrSelfApproval, got %v", err)
+	}
+	owner := "6f1c2a7e-0000-4000-8000-00000000a006"
+	if _, err := store.Approve(ctx, created.ID, policy.Approver{UserID: owner, CredentialID: "jwt:owner-session"}); !errors.Is(err, policy.ErrSubmitterUnknown) {
+		t.Fatalf("approving a key-submitted policy through a JWT: expected ErrSubmitterUnknown, got %v", err)
+	}
+	resubmitted, err := store.SubmitForReview(ctx, created.ID, owner)
+	if err != nil {
+		t.Fatalf("re-submit: %v", err)
+	}
+	if resubmitted.SubmittedBy == nil || *resubmitted.SubmittedBy != owner {
+		t.Fatalf("re-submit recorded submitter %v, want %q", resubmitted.SubmittedBy, owner)
+	}
+	if _, err := store.Approve(ctx, created.ID, policy.Approver{UserID: owner, CredentialID: "jwt:owner-session"}); !errors.Is(err, policy.ErrSelfApproval) {
+		t.Fatalf("the re-submitter approving: expected ErrSelfApproval, got %v", err)
+	}
+	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
+		t.Fatalf("a second person approving after re-submit: %v", err)
+	}
+}
+
+// Submit, re-submit and approve each append a policy_audit_log row naming
+// the actor and the states before and after, in the transaction that
+// made the transition (#2200). A refused approval writes nothing.
+func TestTransitions_WriteAuditRows(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	app := dbtest.NewAppPool(t)
+	tenant := freshTenant(t, admin)
+	ctrl := seedControl(t, admin, tenant)
+	store := policy.NewStore(app)
+	ctx := ctxFor(t, tenant)
+
+	created, _ := store.Create(ctx, validCreate([]uuid.UUID{ctrl}, "key_author"))
+	if _, err := store.SubmitForReview(ctx, created.ID, "jwt:pre-1807-token"); err != nil {
+		t.Fatalf("SubmitForReview: %v", err)
+	}
+	if _, err := store.SubmitForReview(ctx, created.ID, submitterPerson); err != nil {
+		t.Fatalf("re-submit: %v", err)
+	}
+	if _, err := store.Approve(ctx, created.ID, policy.Approver{UserID: submitterPerson, CredentialID: "key_s"}); !errors.Is(err, policy.ErrSelfApproval) {
+		t.Fatalf("self-approval: expected ErrSelfApproval, got %v", err)
+	}
+	if _, err := store.Approve(ctx, created.ID, approverPerson); err != nil {
+		t.Fatalf("Approve: %v", err)
+	}
+
+	rows, err := admin.Query(context.Background(), `
+		SELECT action, actor, previous_state, new_state
+		FROM policy_audit_log
+		WHERE tenant_id = $1 AND policy_id = $2
+		ORDER BY created_at, id`, tenant, created.ID)
+	if err != nil {
+		t.Fatalf("query audit log: %v", err)
+	}
+	defer rows.Close()
+	type auditRow struct{ action, actor, prev, next string }
+	var got []auditRow
+	for rows.Next() {
+		var r auditRow
+		var prev, next *string
+		if err := rows.Scan(&r.action, &r.actor, &prev, &next); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		if prev != nil {
+			r.prev = *prev
+		}
+		if next != nil {
+			r.next = *next
+		}
+		got = append(got, r)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows: %v", err)
+	}
+	want := []auditRow{
+		{"submitted", "jwt:pre-1807-token", policy.StateDraft, policy.StateUnderReview},
+		{"resubmitted", submitterPerson, policy.StateUnderReview, policy.StateUnderReview},
+		{"approved", approverPerson.UserID, policy.StateUnderReview, policy.StateApproved},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("audit rows: got %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("audit row %d: got %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }
 

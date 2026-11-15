@@ -37,6 +37,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -91,7 +92,8 @@ var (
 	// bootstrap admin. Only people approve policies (#1807). HTTP 403.
 	ErrApproverNotPerson = errors.New("policy: only a person can approve a policy; approve with your own login or a key bound to your user, not an unbound API key, OAuth client or bootstrap credential")
 	// ErrSubmitterUnknown is returned when the policy was submitted
-	// before #1807 under a session id rather than a person, so no
+	// before #1807 under a session or credential id rather than a
+	// person (#2200), so no
 	// approver can be shown to differ from the submitter. HTTP 409.
 	ErrSubmitterUnknown = errors.New("policy: this policy was submitted before submitters were recorded by person, so a second approver cannot be verified; it must be re-submitted before it can be approved")
 	// ErrOrphanPublish is returned when publish is attempted on a policy
@@ -331,10 +333,27 @@ func (s *Store) List(ctx context.Context, filter ListFilter) ([]Policy, error) {
 	return out, err
 }
 
+// policy_audit_log actions for the review transitions (#2200). A
+// self-approval writes auditActionSelfApproved instead of
+// auditActionApproved, so each approval is one row.
+const (
+	auditActionSubmitted   = "submitted"
+	auditActionResubmitted = "resubmitted"
+	auditActionApproved    = "approved"
+)
+
+// legacyKeyPrefix marks a submitter recorded by credential id before
+// #1807, when a key bound to a user recorded its own id. It names a key,
+// not a person (#2200).
+const legacyKeyPrefix = "key_"
+
 // SubmitForReview transitions draft -> under_review. Operator action; no
 // role gate. It also re-submits an under_review policy whose submitter
-// was recorded before #1807 as a session id, so that approval, which
-// refuses such a row (ErrSubmitterUnknown), has a person to compare.
+// was recorded before #1807 as a session or credential id, so that
+// approval, which refuses such a row (ErrSubmitterUnknown), has a person
+// to compare; the re-submitter becomes the submitter of record. Either
+// way a policy_audit_log row naming the actor and the states is appended
+// in the same transaction.
 func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string) (Policy, error) {
 	if actor == "" {
 		return Policy{}, ErrCreatedByRequired
@@ -343,13 +362,47 @@ func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string)
 		expectedPrior: StateDraft,
 		newState:      StateUnderReview,
 		run: func(q *dbx.Queries, tenantID uuid.UUID) (dbx.Policy, error) {
-			return q.SubmitPolicyForReview(ctx, dbx.SubmitPolicyForReviewParams{
+			prior, err := q.GetPolicyByID(ctx, dbx.GetPolicyByIDParams{
+				TenantID: pgUUID(tenantID),
+				ID:       pgUUID(id),
+			})
+			if err != nil {
+				return dbx.Policy{}, err
+			}
+			row, err := q.SubmitPolicyForReview(ctx, dbx.SubmitPolicyForReviewParams{
 				TenantID:    pgUUID(tenantID),
 				ID:          pgUUID(id),
 				SubmittedBy: stringPtr(actor),
 			})
+			if err != nil {
+				return dbx.Policy{}, err
+			}
+			action := auditActionSubmitted
+			if prior.Status == StateUnderReview {
+				action = auditActionResubmitted
+			}
+			if err := insertTransitionAudit(ctx, q, tenantID, row, action, actor, prior.Status); err != nil {
+				return dbx.Policy{}, fmt.Errorf("submit: audit log: %w", err)
+			}
+			return row, nil
 		},
 	})
+}
+
+// insertTransitionAudit appends the policy_audit_log row for a status
+// transition of row, from previous to row's current status.
+func insertTransitionAudit(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, row dbx.Policy, action, actor, previous string) error {
+	_, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
+		TenantID:      pgUUID(tenantID),
+		PolicyID:      row.ID,
+		Action:        action,
+		Actor:         actor,
+		PolicyTitle:   &row.Title,
+		PolicyVersion: &row.Version,
+		PreviousState: &previous,
+		NewState:      &row.Status,
+	})
+	return err
 }
 
 // Approver names who is approving a policy (#1807). UserID is the person:
@@ -365,8 +418,9 @@ const auditActionSelfApproved = "self_approved"
 // Approve transitions under_review -> approved. Handler validates
 // IsApprover before calling; the store applies checkApprover (#1807) in
 // the same transaction as the approval, reading the organisation's Allow
-// self-approval setting there too (#2101). A self-approval flags the row
-// and appends a policy_audit_log row.
+// self-approval setting there too (#2101). Every approval appends a
+// policy_audit_log row (#2200); a self-approval also flags the row and
+// records its audit row as self_approved.
 func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (Policy, error) {
 	if approver.UserID == "" && approver.CredentialID == "" {
 		return Policy{}, ErrCreatedByRequired
@@ -401,18 +455,15 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (P
 				ApprovedBy:   stringPtr(approver.UserID),
 				SelfApproved: self,
 			})
-			if err != nil || !self {
+			if err != nil {
 				return row, err
 			}
-			if _, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
-				TenantID:      pgUUID(tenantID),
-				PolicyID:      row.ID,
-				Action:        auditActionSelfApproved,
-				Actor:         approver.UserID,
-				PolicyTitle:   &row.Title,
-				PolicyVersion: &row.Version,
-			}); err != nil {
-				return dbx.Policy{}, fmt.Errorf("self-approval: audit log: %w", err)
+			action := auditActionApproved
+			if self {
+				action = auditActionSelfApproved
+			}
+			if err := insertTransitionAudit(ctx, q, tenantID, row, action, approver.UserID, current.Status); err != nil {
+				return dbx.Policy{}, fmt.Errorf("approve: audit log: %w", err)
 			}
 			return row, nil
 		},
@@ -424,6 +475,12 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (P
 // a person approves, and never the person who submitted the policy unless
 // the organisation allows self-approval; selfApproved reports that case.
 // A machine credential never approves, whatever the setting.
+//
+// A submitter recorded by credential id ("key_...", before #1807) is
+// compared against the approving credential, so the same key is still
+// caught; any other approver is refused with ErrSubmitterUnknown, because
+// the key's owner could be approving through a JWT or another key (#2200).
+// The policy is re-submitted to record the person.
 func checkApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool, err error) {
 	submitter := ""
 	if p.SubmittedBy != nil {
@@ -437,8 +494,13 @@ func checkApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool,
 		return false, ErrSubmitterUnknown
 	case errors.Is(err, approval.ErrSelfApproval):
 		return false, ErrSelfApproval
+	case err != nil:
+		return false, err
 	}
-	return self, err
+	if !self && strings.HasPrefix(submitter, legacyKeyPrefix) && submitter != a.CredentialID {
+		return false, ErrSubmitterUnknown
+	}
+	return self, nil
 }
 
 // PublishInput is the API shape for POST /v1/policies/{id}/publish. The

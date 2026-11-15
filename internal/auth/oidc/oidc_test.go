@@ -24,6 +24,9 @@ import (
 	"github.com/mgoodric/security-atlas/internal/auth/oidc"
 )
 
+// testStateKey signs the OIDC flow state in tests (#2177).
+var testStateKey = []byte("test-oidc-state-key-0123456789abcdef")
+
 // newDiscoveryOnlyIDP serves just the well-known config endpoint and
 // a stub JWKS — enough for go-oidc's NewProvider call to succeed,
 // but does not mint tokens (BeginLogin never calls the token
@@ -77,7 +80,7 @@ func runBeginLogin(t *testing.T) oidc.LoginResult {
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 	}}
-	a := oidc.New(resolver)
+	a := oidc.New(resolver, testStateKey)
 	loginResult, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: tenantID,
 		IdpName:  "primary",
@@ -128,7 +131,7 @@ func (f failingResolver) ResolveIdp(_ context.Context, _ uuid.UUID, _ string) (o
 // TestBeginLoginPropagatesResolverError confirms the resolver-error
 // branch returns the error verbatim and emits no cookies.
 func TestBeginLoginPropagatesResolverError(t *testing.T) {
-	a := oidc.New(failingResolver{err: oidc.ErrUnknownIdp})
+	a := oidc.New(failingResolver{err: oidc.ErrUnknownIdp}, testStateKey)
 	_, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: uuid.New(),
 		IdpName:  "missing",
@@ -155,7 +158,7 @@ func TestBeginLoginDiscoveryFailureIsProviderUnavailableAndTimeoutBounded(t *tes
 		ClientID:     "test-client",
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
-	}}, 25*time.Millisecond)
+	}}, testStateKey, 25*time.Millisecond)
 
 	start := time.Now()
 	_, err := a.BeginLogin(context.Background(), oidc.LoginInput{
@@ -274,19 +277,19 @@ func TestBeginLoginBindsTenantCookie(t *testing.T) {
 	a := oidc.New(unitStubResolver{cfg: oidc.IdpConfig{
 		TenantID: tenantID, Name: "primary", IssuerURL: idp.URL,
 		ClientID: "test-client", RedirectURL: "http://localhost:9999/auth/oidc/callback",
-	}})
+	}}, testStateKey)
 	res, err := a.BeginLogin(context.Background(), oidc.LoginInput{TenantID: tenantID, IdpName: "primary"}, true)
 	if err != nil {
 		t.Fatalf("BeginLogin: %v", err)
 	}
-	c := findCookie(res.Cookies, oidc.TenantCookie)
+	c := findCookie(res.Cookies, oidc.CookieName(oidc.TenantCookie, true))
 	if c == nil {
-		t.Fatalf("BeginLogin did not emit %q", oidc.TenantCookie)
+		t.Fatalf("BeginLogin did not emit %q", oidc.CookieName(oidc.TenantCookie, true))
 	}
 	if c.Value != tenantID.String() {
 		t.Errorf("tenant cookie = %q, want %q", c.Value, tenantID)
 	}
-	if !c.HttpOnly || !c.Secure || c.Path != "/auth/oidc" || c.MaxAge != int(oidc.FlowCookieMaxAge/time.Second) {
+	if !c.HttpOnly || !c.Secure || c.Path != "/" || c.MaxAge != int(oidc.FlowCookieMaxAge/time.Second) {
 		t.Errorf("tenant cookie shape = %+v, want a flow cookie", c)
 	}
 }
@@ -322,7 +325,7 @@ func TestHandleCallbackRefusesTenantOutsideFlow(t *testing.T) {
 			if tc.cookie != "" {
 				r.AddCookie(&http.Cookie{Name: oidc.TenantCookie, Value: tc.cookie})
 			}
-			_, err := oidc.New(panicResolver{t}).HandleCallback(context.Background(), r, tc.callback)
+			_, err := oidc.New(panicResolver{t}, testStateKey).HandleCallback(context.Background(), r, tc.callback, false)
 			if !errors.Is(err, oidc.ErrTenantMismatch) {
 				t.Fatalf("HandleCallback err = %v, want ErrTenantMismatch", err)
 			}

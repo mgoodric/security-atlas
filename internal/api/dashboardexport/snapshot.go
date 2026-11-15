@@ -72,15 +72,22 @@ type Panels struct {
 
 // FrameworkPosturePanelRow mirrors the wire shape of
 // `/v1/frameworks/posture`'s rows.
+//
+// ScopeSet (#2114) is false when the tenant has no activated framework
+// scope for the version; the percentages are then nil (JSON null, an empty
+// CSV/XLSX cell). The percentages are pointers so a snapshot written before
+// #2114, with plain numbers and no scope_set key, still decodes.
 type FrameworkPosturePanelRow struct {
-	FrameworkID      string  `json:"framework_id"`
-	FrameworkVersion string  `json:"framework_version"`
-	CoveragePct      float64 `json:"coverage_pct"`
+	FrameworkID        string   `json:"framework_id"`
+	FrameworkVersion   string   `json:"framework_version"`
+	FrameworkVersionID string   `json:"framework_version_id"`
+	ScopeSet           bool     `json:"scope_set"`
+	CoveragePct        *float64 `json:"coverage_pct"`
 	// CoveredByExceptionPct is the part of CoveragePct that rests only on
 	// active exceptions (#2112).
-	CoveredByExceptionPct float64 `json:"covered_by_exception_pct"`
-	FreshnessComposite    float64 `json:"freshness_composite"`
-	TrendDelta90d         float64 `json:"trend_delta_90d"`
+	CoveredByExceptionPct *float64 `json:"covered_by_exception_pct"`
+	FreshnessComposite    *float64 `json:"freshness_composite"`
+	TrendDelta90d         *float64 `json:"trend_delta_90d"`
 }
 
 // RiskPanelRow mirrors the relevant subset of `/v1/risks`'s rows
@@ -253,14 +260,19 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 	}
 	out.Panels.FrameworkPosture = make([]FrameworkPosturePanelRow, len(postureRows))
 	for i, p := range postureRows {
-		out.Panels.FrameworkPosture[i] = FrameworkPosturePanelRow{
-			FrameworkID:           uuidStringFromPgtype(p.FrameworkID),
-			FrameworkVersion:      p.FrameworkVersion,
-			CoveragePct:           p.CoveragePct,
-			CoveredByExceptionPct: p.CoveredByExceptionPct,
-			FreshnessComposite:    p.FreshnessComposite,
-			TrendDelta90d:         p.TrendDelta90d,
+		row := FrameworkPosturePanelRow{
+			FrameworkID:        uuidStringFromPgtype(p.FrameworkID),
+			FrameworkVersion:   p.FrameworkVersion,
+			FrameworkVersionID: uuidStringFromPgtype(p.FrameworkVersionID),
+			ScopeSet:           p.ScopeActivated,
 		}
+		if p.ScopeActivated {
+			row.CoveragePct = &p.CoveragePct
+			row.CoveredByExceptionPct = &p.CoveredByExceptionPct
+			row.FreshnessComposite = &p.FreshnessComposite
+			row.TrendDelta90d = &p.TrendDelta90d
+		}
+		out.Panels.FrameworkPosture[i] = row
 	}
 
 	// 2. Risks — same filter the dashboard's risks panel uses

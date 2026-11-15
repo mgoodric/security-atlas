@@ -174,7 +174,7 @@ func TestNonceMismatchRejected(t *testing.T) {
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 	}}
-	a := oidc.New(resolver)
+	a := oidc.New(resolver, testStateKey)
 
 	loginResult, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: tenantID,
@@ -203,7 +203,7 @@ func TestNonceMismatchRejected(t *testing.T) {
 	req := buildCallbackRequest(t, stateCookie, verifierCookie, idpCookie, nonceCookie,
 		extractCookie(loginResult.Cookies, oidc.TenantCookie))
 
-	_, err = a.HandleCallback(context.Background(), req, tenantID)
+	_, err = a.HandleCallback(context.Background(), req, tenantID, false)
 	if err == nil {
 		t.Fatalf("HandleCallback accepted ID token with mismatched nonce — H-1 NOT fixed")
 	}
@@ -228,7 +228,7 @@ func TestNonceMatchAccepted(t *testing.T) {
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 	}}
-	a := oidc.New(resolver)
+	a := oidc.New(resolver, testStateKey)
 
 	loginResult, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: tenantID,
@@ -252,7 +252,7 @@ func TestNonceMatchAccepted(t *testing.T) {
 	req := buildCallbackRequest(t, stateCookie, verifierCookie, idpCookie, nonceCookie,
 		extractCookie(loginResult.Cookies, oidc.TenantCookie))
 
-	cb, err := a.HandleCallback(context.Background(), req, tenantID)
+	cb, err := a.HandleCallback(context.Background(), req, tenantID, false)
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestStateStillEnforcedAlongsideNonce(t *testing.T) {
 		ClientSecret: "test-secret",
 		RedirectURL:  "http://localhost:9999/auth/oidc/callback",
 	}}
-	a := oidc.New(resolver)
+	a := oidc.New(resolver, testStateKey)
 
 	loginResult, err := a.BeginLogin(context.Background(), oidc.LoginInput{
 		TenantID: tenantID,
@@ -318,7 +318,7 @@ func TestStateStillEnforcedAlongsideNonce(t *testing.T) {
 	req.AddCookie(idpCookie)
 	req.AddCookie(nonceCookie)
 
-	_, err = a.HandleCallback(context.Background(), req, tenantID)
+	_, err = a.HandleCallback(context.Background(), req, tenantID, false)
 	if !errors.Is(err, oidc.ErrStateMismatch) {
 		t.Fatalf("HandleCallback returned %v, want ErrStateMismatch (state guard regression — P0-365-1)", err)
 	}
