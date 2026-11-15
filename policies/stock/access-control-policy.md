@@ -6,7 +6,7 @@ approver_role: security_lead
 scf_release: "2026.3"
 linked_control_ids:
   - IAC-01
-  - IAC-07
+  - IAC-04
   - IAC-22
 acknowledgment_required_roles:
   - employee

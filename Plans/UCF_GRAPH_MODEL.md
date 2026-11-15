@@ -88,7 +88,7 @@ EvidenceRecord {
 }
 ```
 
-Your internal `Control` named `MFA Enforcement (Workforce IAM)` is anchored at `SCF:IAC-06` ("Multi-Factor Authentication").
+Your internal `Control` named `MFA Enforcement (Workforce IAM)` is anchored at `SCF:IAC-37` ("Multi-Factor Authentication").
 
 ### 3.2 What the graph computes
 
@@ -96,7 +96,7 @@ Your internal `Control` named `MFA Enforcement (Workforce IAM)` is anchored at `
 graph TD
     EV[Evidence:<br/>Okta MFA policy<br/>pass at 2026-05-10]
     CTRL[Control: MFA Enforcement<br/>Workforce IAM]
-    ANCHOR[SCF:IAC-06<br/>Multi-Factor Authentication]
+    ANCHOR[SCF:IAC-37<br/>Multi-Factor Authentication]
 
     EV --> CTRL
     CTRL -- anchored_at --> ANCHOR
@@ -128,7 +128,7 @@ Where `effectiveness(C)` is the rolling pass rate of evidence over the freshness
 
 A user opens the SOC 2 dashboard and sees `CC6.6` is at **96% coverage**. They drill down:
 
-- The control is satisfied through `SCF:IAC-06` (MFA), strength `1.0` (equal).
+- The control is satisfied through `SCF:IAC-37` (MFA), strength `1.0` (equal).
 - Effectiveness of the underlying `MFA Enforcement` control is `0.96` over the last 30 days.
 - Coverage = `1.0 * 0.96 = 0.96`.
 - Click through to the underlying evidence stream. See the 30 daily Okta evidence records, including the one day last week where coverage dipped to 0.94 because two new hires hadn't enrolled yet.
@@ -164,11 +164,11 @@ graph LR
 
 | Type              | Meaning                                                               | Coverage rule                                                 | Example                                                                                  |
 | ----------------- | --------------------------------------------------------------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `equal`           | Source and target describe the same concept.                          | `coverage = strength * effectiveness`                         | `SOC2:CC6.6 equal SCF:IAC-06`                                                            |
-| `subset_of`       | Source is fully covered by target — target is broader.                | `coverage = strength * effectiveness` (full credit)           | `SOC2:CC6.6 subset_of SCF:IAC-06` (SCF concept includes MFA + risk-based auth + step-up) |
-| `superset_of`     | Source covers more than target — only partial credit.                 | `coverage = strength * effectiveness * scaling_factor`        | `SCF:IAC-06 superset_of NIST_CSF:PR.AA-03` (CSF is narrower)                             |
-| `intersects_with` | Partial overlap; supplemental evidence needed for full coverage.      | `coverage = strength * effectiveness` and UI flags as partial | `GDPR:Art.32 intersects_with SCF:IAC-06`                                                 |
-| `no_relationship` | Confirmed _no_ overlap. Stored as data to suppress false suggestions. | `coverage = 0`                                                | `PCI:9.4 no_relationship SCF:IAC-06` (physical access ≠ MFA)                             |
+| `equal`           | Source and target describe the same concept.                          | `coverage = strength * effectiveness`                         | `SOC2:CC6.6 equal SCF:IAC-37`                                                            |
+| `subset_of`       | Source is fully covered by target — target is broader.                | `coverage = strength * effectiveness` (full credit)           | `SOC2:CC6.6 subset_of SCF:IAC-37` (SCF concept includes MFA + risk-based auth + step-up) |
+| `superset_of`     | Source covers more than target — only partial credit.                 | `coverage = strength * effectiveness * scaling_factor`        | `SCF:IAC-37 superset_of NIST_CSF:PR.AA-03` (CSF is narrower)                             |
+| `intersects_with` | Partial overlap; supplemental evidence needed for full coverage.      | `coverage = strength * effectiveness` and UI flags as partial | `GDPR:Art.32 intersects_with SCF:IAC-37`                                                 |
+| `no_relationship` | Confirmed _no_ overlap. Stored as data to suppress false suggestions. | `coverage = 0`                                                | `PCI:9.4 no_relationship SCF:IAC-37` (physical access ≠ MFA)                             |
 
 **Why store `no_relationship` explicitly?** Because the alternative is "absence of an edge", which the graph engine cannot distinguish from "we haven't gotten around to mapping this yet." Storing the negative is the difference between "we know this isn't relevant" and "we don't know."
 
@@ -182,13 +182,13 @@ Framework versions are **immutable, additive nodes**. Mappings are **pinned to a
 graph LR
     subgraph "ISO 27001:2013 mappings"
         I13["ISO27001:2013 A.9.4.2"]
-        I13 -- "equal · 0.9" --> SCF1["SCF:IAC-06<br/>(SCF release 2024.2)"]
+        I13 -- "equal · 0.9" --> SCF1["SCF:IAC-37<br/>(SCF release 2024.2)"]
     end
 
     subgraph "ISO 27001:2022 mappings"
         I22a["ISO27001:2022 A.5.17<br/>(authentication info)"]
         I22b["ISO27001:2022 A.8.5<br/>(secure auth)"]
-        I22a -- "equal · 0.85" --> SCF2["SCF:IAC-06<br/>(SCF release 2026.1)"]
+        I22a -- "equal · 0.85" --> SCF2["SCF:IAC-37<br/>(SCF release 2026.1)"]
         I22b -- "subset_of · 1.0" --> SCF2
     end
 
@@ -220,10 +220,10 @@ Most framework requirements are **broad** and need multiple SCF anchors to fully
 graph TB
     REQ[PCI DSS:4.0 Req 8<br/>Identify users and<br/>authenticate access]
 
-    REQ -- "0.4 weight" --> S1[SCF:IAC-06<br/>MFA]
-    REQ -- "0.2 weight" --> S2[SCF:IAC-10<br/>Password policy]
-    REQ -- "0.2 weight" --> S3[SCF:IAC-15<br/>Account management]
-    REQ -- "0.2 weight" --> S4[SCF:IAC-25<br/>Session management]
+    REQ -- "0.4 weight" --> S1[SCF:IAC-37<br/>MFA]
+    REQ -- "0.2 weight" --> S2[SCF:IAC-14<br/>Password policy]
+    REQ -- "0.2 weight" --> S3[SCF:IAC-12<br/>Account management]
+    REQ -- "0.2 weight" --> S4[SCF:CFG-04.5<br/>Session management]
 
     S1 --> C1[Control: Okta MFA<br/>effectiveness 0.96]
     S2 --> C2[Control: Pwd policy<br/>effectiveness 1.0]
@@ -314,7 +314,7 @@ If we ever do hit 10⁶+ edges or property-graph traversal patterns we don't hav
 SCF is the _default_ spine, but no real org's controls match SCF exactly. The graph supports three escape hatches:
 
 1. **Add a new SCF-shaped anchor.** Users define `org-anchors:custom-X` with the same interface. Same edges, same traversal, same coverage math. Used when SCF lacks a concept.
-2. **Override an SCF mapping for your tenant.** A user disagrees that `SCF:IAC-06 equal SOC2:CC6.6` for their context — they edit the edge type/strength locally. The override is per-tenant; the SCF default is untouched.
+2. **Override an SCF mapping for your tenant.** A user disagrees that `SCF:IAC-37 equal SOC2:CC6.6` for their context — they edit the edge type/strength locally. The override is per-tenant; the SCF default is untouched.
 3. **Map directly between framework requirements.** Discouraged but supported. Used when no SCF anchor fits and authoring an org-anchor is overkill. Marked clearly in the UI as a "direct mapping" so the maintenance debt is visible.
 
 All three are first-class graph operations; none of them break the traversal.

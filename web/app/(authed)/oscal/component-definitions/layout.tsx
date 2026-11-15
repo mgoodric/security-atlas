@@ -11,7 +11,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Vendor Claims · security-atlas",
+  title: "Vendor Claims",
 };
 
 export default function VendorClaimsLayout({

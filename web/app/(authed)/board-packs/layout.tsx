@@ -7,7 +7,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Board Packs · security-atlas",
+  title: "Board Packs",
 };
 
 export default function BoardPacksLayout({

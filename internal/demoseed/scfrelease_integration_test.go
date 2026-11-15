@@ -2,12 +2,14 @@
 
 // #1772: the posture spine adopts global SCF anchors only from the release
 // its anchor slice declares. Uses the two #1770 fixture releases (A legacy,
-// B current), which both carry IAC-06 as different anchors.
+// B current), each given its own anchor for the spine's first code, so the
+// same code names a different anchor in each.
 
 package demoseed_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/uuid"
@@ -16,18 +18,24 @@ import (
 	"github.com/mgoodric/security-atlas/internal/scfrelease/scfreleasetest"
 )
 
-// fixtureAnchorID returns the id of the anchor with code in a fixture
-// release.
-func fixtureAnchorID(t *testing.T, release, code string) uuid.UUID {
+// addFixtureAnchor adds an anchor with code to a fixture release and
+// returns its id. Anchors are frozen against UPDATE, not INSERT, and
+// LoadAB's cleanup deletes the release with its anchors.
+func addFixtureAnchor(t *testing.T, release, code string) uuid.UUID {
 	t.Helper()
-	var id uuid.UUID
-	err := adminPool.QueryRow(context.Background(), `
-		SELECT a.id FROM scf_anchors a
-		JOIN framework_versions fv ON fv.id = a.framework_version_id
-		WHERE fv.tenant_id IS NULL AND fv.version = $1 AND a.scf_id = $2`,
-		release, code).Scan(&id)
+	id := uuid.New()
+	tag, err := adminPool.Exec(context.Background(), `
+		INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description)
+		SELECT $3, fv.id, $2, 'IAC', 'Multi-Factor Authentication (MFA)', 'Release ' || $1 || ': MFA.'
+		FROM framework_versions fv
+		JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND fv.tenant_id IS NULL AND fv.version = $1`,
+		release, code, id)
+	if err == nil && tag.RowsAffected() != 1 {
+		err = fmt.Errorf("inserted %d rows", tag.RowsAffected())
+	}
 	if err != nil {
-		t.Fatalf("fixture anchor %s %s: %v", release, code, err)
+		t.Fatalf("add fixture anchor %s %s: %v", release, code, err)
 	}
 	return id
 }
@@ -46,8 +54,9 @@ func controlsOn(t *testing.T, tenantID, anchor uuid.UUID) int {
 
 func TestApply_PostureSpineAdoptsFromTheDeclaredRelease(t *testing.T) {
 	scfreleasetest.LoadAB(t, adminPool)
-	anchorA := fixtureAnchorID(t, scfreleasetest.ReleaseA, "IAC-06")
-	anchorB := fixtureAnchorID(t, scfreleasetest.ReleaseB, "IAC-06")
+	code := demoseed.FirstDemoSCFAnchorCode()
+	anchorA := addFixtureAnchor(t, scfreleasetest.ReleaseA, code)
+	anchorB := addFixtureAnchor(t, scfreleasetest.ReleaseB, code)
 
 	for _, tc := range []struct {
 		name, slug, release string
@@ -72,10 +81,10 @@ func TestApply_PostureSpineAdoptsFromTheDeclaredRelease(t *testing.T) {
 				t.Fatalf("Apply: %v", err)
 			}
 			if got := controlsOn(t, res.TenantID, anchorA) > 0; got != tc.wantA {
-				t.Errorf("controls on release A's IAC-06: %v; want %v", got, tc.wantA)
+				t.Errorf("controls on release A's anchor: %v; want %v", got, tc.wantA)
 			}
 			if got := controlsOn(t, res.TenantID, anchorB) > 0; got != tc.wantB {
-				t.Errorf("controls on release B's IAC-06: %v; want %v", got, tc.wantB)
+				t.Errorf("controls on release B's anchor: %v; want %v", got, tc.wantB)
 			}
 			if controlsAnchored(t, res.TenantID) == 0 {
 				t.Error("no demo control is anchored")

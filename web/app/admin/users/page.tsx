@@ -85,6 +85,7 @@ import {
   tenantFieldMode,
 } from "@/lib/admin/assign-options";
 import { showTenantChrome, useTenancy } from "@/lib/tenancy";
+import { PageShell } from "@/components/shell/page-shell";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -286,17 +287,12 @@ export default function UsersPage() {
   const assignErrorId = assignError ? "assign-user-error" : undefined;
 
   return (
-    <div className="space-y-6" data-testid="admin-users-page">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Users</h1>
-          <p className="text-sm text-muted-foreground">
-            User accounts with their tenant memberships and RBAC roles. Roles
-            are the coarse authorization signal; ABAC predicates layer over them
-            per scope.
-          </p>
-        </div>
-        <div className="flex shrink-0 gap-2">
+    <PageShell
+      title="Users"
+      data-testid="admin-users-page"
+      subtitle="User accounts with their tenant memberships and RBAC roles. Roles are the coarse authorization signal; ABAC predicates layer over them per scope."
+      actions={
+        <>
           <Button data-testid="open-assign-user" onClick={() => openAssign({})}>
             {singleTenant ? "Add user" : "Assign user to tenant"}
           </Button>
@@ -311,9 +307,9 @@ export default function UsersPage() {
               Add me to a tenant
             </Button>
           ) : null}
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {singleTenant ? null : (
         <Alert data-testid="users-tenancy-banner">
           <AlertTitle>
@@ -854,6 +850,6 @@ export default function UsersPage() {
           </DialogContent>
         </DialogPortal>
       </Dialog>
-    </div>
+    </PageShell>
   );
 }

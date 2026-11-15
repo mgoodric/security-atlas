@@ -7,7 +7,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Calendar · security-atlas",
+  title: "Calendar",
 };
 
 export default function CalendarLayout({

@@ -121,7 +121,7 @@ func okSubscribeFlags() subscribeFlags {
 		cluster:         "cluster-1",
 		environment:     "prod",
 		authMode:        "kubeconfig-token",
-		rbacControl:     "scf:IAC-21",
+		rbacControl:     "scf:IAC-10",
 		workloadControl: "scf:CFG-02",
 		skipWorkload:    true, // most tests exercise rbac only
 	}
@@ -242,14 +242,14 @@ func TestSubscribe_WatchKeyEqualsPullKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("rbac.Pull: %v", err)
 	}
-	pullRec, err := buildRBACRecord(pullBindings[0], "cluster-1", "prod", "scf:IAC-21")
+	pullRec, err := buildRBACRecord(pullBindings[0], "cluster-1", "prod", "scf:IAC-10")
 	if err != nil {
 		t.Fatalf("buildRBACRecord: %v", err)
 	}
 
 	// The watch emitter builds the same record from the same Raw, captured here.
 	captured := &capturingSDKClient{}
-	emit := rbacEmitter(captured, "cluster-1", "prod", "scf:IAC-21")
+	emit := rbacEmitter(captured, "cluster-1", "prod", "scf:IAC-10")
 	if _, err := emit(context.Background(), watch.EventAdded, bindingRaw("admins")); err != nil {
 		t.Fatalf("emit: %v", err)
 	}
@@ -411,7 +411,7 @@ func TestSubscribe_BadAuthModeRejected(t *testing.T) {
 func TestSubscribe_EmitterSkipsUnbuildable(t *testing.T) {
 	subscribeTestEnv(t)
 	cap := &capturingSDKClient{}
-	emit := rbacEmitter(cap, "c", "e", "scf:IAC-21")
+	emit := rbacEmitter(cap, "c", "e", "scf:IAC-10")
 	// An object that is not a RawBinding → skipped, empty key, no push.
 	key, err := emit(context.Background(), watch.EventAdded, "not-a-binding")
 	if err != nil || key != "" {
@@ -427,7 +427,7 @@ func TestSubscribe_EmitterSkipsUnbuildable(t *testing.T) {
 func TestSubscribe_RBACEmitterPushError(t *testing.T) {
 	t.Parallel()
 	sentinel := errors.New("push 503")
-	emit := rbacEmitter(&capturingSDKClient{pushErr: sentinel}, "c", "e", "scf:IAC-21")
+	emit := rbacEmitter(&capturingSDKClient{pushErr: sentinel}, "c", "e", "scf:IAC-10")
 	_, err := emit(context.Background(), watch.EventAdded, bindingRaw("admins"))
 	if !errors.Is(err, sentinel) || !strings.Contains(err.Error(), "push rbac") {
 		t.Fatalf("want wrapped push rbac error; got %v", err)

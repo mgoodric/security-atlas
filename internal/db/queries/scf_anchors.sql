@@ -114,7 +114,7 @@ LIMIT $1 OFFSET $2;
 SELECT * FROM scf_anchors WHERE id = $1;
 
 -- name: GetSCFAnchorBySCFID :one
--- Look up an anchor by its SCF code (e.g., "IAC-06") in the current SCF
+-- Look up an anchor by its SCF code (e.g., "IAC-37") in the current SCF
 -- framework version.
 SELECT a.*
 FROM scf_anchors a
@@ -477,8 +477,8 @@ ORDER BY a.scf_id
 LIMIT $1;
 
 -- name: ListAllFwToScfEdgesForExport :many
--- Slice 174: anchor catalog export edges projection. Returns EVERY
--- fw_to_scf_edges row whose target anchor is in the current SCF
+-- Slice 174: anchor catalog export edges projection. Returns EVERY live
+-- (not retired) fw_to_scf_edges row whose target anchor is in the current SCF
 -- framework_version, joined to framework_requirements +
 -- framework_versions + frameworks so consumers get the natural-key
 -- (`framework_slug:version:code`) without a second query.
@@ -524,6 +524,8 @@ JOIN frameworks f                 ON f.id = fv.framework_id
 WHERE af.slug = 'scf'
   AND afv.status = 'current'
   AND af.tenant_id IS NULL
+  -- A retired edge (#1971) is no longer part of the catalog.
+  AND e.retired_at IS NULL
 ORDER BY a.scf_id, f.slug, fv.version, r.code;
 
 -- name: CountSCFAnchorsLatest :one

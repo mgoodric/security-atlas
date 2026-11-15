@@ -157,15 +157,15 @@ func TestValidateItemCitations_SCFAnchorMatched(t *testing.T) {
 	t.Parallel()
 	cid := uuid.New()
 	res := fakeResolver{controls: map[uuid.UUID]bool{cid: true}}
-	allowed, _ := buildAllowed(ctrl(cid.String(), "security", "IAC-06", true))
-	task := "Implement IAC-06 access control (" + cid.String() + ")."
+	allowed, _ := buildAllowed(ctrl(cid.String(), "security", "IAC-37", true))
+	task := "Implement IAC-37 access control (" + cid.String() + ")."
 	cites, ok, _, _ := validateItemCitations(context.Background(), res, task, allowed)
 	if !ok {
 		t.Fatal("want valid SCF citation")
 	}
 	var sawSCF bool
 	for _, c := range cites {
-		if c.Kind == KindSCFAnchor && c.ID == "IAC-06" {
+		if c.Kind == KindSCFAnchor && c.ID == "IAC-37" {
 			sawSCF = true
 		}
 	}
@@ -178,7 +178,7 @@ func TestValidateItemCitations_WrongSCFRejected(t *testing.T) {
 	t.Parallel()
 	cid := uuid.New()
 	res := fakeResolver{controls: map[uuid.UUID]bool{cid: true}}
-	allowed, _ := buildAllowed(ctrl(cid.String(), "security", "IAC-06", true))
+	allowed, _ := buildAllowed(ctrl(cid.String(), "security", "IAC-37", true))
 	// Cites a DIFFERENT anchor than the control's.
 	task := "Implement GOV-01 (" + cid.String() + ")."
 	_, ok, reason, _ := validateItemCitations(context.Background(), res, task, allowed)
@@ -207,14 +207,14 @@ func TestParseTaskLines(t *testing.T) {
 func TestBuildPrompt_NoEvidenceMarker(t *testing.T) {
 	t.Parallel()
 	cid := uuid.New().String()
-	p := buildPrompt(RoleInfra, []ControlInput{ctrl(cid, "infra", "IAC-06", false)})
+	p := buildPrompt(RoleInfra, []ControlInput{ctrl(cid, "infra", "IAC-37", false)})
 	if !strings.Contains(p, "NO EVIDENCE YET") {
 		t.Error("prompt must mark a control with no evidence")
 	}
 	if !strings.Contains(p, cid) {
 		t.Error("prompt must include the control id for citation")
 	}
-	if !strings.Contains(p, "IAC-06") {
+	if !strings.Contains(p, "IAC-37") {
 		t.Error("prompt must include the scf anchor")
 	}
 }

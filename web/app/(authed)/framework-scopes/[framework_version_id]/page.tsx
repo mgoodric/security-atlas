@@ -21,6 +21,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useParams } from "next/navigation";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { Badge } from "@/components/ui/badge";
@@ -152,19 +153,17 @@ export default function FrameworkScopesPage() {
   });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Framework scope
-        </h1>
-        <p className="text-sm text-muted-foreground">
+    <PageShell
+      title="Framework scope"
+      subtitle={
+        <>
           One scope predicate per framework, versioned. Approval is the
           auditor&apos;s sign-off; activation is when it takes effect. Editing
           the predicate on a row in review or approved bounces it back to draft
           — the auditor sees every change.
-        </p>
-      </div>
-
+        </>
+      }
+    >
       {banner && (
         <Alert variant="destructive">
           <AlertTitle>Heads up</AlertTitle>
@@ -243,7 +242,7 @@ export default function FrameworkScopesPage() {
         scopesQ.data
           .filter((s) => s.state === "review")
           .map((s) => <ReviewDiff key={s.id} scope={s} />)}
-    </div>
+    </PageShell>
   );
 }
 

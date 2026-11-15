@@ -16,7 +16,7 @@ one named release:
 
 The bug the work exposed: the demo seed adopted "the oldest global anchor with
 this code" across every loaded release. With two releases loaded it bound
-release A's IAC-06 even when the demo data meant B's, and it adopted A's even
+release A's anchor for a code even when the demo data meant B's, and it adopted A's even
 when its own release was not loaded at all. The new
 `TestApply_PostureSpineAdoptsFromTheDeclaredRelease` fails on the old query
 (two of three cases) and passes on the new one.

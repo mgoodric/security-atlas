@@ -17,6 +17,10 @@ func (s *Seeder) WithSCFRelease(label string) *Seeder {
 	return s
 }
 
+// FirstDemoSCFAnchorCode is the code of the first anchor in the spine's
+// slice, which the round-robin always gives a control.
+func FirstDemoSCFAnchorCode() string { return demoSCFAnchors[0].SCFID }
+
 // IsTenantAuditTable exposes isTenantAuditTable to the integration tests,
 // so "exactly the pre-seed rows" excludes the same tables the seed does.
 var IsTenantAuditTable = isTenantAuditTable

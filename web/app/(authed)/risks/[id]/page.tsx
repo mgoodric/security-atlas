@@ -35,6 +35,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LinkedActionPlans } from "@/components/action-plans/linked-action-plans";
 import { RiskHierarchyLinks } from "@/components/risk-hierarchy/risk-hierarchy-links";
+import { PageShell } from "@/components/shell/page-shell";
 import { APIError } from "@/lib/api/base";
 import { fetchRiskDetail, treatmentLabel } from "@/lib/api/risks";
 
@@ -91,23 +92,22 @@ export default function RiskDetailPage({
 
   if (isLoading) {
     return (
-      <div className="space-y-6" data-testid="risk-detail-loading">
+      <PageShell title="Risk" data-testid="risk-detail-loading">
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (error && !(error instanceof APIError && error.status === 401)) {
     return (
-      <div className="space-y-6">
-        <BackLink />
+      <PageShell title="Risk" actions={<BackLink />}>
         <Alert variant="destructive" data-testid="risk-detail-error">
           <AlertTitle>Could not load risk</AlertTitle>
           <AlertDescription>{(error as Error).message}</AlertDescription>
         </Alert>
-      </div>
+      </PageShell>
     );
   }
 
@@ -134,60 +134,56 @@ export default function RiskDetailPage({
   const residualN = isFair ? null : residualSeverity(risk.residual_score);
 
   return (
-    <div className="space-y-6" data-testid="risk-detail">
-      <BackLink />
-
-      {/* ============ HEADER ============ */}
-      <header className="space-y-3" data-testid="risk-detail-header">
-        <div className="flex flex-wrap items-center gap-2">
-          <Badge
-            variant="secondary"
-            data-testid="risk-detail-treatment"
-            className="capitalize"
-          >
-            {treatmentLabel(risk)}
-          </Badge>
-          <span
-            className="font-mono text-xs text-muted-foreground"
-            data-testid="risk-detail-category"
-          >
-            {risk.category}
-          </span>
+    <PageShell
+      data-testid="risk-detail"
+      actions={<BackLink />}
+      title={<span data-testid="risk-detail-title">{risk.title}</span>}
+      subtitle={
+        <div className="mt-2 space-y-3" data-testid="risk-detail-header">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge
+              variant="secondary"
+              data-testid="risk-detail-treatment"
+              className="capitalize"
+            >
+              {treatmentLabel(risk)}
+            </Badge>
+            <span
+              className="font-mono text-xs text-muted-foreground"
+              data-testid="risk-detail-category"
+            >
+              {risk.category}
+            </span>
+          </div>
+          <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+            <div>
+              <dt className="inline text-muted-foreground">Owner </dt>
+              <dd
+                className="inline text-foreground"
+                data-testid="risk-detail-owner"
+              >
+                {risk.treatment_owner.trim() || "unassigned"}
+              </dd>
+            </div>
+            <div>
+              <dt className="inline text-muted-foreground">Methodology </dt>
+              <dd className="inline text-foreground">{risk.methodology}</dd>
+            </div>
+            <div>
+              <dt className="inline text-muted-foreground">Review due </dt>
+              <dd
+                className="inline font-mono text-foreground"
+                data-testid="risk-detail-review-due"
+              >
+                {reviewDuePending(risk.review_due_at)
+                  ? "Not set"
+                  : formatDate(risk.review_due_at)}
+              </dd>
+            </div>
+          </dl>
         </div>
-        <h1
-          className="text-2xl font-semibold tracking-tight"
-          data-testid="risk-detail-title"
-        >
-          {risk.title}
-        </h1>
-        <dl className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-          <div>
-            <dt className="inline text-muted-foreground">Owner </dt>
-            <dd
-              className="inline text-foreground"
-              data-testid="risk-detail-owner"
-            >
-              {risk.treatment_owner.trim() || "unassigned"}
-            </dd>
-          </div>
-          <div>
-            <dt className="inline text-muted-foreground">Methodology </dt>
-            <dd className="inline text-foreground">{risk.methodology}</dd>
-          </div>
-          <div>
-            <dt className="inline text-muted-foreground">Review due </dt>
-            <dd
-              className="inline font-mono text-foreground"
-              data-testid="risk-detail-review-due"
-            >
-              {reviewDuePending(risk.review_due_at)
-                ? "Not set"
-                : formatDate(risk.review_due_at)}
-            </dd>
-          </div>
-        </dl>
-      </header>
-
+      }
+    >
       {patternNoLongerMet(risk.inherent_score) ? (
         <Alert data-testid="risk-detail-pattern-lapsed">
           <AlertTitle>Pattern no longer met</AlertTitle>
@@ -346,7 +342,7 @@ export default function RiskDetailPage({
           View in hierarchy →
         </Link>
       </div>
-    </div>
+    </PageShell>
   );
 }
 

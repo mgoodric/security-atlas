@@ -40,7 +40,7 @@ Once connected, the assistant can answer questions from your **live data**:
 | Tool                     | Answers questions like…                                           |
 | ------------------------ | ----------------------------------------------------------------- |
 | `list_controls`          | "List my active controls and their framework mappings."           |
-| `get_control`            | "Show me control IAC-06 and where its evidence stands."           |
+| `get_control`            | "Show me control IAC-37 and where its evidence stands."           |
 | `list_risks`             | "What risks are in the mitigate treatment?" (filter by treatment) |
 | `get_risk`               | "Show risk R-14 with its linked controls and residual score."     |
 | `list_evidence`          | "What evidence landed in the last 30 days?" (never raw payloads)  |

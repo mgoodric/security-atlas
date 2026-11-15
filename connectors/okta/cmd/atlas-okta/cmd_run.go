@@ -98,8 +98,8 @@ appears in shell history.`,
 	// documented preferred path so the secret never reaches shell history.
 	cmd.Flags().StringVar(&f.token, "token-env-only-do-not-pass-on-cli", "", "")
 	_ = cmd.Flags().MarkHidden("token-env-only-do-not-pass-on-cli")
-	cmd.Flags().StringVar(&f.mfaPolicyControl, "mfa-policy-control", "scf:IAC-06", "control_id to attach to okta.mfa_policy.v1 records")
-	cmd.Flags().StringVar(&f.appAssignControl, "app-assignment-control", "scf:IAC-21", "control_id to attach to okta.app_assignment.v1 records")
+	cmd.Flags().StringVar(&f.mfaPolicyControl, "mfa-policy-control", "scf:IAC-37", "control_id to attach to okta.mfa_policy.v1 records")
+	cmd.Flags().StringVar(&f.appAssignControl, "app-assignment-control", "scf:IAC-10", "control_id to attach to okta.app_assignment.v1 records")
 	cmd.Flags().StringVar(&f.userLifeControl, "user-lifecycle-control", "scf:IAC-22", "control_id to attach to okta.user_lifecycle.v1 records")
 	cmd.Flags().BoolVar(&f.skipMFAPolicy, "skip-mfa-policy", false, "skip okta.mfa_policy.v1 pull")
 	cmd.Flags().BoolVar(&f.skipAppAssign, "skip-app-assignment", false, "skip okta.app_assignment.v1 pull")
