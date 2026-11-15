@@ -318,18 +318,49 @@ type anchorEdge struct {
 	strength          float64
 	sourceAttribution string
 	mappingTier       string
+	origin            string
 	rationale         string
 }
 
 // listAnchorsForRequirement runs either the unpinned or pinned variant
-// based on whether an SCF framework_version filter was supplied.
+// based on whether an SCF framework_version filter was supplied. It reads
+// inside the request's tenant GUC: effective_fw_to_scf_edges carries the
+// caller tenant's active overlay edges (#1798), which RLS hides without it.
 func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UUID, scfFV *scfrelease.Release) ([]anchorEdge, error) {
-	if scfFV == nil {
-		rows, err := h.q.ListAnchorsForRequirementWithEdges(ctx, reqID)
-		if err != nil {
-			return nil, err
+	var out []anchorEdge
+	err := h.inTenantTx(ctx, func(ctx context.Context, q *dbx.Queries) error {
+		if scfFV == nil {
+			rows, err := q.ListAnchorsForRequirementWithEdges(ctx, reqID)
+			if err != nil {
+				return err
+			}
+			out = make([]anchorEdge, len(rows))
+			for i, r := range rows {
+				out[i] = anchorEdge{
+					edgeID:            r.EdgeID,
+					scfAnchorID:       r.ScfAnchorID,
+					scfID:             r.ScfID,
+					family:            r.Family,
+					anchorTitle:       r.AnchorTitle,
+					anchorDescription: r.AnchorDescription,
+					relationshipType:  string(r.RelationshipType),
+					strength:          r.Strength,
+					sourceAttribution: string(r.SourceAttribution),
+					mappingTier:       string(r.MappingTier),
+					origin:            r.Origin,
+					rationale:         r.Rationale,
+				}
+			}
+			return nil
 		}
-		out := make([]anchorEdge, len(rows))
+		rows, err := q.ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx, dbx.ListAnchorsForRequirementWithEdgesByFrameworkVersionParams{
+			FrameworkRequirementID: reqID,
+			FrameworkVersionID:     scfFV.ID,
+		})
+		if err != nil {
+			return err
+		}
+		out = make([]anchorEdge, len(rows))
 		for i, r := range rows {
 			out[i] = anchorEdge{
 				edgeID:            r.EdgeID,
@@ -342,34 +373,13 @@ func (h *Handler) listAnchorsForRequirement(ctx context.Context, reqID pgtype.UU
 				strength:          r.Strength,
 				sourceAttribution: string(r.SourceAttribution),
 				mappingTier:       string(r.MappingTier),
+				origin:            r.Origin,
 				rationale:         r.Rationale,
 			}
 		}
-		return out, nil
-	}
-	rows, err := h.q.ListAnchorsForRequirementWithEdgesByFrameworkVersion(ctx, dbx.ListAnchorsForRequirementWithEdgesByFrameworkVersionParams{
-		FrameworkRequirementID: reqID,
-		FrameworkVersionID:     scfFV.ID,
+		return nil
 	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]anchorEdge, len(rows))
-	for i, r := range rows {
-		out[i] = anchorEdge{
-			edgeID:            r.EdgeID,
-			scfAnchorID:       r.ScfAnchorID,
-			scfID:             r.ScfID,
-			family:            r.Family,
-			anchorTitle:       r.AnchorTitle,
-			anchorDescription: r.AnchorDescription,
-			relationshipType:  string(r.RelationshipType),
-			strength:          r.Strength,
-			sourceAttribution: string(r.SourceAttribution),
-			rationale:         r.Rationale,
-		}
-	}
-	return out, nil
+	return out, err
 }
 
 // listControlsForAnchors runs the tenant-scoped controls lookup inside
@@ -432,6 +442,7 @@ func anchorWiresFromAnchors(anchors []anchorEdge) []anchorWire {
 			Strength:          a.strength,
 			SourceAttribution: a.sourceAttribution,
 			MappingTier:       a.mappingTier,
+			Origin:            a.origin,
 			Rationale:         a.rationale,
 		})
 	}
