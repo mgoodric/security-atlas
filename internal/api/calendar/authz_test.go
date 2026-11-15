@@ -43,14 +43,14 @@ func requestAs(t *testing.T, role authz.Role) func(string) (string, bool) {
 func TestReadableTypes_PerRole(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		role         authz.Role
-		risk, action bool
+		role                      authz.Role
+		risk, action, offboarding bool
 	}{
-		{authz.RoleAdmin, true, true},
-		{authz.RoleGRCEngineer, true, true},
-		{authz.RoleViewer, true, false},
-		{authz.RoleAuditor, false, false},
-		{authz.RoleControlOwner, false, false},
+		{authz.RoleAdmin, true, true, true},
+		{authz.RoleGRCEngineer, true, true, true},
+		{authz.RoleViewer, true, false, false},
+		{authz.RoleAuditor, false, false, false},
+		{authz.RoleControlOwner, false, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.role), func(t *testing.T) {
@@ -71,6 +71,10 @@ func TestReadableTypes_PerRole(t *testing.T) {
 				t.Errorf("%s: risk=%v action_plan=%v, want risk=%v action_plan=%v (filter %q)",
 					tc.role, set["risk"], set["action_plan"], tc.risk, tc.action, got)
 			}
+			// #2215: offboarding events need a personnel-security read.
+			if set["offboarding"] != tc.offboarding {
+				t.Errorf("%s: offboarding=%v, want %v (filter %q)", tc.role, set["offboarding"], tc.offboarding, got)
+			}
 			for _, always := range []string{"audit", "exception", "policy", "vendor", "control", "policy_ack"} {
 				if !set[always] {
 					t.Errorf("%s: %s dropped from %q", tc.role, always, got)
@@ -88,6 +92,9 @@ func TestReadableTypes_OnlyGatedRequestedAndDenied(t *testing.T) {
 	}
 	if got, ok := readable("risk,exception"); !ok || got != "exception" {
 		t.Errorf("auditor asking for risk,exception: got %q ok=%v, want exception", got, ok)
+	}
+	if got, ok := readable("offboarding"); ok || got != "" {
+		t.Errorf("auditor asking only for offboarding: got %q ok=%v, want nothing", got, ok)
 	}
 }
 

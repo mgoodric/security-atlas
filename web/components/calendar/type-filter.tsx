@@ -3,7 +3,8 @@
 // Slice 094 — event-type filter sidebar.
 //
 // Checkboxes — audit / exception / policy / vendor / control / risk /
-// action_plan / policy_ack (the last three added by #2130). State
+// action_plan / policy_ack (the last three added by #2130) / offboarding
+// (#2215). State
 // lives in the parent (URL query string). Clicking a checkbox toggles its
 // type in the selection.
 //
@@ -46,6 +47,10 @@ const TYPE_LABELS: Record<CalendarEventType, { label: string; color: string }> =
     policy_ack: {
       label: "Policy acknowledgements",
       color: "bg-violet-500",
+    },
+    offboarding: {
+      label: "Offboarding due",
+      color: "bg-slate-500",
     },
   };
 

@@ -120,6 +120,19 @@ func TestNormalizeTypeFilter_AcceptsRiskAndActionPlan(t *testing.T) {
 	}
 }
 
+// TestNormalizeTypeFilter_AcceptsOffboarding is the #2215 guard: the
+// query emits offboarding checklists, so the filter must be able to name
+// them.
+func TestNormalizeTypeFilter_AcceptsOffboarding(t *testing.T) {
+	got, err := normalizeTypeFilter("offboarding")
+	if err != nil {
+		t.Fatalf("offboarding should be a valid event type: %v", err)
+	}
+	if got != "offboarding" {
+		t.Errorf("normalized=%q want=offboarding", got)
+	}
+}
+
 // TestNormalizeTypeFilter_AcceptsVendor is the slice-675 guard: `vendor`
 // is now a first-class calendar event type (aligning the agenda with the
 // dashboard "Upcoming" widget). It must pass the closed-vocabulary check.
