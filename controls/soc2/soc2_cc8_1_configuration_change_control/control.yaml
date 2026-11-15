@@ -9,8 +9,8 @@ description: |
   with required reviews AND that the repo is tagged
   `iac: true` so future automation can target it deterministically.
 
-scf_anchor_id: CFG-04
-control_family: CFG
+scf_anchor_id: CHG-03
+control_family: CHG
 implementation_type: automated
 owner_role: security-engineering
 lifecycle_state: active

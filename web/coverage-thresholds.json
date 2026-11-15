@@ -61,12 +61,6 @@
       "functions": 98,
       "lines": 98
     },
-    "app/(authed)/controls/new-control-future.ts": {
-      "statements": 98,
-      "branches": 98,
-      "functions": 98,
-      "lines": 98
-    },
     "app/(authed)/controls/saved-views.ts": {
       "statements": 98,
       "branches": 95,
