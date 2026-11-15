@@ -322,6 +322,44 @@ func TestHTTP_NewVendor_FirstReviewDue(t *testing.T) {
 	}
 }
 
+// #2201: GET /v1/vendors/initial-review-window returns the tenant's window,
+// and the 30-day default for a tenant with no tenants row.
+func TestHTTP_InitialReviewWindow(t *testing.T) {
+	admin := dbtest.NewMigratePool(t)
+	tenant := freshTenant(t, admin)
+	ts, bearer := setupHTTPServer(t, tenant)
+
+	read := func() int {
+		t.Helper()
+		resp, payload := doJSON(t, http.MethodGet, ts.URL+"/v1/vendors/initial-review-window", bearer, "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET: %d %s", resp.StatusCode, payload)
+		}
+		var body struct {
+			Days int `json:"vendor_initial_review_days"`
+		}
+		if err := json.Unmarshal(payload, &body); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return body.Days
+	}
+
+	if got := read(); got != 30 {
+		t.Fatalf("no tenants row: window = %d; want 30", got)
+	}
+	if _, err := admin.Exec(context.Background(),
+		`INSERT INTO tenants (id, name, vendor_initial_review_days) VALUES ($1, $2, 12)`,
+		tenant, "vendor-2201-"+tenant[:8]); err != nil {
+		t.Fatalf("seed tenant row: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = admin.Exec(context.Background(), `DELETE FROM tenants WHERE id = $1`, tenant)
+	})
+	if got := read(); got != 12 {
+		t.Fatalf("window = %d; want 12", got)
+	}
+}
+
 // Bad criticality filter returns 400.
 func TestHTTP_ListVendors_RejectsBadCriticality(t *testing.T) {
 	admin := dbtest.NewMigratePool(t)
