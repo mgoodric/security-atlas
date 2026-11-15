@@ -3,7 +3,10 @@
 //
 // HERMETIC: route-mocks every BFF GET the pages hit for the asserted
 // panels (the slice 594 shared-DB -> hermetic-mock convention), so the
-// spec does not depend on the docker-compose seed.
+// spec does not depend on the docker-compose seed. The posture tile is
+// asserted in `framework-scope-soa.spec.ts` instead: the dashboard
+// prefetches posture server-side, out of reach of a browser route mock,
+// and that spec already activates a real scope at 50% coverage.
 //
 // Neutral test strings only (P0-A9 / GitGuardian).
 
@@ -56,23 +59,6 @@ const TARGET = {
   direction: "higher_is_better",
 };
 
-const POSTURE = {
-  frameworks: [
-    {
-      framework_id: "e2e-framework",
-      framework_version: "E2E Framework 1.0",
-      framework_version_id: "00000000-0000-4000-8000-000000002095",
-      scope_set: true,
-      // Low coverage falling: the old tile painted both red.
-      coverage_pct: 42.5,
-      covered_by_exception_pct: 0,
-      freshness_composite: 80,
-      trend_delta_90d: -3.5,
-    },
-  ],
-  count: 1,
-};
-
 function json(body: unknown) {
   return {
     status: 200,
@@ -95,9 +81,6 @@ test.describe("charts and tiles (#2095)", () => {
     );
     await authedPage.route(`**/api/metrics/${METRIC.id}/target**`, (route) =>
       route.fulfill(json(TARGET)),
-    );
-    await authedPage.route("**/api/dashboard/framework-posture", (route) =>
-      route.fulfill(json(POSTURE)),
     );
   });
 
@@ -132,34 +115,6 @@ test.describe("charts and tiles (#2095)", () => {
     await expect(
       authedPage.getByTestId("metric-detail-chart-svg-target-line"),
     ).toBeAttached();
-  });
-
-  test("a posture tile with no target is neutral and says No target set", async ({
-    authedPage,
-  }) => {
-    await authedPage.goto("/dashboard");
-
-    const tile = authedPage
-      .getByTestId("framework-tile")
-      .filter({ hasText: "E2E Framework 1.0" });
-    await expect(tile).toBeVisible();
-
-    const noTarget = tile.getByTestId("framework-tile-no-target");
-    await expect(noTarget).toHaveText("No target set");
-    // Plain text: there is nowhere to set a posture target yet (#2341).
-    await expect(tile.locator("a", { hasText: "No target set" })).toHaveCount(
-      0,
-    );
-
-    const coverage = tile.getByTestId("framework-tile-coverage");
-    await expect(coverage).toHaveAttribute("data-tone", "neutral");
-    await expect(coverage).not.toHaveClass(/destructive|emerald|amber/);
-
-    const trend = tile.getByTestId("framework-tile-trend");
-    await expect(trend).toHaveAttribute("data-tone", "neutral");
-    await expect(trend).not.toHaveClass(/destructive|emerald/);
-    await expect(trend).toContainText("-3.5");
-    await expect(trend).toHaveAttribute("aria-label", /no target set/);
   });
 
   test("a metric tile with a target below its value is not red", async ({
