@@ -34,3 +34,9 @@ deploy/helm/templates/
 docs/issues/_STATUS.md
 docs/issues/_STATUS_HISTORY.md
 docs/issues/_events.jsonl
+
+# Lifecycle transition tables (#2146), written by `just lifecycles-export`
+# with Go-stdlib JSON indentation. cmd/atlas-lifecycles'
+# TestExport_MatchesCommitted compares them byte for byte with the export,
+# so a prettier reflow would fail it. Same reason as the golden files above.
+docs/lifecycles/
