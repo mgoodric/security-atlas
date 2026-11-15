@@ -80,6 +80,7 @@ func buildMultiSectionRollups(periodEnd, ctrlID string) map[boardnarrative.Secti
 	brief := board.Brief{
 		PeriodEnd:  periodEnd,
 		Frameworks: []board.FrameworkPosture{{Slug: "soc2", Name: "SOC 2", CoveragePct: 84, FreshnessPct: 91, Delta: -3}},
+		Coverage:   &board.CoverageSummary{CoveragePct: 84, ScopedFrameworkCount: 1, EvidenceFreshnessRatePct: 91},
 		Drift:      board.DriftSummary{WindowDays: 30, Delta: -3, FlippedOutCount: 3},
 		TopRisks: []board.RiskAging{
 			{ID: uuid.NewString(), Title: "Stale access reviews", Category: "access", Treatment: "mitigate", ResidualSeverity: 12.0, AgeDays: 47},

@@ -34,7 +34,8 @@ func fixtureRollup(t *testing.T) (Rollup, string, string) {
 			{Slug: "soc2", Name: "SOC 2", CoveragePct: 84, FreshnessPct: 91, Delta: -3},
 			{Slug: "iso27001", Name: "ISO 27001", CoveragePct: 84, FreshnessPct: 91, Delta: -3},
 		},
-		Drift: board.DriftSummary{WindowDays: 30, Delta: -3, FlippedOutCount: 3},
+		Coverage: &board.CoverageSummary{CoveragePct: 84, ScopedFrameworkCount: 2, EvidenceFreshnessRatePct: 91},
+		Drift:    board.DriftSummary{WindowDays: 30, Delta: -3, FlippedOutCount: 3},
 	}
 	excerpts := []Excerpt{
 		{ID: ctrlID, Kind: KindControl, Title: "Access reviews", Excerpt: "quarterly access review"},
