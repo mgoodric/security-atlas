@@ -1,4 +1,4 @@
--- Reverses 20261129000000_scf_remap_decisions.sql (#1776). Decided
+-- Reverses 20261201000000_scf_remap_decisions.sql (#1776). Decided
 -- proposals return to open, so the narrower CHECKs hold again.
 DROP TABLE IF EXISTS scf_remap_decisions;
 ALTER TABLE scf_remap_proposals

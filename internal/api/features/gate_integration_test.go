@@ -2,8 +2,8 @@
 
 // Slice 660 — route-gate integration tests. These are the LOAD-BEARING
 // proof that a flag-off module's route is actually UNREACHABLE (404),
-// not merely nav-hidden. They wire the real featureflag.Gate middleware
-// (the same factory httpserver.go applies to the OSCAL + board routes)
+// not merely nav-hidden. They wire the real featureflag.ModuleGate
+// middleware (the authorization-chain step httpserver.go mounts, #2171)
 // over a sentinel handler against real Postgres, so the per-tenant flag
 // read happens under RLS exactly as in production.
 //
@@ -45,11 +45,18 @@ func tenancyCtx(tenant uuid.UUID) (context.Context, error) {
 // the gate means the request never reached it, so this marker is absent.
 const sentinelMarker = "REACHED_DOWNSTREAM"
 
+// Paths the module registry assigns to Vendor claims (Third-party risk)
+// and Board reporting, both off by Seed default.
+const (
+	vendorClaimsPath = "/v1/oscal/component-definitions"
+	boardPath        = "/v1/board-packs"
+)
+
 // newGatedRouter wires the production middleware stack fragment relevant
 // to the gate: a canned credential -> tenancymw (derives tenant + sets
-// RLS GUC) -> featureflag.CacheMiddleware -> featureflag.Gate(key) over a
-// sentinel handler. This mirrors httpserver.go's OSCAL / board groups.
-func newGatedRouter(t *testing.T, tenantID uuid.UUID, key string) http.Handler {
+// RLS GUC) -> featureflag.CacheMiddleware -> featureflag.ModuleGate over a
+// sentinel handler on every path. This mirrors httpserver.go's chain.
+func newGatedRouter(t *testing.T, tenantID uuid.UUID) http.Handler {
 	t.Helper()
 	store := featureflag.NewStore(appPool)
 
@@ -68,8 +75,8 @@ func newGatedRouter(t *testing.T, tenantID uuid.UUID, key string) http.Handler {
 	r.Use(tenancymw.Middleware)
 	r.Use(featureflag.CacheMiddleware)
 	r.Group(func(g chi.Router) {
-		g.Use(featureflag.Gate(store, key))
-		g.Get("/gated", func(w http.ResponseWriter, _ *http.Request) {
+		g.Use(featureflag.ModuleGate(store))
+		g.Get("/*", func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(sentinelMarker))
 		})
@@ -99,20 +106,20 @@ func toggleFlagOn(t *testing.T, tenant uuid.UUID, key string) {
 	}
 }
 
-func TestGate_OSCALExport_OffReturns404(t *testing.T) {
+func TestGate_VendorClaims_OffReturns404(t *testing.T) {
 	tenant := uuid.New()
 	cleanupFlags(t, tenant)
-	r := newGatedRouter(t, tenant, "oscal.export") // OFF by Seed default
+	r := newGatedRouter(t, tenant) // OFF by Seed default
 
-	req := httptest.NewRequest(http.MethodGet, "/gated", nil)
+	req := httptest.NewRequest(http.MethodGet, vendorClaimsPath, nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("status = %d; want 404 when oscal.export is OFF (body=%s)", rec.Code, rec.Body.String())
+		t.Fatalf("status = %d; want 404 when vendor.claims is OFF (body=%s)", rec.Code, rec.Body.String())
 	}
-	if got := rec.Header().Get("X-Feature-Disabled"); got != "oscal.export" {
-		t.Errorf("X-Feature-Disabled = %q; want oscal.export", got)
+	if got := rec.Header().Get("X-Feature-Disabled"); got != "vendor.claims" {
+		t.Errorf("X-Feature-Disabled = %q; want vendor.claims", got)
 	}
 	// Clean disabled shape; the sentinel must NOT have run.
 	if rec.Body.String() == sentinelMarker {
@@ -135,9 +142,9 @@ func TestGate_OSCALExport_OffReturns404(t *testing.T) {
 func TestGate_BoardReporting_OffReturns404(t *testing.T) {
 	tenant := uuid.New()
 	cleanupFlags(t, tenant)
-	r := newGatedRouter(t, tenant, "board.reporting") // OFF by Seed default
+	r := newGatedRouter(t, tenant) // OFF by Seed default
 
-	req := httptest.NewRequest(http.MethodGet, "/gated", nil)
+	req := httptest.NewRequest(http.MethodGet, boardPath, nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -149,18 +156,18 @@ func TestGate_BoardReporting_OffReturns404(t *testing.T) {
 	}
 }
 
-func TestGate_OSCALExport_OnReachesHandler(t *testing.T) {
+func TestGate_VendorClaims_OnReachesHandler(t *testing.T) {
 	tenant := uuid.New()
 	cleanupFlags(t, tenant)
-	toggleFlagOn(t, tenant, "oscal.export")
-	r := newGatedRouter(t, tenant, "oscal.export")
+	toggleFlagOn(t, tenant, "vendor.claims")
+	r := newGatedRouter(t, tenant)
 
-	req := httptest.NewRequest(http.MethodGet, "/gated", nil)
+	req := httptest.NewRequest(http.MethodGet, vendorClaimsPath, nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d; want 200 when oscal.export is ON (body=%s)", rec.Code, rec.Body.String())
+		t.Fatalf("status = %d; want 200 when vendor.claims is ON (body=%s)", rec.Code, rec.Body.String())
 	}
 	if rec.Body.String() != sentinelMarker {
 		t.Errorf("body = %q; want sentinel (downstream should have run)", rec.Body.String())
@@ -171,9 +178,9 @@ func TestGate_BoardReporting_OnReachesHandler(t *testing.T) {
 	tenant := uuid.New()
 	cleanupFlags(t, tenant)
 	toggleFlagOn(t, tenant, "board.reporting")
-	r := newGatedRouter(t, tenant, "board.reporting")
+	r := newGatedRouter(t, tenant)
 
-	req := httptest.NewRequest(http.MethodGet, "/gated", nil)
+	req := httptest.NewRequest(http.MethodGet, boardPath, nil)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, req)
 
@@ -183,7 +190,7 @@ func TestGate_BoardReporting_OnReachesHandler(t *testing.T) {
 }
 
 // TestGate_RLSIsolation proves the gate decision is per-tenant: tenant A
-// toggling oscal.export ON does NOT make the route reachable for tenant B
+// toggling vendor.claims ON does NOT make the route reachable for tenant B
 // (whose flag stays at the Seed default OFF). This exercises constitutional
 // invariant #6 — the flag override row is RLS-scoped, so the gate read for
 // tenant B never sees tenant A's row.
@@ -193,20 +200,20 @@ func TestGate_RLSIsolation(t *testing.T) {
 	cleanupFlags(t, tenantA)
 	cleanupFlags(t, tenantB)
 
-	toggleFlagOn(t, tenantA, "oscal.export") // only A toggles ON
+	toggleFlagOn(t, tenantA, "vendor.claims") // only A toggles ON
 
 	// Tenant A: reachable.
-	ra := newGatedRouter(t, tenantA, "oscal.export")
+	ra := newGatedRouter(t, tenantA)
 	recA := httptest.NewRecorder()
-	ra.ServeHTTP(recA, httptest.NewRequest(http.MethodGet, "/gated", nil))
+	ra.ServeHTTP(recA, httptest.NewRequest(http.MethodGet, vendorClaimsPath, nil))
 	if recA.Code != http.StatusOK {
 		t.Fatalf("tenant A status = %d; want 200 (A toggled ON)", recA.Code)
 	}
 
 	// Tenant B: still gated (404). A's override must not leak across RLS.
-	rb := newGatedRouter(t, tenantB, "oscal.export")
+	rb := newGatedRouter(t, tenantB)
 	recB := httptest.NewRecorder()
-	rb.ServeHTTP(recB, httptest.NewRequest(http.MethodGet, "/gated", nil))
+	rb.ServeHTTP(recB, httptest.NewRequest(http.MethodGet, vendorClaimsPath, nil))
 	if recB.Code != http.StatusNotFound {
 		t.Fatalf("tenant B status = %d; want 404 (B never toggled; RLS must isolate A's override)", recB.Code)
 	}
