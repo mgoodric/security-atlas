@@ -139,6 +139,7 @@ import {
   sanitizeFilters,
   type SavedView,
 } from "./saved-views";
+import { pageTitle } from "@/lib/page-titles";
 
 const FILTER_KEYS: (keyof ControlFilters)[] = [
   "framework",
@@ -1097,7 +1098,7 @@ function ControlsPageInner() {
   if (listQ.isLoading) {
     return (
       <ListPage
-        title="Controls"
+        title={pageTitle("/controls")}
         subtitle={subtitle}
         actions={actions}
         filterRow={
@@ -1111,7 +1112,11 @@ function ControlsPageInner() {
 
   if (listQ.isError) {
     return (
-      <ListPage title="Controls" subtitle={subtitle} actions={actions}>
+      <ListPage
+        title={pageTitle("/controls")}
+        subtitle={subtitle}
+        actions={actions}
+      >
         <Alert variant="destructive" data-testid="controls-load-error">
           <AlertTitle>Could not load controls</AlertTitle>
           <AlertDescription>{(listQ.error as Error).message}</AlertDescription>
@@ -1167,7 +1172,7 @@ function ControlsPageInner() {
 
   return (
     <ListPage
-      title="Controls"
+      title={pageTitle("/controls")}
       subtitle={subtitle}
       actions={actions}
       filterRow={

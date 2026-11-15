@@ -120,6 +120,7 @@ import {
 } from "./sort";
 import { SeverityPill } from "./severity-pill";
 import { SortableHeader } from "./sortable-header";
+import { pageTitle } from "@/lib/page-titles";
 
 // Slice 244 — six filter keys. Order mirrors the mockup
 // (Plans/_archive/mockups/risks.html lines 126-173) with one local deviation:
@@ -882,7 +883,7 @@ function RisksPageInner() {
   if (risksQ.isLoading) {
     return (
       <ListPage
-        title="Risk register"
+        title={pageTitle("/risks")}
         subtitle={subtitle}
         actions={actions}
         filterRow={
@@ -896,7 +897,11 @@ function RisksPageInner() {
 
   if (risksQ.isError) {
     return (
-      <ListPage title="Risk register" subtitle={subtitle} actions={actions}>
+      <ListPage
+        title={pageTitle("/risks")}
+        subtitle={subtitle}
+        actions={actions}
+      >
         <Alert variant="destructive" data-testid="risks-load-error">
           <AlertTitle>Could not load risks</AlertTitle>
           <AlertDescription>{(risksQ.error as Error).message}</AlertDescription>
@@ -965,7 +970,7 @@ function RisksPageInner() {
 
   return (
     <ListPage
-      title="Risk register"
+      title={pageTitle("/risks")}
       subtitle={subtitle}
       actions={actions}
       filterRow={

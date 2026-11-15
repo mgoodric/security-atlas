@@ -3,9 +3,10 @@
 // so metadata lives in this sibling server-component layout.
 
 import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-titles";
 
 export const metadata: Metadata = {
-  title: "Action Plans",
+  title: pageTitle("/action-plans"),
 };
 
 export default function ActionPlansLayout({

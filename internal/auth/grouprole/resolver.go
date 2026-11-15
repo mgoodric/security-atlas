@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/auth/users"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
@@ -129,11 +130,15 @@ func (r *Resolver) Derive(ctx context.Context, in DeriveInput) (DeriveResult, er
 	current := setOf(currentRoles)
 
 	// 3. Tenant admin count + whether THIS user holds admin manually — inputs to
-	//    the last-admin guard (AC-5).
-	adminCount, err := q.CountTenantAdmins(ctx, tID)
+	//    the last-admin guard (AC-5). The count is of ACTIVE admins and is
+	//    taken under the tenant's admin-roster lock, the same lock the admin
+	//    API's revoke and role replacement take, so a reconcile and a revoke
+	//    cannot both remove one of the last two admins (#2261).
+	guard, err := users.LockAdmins(ctx, q, tenantID)
 	if err != nil {
-		return DeriveResult{}, fmt.Errorf("grouprole: count admins: %w", err)
+		return DeriveResult{}, fmt.Errorf("grouprole: %w", err)
 	}
+	adminCount := guard.Before()
 	userHoldsManualAdmin, err := q.HasManualRole(ctx, dbx.HasManualRoleParams{
 		TenantID: tID, UserID: in.UserID, Role: roleAdmin,
 	})
@@ -145,7 +150,7 @@ func (r *Resolver) Derive(ctx context.Context, in DeriveInput) (DeriveResult, er
 	plan := planReconcile(reconcileState{
 		target:               target,
 		current:              current,
-		tenantAdminCount:     int(adminCount),
+		tenantAdminCount:     adminCount,
 		userHoldsManualAdmin: userHoldsManualAdmin,
 	})
 

@@ -9,9 +9,10 @@
 // sibling server-component layout (the /settings pattern, slice 248).
 
 import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-titles";
 
 export const metadata: Metadata = {
-  title: "Vendor Claims",
+  title: pageTitle("/oscal/component-definitions"),
 };
 
 export default function VendorClaimsLayout({
