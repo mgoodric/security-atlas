@@ -202,8 +202,12 @@ func toSideWire(d *frameworkscope.Decision) *decisionSideWire {
 // justification_changed) with both predicates, so the approver of a
 // revision in review reads the changes rather than the whole list.
 // baseline is null when no other revision is activated; every decision is
-// then `added`. A read: any tenant credential may call it, approvers
-// included.
+// then `added`. reference_changes lists, apart from changes, the
+// requirements whose implementation reference alone changed (#2214), so the
+// four kinds' counts are unchanged. The baseline is the revision activated
+// now, whatever the state of the one asked about: the diff of a superseded
+// revision compares it against the current activated revision. A read: any
+// tenant credential may call it, approvers included.
 func (h *Handler) DiffApplicability(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
 	if !ok {
@@ -223,17 +227,6 @@ func (h *Handler) DiffApplicability(w http.ResponseWriter, r *http.Request) {
 		httperr.WriteInternal(w, r, "diff applicability", err)
 		return
 	}
-	changes := make([]decisionChangeWire, len(d.Changes))
-	for i, c := range d.Changes {
-		changes[i] = decisionChangeWire{
-			RequirementID: c.RequirementID.String(),
-			Code:          c.Code,
-			Title:         c.Title,
-			Change:        c.Kind,
-			Before:        toSideWire(c.Before),
-			After:         toSideWire(c.After),
-		}
-	}
 	var baseline any
 	var basePredicate json.RawMessage
 	if d.Baseline != nil {
@@ -248,8 +241,24 @@ func (h *Handler) DiffApplicability(w http.ResponseWriter, r *http.Request) {
 			"before":  basePredicate,
 			"after":   json.RawMessage(d.Scope.Predicate),
 		},
-		"changes": changes,
+		"changes":           toChangesWire(d.Changes),
+		"reference_changes": toChangesWire(d.ReferenceChanges),
 	})
+}
+
+func toChangesWire(cs []frameworkscope.DecisionChange) []decisionChangeWire {
+	out := make([]decisionChangeWire, len(cs))
+	for i, c := range cs {
+		out[i] = decisionChangeWire{
+			RequirementID: c.RequirementID.String(),
+			Code:          c.Code,
+			Title:         c.Title,
+			Change:        c.Kind,
+			Before:        toSideWire(c.Before),
+			After:         toSideWire(c.After),
+		}
+	}
+	return out
 }
 
 // ApplicabilityAsOf — GET /v1/framework-scopes/applicability?framework_version=…&as_of=….

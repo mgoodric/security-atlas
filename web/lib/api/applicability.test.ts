@@ -4,6 +4,8 @@ import {
   applicabilityQuery,
   buildSoAExportURL,
   defaultRevision,
+  describeReferenceChange,
+  describeReferenceMove,
   describeSide,
   isFrozen,
   soaTitle,
@@ -110,6 +112,76 @@ describe("summarizeChanges", () => {
       decision_changed: 1,
       justification_changed: 0,
     });
+  });
+});
+
+describe("describeReferenceMove", () => {
+  const row = (
+    before: string | null,
+    after: string | null,
+  ): ApplicabilityChange => ({
+    requirement_id: "r",
+    code: "A.5.1",
+    title: "",
+    change: "justification_changed",
+    before:
+      before === null
+        ? null
+        : {
+            decision: "excluded",
+            justification: "x",
+            implementation_ref: before,
+          },
+    after:
+      after === null
+        ? null
+        : {
+            decision: "excluded",
+            justification: "y",
+            implementation_ref: after,
+          },
+  });
+  it("names a moved reference on a change row", () => {
+    expect(describeReferenceMove(row("wiki/a", "wiki/b"))).toBe(
+      "reference: wiki/a → wiki/b",
+    );
+    expect(describeReferenceMove(row("", "wiki/b"))).toBe(
+      "reference: (none) → wiki/b",
+    );
+  });
+  it("is null when the reference is unchanged or a side is missing", () => {
+    expect(describeReferenceMove(row("wiki/a", "wiki/a"))).toBeNull();
+    expect(describeReferenceMove(row(null, "wiki/b"))).toBeNull();
+    expect(describeReferenceMove(row("wiki/a", null))).toBeNull();
+  });
+});
+
+describe("describeReferenceChange", () => {
+  const change = (before: string, after: string) => ({
+    requirement_id: "r",
+    code: "A.5.1",
+    title: "",
+    change: "reference_changed" as const,
+    before: {
+      decision: "applicable" as const,
+      justification: "",
+      implementation_ref: before,
+    },
+    after: {
+      decision: "applicable" as const,
+      justification: "",
+      implementation_ref: after,
+    },
+  });
+  it("names the reference before and after", () => {
+    expect(describeReferenceChange(change("wiki/a", "wiki/b"))).toBe(
+      "reference changed: wiki/a → wiki/b",
+    );
+  });
+  it("marks an empty side as none", () => {
+    expect(describeReferenceChange(change("", "wiki/b"))).toBe(
+      "reference changed: (none) → wiki/b",
+    );
   });
 });
 
