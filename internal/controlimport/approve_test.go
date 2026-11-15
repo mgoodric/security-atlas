@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"github.com/mgoodric/security-atlas/internal/control"
 )
 
@@ -25,11 +27,19 @@ func TestBundleIDFor(t *testing.T) {
 		"ünïcode":               "n-code",
 		"Ctl_1.a":               "ctl_1.a",
 		strings.Repeat("a", 80): strings.Repeat("a", 64),
+		// uuid-shaped organisation IDs starting a-f (#2255 refuses a
+		// uuid-shaped bundle_id): 36-char, 32-hex and braced forms.
+		"AB6F2C1E-1111-4222-8333-444455556666":   "c-ab6f2c1e-1111-4222-8333-444455556666",
+		"ab6f2c1e111142228333444455556666":       "c-ab6f2c1e111142228333444455556666",
+		"{ab6f2c1e-1111-4222-8333-444455556666}": "c-ab6f2c1e-1111-4222-8333-444455556666",
 	}
 	for in, want := range cases {
 		got := BundleIDFor(in)
 		if got != want {
 			t.Errorf("BundleIDFor(%q) = %q, want %q", in, got, want)
+		}
+		if _, err := uuid.Parse(got); err == nil {
+			t.Errorf("BundleIDFor(%q) = %q parses as a uuid", in, got)
 		}
 		m := control.Manifest{
 			BundleSchemaVersion: control.BundleSchemaVersion, BundleID: got, Title: "t",
