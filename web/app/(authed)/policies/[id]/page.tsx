@@ -34,7 +34,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { APIError } from "@/lib/api/base";
 import { fetchPolicyDetail } from "@/lib/api/policies";
-import { renderMarkdown } from "@/lib/markdown";
+import { Markdown } from "@/components/markdown";
 
 function statusPillVariant(
   status: string,
@@ -130,7 +130,6 @@ export default function PolicyDetailPage({
   }
 
   const { policy, ack_rate } = data;
-  const bodyHtml = renderMarkdown(policy.body_md);
   const sourceHref = safeHttpUrl(policy.source_url);
 
   return (
@@ -279,15 +278,10 @@ export default function PolicyDetailPage({
           <CardTitle>Policy text</CardTitle>
         </CardHeader>
         <CardContent>
-          {bodyHtml ? (
-            <div
-              className="prose prose-sm max-w-none break-words"
+          {policy.body_md.trim() ? (
+            <Markdown
+              source={policy.body_md}
               data-testid="policy-detail-body"
-              // Safe: renderMarkdown HTML-escapes the input before any
-              // transform and only emits a fixed grammar of safe tags
-              // (see web/lib/markdown.ts). No raw body_md byte reaches
-              // the DOM unescaped.
-              dangerouslySetInnerHTML={{ __html: bodyHtml }}
             />
           ) : (
             <p

@@ -33,7 +33,7 @@ export default function ComponentDefinitionsPage() {
       ),
   });
 
-  // The `oscal.export` flag is checked server-side by FeatureGate in
+  // The Vendor claims module is checked server-side by FeatureGate in
   // ./layout.tsx (#2092); this page only mounts when the module is on.
   return (
     <PageShell
