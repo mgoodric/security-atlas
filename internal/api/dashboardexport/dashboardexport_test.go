@@ -552,7 +552,7 @@ func TestSlice269_PanelTable_PerPanelShape(t *testing.T) {
 		{"framework_posture", 8, 2}, // #2112 covered_by_exception_pct; #2114 framework_version_id + scope_set
 		{"risks", 8, 1},
 		{"freshness", 4, 2}, // 1 summary + 1 class row
-		{"drift", 3, 2},     // 1 window summary + 1 flipped-out row
+		{"drift", 4, 2},     // 1 window summary + 1 flipped-out row; #2195 adds change
 		{"upcoming", 5, 1},
 		{"activity", 6, 1},
 	}
