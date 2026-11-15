@@ -80,7 +80,10 @@ type User struct {
 	// TimeZone is an IANA timezone name (e.g. "America/Los_Angeles") or
 	// "" (empty = browser-derived; the backend never invents a timezone).
 	// Slice 108 added the column via an additive ALTER on users.
-	TimeZone  string
+	TimeZone string
+	// Theme is the /settings appearance choice: "system" (follows the
+	// OS), "light", "dark", or "" when the user has never chosen (#2142).
+	Theme     string
 	CreatedAt time.Time
 	UpdatedAt time.Time
 }
@@ -717,6 +720,7 @@ type UpdateProfileInput struct {
 	ID          uuid.UUID
 	DisplayName string
 	TimeZone    string
+	Theme       string
 }
 
 // UpdateProfile writes the slice 108 PATCH /v1/me mutation. Returns the resulting
@@ -737,6 +741,7 @@ func (s *Store) UpdateProfile(ctx context.Context, in UpdateProfileInput) (User,
 		ID:          pgtype.UUID{Bytes: in.ID, Valid: true},
 		DisplayName: in.DisplayName,
 		TimeZone:    in.TimeZone,
+		Theme:       in.Theme,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -761,6 +766,7 @@ func userFromRow(row dbx.User) User {
 		IdpIssuer:   row.IdpIssuer,
 		IdpSubject:  row.IdpSubject,
 		TimeZone:    row.TimeZone,
+		Theme:       row.Theme,
 		CreatedAt:   row.CreatedAt.Time,
 		UpdatedAt:   row.UpdatedAt.Time,
 	}

@@ -10,11 +10,12 @@
 // so we can test against a minimal stub without a DOM. NO vendor-
 // prefixed test tokens.
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 import {
   applyPersistedThemeClass,
   applyThemeClass,
+  applyThemeToDocument,
   DARK_CLASS,
   isDarkActive,
   type ClassListTarget,
@@ -223,5 +224,56 @@ describe("applyPersistedThemeClass -- early-paint storage read", () => {
     // (&:is(.dark *))` selector keys off this exact token. Renaming the
     // constant without updating the CSS would silently break the wire.
     expect(DARK_CLASS).toBe("dark");
+  });
+});
+
+// #2142 -- the shared picker / <ThemeServerSync> apply path. The vitest
+// env has no DOM, so `document` and `window.matchMedia` are stubbed with
+// the minimum the helper touches.
+describe("applyThemeToDocument -- live-document apply", () => {
+  function stubDocument(prefersDark: boolean) {
+    const html = Object.assign(makeTarget(), {
+      attrs: new Map<string, string>(),
+      setAttribute(name: string, value: string) {
+        this.attrs.set(name, value);
+      },
+    });
+    vi.stubGlobal("document", { documentElement: html });
+    vi.stubGlobal("window", {
+      matchMedia: (query: string) => ({
+        matches: query === "(prefers-color-scheme: dark)" && prefersDark,
+      }),
+    });
+    return html;
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  test("dark writes data-theme and adds the class whatever the OS", () => {
+    const html = stubDocument(false);
+    applyThemeToDocument("dark");
+    expect(html.attrs.get("data-theme")).toBe("dark");
+    expect(html.classes.has(DARK_CLASS)).toBe(true);
+  });
+
+  test("light removes the class even with the OS in dark", () => {
+    const html = stubDocument(true);
+    html.classList.add(DARK_CLASS);
+    applyThemeToDocument("light");
+    expect(html.attrs.get("data-theme")).toBe("light");
+    expect(html.classes.has(DARK_CLASS)).toBe(false);
+  });
+
+  test("system follows the OS preference", () => {
+    const dark = stubDocument(true);
+    applyThemeToDocument("system");
+    expect(dark.attrs.get("data-theme")).toBe("system");
+    expect(dark.classes.has(DARK_CLASS)).toBe(true);
+
+    const light = stubDocument(false);
+    applyThemeToDocument("system");
+    expect(light.classes.has(DARK_CLASS)).toBe(false);
   });
 });
