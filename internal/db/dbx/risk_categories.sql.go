@@ -258,6 +258,53 @@ func (q *Queries) LockRiskCategory(ctx context.Context, arg LockRiskCategoryPara
 	return i, err
 }
 
+const resolveRiskCategoriesByName = `-- name: ResolveRiskCategoriesByName :many
+SELECT id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
+FROM org_risk_categories
+WHERE tenant_id = $1
+  AND lower(btrim(name)) = lower(btrim($2::text))
+ORDER BY slug
+`
+
+type ResolveRiskCategoriesByNameParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Name     string      `json:"name"`
+}
+
+// #1815: the tenant's categories whose display name matches name, case-
+// insensitively on the trimmed value, archived included. Active names are
+// unique per tenant, but an archived category can share one, so a caller
+// gets every match and refuses more than one as ambiguous.
+func (q *Queries) ResolveRiskCategoriesByName(ctx context.Context, arg ResolveRiskCategoriesByNameParams) ([]OrgRiskCategory, error) {
+	rows, err := q.db.Query(ctx, resolveRiskCategoriesByName, arg.TenantID, arg.Name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrgRiskCategory
+	for rows.Next() {
+		var i OrgRiskCategory
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Slug,
+			&i.Name,
+			&i.Description,
+			&i.Archived,
+			&i.IsDefault,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const resolveRiskCategory = `-- name: ResolveRiskCategory :one
 SELECT id, tenant_id, slug, name, description, archived, is_default, created_at, updated_at
 FROM org_risk_categories

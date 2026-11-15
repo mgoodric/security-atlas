@@ -28,6 +28,17 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (slug = sqlc.arg(ref)::text OR id::text = sqlc.arg(ref)::text)
 LIMIT 1;
 
+-- name: ResolveRiskCategoriesByName :many
+-- #1815: the tenant's categories whose display name matches name, case-
+-- insensitively on the trimmed value, archived included. Active names are
+-- unique per tenant, but an archived category can share one, so a caller
+-- gets every match and refuses more than one as ambiguous.
+SELECT *
+FROM org_risk_categories
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND lower(btrim(name)) = lower(btrim(sqlc.arg(name)::text))
+ORDER BY slug;
+
 -- ===== #1810: category management =====
 
 -- name: ListRiskCategoriesWithUsage :many
