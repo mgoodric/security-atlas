@@ -68,12 +68,20 @@
 //     risks → /risks/hierarchy?focus=<id>, evidence → /evidence).
 //   * Arrow keys move selection; Enter follows the active link; Esc
 //     closes the popover.
+//   * #2213 — below `lg` (1,024px) the input is folded behind a search
+//     icon button so the top bar fits a phone or a 768px tablet. The
+//     button (or ⌘K) reveals the input as a full-width row under the
+//     bar; Esc or an outside click folds it again and returns focus to
+//     the button. From `lg` up nothing changes: the input is always
+//     visible and the button is not rendered.
 
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+
+import { cn } from "@/lib/utils";
 
 const DEBOUNCE_MS = 250; // AC-6
 
@@ -325,14 +333,25 @@ export function GlobalSearch() {
   const [activeIndex, setActiveIndex] = useState(0);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  // #2213 — whether the input is unfolded below `lg`. Ignored from `lg`
+  // up, where the input is always shown.
+  const [revealed, setRevealed] = useState(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const toggleRef = useRef<HTMLButtonElement | null>(null);
+
+  // Focus the input once the unfolded row has rendered. It is
+  // `display:none` until then, so focusing in the click handler is lost.
+  useEffect(() => {
+    if (revealed) inputRef.current?.focus();
+  }, [revealed]);
 
   // ⌘K / Ctrl+K global focus shortcut.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (isShortcutTrigger(e)) {
         e.preventDefault();
+        setRevealed(true);
         inputRef.current?.focus();
         inputRef.current?.select();
         setOpen(true);
@@ -348,7 +367,10 @@ export function GlobalSearch() {
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) setOpen(false);
+      if (!containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setRevealed(false);
+      }
     };
     document.addEventListener("mousedown", onDown);
     return () => {
@@ -476,7 +498,15 @@ export function GlobalSearch() {
     (e: React.KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Escape") {
         setOpen(false);
-        inputRef.current?.blur();
+        // Below `lg` the input folds away again; hand focus back to the
+        // button that unfolded it. From `lg` up the button is hidden, so
+        // the input just blurs as before.
+        if (revealed && toggleRef.current?.offsetParent) {
+          toggleRef.current.focus();
+        } else {
+          inputRef.current?.blur();
+        }
+        setRevealed(false);
         return;
       }
       if (e.key === "ArrowDown") {
@@ -498,11 +528,12 @@ export function GlobalSearch() {
         if (!hit) return;
         const href = hrefForHit(hit);
         setOpen(false);
+        setRevealed(false);
         setQuery("");
         router.push(href);
       }
     },
-    [activeIndex, flatHits, router],
+    [activeIndex, flatHits, revealed, router],
   );
 
   // Stable flat index for each (type, idx-within-type) tuple so we
@@ -532,37 +563,70 @@ export function GlobalSearch() {
 
   return (
     <div ref={containerRef} data-testid="global-search" className="relative">
-      <div className="relative">
-        <SearchIcon />
-        <input
-          ref={inputRef}
-          type="text"
-          placeholder="Search controls, evidence, risks…"
-          value={query}
-          onChange={(e) => {
-            setQuery(e.target.value);
+      <button
+        ref={toggleRef}
+        type="button"
+        data-testid="global-search-toggle"
+        aria-label="Search"
+        aria-expanded={revealed}
+        onClick={() => {
+          if (revealed) {
+            setRevealed(false);
+            setOpen(false);
+          } else {
+            setRevealed(true);
             setOpen(true);
-          }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={onKeyDown}
-          data-testid="global-search-input"
-          aria-label="Global search"
-          role="combobox"
-          aria-haspopup="listbox"
-          aria-expanded={showPopover}
-          aria-controls={LISTBOX_ID}
-          aria-activedescendant={activeOptionId || undefined}
-          aria-autocomplete="list"
-          className="pl-8 pr-12 py-1.5 w-64 text-sm bg-muted/40 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:bg-background"
-        />
-        <kbd
-          aria-hidden
-          className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-muted-foreground bg-background border border-border px-1 rounded"
-        >
-          ⌘K
-        </kbd>
-      </div>
+          }
+        }}
+        className="lg:hidden inline-flex h-9 w-9 items-center justify-center rounded-md text-foreground hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      >
+        <SearchIcon className="h-4 w-4 text-muted-foreground" />
+      </button>
       {/*
+        #2213 — below `lg` this row is hidden until the button above
+        unfolds it, then it spans the viewport under the 56px top bar.
+        From `lg` up it is the inline input it always was.
+      */}
+      <div
+        data-testid="global-search-field"
+        className={cn(
+          "lg:static lg:block lg:border-0 lg:bg-transparent lg:p-0",
+          revealed
+            ? "fixed inset-x-0 top-14 z-40 border-b bg-background p-3"
+            : "hidden",
+        )}
+      >
+        <div className="relative">
+          <SearchIcon className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
+          <input
+            ref={inputRef}
+            type="text"
+            placeholder="Search controls, evidence, risks…"
+            value={query}
+            onChange={(e) => {
+              setQuery(e.target.value);
+              setOpen(true);
+            }}
+            onFocus={() => setOpen(true)}
+            onKeyDown={onKeyDown}
+            data-testid="global-search-input"
+            aria-label="Global search"
+            role="combobox"
+            aria-haspopup="listbox"
+            aria-expanded={showPopover}
+            aria-controls={LISTBOX_ID}
+            aria-activedescendant={activeOptionId || undefined}
+            aria-autocomplete="list"
+            className="pl-8 pr-12 py-1.5 w-full lg:w-64 text-sm bg-muted/40 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:bg-background"
+          />
+          <kbd
+            aria-hidden
+            className="absolute right-2 top-1/2 -translate-y-1/2 font-mono text-[10px] text-muted-foreground bg-background border border-border px-1 rounded"
+          >
+            ⌘K
+          </kbd>
+        </div>
+        {/*
         Slice 361 — visually-hidden aria-live=polite region announcing
         the result count whenever it updates. Only mounted when the
         popover is open + not in the loading flash; otherwise an SR
@@ -570,67 +634,69 @@ export function GlobalSearch() {
         OUTSIDE the popover so SR users hear the count without having
         to focus into the listbox. WCAG 4.1.3 Status Messages.
       */}
-      {showPopover && !loading ? (
-        <div
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          data-testid="global-search-live-region"
-          className="sr-only"
-        >
-          {resultCountAnnouncement(flatHits.length)}
-        </div>
-      ) : null}
-      {showPopover ? (
-        <div
-          id={LISTBOX_ID}
-          role="listbox"
-          aria-label="Search results"
-          data-testid="global-search-popover"
-          className="absolute right-0 top-full mt-1 w-96 max-h-96 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg z-50"
-        >
-          {loading ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
-              Searching…
-            </div>
-          ) : flatHits.length === 0 ? (
-            <div className="px-3 py-2 text-xs text-muted-foreground">
-              No matches
-            </div>
-          ) : (
-            <>
-              {GROUP_ORDER.map((type) => {
-                const rows = grouped[type];
-                if (rows.length === 0) return null;
-                return (
-                  <ResultGroup
-                    key={type}
-                    type={type}
-                    rows={rows}
-                    total={counts[type]}
-                    onShowAll={() => void showAll(type)}
-                    activeIndex={activeIndex}
-                    flatIndexFor={(idx) => flatIndexFor(type, idx)}
-                    onRowClick={() => {
-                      setOpen(false);
-                      setQuery("");
-                    }}
-                  />
-                );
-              })}
-              {partialTypes.length > 0 ? (
-                <div
-                  data-testid="global-search-partial"
-                  className="px-3 py-2 text-[10px] text-muted-foreground border-t border-border"
-                >
-                  Some result types are hidden by your role:{" "}
-                  {partialTypes.join(", ")}
-                </div>
-              ) : null}
-            </>
-          )}
-        </div>
-      ) : null}
+        {showPopover && !loading ? (
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            data-testid="global-search-live-region"
+            className="sr-only"
+          >
+            {resultCountAnnouncement(flatHits.length)}
+          </div>
+        ) : null}
+        {showPopover ? (
+          <div
+            id={LISTBOX_ID}
+            role="listbox"
+            aria-label="Search results"
+            data-testid="global-search-popover"
+            className="absolute right-0 top-full mt-1 w-96 max-w-[calc(100vw-1rem)] max-h-96 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg z-50"
+          >
+            {loading ? (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                Searching…
+              </div>
+            ) : flatHits.length === 0 ? (
+              <div className="px-3 py-2 text-xs text-muted-foreground">
+                No matches
+              </div>
+            ) : (
+              <>
+                {GROUP_ORDER.map((type) => {
+                  const rows = grouped[type];
+                  if (rows.length === 0) return null;
+                  return (
+                    <ResultGroup
+                      key={type}
+                      type={type}
+                      rows={rows}
+                      total={counts[type]}
+                      onShowAll={() => void showAll(type)}
+                      activeIndex={activeIndex}
+                      flatIndexFor={(idx) => flatIndexFor(type, idx)}
+                      onRowClick={() => {
+                        setOpen(false);
+                        setRevealed(false);
+                        setQuery("");
+                      }}
+                    />
+                  );
+                })}
+                {partialTypes.length > 0 ? (
+                  <div
+                    data-testid="global-search-partial"
+                    className="px-3 py-2 text-[10px] text-muted-foreground border-t border-border"
+                  >
+                    Some result types are hidden by your role:{" "}
+                    {partialTypes.join(", ")}
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -730,10 +796,10 @@ const GROUP_LABELS: Record<SearchHitType, string> = {
   anchors: "SCF anchors",
 };
 
-function SearchIcon() {
+function SearchIcon({ className }: { className: string }) {
   return (
     <svg
-      className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground"
+      className={className}
       viewBox="0 0 20 20"
       fill="currentColor"
       aria-hidden
