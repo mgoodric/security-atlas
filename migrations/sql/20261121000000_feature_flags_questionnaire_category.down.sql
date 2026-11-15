@@ -1,4 +1,4 @@
--- Reverses 20261119000000_feature_flags_questionnaire_category.sql:
+-- Reverses 20261121000000_feature_flags_questionnaire_category.sql:
 -- restores the slice-059 feature_flags category CHECK.
 --
 -- A 'questionnaire' row is a tenant's stored switch. It is not deleted
@@ -12,7 +12,7 @@ BEGIN
     SELECT count(*) INTO n FROM feature_flags WHERE category = 'questionnaire';
     IF n > 0 THEN
         RAISE EXCEPTION 'feature_flags holds % questionnaire row(s); refusing to delete tenant switches', n
-            USING HINT = 'Remove those rows deliberately before reversing 20261119000000.';
+            USING HINT = 'Remove those rows deliberately before reversing 20261121000000.';
     END IF;
 END
 $$;

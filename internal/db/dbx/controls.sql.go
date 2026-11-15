@@ -332,6 +332,58 @@ func (q *Queries) InsertControlVersion(ctx context.Context, arg InsertControlVer
 	return i, err
 }
 
+const insertSCFRemapProposal = `-- name: InsertSCFRemapProposal :execrows
+INSERT INTO scf_remap_proposals (
+    tenant_id, control_id, bundle_id, legacy_anchor_id, legacy_scf_id,
+    legacy_release, target_framework_version_id, target_release, class,
+    status, successor_scf_ids
+) VALUES (
+    $1, $2, $3,
+    $4, $5,
+    $6, $7,
+    $8, $9, $10,
+    $11::text[]
+)
+ON CONFLICT (control_id, target_framework_version_id) DO NOTHING
+`
+
+type InsertSCFRemapProposalParams struct {
+	TenantID                 pgtype.UUID `json:"tenant_id"`
+	ControlID                pgtype.UUID `json:"control_id"`
+	BundleID                 string      `json:"bundle_id"`
+	LegacyAnchorID           pgtype.UUID `json:"legacy_anchor_id"`
+	LegacyScfID              string      `json:"legacy_scf_id"`
+	LegacyRelease            string      `json:"legacy_release"`
+	TargetFrameworkVersionID pgtype.UUID `json:"target_framework_version_id"`
+	TargetRelease            string      `json:"target_release"`
+	Class                    string      `json:"class"`
+	Status                   string      `json:"status"`
+	SuccessorScfIds          []string    `json:"successor_scf_ids"`
+}
+
+// Issue #1775: queue one remap proposal for a control on a legacy SCF
+// anchor. Written by the migrate role during `catalog import-scf`; a re-run
+// of the same import leaves the existing proposal alone.
+func (q *Queries) InsertSCFRemapProposal(ctx context.Context, arg InsertSCFRemapProposalParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertSCFRemapProposal,
+		arg.TenantID,
+		arg.ControlID,
+		arg.BundleID,
+		arg.LegacyAnchorID,
+		arg.LegacyScfID,
+		arg.LegacyRelease,
+		arg.TargetFrameworkVersionID,
+		arg.TargetRelease,
+		arg.Class,
+		arg.Status,
+		arg.SuccessorScfIds,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const listActiveControls = `-- name: ListActiveControls :many
 SELECT id, tenant_id, bundle_id, version, scf_id, scf_anchor_id, title,
        control_family, implementation_type, owner_role, lifecycle_state,
@@ -1091,7 +1143,23 @@ SELECT
     -- '' when SCF lists no current anchor with this legacy code.
     COALESCE((SELECT s.scf_id FROM scf_anchors s
       WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
-      ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id
+      ORDER BY s.scf_id LIMIT 1), '')::text AS successor_scf_id,
+    -- #1775 remap queue: the current release's id, the legacy ID of the
+    -- current anchor with this code ('' when it lists none, or the code is
+    -- gone), every current anchor that SCF lists the legacy code as the
+    -- legacy ID of (codes and titles in the same order), and whether the
+    -- current release carries any legacy IDs at all.
+    cfv.id                AS current_framework_version_id,
+    COALESCE(ca.legacy_scf_id, '')::text AS current_anchor_legacy_scf_id,
+    ARRAY(SELECT s.scf_id FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_scf_ids,
+    ARRAY(SELECT s.title FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id AND s.legacy_scf_id = la.scf_id
+      ORDER BY s.scf_id)::text[] AS legacy_successor_titles,
+    EXISTS (SELECT 1 FROM scf_anchors s
+      WHERE s.framework_version_id = cfv.id
+        AND COALESCE(btrim(s.legacy_scf_id), '') <> '') AS current_release_has_legacy_ids
 FROM controls c
 JOIN scf_anchors la            ON la.id = c.scf_anchor_id
 JOIN framework_versions lfv    ON lfv.id = la.framework_version_id
@@ -1105,19 +1173,24 @@ ORDER BY c.tenant_id, c.bundle_id, c.id
 `
 
 type ListControlsOnLegacySCFAnchorsRow struct {
-	ControlID          pgtype.UUID `json:"control_id"`
-	TenantID           pgtype.UUID `json:"tenant_id"`
-	BundleID           string      `json:"bundle_id"`
-	ControlTitle       string      `json:"control_title"`
-	BundleManifestYaml string      `json:"bundle_manifest_yaml"`
-	LegacyAnchorID     pgtype.UUID `json:"legacy_anchor_id"`
-	LegacyScfID        string      `json:"legacy_scf_id"`
-	LegacyAnchorTitle  string      `json:"legacy_anchor_title"`
-	LegacyRelease      string      `json:"legacy_release"`
-	CurrentRelease     string      `json:"current_release"`
-	CurrentAnchorID    pgtype.UUID `json:"current_anchor_id"`
-	CurrentAnchorTitle *string     `json:"current_anchor_title"`
-	SuccessorScfID     string      `json:"successor_scf_id"`
+	ControlID                  pgtype.UUID `json:"control_id"`
+	TenantID                   pgtype.UUID `json:"tenant_id"`
+	BundleID                   string      `json:"bundle_id"`
+	ControlTitle               string      `json:"control_title"`
+	BundleManifestYaml         string      `json:"bundle_manifest_yaml"`
+	LegacyAnchorID             pgtype.UUID `json:"legacy_anchor_id"`
+	LegacyScfID                string      `json:"legacy_scf_id"`
+	LegacyAnchorTitle          string      `json:"legacy_anchor_title"`
+	LegacyRelease              string      `json:"legacy_release"`
+	CurrentRelease             string      `json:"current_release"`
+	CurrentAnchorID            pgtype.UUID `json:"current_anchor_id"`
+	CurrentAnchorTitle         *string     `json:"current_anchor_title"`
+	SuccessorScfID             string      `json:"successor_scf_id"`
+	CurrentFrameworkVersionID  pgtype.UUID `json:"current_framework_version_id"`
+	CurrentAnchorLegacyScfID   string      `json:"current_anchor_legacy_scf_id"`
+	LegacySuccessorScfIds      []string    `json:"legacy_successor_scf_ids"`
+	LegacySuccessorTitles      []string    `json:"legacy_successor_titles"`
+	CurrentReleaseHasLegacyIds bool        `json:"current_release_has_legacy_ids"`
 }
 
 // Issue #1971 (D3): active controls still bound to an anchor of an SCF
@@ -1153,6 +1226,78 @@ func (q *Queries) ListControlsOnLegacySCFAnchors(ctx context.Context, tenantID p
 			&i.CurrentAnchorID,
 			&i.CurrentAnchorTitle,
 			&i.SuccessorScfID,
+			&i.CurrentFrameworkVersionID,
+			&i.CurrentAnchorLegacyScfID,
+			&i.LegacySuccessorScfIds,
+			&i.LegacySuccessorTitles,
+			&i.CurrentReleaseHasLegacyIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSCFRemapProposals = `-- name: ListSCFRemapProposals :many
+SELECT p.id, p.control_id, p.bundle_id, c.title AS control_title,
+       p.legacy_scf_id, p.legacy_release, p.target_release, p.class,
+       p.status, p.successor_scf_ids, p.created_at
+FROM scf_remap_proposals p
+JOIN controls c ON c.id = p.control_id
+WHERE p.tenant_id = $1
+  AND ($2::text IS NULL OR p.class = $2::text)
+  AND ($3::text IS NULL OR p.status = $3::text)
+ORDER BY p.created_at DESC, p.bundle_id, p.id
+`
+
+type ListSCFRemapProposalsParams struct {
+	TenantID pgtype.UUID `json:"tenant_id"`
+	Class    *string     `json:"class"`
+	Status   *string     `json:"status"`
+}
+
+type ListSCFRemapProposalsRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	ControlID       pgtype.UUID        `json:"control_id"`
+	BundleID        string             `json:"bundle_id"`
+	ControlTitle    string             `json:"control_title"`
+	LegacyScfID     string             `json:"legacy_scf_id"`
+	LegacyRelease   string             `json:"legacy_release"`
+	TargetRelease   string             `json:"target_release"`
+	Class           string             `json:"class"`
+	Status          string             `json:"status"`
+	SuccessorScfIds []string           `json:"successor_scf_ids"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+// Issue #1775: GET /v1/controls/remap-proposals. The tenant's remap
+// proposals, newest target release first, optionally filtered by class and
+// status. RLS (tenant_read) and the explicit tenant id both bind the read.
+func (q *Queries) ListSCFRemapProposals(ctx context.Context, arg ListSCFRemapProposalsParams) ([]ListSCFRemapProposalsRow, error) {
+	rows, err := q.db.Query(ctx, listSCFRemapProposals, arg.TenantID, arg.Class, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSCFRemapProposalsRow
+	for rows.Next() {
+		var i ListSCFRemapProposalsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ControlID,
+			&i.BundleID,
+			&i.ControlTitle,
+			&i.LegacyScfID,
+			&i.LegacyRelease,
+			&i.TargetRelease,
+			&i.Class,
+			&i.Status,
+			&i.SuccessorScfIds,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}

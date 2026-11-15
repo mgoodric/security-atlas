@@ -21,7 +21,7 @@ an ordinary per-tenant feature flag, stored, audited and toggled through
 `PATCH /v1/admin/features/{key}` as before. The registry only says which
 routes and pages each switch governs. Questionnaires gets the new key
 `questionnaires.enabled` (default on, category `questionnaire`, which needed
-the CHECK widened in migration `20261119000000`).
+the CHECK widened in migration `20261121000000`).
 
 ### D2 — Board reporting and Vendor claims keep their flag keys
 
