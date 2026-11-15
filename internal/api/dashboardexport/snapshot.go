@@ -73,11 +73,14 @@ type Panels struct {
 // FrameworkPosturePanelRow mirrors the wire shape of
 // `/v1/frameworks/posture`'s rows.
 type FrameworkPosturePanelRow struct {
-	FrameworkID        string  `json:"framework_id"`
-	FrameworkVersion   string  `json:"framework_version"`
-	CoveragePct        float64 `json:"coverage_pct"`
-	FreshnessComposite float64 `json:"freshness_composite"`
-	TrendDelta90d      float64 `json:"trend_delta_90d"`
+	FrameworkID      string  `json:"framework_id"`
+	FrameworkVersion string  `json:"framework_version"`
+	CoveragePct      float64 `json:"coverage_pct"`
+	// CoveredByExceptionPct is the part of CoveragePct that rests only on
+	// active exceptions (#2112).
+	CoveredByExceptionPct float64 `json:"covered_by_exception_pct"`
+	FreshnessComposite    float64 `json:"freshness_composite"`
+	TrendDelta90d         float64 `json:"trend_delta_90d"`
 }
 
 // RiskPanelRow mirrors the relevant subset of `/v1/risks`'s rows
@@ -240,11 +243,12 @@ func (s *LivePanelSource) Snapshot(ctx context.Context) (Snapshot, error) {
 	out.Panels.FrameworkPosture = make([]FrameworkPosturePanelRow, len(postureRows))
 	for i, p := range postureRows {
 		out.Panels.FrameworkPosture[i] = FrameworkPosturePanelRow{
-			FrameworkID:        uuidStringFromPgtype(p.FrameworkID),
-			FrameworkVersion:   p.FrameworkVersion,
-			CoveragePct:        p.CoveragePct,
-			FreshnessComposite: p.FreshnessComposite,
-			TrendDelta90d:      p.TrendDelta90d,
+			FrameworkID:           uuidStringFromPgtype(p.FrameworkID),
+			FrameworkVersion:      p.FrameworkVersion,
+			CoveragePct:           p.CoveragePct,
+			CoveredByExceptionPct: p.CoveredByExceptionPct,
+			FreshnessComposite:    p.FreshnessComposite,
+			TrendDelta90d:         p.TrendDelta90d,
 		}
 	}
 

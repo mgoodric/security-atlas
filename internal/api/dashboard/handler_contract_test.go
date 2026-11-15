@@ -118,11 +118,12 @@ func TestContract_FrameworkPosture(t *testing.T) {
 	// a populated `frameworks` array and `[]` with count 0.
 	populated := stubReader{posture: []dbx.FrameworkPostureRow{
 		{
-			FrameworkID:        pgUUIDFromString(contractFrameworkA),
-			FrameworkVersion:   "2017",
-			CoveragePct:        87.5,
-			FreshnessComposite: 0.92,
-			TrendDelta90d:      3.0,
+			FrameworkID:           pgUUIDFromString(contractFrameworkA),
+			FrameworkVersion:      "2017",
+			CoveragePct:           87.5,
+			CoveredByExceptionPct: 12.5,
+			FreshnessComposite:    0.92,
+			TrendDelta90d:         3.0,
 		},
 	}}
 	empty := stubReader{posture: []dbx.FrameworkPostureRow{}}
