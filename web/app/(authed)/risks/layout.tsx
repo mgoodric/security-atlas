@@ -7,9 +7,14 @@
 // component. The canonical pattern (slice 248) is a sibling
 // server-component layout that declares the metadata and passes
 // `children` through unchanged.
+//
+// #2171: the layout also gates the whole module on its switch,
+// server-side, before the client page mounts.
 
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-titles";
+
+import { FeatureGate } from "@/components/feature-gate";
 
 export const metadata: Metadata = {
   title: pageTitle("/risks"),
@@ -20,5 +25,9 @@ export default function RisksLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return (
+    <FeatureGate page="/risks" moduleName={pageTitle("/risks")}>
+      {children}
+    </FeatureGate>
+  );
 }

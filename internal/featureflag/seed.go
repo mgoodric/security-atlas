@@ -8,7 +8,7 @@
 //   - SpineForbiddenPrefixes (the namespaces that MUST NOT be toggleable).
 //   - Store (DB-backed CRUD + audit-log writes; tenant-scoped under RLS).
 //   - Enabled(ctx, key) (package-level helper with in-request memoization).
-//   - Gate(key) (chi middleware that 404s a route when the flag is off).
+//   - ModuleGate answers 404 for a route whose module or feature is off.
 //
 // Constitutional invariants honored:
 //
@@ -98,7 +98,7 @@ var Seed = []Default{
 	{
 		Key:         "exceptions.enabled",
 		Enabled:     true,
-		Description: "Exception / waiver workflow (slice 021).",
+		Description: "Exceptions module (slice 021). Switching it off hides /v1/exceptions/* and its page; its data is kept.",
 		Category:    "controls",
 	},
 	{
@@ -108,10 +108,25 @@ var Seed = []Default{
 		Category:    "audit",
 	},
 	{
-		Key:         "oscal.export",
+		// #2171: renamed from `oscal.export`, which gated vendor claims
+		// under a misleading name. Migration 20261126000000 moves each
+		// tenant's stored value to this key.
+		Key:         "vendor.claims",
 		Enabled:     false,
-		Description: "OSCAL SSP / AP / AR / POA&M export (future slice 030). Default off pending GA.",
-		Category:    "integrations",
+		Description: "Vendor claims (OSCAL component definitions), a feature of Third-party risk. Default off pending GA.",
+		Category:    "vendor",
+	},
+	{
+		Key:         "audit.oscal_export",
+		Enabled:     true,
+		Description: "OSCAL SSP and POA&M export for an audit period, a feature of Audit periods.",
+		Category:    "audit",
+	},
+	{
+		Key:         "personnel.enabled",
+		Enabled:     true,
+		Description: "Personnel security module. Switching it off hides /v1/personnel-security/* and its page; its data, and the evidence it wrote, are kept.",
+		Category:    "personnel",
 	},
 	{
 		Key:         "board.reporting",

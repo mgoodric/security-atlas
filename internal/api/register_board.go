@@ -42,59 +42,57 @@ func (s *Server) registerBoard(root *chi.Mux, freshnessStore *freshness.Store, d
 	// the authorization chain answers 404 + {"error":"feature disabled"} on
 	// every one of them when the module is off. `board.reporting` is OFF by
 	// default pending GA.
-	root.Group(func(r chi.Router) {
-		boardH.RegisterRoutes(r)
-		// Slice 032: quarterly board pack. Extends the slice-031 monthly brief
-		// into the full board-meeting artifact — a multi-section report
-		// (posture, top risks, coverage trend, open findings, operational
-		// metrics, investment-vs-coverage, asks of the board) with a
-		// draft -> publish lifecycle. The PackGenerator reads the dashboard's
-		// per-framework posture query (#2056) plus the board-pack-owned
-		// failing-evaluations read (control_evaluations as of period_end —
-		// decision D4). The narrative is TEMPLATED — no LLM (P0 anti-criterion).
-		// Publish is gated on every section being human-approved (decision D6).
-		// Routes appended per the parallel-batch convention; the literal-suffix
-		// and deeper /sections/... routes are declared before the bare /{id}.
-		boardPackStore := board.NewPackStore(s.dbPool)
-		// Slice 273: the board-pack `vendor_burndown` section reads through
-		// the existing slice-122 high-criticality vendor burndown surface
-		// (vendor.Store.Burndown) via a tiny in-process adapter. The adapter
-		// lives at this wiring layer so internal/board stays free of an
-		// internal/vendor import (board.VendorBurndownReader is the contract).
-		// Pinned to criticality=high per slice 273 D2 — the board concern is
-		// overdue reviews on the vendors that matter.
-		boardPackGen := board.NewPackGenerator(
-			boardPackStore,
-			vendorBurndownAdapter{store: vendorStore},
-		)
-		boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
-		boardPackH.RegisterRoutes(r)
-		// Slice 440: board-narrative AI v0 (cited, numeric-verified,
-		// per-section approval). The HIGHEST-RISK AI-assist surface: an
-		// AI-drafted board-report SECTION (the control-coverage-summary
-		// section) an operator approves before it ships into the board pack.
-		// The deterministic rollup REUSES the slice-031 brief data path
-		// (boardGen.Assemble — a pure read, no board_briefs write); the seven
-		// guardrails (hybrid input, mandatory citations, numeric verification,
-		// section-shape, per-section approval, full audit, tone) are enforced
-		// server-side BEFORE the operator sees a draft. Constitutional
-		// invariants (no fabricated coverage/numbers, no cross-tenant bleed,
-		// one-click approval, local-Ollama-only) enforced by the service + the
-		// DB CHECK on board_narrative_sections (the slice-498 shared ai_assist
-		// guard). Gated with the board module under board.reporting; routes
-		// append per the parallel-batch convention.
-		boardNarrativeStore := boardnarrative.NewStore(s.dbPool, boardGen)
-		boardNarrativeSvc := boardnarrative.NewService(
-			boardNarrativeStore,
-			// Slice 499: per-tenant inference router (local-Ollama default,
-			// cloud opt-in resolved under app.current_tenant). Call site
-			// unchanged.
-			s.inferenceClient(),
-			boardNarrativeStore,
-			boardnarrative.NewAuditSink(llm.NewAuditWriter(s.dbPool)),
-			boardNarrativeStore,
-		)
-		boardNarrativeH := boardnarrativeapi.New(boardNarrativeSvc)
-		boardNarrativeH.RegisterRoutes(r)
-	})
+	boardH.RegisterRoutes(root)
+	// Slice 032: quarterly board pack. Extends the slice-031 monthly brief
+	// into the full board-meeting artifact — a multi-section report
+	// (posture, top risks, coverage trend, open findings, operational
+	// metrics, investment-vs-coverage, asks of the board) with a
+	// draft -> publish lifecycle. The PackGenerator reads the dashboard's
+	// per-framework posture query (#2056) plus the board-pack-owned
+	// failing-evaluations read (control_evaluations as of period_end —
+	// decision D4). The narrative is TEMPLATED — no LLM (P0 anti-criterion).
+	// Publish is gated on every section being human-approved (decision D6).
+	// Routes appended per the parallel-batch convention; the literal-suffix
+	// and deeper /sections/... routes are declared before the bare /{id}.
+	boardPackStore := board.NewPackStore(s.dbPool)
+	// Slice 273: the board-pack `vendor_burndown` section reads through
+	// the existing slice-122 high-criticality vendor burndown surface
+	// (vendor.Store.Burndown) via a tiny in-process adapter. The adapter
+	// lives at this wiring layer so internal/board stays free of an
+	// internal/vendor import (board.VendorBurndownReader is the contract).
+	// Pinned to criticality=high per slice 273 D2 — the board concern is
+	// overdue reviews on the vendors that matter.
+	boardPackGen := board.NewPackGenerator(
+		boardPackStore,
+		vendorBurndownAdapter{store: vendorStore},
+	)
+	boardPackH := boardapi.NewPack(boardPackGen, boardPackStore)
+	boardPackH.RegisterRoutes(root)
+	// Slice 440: board-narrative AI v0 (cited, numeric-verified,
+	// per-section approval). The HIGHEST-RISK AI-assist surface: an
+	// AI-drafted board-report SECTION (the control-coverage-summary
+	// section) an operator approves before it ships into the board pack.
+	// The deterministic rollup REUSES the slice-031 brief data path
+	// (boardGen.Assemble — a pure read, no board_briefs write); the seven
+	// guardrails (hybrid input, mandatory citations, numeric verification,
+	// section-shape, per-section approval, full audit, tone) are enforced
+	// server-side BEFORE the operator sees a draft. Constitutional
+	// invariants (no fabricated coverage/numbers, no cross-tenant bleed,
+	// one-click approval, local-Ollama-only) enforced by the service + the
+	// DB CHECK on board_narrative_sections (the slice-498 shared ai_assist
+	// guard). Gated with the board module under board.reporting; routes
+	// append per the parallel-batch convention.
+	boardNarrativeStore := boardnarrative.NewStore(s.dbPool, boardGen)
+	boardNarrativeSvc := boardnarrative.NewService(
+		boardNarrativeStore,
+		// Slice 499: per-tenant inference router (local-Ollama default,
+		// cloud opt-in resolved under app.current_tenant). Call site
+		// unchanged.
+		s.inferenceClient(),
+		boardNarrativeStore,
+		boardnarrative.NewAuditSink(llm.NewAuditWriter(s.dbPool)),
+		boardNarrativeStore,
+	)
+	boardNarrativeH := boardnarrativeapi.New(boardNarrativeSvc)
+	boardNarrativeH.RegisterRoutes(root)
 }

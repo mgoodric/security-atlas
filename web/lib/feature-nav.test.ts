@@ -146,3 +146,61 @@ describe("resolveFeatureGate", () => {
     expect(resolveFeatureGate([], "/board-packs", true)).toBe("off-admin");
   });
 });
+
+describe("module features (#2171)", () => {
+  const tpr = (
+    moduleState: "on" | "switched_off",
+    claims: "on" | "switched_off",
+  ): EffectiveModule[] => [
+    {
+      key: "third_party_risk",
+      name: "Third-party risk",
+      state: moduleState,
+      pages: ["/vendors"],
+      features: [
+        {
+          key: "vendor_claims",
+          name: "Vendor claims",
+          state: claims,
+          pages: ["/oscal/component-definitions"],
+        },
+      ],
+    },
+  ];
+
+  test("a feature's page is gated by the feature's effective state", () => {
+    expect(
+      moduleForPage(tpr("on", "switched_off"), "/oscal/component-definitions/x")
+        ?.key,
+    ).toBe("vendor_claims");
+    expect(
+      resolveFeatureGate(
+        tpr("on", "on"),
+        "/oscal/component-definitions",
+        false,
+      ),
+    ).toBe("on");
+    expect(
+      resolveFeatureGate(
+        tpr("on", "switched_off"),
+        "/oscal/component-definitions",
+        true,
+      ),
+    ).toBe("off-admin");
+    expect(
+      resolveFeatureGate(tpr("on", "switched_off"), "/vendors", false),
+    ).toBe("on");
+  });
+
+  test("the nav hides a feature's entry when it is off", () => {
+    const items = [
+      { href: "/vendors" },
+      { href: "/oscal/component-definitions" },
+      { href: "/controls" },
+    ];
+    expect(
+      gateNavItems(items, tpr("on", "switched_off")).map((i) => i.href),
+    ).toEqual(["/vendors", "/controls"]);
+    expect(gateNavItems(items, tpr("on", "on"))).toEqual(items);
+  });
+});

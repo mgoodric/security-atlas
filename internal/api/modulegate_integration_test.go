@@ -200,7 +200,12 @@ func TestModuleGate_QuestionnairesSwitchedOff(t *testing.T) {
 func TestModuleGate_EffectiveModules(t *testing.T) {
 	f := newModuleGateFixture(t)
 
-	want := map[string]string{"questionnaires": "on", "board_reporting": "switched_off", "vendor_claims": "switched_off"}
+	// #2171: every optional module, each on by default except Board
+	// reporting, so existing tenants keep today's behaviour.
+	want := map[string]string{
+		"risk": "on", "third_party_risk": "on", "policies": "on", "questionnaires": "on",
+		"personnel_security": "on", "exceptions": "on", "board_reporting": "switched_off",
+	}
 	for name, bearer := range map[string]string{"admin": f.admin, "viewer": f.viewer} {
 		if got := f.modules(t, bearer); !equalStates(got, want) {
 			t.Fatalf("defaults, %s: %v; want %v", name, got, want)
@@ -209,8 +214,8 @@ func TestModuleGate_EffectiveModules(t *testing.T) {
 
 	f.setSwitch(t, "questionnaires.enabled", false)
 	f.setSwitch(t, "board.reporting", true)
-	f.setSwitch(t, "oscal.export", true)
-	want = map[string]string{"questionnaires": "switched_off", "board_reporting": "on", "vendor_claims": "on"}
+	f.setSwitch(t, "vendor.claims", true)
+	want["questionnaires"], want["board_reporting"] = "switched_off", "on"
 	for name, bearer := range map[string]string{"admin": f.admin, "viewer": f.viewer} {
 		if got := f.modules(t, bearer); !equalStates(got, want) {
 			t.Fatalf("flipped, %s: %v; want %v", name, got, want)
@@ -220,11 +225,11 @@ func TestModuleGate_EffectiveModules(t *testing.T) {
 	// Board reporting and Vendor claims keep their gate, now from the
 	// registry: switched off again, their routes answer the marker.
 	f.setSwitch(t, "board.reporting", false)
-	f.setSwitch(t, "oscal.export", false)
+	f.setSwitch(t, "vendor.claims", false)
 	for path, key := range map[string]string{
 		"/v1/board-packs":                 "board.reporting",
 		"/v1/board-briefs":                "board.reporting",
-		"/v1/oscal/component-definitions": "oscal.export",
+		"/v1/oscal/component-definitions": "vendor.claims",
 	} {
 		if got := f.do(t, http.MethodGet, path, f.admin, nil); got.status != http.StatusNotFound || got.marker != key {
 			t.Fatalf("GET %s: status %d marker %q; want 404 marker %q", path, got.status, got.marker, key)
