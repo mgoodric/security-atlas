@@ -73,6 +73,33 @@ func freshTenant(t *testing.T, admin *pgxpool.Pool) string {
 	)
 }
 
+// activateScope gives the tenant an activated framework scope for the
+// version, with no applicability decisions. Posture reports a percentage
+// only for a version with an activated scope (#2114); without one the row
+// is "scope not set".
+func activateScope(t *testing.T, admin *pgxpool.Pool, tenant string, frameworkVersionID uuid.UUID) {
+	t.Helper()
+	ctx := context.Background()
+	scopeID := uuid.New()
+	if _, err := admin.Exec(ctx, `
+		INSERT INTO framework_scopes (id, tenant_id, framework_version_id, name, predicate, predicate_hash, state)
+		VALUES ($1, $2, $3, 'ISMS', '{"op":"true"}'::jsonb, 'h0', 'draft')`,
+		scopeID, tenant, frameworkVersionID); err != nil {
+		t.Fatalf("seed framework_scope: %v", err)
+	}
+	if _, err := admin.Exec(ctx, `
+		UPDATE framework_scopes SET state = 'activated', effective_from = now()
+		WHERE id = $1`, scopeID); err != nil {
+		t.Fatalf("activate framework_scope: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(),
+			`DELETE FROM framework_scopes WHERE id = $1`, scopeID); err != nil {
+			t.Logf("cleanup activated scope: %v", err)
+		}
+	})
+}
+
 // framework bundles the ids a seeded framework version exposes so the tests
 // can assert against a known framework_id + version string.
 type framework struct {
@@ -345,6 +372,8 @@ func TestFrameworkPosture_AggregatesAcrossVersions(t *testing.T) {
 
 	// Framework B: 2 requirements, tenant covers neither -> coverage 0%.
 	fwB, _ := seedFramework(t, admin, "fwb", "2025", 2)
+	activateScope(t, admin, tenant, fwA.frameworkVersionID)
+	activateScope(t, admin, tenant, fwB.frameworkVersionID)
 
 	resp, body := get(t, env, "/v1/frameworks/posture")
 	if resp.StatusCode != http.StatusOK {
@@ -399,6 +428,7 @@ func TestFrameworkPosture_TrendReflectsGrowth(t *testing.T) {
 	old := time.Now().UTC().Add(-120 * 24 * time.Hour)
 	seedEvaluation(t, admin, tenant, ctrl1, "pass", old) // passing then
 	seedEvaluation(t, admin, tenant, ctrl2, "fail", old) // NOT passing then
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
 
 	_, body := get(t, env, "/v1/frameworks/posture")
 	rows, _ := body["frameworks"].([]any)
@@ -450,6 +480,7 @@ func TestFrameworkPosture_ExceptedCountsAsCoveredAndIsReportedSeparately(t *test
 	ctrl2b := seedControlOnAnchor(t, admin, tenant, anchors[2])
 	seedEvaluation(t, admin, tenant, ctrl2a, "excepted", recent)
 	seedEvaluation(t, admin, tenant, ctrl2b, "pass", recent)
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
 
 	_, body := get(t, env, "/v1/frameworks/posture")
 	rows, _ := body["frameworks"].([]any)
@@ -492,6 +523,7 @@ func TestFrameworkPosture_RejectedEdgeEarnsNoCredit(t *testing.T) {
 	old := time.Now().UTC().Add(-120 * 24 * time.Hour)
 	seedEvaluation(t, admin, tenant, ctrl1, "pass", old)
 	seedEvaluation(t, admin, tenant, ctrl2, "fail", old)
+	activateScope(t, admin, tenant, fw.frameworkVersionID)
 
 	setTier := func(tier string) {
 		t.Helper()
@@ -645,11 +677,30 @@ func TestAllEndpoints_RLSIsolatedAcrossTenants(t *testing.T) {
 	if rows, _ := actBody["activity"].([]any); len(rows) != 0 {
 		t.Fatalf("ISC-23: /v1/activity leaked %d cross-tenant rows", len(rows))
 	}
+	// Framework scope is tenant-scoped too (#2114): tenant A's activated
+	// scope leaves tenant B's row "scope not set".
+	activateScope(t, admin, tenantA, fwA.frameworkVersionID)
+	postureRow := func() map[string]any {
+		t.Helper()
+		_, body := get(t, envB, "/v1/frameworks/posture")
+		rows, _ := body["frameworks"].([]any)
+		for _, r := range rows {
+			if m := r.(map[string]any); m["framework_id"].(string) == fwA.frameworkID.String() {
+				return m
+			}
+		}
+		t.Fatalf("ISC-23: no posture row for framework A")
+		return nil
+	}
+	if m := postureRow(); m["scope_set"] != false || m["coverage_pct"] != nil {
+		t.Fatalf("ISC-23: tenant A's activated scope leaked into tenant B's posture: %v", m)
+	}
+
 	// Framework posture: the framework + requirements are global catalog
 	// (visible to any tenant), but the COVERAGE must be tenant B's — which
 	// is zero, because tenant B has no controls anchored on fwA's anchors.
-	_, postBody := get(t, envB, "/v1/frameworks/posture")
-	rows, _ := postBody["frameworks"].([]any)
+	activateScope(t, admin, tenantB, fwA.frameworkVersionID)
+	rows := []any{postureRow()}
 	for _, r := range rows {
 		m := r.(map[string]any)
 		if m["framework_id"].(string) != fwA.frameworkID.String() {
