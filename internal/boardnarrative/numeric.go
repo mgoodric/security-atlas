@@ -94,10 +94,20 @@ func VerifyNumbers(text string, allowed map[int]bool, periodEnd string) bool {
 	//   3. the exact period-end label.
 	// What remains is the section's actual numeric claims, every one of which
 	// must be a ground-truth value.
+	return allowedInts(stripNonClaims(text, periodEnd), allowed)
+}
+
+// stripNonClaims removes the number-shaped tokens that are not claims: list
+// markers, cited UUIDs and the exact period-end label.
+func stripNonClaims(text, periodEnd string) string {
 	stripped := listMarkerPattern.ReplaceAllString(text, "")
 	stripped = uuidPattern.ReplaceAllString(stripped, " ")
-	stripped = stripLabelDate(stripped, periodEnd)
-	for _, n := range extractNumbers(stripped) {
+	return stripLabelDate(stripped, periodEnd)
+}
+
+// allowedInts reports whether every integer token in text is allowed.
+func allowedInts(text string, allowed map[int]bool) bool {
+	for _, n := range extractNumbers(text) {
 		if !allowed[n] {
 			return false
 		}
@@ -105,12 +115,47 @@ func VerifyNumbers(text string, allowed map[int]bool, periodEnd string) bool {
 	return true
 }
 
-// verifyNumbers is the slice-440 one-section convenience over VerifyNumbers,
-// kept so the coverage-section call site (and its tests) are unchanged. It
-// supplies the coverage Rollup's AllowedNumbers + PeriodEnd to the reusable
-// library.
+// decimalPattern matches a decimal number token ("41.9", "-0.5").
+var decimalPattern = regexp.MustCompile(`-?\d+\.\d+`)
+
+// percentPattern matches an integer written as a percentage ("42%", "42 %").
+// Decimals are removed before it runs, so its digits are a whole token.
+var percentPattern = regexp.MustCompile(`-?\d+\s*%`)
+
+// verifyCoverageNumbers is guardrail 5 for the coverage section (#2210). The
+// coverage figure is the board pack's, which the pack prints to one decimal,
+// so the integer-only check alone would either reject the true figure or
+// accept a rounded one the pack never shows. On top of the shared integer
+// check it requires:
+//
+//   - every decimal token is the coverage figure exactly as the pack renders
+//     it ("41.9"), and nothing else: "42", "41.8" and "41.93" fail;
+//   - every percentage is a percentage field (the coverage figure or the
+//     evidence freshness rate), so a count with a "%" after it, the retired
+//     tenant-wide coverage, or "0%" for a tenant with no scoped framework
+//     fails even when the same integer is a legitimate count elsewhere.
+func verifyCoverageNumbers(text string, r Rollup) bool {
+	stripped := stripNonClaims(text, r.PeriodEnd)
+	allowedDecimal := r.coverageDecimal()
+	for _, d := range decimalPattern.FindAllString(stripped, -1) {
+		if d != allowedDecimal {
+			return false
+		}
+	}
+	stripped = decimalPattern.ReplaceAllString(stripped, " ")
+	percents := r.allowedPercents()
+	for _, p := range percentPattern.FindAllString(stripped, -1) {
+		n, err := strconv.Atoi(strings.TrimSpace(strings.TrimSuffix(p, "%")))
+		if err != nil || !percents[n] {
+			return false
+		}
+	}
+	return allowedInts(stripped, r.AllowedNumbers())
+}
+
+// verifyNumbers runs guardrail 5 for the rollup's own section.
 func verifyNumbers(text string, r Rollup) bool {
-	return VerifyNumbers(text, r.AllowedNumbers(), r.PeriodEnd)
+	return r.verifyDraftNumbers(text)
 }
 
 // stripLabelDate removes the exact period-end label (e.g. "2026-05-31") from
