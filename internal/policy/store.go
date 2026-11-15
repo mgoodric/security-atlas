@@ -37,7 +37,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,6 +45,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/mgoodric/security-atlas/internal/approval"
 	"github.com/mgoodric/security-atlas/internal/db/dbx"
 	"github.com/mgoodric/security-atlas/internal/tenancy"
 )
@@ -83,8 +83,8 @@ var (
 	// state that doesn't permit it. HTTP 409.
 	ErrWrongState = errors.New("policy: not in expected state")
 	// ErrSelfApproval is returned when the approver is the person who
-	// submitted the policy for review (#1807, segregation of duties).
-	// HTTP 403.
+	// submitted the policy for review (#1807, segregation of duties) and
+	// the organisation does not allow self-approval (#2101). HTTP 403.
 	ErrSelfApproval = errors.New("policy: the submitter cannot approve their own policy; a second approver must approve it")
 	// ErrApproverNotPerson is returned when the approving credential
 	// belongs to no user: an unbound API key, an OAuth client or the
@@ -158,10 +158,13 @@ type Policy struct {
 	SubmittedBy                 *string
 	ApprovedAt                  *time.Time
 	ApprovedBy                  *string
-	PublishedAt                 *time.Time
-	PublishedBy                 *string
-	SupersededAt                *time.Time
-	NextReviewAt                *time.Time
+	// SelfApproved is true when the submitter approved the policy under
+	// the organisation's Allow self-approval setting (#2101).
+	SelfApproved bool
+	PublishedAt  *time.Time
+	PublishedBy  *string
+	SupersededAt *time.Time
+	NextReviewAt *time.Time
 	// Import fields (#1747). Set only when SourceAttribution is
 	// SourceImported. HistoricalApproverName is a free-text name, never a
 	// credential id; ApprovedBy stays nil on imported rows.
@@ -353,14 +356,17 @@ func (s *Store) SubmitForReview(ctx context.Context, id uuid.UUID, actor string)
 // the users(id) uuid behind the credential, empty when the credential
 // belongs to no user. CredentialID is the credential itself, compared
 // against submitters recorded by credential id before #1807.
-type Approver struct {
-	UserID       string
-	CredentialID string
-}
+type Approver = approval.Approver
+
+// auditActionSelfApproved is the policy_audit_log action written when the
+// submitter approves their own policy under Allow self-approval (#2101).
+const auditActionSelfApproved = "self_approved"
 
 // Approve transitions under_review -> approved. Handler validates
 // IsApprover before calling; the store applies checkApprover (#1807) in
-// the same transaction as the approval.
+// the same transaction as the approval, reading the organisation's Allow
+// self-approval setting there too (#2101). A self-approval flags the row
+// and appends a policy_audit_log row.
 func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (Policy, error) {
 	if approver.UserID == "" && approver.CredentialID == "" {
 		return Policy{}, ErrCreatedByRequired
@@ -379,44 +385,60 @@ func (s *Store) Approve(ctx context.Context, id uuid.UUID, approver Approver) (P
 			if err != nil {
 				return dbx.Policy{}, err
 			}
+			var self bool
 			if current.Status == StateUnderReview {
-				if err := checkApprover(current, approver); err != nil {
+				allowSelf, err := approval.AllowSelf(ctx, q, tenantID)
+				if err != nil {
+					return dbx.Policy{}, err
+				}
+				if self, err = checkApprover(current, approver, allowSelf); err != nil {
 					return dbx.Policy{}, err
 				}
 			}
-			return q.ApprovePolicy(ctx, dbx.ApprovePolicyParams{
-				TenantID:   pgUUID(tenantID),
-				ID:         pgUUID(id),
-				ApprovedBy: stringPtr(approver.UserID),
+			row, err := q.ApprovePolicy(ctx, dbx.ApprovePolicyParams{
+				TenantID:     pgUUID(tenantID),
+				ID:           pgUUID(id),
+				ApprovedBy:   stringPtr(approver.UserID),
+				SelfApproved: self,
 			})
+			if err != nil || !self {
+				return row, err
+			}
+			if _, err := q.InsertPolicyAuditLog(ctx, dbx.InsertPolicyAuditLogParams{
+				TenantID:      pgUUID(tenantID),
+				PolicyID:      row.ID,
+				Action:        auditActionSelfApproved,
+				Actor:         approver.UserID,
+				PolicyTitle:   &row.Title,
+				PolicyVersion: &row.Version,
+			}); err != nil {
+				return dbx.Policy{}, fmt.Errorf("self-approval: audit log: %w", err)
+			}
+			return row, nil
 		},
 	})
 }
 
-// legacySessionSubmitterPrefix marks a submitted_by recorded before #1807
-// from a JWT credential id ("jwt:<token id>"). It names a session, not a
-// person, so no approver can be shown to differ from it.
-const legacySessionSubmitterPrefix = "jwt:"
-
-// checkApprover is the single approval rule for policies (#1807). Only a
-// person approves, and never the person who submitted the policy. It
-// refuses unconditionally for now; the organisation-level self-approval
-// opt-in (#2101) extends this function rather than adding a second check.
-func checkApprover(p dbx.Policy, a Approver) error {
-	if a.UserID == "" {
-		return ErrApproverNotPerson
+// checkApprover applies the shared approval rule (internal/approval,
+// #1807 / #2101) to a policy and maps its errors onto this package's. Only
+// a person approves, and never the person who submitted the policy unless
+// the organisation allows self-approval; selfApproved reports that case.
+// A machine credential never approves, whatever the setting.
+func checkApprover(p dbx.Policy, a Approver, allowSelf bool) (selfApproved bool, err error) {
+	submitter := ""
+	if p.SubmittedBy != nil {
+		submitter = *p.SubmittedBy
 	}
-	if p.SubmittedBy == nil || *p.SubmittedBy == "" {
-		return nil
+	self, err := approval.Check(submitter, a, allowSelf)
+	switch {
+	case errors.Is(err, approval.ErrNotPerson):
+		return false, ErrApproverNotPerson
+	case errors.Is(err, approval.ErrRequesterUnknown):
+		return false, ErrSubmitterUnknown
+	case errors.Is(err, approval.ErrSelfApproval):
+		return false, ErrSelfApproval
 	}
-	submitter := *p.SubmittedBy
-	if strings.HasPrefix(submitter, legacySessionSubmitterPrefix) {
-		return ErrSubmitterUnknown
-	}
-	if submitter == a.UserID || submitter == a.CredentialID {
-		return ErrSelfApproval
-	}
-	return nil
+	return self, err
 }
 
 // PublishInput is the API shape for POST /v1/policies/{id}/publish. The
@@ -828,6 +850,7 @@ func policyFromRow(r dbx.Policy) Policy {
 		v := *r.ApprovedBy
 		out.ApprovedBy = &v
 	}
+	out.SelfApproved = r.SelfApproved
 	if r.PublishedAt.Valid {
 		t := r.PublishedAt.Time
 		out.PublishedAt = &t

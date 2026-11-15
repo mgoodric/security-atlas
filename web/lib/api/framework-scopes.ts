@@ -23,6 +23,13 @@ export type FrameworkScope = {
   predicate_hash_at_approval?: string;
   approval_evidence_file_url?: string;
   approval_evidence_file_hash?: string;
+  /** #2101 — who submitted the scope for review (a user id). */
+  submitted_by?: string;
+  /**
+   * #2101 — true when the submitter approved the scope under the
+   * organisation's Allow self-approval setting.
+   */
+  self_approved?: boolean;
   effective_from?: string;
   superseded_by?: string;
   superseded_at?: string;

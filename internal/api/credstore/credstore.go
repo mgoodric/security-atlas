@@ -712,6 +712,23 @@ func MinterUserID(c Credential) string {
 	return u.String()
 }
 
+// PrincipalOf names who is behind the caller c, stably across sessions:
+// the bare users(id) uuid for a person, else c.UserID (an unbound key's own
+// "key_..." id, "oauth_client:<id>", "bootstrap-admin"), else c.ID. It is
+// what approval records as the requester and compares against (#2101).
+// Never the JWT credential id when anything better exists: that is per
+// token ("jwt:<jti>"), and approval reads that prefix as a pre-#1807
+// session requester it cannot compare.
+func PrincipalOf(c Credential) string {
+	if u := MinterUserID(c); u != "" {
+		return u
+	}
+	if c.UserID != "" {
+		return c.UserID
+	}
+	return c.ID
+}
+
 // CallerUserID returns the users(id) behind the caller c, and false when c
 // is not a user. It is the one place code turns cred.UserID into a users(id)
 // (#2183); never parse cred.UserID raw (TestNoRawCredUserIDParse guards it).

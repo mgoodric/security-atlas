@@ -56,8 +56,10 @@ ORDER BY expires_at ASC, id ASC;
 
 -- name: ApproveException :one
 -- AC-3 transition: requested -> approved. The application MUST verify the
--- caller has IsApprover before invoking this query AND that approved_by
--- differs from requested_by (segregation of duties). The WHERE
+-- caller has IsApprover before invoking this query AND apply the approval
+-- rule (internal/approval, #2101): approved_by differs from requested_by
+-- unless the organisation allows self-approval, in which case self_approved
+-- is true and exceptions_sod admits the same person. The WHERE
 -- status='requested' clause guards against double-approval / out-of-order
 -- transitions; zero rows returned indicates either a missing row or a wrong
 -- prior state -- the application probes after to disambiguate.
@@ -65,6 +67,7 @@ UPDATE exceptions
 SET status = 'approved',
     approved_by = $3,
     approved_at = now(),
+    self_approved = sqlc.arg('self_approved'),
     updated_at = now()
 WHERE tenant_id = $1
   AND id = $2

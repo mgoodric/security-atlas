@@ -25,6 +25,7 @@ func TestSlice138_PoliciesExportHeader_StableOrder(t *testing.T) {
 		"next_review_at", "body_md", "created_at", "updated_at",
 		"source_attribution", "imported", "historical_approver_name",
 		"historical_approved_at", "source_url", "imported_by", "imported_at",
+		"self_approved",
 	}
 	got := policiesExportHeader()
 	if len(got) != len(want) {
