@@ -425,6 +425,8 @@ func risksTable(rows []RiskPanelRow) ([]string, [][]string) {
 		"methodology",
 		"residual_score",
 		"created_at",
+		// #1814: appended so existing column positions hold.
+		"category_name",
 	}
 	out := make([][]string, len(rows))
 	for i, r := range rows {
@@ -436,6 +438,7 @@ func risksTable(rows []RiskPanelRow) ([]string, [][]string) {
 			r.Methodology,
 			r.ResidualScore,
 			r.CreatedAt,
+			r.CategoryName,
 		}
 	}
 	return header, out

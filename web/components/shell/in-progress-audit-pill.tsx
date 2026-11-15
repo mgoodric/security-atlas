@@ -87,12 +87,15 @@ export function InProgressAuditPill() {
   return (
     <div
       data-testid="in-progress-audit-pill"
-      className="flex items-center gap-2 px-2.5 py-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-full"
+      className="flex items-center gap-2 px-2 py-2 lg:px-2.5 lg:py-1 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 rounded-full"
       title={`${pick.name} in progress`}
       aria-label={`${pick.name} in progress`}
     >
       <span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse" />
-      <span className="text-xs font-medium text-amber-800 dark:text-amber-200">
+      {/* #2213 — below `lg` the pill shows only its dot; the name is
+          visually hidden there, not removed, so it is still read out
+          and still in the hover title. */}
+      <span className="sr-only text-xs font-medium text-amber-800 dark:text-amber-200 lg:not-sr-only">
         {pick.name} in progress
       </span>
     </div>

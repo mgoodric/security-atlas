@@ -9,6 +9,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 
 import { PageShell } from "@/components/shell/page-shell";
+import { useToast } from "@/components/ui/toast";
 import { createActionPlan } from "@/lib/api/action-plans";
 
 import { ActionPlanForm } from "./action-plan-form";
@@ -16,6 +17,7 @@ import { ActionPlanForm } from "./action-plan-form";
 export default function NewActionPlanPage() {
   const router = useRouter();
   const qc = useQueryClient();
+  const { toast } = useToast();
 
   return (
     <PageShell
@@ -27,6 +29,7 @@ export default function NewActionPlanPage() {
         onSubmit={async (body) => {
           const { id } = await createActionPlan(body);
           await qc.invalidateQueries({ queryKey: ["action-plans", "list"] });
+          toast("Action plan created");
           router.push(`/action-plans/${encodeURIComponent(id)}`);
         }}
       />
