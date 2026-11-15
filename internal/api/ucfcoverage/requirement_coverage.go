@@ -19,7 +19,8 @@ import (
 )
 
 // releaseLabel is the `scf_release` a coverage read echoes: the pinned
-// release's label, or nil (JSON null) when the read was not pinned.
+// release's label, or nil (JSON null) when no SCF release is current and
+// the read was not pinned.
 func releaseLabel(r *scfrelease.Release) *string {
 	if r == nil {
 		return nil
@@ -46,9 +47,10 @@ func releaseLabel(r *scfrelease.Release) *string {
 //     filtering. Caller-friendly so dashboards can start sending the
 //     param ahead of slice 012's eval engine.
 //   - ?scf_release=<version> — pin the anchors to one SCF release
-//     (#1770); an unknown label is 404. `scf_release` in the response
-//     names the pinned release, or is null when the read was unpinned
-//     (no parameter: every release's anchors, as before #1770).
+//     (#1770); an unknown label is 404. Absent, the read is pinned to the
+//     current SCF release (#2203). `scf_release` in the response names the
+//     release the read was pinned to; it is null only when no SCF release
+//     is current (an empty catalog), and the read is then unpinned.
 //
 // Returns:
 //   - 200 { requirement, anchors[], controls[] } on success
@@ -408,18 +410,19 @@ func (h *Handler) listControlsForAnchors(ctx context.Context, anchorIDs []pgtype
 // coverage read is pinned to (#1770). An unknown label is
 // scfrelease.ErrUnknownRelease.
 //
-// Absent, it returns a nil pin: the traversal stays unpinned, as before
-// #1770, and the response echoes `scf_release: null`. Defaulting to the
-// current release would show no anchors for every requirement between a
-// new SCF release import and the re-bind of its crosswalk edges (#1971),
-// so that default is the contract step, not this expand step. See
-// docs/audit-log/1770-release-aware-anchor-resolution-decisions.md D1.
+// Absent, it pins the read to the current SCF release (#2203, the contract
+// step of #1770 D1). The boot-time re-bind (#1971) and the crosswalk
+// re-import move controls and edges onto the current release's anchors, so
+// on an upgraded install this matches the unpinned read. An edge left on a
+// legacy release on purpose (a crosswalk declaring an old scf_release)
+// drops out of the default read; ?scf_release=<old> still reads it. See
+// docs/audit-log/2203-coverage-default-release-decisions.md. With no
+// current release at all (an empty catalog) the read stays unpinned.
 func (h *Handler) resolveSCFRelease(ctx context.Context, r *http.Request) (*scfrelease.Release, error) {
-	label := r.URL.Query().Get("scf_release")
-	if label == "" {
+	rel, err := scfrelease.Lookup(ctx, h.q, r.URL.Query().Get("scf_release"))
+	if errors.Is(err, scfrelease.ErrNoCurrentRelease) {
 		return nil, nil
 	}
-	rel, err := scfrelease.Lookup(ctx, h.q, label)
 	if err != nil {
 		return nil, err
 	}

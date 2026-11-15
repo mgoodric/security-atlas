@@ -41,8 +41,12 @@ func TestCoverage_RejectedEdgeEarnsNoCredit(t *testing.T) {
 		VALUES ($1, NULL, $2, '2026', 'current')`, fvID, fwID); err != nil {
 		t.Fatalf("seed framework_version: %v", err)
 	}
+	// The anchor goes in the current SCF release: requirement coverage reads
+	// pin to it by default (#2203).
 	if _, err := pool.Exec(ctx, `INSERT INTO scf_anchors (id, framework_version_id, scf_id, family, title, description)
-		VALUES ($1, $2, $3, 'IAC', 'rejected-tier anchor', '')`, anchorID, fvID, anchorSCFID); err != nil {
+		SELECT $1, fv.id, $2, 'IAC', 'rejected-tier anchor', ''
+		FROM framework_versions fv JOIN frameworks f ON f.id = fv.framework_id
+		WHERE f.slug = 'scf' AND f.tenant_id IS NULL AND fv.status = 'current'`, anchorID, anchorSCFID); err != nil {
 		t.Fatalf("seed anchor: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO framework_requirements (id, framework_version_id, code, title, body)
