@@ -789,3 +789,23 @@ func coerceStringSlice(s []string) []string {
 	}
 	return s
 }
+
+// ListRemapProposals returns the active tenant's SCF remap proposals
+// (#1775), optionally filtered by class and status (nil = any). The query
+// is filtered by the explicit tenant id as well as by RLS.
+func (s *Store) ListRemapProposals(ctx context.Context, class, status *string) ([]dbx.ListSCFRemapProposalsRow, error) {
+	var rows []dbx.ListSCFRemapProposalsRow
+	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
+		var err error
+		rows, err = q.ListSCFRemapProposals(ctx, dbx.ListSCFRemapProposalsParams{
+			TenantID: pgUUID(tenantID),
+			Class:    class,
+			Status:   status,
+		})
+		if err != nil {
+			return fmt.Errorf("list scf remap proposals: %w", err)
+		}
+		return nil
+	})
+	return rows, err
+}

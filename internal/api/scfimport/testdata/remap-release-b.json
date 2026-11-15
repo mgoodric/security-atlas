@@ -1,0 +1,49 @@
+{
+  "schema_version": "1.0",
+  "release_version": "test-remap-b",
+  "release_date": "2026-06-01",
+  "attribution": "Synthetic test catalog for the #1775 remap queue; not SCF content. Against test-remap-a: TRM-01 unchanged; TRM-02 renamed as TRM-20; TRM-03 split into TRM-30 and TRM-31; TRM-04 reused for a control whose legacy ID is TRM-09, its concept now TRM-41; TRM-05 withdrawn.",
+  "controls": [
+    {
+      "scf_id": "TRM-01",
+      "family": "TRM",
+      "title": "Asset Inventory",
+      "description": "Keep a list of assets."
+    },
+    {
+      "scf_id": "TRM-20",
+      "family": "TRM",
+      "title": "Change Control",
+      "description": "Review changes.",
+      "legacy_scf_id": "TRM-02"
+    },
+    {
+      "scf_id": "TRM-30",
+      "family": "TRM",
+      "title": "Security Event Logging",
+      "description": "Log security events.",
+      "legacy_scf_id": "TRM-03"
+    },
+    {
+      "scf_id": "TRM-31",
+      "family": "TRM",
+      "title": "Log Retention",
+      "description": "Keep logs.",
+      "legacy_scf_id": "TRM-03"
+    },
+    {
+      "scf_id": "TRM-04",
+      "family": "TRM",
+      "title": "Encryption at Rest",
+      "description": "Encrypt stored data.",
+      "legacy_scf_id": "TRM-09"
+    },
+    {
+      "scf_id": "TRM-41",
+      "family": "TRM",
+      "title": "Data Backup",
+      "description": "Back up data.",
+      "legacy_scf_id": "TRM-04"
+    }
+  ]
+}

@@ -43,13 +43,17 @@
     },
     {
       "name": "list_risks",
-      "description": "List risks from the bearer tenant's risk register. Optional filters: status (treatment), category. RLS scopes to the caller's tenant.",
+      "description": "List risks from the bearer tenant's risk register. Roll-ups (risks with at least one child linked) are left out unless include_rollups is true. Optional filters: status (treatment), category. RLS scopes to the caller's tenant.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
           "category": {
             "description": "Filter by risk category slug, one of the organisation's own categories (call list_risk_categories for the valid slugs; archived ones are filterable). An unknown slug is an error naming the valid ones. Optional.",
             "type": "string"
+          },
+          "include_rollups": {
+            "description": "Also list roll-ups (risks with at least one child risk linked). Default false: a roll-up summarises its children, so listing both would count the same exposure twice. Included roll-ups carry child_count.",
+            "type": "boolean"
           },
           "limit": {
             "description": "Result cap; default 100, max 500.",

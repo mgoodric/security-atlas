@@ -6,6 +6,9 @@
 //	PUT    /v1/admin/llm-routing   set/replace provider + (encrypted) key
 //	DELETE /v1/admin/llm-routing   clear config -> revert to local-ollama
 //
+// Every PUT, and every DELETE that removes a config, writes one me_audit_log
+// row in the same transaction (#2224); see cloud.Store.Set and Clear.
+//
 // All routes are TENANT-ADMIN gated (P0-499 threat-model S): a non-admin
 // credential is 403. The provider is a CLOSED ENUM (no operator URL, P0-499-3).
 // The provider API key is WRITE-ONLY: it is accepted on PUT, encrypted, and
@@ -23,8 +26,10 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 
 	"github.com/mgoodric/security-atlas/internal/api/authctx"
+	"github.com/mgoodric/security-atlas/internal/api/credstore"
 	"github.com/mgoodric/security-atlas/internal/api/httpresp"
 	"github.com/mgoodric/security-atlas/internal/authz"
 	"github.com/mgoodric/security-atlas/internal/llm/cloud"
@@ -109,7 +114,7 @@ func (h *Handler) Put(w http.ResponseWriter, r *http.Request) {
 		httpresp.WriteError(w, http.StatusBadRequest, "provider must be one of: local-ollama, anthropic, openai, bedrock")
 		return
 	}
-	mc, err := h.store.Set(r.Context(), provider, cloud.Secret(req.APIKey))
+	mc, err := h.store.Set(r.Context(), provider, cloud.Secret(req.APIKey), actor(r))
 	if err != nil {
 		writeSetError(w, err)
 		return
@@ -122,7 +127,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !requireTenantAdmin(w, r) {
 		return
 	}
-	if _, err := h.store.Clear(r.Context()); err != nil {
+	if _, err := h.store.Clear(r.Context(), actor(r)); err != nil {
 		httpresp.WriteError(w, http.StatusInternalServerError, "failed to clear routing config")
 		return
 	}
@@ -148,6 +153,14 @@ func writeSetError(w http.ResponseWriter, err error) {
 	default:
 		httpresp.WriteError(w, http.StatusInternalServerError, "failed to set routing config")
 	}
+}
+
+// actor is the user the audit row names (#2224); a caller that is not a user
+// (a bootstrap key) is recorded as uuid.Nil.
+func actor(r *http.Request) uuid.UUID {
+	cred, _ := authctx.CredentialFromContext(r.Context())
+	u, _ := credstore.CallerUserID(cred)
+	return u
 }
 
 // requireTenantAdmin enforces the tenant-admin gate (P0-499 threat-model S): a

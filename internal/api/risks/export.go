@@ -6,7 +6,10 @@
 // audit-log reference impl (`internal/api/adminauditlog/export.go`),
 // adapted to the risk register shape:
 //
-//   - Source query is `risk.Store.List(ctx, ListFilter{})` (RLS-scoped).
+//   - Source query is `dbx.ListRisks` read directly under the tenant GUC
+//     (RLS-scoped), not `risk.Store.List`, so roll-ups stay in: the
+//     export is the full register, with `parent_risk_ids` naming each
+//     row's parents (#2060 D4).
 //   - No from/to window filter — the risk register is a small, live
 //     state; the row cap (50K) is the load-bearing DoS mitigation.
 //     Audit-period freezing is not relevant to the v1 export (risks
