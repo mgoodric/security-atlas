@@ -2997,6 +2997,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+  /v1/evidence/{id}:
+    get:
+      summary: GET /v1/evidence/{id} — one evidence record with its redacted payload
+      tags: [evidence]
+      operationId: get-v1-evidence-id
+      security:
+        - bearer: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        default:
+          description: Default response envelope.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
   /v1/evidence:push:
     post:
       summary: POST /v1/evidence:push
