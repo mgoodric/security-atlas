@@ -332,7 +332,7 @@ mappings:
     strength: 0.9
     rationale: "A security awareness program maps to SCF Security Awareness Training — shared with SOC 2 CC1.4 and ISO A.6.3."
   - requirement_code: 12.8.1
-    scf_anchor: TPM-01
+    scf_anchor: TPM-02
     relationship_type: equal
     strength: 0.9
     rationale: "Managing third-party service providers handling account data maps to SCF Third-Party Management — shared with SOC 2 CC9.2 and ISO A.5.19."

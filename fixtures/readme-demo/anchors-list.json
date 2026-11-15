@@ -22,8 +22,8 @@
       "description": "Mechanisms exist to authorize changes prior to implementation."
     },
     {
-      "id": "scf-tpm-04",
-      "scf_id": "TPM-04",
+      "id": "scf-tpm-10",
+      "scf_id": "TPM-10",
       "family": "Third-Party Management",
       "name": "Vendor Due Diligence",
       "description": "Mechanisms exist to perform due diligence on prospective third parties."

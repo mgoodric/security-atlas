@@ -8,7 +8,7 @@ description: |
   questionnaire, or internal assessment). The control owner uploads
   the assessment-status snapshot quarterly.
 
-scf_anchor_id: TPM-04
+scf_anchor_id: TPM-10
 control_family: TPM
 implementation_type: manual_periodic
 owner_role: ciso

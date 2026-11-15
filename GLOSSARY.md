@@ -254,7 +254,7 @@ No other transitions. `superseded` is terminal for that row; revisions continue 
 | -------------------------------- | --------------------------- | ---------------------------- |
 | `information-security-policy.md` | Information Security Policy | `GOV-01`, `GOV-04`, `RSK-01` |
 | `access-control-policy.md`       | Access Control Policy       | `IAC-01`, `IAC-04`, `IAC-22` |
-| `vendor-management-policy.md`    | Vendor Management Policy    | `TPM-01`, `TPM-03`, `TPM-04` |
+| `vendor-management-policy.md`    | Vendor Management Policy    | `TPM-02`, `TPM-03`, `TPM-10` |
 | `incident-response-plan.md`      | Incident Response Plan      | `IRO-04`, `IRO-01`, `IRO-02` |
 | `change-management-policy.md`    | Change Management Policy    | `CHG-02`, `CFG-04`, `CHG-04` |
 

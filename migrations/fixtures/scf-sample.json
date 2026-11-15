@@ -113,10 +113,10 @@
     },
 
     {
-      "scf_id": "CLD-01",
+      "scf_id": "CLD-02",
       "family": "CLD",
-      "title": "Cloud Infrastructure Governance",
-      "description": "Mechanisms exist to govern the use of cloud computing infrastructure."
+      "title": "Cloud Services",
+      "description": "Mechanisms exist to govern the cloud services the organization uses."
     },
     {
       "scf_id": "CLD-09",
@@ -126,13 +126,13 @@
     },
 
     {
-      "scf_id": "CPL-01",
+      "scf_id": "CPL-02",
       "family": "CPL",
-      "title": "Compliance Management",
+      "title": "Statutory, Regulatory & Contractual Compliance",
       "description": "Mechanisms exist to facilitate the identification and implementation of relevant statutory, regulatory, and contractual requirements."
     },
     {
-      "scf_id": "CPL-03",
+      "scf_id": "CPL-07.1",
       "family": "CPL",
       "title": "Internal Audit Function",
       "description": "Mechanisms exist to plan and conduct internal audits."
@@ -460,19 +460,19 @@
     },
 
     {
-      "scf_id": "TPM-01",
+      "scf_id": "TPM-02",
       "family": "TPM",
       "title": "Third-Party Management",
       "description": "Mechanisms exist to facilitate the implementation of third-party management."
     },
     {
-      "scf_id": "TPM-04",
+      "scf_id": "TPM-10",
       "family": "TPM",
-      "title": "Third-Party Risk Assessments",
-      "description": "Mechanisms exist to conduct third-party risk assessments."
+      "title": "Third-Party Risk Assessments & Approvals",
+      "description": "Mechanisms exist to assess the risk a third party poses and to approve it before engagement."
     },
     {
-      "scf_id": "TPM-05",
+      "scf_id": "TPM-14",
       "family": "TPM",
       "title": "Third-Party Contract Requirements",
       "description": "Mechanisms exist to require contractual security and privacy obligations of third parties, and to flow those obligations down to the agents and subcontractors that handle the organization's data on their behalf."
