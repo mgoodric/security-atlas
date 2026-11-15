@@ -270,7 +270,7 @@ func TestHTTP_Applicability_CarryOver(t *testing.T) {
 		if !ok {
 			t.Fatalf("carry_over row without carried_over_from: %+v", r.After)
 		}
-		if src["framework_version"] != "2017" || src["framework_version_id"] != f.FromVersionID.String() || src["framework_scope_id"] != oldRev {
+		if src["framework_version"] != "2017" || src["framework_version_id"] != f.FromVersionID.String() || src["framework_scope_id"] != oldRev || src["framework_scope_state"] != "activated" {
 			t.Fatalf("carried_over_from = %v", src)
 		}
 		if r.Actor == "" {

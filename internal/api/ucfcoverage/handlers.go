@@ -51,6 +51,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -295,6 +296,36 @@ type anchorWire struct {
 	// caller tenant's own org mapping (#1798). Omitted on the bare anchor.
 	Origin    string `json:"origin,omitempty"`
 	Rationale string `json:"rationale,omitempty"`
+	// Overlay is the org mapping's source, author and date (#1800). Set
+	// only when Origin is "overlay".
+	Overlay *overlayWire `json:"overlay,omitempty"`
+}
+
+// overlayWire is the provenance of an overlay edge (#1800): the source
+// reference the organisation recorded, who created it and when. The
+// rationale stays on the edge row, where catalog edges carry theirs.
+type overlayWire struct {
+	SourceRef string    `json:"source_ref"`
+	CreatedBy string    `json:"created_by"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// overlayFrom builds the overlay provenance for a traversal row. It returns
+// nil for a catalog row, and for an overlay row whose LEFT JOIN found
+// nothing (it cannot: the view's overlay arm reads the same table under
+// the same tenant setting).
+func overlayFrom(origin string, sourceRef, createdBy *string, createdAt pgtype.Timestamptz) *overlayWire {
+	if origin != "overlay" || sourceRef == nil {
+		return nil
+	}
+	w := &overlayWire{SourceRef: *sourceRef}
+	if createdBy != nil {
+		w.CreatedBy = *createdBy
+	}
+	if createdAt.Valid {
+		w.CreatedAt = createdAt.Time.UTC()
+	}
+	return w
 }
 
 // controlWire is the shape of a control in slice-008 responses.
@@ -374,6 +405,9 @@ type requirementForAnchorWire struct {
 	// caller tenant's own org mapping (#1798).
 	Origin    string `json:"origin"`
 	Rationale string `json:"rationale,omitempty"`
+	// Overlay is the org mapping's source, author and date (#1800). Set
+	// only when Origin is "overlay".
+	Overlay *overlayWire `json:"overlay,omitempty"`
 }
 
 // ===== shared write helpers =====

@@ -4,6 +4,7 @@
 // policies/risks/history reads.
 
 import { apiFetch, bffControlFetch } from "./_shared";
+import type { EdgeOrigin, OverlayProvenance } from "./org-mapping";
 
 // ===== Slice 041 — Control detail view =====
 //
@@ -96,7 +97,12 @@ export type CoverageRequirement = {
   strength: number;
   coverage: number | null;
   source_attribution: string;
+  // "catalog", or "overlay" when the path is the tenant's own org mapping
+  // (#1798); `overlay` carries that mapping's source, author and date
+  // (#1800).
+  origin?: EdgeOrigin;
   rationale?: string;
+  overlay?: OverlayProvenance;
 };
 
 export type ControlCoverage = {
