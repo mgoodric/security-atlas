@@ -42,6 +42,9 @@ export type RowActionsProps = {
   items: readonly RowActionItem[];
   /** Accessible name for the trigger, e.g. "Actions for key ab12". */
   label?: string;
+  /** `row` (default): a compact ghost trigger for table rows. `header`:
+   *  an outline trigger sized to sit beside page-header buttons (#2102). */
+  variant?: "row" | "header";
   /** Testid on the trigger. The confirm's testids derive from it:
    *  `<id>-confirm`, `<id>-confirm-cancel`, `<id>-confirm-ok`. */
   "data-testid"?: string;
@@ -53,6 +56,7 @@ export type RowActionsProps = {
 export function RowActions({
   items,
   label = "More actions",
+  variant = "row",
   "data-testid": testId = "row-actions",
 }: RowActionsProps) {
   const [state, setState] = useState<ConfirmState>(IDLE);
@@ -89,7 +93,11 @@ export function RowActions({
         <Menu.Trigger
           ref={triggerRef}
           aria-label={label}
-          className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+          className={
+            variant === "header"
+              ? buttonVariants({ variant: "outline", size: "icon" })
+              : buttonVariants({ variant: "ghost", size: "icon-sm" })
+          }
           data-testid={testId}
         >
           <span aria-hidden="true">⋯</span>

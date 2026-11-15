@@ -118,6 +118,7 @@ GET /v1/evidence 8
 GET /v1/evidence/receipts/{record_id} 8
 GET /v1/evidence-summary/portfolio 8
 GET /v1/evidence/freshness 8
+GET /v1/evidence/{id} 8
 GET /v1/exceptions 8
 GET /v1/exceptions/expiring 8
 GET /v1/exceptions/{id} 8

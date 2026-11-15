@@ -62,6 +62,11 @@ type PackFrameworkPosture struct {
 	// CoveragePct is the dashboard's coverage_pct [0,100]: in-scope
 	// requirements with a covering control / all in-scope requirements.
 	CoveragePct float64 `json:"coverage_pct"`
+	// CoveredByExceptionPct is the dashboard's covered_by_exception_pct
+	// [0,100]: the part of CoveragePct that rests only on active exceptions
+	// (#2112). Omitted when zero, so packs generated before #2112 decode
+	// unchanged.
+	CoveredByExceptionPct float64 `json:"covered_by_exception_pct,omitempty"`
 	// FreshnessPct is the dashboard's freshness_composite [0,100].
 	FreshnessPct float64 `json:"freshness_pct"`
 	// BaselinePct is the coverage at the start of the 90-day trend:
@@ -89,6 +94,7 @@ type frameworkPostureRow struct {
 	Name           string
 	Version        string
 	CoveragePct    float64
+	ExceptionPct   float64
 	FreshnessPct   float64
 	TrendDelta90d  float64
 	ScopeActivated bool
@@ -131,6 +137,7 @@ func (s *PackStore) FrameworkPosture(ctx context.Context, trendCutoff time.Time)
 				Name:           fw.Name,
 				Version:        r.FrameworkVersion,
 				CoveragePct:    r.CoveragePct,
+				ExceptionPct:   r.CoveredByExceptionPct,
 				FreshnessPct:   r.FreshnessComposite,
 				TrendDelta90d:  r.TrendDelta90d,
 				ScopeActivated: r.ScopeActivated,
@@ -168,6 +175,7 @@ func packPostures(rows []frameworkPostureRow) []PackFrameworkPosture {
 			continue
 		}
 		p.CoveragePct = r.CoveragePct
+		p.CoveredByExceptionPct = r.ExceptionPct
 		p.FreshnessPct = r.FreshnessPct
 		if r.TrendHistory {
 			p.Delta = r.TrendDelta90d
