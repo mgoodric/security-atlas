@@ -6,15 +6,23 @@ package main
 // like the taxonomy commands; the tenant is the token's, never a flag.
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/mgoodric/security-atlas/cmd/atlas-cli/cmdhttp"
+	sdk "github.com/mgoodric/security-atlas/pkg/sdk-go"
 )
 
 func newMappingsCmd() *cobra.Command {
@@ -29,12 +37,13 @@ func newMappingsCmd() *cobra.Command {
 func newMappingsOverlayCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "overlay",
-		Short: "add, list or retire the organisation's overlay edges (requirement -> SCF anchor)",
+		Short: "add, list, retire, import or export the organisation's overlay edges (requirement -> SCF anchor)",
 		Long: "An overlay edge is the organisation's own link from a framework requirement to an SCF anchor, " +
 			"such as a criterion its auditor tested a control under. Overlay edges belong to the token's " +
-			"tenant only. Adding and retiring need an admin or grc_engineer token and are audit-logged.",
+			"tenant only. Adding, retiring and importing need an admin or grc_engineer token and are audit-logged.",
 	}
-	cmd.AddCommand(newMappingsOverlayAddCmd(), newMappingsOverlayListCmd(), newMappingsOverlayRetireCmd())
+	cmd.AddCommand(newMappingsOverlayAddCmd(), newMappingsOverlayListCmd(), newMappingsOverlayRetireCmd(),
+		newMappingsOverlayImportCmd(), newMappingsOverlayExportCmd())
 	return cmd
 }
 
@@ -196,5 +205,192 @@ func printOverlayResult(out io.Writer, verb string, raw []byte) error {
 	}
 	e := resp.OverlayEdge
 	_, _ = fmt.Fprintf(out, "%s %s: %s -> %s [%s]\n", verb, printable(e.ID), overlayRequirement(e), overlayAnchor(e), printable(e.Status))
+	return nil
+}
+
+// maxOverlayFileBytes mirrors the API's import body cap, so an oversized
+// file is refused before it is sent.
+const maxOverlayFileBytes = 4 << 20
+
+func newMappingsOverlayImportCmd() *cobra.Command {
+	var format string
+	var partial bool
+	cmd := &cobra.Command{
+		Use:   "import <file>",
+		Short: "import overlay edges from a CSV or YAML file",
+		Long: "Each row is an overlay edge with the columns framework, framework_version, requirement_code, " +
+			"scf_release, anchor_code, relationship_type, strength, rationale and source_ref. Every row is " +
+			"checked as a single add is. By default nothing is written if any row is bad; with --partial the " +
+			"valid rows are written. Bad rows are printed with their row number and reason.",
+		Example: "  atlas-cli mappings overlay import overlays.csv\n" +
+			"  atlas-cli mappings overlay import overlays.yaml --partial",
+		Args:    cobra.ExactArgs(1),
+		PreRunE: func(_ *cobra.Command, _ []string) error { return resolveCommon() },
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if format == "" {
+				switch strings.ToLower(filepath.Ext(args[0])) {
+				case ".csv":
+					format = "csv"
+				case ".yaml", ".yml":
+					format = "yaml"
+				default:
+					return fmt.Errorf("cannot tell the format from %q: pass --format csv or --format yaml", filepath.Base(args[0]))
+				}
+			}
+			if format != "csv" && format != "yaml" {
+				return fmt.Errorf("--format must be csv or yaml")
+			}
+			body, err := readOverlayFile(args[0])
+			if err != nil {
+				return err
+			}
+			q := url.Values{"format": {format}}
+			if partial {
+				q.Set("partial", "true")
+			}
+			status, raw, err := overlayRawRequest(http.MethodPost, "/v1/mapping-overlays/import?"+q.Encode(), body)
+			if err != nil {
+				return err
+			}
+			return printOverlayImport(cmd.OutOrStdout(), status, raw)
+		},
+	}
+	cmd.Flags().StringVar(&format, "format", "", "csv or yaml (default: from the file extension)")
+	cmd.Flags().BoolVar(&partial, "partial", false, "write the valid rows even if some rows are bad")
+	return cmd
+}
+
+func newMappingsOverlayExportCmd() *cobra.Command {
+	var framework, requirement, anchor, status, outPath string
+	cmd := &cobra.Command{
+		Use:     "export",
+		Short:   "export the organisation's overlay edges as CSV",
+		Args:    cobra.NoArgs,
+		PreRunE: func(_ *cobra.Command, _ []string) error { return resolveCommon() },
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			q := url.Values{}
+			for k, v := range map[string]string{
+				"framework": framework, "requirement": requirement, "anchor": anchor, "status": status,
+			} {
+				if v != "" {
+					q.Set(k, v)
+				}
+			}
+			path := "/v1/mapping-overlays/export"
+			if len(q) > 0 {
+				path += "?" + q.Encode()
+			}
+			code, raw, err := overlayRawRequest(http.MethodGet, path, nil)
+			if err != nil {
+				return err
+			}
+			if code != http.StatusOK {
+				return apiError(code, raw)
+			}
+			if outPath == "" {
+				_, err = cmd.OutOrStdout().Write(raw)
+				return err
+			}
+			if err := os.WriteFile(outPath, raw, 0o600); err != nil {
+				return fmt.Errorf("write %s: %w", outPath, err)
+			}
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "wrote %s\n", outPath)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&framework, "framework", "", "only this framework slug")
+	cmd.Flags().StringVar(&requirement, "requirement", "", "only this requirement code")
+	cmd.Flags().StringVar(&anchor, "anchor", "", "only this SCF anchor code")
+	cmd.Flags().StringVar(&status, "status", "", "only active or retired edges")
+	cmd.Flags().StringVarP(&outPath, "out", "o", "", "write the CSV to this file (default: stdout)")
+	return cmd
+}
+
+func readOverlayFile(path string) ([]byte, error) {
+	f, err := os.Open(path) // #nosec G304 -- the operator names the file to import.
+	if err != nil {
+		return nil, fmt.Errorf("open %s: %w", path, err)
+	}
+	defer func() { _ = f.Close() }()
+	body, err := io.ReadAll(io.LimitReader(f, maxOverlayFileBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if len(body) > maxOverlayFileBytes {
+		return nil, fmt.Errorf("%s exceeds the 4 MiB import limit", path)
+	}
+	return body, nil
+}
+
+// overlayRawRequest is taxonomyRequest for a non-JSON body or response: it
+// sends body as-is and hands back the status, so the caller can read a
+// 422's row report.
+func overlayRawRequest(method, path string, body []byte) (int, []byte, error) {
+	var reader io.Reader
+	if body != nil {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequest(method, strings.TrimRight(common.endpoint, "/")+path, reader)
+	if err != nil {
+		return 0, nil, fmt.Errorf("new request: %w", err)
+	}
+	req.Header.Set(sdk.MetadataAuthorization, sdk.BearerPrefix+common.token)
+	resp, err := cmdhttp.Client(60 * time.Second).Do(req)
+	if err != nil {
+		return 0, nil, fmt.Errorf("request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 64*1024*1024))
+	if err != nil {
+		return 0, nil, fmt.Errorf("read response: %w", err)
+	}
+	return resp.StatusCode, raw, nil
+}
+
+// apiError is the error taxonomyRequest returns for a 4xx/5xx.
+func apiError(status int, raw []byte) error {
+	var e struct {
+		Error string `json:"error"`
+	}
+	msg := strings.TrimSpace(string(raw))
+	if json.Unmarshal(raw, &e) == nil && e.Error != "" {
+		msg = e.Error
+	}
+	return fmt.Errorf("HTTP %d: %s", status, printable(msg))
+}
+
+// printOverlayImport prints what an import wrote and every rejected row.
+// It is an error when nothing was written.
+func printOverlayImport(out io.Writer, status int, raw []byte) error {
+	if status != http.StatusCreated && status != http.StatusUnprocessableEntity {
+		return apiError(status, raw)
+	}
+	var resp struct {
+		Written bool `json:"written"`
+		Created []struct {
+			Row         int         `json:"row"`
+			OverlayEdge overlayEdge `json:"overlay_edge"`
+		} `json:"created"`
+		Rejected []struct {
+			Row    int    `json:"row"`
+			Line   int    `json:"line"`
+			Code   string `json:"code"`
+			Reason string `json:"reason"`
+		} `json:"rejected"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
+	for _, c := range resp.Created {
+		_, _ = fmt.Fprintf(out, "row %d: added %s: %s -> %s\n", c.Row, printable(c.OverlayEdge.ID),
+			overlayRequirement(c.OverlayEdge), overlayAnchor(c.OverlayEdge))
+	}
+	for _, rj := range resp.Rejected {
+		_, _ = fmt.Fprintf(out, "row %d (line %d): rejected: %s: %s\n", rj.Row, rj.Line, printable(rj.Code), printable(rj.Reason))
+	}
+	if !resp.Written {
+		return fmt.Errorf("nothing imported: %d row(s) rejected", len(resp.Rejected))
+	}
+	_, _ = fmt.Fprintf(out, "imported %d overlay edge(s), %d row(s) rejected\n", len(resp.Created), len(resp.Rejected))
 	return nil
 }
