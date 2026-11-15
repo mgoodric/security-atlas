@@ -71,6 +71,9 @@ func (s *Server) registerGraph(root *chi.Mux) {
 	root.Post("/v1/mapping-overlays/{id}/retire", overlaysH.Retire)
 	root.Post("/v1/mapping-overlays/import", overlaysH.Import)
 	root.Get("/v1/mapping-overlays/export", overlaysH.Export)
+	// #1801: the "audited under" report.
+	root.Get("/v1/mapping-overlays/audited-under", overlaysH.AuditedUnder)
+	root.Get("/v1/mapping-overlays/audited-under/export", overlaysH.AuditedUnderExport)
 	// Slice 013: evidence ledger write API. Only mounted when an ingest
 	// service has been wired in (DB-backed). Unit-only servers leave it
 	// nil and exclusively use the slice-003 gRPC fallback path.

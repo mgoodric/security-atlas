@@ -64,3 +64,32 @@ func TestImportFormat(t *testing.T) {
 		}
 	}
 }
+
+// The audited-under report refuses a request with no tenant before reaching
+// the store (nil here, so a store call would panic).
+func TestAuditedUnder_RequiresTenant(t *testing.T) {
+	t.Parallel()
+	h := New(nil)
+	for path, serve := range map[string]http.HandlerFunc{
+		"/v1/mapping-overlays/audited-under":        h.AuditedUnder,
+		"/v1/mapping-overlays/audited-under/export": h.AuditedUnderExport,
+	} {
+		rec := httptest.NewRecorder()
+		serve(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code != http.StatusUnauthorized {
+			t.Errorf("%s with no tenant: status %d; want 401", path, rec.Code)
+		}
+	}
+}
+
+// An unanchored control's row carries anchor_id null and no anchor code.
+func TestGapWireFrom_Unanchored(t *testing.T) {
+	t.Parallel()
+	w := gapWireFrom(mappingoverlay.Gap{ControlID: uuid.New(), AnchorFit: "none", AnchorFitNote: "no SCF equivalent"})
+	if w.AnchorID != nil || w.AnchorCode != "" {
+		t.Errorf("anchor = %v %q; want none", w.AnchorID, w.AnchorCode)
+	}
+	if w.CandidateAnchors == nil {
+		t.Error("candidate_anchors is nil; want an empty list so it encodes as []")
+	}
+}
