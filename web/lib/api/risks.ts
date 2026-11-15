@@ -18,7 +18,10 @@ export type Risk = {
   id: string;
   title: string;
   description: string;
+  // #1812: the slug of the organisation category; category_name is its
+  // display name.
   category: string;
+  category_name?: string;
   methodology: string;
   inherent_score: unknown;
   treatment: string;
@@ -211,6 +214,50 @@ async function fetchRisks(url: string): Promise<RisksListResponse> {
     throw new APIError(res.status, msg);
   }
   return (await res.json()) as RisksListResponse;
+}
+
+// ----- #1817: organisation risk categories -----
+//
+// The GET /v1/risks/categories wire shape (#1809, #1810). `slug` is the
+// stable reference: the form posts it and the register filter matches it,
+// so a renamed category never breaks a saved form or a bookmarked filter.
+// `name` is what the user reads. An archived category stays on the risks
+// that have it and is filterable, but takes no new risks.
+
+export type RiskCategory = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  archived: boolean;
+  is_default: boolean;
+  risk_count: number;
+  rule_count: number;
+};
+
+// Browser-side fetcher for the `/api/risks/categories` BFF: active
+// categories only unless `includeArchived`.
+export async function fetchRiskCategories(
+  includeArchived = false,
+): Promise<RiskCategory[]> {
+  const res = await fetch(
+    includeArchived
+      ? "/api/risks/categories?include_archived=true"
+      : "/api/risks/categories",
+    { cache: "no-store" },
+  );
+  if (!res.ok) {
+    let msg = `${res.status} ${res.statusText}`;
+    try {
+      const j = (await res.json()) as { error?: string };
+      if (j.error) msg = j.error;
+    } catch {
+      // body not JSON — keep the status line
+    }
+    throw new APIError(res.status, msg);
+  }
+  const body = (await res.json()) as { categories?: RiskCategory[] };
+  return body.categories ?? [];
 }
 
 // ----- Slice 681: per-risk read-only detail -----
