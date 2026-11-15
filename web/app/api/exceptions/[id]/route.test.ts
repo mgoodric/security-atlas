@@ -147,4 +147,23 @@ describe("/api/exceptions BFFs (#2113)", () => {
     expect(res.status).toBe(404);
     expect(spy).not.toHaveBeenCalled();
   });
+
+  // #2312: a `..` id would normalise upstream to another route.
+  test.each(["..", "%2E%2E", "not-a-uuid"])(
+    "id %s is 400 on every route and never reaches the platform",
+    async (bad) => {
+      mockCookieGet.mockReturnValue({ value: "test-bearer-2113" });
+      const spy = vi.spyOn(globalThis, "fetch");
+      const p = { params: Promise.resolve({ id: bad }) };
+      const tp = { params: Promise.resolve({ id: bad, transition: "revoke" }) };
+      expect((await getOne(new Request("http://web"), p)).status).toBe(400);
+      expect((await getAuditLog(new Request("http://web"), p)).status).toBe(
+        400,
+      );
+      expect(
+        (await transition(jsonReq({ reason: "x" }, "PATCH"), tp)).status,
+      ).toBe(400);
+      expect(spy).not.toHaveBeenCalled();
+    },
+  );
 });

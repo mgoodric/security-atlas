@@ -8,7 +8,7 @@
 
 import { NextResponse } from "next/server";
 
-import { forwardJSON } from "@/lib/api/bff";
+import { forwardJSON, rejectNonUUID } from "@/lib/api/bff";
 
 const ALLOWED = new Set(["approve", "deny", "activate", "revoke"]);
 
@@ -17,6 +17,8 @@ export async function PATCH(
   ctx: { params: Promise<{ id: string; transition: string }> },
 ) {
   const { id, transition } = await ctx.params;
+  const bad = rejectNonUUID({ id });
+  if (bad) return bad;
   if (!ALLOWED.has(transition)) {
     return NextResponse.json({ error: "unknown transition" }, { status: 404 });
   }
