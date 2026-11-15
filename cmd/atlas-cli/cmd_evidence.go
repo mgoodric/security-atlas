@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/structpb"
@@ -77,6 +79,7 @@ func newEvidencePushCmd() *cobra.Command {
 				return fmt.Errorf("marshal receipt: %w", err)
 			}
 			fmt.Println(string(b))
+			warnUnlinked(cmd.ErrOrStderr(), f.control, receipt)
 			return nil
 		},
 	}
@@ -94,6 +97,21 @@ func newEvidencePushCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.sessionID, "session-id", "", "optional session reference")
 	cmd.Flags().StringVar(&f.payloadURI, "payload-uri", "", "optional object-storage URI for large artifacts")
 	return cmd
+}
+
+// warnUnlinked tells the operator on stderr when --control was not a UUID and
+// the server linked the record to no control (#2165). The server reads such a
+// value as a bundle ID; when no active control has that bundle ID the record
+// keeps it only as a free-form reference, which is usually a mistyped bundle
+// ID. stdout keeps only the receipt JSON, so scripts parsing it are unaffected.
+func warnUnlinked(w io.Writer, control string, receipt *evidencev1.EvidenceReceipt) {
+	if _, err := uuid.Parse(control); err == nil {
+		return
+	}
+	if receipt.GetLinkedControlId() != "" {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "warning: --control %q matched no active control bundle; the record was stored as an unlinked, free-form reference\n", control)
 }
 
 func validatePushFlags(f *evidencePushFlags) error {
