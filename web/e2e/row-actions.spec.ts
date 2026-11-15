@@ -162,14 +162,24 @@ test.describe("row actions with inline confirm", () => {
   test("a failed settings-token revoke surfaces its error", async ({
     authedPage: page,
   }) => {
-    // The seeded token list is real; only the revoke fails, so nothing
-    // is revoked in the shared database.
+    // Both the list and the revoke are mocked (this spec does not load
+    // settings.spec.ts's token fixture), so nothing touches the shared
+    // database.
+    await page.route("**/api/admin/credentials", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [CRED] }),
+      }),
+    );
     await page.route("**/api/admin/credentials/*/revoke", (route) =>
       route.fulfill({ status: 500, body: "" }),
     );
 
     await page.goto("/settings");
-    const row = page.getByTestId("settings-token-row").first();
+    const row = page
+      .getByTestId("settings-token-row")
+      .filter({ hasText: CRED.last4 });
     await expect(row).toBeVisible();
     await row.getByTestId("settings-token-actions").click();
     await page.getByTestId("settings-token-revoke-button").click();
