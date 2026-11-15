@@ -86,7 +86,7 @@ func do(t *testing.T, h http.Handler, method, path, body string) (int, string) {
 func freshTenant(t *testing.T) string {
 	t.Helper()
 	admin := dbtest.NewMigratePool(t)
-	return dbtest.SeedTenant(t, admin, "tenant_llm_routing")
+	return dbtest.SeedTenant(t, admin, "tenant_llm_routing", "me_audit_log")
 }
 
 func TestHandler_NonAdminForbidden(t *testing.T) {
