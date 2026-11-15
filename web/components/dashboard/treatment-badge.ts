@@ -12,10 +12,10 @@ import { treatmentLabel } from "@/lib/api/risks";
 // `progress` tone (work is under way), never `destructive`. Red is kept
 // for irreversible actions.
 export type TreatmentBadgeVariant =
-  | "progress"
-  | "secondary"
-  | "warning"
-  | "outline";
+  | "progress" // mitigate
+  | "secondary" // accept (approved)
+  | "warning" // accept (proposed or no status)
+  | "outline"; // every other treatment
 
 type TreatmentFields = Pick<DashboardRisk, "treatment" | "acceptance_status">;
 
