@@ -281,7 +281,7 @@ export function TenantSwitcher() {
           aria-label="Switch tenant"
           className="inline-flex items-center gap-2 rounded-md border bg-background px-3 py-1.5 text-sm font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
         >
-          <span className="max-w-[16rem] truncate">
+          <span className="max-w-[6rem] truncate sm:max-w-[10rem] lg:max-w-[16rem]">
             {currentTenant?.name || "Select tenant"}
           </span>
           <svg

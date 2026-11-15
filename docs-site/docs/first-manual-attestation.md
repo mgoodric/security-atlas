@@ -225,9 +225,14 @@ The CLI prints the receipt:
   "recordId": "d505aed3-6eb3-4481-ad52-1b975df7e2ec",
   "hash": "5eff697623684823257ae045299e65eb1eacb03fc0c3831fc1224dbbb0ddc4ce",
   "ingestedAt": "2026-11-14T17:12:26.985795Z",
-  "credentialId": "key_1a7f4e35-623c-4cda-a757-dec4558316e8"
+  "credentialId": "key_1a7f4e35-623c-4cda-a757-dec4558316e8",
+  "linkedControlId": "46e80fc7-41bc-4351-bd23-eed3cd83b3ac"
 }
 ```
+
+`linkedControlId` is the control the record linked to. If it is missing,
+the record is stored unlinked and the CLI prints a warning on stderr. Check
+`--control` against the control's UUID or bundle ID.
 
 `hash` is the record's sha256 content hash. The record is now in the
 ledger, linked to the control, and listed on the control's **Evidence**
