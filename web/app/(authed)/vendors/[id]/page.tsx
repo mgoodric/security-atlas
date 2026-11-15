@@ -31,6 +31,7 @@ import Link from "next/link";
 import { notFound, useRouter } from "next/navigation";
 import { use, useEffect } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { DetailHeader } from "@/components/detail/detail-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -112,23 +113,22 @@ export default function VendorDetailPage({
 
   if (isLoading) {
     return (
-      <div className="space-y-6" data-testid="vendor-detail-loading">
+      <PageShell title="Vendor" data-testid="vendor-detail-loading">
         <Skeleton className="h-10 w-2/3" />
         <Skeleton className="h-24 w-full" />
         <Skeleton className="h-64 w-full" />
-      </div>
+      </PageShell>
     );
   }
 
   if (error && !(error instanceof APIError && error.status === 401)) {
     return (
-      <div className="space-y-6">
-        <BackLink />
+      <PageShell title="Vendor" actions={<BackLink />}>
         <Alert variant="destructive" data-testid="vendor-detail-error">
           <AlertTitle>Could not load vendor</AlertTitle>
           <AlertDescription>{(error as Error).message}</AlertDescription>
         </Alert>
-      </div>
+      </PageShell>
     );
   }
 
@@ -141,55 +141,52 @@ export default function VendorDetailPage({
   const mailto = ownerMailto(vendor.owner_user);
 
   return (
-    <div className="space-y-6" data-testid="vendor-detail">
-      <BackLink />
-
-      {/* ============ HEADER ============ */}
-      {/* #2102: the shared detail-page header. Record review is the
-          vendor's lifecycle action; there are no overflow items yet. */}
-      <DetailHeader
-        data-testid="vendor-detail-header"
-        titleTestId="vendor-detail-name"
-        title={vendor.name}
-        status={
-          <>
-            <CriticalityBadge value={vendor.criticality} />
-            {vendor.overdue ? (
-              <Badge variant="destructive" data-testid="vendor-detail-status">
-                overdue
-              </Badge>
-            ) : vendor.first_review_due ? (
-              <Badge variant="outline" data-testid="vendor-detail-status">
-                First review due {formatDetailDate(vendor.first_review_due)}
-              </Badge>
-            ) : (
-              <Badge variant="secondary" data-testid="vendor-detail-status">
-                on time
-              </Badge>
-            )}
-          </>
-        }
-        subtitle={
-          vendor.domain ? (
-            <p
-              className="text-sm text-muted-foreground"
-              data-testid="vendor-detail-domain"
-            >
-              {vendor.domain}
-            </p>
-          ) : null
-        }
-        primaryAction={{
-          label: "Record review",
-          href: `/vendors/${id}/reviews/new`,
-          "data-testid": "vendor-detail-record-review",
-        }}
-        edit={{
-          href: `/vendors/${id}/edit`,
-          "data-testid": "vendor-detail-edit",
-        }}
-      />
-
+    // #2102: the shared detail-page header. Record review is the vendor's
+    // lifecycle action; there are no overflow items yet.
+    <DetailHeader
+      data-testid="vendor-detail"
+      titleTestId="vendor-detail-name"
+      headerTestId="vendor-detail-header"
+      title={vendor.name}
+      status={
+        <>
+          <CriticalityBadge value={vendor.criticality} />
+          {vendor.overdue ? (
+            <Badge variant="destructive" data-testid="vendor-detail-status">
+              overdue
+            </Badge>
+          ) : vendor.first_review_due ? (
+            <Badge variant="outline" data-testid="vendor-detail-status">
+              First review due {formatDetailDate(vendor.first_review_due)}
+            </Badge>
+          ) : (
+            <Badge variant="secondary" data-testid="vendor-detail-status">
+              on time
+            </Badge>
+          )}
+        </>
+      }
+      subtitle={
+        vendor.domain ? (
+          <p
+            className="text-sm text-muted-foreground"
+            data-testid="vendor-detail-domain"
+          >
+            {vendor.domain}
+          </p>
+        ) : null
+      }
+      back={<BackLink />}
+      primaryAction={{
+        label: "Record review",
+        href: `/vendors/${id}/reviews/new`,
+        "data-testid": "vendor-detail-record-review",
+      }}
+      edit={{
+        href: `/vendors/${id}/edit`,
+        "data-testid": "vendor-detail-edit",
+      }}
+    >
       {/* ============ SUMMARY ============ */}
       <Card data-testid="vendor-detail-summary-card">
         <CardHeader className="border-b">
@@ -354,7 +351,7 @@ export default function VendorDetailPage({
           )}
         </CardContent>
       </Card>
-    </div>
+    </DetailHeader>
   );
 }
 

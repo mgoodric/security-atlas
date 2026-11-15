@@ -76,6 +76,26 @@ describe("DetailHeader", () => {
     expect(html).toMatch(/data-testid="hdr-primary"[^>]*>Record review</);
   });
 
+  it("sits in PageShell's header: title in the H1, back link first in actions", () => {
+    const html = renderToStaticMarkup(
+      h(
+        DetailHeader,
+        {
+          title: "Acme Corp",
+          titleTestId: "hdr-title",
+          back: h("a", { href: "/vendors", "data-testid": "hdr-back" }, "Back"),
+          edit: { href: "/vendors/v1/edit", "data-testid": "hdr-edit" },
+        },
+        h("p", { "data-testid": "hdr-body" }, "body"),
+      ),
+    );
+    expect(html).toContain("data-page-shell");
+    expect(html.match(/<header/g)).toHaveLength(1);
+    expect(html).toMatch(/<h1[^>]*><span data-testid="hdr-title">Acme Corp</);
+    expect(html.indexOf("hdr-back")).toBeLessThan(html.indexOf("hdr-edit"));
+    expect(html.indexOf("</header>")).toBeLessThan(html.indexOf("hdr-body"));
+  });
+
   it("omits the overflow trigger when there are no overflow items", () => {
     expect(render()).not.toContain("detail-header-overflow-trigger");
   });

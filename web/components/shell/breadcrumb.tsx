@@ -64,13 +64,15 @@ export function Breadcrumb() {
     <nav
       data-testid="breadcrumb"
       aria-label="Breadcrumb"
-      className="flex items-center gap-1 text-xs text-muted-foreground"
+      className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
     >
-      <span data-testid="breadcrumb-tenant">{tenantName}</span>
+      <span data-testid="breadcrumb-tenant" className="truncate">
+        {tenantName}
+      </span>
       <ChevronRight />
       <span
         data-testid="breadcrumb-page"
-        className="text-foreground font-medium"
+        className="truncate text-foreground font-medium"
       >
         {pageName}
       </span>

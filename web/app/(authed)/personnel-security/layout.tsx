@@ -6,7 +6,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Personnel Security · security-atlas",
+  title: "Personnel Security",
 };
 
 export default function PersonnelSecurityLayout({

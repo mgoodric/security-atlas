@@ -78,6 +78,8 @@ type metaRiskWriter interface {
 	LockRiskHierarchy(ctx context.Context, tenantID pgtype.UUID) error
 	// transaction-scoped advisory lock on a meta-risk key (#1861)
 	LockAggregationKey(ctx context.Context, aggregationKey string) error
+	// the tenant's risk categories, for the meta-risk category (#1813)
+	ListRiskCategories(ctx context.Context, tenantID pgtype.UUID) ([]dbx.OrgRiskCategory, error)
 	// the five — and only five — writes
 	CreateAggregateRisk(ctx context.Context, arg dbx.CreateAggregateRiskParams) (dbx.Risk, error)
 	UpdateMetaRiskInherentScore(ctx context.Context, arg dbx.UpdateMetaRiskInherentScoreParams) (dbx.Risk, error)
@@ -136,12 +138,22 @@ func (e *Engine) Evaluate(ctx context.Context, tenantID uuid.UUID, triggerThemes
 	}
 
 	selected := rulesForThemes(rules, triggerThemes)
+	if len(selected) == 0 {
+		return nil, nil
+	}
+	// The categories are a plain read, taken before the hierarchy and key
+	// locks (#1813): it locks no row, so it cannot join the lock order
+	// those protect (#1867).
+	cats, err := e.loadCategories(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
 	if err := e.lockHierarchy(ctx, tenantID, selected); err != nil {
 		return nil, err
 	}
 	var out []Evaluation
 	for _, ruleRow := range selected {
-		ev, err := e.evaluateRule(ctx, tenantID, ruleRow)
+		ev, err := e.evaluateRule(ctx, tenantID, ruleRow, cats)
 		if err != nil {
 			return nil, err
 		}
@@ -221,7 +233,7 @@ func rulesForThemes(rules []dbx.AggregationRule, themes []string) []dbx.Aggregat
 // evaluateRule runs one active rule: reads candidates, checks thresholds,
 // and on a met threshold creates or updates the meta-risk. Exactly one
 // aggregation_rule_evaluations row is written before return.
-func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow dbx.AggregationRule) (Evaluation, error) {
+func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow dbx.AggregationRule, cats metaRiskCategories) (Evaluation, error) {
 	var rule Rule
 	if err := json.Unmarshal(ruleRow.RuleBody, &rule); err != nil {
 		return Evaluation{}, fmt.Errorf("aggrule: unmarshal rule_body for %s: %w",
@@ -303,7 +315,7 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 	scores := make([]ChildSeverity, 0, len(eligible))
 	childIDs := make([]uuid.UUID, 0, len(eligible))
 	themeUnion := make(map[string]struct{})
-	var category dbx.RiskCategory
+	scored := make([]dbx.Risk, 0, len(eligible))
 	for _, c := range eligible {
 		sev, perr := severityFromInherent(c.InherentScore)
 		if perr != nil {
@@ -325,13 +337,7 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 			teamKey = uuid.UUID(c.OrgUnitID.Bytes).String()
 		}
 		teamSet[teamKey] = struct{}{}
-		// Category of the meta-risk is the first scored child's category.
-		if category == "" {
-			category = c.Category
-		}
-	}
-	if category == "" {
-		category = dbx.RiskCategoryOperational
+		scored = append(scored, c)
 	}
 
 	riskCount := len(childIDs)
@@ -386,6 +392,10 @@ func (e *Engine) evaluateRule(ctx context.Context, tenantID uuid.UUID, ruleRow d
 		themes := make([]string, 0, len(themeUnion))
 		for t := range themeUnion {
 			themes = append(themes, t)
+		}
+		category, cerr := cats.pick(scored)
+		if cerr != nil {
+			return Evaluation{}, fmt.Errorf("aggrule: category for rule %s: %w", ruleID, cerr)
 		}
 		metaRiskID, err = e.createMetaRisk(ctx, tenantID, rule, ruleID, inherent, riskCount, category, themes, childIDs)
 		if err != nil {

@@ -16,13 +16,16 @@
 // Esc to close, and focus back on the trigger. The inline confirm takes
 // focus on open, closes on Esc, and hands focus back to the trigger.
 //
-// Every testid is caller-supplied so adopting pages keep the selectors
-// their existing specs use.
+// It renders through PageShell (#2080): the title in the H1, status and
+// subtitle in the subtitle slot, and the back link, primary action, Edit
+// and overflow in the actions slot. Every testid is caller-supplied so
+// adopting pages keep the selectors their existing specs use.
 
 import { Menu } from "@base-ui/react/menu";
 import Link from "next/link";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -56,50 +59,71 @@ export type DetailHeaderAction = {
 
 export type DetailHeaderProps = {
   title: ReactNode;
-  /** Status badges, rendered above the title. */
+  /** Status badges, rendered under the title. */
   status?: ReactNode;
-  /** Secondary line under the title (e.g. a domain). */
+  /** Secondary line under the status (e.g. a domain). */
   subtitle?: ReactNode;
+  /** Leads the actions slot, where PageShell pages keep their back link. */
+  back?: ReactNode;
   edit?: DetailHeaderLink;
   primaryAction?: DetailHeaderAction;
   overflow?: readonly OverflowItem[];
+  /** Page body, rendered under the header by PageShell. */
+  children?: ReactNode;
+  tabs?: ReactNode;
+  /** The PageShell root's testid. */
   "data-testid"?: string;
   titleTestId?: string;
+  /** Testid on the status + subtitle block under the title. */
+  headerTestId?: string;
 };
 
+/** A record's detail page: PageShell with the shared header in its
+ *  title, subtitle and actions slots, not a second header row. */
 export function DetailHeader({
   title,
   status,
   subtitle,
+  back,
   edit,
   primaryAction,
   overflow,
+  children,
+  tabs,
   "data-testid": testId,
   titleTestId,
+  headerTestId,
 }: DetailHeaderProps) {
   return (
-    <header
-      className="flex flex-wrap items-start justify-between gap-4"
+    <PageShell
       data-testid={testId}
+      title={
+        titleTestId ? <span data-testid={titleTestId}>{title}</span> : title
+      }
+      subtitle={
+        status || subtitle ? (
+          <div className="mt-2 space-y-2" data-testid={headerTestId}>
+            {status ? (
+              <div className="flex flex-wrap items-center gap-2">{status}</div>
+            ) : null}
+            {subtitle}
+          </div>
+        ) : undefined
+      }
+      actions={
+        <>
+          {back}
+          <DetailHeaderActions
+            edit={edit}
+            primaryAction={primaryAction}
+            overflow={overflow}
+          />
+        </>
+      }
+      tabs={tabs}
     >
-      <div className="space-y-2">
-        {status ? (
-          <div className="flex flex-wrap items-center gap-2">{status}</div>
-        ) : null}
-        <h1
-          className="text-2xl font-semibold tracking-tight"
-          data-testid={titleTestId}
-        >
-          {title}
-        </h1>
-        {subtitle}
-      </div>
-      <DetailHeaderActions
-        edit={edit}
-        primaryAction={primaryAction}
-        overflow={overflow}
-      />
-    </header>
+      {children}
+    </PageShell>
   );
 }
 

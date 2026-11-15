@@ -47,7 +47,19 @@ confirm. The menu popup is portalled and mounts only in a browser, so the
 items' select/confirm/cancel behaviour is asserted through the reducer. The
 vendor Playwright specs cover the header in the running app.
 
-## D4 — Order and variants kept from the vendor page
+## D4 — The header renders through PageShell
+
+**Decision.** `DetailHeader` wraps PageShell (#2080): the title goes in
+its H1, status and subtitle in its subtitle slot, and the back link,
+primary action, Edit and overflow in its actions slot, where #2226 put the
+vendor page's back link. The page body is `DetailHeader`'s children.
+`DetailHeaderActions` is exported on its own for a page that builds its
+PageShell itself.
+
+**Why.** One header row per page. A second header under PageShell's would
+duplicate the H1.
+
+## D5 — Order and variants kept from the vendor page
 
 **Decision.** Primary action (secondary variant), then Edit (default
 variant), then the overflow trigger, which is hidden when there are no items.

@@ -43,7 +43,18 @@ function renderLabel(info: VersionInfo): string {
   return `v${info.version}`;
 }
 
-export function VersionFooter() {
+/**
+ * `placement`:
+ *   * `fixed` (default) — pinned bottom-right; the signed-out /login page.
+ *   * `sidebar` — #2080: in flow at the foot of the app-shell sidebar,
+ *     the only place the version tag appears on an authenticated page.
+ *     The build-info panel opens upward from the trigger.
+ */
+export function VersionFooter({
+  placement = "fixed",
+}: {
+  placement?: "fixed" | "sidebar";
+} = {}) {
   const query = useVersion();
   const info: VersionInfo = query.data ?? UNKNOWN_VERSION;
   const isUnknown = !query.data;
@@ -77,8 +88,10 @@ export function VersionFooter() {
   return (
     <div
       ref={rootRef}
+      data-testid="version-footer"
+      data-placement={placement}
       className={cn(
-        "fixed bottom-2 right-3 z-40",
+        placement === "fixed" ? "fixed bottom-2 right-3 z-40" : "relative",
         // P0-A2: never render on print contexts (board-pack export,
         // browser print). The board-pack print CSS uses `print:hidden`
         // on similar utility chrome.
@@ -90,7 +103,10 @@ export function VersionFooter() {
           id="version-footer-panel"
           role="region"
           aria-label="Show build info"
-          className="mb-2 w-64 rounded-md border border-border bg-popover p-3 text-xs shadow-md"
+          className={cn(
+            "mb-2 w-64 rounded-md border border-border bg-popover p-3 text-xs shadow-md",
+            placement === "sidebar" && "absolute bottom-full left-0 z-40",
+          )}
         >
           <dl className="space-y-1">
             <div className="flex justify-between gap-2">
