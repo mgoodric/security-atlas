@@ -170,33 +170,21 @@ func TestValidateInput_AllBranches(t *testing.T) {
 	}
 }
 
-// TestReviewCadence_Duration_DefaultCase locks the fail-CLOSED contract for
-// an unknown cadence: it returns the annual duration so an unknown enum
-// eventually surfaces as overdue rather than silently never-overdue.
-func TestReviewCadence_Duration_DefaultCase(t *testing.T) {
-	if got, want := ReviewCadence("weekly").Duration(), 365*24*time.Hour; got != want {
-		t.Fatalf("unknown cadence Duration: got %v, want %v (fail-closed = annual)", got, want)
-	}
-	if got, want := ReviewCadence("").Duration(), 365*24*time.Hour; got != want {
-		t.Fatalf("empty cadence Duration: got %v, want %v", got, want)
-	}
-}
-
-// TestReviewCadence_Duration_KnownCases keeps the day-count mapping a real
-// regression guard — the SQL CASE uses Postgres INTERVAL math; this Go
-// mapping is the fallback for callers computing overdue in memory. A bug
-// in one without the other is exactly the silent-drift class of failure
-// the slice-024 contract calls out.
-func TestReviewCadence_Duration_KnownCases(t *testing.T) {
-	cases := map[ReviewCadence]time.Duration{
-		CadenceMonthly:   30 * 24 * time.Hour,
-		CadenceQuarterly: 91 * 24 * time.Hour,
-		CadenceBiannual:  182 * 24 * time.Hour,
-		CadenceAnnual:    365 * 24 * time.Hour,
+// TestReviewCadence_Months locks the cadence -> calendar-month mapping the
+// SQL function vendor_review_due_date uses, and the fail-CLOSED contract for
+// an unknown cadence: annual, so it eventually surfaces as overdue.
+func TestReviewCadence_Months(t *testing.T) {
+	cases := map[ReviewCadence]int{
+		CadenceMonthly:   1,
+		CadenceQuarterly: 3,
+		CadenceBiannual:  6,
+		CadenceAnnual:    12,
+		"weekly":         12,
+		"":               12,
 	}
 	for c, want := range cases {
-		if got := c.Duration(); got != want {
-			t.Fatalf("%s.Duration() = %v, want %v", c, got, want)
+		if got := c.Months(); got != want {
+			t.Fatalf("%q.Months() = %d, want %d", c, got, want)
 		}
 	}
 }

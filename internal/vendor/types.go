@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/mgoodric/security-atlas/internal/duedate"
 )
 
 // Criticality is the slice-024 risk band. Three buckets is enough for a
@@ -99,29 +101,22 @@ const (
 // AllCadences mirrors AllCriticalities for input validation.
 var AllCadences = []ReviewCadence{CadenceMonthly, CadenceQuarterly, CadenceBiannual, CadenceAnnual}
 
-// Duration returns the calendar interval for the cadence. Used by IsOverdue
-// for the pure-Go (test-only) check; the SQL store has the equivalent CASE.
-//
-// The mapping uses simple day counts because Go's time.Time doesn't have a
-// native "calendar month" type and a vendor review program is happy with
-// "≈30 days" precision. The SQL store uses Postgres INTERVAL '1 month' /
-// '3 months' / '6 months' / '1 year' for the actual production query;
-// this Go mapping is only a fallback for clients that compute overdue in
-// memory.
-func (c ReviewCadence) Duration() time.Duration {
+// Months returns the cadence as whole calendar months, the interval the
+// SQL function vendor_review_due_date adds (#2232).
+func (c ReviewCadence) Months() int {
 	switch c {
 	case CadenceMonthly:
-		return 30 * 24 * time.Hour
+		return 1
 	case CadenceQuarterly:
-		return 91 * 24 * time.Hour
+		return 3
 	case CadenceBiannual:
-		return 182 * 24 * time.Hour
+		return 6
 	case CadenceAnnual:
-		return 365 * 24 * time.Hour
+		return 12
 	default:
 		// Unknown cadence: treat as annual so the system fails closed
 		// (eventually surfaces as overdue) rather than open (never).
-		return 365 * 24 * time.Hour
+		return 12
 	}
 }
 
@@ -225,27 +220,39 @@ func FirstReviewDueDate(createdAt time.Time, windowDays int) time.Time {
 	return time.Date(c.Year(), c.Month(), c.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, windowDays)
 }
 
-// IsOverdueAsOf computes the derived overdue flag without a database round
-// trip. The store always populates this from the SQL query (where it
-// composes with the indexed cadence math), but a pure-Go path keeps the
-// API handler from re-fetching when it already has the row.
-//
-// Contract:
-//   - NULL last_review_date => overdue only after the first-review due day:
-//     the UTC date of cutoff is later than FirstReviewDue (#2061). A
-//     never-reviewed vendor with no FirstReviewDue is never overdue.
-//   - otherwise: last_review + cadence < cutoff
-func (v Vendor) IsOverdueAsOf(cutoff time.Time) bool {
+// ReviewDueDate is the UTC date (midnight UTC) the vendor's next review is
+// due, the Go mirror of the SQL function vendor_review_due_date (#2232):
+// LastReviewDate plus the cadence in calendar months, the day clamped to the
+// month's end as Postgres date + interval does; or, for a vendor never
+// reviewed, FirstReviewDue (#2061). Nil when neither is known.
+func (v Vendor) ReviewDueDate() *time.Time {
 	if v.LastReviewDate == nil {
-		if v.FirstReviewDue == nil {
-			return false
-		}
-		c := cutoff.UTC()
-		cutoffDay := time.Date(c.Year(), c.Month(), c.Day(), 0, 0, 0, 0, time.UTC)
-		return v.FirstReviewDue.Before(cutoffDay)
+		return v.FirstReviewDue
 	}
-	due := v.LastReviewDate.Add(v.ReviewCadence.Duration())
-	return due.Before(cutoff)
+	d := addMonthsClamped(duedate.UTCDay(*v.LastReviewDate), v.ReviewCadence.Months())
+	return &d
+}
+
+// addMonthsClamped adds n calendar months to the UTC date d, clamping the
+// day to the target month's last day (Jan 31 + 1 month = Feb 28 or 29), as
+// Postgres does. time.AddDate would normalise to early March instead.
+func addMonthsClamped(d time.Time, n int) time.Time {
+	y, m, day := d.Date()
+	first := time.Date(y, m+time.Month(n), 1, 0, 0, 0, 0, time.UTC)
+	if last := first.AddDate(0, 1, -1).Day(); day > last {
+		day = last
+	}
+	return time.Date(first.Year(), first.Month(), day, 0, 0, 0, 0, time.UTC)
+}
+
+// IsOverdueAsOf computes the derived overdue flag without a database round
+// trip. It is the rule ListOverdueVendors, CountVendorsForBurndown and the
+// compliance calendar apply (#2232): overdue once the UTC day of
+// ReviewDueDate has ended (duedate.IsOverdue). A vendor with no due date is
+// never overdue.
+func (v Vendor) IsOverdueAsOf(cutoff time.Time) bool {
+	due := v.ReviewDueDate()
+	return due != nil && duedate.IsOverdue(*due, cutoff)
 }
 
 // CreateVendorInput is the payload the API/store accept for POST /v1/vendors.

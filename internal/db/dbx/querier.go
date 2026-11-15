@@ -279,8 +279,8 @@ type Querier interface {
 	// in the page header.
 	CountUnreadNotificationsForUser(ctx context.Context, arg CountUnreadNotificationsForUserParams) (int64, error)
 	// AC-3 burndown: returns total + overdue counts per criticality band. The
-	// overdue rule is ListOverdueVendors' (first-review window for a vendor never
-	// reviewed, #2061), so the counts match the overdue list. Used
+	// overdue rule is ListOverdueVendors' (vendor_review_due_date before the
+	// cutoff day, #2232), so the counts match the overdue list. Used
 	// by the dashboard panel (slice 040) and the quarterly board pack (slice 032).
 	// Returns one row per criticality present in the result set; empty bands are
 	// not included (callers fill in zero where needed).
@@ -1867,9 +1867,9 @@ type Querier interface {
 	//   2. exceptions              — expires_at is the waiver-lapse date
 	//   3. policies                — next_review_at is the next review date
 	//                                 (published only; overdue / due-soon, #1806)
-	//   4. vendors                 — last_review_date + review_cadence interval is
-	//      the next vendor-review date. Mirrors the dashboard "Upcoming" rollup's
-	//      vendor branch so the two surfaces cannot drift (slice 675).
+	//   4. vendors                 — vendor_review_due_date() is the next
+	//      vendor-review date, the one the vendor overdue list and burndown use
+	//      (#2232), never-reviewed vendors' first review included.
 	//      Also includes renewal_date as a separate vendor renewal event (OE-623).
 	//   5. controls + control_evaluations — periodic-review controls whose
 	//      cadence (derived from freshness_class) places their next review
@@ -2460,15 +2460,14 @@ type Querier interface {
 	// overdue-notification job.
 	ListOverdueDecisions(ctx context.Context, arg ListOverdueDecisionsParams) ([]Decision, error)
 	ListOverdueOffboardingChecklists(ctx context.Context, arg ListOverdueOffboardingChecklistsParams) ([]PersonnelSecurityChecklist, error)
-	// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
-	// the cutoff date. A vendor never reviewed (NULL last_review_date) has its
-	// first review due on the UTC date of created_at plus the tenant's
-	// vendor_initial_review_days (default 30 when the tenant has no row), and is
-	// overdue only after that day (#2061). CountVendorsForBurndown and
-	// vendor.IsOverdueAsOf apply the same rule. Cadence -> interval mapping
-	// happens with a CASE in SQL so the query plan is stable. Cutoff is passed as
-	// DATE so the caller controls "now" (testability) and timezone semantics
-	// (vendor reviews are date-granular, not timestamp-granular).
+	// AC-4 overdue calc. A vendor is overdue once the UTC day its review is due
+	// has ended: vendor_review_due_date(...) < cutoff (#2232, the
+	// internal/duedate rule). The due date is last_review_date + cadence, or for
+	// a vendor never reviewed the UTC date of created_at plus the tenant's
+	// vendor_initial_review_days (default 30 when the tenant has no row, #2061).
+	// CountVendorsForBurndown, the compliance calendar and vendor.IsOverdueAsOf
+	// apply the same rule. Cutoff is passed as DATE so the caller controls "now"
+	// (testability) and the day it falls on (vendor reviews are date-granular).
 	ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error)
 	ListOverlayEdgeAuditLog(ctx context.Context, arg ListOverlayEdgeAuditLogParams) ([]FwToScfOverlayEdgeAuditLog, error)
 	// The tenant's overlay edges with the codes they were named by. Each filter

@@ -458,10 +458,18 @@ func normalizeTypeFilter(raw string) (string, error) {
 // per type. Offboarding events (#2215) carry the departing person's work
 // email, so they need a personnel-security read, which only the GRC
 // engineer and admin hold.
+//
+// Vendor and exception events (#2232) name a vendor or the control an
+// exception waives, so they need a vendors or exceptions read: the auditor
+// reads exceptions but not vendors, and the control owner reads neither.
+// The ICS feed drops every gated type, these two included, because its
+// token names no user to ask OPA about.
 var gatedEventTypes = map[string]string{
 	"risk":        "risks",
 	"action_plan": "action-plans",
 	"offboarding": "personnel-security",
+	"vendor":      "vendors",
+	"exception":   "exceptions",
 }
 
 // readableTypes narrows a normalized type filter to the types the caller
