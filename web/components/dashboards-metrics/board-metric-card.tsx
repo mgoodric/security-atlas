@@ -30,7 +30,16 @@ import {
   measuredObservations,
   noDataReason,
   type Metric,
+  type MetricTarget,
 } from "@/lib/api/metrics";
+
+import {
+  type DeltaTone,
+  deltaAriaLabel,
+  deltaArrow,
+  deltaTone,
+  deltaToneClass,
+} from "@/lib/charts/delta-tone";
 
 import { formatValue, parseValue } from "./format";
 import { Sparkline } from "./sparkline";
@@ -109,6 +118,18 @@ export function BoardMetricCard({
   // live freshness query; every other metric follows the observations
   // query. Keeping these as explicit locals keeps the JSX branches
   // readable and the two surfaces' "do we have a number?" logic aligned.
+  // #2095: the 90-day change, coloured by whether it moves toward the
+  // target (never by its sign alone, and neutral with no target).
+  const trend =
+    emptyReason || latest?.value === undefined
+      ? null
+      : trendSince(
+          latest.value,
+          measuredObservations(obsQuery.data?.observations ?? []),
+          metric.unit,
+          target,
+        );
+
   const valueIsLoading = isFreshnessKPI
     ? freshnessQuery.isLoading
     : obsQuery.isLoading;
@@ -162,10 +183,29 @@ export function BoardMetricCard({
                   {formatValue(parseValue(target.target_value), metric.unit)}
                 </span>
               ) : (
-                <span className="text-xs text-muted-foreground">
-                  no target set
-                </span>
+                <Link
+                  href={`/dashboards/metrics/${encodeURIComponent(
+                    metric.id,
+                  )}#metric-detail-target`}
+                  className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
+                  data-testid={`board-metric-${metric.id}-no-target`}
+                >
+                  No target set
+                </Link>
               )}
+              {trend ? (
+                <span
+                  className={`text-xs ${deltaToneClass(trend.tone)}`}
+                  data-testid={`board-metric-${metric.id}-delta`}
+                  data-tone={trend.tone}
+                  aria-label={`90-day change ${deltaAriaLabel(
+                    trend.tone,
+                    trend.label,
+                  )}`}
+                >
+                  {deltaArrow(trend.delta)} {trend.label} over 90 days
+                </span>
+              ) : null}
             </div>
             <Sparkline
               observations={measuredObservations(
@@ -224,4 +264,29 @@ function latestObservation(
     value: parseValue(raw),
     noDataReason: noDataReason(observations[0]),
   };
+}
+
+// trendSince is the change from the oldest measured observation in the
+// window to the current value, toned against the target. Percent values
+// stored as fractions (0-1) are reported in percentage points.
+function trendSince(
+  value: number,
+  observations: { numeric_value: string }[],
+  unit: string,
+  target: MetricTarget | null,
+): { delta: number; label: string; tone: DeltaTone } | null {
+  // Upstream order is newest first; the last row is the oldest.
+  const oldest = parseValue(
+    observations[observations.length - 1]?.numeric_value,
+  );
+  if (observations.length < 2 || oldest === undefined) return null;
+  const delta = value - oldest;
+  const isPercent = unit === "percent" || unit === "ratio";
+  const fraction = isPercent && Math.abs(value) <= 1 && Math.abs(oldest) <= 1;
+  const shown = fraction ? delta * 100 : delta;
+  const sign = shown > 0 ? "+" : "";
+  const label = isPercent
+    ? `${sign}${shown.toFixed(1)} pts`
+    : `${sign}${formatValue(shown, unit)}`;
+  return { delta, label, tone: deltaTone(value, delta, target) };
 }
