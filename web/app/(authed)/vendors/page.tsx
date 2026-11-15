@@ -113,7 +113,7 @@ export default function VendorsPage() {
   return (
     <PageShell
       title={pageTitle("/vendors")}
-      subtitle="Third-party register. Lite scope: contract dates, DPA, review cadence, criticality. Phase 2 adds questionnaire issuance."
+      subtitle="Third-party register: contract dates, DPA, review cadence and criticality."
       actions={
         <>
           {/* Slice 139 — vendor data export (csv|json|xlsx). The

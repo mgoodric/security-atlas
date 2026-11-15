@@ -12,7 +12,7 @@ metrics:
     name: Investment vs coverage
     description: |
       Quarterly security spend (USD) divided by the quarter-over-quarter
-      delta in program_effectiveness. The "are we getting value out of
+      change in program effectiveness. The "are we getting value out of
       what we spend?" board number.
     unit: dollars_ale
     cadence: quarterly

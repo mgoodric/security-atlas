@@ -122,7 +122,7 @@ func okSubscribeFlags() subscribeFlags {
 		environment:     "prod",
 		authMode:        "kubeconfig-token",
 		rbacControl:     "scf:IAC-10",
-		workloadControl: "scf:CFG-02",
+		workloadControl: "scf:CFG-04",
 		skipWorkload:    true, // most tests exercise rbac only
 	}
 }
@@ -439,7 +439,7 @@ func TestSubscribe_RBACEmitterPushError(t *testing.T) {
 func TestSubscribe_WorkloadEmitterPaths(t *testing.T) {
 	t.Parallel()
 	// Skip: not a RawWorkload.
-	emitSkip := workloadEmitter(&capturingSDKClient{}, "c", "e", "scf:CFG-02")
+	emitSkip := workloadEmitter(&capturingSDKClient{}, "c", "e", "scf:CFG-04")
 	if key, err := emitSkip(context.Background(), watch.EventAdded, 42); key != "" || err != nil {
 		t.Errorf("non-workload object: key=%q err=%v; want empty,nil", key, err)
 	}
@@ -449,14 +449,14 @@ func TestSubscribe_WorkloadEmitterPaths(t *testing.T) {
 	}
 	// Push success.
 	cap := &capturingSDKClient{}
-	emitOK := workloadEmitter(cap, "c", "e", "scf:CFG-02")
+	emitOK := workloadEmitter(cap, "c", "e", "scf:CFG-04")
 	raw := workload.RawWorkload{Kind: workload.KindDeployment, Name: "api", Namespace: "prod"}
 	if key, err := emitOK(context.Background(), watch.EventModified, raw); err != nil || key == "" {
 		t.Errorf("push: key=%q err=%v", key, err)
 	}
 	// Push error.
 	sentinel := errors.New("push down")
-	emitErr := workloadEmitter(&capturingSDKClient{pushErr: sentinel}, "c", "e", "scf:CFG-02")
+	emitErr := workloadEmitter(&capturingSDKClient{pushErr: sentinel}, "c", "e", "scf:CFG-04")
 	if _, err := emitErr(context.Background(), watch.EventModified, raw); !errors.Is(err, sentinel) {
 		t.Errorf("want wrapped push error; got %v", err)
 	}

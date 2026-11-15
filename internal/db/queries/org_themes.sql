@@ -37,6 +37,24 @@ FROM org_themes
 WHERE tenant_id IS NULL OR tenant_id = $1
 ORDER BY (tenant_id IS NULL) DESC, theme_name;
 
+-- name: ListVisibleThemesWithUsage :many
+-- The visible vocabulary (defaults + the tenant's own) with each theme's
+-- usage (#1818): how many of the tenant's risks carry it, and how many of
+-- its aggregation rules target it. Same counts as ThemeUsage.
+SELECT
+    t.theme_name,
+    t.description,
+    t.tenant_id,
+    (SELECT count(*) FROM risks r
+        WHERE r.tenant_id = sqlc.arg(tenant_id)
+          AND r.themes @> ARRAY[t.theme_name])::bigint AS risk_count,
+    (SELECT count(*) FROM aggregation_rules ar
+        WHERE ar.tenant_id = sqlc.arg(tenant_id)
+          AND ar.target_theme = t.theme_name)::bigint AS rule_count
+FROM org_themes t
+WHERE t.tenant_id IS NULL OR t.tenant_id = sqlc.arg(tenant_id)
+ORDER BY (t.tenant_id IS NULL) DESC, t.theme_name;
+
 -- name: DeleteTenantTheme :exec
 -- Tenant-private themes only — the policy forbids deleting defaults
 -- regardless of what this query asks for.
