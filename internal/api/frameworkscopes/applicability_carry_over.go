@@ -71,7 +71,8 @@ func (h *Handler) CarryOverApplicability(w http.ResponseWriter, r *http.Request)
 		switch {
 		case errors.Is(err, frameworkscope.ErrCarryOverNotDraft),
 			errors.Is(err, frameworkscope.ErrNoCarryOverSource),
-			errors.Is(err, frameworkscope.ErrAmbiguousCarryOverSource):
+			errors.Is(err, frameworkscope.ErrAmbiguousCarryOverSource),
+			errors.Is(err, frameworkscope.ErrCarryOverSourceUnavailable):
 			httpresp.WriteError(w, http.StatusConflict, err.Error())
 		default:
 			writeDecisionError(w, r, "carry over applicability", err)

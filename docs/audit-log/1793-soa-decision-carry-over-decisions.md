@@ -73,3 +73,32 @@ The first four are `flagged` (need review); the last two are `skipped`.
 **D9: Authz is the bulk write's gate.** The route is a POST under
 `/v1/framework-scopes`, so the OPA role gate treats it as a `write` on
 `framework-scopes`: grc_engineer and admin pass, viewer gets 403.
+
+## Follow-ups (#2179)
+
+From the review of #2158. No bug surfaced in production; the four gaps
+below were found in review (detection tier `manual_review`, target
+`integration`). Three mutations were run against the new tests (in the PR
+body); all were caught.
+
+**D10: `carried_over_from` records the source revision's state.** A new
+`framework_scope_state` key holds the source revision's state at the copy,
+so an auditor can see a decision came from a draft or review revision under
+the D5 fallback rather than an activated one. It is additive: rows written
+before it was added have no such key and still decode. The same-version fork
+(#1965) records it too, since it writes the same struct.
+
+**D11: The target row is held `FOR UPDATE`.** The carry-over reads the
+draft's decisions and then upserts the missing ones. Without a lock, a
+concurrent carry-over or hand edit could land between the read and the
+upsert. `LockOpenFrameworkScope` locks the target only when it is a draft or
+in review; an approved, activated or superseded revision is read without a
+lock and refused (409, D4). A hand edit's guard trigger takes the scope row
+`FOR SHARE` before it writes a decision row, so both paths lock the scope
+row first and the decision rows second, and they cannot deadlock.
+
+**D12: A source version the tenant cannot see is 409.** The queue is
+catalog-wide; if it leads from another tenant's custom version, the label
+lookup under RLS finds no row. That is reported as
+`ErrCarryOverSourceUnavailable` (409) with a message that names neither the
+version nor whether it exists elsewhere, instead of a 500.
