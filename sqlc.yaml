@@ -129,8 +129,9 @@ sql:
       - "migrations/sql/20261010000000_control_import_candidates_row_fk.sql"
       - "migrations/sql/20261107000000_control_import_approval.sql"
       - "migrations/sql/20261117000000_users_theme.sql"
+      - "migrations/sql/20261119000000_scf_remap_proposals.sql"
       # #2113: exceptions gain revoked_by / revoked_at.
-      - "migrations/sql/20261118000000_exception_revoke.sql"
+      - "migrations/sql/20261121000000_exception_revoke.sql"
     queries: "internal/db/queries"
     gen:
       go:

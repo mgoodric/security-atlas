@@ -17,7 +17,7 @@ exception through approve, deny, activate and revoke; a new
 Revoke could have set `expired` early. It does not: an auditor reading the
 trail must tell an exception that ran its course from one an approver cut
 short, and the reason belongs to the revoke. `revoked` joins the status and
-audit-log CHECKs (migration `20261118000000_exception_revoke`), with
+audit-log CHECKs (migration `20261121000000_exception_revoke`), with
 `revoked_by` / `revoked_at` on the row and a CHECK that a revoked row names
 both. `expires_at` is left as granted, so the record shows the approved
 window and when it ended. The down migration refuses while revoked rows

@@ -15,7 +15,7 @@
 --      revoked it and when, so the trail cannot lose the actor.
 --
 -- Every existing value is kept. Reversible via
--- 20261118000000_exception_revoke.down.sql, which refuses while a revoked
+-- 20261121000000_exception_revoke.down.sql, which refuses while a revoked
 -- row exists (audit evidence is not deleted by a down migration).
 
 -- ===== 1. who revoked it =====
