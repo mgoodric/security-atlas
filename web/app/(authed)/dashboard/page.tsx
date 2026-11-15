@@ -50,6 +50,7 @@ import {
   fetchDashboardRisks,
   fetchDashboardComingUp,
 } from "@/lib/api/dashboard";
+import { pageTitle } from "@/lib/page-titles";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -111,7 +112,7 @@ export default function DashboardPage() {
     // shape exposes a `received_at` — see slice header comment in
     // `dashboard-header-subtitle.tsx` for the JUDGMENT note.
     <PageShell
-      title="Program"
+      title={pageTitle("/dashboard")}
       titleAdornment={<TenantContext />}
       subtitle={<DashboardHeaderSubtitle />}
       data-testid="program-dashboard"

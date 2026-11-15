@@ -7,9 +7,10 @@
 // page-specific metadata and pass `children` through unchanged.
 
 import type { Metadata } from "next";
+import { pageTitle } from "@/lib/page-titles";
 
 export const metadata: Metadata = {
-  title: "Audits",
+  title: pageTitle("/audits"),
 };
 
 export default function AuditsLayout({
