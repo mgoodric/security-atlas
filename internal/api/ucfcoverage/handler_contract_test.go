@@ -141,6 +141,7 @@ func contractRequirement(coverage *float64) requirementForAnchorWire {
 		Coverage:               coverage,
 		SourceAttribution:      "scf-strm",
 		MappingTier:            "verified",
+		Origin:                 "catalog",
 		Rationale:              "SCF anchor satisfies the SOC 2 logical-access requirement.",
 	}
 }
