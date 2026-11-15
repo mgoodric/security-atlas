@@ -87,16 +87,16 @@
  *     than a tracking issue number, per slice 184 D3 / slice
  *     217 D3 precedent: a slice number can be re-shuffled, the
  *     capability name is stable.
- *   * Names the operator's next concrete action — drafting
- *     policies via the API (`POST /v1/policies`) — so the
- *     empty-state is a signpost, not a dead end.
+ *   * Names the operator's next concrete action — asking an
+ *     administrator — so the empty-state is a signpost, not a dead
+ *     end. It names no API path (#2082).
  *   * Sentence-shaped (capitalized, ends with a period). Tests
  *     pin both.
  *   * The substring "policy scaffold" is load-bearing — AC-7's
  *     Playwright spec asserts on it.
  */
 export const POLICIES_SCAFFOLD_FUTURE_BODY =
-  "The in-app policy scaffold wizard is not available yet — until then, drafts can be created via the platform API (POST /v1/policies).";
+  "The in-app policy scaffold wizard is not available yet. An administrator can add draft policies for you in the meantime.";
 
 /**
  * Test-id token surfaced on the empty-state body wrapper so the
