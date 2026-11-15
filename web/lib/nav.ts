@@ -72,6 +72,7 @@ export const NAV_GROUPS: readonly {
       "/personnel-security",
       "/questionnaires",
       "/catalog/scf",
+      "/catalog/audited-under",
     ],
   },
   {
