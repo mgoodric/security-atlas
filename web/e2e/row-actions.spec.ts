@@ -87,6 +87,99 @@ test.describe("row actions with inline confirm", () => {
     expect(patches[0]).toEqual({ enabled: false, reason: "module unused" });
   });
 
+  // Review of #2259: the reason must not outlive its confirm, or a later
+  // disable resends it into the audit trail.
+  test("the disable reason resets on Cancel and after a successful disable", async ({
+    authedPage: page,
+  }) => {
+    const patches: { enabled: boolean; reason: string }[] = [];
+    // The list stays enabled, so the row can be disabled a second time.
+    await page.route("**/api/admin/features", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [FLAG] }),
+      }),
+    );
+    await page.route(`**/api/admin/features/${FLAG.key}`, async (route) => {
+      patches.push(route.request().postDataJSON());
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ...FLAG, enabled: false }),
+      });
+    });
+
+    await page.goto("/admin/features");
+    const trigger = page.getByTestId(`flag-actions-${FLAG.key}`);
+    const reason = page.getByTestId(`flag-disable-reason-${FLAG.key}`);
+    const openConfirm = async () => {
+      await trigger.click();
+      await page.getByTestId(`flag-disable-${FLAG.key}`).click();
+    };
+
+    // Cancel clears it.
+    await openConfirm();
+    await reason.fill("cancelled reason");
+    await page.getByTestId(`flag-actions-${FLAG.key}-confirm-cancel`).click();
+    await openConfirm();
+    await expect(reason).toHaveValue("");
+
+    // A successful disable clears it.
+    await reason.fill("first reason");
+    await page.getByTestId(`flag-actions-${FLAG.key}-confirm-ok`).click();
+    await expect.poll(() => patches.length).toBe(1);
+    await openConfirm();
+    await expect(reason).toHaveValue("");
+    await page.getByTestId(`flag-actions-${FLAG.key}-confirm-ok`).click();
+    await expect.poll(() => patches.length).toBe(2);
+    expect(patches[1]).toEqual({ enabled: false, reason: "" });
+  });
+
+  test("a failed flag disable surfaces its error", async ({
+    authedPage: page,
+  }) => {
+    await page.route("**/api/admin/features", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: [FLAG] }),
+      }),
+    );
+    await page.route(`**/api/admin/features/${FLAG.key}`, (route) =>
+      route.fulfill({ status: 500, body: "" }),
+    );
+
+    await page.goto("/admin/features");
+    await page.getByTestId(`flag-actions-${FLAG.key}`).click();
+    await page.getByTestId(`flag-disable-${FLAG.key}`).click();
+    await page.getByTestId(`flag-actions-${FLAG.key}-confirm-ok`).click();
+    await expect(page.getByTestId("flag-patch-error")).toContainText(
+      "patch: 500",
+    );
+  });
+
+  test("a failed settings-token revoke surfaces its error", async ({
+    authedPage: page,
+  }) => {
+    // The seeded token list is real; only the revoke fails, so nothing
+    // is revoked in the shared database.
+    await page.route("**/api/admin/credentials/*/revoke", (route) =>
+      route.fulfill({ status: 500, body: "" }),
+    );
+
+    await page.goto("/settings");
+    const row = page.getByTestId("settings-token-row").first();
+    await expect(row).toBeVisible();
+    await row.getByTestId("settings-token-actions").click();
+    await page.getByTestId("settings-token-revoke-button").click();
+    await row.getByTestId("settings-token-actions-confirm-ok").click();
+    await expect(page.getByTestId("settings-token-revoke-error")).toContainText(
+      "revoke credential: 500",
+    );
+    await expect(row).toBeVisible();
+  });
+
   test("revoking a key goes through the row menu and the inline confirm", async ({
     authedPage: page,
   }) => {

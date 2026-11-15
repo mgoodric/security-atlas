@@ -118,6 +118,26 @@ describe("row-actions confirm rule", () => {
     expect(state).toEqual(IDLE);
   });
 
+  it("hands the pending item back on cancel so its state can be reset", () => {
+    const { list } = items();
+    const onCancel = vi.fn();
+    const withCancel = list.map((i) =>
+      i.id === "revoke" ? { ...i, onCancel } : i,
+    );
+    const asked = reduceConfirm(
+      IDLE,
+      { type: "select", item: withCancel[1] },
+      withCancel,
+    );
+    const out = reduceConfirm(asked.state, { type: "cancel" }, withCancel);
+    expect(out.cancelled).toBe(withCancel[1]);
+    out.cancelled?.onCancel?.();
+    expect(onCancel).toHaveBeenCalledOnce();
+    // A confirm hands back no cancelled item.
+    const again = reduceConfirm(asked.state, { type: "confirm" }, withCancel);
+    expect(again.cancelled).toBeUndefined();
+  });
+
   it("never runs or confirms a disabled item", () => {
     const { list } = items();
     const { state, run } = reduceConfirm(

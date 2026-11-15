@@ -79,3 +79,15 @@ covers that path with a two-row list). Two limits recorded:
 admin: `destructive` → `info`. The API-keys "admin" credential badge:
 `destructive` → `secondary`. The register's treatment cell was already
 neutral (`bg-muted`). Red is kept for irreversible actions.
+
+## D8 — Review of #2259: reset the reason, surface failures on the page
+
+**Decision.** `RowActionItem.onCancel` runs when its inline confirm is
+cancelled. Features resets the disable reason on Cancel and on a successful
+PATCH, and keeps it on failure so a retry does not need it retyped. A
+failed flag change and a failed settings-token revoke render an Alert on
+the page, as Admin API keys does. The `busy` prop on `RowActions` is
+removed: the confirm closes on Confirm, so it never disabled anything.
+
+**Why.** A stale reason could be resent into the audit trail by a later
+disable, and a failed action showed nothing at all.

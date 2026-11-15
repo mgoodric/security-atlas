@@ -35,6 +35,9 @@ export type RowActionItem = {
   /** Leave the item out of the menu entirely. */
   hidden?: boolean;
   onSelect: () => void;
+  /** Called when its inline confirm is cancelled (Cancel or Esc), so
+   *  the caller can reset any state the confirm held, e.g. a reason. */
+  onCancel?: () => void;
   "data-testid"?: string;
 };
 
@@ -60,13 +63,18 @@ export function isDisabled(item: RowActionItem): boolean {
 /**
  * Advance the confirm state. `run` is the item whose `onSelect` the
  * caller must call now: never a destructive item on `select`, and never
- * a disabled or hidden item.
+ * a disabled or hidden item. `cancelled` is the item whose `onCancel`
+ * the caller must call now (a cancel of a pending confirm).
  */
 export function reduceConfirm(
   state: ConfirmState,
   event: ConfirmEvent,
   items: readonly RowActionItem[],
-): { state: ConfirmState; run: RowActionItem | null } {
+): {
+  state: ConfirmState;
+  run: RowActionItem | null;
+  cancelled?: RowActionItem | null;
+} {
   switch (event.type) {
     case "select":
       if (isDisabled(event.item) || event.item.hidden) {
@@ -81,7 +89,11 @@ export function reduceConfirm(
       return { state: IDLE, run: item };
     }
     case "cancel":
-      return { state: IDLE, run: null };
+      return {
+        state: IDLE,
+        run: null,
+        cancelled: items.find((i) => i.id === state.confirmingId) ?? null,
+      };
   }
 }
 

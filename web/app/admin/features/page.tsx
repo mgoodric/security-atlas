@@ -93,6 +93,17 @@ export default function FeaturesPage() {
           <AlertDescription>{(list.error as Error).message}</AlertDescription>
         </Alert>
       ) : null}
+      {/* #2090: the inline disable confirm closes on Confirm, so a
+          failed PATCH surfaces here. The enable modal stays open on
+          failure and this alert covers it too. */}
+      {mut.error ? (
+        <Alert variant="destructive" aria-live="polite">
+          <AlertTitle>Could not change the flag</AlertTitle>
+          <AlertDescription data-testid="flag-patch-error">
+            {(mut.error as Error).message}
+          </AlertDescription>
+        </Alert>
+      ) : null}
 
       {Object.entries(grouped).map(([category, flags]) => (
         <Card key={category}>
@@ -111,10 +122,12 @@ export default function FeaturesPage() {
                 onRequestEnable={() =>
                   setPending({ flag: f, nextEnabled: true })
                 }
-                onDisable={(reason) =>
-                  mut.mutate({ key: f.key, enabled: false, reason })
+                onDisable={(reason, onDone) =>
+                  mut.mutate(
+                    { key: f.key, enabled: false, reason },
+                    { onSuccess: onDone },
+                  )
                 }
-                submitting={mut.isPending}
               />
             ))}
           </CardContent>
@@ -144,13 +157,14 @@ function FlagRow({
   flag,
   onRequestEnable,
   onDisable,
-  submitting,
 }: {
   flag: FeatureFlag;
   onRequestEnable: () => void;
-  onDisable: (reason: string) => void;
-  submitting: boolean;
+  /** `onDone` runs when the PATCH succeeds. */
+  onDisable: (reason: string, onDone: () => void) => void;
 }) {
+  // Reset on Cancel and on success, so a later disable never resends an
+  // earlier reason into the audit trail. Kept on failure for a retry.
   const [reason, setReason] = useState("");
   return (
     <div className="flex flex-col gap-2 rounded-lg border p-3 sm:flex-row sm:items-center sm:justify-between">
@@ -180,7 +194,6 @@ function FlagRow({
           <RowActions
             label={`Actions for ${flag.key}`}
             data-testid={`flag-actions-${flag.key}`}
-            busy={submitting}
             items={[
               {
                 id: "disable",
@@ -199,7 +212,8 @@ function FlagRow({
                     />
                   </label>
                 ),
-                onSelect: () => onDisable(reason),
+                onSelect: () => onDisable(reason, () => setReason("")),
+                onCancel: () => setReason(""),
                 "data-testid": `flag-disable-${flag.key}`,
               },
             ]}

@@ -198,6 +198,7 @@
       "settings-token-issue-button",
       "settings-token-issue-form",
       "settings-token-revoke-button",
+      "settings-token-revoke-error",
       "settings-token-rotate-button",
       "settings-token-rotate-modal",
       "settings-token-rotated-to-link",

@@ -45,15 +45,15 @@ export type RowActionsProps = {
   /** Testid on the trigger. The confirm's testids derive from it:
    *  `<id>-confirm`, `<id>-confirm-cancel`, `<id>-confirm-ok`. */
   "data-testid"?: string;
-  /** Disable the confirm button while the action runs. */
-  busy?: boolean;
 };
 
+// The confirm closes as soon as it is confirmed, so the caller surfaces
+// the action's pending and error state on its own page (an Alert), not
+// inside the menu.
 export function RowActions({
   items,
   label = "More actions",
   "data-testid": testId = "row-actions",
-  busy = false,
 }: RowActionsProps) {
   const [state, setState] = useState<ConfirmState>(IDLE);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -65,9 +65,10 @@ export function RowActions({
   const pending = confirmingItem(state, items);
 
   function dispatch(event: ConfirmEvent) {
-    const { state: next, run } = reduceConfirm(state, event, items);
+    const { state: next, run, cancelled } = reduceConfirm(state, event, items);
     confirmOpening.current = next.confirmingId !== null;
     setState(next);
+    cancelled?.onCancel?.();
     run?.onSelect();
   }
 
@@ -144,7 +145,6 @@ export function RowActions({
           confirmLabel={pending.confirmLabel ?? pending.label}
           ariaLabel={`Confirm: ${pending.label}`}
           cancelRef={cancelRef}
-          busy={busy}
           onCancel={() => close({ type: "cancel" })}
           onConfirm={() => close({ type: "confirm" })}
           data-testid={`${testId}-confirm`}

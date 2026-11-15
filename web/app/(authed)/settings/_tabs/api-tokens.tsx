@@ -245,6 +245,17 @@ export function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
           />
         ) : null}
 
+        {/* #2090: the inline revoke confirm closes on Confirm, so a
+            failed revoke surfaces here. */}
+        {revokeMut.error ? (
+          <Alert variant="destructive" aria-live="polite">
+            <AlertTitle>Revoke failed</AlertTitle>
+            <AlertDescription data-testid="settings-token-revoke-error">
+              {(revokeMut.error as Error).message}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+
         {list.isLoading ? (
           <Skeleton
             className="h-32 w-full"
@@ -320,7 +331,6 @@ export function ApiTokensSection({ isAdmin }: { isAdmin: boolean }) {
                       <RowActions
                         label={`Actions for token ending ${c.last4}`}
                         data-testid="settings-token-actions"
-                        busy={revokeMut.isPending}
                         items={[
                           {
                             id: "rotate",

@@ -234,7 +234,6 @@ export default function APIKeysPage() {
                       <RowActions
                         label={`Actions for credential ending ${c.last4}`}
                         data-testid={`cred-actions-${c.id}`}
-                        busy={revokeMut.isPending}
                         items={[
                           {
                             id: "rotate",
