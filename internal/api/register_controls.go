@@ -71,7 +71,9 @@ func (s *Server) registerControls(root *chi.Mux) {
 	))
 	// #1782: approve (creating a control through the bundle store) and
 	// reject staged rows; a person decides, never a machine credential.
-	controlimportsapi.New(stager).WithSettings(importStore).WithDecisions(importStore).RegisterRoutes(root)
+	// #1784: download the approved rows' controls as control.yaml bundles.
+	controlimportsapi.New(stager).WithSettings(importStore).WithDecisions(importStore).
+		WithExport(importStore).RegisterRoutes(root)
 	// Slice 175: controls history export (lineage incl. superseded
 	// versions). Sibling endpoint to /v1/controls/export — same shape,
 	// 17-column projection (slice 137's 15 + superseded_by +

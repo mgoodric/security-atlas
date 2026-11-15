@@ -1,0 +1,77 @@
+// #2092 — FeatureGate: a gated route checks its flag on the server.
+//
+// Wraps a gated module's route (board packs, vendor claims) in its
+// layout. The flag is read before anything renders, with the caller's own
+// bearer, through the same `GET /v1/features/enabled` read the sidebar
+// uses, plus `GET /v1/me` for `is_admin`. No privileged read: a caller
+// learns only their own tenant's flag and their own admin bit.
+//
+// Flag on: the route renders as normal. Flag off: a calm off state, and
+// the client page never mounts, so there is no skeleton, no flash of the
+// form, and no "Could not load…" error from the gated API's 404.
+//
+// Only an admin is pointed at Admin › Features; a non-admin is told to
+// ask one and never sees the link. Neither message leaks internal detail
+// (slice 367).
+//
+// Both reads fail closed (`{}` and not-admin), so a transport error shows
+// the non-admin off state rather than a module the API would refuse.
+
+import { cookies } from "next/headers";
+import Link from "next/link";
+import type { ReactNode } from "react";
+
+import { PageShell } from "@/components/shell/page-shell";
+import { Card, CardContent } from "@/components/ui/card";
+import { fetchAdminMe, fetchEnabledModules } from "@/lib/api/self.server";
+import { ATLAS_JWT_COOKIE } from "@/lib/auth";
+import { resolveFeatureGate } from "@/lib/feature-nav";
+
+export async function FeatureGate({
+  flag,
+  moduleName,
+  children,
+}: {
+  /** The gating flag key (one of NAV_FEATURE_GATES' values). */
+  flag: string;
+  /** The page title shown above the off state. */
+  moduleName: string;
+  children: ReactNode;
+}) {
+  const jar = await cookies();
+  const bearer = jar.get(ATLAS_JWT_COOKIE)?.value;
+  const [modules, me] = bearer
+    ? await Promise.all([fetchEnabledModules(bearer), fetchAdminMe(bearer)])
+    : [{}, { is_admin: false }];
+
+  const state = resolveFeatureGate(modules, flag, me.is_admin);
+  if (state === "on") {
+    return children;
+  }
+
+  return (
+    <PageShell title={moduleName}>
+      <Card data-testid="feature-off-state" data-audience={state}>
+        <CardContent className="py-6 text-sm text-muted-foreground">
+          {state === "off-admin" ? (
+            <p>
+              This feature is off.{" "}
+              <Link
+                href="/admin/features"
+                className="font-medium text-foreground underline"
+                data-testid="feature-off-admin-link"
+              >
+                Enable in Admin › Features
+              </Link>
+            </p>
+          ) : (
+            <p>
+              This feature isn&apos;t turned on for your organisation. Ask an
+              administrator.
+            </p>
+          )}
+        </CardContent>
+      </Card>
+    </PageShell>
+  );
+}
