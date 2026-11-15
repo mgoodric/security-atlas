@@ -32,7 +32,7 @@ func TestLifecycle_EveryPair(t *testing.T) {
 		return p.ID.String(), err
 	}
 	submit := func(t *testing.T, id string) error {
-		_, err := store.SubmitForReview(ctx, uuid.MustParse(id), "key_submitter")
+		_, err := store.SubmitForReview(ctx, uuid.MustParse(id), submitterPerson)
 		return err
 	}
 	approve := func(t *testing.T, id string) error {

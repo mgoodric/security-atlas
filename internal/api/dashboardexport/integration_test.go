@@ -448,13 +448,15 @@ func syntheticLargeSnapshot(total int) dashboardexport.Snapshot {
 		SnapshotAt: time.Now().UTC(),
 	}
 	for i := 0; i < per; i++ {
+		coverage, freshness, trend := 0.5+float64(i%100)/200, 0.8, 0.02
 		out.Panels.FrameworkPosture = append(out.Panels.FrameworkPosture,
 			dashboardexport.FrameworkPosturePanelRow{
 				FrameworkID:        uuid.NewString(),
 				FrameworkVersion:   "v" + fmt.Sprintf("%d", i%5+1),
-				CoveragePct:        0.5 + float64(i%100)/200,
-				FreshnessComposite: 0.8,
-				TrendDelta90d:      0.02,
+				ScopeSet:           true,
+				CoveragePct:        &coverage,
+				FreshnessComposite: &freshness,
+				TrendDelta90d:      &trend,
 			})
 		out.Panels.Risks = append(out.Panels.Risks,
 			dashboardexport.RiskPanelRow{
