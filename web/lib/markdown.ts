@@ -196,18 +196,19 @@ export function renderMarkdown(md: string): string {
   if (md.length > MAX_MARKDOWN_CHARS) return `<pre>${escapeHtml(md)}</pre>`;
   const refs: RefMap = new Map();
   let inFence = false;
-  const lines = md
-    .replace(/\r\n?/g, "\n")
-    .split("\n")
-    .filter((line) => {
-      if (FENCE.test(line)) inFence = !inFence;
-      if (inFence) return true;
-      const def = line.match(REF_DEF);
-      if (!def) return true;
-      const label = def[1].trim().toLowerCase();
-      if (!refs.has(label)) refs.set(label, def[2]);
-      return false;
-    });
+  // Split on every character `.` refuses to match (\n, \r, U+2028,
+  // U+2029), so no line holds a character that `\s` matches but `.` does
+  // not. Otherwise the `\s+ … .* … $` block patterns backtrack
+  // quadratically on a line like "- " + spaces + "x\u2028x".
+  const lines = md.split(/\r\n?|[\n\u2028\u2029]/).filter((line) => {
+    if (FENCE.test(line)) inFence = !inFence;
+    if (inFence) return true;
+    const def = line.match(REF_DEF);
+    if (!def) return true;
+    const label = def[1].trim().toLowerCase();
+    if (!refs.has(label)) refs.set(label, def[2]);
+    return false;
+  });
   return renderBlocks(lines, refs, 0);
 }
 

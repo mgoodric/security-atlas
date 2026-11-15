@@ -369,6 +369,14 @@ describe("renderMarkdown — bounded work (#2094 review)", () => {
       "a|b\n|-" + " ".repeat(n * 4) + "x",
     ],
     ["repeated [x]: in definitions", "[x]:".repeat(n)],
+    // `\s` matches U+2028/U+2029 and `.` does not; a `\s+ … .*$` block
+    // pattern backtracks on these unless the line split breaks on them.
+    ...["- ", "# ", "1. ", "[x]: a "].flatMap((prefix) =>
+      [" ", "\u2028", "\u2029"].map((sep): [string, string] => [
+        `${JSON.stringify(prefix)} + spaces + x${JSON.stringify(sep)}x`,
+        prefix + " ".repeat(99_000) + "x" + sep + "x",
+      ]),
+    ),
   ])("%s renders in well under a second", (_name, md) => {
     expect(md.length).toBeLessThanOrEqual(MAX_MARKDOWN_CHARS);
     const start = performance.now();
@@ -382,5 +390,11 @@ describe("renderMarkdown — bounded work (#2094 review)", () => {
     expect(html.startsWith("<pre>**bold** &lt;script&gt;")).toBe(true);
     expect(html).not.toContain("<strong>");
     expect(html).not.toContain("<script");
+  });
+
+  test("U+2028 and U+2029 break lines like \\n", () => {
+    expect(renderMarkdown("- a\u2028- b\u2029- c")).toBe(
+      "<ul>\n<li>a</li>\n<li>b</li>\n<li>c</li>\n</ul>",
+    );
   });
 });
