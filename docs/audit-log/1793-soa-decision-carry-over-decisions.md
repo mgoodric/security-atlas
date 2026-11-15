@@ -93,9 +93,14 @@ draft's decisions and then upserts the missing ones. Without a lock, a
 concurrent carry-over or hand edit could land between the read and the
 upsert. `LockOpenFrameworkScope` locks the target only when it is a draft or
 in review; an approved, activated or superseded revision is read without a
-lock and refused (409, D4). A hand edit's guard trigger takes the scope row
-`FOR SHARE` before it writes a decision row, so both paths lock the scope
-row first and the decision rows second, and they cannot deadlock.
+lock and refused (409, D4). The carry-over only ever writes decision rows
+that were absent while it held the lock: a hand edit that inserts a new row
+waits on the scope row in its guard trigger, and a requirement that already
+has a row is reported `already_decided` and never written. If the lock finds
+no open row but a plain read then sees a draft or review revision (an
+approved revision was edited back to draft in between), the lock is retried,
+up to three times, so the carry-over never proceeds on an open revision it
+does not hold.
 
 **D12: A source version the tenant cannot see is 409.** The queue is
 catalog-wide; if it leads from another tenant's custom version, the label

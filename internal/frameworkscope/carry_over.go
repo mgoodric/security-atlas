@@ -239,35 +239,58 @@ func (s *Store) CarryOverDecisions(ctx context.Context, scopeID uuid.UUID, actor
 	return out, err
 }
 
-// lockCarryOverTarget reads the target revision and, when it is a draft or
+// carryTargetReader is the slice of dbx.Queries that lockCarryOverTarget
+// uses, so the retry can be tested without a database.
+type carryTargetReader interface {
+	LockOpenFrameworkScope(ctx context.Context, arg dbx.LockOpenFrameworkScopeParams) (dbx.FrameworkScope, error)
+	GetFrameworkScopeByID(ctx context.Context, arg dbx.GetFrameworkScopeByIDParams) (dbx.FrameworkScope, error)
+}
+
+// carryLockAttempts bounds lockCarryOverTarget's retries. Each retry needs
+// the revision to move between frozen and open in the gap between two
+// statements, so more than one in practice means something is wrong.
+const carryLockAttempts = 3
+
+// lockCarryOverTarget returns the target revision and, when it is a draft or
 // in review, holds it FOR UPDATE until the carry-over commits. A concurrent
 // carry-over or hand edit on the same revision then waits rather than
-// interleaving with the read-then-upsert below; a hand edit's guard trigger
-// takes the same row FOR SHARE before it writes a decision, so the lock order
-// matches writeDecisions: scope row first, then decision rows. A frozen
-// revision is read without a lock and refused by the caller.
-func lockCarryOverTarget(ctx context.Context, q *dbx.Queries, tenantID, scopeID uuid.UUID) (dbx.FrameworkScope, error) {
-	row, err := q.LockOpenFrameworkScope(ctx, dbx.LockOpenFrameworkScopeParams{
-		TenantID: pgUUID(tenantID),
-		ID:       pgUUID(scopeID),
-	})
-	if err == nil {
-		return row, nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return dbx.FrameworkScope{}, fmt.Errorf("lock framework_scope: %w", err)
-	}
-	row, err = q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
-		TenantID: pgUUID(tenantID),
-		ID:       pgUUID(scopeID),
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return dbx.FrameworkScope{}, ErrNotFound
+// interleaving with the read-then-upsert in CarryOverDecisions. A frozen
+// (approved, activated or superseded) revision is returned without a lock
+// for the caller to refuse.
+//
+// The lock query matches only open revisions, so no row means the revision
+// is frozen, unknown, or was frozen when the lock ran and has since gone
+// back to draft (an approved revision is edited, the "edit" transition).
+// In that last case the plain read sees an open revision it does not hold,
+// and the lock is tried again; a row is never returned open but unlocked.
+func lockCarryOverTarget(ctx context.Context, q carryTargetReader, tenantID, scopeID uuid.UUID) (dbx.FrameworkScope, error) {
+	for range carryLockAttempts {
+		row, err := q.LockOpenFrameworkScope(ctx, dbx.LockOpenFrameworkScopeParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(scopeID),
+		})
+		if err == nil {
+			return row, nil
 		}
-		return dbx.FrameworkScope{}, fmt.Errorf("get framework_scope: %w", err)
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return dbx.FrameworkScope{}, fmt.Errorf("lock framework_scope: %w", err)
+		}
+		row, err = q.GetFrameworkScopeByID(ctx, dbx.GetFrameworkScopeByIDParams{
+			TenantID: pgUUID(tenantID),
+			ID:       pgUUID(scopeID),
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return dbx.FrameworkScope{}, ErrNotFound
+			}
+			return dbx.FrameworkScope{}, fmt.Errorf("get framework_scope: %w", err)
+		}
+		if row.State != StateDraft && row.State != StateReview {
+			return row, nil
+		}
+		// Reopened between the lock and the read: lock it again.
 	}
-	return row, nil
+	return dbx.FrameworkScope{}, fmt.Errorf("lock framework_scope: state changed on each of %d attempts", carryLockAttempts)
 }
 
 // sourceRevision picks the tenant's revision on the source version whose
