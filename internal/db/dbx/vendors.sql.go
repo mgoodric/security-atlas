@@ -51,18 +51,9 @@ SELECT
     criticality,
     COUNT(*)::bigint AS total_count,
     COUNT(*) FILTER (
-        WHERE (last_review_date IS NULL
-               AND (created_at AT TIME ZONE 'UTC')::date + COALESCE(
-                       (SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = $1),
-                       30
-                   ) < $2::date)
-           OR last_review_date + (
-                  CASE review_cadence
-                      WHEN 'monthly'   THEN INTERVAL '1 month'
-                      WHEN 'quarterly' THEN INTERVAL '3 months'
-                      WHEN 'biannual'  THEN INTERVAL '6 months'
-                      WHEN 'annual'    THEN INTERVAL '1 year'
-                  END
+        WHERE vendor_review_due_date(
+                  last_review_date, review_cadence, created_at,
+                  COALESCE((SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = $1), 30)
               ) < $2::date
     )::bigint AS overdue_count
 FROM vendors
@@ -85,8 +76,8 @@ type CountVendorsForBurndownRow struct {
 }
 
 // AC-3 burndown: returns total + overdue counts per criticality band. The
-// overdue rule is ListOverdueVendors' (first-review window for a vendor never
-// reviewed, #2061), so the counts match the overdue list. Used
+// overdue rule is ListOverdueVendors' (vendor_review_due_date before the
+// cutoff day, #2232), so the counts match the overdue list. Used
 // by the dashboard panel (slice 040) and the quarterly board pack (slice 032).
 // Returns one row per criticality present in the result set; empty bands are
 // not included (callers fill in zero where needed).
@@ -272,21 +263,10 @@ SELECT id, tenant_id, name, domain, criticality, contract_start, contract_end, d
 WHERE tenant_id = $1
   AND ($2::vendor_criticality IS NULL
        OR criticality = $2)
-  AND (
-        (last_review_date IS NULL
-         AND (created_at AT TIME ZONE 'UTC')::date + COALESCE(
-                 (SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = $1),
-                 30
-             ) < $3::date)
-     OR last_review_date + (
-            CASE review_cadence
-                WHEN 'monthly'   THEN INTERVAL '1 month'
-                WHEN 'quarterly' THEN INTERVAL '3 months'
-                WHEN 'biannual'  THEN INTERVAL '6 months'
-                WHEN 'annual'    THEN INTERVAL '1 year'
-            END
-        ) < $3::date
-      )
+  AND vendor_review_due_date(
+          last_review_date, review_cadence, created_at,
+          COALESCE((SELECT t.vendor_initial_review_days FROM tenants t WHERE t.id = $1), 30)
+      ) < $3::date
 ORDER BY last_review_date ASC NULLS FIRST, created_at ASC, name ASC
 `
 
@@ -296,15 +276,14 @@ type ListOverdueVendorsParams struct {
 	Cutoff      pgtype.Date        `json:"cutoff"`
 }
 
-// AC-4 overdue calc — vendors whose last_review_date + cadence is older than
-// the cutoff date. A vendor never reviewed (NULL last_review_date) has its
-// first review due on the UTC date of created_at plus the tenant's
-// vendor_initial_review_days (default 30 when the tenant has no row), and is
-// overdue only after that day (#2061). CountVendorsForBurndown and
-// vendor.IsOverdueAsOf apply the same rule. Cadence -> interval mapping
-// happens with a CASE in SQL so the query plan is stable. Cutoff is passed as
-// DATE so the caller controls "now" (testability) and timezone semantics
-// (vendor reviews are date-granular, not timestamp-granular).
+// AC-4 overdue calc. A vendor is overdue once the UTC day its review is due
+// has ended: vendor_review_due_date(...) < cutoff (#2232, the
+// internal/duedate rule). The due date is last_review_date + cadence, or for
+// a vendor never reviewed the UTC date of created_at plus the tenant's
+// vendor_initial_review_days (default 30 when the tenant has no row, #2061).
+// CountVendorsForBurndown, the compliance calendar and vendor.IsOverdueAsOf
+// apply the same rule. Cutoff is passed as DATE so the caller controls "now"
+// (testability) and the day it falls on (vendor reviews are date-granular).
 func (q *Queries) ListOverdueVendors(ctx context.Context, arg ListOverdueVendorsParams) ([]Vendor, error) {
 	rows, err := q.db.Query(ctx, listOverdueVendors, arg.TenantID, arg.Criticality, arg.Cutoff)
 	if err != nil {

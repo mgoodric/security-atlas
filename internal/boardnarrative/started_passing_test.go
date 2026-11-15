@@ -21,6 +21,7 @@ func threeGainsOneLossBrief(started *int) board.Brief {
 		Frameworks: []board.FrameworkPosture{
 			{Slug: "soc2", Name: "SOC 2", CoveragePct: 84, FreshnessPct: 91, Delta: 1},
 		},
+		Coverage: &board.CoverageSummary{CoveragePct: 84, ScopedFrameworkCount: 1, EvidenceFreshnessRatePct: 91},
 		Drift: board.DriftSummary{
 			WindowDays: 30, Delta: 1, FlippedOutCount: 1, StartedPassingCount: started,
 		},

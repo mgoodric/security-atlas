@@ -112,7 +112,7 @@ type SectionDef struct {
 var sectionDefs = map[SectionKey]SectionDef{
 	SectionControlCoverage: {
 		Key:           SectionControlCoverage,
-		PromptVersion: promptVersion, // boardnarrative-coverage-v1 (#2195)
+		PromptVersion: promptVersion, // boardnarrative-coverage-v2 (#2210)
 		Heading:       sectionHeading,
 		ExpectedItems: expectedItems,
 		buildRollup:   RollupFromBrief,

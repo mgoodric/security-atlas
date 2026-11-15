@@ -96,20 +96,12 @@ th { background: #f5f5f5; font-weight: 600; }
 		html.EscapeString(b.GeneratedAt))
 
 	// Posture stat grid.
-	w.WriteString(`<h2>Program posture</h2><div class="grid">`)
-	for _, fp := range b.Frameworks {
-		stateClass := "state-" + strings.ReplaceAll(fp.State, " ", "-")
-		fmt.Fprintf(&w,
-			`<div class="card"><div class="label">%s</div><div class="pct">%d%%</div>`+
-				`<div class="meta">evidence freshness rate (tenant-wide)</div>`+
-				`<div class="meta">%s %s pts · controls fresh %d%%</div>`+
-				`<div class="meta %s">%s</div></div>`,
-			html.EscapeString(fp.Name), fp.CoveragePct,
-			html.EscapeString(arrowGlyph(fp.TrendArrow)), html.EscapeString(signedInt(fp.Delta)),
-			fp.FreshnessPct,
-			html.EscapeString(stateClass), html.EscapeString(fp.State))
+	w.WriteString(`<h2>Program posture</h2>`)
+	if b.Coverage != nil {
+		writeBriefPosture(&w, b)
+	} else {
+		writeLegacyBriefPosture(&w, b)
 	}
-	w.WriteString(`</div>`)
 
 	// Drift summary.
 	w.WriteString(`<h2>Control drift</h2>`)
@@ -136,4 +128,66 @@ th { background: #f5f5f5; font-weight: 600; }
 
 	w.WriteString(`</body></html>`)
 	return w.String()
+}
+
+// writeBriefPosture renders the #2210 posture: the program coverage figure
+// the board pack reports, one card per framework version, and the
+// tenant-wide evidence freshness rate under its own name.
+func writeBriefPosture(w *strings.Builder, b Brief) {
+	c := b.Coverage
+	if c.NoScopedFrameworks() {
+		w.WriteString(`<div class="drift">No framework has an activated scope, so no coverage figure is reported.</div>`)
+	} else {
+		fmt.Fprintf(w, `<div class="drift">Requirement coverage averages %s%% across the %d framework(s) with an activated scope.</div>`,
+			html.EscapeString(formatPct(c.CoveragePct)), c.ScopedFrameworkCount)
+	}
+	w.WriteString(`<div class="grid">`)
+	for _, fp := range b.Frameworks {
+		name := fp.Name
+		if fp.Version != "" {
+			name += " " + fp.Version
+		}
+		if fp.ScopeNotSet {
+			fmt.Fprintf(w,
+				`<div class="card"><div class="label">%s</div><div class="pct">Scope not set</div>`+
+					`<div class="meta">no coverage until a framework scope is activated</div></div>`,
+				html.EscapeString(name))
+			continue
+		}
+		trend := noBaselineText
+		if !fp.NoTrendHistory {
+			trend = arrowGlyph(fp.TrendArrow) + " " + signedPts(fp.Delta) + " pts over 90 days"
+		}
+		stateClass := "state-" + strings.ReplaceAll(fp.State, " ", "-")
+		fmt.Fprintf(w,
+			`<div class="card"><div class="label">%s</div><div class="pct">%s%%</div>`+
+				`<div class="meta">requirement coverage</div>`+
+				`<div class="meta">%s</div>`+
+				`<div class="meta %s">%s</div></div>`,
+			html.EscapeString(name), html.EscapeString(formatPct(fp.CoveragePct)),
+			html.EscapeString(trend),
+			html.EscapeString(stateClass), html.EscapeString(fp.State))
+	}
+	w.WriteString(`</div>`)
+	fmt.Fprintf(w, `<div class="drift">Evidence freshness rate (tenant-wide): %d%% of controls have fresh evidence.</div>`,
+		c.EvidenceFreshnessRatePct)
+}
+
+// writeLegacyBriefPosture renders a brief stored before #2210 exactly as it
+// rendered then: its figures are the tenant-wide evidence freshness rate.
+func writeLegacyBriefPosture(w *strings.Builder, b Brief) {
+	w.WriteString(`<div class="grid">`)
+	for _, fp := range b.Frameworks {
+		stateClass := "state-" + strings.ReplaceAll(fp.State, " ", "-")
+		fmt.Fprintf(w,
+			`<div class="card"><div class="label">%s</div><div class="pct">%d%%</div>`+
+				`<div class="meta">evidence freshness rate (tenant-wide)</div>`+
+				`<div class="meta">%s %s pts · controls fresh %d%%</div>`+
+				`<div class="meta %s">%s</div></div>`,
+			html.EscapeString(fp.Name), legacyInt(fp.CoveragePct),
+			html.EscapeString(arrowGlyph(fp.TrendArrow)), html.EscapeString(signedInt(legacyInt(fp.Delta))),
+			legacyInt(fp.FreshnessPct),
+			html.EscapeString(stateClass), html.EscapeString(fp.State))
+	}
+	w.WriteString(`</div>`)
 }

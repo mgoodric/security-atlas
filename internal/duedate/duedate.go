@@ -5,10 +5,10 @@
 // value is stored as 00:00 UTC). An item is Overdue only once its due day
 // has ended, that is from the next UTC day on; it is DueSoon from soonDays
 // days before its due day through the due day itself, and Upcoming before
-// that. It is the policy-review rule (#2009, #2075). So far policy
-// reviews, and the calendar's risk-review, action-plan and policy
-// acknowledgement events (#2130), use it; vendor reviews still compute
-// their own (vendor.IsOverdueAsOf), and converging them is a follow-up.
+// that. It is the policy-review rule (#2009, #2075). Policy reviews,
+// vendor reviews (vendor.IsOverdueAsOf, and in SQL the vendor queries'
+// vendor_review_due_date < cutoff) and every calendar event type whose status
+// the calendar store fills (#2130, #2232) use it.
 package duedate
 
 import "time"
@@ -26,13 +26,19 @@ const (
 func Status(due, now time.Time, soonDays int) string {
 	d, today := UTCDay(due), UTCDay(now)
 	switch {
-	case d.Before(today):
+	case IsOverdue(due, now):
 		return Overdue
 	case !d.After(today.AddDate(0, 0, soonDays)):
 		return DueSoon
 	default:
 		return Upcoming
 	}
+}
+
+// IsOverdue reports whether an item due at due is overdue at now: its UTC
+// due day has ended.
+func IsOverdue(due, now time.Time) bool {
+	return UTCDay(due).Before(UTCDay(now))
 }
 
 // UTCDay is the start of t's UTC calendar day.
