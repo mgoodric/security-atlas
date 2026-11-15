@@ -5,11 +5,12 @@ import Link from "next/link";
 import { signOut } from "@/app/login/actions";
 import { TenantSwitcher } from "@/components/auth/tenant-switcher";
 import { Button } from "@/components/ui/button";
+import { AccountMenu } from "@/components/shell/account-menu";
 import { Breadcrumb } from "@/components/shell/breadcrumb";
 import { GlobalSearch } from "@/components/shell/global-search";
 import { InProgressAuditPill } from "@/components/shell/in-progress-audit-pill";
 import { ThemeAwareLogo } from "@/components/shell/theme-aware-logo";
-import { UserAvatar } from "@/components/shell/user-avatar";
+import { UserAvatar, fetchUserIdentity } from "@/components/shell/user-avatar";
 
 // Slice 075 — the top-nav header. Replaces the slice-005 text placeholder
 // ("security-atlas" span) with the canonical mark wrapped in a Link to
@@ -80,15 +81,37 @@ import { UserAvatar } from "@/components/shell/user-avatar";
 // checked at 1,200px): text never wraps, the right-hand cluster keeps
 // its width, and the left cluster (logo + breadcrumb) is the one that
 // gives way, truncating the breadcrumb rather than pushing the bar
-// wider. Below `md` the slice 277 phone layout is unchanged; pinning
-// the right cluster there would squeeze out the hamburger.
+// wider.
+//
+// #2213 — below `lg` (1,024px) the bar collapses so it fits a 390px
+// phone and a 768px tablet without widening the page. Search folds
+// behind an icon (`<GlobalSearch>` owns that), the avatar, name and
+// Sign out fold into `<AccountMenu>`, and the audit pill keeps only its
+// dot. Below `sm` the wordmark and breadcrumb drop too, leaving the
+// hamburger and the mark on the left. With the right cluster that
+// small it is pinned at every width now, and the left cluster is the
+// one that gives way, as #2080 set up for `md` and wider.
 export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
+  const identity = await fetchUserIdentity();
+  const signOutForm = (
+    <form action={signOut}>
+      <Button
+        type="submit"
+        variant="ghost"
+        size="sm"
+        className="w-full lg:w-auto"
+      >
+        Sign out
+      </Button>
+    </form>
+  );
+
   return (
     <header
       data-testid="app-topbar"
-      className="flex h-14 shrink-0 items-center justify-between gap-4 border-b bg-background px-4 md:px-6 md:whitespace-nowrap"
+      className="flex h-14 shrink-0 items-center justify-between gap-3 whitespace-nowrap border-b bg-background px-4 md:gap-4 md:px-6"
     >
-      <div className="flex items-center gap-2 md:min-w-0 md:gap-3 md:overflow-hidden">
+      <div className="flex min-w-0 items-center gap-2 overflow-hidden md:gap-3">
         {/*
           Slice 277 — mobile sidebar trigger. The component carries
           `md:hidden` on its outer button, so this slot collapses to
@@ -103,7 +126,9 @@ export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
           aria-label="security-atlas — go to dashboard"
         >
           <ThemeAwareLogo width={28} height={28} className="h-7 w-7" alt="" />
-          <span className="text-base font-semibold">security-atlas</span>
+          <span className="hidden text-base font-semibold sm:inline">
+            security-atlas
+          </span>
         </Link>
         {/*
           Slice 223 — read-only breadcrumb chip `<tenant> > <page>`.
@@ -111,9 +136,9 @@ export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
           + interactive). Renders null when the tenant fetch fails
           (fail-quiet).
         */}
-        <Breadcrumb />
+        <Breadcrumb className="hidden sm:flex" />
       </div>
-      <div className="flex items-center gap-3 md:shrink-0">
+      <div className="flex shrink-0 items-center gap-2 lg:gap-3">
         {/*
           Slice 223 — global ⌘K search input. Calls slice 268's
           /v1/search via the BFF /api/search; popover groups results
@@ -141,12 +166,22 @@ export async function TopBar({ mobileSidebar }: { mobileSidebar?: ReactNode }) {
           on any fetch / parse error (P0-213-4: no mock; the real
           user-context source is the single source of truth).
         */}
-        <UserAvatar />
-        <form action={signOut}>
-          <Button type="submit" variant="ghost" size="sm">
-            Sign out
-          </Button>
-        </form>
+        <div className="hidden items-center gap-3 lg:flex">
+          <UserAvatar identity={identity} />
+          {signOutForm}
+        </div>
+        {/*
+          #2213 — below `lg`, the avatar and Sign out live behind one
+          button. It renders even when `/v1/me` failed so Sign out is
+          always reachable.
+        */}
+        <AccountMenu
+          className="lg:hidden"
+          name={identity?.name ?? null}
+          initials={identity?.initials ?? null}
+        >
+          {signOutForm}
+        </AccountMenu>
       </div>
     </header>
   );

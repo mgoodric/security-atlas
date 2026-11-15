@@ -89,6 +89,28 @@ func TestValidateStructural_RejectsBadBundleIDPattern(t *testing.T) {
 	}
 }
 
+// #2165: a UUID-shaped bundle_id would always be read as a control UUID by
+// evidence push, so it is refused at upload.
+func TestValidateStructural_RejectsUUIDShapedBundleID(t *testing.T) {
+	t.Parallel()
+	for _, bad := range []string{
+		"deadbeef-0000-4000-8000-000000000000",
+		"deadbeef000040008000000000000000",
+	} {
+		m := Manifest{
+			BundleSchemaVersion: "1",
+			BundleID:            bad,
+			Title:               "x",
+			SCFAnchorID:         "IAC-37",
+			ImplementationType:  "automated",
+		}
+		err := m.ValidateStructural()
+		if err == nil || !strings.Contains(err.Error(), "UUID-shaped") {
+			t.Errorf("bundle_id=%q: want UUID-shaped rejection, got %v", bad, err)
+		}
+	}
+}
+
 func TestValidateStructural_RejectsDuplicateQueryIDs(t *testing.T) {
 	t.Parallel()
 	m := Manifest{
