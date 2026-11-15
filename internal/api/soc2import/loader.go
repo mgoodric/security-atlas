@@ -79,6 +79,13 @@ type Crosswalk struct {
 
 	Requirements []Requirement `yaml:"requirements"`
 	Mappings     []Mapping     `yaml:"mappings"`
+	// Source names where this crosswalk came from, and is stamped on every
+	// edge the import writes (fw_to_scf_edges.crosswalk_source, #1971). The
+	// importer retires only the edges its own source wrote, so a YAML
+	// crosswalk and a workbook import into the same framework version leave
+	// each other's edges alone. Set by the loaders, never read from the file:
+	// "yaml:<file name>", "scf-workbook:<columns>" or "scf-olir:<sheet>".
+	Source string `yaml:"-"`
 
 	// PointsOfFocusRollUp reports what the workbook loaders folded into
 	// parent criteria, for the import summary. Never read from YAML.
@@ -169,8 +176,14 @@ func Load(path string) (*Crosswalk, error) {
 	if err := validate(&cw); err != nil {
 		return nil, err
 	}
+	cw.Source = yamlSourcePrefix + filepath.Base(path)
 	return &cw, nil
 }
+
+// yamlSourcePrefix marks a YAML crosswalk's Source. A YAML import also owns
+// edges with no recorded source (written before #1971), since the bundled
+// YAML crosswalks were the only importer before workbook imports existed.
+const yamlSourcePrefix = "yaml:"
 
 // validate rejects malformed crosswalks. The strict checks (no silent
 // defaults, every row explicit) are the in-loader half of the slice's

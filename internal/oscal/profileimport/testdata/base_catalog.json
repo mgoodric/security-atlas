@@ -53,11 +53,11 @@
         "title": "Identification and Authentication",
         "controls": [
           {
-            "id": "IAC-06",
+            "id": "IAC-37",
             "title": "Multi-Factor Authentication",
             "parts": [
               {
-                "id": "IAC-06_smt",
+                "id": "IAC-37_smt",
                 "name": "statement",
                 "prose": "Enforce multi-factor authentication for privileged accounts."
               }

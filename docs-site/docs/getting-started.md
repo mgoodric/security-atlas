@@ -273,7 +273,7 @@ bundle_id: acme_mfa_all_staff
 title: "MFA is enforced for every staff account"
 description: |
   Every workforce identity signs in through the IdP with MFA enforced.
-scf_anchor_id: IAC-06
+scf_anchor_id: IAC-37
 implementation_type: manual_attested
 owner_role: it
 lifecycle_state: active

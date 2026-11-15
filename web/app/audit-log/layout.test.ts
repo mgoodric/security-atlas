@@ -46,8 +46,10 @@ describe("canReachAuditLog", () => {
     );
   });
 
-  test("admit: roles includes 'admin' (explicit role grant, not just is_admin)", () => {
-    expect(canReachAuditLog({ is_admin: false, roles: ["admin"] })).toBe(true);
+  // #2216: a tenant admin who is not a super-admin is not admitted; the
+  // backend's HasUnifiedAuditLogRole SQL would 403 them anyway.
+  test("redirect: roles includes 'admin' but is_admin false (tenant admin)", () => {
+    expect(canReachAuditLog({ is_admin: false, roles: ["admin"] })).toBe(false);
   });
 
   test("admit: one matching role is enough", () => {

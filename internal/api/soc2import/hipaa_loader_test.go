@@ -38,6 +38,9 @@ func TestLoad_ShippedHIPAACrosswalkParses(t *testing.T) {
 	if cw.FrameworkVersion != "2013-01-25" {
 		t.Fatalf("framework_version = %q; want 2013-01-25", cw.FrameworkVersion)
 	}
+	if cw.Source != "yaml:hipaa-security-rule.yaml" {
+		t.Fatalf("Source = %q; want yaml:hipaa-security-rule.yaml (#1971)", cw.Source)
+	}
 	// Slice 516 — FULL Security Rule coverage (incl. §164.314 organizational +
 	// §164.316 documentation), no longer the slice-481 curated 31-row subset.
 	// The exact-count assertion (AC-1) lives in TestLoad_HIPAAFullCoverage below;

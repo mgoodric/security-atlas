@@ -236,7 +236,7 @@ func (h *ProfileHandler) resolveRoles(ctx context.Context, cred credstore.Creden
 	if h.roles == nil || cred.UserID == "" || cred.TenantID == "" {
 		return out, nil
 	}
-	rows, err := h.roles.RolesFor(ctx, cred.TenantID, cred.UserID)
+	rows, err := h.roles.RolesFor(ctx, cred.TenantID, rolesKey(cred))
 	if err != nil {
 		return nil, err
 	}
@@ -244,6 +244,19 @@ func (h *ProfileHandler) resolveRoles(ctx context.Context, cred credstore.Creden
 		out = append(out, string(r))
 	}
 	return out, nil
+}
+
+// rolesKey is the user_roles.user_id to look the caller up under. A JWT
+// session (password or OIDC sign-in, PKCE, device grant) carries the subject
+// "user:<uuid>" while user_roles stores the bare uuid, so a user caller is
+// keyed by credstore.CallerUserID (#2216). A principal that names no user
+// (API key, bootstrap admin, machine token) keeps its raw UserID, which is
+// what the lookup used before.
+func rolesKey(cred credstore.Credential) string {
+	if u, ok := credstore.CallerUserID(cred); ok {
+		return u.String()
+	}
+	return cred.UserID
 }
 
 // buildProfile resolves the caller's identity into the wire shape. When the

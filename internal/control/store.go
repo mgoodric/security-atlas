@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -62,6 +63,16 @@ type UploadResult struct {
 	// place rather than superseded (issue #1908). ControlID and Version
 	// are the existing row's; SupersededID is zero.
 	UpdatedInPlace bool
+	// AnchorRebound is true when the manifest's SCF code now resolves to a
+	// different anchor row (a newer SCF release was imported, #1768) with
+	// the same title, and the active row was moved to it in place rather
+	// than superseded (#1971).
+	AnchorRebound bool
+	// NeedsReanchoring is true when the manifest's SCF code now resolves to
+	// a newer release's row whose title differs: the code changed meaning,
+	// so the control was left on its legacy anchor (#1971 D3). It earns no
+	// framework credit until it is re-anchored.
+	NeedsReanchoring bool
 	// AnchorID is the SCF anchor the bundle's scf_anchor_id resolved to;
 	// zero for an unanchored (anchor_fit: none) control.
 	AnchorID uuid.UUID
@@ -71,6 +82,81 @@ type UploadResult struct {
 	// Warnings are non-fatal notes for the uploader, such as
 	// SCFReleaseDeprecationWarning.
 	Warnings []string
+}
+
+// rebindOutcome is what rebindAnchor did with an unchanged manifest whose
+// SCF code now resolves to a different anchor row.
+type rebindOutcome int
+
+const (
+	rebindNone          rebindOutcome = iota // already on the resolved anchor
+	rebindMoved                              // moved to the new row: same code, same title
+	rebindNeedsReanchor                      // left in place: the code's meaning changed
+)
+
+// rebindAnchor handles an unchanged manifest (byte-identical, or differing
+// only in in-place metadata) whose SCF code now resolves to a different
+// anchor row than the active row's: a new SCF release minted a new row for
+// the code (#1768). Matt's call (#1971 D3): move the control only when the
+// new row has the same code AND the same title as the old one, i.e. the
+// meaning did not change. Otherwise the control stays where it is and is
+// reported as needing re-anchoring, never silently re-pointed.
+//
+// anchorID is what bindSCFAnchor resolved the manifest to. A bundle pinned
+// to one release is never re-bound: one that declares scf_release (#1770),
+// and one whose scf_anchor_id is an anchor UUID, which scfrelease.Resolve
+// binds to that exact row in whichever release holds it. Moving either is
+// the silent re-point #1770 and D3 forbid, and for a UUID ref would flip
+// the control between releases on every boot and re-upload. An unanchored
+// control (anchor_fit: none) has nothing to re-bind. As a backstop, the
+// control only ever moves to a row in the current SCF release.
+func rebindAnchor(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, prior dbx.LockActiveControlByBundleIDRow, anchorID uuid.UUID, pinnedRelease, anchorRef string) (rebindOutcome, error) {
+	if pinnedRelease != "" || anchorID == uuid.Nil {
+		return rebindNone, nil
+	}
+	if _, err := uuid.Parse(strings.TrimSpace(anchorRef)); err == nil {
+		return rebindNone, nil
+	}
+	if !prior.ScfAnchorID.Valid || uuid.UUID(prior.ScfAnchorID.Bytes) == anchorID {
+		return rebindNone, nil
+	}
+	oldRow, err := lookupAnchorRow(ctx, q, uuid.UUID(prior.ScfAnchorID.Bytes))
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: read bound anchor: %w", err)
+	}
+	newRow, err := lookupAnchorRow(ctx, q, anchorID)
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: read resolved anchor: %w", err)
+	}
+	release, err := q.GetFrameworkVersionByID(ctx, newRow.FrameworkVersionID)
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: read resolved anchor's release: %w", err)
+	}
+	if release.Status != dbx.FrameworkVersionStatusCurrent {
+		return rebindNone, nil
+	}
+	if oldRow.ScfID != newRow.ScfID || oldRow.Title != newRow.Title {
+		return rebindNeedsReanchor, nil
+	}
+	n, err := q.RebindControlAnchorInPlace(ctx, dbx.RebindControlAnchorInPlaceParams{
+		TenantID:    pgUUID(tenantID),
+		ID:          prior.ID,
+		ScfAnchorID: pgUUID(anchorID),
+		ScfID:       &newRow.ScfID,
+	})
+	if err != nil {
+		return rebindNone, fmt.Errorf("rebind control anchor: %w", err)
+	}
+	if n != 1 {
+		return rebindNone, ErrControlChangedConcurrently
+	}
+	return rebindMoved, nil
+}
+
+// apply records a rebind outcome on the upload result.
+func (o rebindOutcome) apply(r *UploadResult) {
+	r.AnchorRebound = o == rebindMoved
+	r.NeedsReanchoring = o == rebindNeedsReanchor
 }
 
 // Store persists parsed bundles to the controls table under RLS.
@@ -106,7 +192,7 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 	var result UploadResult
 	err := s.inTx(ctx, func(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID) error {
 		// 1. Resolve scf_anchor_id. Accept either a uuid (FK target) or a
-		//    human-readable SCF code (e.g. "IAC-06") that resolves via the
+		//    human-readable SCF code (e.g. "IAC-37") that resolves via the
 		//    slice-006 importer. Both shapes are common: hand-written
 		//    bundles use the code, machine-generated bundles use the uuid.
 		//
@@ -187,6 +273,11 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 		//     v2, v3, ... on every boot — the slice-065 idempotency
 		//     assertion (AC-7) exists precisely to catch that.
 		if !isNew && prior.BundleManifestHash == b.ManifestHashHex {
+			outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease, b.Manifest.SCFAnchorID)
+			if err != nil {
+				return err
+			}
+			outcome.apply(&result)
 			result.ControlID = uuid.UUID(prior.ID.Bytes)
 			result.BundleID = b.Manifest.BundleID
 			result.Version = prior.Version
@@ -245,6 +336,11 @@ func (s *Store) Upload(ctx context.Context, b *Bundle, uploadedBy string) (Uploa
 				if n != 1 {
 					return ErrControlChangedConcurrently
 				}
+				outcome, err := rebindAnchor(ctx, q, tenantID, prior, anchorID, b.Manifest.SCFRelease, b.Manifest.SCFAnchorID)
+				if err != nil {
+					return err
+				}
+				outcome.apply(&result)
 				result.ControlID = uuid.UUID(prior.ID.Bytes)
 				result.BundleID = b.Manifest.BundleID
 				result.Version = prior.Version
@@ -456,7 +552,7 @@ func (s *Store) ListWithState(ctx context.Context, limit, offset int32, scopeCel
 }
 
 // resolveSCFAnchor accepts either a uuid string or an SCF code (e.g.,
-// "IAC-06") resolved in the current SCF release, and returns the anchor's
+// "IAC-37") resolved in the current SCF release, and returns the anchor's
 // uuid. Unknown values fail with ErrSCFAnchorUnknown.
 func resolveSCFAnchor(ctx context.Context, q *dbx.Queries, ref string) (uuid.UUID, error) {
 	row, _, err := bindSCFAnchor(ctx, q, "", ref)

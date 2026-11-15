@@ -1,0 +1,88 @@
+# #1971 — SCF 2026.3 remap, IAC family group: decisions log
+
+detection_tier_actual: manual_review
+detection_tier_target: integration
+
+The first head of the PR re-anchored the sample rows and every reference correctly, but did nothing about installs that already ran the old bootstrap. The PR reviewer caught it: the crosswalk import only upserted edges, so on an upgraded install HIPAA Password Management kept its edge to the old Authenticator Management row. The second review found that the first fix deleted append-only tier history. Then #2011 (#1768) landed, freezing each SCF release, which made the in-place re-titling of the sample illegal. The integration test `TestSCFRemapUpgrade_RetiresEdgesLeftOnTheOldRelease` is the tier that should have caught the first gap.
+
+## D1 — The remap ran as one simultaneous substitution
+
+The D5 table in `1717-scf-pin-ratchet-decisions.md` has a chain (`IAC-21`→`IAC-10` while `IAC-10`→`IAC-14`). A Perl lookup-table regex rewrote each file in one pass, so no ID was rewritten twice. The pattern requires a non-alphanumeric character before the ID and refuses a following digit or `.digit`, so `IAC-060` and `IAC-06.1` are untouched. The lowercase `scf-iac-06` form in `fixtures/readme-demo` followed. Arbitrary bundle ids such as `ctrl-iac-06` did not, because they name a fixture rather than an anchor.
+
+Left as written: existing CHANGELOG entries, `docs/audit-log/`, `docs/issues/`, `migrations/sql/` (applied, and the IDs there are only in comments), `Plans/_archive/`, `Plans/prompts/`, and `internal/api/scfseed/testdata/scf-pin.json`, which is the source of truth.
+
+## D2 — The sample ships as a new SCF release, `test-2026.3`
+
+Matt's call (2026-11-14, on #1999 and #1717). Since #2011 an imported release is frozen: re-importing `test-2026.1` with the remapped rows would be a `ReleaseConflictError` and fail every upgraded install's bootstrap. So the sample's `release_version` moves to `test-2026.3`, and the upgrade goes down the new-release path. A new framework version is created with new anchor rows, and `test-2026.1` stays as a legacy version with its rows unchanged.
+
+- **The legacy rows are kept, not orphaned.** The old IDs (`IAC-06`, `IAC-21` and the rest) are simply the legacy release's rows. Superseded control versions still reference them (`controls.scf_anchor_id` is `ON DELETE RESTRICT`), and audit replay can read them.
+- **A pin keeps the label honest.** `internal/api/scfseed/fixturepin_test.go` pins a sha256 of the sample's anchor content (`scf_id`, `family`, `title`, `description`, `subtopics`, in file order) to its `release_version`. Editing a row without updating the pin fails in CI, and the failure prints the hash to pin. A released label's entry is frozen.
+- **`test-2026.3` is an open working label until a release is cut.** The remap lands one #1717 family group at a time, and each group edits the sample and updates the `test-2026.3` entry. The entry freezes when the 2026.3 remap is complete and a release ships with it. The cost falls on development installs only: one that imported an earlier `test-2026.3` state fails its next bootstrap with `ReleaseConflictError` (#1768) and needs a catalog reset (a fresh database, or `just scratch-pg-up`). No shipped install has imported `test-2026.3`, so none is affected. This is the review's N4; bumping the label once per group instead would leave a trail of throwaway legacy releases on every install that tracks main.
+
+## D3 — Controls on a legacy release: re-bind only what kept its meaning, flag the rest
+
+**Matt's decision (2026-11-14, relayed by the dispatcher): flag for re-anchoring.**
+
+The problem: coverage joins controls to crosswalk edges by anchor row (`dashboard.sql`, `covering_control`), so after a new release a control left on a legacy row matches no live edge and earns no framework credit. Re-binding every such control by code would silently re-point a control whose code changed meaning: a tenant control on the old `IAC-10` (Authenticator Management) would become a PAM control.
+
+The rule. A control moves to the current release's anchor only when that anchor has the same SCF code **and the same title**. Every other active control on a legacy anchor stays put and is reported as needing re-anchoring. The rule is applied in two places:
+
+- **`scfimport.RebindControls`**, run by `atlas-cli catalog import-scf` right after the import, so on every bootstrap. It works across every tenant through the migrate role. It reads `ListControlsOnLegacySCFAnchors`, re-binds the rows that pass (`RebindControlAnchorInPlace`), and prints one `control needs re-anchoring` line per remaining control.
+- **`control.Store.Upload`**, for an unchanged re-uploaded bundle (byte-identical, or in-place metadata only). It moves the control on the same test, and otherwise leaves it in place and reports `NeedsReanchoring`. A re-upload therefore never silently changes what a control means either.
+
+**A bundle pinned to a release is never moved.** Two forms pin a bundle to one SCF release on purpose (#1770):
+
+- a declared `scf_release`;
+- an `scf_anchor_id` written as an anchor UUID, which `scfrelease.Resolve` binds to that exact row in whichever release holds it.
+
+Both re-bind paths skip both forms:
+
+- **Boot-time re-bind:** `RebindControls` reads the stored `bundle_manifest_yaml` (`IsPinned`) and reports a pinned control as `Pinned`, neither moved nor flagged.
+- **Upload:** the re-bind consumes what `bindSCFAnchor` resolved and returns early for either form.
+
+Missing the UUID form was the second review's blocking finding (B1). The boot moved such a control to 2026.3, the next unchanged re-upload resolved the UUID back and moved it back, and so it flipped on every boot.
+
+Two guards back this up:
+
+- The upload re-bind only ever moves a control to a row in the current SCF release.
+- A stored manifest that does not parse is never moved, because its pin can't be read. It is flagged for re-anchoring with a note saying to re-upload the bundle (N1).
+
+A pinned legacy bundle is a deliberate choice, so it does not count as needing re-anchoring. Tests:
+
+- `TestRebind_PinnedLegacyBundleIsNeverMoved` (declared release) fails when the skip is removed.
+- `TestRebind_UUIDRefAndUnreadableManifestAreNeverMoved` fails when the UUID pin is removed, and separately when the unparseable guard is removed.
+
+A control that a concurrent upload supersedes between the boot's listing and its update is counted as `superseded_mid_run` rather than dropped silently (N3); the new version binds through the upload path. A durable per-control re-bind record (N2) is a filed follow-up.
+
+The note says where the concept went, most specific source first:
+
+1. `data/scfremap/remaps.json`, a machine-readable copy of the D5 table, embedded in the binary. The `concept` rows (`IAC-15`, `IAC-21`, `IAC-24`) cannot come from #2032's `legacy_scf_id`, which records SCF's official legacy number, so this table is the only source for them. Later family groups append their rows.
+2. SCF's own legacy ID: the current anchor whose `legacy_scf_id` is the old code.
+3. The code's new title.
+4. "Not in the current release".
+
+Every row of `ListControlsOnLegacySCFAnchors` with a tenant id is a control needing re-anchoring, because the upgrade has already re-bound the rest. The tenant-facing API endpoint and dashboard warning that read it are #2176, split out of this PR at the dispatcher's call.
+
+The five stock controls whose code this PR changes still supersede on the re-upload (their manifest changed). Until that re-upload runs, the boot-time SCF import lists them as needing re-anchoring, so the bootstrap log can show a stock bundle that the next phase supersedes.
+
+## D4 — The crosswalk import retires the edges it no longer lists
+
+After the upsert pass, in the same transaction, `importIntoTx` reads every live edge under the framework version (`ListFwToScfEdgesForVersionForUpdate`, row-locked) and retires the ones the crosswalk does not list.
+
+- **Retire, don't delete.** Matt's call, after the second review: deleting cascaded the append-only `fw_to_scf_edge_tier_transitions` rows. The same migration adds `fw_to_scf_edges.retired_at`. Retiring sets it and writes a transition row by `SystemReviewerID`, with from-tier equal to to-tier and the note `retired: dropped by crosswalk <source>`. The table has no CHECK requiring the tier to change, so no second audit table is needed. A crosswalk that lists the pair again clears `retired_at` and writes a `restored` row. Since a retired edge's old content no longer stands for anything, the restore runs before the provenance precedence check.
+- **Readers.** `effective_fw_to_scf_edges` (coverage and traversal, #1796) excludes retired edges. So do the base-table readers: the catalog export, the tier state machine's reads (a transition on a retired edge is a 404), `GetFwToScfEdge`, the attribution count, and the importer's own list. The importer's per-pair lookup alone still sees retired rows, so it can restore them.
+- **Keyed on rows, not codes.** The listed set is built from the requirement and anchor row ids resolved during the upsert pass. Keying on `(requirement code, scf_id)` would have treated an edge to `IAC-01` in the legacy release as listed, because the code matches, and left it live. The deterministic edge id now includes the anchor row id, so the edge to a new release's row cannot collide with the retired one to the legacy row. Nothing depended on the old id derivation.
+- **Scoped to the source that wrote the edge.** `source_attribution` cannot do this alone: workbook imports land as `community_draft`, the same as the bundled YAML, and the ISO 27001 preset imports a workbook into the YAML's own slug and version. So the same migration adds `fw_to_scf_edges.crosswalk_source`, stamped on every insert and update: `yaml:<file name>`, `scf-workbook:<columns, with prefixes>` or `scf-olir:<sheet>`. An import retires an edge only when it wrote that edge (`ownsEdge`) **and** the edge's `source_attribution` is one the crosswalk writes. The dispatcher chose this over an opt-in `--prune` flag, which would still have wiped workbook edges merged into `soc2/2017` on every boot.
+- **A NULL source belongs to the YAML.** Rows written before the column existed have no source. Until workbook imports arrived (#1934, #2001), the bundled YAML crosswalks were the only importer, so a YAML import, or an in-memory crosswalk with no `Source`, owns NULL rows. A workbook import never retires them. The cost is one-time: legacy workbook edges merged into a bundled slug or version are retired by the next YAML import, and come back under their own source when the operator re-runs the workbook import. The CHANGELOG says so.
+- **A pair both sources list has one owner, the last writer.** An update stamps the importer's source; an unchanged edge keeps its own. If the owner stops listing a pair the other source still lists, the edge is retired, and the other source's next import restores it.
+- **The workbook source names its columns.** Importing different columns into one version in separate runs gives separate sources. A later SCF release that renames a column header produces a new source, so the old column's edges are not retired automatically.
+- **Platform edges only.** `fw_to_scf_edges` has no `tenant_id`; it is catalog data. Tenant overlay edges (#1735) are not built yet. When they land they need their own rows, and this pass must stay scoped to catalog edges.
+- **Convergence.** The upgrade path is a re-run of the crosswalk import. The bootstrap re-imports only the SOC 2 crosswalk; the opt-in crosswalks converge when the operator re-runs `atlas-cli catalog import-crosswalk`, and the CHANGELOG says so. The dispatcher is filing the follow-up for the bootstrap to converge every bundled crosswalk.
+
+## D5 — Migration numbering
+
+The dispatcher named `20260914000000`, but by the time this branch merged main, main had gained `20260916000000_scf_anchor_immutability.sql`, then `20260920000000_oidc_identity_link_audit.sql`, then `20260925000000_control_import_candidates.sql`, then `20260926000000_scf_anchor_legacy_scf_id.sql` (which took the slot this branch had used). The dispatcher then fixed the slot at `20261014000000`, clear of main's queue. None of those migrations touches `fw_to_scf_edges`, so the order between them does not matter. It is additive: two nullable columns, plus the view redefined with the same column list. The down migration restores the view's earlier shape first, because the view references `retired_at`, and then drops both columns.
+
+## D6 — `IAC-10` changing meaning is documented, not migrated
+
+`IAC-10` is the only old ID that 2026.3 reuses for a different concept. Evidence recorded against `scf:IAC-10` is append-only and is not rewritten (invariant #2). The legacy release's `IAC-10` row keeps its old title, but anything that resolves the code today gets PAM. The CHANGELOG names the connector flags, evidence and tenant bundles. Nothing here can tell which `IAC-10` references meant authenticator management, so the operator has to re-point them.

@@ -44,7 +44,7 @@ func (f *fakePlatform) rowsForTenant(tenantKey string) (controls []map[string]st
 			"id":              "00000000-0000-0000-0000-000000000a01",
 			"title":           "Tenant A control 1",
 			"control_family":  "IAC",
-			"scf_id":          "IAC-06",
+			"scf_id":          "IAC-37",
 			"lifecycle_state": "active",
 			"bundle_id":       "ba1",
 		}}
@@ -269,7 +269,7 @@ func TestIntegration_AllSixToolsCallable(t *testing.T) {
 		args string
 	}{
 		{"list_controls", `{}`},
-		{"get_control", `{"anchor_id":"IAC-06"}`},
+		{"get_control", `{"anchor_id":"IAC-37"}`},
 		{"list_risks", `{}`},
 		{"get_risk", `{"risk_id":"00000000-0000-0000-0000-000000000a11"}`},
 		{"list_evidence", `{}`},

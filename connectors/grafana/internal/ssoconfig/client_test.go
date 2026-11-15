@@ -146,7 +146,7 @@ func TestClient_NeverLeaksSecretOrPII(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
-	rec, err := Build(cfg, "scf:IAC-06", "connector:grafana:ssoconfig@test", "grafana", "prod")
+	rec, err := Build(cfg, "scf:IAC-37", "connector:grafana:ssoconfig@test", "grafana", "prod")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

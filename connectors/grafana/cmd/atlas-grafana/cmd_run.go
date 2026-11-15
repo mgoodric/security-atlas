@@ -100,7 +100,7 @@ member / role-assignment identity.`,
 	}
 	cmd.Flags().StringVar(&f.environment, "environment", "", "environment scope tag [required]")
 	cmd.Flags().StringVar(&f.ruleControl, "rule-control", "scf:MON-01", "control_id to attach to monitoring.alert_config.v1 records")
-	cmd.Flags().StringVar(&f.accessControl, "access-control", "scf:IAC-06", "control_id to attach to grafana.access_config.v1 records")
+	cmd.Flags().StringVar(&f.accessControl, "access-control", "scf:IAC-37", "control_id to attach to grafana.access_config.v1 records")
 	cmd.Flags().StringVar(&f.firingControl, "firing-control", "scf:IRO-09", "control_id to attach to monitoring.alert_firing.v1 records")
 	cmd.Flags().DurationVar(&f.firingLookback, "grafana-firing-lookback", 24*time.Hour, "bounded look-back window for the alert-firing-history pull (honest interval — NOT continuous monitoring)")
 	cmd.Flags().StringVar(&f.baseURL, "grafana-url", "", "Grafana base URL override (env: GRAFANA_URL)")

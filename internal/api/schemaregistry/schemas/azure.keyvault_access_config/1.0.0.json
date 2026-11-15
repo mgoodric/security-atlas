@@ -4,7 +4,7 @@
   "x-evidence-kind": "azure.keyvault_access_config.v1",
   "x-semver": "1.0.0",
   "x-owner": "platform",
-  "x-default-scf-anchors": ["IAC-21", "CRY-09"],
+  "x-default-scf-anchors": ["IAC-10", "CRY-09"],
   "title": "Azure Key-Vault access-policy / RBAC posture",
   "description": "Per-Key-Vault secrets-management + least-privilege posture captured read-only from Azure Resource Manager (ARM Reader role): the access model (legacy access policies vs Azure RBAC authorization), purge-protection + soft-delete state, public-network-access posture, the network-ACL default action, and the principals entitled to the vault (legacy access-policy entries with their granted keys/secrets/certificates permission VERBS, or RBAC role-assignment principals with their role name). The minimum that demonstrates secrets-management / least-privilege posture (e.g. the vault enforces purge protection and grants no over-broad secret access). Management-plane CONFIGURATION + access-policy / role-assignment METADATA only — NEVER a secret, key, or certificate VALUE: the connector reads only the ARM management plane (vault list + access policies) and NEVER the Key-Vault data plane (vault.azure.net secret/key/certificate get); it is never granted any data-plane permission. The platform evaluator decides pass/fail per (control, vault); the connector emits a descriptive default verdict. x-default-scf-anchors are default mapping hints flagged for maintainer recheck (OQ #9).",
   "type": "object",
