@@ -13,7 +13,7 @@
 -- move together.
 --
 -- users already carries RLS (slice 034); an additive column needs no new
--- policy. Reversible via 20261115000000_users_theme.down.sql.
+-- policy. Reversible via 20261117000000_users_theme.down.sql.
 
 ALTER TABLE users
     ADD COLUMN IF NOT EXISTS theme TEXT NOT NULL DEFAULT ''

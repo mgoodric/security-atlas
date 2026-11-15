@@ -670,7 +670,7 @@ const DemoSCFRelease = "2026.3"
 var demoSCFAnchors = []demoSCFAnchor{
 	{"IAC-37", "Identification & Authentication", "Multi-Factor Authentication"},
 	{"CRY-05", "Cryptographic Protections", "Encryption of Data at Rest"},
-	{"BCD-11", "Business Continuity & Disaster Recovery", "Data Backups"},
+	{"BCD-24", "Business Continuity & Disaster Recovery", "Data Backups"},
 	{"TDA-09", "Technology Development & Acquisition", "Secure Coding"},
 	{"TPM-03", "Third-Party Management", "Supply Chain Risk Management"},
 	{"MON-02", "Continuous Monitoring", "Continuous Monitoring"},

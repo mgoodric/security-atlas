@@ -29,6 +29,8 @@ func (s *Server) registerVendor(root *chi.Mux, vendorStore *vendor.Store) {
 	root.Get("/v1/vendors", vendorsH.ListVendors)
 	root.Get("/v1/vendors/burndown", vendorsH.Burndown)
 	root.Get("/v1/vendors/spend", vendorsH.SpendRollup)
+	// #2201: the organisation vendor initial-review window, read by Settings.
+	root.Get("/v1/vendors/initial-review-window", vendorsH.GetInitialReviewWindow)
 	root.Get("/v1/vendors/{id}", vendorsH.GetVendor)
 	root.Patch("/v1/vendors/{id}", vendorsH.UpdateVendor)
 	root.Delete("/v1/vendors/{id}", vendorsH.DeleteVendor)

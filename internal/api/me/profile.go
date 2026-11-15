@@ -92,7 +92,7 @@ type patchProfileRequest struct {
 }
 
 // validThemes is what PATCH /v1/me accepts for theme (#2142). It mirrors the
-// users_theme_check constraint in migrations/sql/20261115000000_users_theme.sql,
+// users_theme_check constraint in migrations/sql/20261117000000_users_theme.sql,
 // whose extra empty-string value means "never chosen" and cannot be written back.
 var validThemes = map[string]bool{"system": true, "light": true, "dark": true}
 

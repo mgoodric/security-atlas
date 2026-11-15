@@ -22,6 +22,23 @@ const baseValid = {
   linked_control_ids: ["00000000-0000-0000-0000-000000000010"],
 };
 
+describe("validateRiskForm — category (#1817)", () => {
+  test("passes with a category slug", () => {
+    expect(validateRiskForm({ ...baseValid, category: "operational" })).toEqual(
+      {},
+    );
+  });
+
+  test("fails when no category is chosen", () => {
+    const e = validateRiskForm({ ...baseValid, category: "" });
+    expect(e.category).toMatch(/category is required/i);
+  });
+
+  test("skips the check when the caller has no category", () => {
+    expect(validateRiskForm(baseValid).category).toBeUndefined();
+  });
+});
+
 describe("validateRiskForm — mitigate + linked controls", () => {
   test("passes when mitigate + at least one linked control", () => {
     const e = validateRiskForm(baseValid);

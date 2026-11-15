@@ -1,0 +1,221 @@
+{
+  "$comment": "#2103 — scope-dimension picker fixture, shared by internal/scope/picker_fixture_test.go (every predicate evaluates under scope.Evaluate and selects `want`) and web/components/scope/scope-picker-model.test.ts (`picker` is what the picker loads the predicate as; `generates` means the picker emits exactly this predicate from that state). One file for both tiers stops the picker and the evaluator drifting.",
+  "universe": [
+    {
+      "label": "prod-restricted",
+      "dimensions": {
+        "environment": "prod",
+        "data_classification": "restricted"
+      }
+    },
+    {
+      "label": "prod-public",
+      "dimensions": { "environment": "prod", "data_classification": "public" }
+    },
+    {
+      "label": "staging-confidential",
+      "dimensions": {
+        "environment": "staging",
+        "data_classification": "confidential"
+      }
+    },
+    {
+      "label": "dev-internal",
+      "dimensions": {
+        "environment": "dev",
+        "data_classification": "internal",
+        "region_tier": "gold"
+      }
+    }
+  ],
+  "cases": [
+    {
+      "name": "everything",
+      "predicate": { "op": "true" },
+      "want": [
+        "prod-restricted",
+        "prod-public",
+        "staging-confidential",
+        "dev-internal"
+      ],
+      "picker": { "mode": "everything" },
+      "generates": true
+    },
+    {
+      "name": "environment=prod and data_classification in {restricted, confidential}",
+      "predicate": {
+        "op": "and",
+        "args": [
+          { "op": "eq", "dim": "environment", "value": "prod" },
+          {
+            "op": "in",
+            "dim": "data_classification",
+            "values": ["restricted", "confidential"]
+          }
+        ]
+      },
+      "want": ["prod-restricted"],
+      "picker": {
+        "mode": "dimensions",
+        "selections": {
+          "environment": ["prod"],
+          "data_classification": ["restricted", "confidential"]
+        }
+      },
+      "generates": true
+    },
+    {
+      "name": "one dimension, several values",
+      "predicate": {
+        "op": "in",
+        "dim": "environment",
+        "values": ["prod", "staging"]
+      },
+      "want": ["prod-restricted", "prod-public", "staging-confidential"],
+      "picker": {
+        "mode": "dimensions",
+        "selections": { "environment": ["prod", "staging"] }
+      },
+      "generates": true
+    },
+    {
+      "name": "empty object loads as Everything",
+      "predicate": {},
+      "want": [
+        "prod-restricted",
+        "prod-public",
+        "staging-confidential",
+        "dev-internal"
+      ],
+      "picker": { "mode": "everything" },
+      "generates": false
+    },
+    {
+      "name": "null loads as Everything",
+      "predicate": null,
+      "want": [
+        "prod-restricted",
+        "prod-public",
+        "staging-confidential",
+        "dev-internal"
+      ],
+      "picker": { "mode": "everything" },
+      "generates": false
+    },
+    {
+      "name": "all-of with one clause loads into the picker",
+      "predicate": {
+        "op": "and",
+        "args": [
+          { "op": "in", "dim": "data_classification", "values": ["public"] }
+        ]
+      },
+      "want": ["prod-public"],
+      "picker": {
+        "mode": "dimensions",
+        "selections": { "data_classification": ["public"] }
+      },
+      "generates": false
+    },
+    {
+      "name": "any-of is Advanced-only",
+      "predicate": {
+        "op": "or",
+        "args": [
+          { "op": "eq", "dim": "environment", "value": "dev" },
+          { "op": "eq", "dim": "data_classification", "value": "public" }
+        ]
+      },
+      "want": ["prod-public", "dev-internal"],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "negation is Advanced-only",
+      "predicate": {
+        "op": "not",
+        "arg": { "op": "eq", "dim": "environment", "value": "prod" }
+      },
+      "want": ["staging-confidential", "dev-internal"],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "a custom dimension is Advanced-only",
+      "predicate": { "op": "eq", "dim": "region_tier", "value": "gold" },
+      "want": ["dev-internal"],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "the same dimension twice is Advanced-only",
+      "predicate": {
+        "op": "and",
+        "args": [
+          { "op": "in", "dim": "environment", "values": ["prod", "staging"] },
+          { "op": "eq", "dim": "environment", "value": "prod" }
+        ]
+      },
+      "want": ["prod-restricted", "prod-public"],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "an empty value list is Advanced-only",
+      "predicate": { "op": "in", "dim": "environment", "values": [] },
+      "want": [],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "nested all-of is Advanced-only",
+      "predicate": {
+        "op": "and",
+        "args": [
+          {
+            "op": "and",
+            "args": [{ "op": "eq", "dim": "environment", "value": "prod" }]
+          }
+        ]
+      },
+      "want": ["prod-restricted", "prod-public"],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "an unknown key in a clause is Advanced-only (Go reads \"Dim\" as dim)",
+      "predicate": {
+        "op": "eq",
+        "dim": "environment",
+        "value": "prod",
+        "Dim": "data_classification"
+      },
+      "want": [],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "an unknown key on the top-level all-of is Advanced-only (Go reads \"Args\" as args)",
+      "predicate": {
+        "op": "and",
+        "args": [{ "op": "eq", "dim": "environment", "value": "prod" }],
+        "Args": [{ "op": "eq", "dim": "environment", "value": "dev" }]
+      },
+      "want": ["dev-internal"],
+      "picker": "advanced",
+      "generates": false
+    },
+    {
+      "name": "an unknown key on the always-true form is Advanced-only",
+      "predicate": { "op": "true", "note": "everything" },
+      "want": [
+        "prod-restricted",
+        "prod-public",
+        "staging-confidential",
+        "dev-internal"
+      ],
+      "picker": "advanced",
+      "generates": false
+    }
+  ]
+}

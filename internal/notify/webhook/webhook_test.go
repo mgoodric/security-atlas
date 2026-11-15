@@ -168,6 +168,51 @@ func TestHTTPTransport_Post_HeadersAndScrub(t *testing.T) {
 	}
 }
 
+// An httptest.Server.Close() anywhere in the process calls
+// http.DefaultTransport.CloseIdleConnections(). When HTTPTransport shared the
+// default transport, that cut its in-flight connection (#2202). Hammer the
+// default transport's idle-close while posting; every post must succeed.
+func TestHTTPTransport_Post_IsolatedFromDefaultTransport(t *testing.T) {
+	t.Parallel()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	tr, err := NewHTTPTransport(Config{URL: srv.URL + "/hook", Timeout: DefaultTimeout},
+		notify.SSRFPolicy{AllowHTTP: true, AllowLoopback: true})
+	if err != nil {
+		t.Fatalf("construct: %v", err)
+	}
+
+	stop := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				http.DefaultTransport.(*http.Transport).CloseIdleConnections()
+			}
+		}
+	}()
+	for i := range 50 {
+		if err := tr.Post(context.Background(), []byte(`{}`)); err != nil {
+			close(stop)
+			<-done
+			t.Fatalf("post %d: %v", i, err)
+		}
+	}
+	close(stop)
+	<-done
+
+	if tr.client.Transport == nil || tr.client.Transport == http.DefaultTransport {
+		t.Fatal("HTTPTransport must own its *http.Transport, not share http.DefaultTransport")
+	}
+}
+
 func TestHTTPTransport_Post_ErrorScrubsSecret(t *testing.T) {
 	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
