@@ -39,6 +39,7 @@ const TYPE_COLOR: Record<string, string> = {
   risk: "bg-orange-500",
   action_plan: "bg-cyan-500",
   policy_ack: "bg-violet-500",
+  offboarding: "bg-slate-500",
 };
 
 const WEEKDAY_HEADERS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
