@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -67,17 +68,33 @@ export default function SCFAnchorDetailPage() {
     }
   }, [error, router, id]);
 
+  // The anchor itself does not change with the version pin, so the header
+  // reads from whichever query has resolved (the pinned one may still be
+  // loading while the base one is already in cache).
+  const anchor = (data ?? base.data)?.anchor;
+
   return (
-    <div className="space-y-6">
-      <div className="text-sm">
+    <PageShell
+      title={anchor?.name ?? "SCF anchor"}
+      subtitle={
+        anchor ? (
+          <>
+            <div className="font-mono text-xs">
+              {anchor.scf_id} · {anchor.family}
+            </div>
+            <p>{anchor.description}</p>
+          </>
+        ) : undefined
+      }
+      actions={
         <Link
           href="/catalog/scf"
-          className="text-muted-foreground hover:underline"
+          className="text-sm text-muted-foreground hover:underline"
         >
           ← All anchors
         </Link>
-      </div>
-
+      }
+    >
       {options.length > 1 ? (
         <div className="flex max-w-xs flex-col gap-1">
           <label
@@ -111,7 +128,7 @@ export default function SCFAnchorDetailPage() {
       ) : null}
 
       {data ? <AnchorDetailView detail={data} /> : null}
-    </div>
+    </PageShell>
   );
 }
 
@@ -136,18 +153,6 @@ function AnchorDetailView({ detail }: { detail: AnchorDetail }) {
 
   return (
     <div className="space-y-6">
-      <div>
-        <div className="font-mono text-xs text-muted-foreground">
-          {detail.anchor.scf_id} · {detail.anchor.family}
-        </div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {detail.anchor.name}
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          {detail.anchor.description}
-        </p>
-      </div>
-
       {[...byFramework.values()].map((group) => (
         <Card key={group.framework + group.version}>
           <CardHeader>

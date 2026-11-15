@@ -1740,6 +1740,17 @@ jobs:
       - name: Run Playwright tests
         working-directory: web
         run: npx playwright test
+      # #2080 — the route sweep's axe findings (serious + critical) are
+      # REPORTED, not enforced: one JSON per route, uploaded on every run
+      # whether or not the suite passed.
+      - name: Upload route-sweep axe report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: route-sweep-axe-report
+          path: web/axe-report/
+          if-no-files-found: warn
+          retention-days: 3
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -1988,13 +1999,17 @@ jobs:
         #
         # #2062 — plus the two token-card specs, which need
         # ATLAS_WEB_DEV_TOKEN_SIGNIN=true (job env) on the web server.
+        #
+        # #2080 — plus the route sweep, so every authenticated route's
+        # shell checks also hold against the standalone build.
         working-directory: web
         run: |
           npx playwright test \
             bff-cookie-production-build.spec.ts \
             logo-render-production-build.spec.ts \
             login-dev-token-signin.spec.ts \
-            auth-open-redirect.spec.ts
+            auth-open-redirect.spec.ts \
+            route-sweep.spec.ts
       - name: Upload Playwright report on failure
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

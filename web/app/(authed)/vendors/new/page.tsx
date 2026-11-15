@@ -2,6 +2,8 @@
 
 import { useRouter } from "next/navigation";
 
+import { PageShell } from "@/components/shell/page-shell";
+
 import { VendorForm } from "../vendor-form";
 
 import { createVendorFromCookieSession } from "../actions";
@@ -9,14 +11,11 @@ import { createVendorFromCookieSession } from "../actions";
 export default function NewVendorPage() {
   const router = useRouter();
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Add vendor</h1>
-        <p className="text-sm text-muted-foreground">
-          Capture the minimum the spreadsheet held: name, criticality, contract
-          + DPA dates, review cadence, owner.
-        </p>
-      </div>
+    <PageShell
+      title="Add vendor"
+      subtitle="Capture the minimum the spreadsheet held: name, criticality, contract + DPA dates, review cadence, owner."
+      width="reading"
+    >
       <VendorForm
         onSubmit={async (body) => {
           const v = await createVendorFromCookieSession(body);
@@ -24,6 +23,6 @@ export default function NewVendorPage() {
         }}
         submitLabel="Create vendor"
       />
-    </div>
+    </PageShell>
   );
 }

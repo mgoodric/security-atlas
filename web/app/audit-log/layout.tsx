@@ -42,6 +42,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
+import { AppShell } from "@/components/shell/app-shell";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 import { fetchAdminMe } from "@/lib/api/self.server";
 
@@ -95,5 +96,7 @@ export default async function AuditLogLayout({
   if (!canReachAuditLog(body)) {
     redirect("/dashboard?error=admin-only");
   }
-  return <>{children}</>;
+  // #2080 — rendered inside the app shell; before this the audit log was
+  // a bare page with no top bar or sidebar.
+  return <AppShell>{children}</AppShell>;
 }

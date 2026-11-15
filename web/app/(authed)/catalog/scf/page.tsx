@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { ListPagination, paginateRows } from "@/components/list/pagination";
+import { PageShell } from "@/components/shell/page-shell";
 import {
   Card,
   CardContent,
@@ -69,36 +70,27 @@ export default function SCFCatalogPage() {
   }, [error, router]);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">SCF Anchors</h1>
-          <p className="text-sm text-muted-foreground">
-            Browse the Secure Controls Framework anchor catalog. Click any
-            anchor to see the framework requirements that map to it.
-          </p>
-        </div>
-        {/* Slice 174: Export buttons (CSV / JSON / XLSX) wire to the
-            BFF proxy at `/api/anchors/export?format=...`, which
-            forwards to the platform `GET /v1/anchors/export`
-            endpoint. Each link is an `<a download>` so the browser
-            honours the backend's Content-Disposition filename. */}
-        <div className="flex flex-wrap gap-2">
-          {ANCHORS_EXPORT_FORMATS.map((format) => (
-            <a
-              key={format}
-              href={buildAnchorsExportURL(format)}
-              download
-              rel="noopener"
-              className={buttonVariants({ variant: "outline", size: "sm" })}
-              data-testid={`anchors-export-${format}`}
-            >
-              Export {ANCHORS_EXPORT_FORMAT_LABELS[format]}
-            </a>
-          ))}
-        </div>
-      </div>
-
+    <PageShell
+      title="SCF Anchors"
+      subtitle="Browse the Secure Controls Framework anchor catalog. Click any anchor to see the framework requirements that map to it."
+      // Slice 174: Export buttons (CSV / JSON / XLSX) wire to the BFF
+      // proxy at `/api/anchors/export?format=...`, which forwards to the
+      // platform `GET /v1/anchors/export` endpoint. Each link is an
+      // `<a download>` so the browser honours the backend's
+      // Content-Disposition filename.
+      actions={ANCHORS_EXPORT_FORMATS.map((format) => (
+        <a
+          key={format}
+          href={buildAnchorsExportURL(format)}
+          download
+          rel="noopener"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+          data-testid={`anchors-export-${format}`}
+        >
+          Export {ANCHORS_EXPORT_FORMAT_LABELS[format]}
+        </a>
+      ))}
+    >
       {isLoading ? <AnchorSkeletons /> : null}
 
       {error && !(error instanceof APIError && error.status === 401) ? (
@@ -197,7 +189,7 @@ export default function SCFCatalogPage() {
           />
         </Card>
       ) : null}
-    </div>
+    </PageShell>
   );
 }
 

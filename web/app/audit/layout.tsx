@@ -24,7 +24,7 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 
-import { TopBar } from "@/components/shell/topbar";
+import { AppShell } from "@/components/shell/app-shell";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 export default async function AuditLayout({
@@ -36,10 +36,9 @@ export default async function AuditLayout({
   if (!jar.get(ATLAS_JWT_COOKIE)?.value) {
     redirect("/login?from=/audit");
   }
-  return (
-    <div className="flex h-screen flex-col">
-      <TopBar />
-      <div className="flex flex-1 flex-col overflow-hidden">{children}</div>
-    </div>
-  );
+  // #2080 — the workspace renders inside the app shell (sidebar, skip
+  // link, mobile drawer) like every other authenticated route. `bleed`
+  // hands the main column to the workspace's own panes, which size to
+  // the viewport and scroll independently.
+  return <AppShell bleed>{children}</AppShell>;
 }

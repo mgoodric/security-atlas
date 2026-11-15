@@ -113,7 +113,7 @@ func seedExclusionTimeline(t *testing.T, admin, app *pgxpool.Pool) exclusionFixt
 		}); err != nil {
 			t.Fatalf("applicable A.8.28 on %s: %v", name, err)
 		}
-		if _, err := store.Submit(tctx, sc.ID, "tester"); err != nil {
+		if _, err := store.Submit(tctx, sc.ID, "tester", "tester"); err != nil {
 			t.Fatalf("submit %s: %v", name, err)
 		}
 		if _, err := store.Approve(tctx, frameworkscope.ApproveRequest{

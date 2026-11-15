@@ -25,6 +25,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { PageShell } from "@/components/shell/page-shell";
 import { BoardMetricCard } from "@/components/dashboards-metrics/board-metric-card";
 import { CascadeTree } from "@/components/dashboards-metrics/cascade-tree";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -43,17 +44,11 @@ export default function MetricsDashboardPage() {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   return (
-    <div className="space-y-6" data-testid="metrics-dashboard">
-      <header className="flex items-baseline justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Metrics</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Board-level KPIs and the cascading program and team metrics that
-            feed them. Click a card to walk its cascade.
-          </p>
-        </div>
-      </header>
-
+    <PageShell
+      title="Metrics"
+      subtitle="Board-level KPIs and the cascading program and team metrics that feed them. Click a card to walk its cascade."
+      data-testid="metrics-dashboard"
+    >
       {boardQuery.isLoading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           <Skeleton className="h-44 w-full" />
@@ -93,6 +88,6 @@ export default function MetricsDashboardPage() {
           ))}
         </div>
       )}
-    </div>
+    </PageShell>
   );
 }
