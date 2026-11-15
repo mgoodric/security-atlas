@@ -25,8 +25,15 @@ function niceStep(raw: number): number {
 // linearAxis fits a y-axis to [lo, hi]: the domain is widened to the
 // nearest round step either side, and the ticks are every step in it.
 // A flat series (lo === hi) gets a band around its value so the line
-// sits mid-plot instead of on an edge.
-export function linearAxis(lo: number, hi: number, count = 5): LinearAxis {
+// sits mid-plot instead of on an edge. `bounds` caps that band (and the
+// fitted range) for a scale with hard limits: a fraction-valued percent
+// series must not grow a tick above 1, which would read "1.1%".
+export function linearAxis(
+  lo: number,
+  hi: number,
+  count = 5,
+  bounds?: [number, number],
+): LinearAxis {
   if (!Number.isFinite(lo) || !Number.isFinite(hi)) {
     return { min: 0, max: 1, ticks: [0, 0.5, 1] };
   }
@@ -35,6 +42,10 @@ export function linearAxis(lo: number, hi: number, count = 5): LinearAxis {
     const pad = lo === 0 ? 1 : Math.abs(lo) * 0.1;
     lo -= pad;
     hi += pad;
+  }
+  if (bounds) {
+    lo = Math.max(lo, bounds[0]);
+    hi = Math.min(hi, bounds[1]);
   }
   const step = niceStep((hi - lo) / Math.max(1, count - 1));
   // Round to the step's precision so 0.1 + 0.2 reads 0.3.
@@ -45,6 +56,17 @@ export function linearAxis(lo: number, hi: number, count = 5): LinearAxis {
   const ticks: number[] = [];
   for (let i = first; i <= last; i++) ticks.push(round(i * step));
   return { min: ticks[0], max: ticks[ticks.length - 1], ticks };
+}
+
+// fractionBounds returns [0, 1] when a percent or ratio series is stored
+// as fractions (every value and overlay in [0, 1]), so the fitted axis
+// stays on one scale. Otherwise there is no hard limit.
+export function fractionBounds(
+  unit: string,
+  values: number[],
+): [number, number] | undefined {
+  if (unit !== "percent" && unit !== "ratio") return undefined;
+  return values.every((v) => v >= 0 && v <= 1) ? [0, 1] : undefined;
 }
 
 export type TimeAxis = {

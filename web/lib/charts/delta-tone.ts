@@ -33,6 +33,7 @@ export function deltaTone(
 ): DeltaTone {
   const t = targetNumber(target);
   if (t === undefined || !target) return "neutral";
+  if (!Number.isFinite(value) || !Number.isFinite(delta)) return "neutral";
   if (delta === 0) return "flat";
   switch (target.direction) {
     case "higher_is_better":

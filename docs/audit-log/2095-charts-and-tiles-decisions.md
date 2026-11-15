@@ -72,3 +72,12 @@ hour when the span is under two days. Tick labels and axis titles sit in the
 margins outside the plot, and the end x-labels anchor inward, so no label
 overlaps a mark or the canvas edge. The chart grew from 200 to 220 px tall to
 make room for the axes.
+
+### D7 — a fraction-valued percent axis stays inside [0, 1]
+
+`formatValue` reads a percent value of 1 or less as a fraction and anything
+above 1 as already scaled. A flat series at 100% (`1.0`) was padded to
+0.9–1.1, so its top ticks read "1.1%" above "100.0%" (review B1 on #2345).
+`fractionBounds` now caps the fitted axis at [0, 1] when every value and
+overlay of a percent or ratio series lies in that range. The axis stays on
+one scale, and 100% is its top tick.

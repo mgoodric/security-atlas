@@ -19,6 +19,8 @@ export type AxisChartProps = {
   tExtent: [number, number];
   // Value extent to fit the y-axis to (data plus any overlays).
   yExtent: [number, number];
+  // Hard limits the fitted y-axis may not cross (see `fractionBounds`).
+  yBounds?: [number, number];
   yFormat: (v: number) => string;
   xLabel: string;
   yLabel: string;
@@ -34,6 +36,7 @@ const MARGIN = { top: 12, right: 20, bottom: 40, left: 64 };
 export function AxisChart({
   tExtent,
   yExtent,
+  yBounds,
   yFormat,
   xLabel,
   yLabel,
@@ -49,7 +52,7 @@ export function AxisChart({
     top: MARGIN.top,
     bottom: height - MARGIN.bottom,
   };
-  const yAxis = linearAxis(yExtent[0], yExtent[1]);
+  const yAxis = linearAxis(yExtent[0], yExtent[1], 5, yBounds);
   const xAxis = timeAxis(tExtent[0], tExtent[1]);
   const span = xAxis.max - xAxis.min;
   const ySpan = yAxis.max - yAxis.min || 1;

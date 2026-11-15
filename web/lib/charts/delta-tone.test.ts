@@ -119,6 +119,20 @@ describe("deltaTone without a target", () => {
     expect(deltaToneClass("neutral")).toBe("text-muted-foreground");
   });
 
+  it.each([
+    [NaN, 1],
+    [1, NaN],
+    [Infinity, 1],
+    [1, -Infinity],
+  ])("a non-finite value or delta (%s, %s) is neutral", (value, delta) => {
+    expect(
+      deltaTone(value, delta, {
+        target_value: 1,
+        direction: "higher_is_better",
+      }),
+    ).toBe("neutral");
+  });
+
   it("an unknown direction is neutral", () => {
     expect(deltaTone(1, 1, { target_value: 2, direction: "sideways" })).toBe(
       "neutral",

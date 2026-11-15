@@ -114,10 +114,6 @@ export function BoardMetricCard({
   // with no percentage and a neutral badge.
   const emptyReason = latest ? latest.noDataReason : null;
 
-  // The freshness KPI's value-loading and has-value signals follow the
-  // live freshness query; every other metric follows the observations
-  // query. Keeping these as explicit locals keeps the JSX branches
-  // readable and the two surfaces' "do we have a number?" logic aligned.
   // #2095: the 90-day change, coloured by whether it moves toward the
   // target (never by its sign alone, and neutral with no target).
   const trend =
@@ -130,6 +126,10 @@ export function BoardMetricCard({
           target,
         );
 
+  // The freshness KPI's value-loading and has-value signals follow the
+  // live freshness query; every other metric follows the observations
+  // query. Keeping these as explicit locals keeps the JSX branches
+  // readable and the two surfaces' "do we have a number?" logic aligned.
   const valueIsLoading = isFreshnessKPI
     ? freshnessQuery.isLoading
     : obsQuery.isLoading;

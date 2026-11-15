@@ -8,6 +8,7 @@
 
 import { AxisChart } from "@/components/charts/axis-chart";
 import type { MetricTarget, Observation } from "@/lib/api/metrics";
+import { fractionBounds } from "@/lib/charts/axes";
 
 import { formatValue, parseValue } from "./format";
 
@@ -66,6 +67,7 @@ export function LineChart({
     <AxisChart
       tExtent={[series[0].t, series[series.length - 1].t]}
       yExtent={[yMin, yMax]}
+      yBounds={fractionBounds(unit, [...values, ...overlays])}
       yFormat={(v) => formatValue(v, unit)}
       xLabel="Observed"
       yLabel={unitLabel(unit)}
