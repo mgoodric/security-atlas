@@ -9,19 +9,20 @@ types.
 - `detection_tier_actual`: none
 - `detection_tier_target`: none
 
-## D1 — Build the overflow menu and inline confirm here, shaped for #2090
+## D1 — One shared overflow menu, in `components/ui`, for #2090 too
 
-**Decision.** The overflow menu is base-ui's `Menu` (already a dependency),
-and the inline confirm is a small `InlineConfirm` in the same module. The
+**Decision.** The overflow menu and its inline confirm are
+`components/ui/overflow-menu.tsx` (`OverflowMenu`, `InlineConfirm`), and the
 rule "a destructive item never fires from the menu" is a pure reducer in
-`detail-header-model.ts`.
+`components/ui/overflow-menu-model.ts`. The detail header uses
+`OverflowMenu`; it holds no menu code of its own.
 
 **Why.** #2071 says destructive items use the row-actions pattern (#2090),
-but #2090 is open with no PR, so there is no `RowActions` / `ConfirmInline`
-to import. Waiting would block every Spec B detail page. The `OverflowItem`
-shape (`label`, `destructive`, `confirmPrompt`, `onSelect`) is what a row
-menu needs too, so #2090 can lift `InlineConfirm` and the model into a shared
-`RowActions` without changing the header's callers.
+which was still in progress when this landed. One implementation serves both:
+`OverflowItem` (`label`, `destructive`, `confirmPrompt`, `onSelect`) is what a
+row menu needs, and `testIdPrefix` keeps each surface's selectors distinct.
+Whichever of #2090 and #2102 merges second adopts the other's primitive
+instead of adding a second menu.
 
 ## D2 — base-ui Menu for the menu-button semantics
 
@@ -38,7 +39,8 @@ and returns focus to the trigger.
 
 **Decision.** `detail-header.test.ts` renders the header with
 `createElement` + `react-dom/server` (no JSX, no new dependency) and drives
-the confirm rule through the model.
+the confirm rule through the model (`overflow-menu.test.ts` for the menu,
+`detail-header.test.ts` for the header).
 
 **Why.** Vitest is node-only and React component tests are out of scope for
 v1 (slice 069 P0-A3, slice 353 Q-3). Static markup covers status, Edit, the

@@ -1,39 +1,29 @@
 // #2102 — the shared detail-page header.
 //
 // The vitest tier is node-only with no DOM (slice 069 P0-A3), so this
-// renders the header to static markup with `createElement` (no JSX) and
-// drives the confirm rule through its pure model. The overflow menu's
-// popup is portalled and only mounts in a browser, so the items are
-// asserted through the confirm-state render and the model; the vendor
-// page's Playwright specs cover the header in the real app.
+// renders the header to static markup with `createElement` (no JSX).
+// The overflow menu and its inline confirm are covered in
+// `components/ui/overflow-menu.test.ts`; the vendor page's Playwright
+// specs cover the header in the real app.
 
 import { createElement as h } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 
-import { DetailHeader, InlineConfirm } from "./detail-header";
-import {
-  confirmingItem,
-  confirmPromptFor,
-  IDLE,
-  reduceConfirm,
-  type OverflowItem,
-} from "./detail-header-model";
+import type { OverflowItem } from "@/components/ui/overflow-menu-model";
 
-function items() {
-  const archive = vi.fn();
-  const remove = vi.fn();
-  const list: OverflowItem[] = [
-    { id: "archive", label: "Archive", onSelect: archive },
+import { DetailHeader } from "./detail-header";
+
+function items(): OverflowItem[] {
+  return [
+    { id: "archive", label: "Archive", onSelect: () => {} },
     {
       id: "delete",
       label: "Delete vendor",
       destructive: true,
-      confirmPrompt: "Delete this vendor? This cannot be undone.",
-      onSelect: remove,
+      onSelect: () => {},
     },
   ];
-  return { list, archive, remove };
 }
 
 /** The opening tag of the element carrying `testid`. */
@@ -101,7 +91,7 @@ describe("DetailHeader", () => {
   });
 
   it("renders the overflow trigger as a menu button", () => {
-    const html = render(items().list);
+    const html = render(items());
     const trigger = tag(html, "detail-header-overflow-trigger");
     expect(trigger).toMatch(/^<button/);
     expect(trigger).toContain('aria-haspopup="menu"');
@@ -121,84 +111,5 @@ describe("DetailHeader", () => {
       }),
     );
     expect(tag(html, "start")).toMatch(/^<button[^>]*type="button"/);
-  });
-});
-
-describe("overflow confirm rule", () => {
-  it("runs a non-destructive item straight away", () => {
-    const { list, archive } = items();
-    const { state, run } = reduceConfirm(
-      IDLE,
-      { type: "select", item: list[0] },
-      list,
-    );
-    expect(state).toEqual(IDLE);
-    expect(run).toBe(list[0]);
-    run?.onSelect();
-    expect(archive).toHaveBeenCalledOnce();
-  });
-
-  it("never runs a destructive item on select; it asks for a confirm", () => {
-    const { list } = items();
-    const { state, run } = reduceConfirm(
-      IDLE,
-      { type: "select", item: list[1] },
-      list,
-    );
-    expect(run).toBeNull();
-    expect(confirmingItem(state, list)).toBe(list[1]);
-  });
-
-  it("runs the destructive item only on confirm", () => {
-    const { list } = items();
-    const asked = reduceConfirm(IDLE, { type: "select", item: list[1] }, list);
-    const { state, run } = reduceConfirm(
-      asked.state,
-      { type: "confirm" },
-      list,
-    );
-    expect(run).toBe(list[1]);
-    expect(state).toEqual(IDLE);
-  });
-
-  it("runs nothing on cancel", () => {
-    const { list } = items();
-    const asked = reduceConfirm(IDLE, { type: "select", item: list[1] }, list);
-    const { state, run } = reduceConfirm(asked.state, { type: "cancel" }, list);
-    expect(run).toBeNull();
-    expect(state).toEqual(IDLE);
-  });
-
-  it("runs nothing on confirm when no item is waiting", () => {
-    const { list } = items();
-    expect(reduceConfirm(IDLE, { type: "confirm" }, list).run).toBeNull();
-  });
-
-  it("falls back to a generic prompt", () => {
-    expect(
-      confirmPromptFor({ id: "x", label: "Revoke key", onSelect: () => {} }),
-    ).toBe("Revoke key? This cannot be undone.");
-  });
-});
-
-describe("InlineConfirm", () => {
-  it("shows the prompt with Cancel and a destructive confirm button", () => {
-    const { list } = items();
-    const html = renderToStaticMarkup(
-      h(InlineConfirm, {
-        item: list[1],
-        onCancel: () => {},
-        onConfirm: () => {},
-      }),
-    );
-    expect(html).toContain('role="group"');
-    expect(html).toContain('aria-label="Confirm: Delete vendor"');
-    expect(html).toContain("Delete this vendor? This cannot be undone.");
-    expect(html).toMatch(
-      /data-testid="detail-header-confirm-cancel"[^>]*>Cancel</,
-    );
-    expect(html).toMatch(
-      /data-testid="detail-header-confirm-ok"[^>]*>Delete vendor</,
-    );
   });
 });

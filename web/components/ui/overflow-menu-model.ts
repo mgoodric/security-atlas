@@ -1,8 +1,9 @@
-// #2102 — the shared detail-page header's overflow-menu model.
+// #2102 — the overflow menu's inline-confirm model (shared by the
+// detail-page header and row actions, #2090).
 //
 // Pure, so the rule that matters (a destructive item never fires from
 // the menu; it opens an inline confirm first) is covered in the node
-// vitest tier without a DOM. `detail-header.tsx` renders it.
+// vitest tier without a DOM. `overflow-menu.tsx` renders it.
 
 export type OverflowItem = {
   /** Stable key, unique within one header. */
