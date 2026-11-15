@@ -27,7 +27,10 @@ func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, keyword: qmapsuggest.NewStore(pool)}
 }
 
-var _ BatchStore = (*Store)(nil)
+var (
+	_ BatchStore    = (*Store)(nil)
+	_ DecisionStore = (*Store)(nil)
+)
 
 func (s *Store) inTx(ctx context.Context, fn func(context.Context, pgx.Tx, string) error) error {
 	tenantID, err := tenancy.TenantFromContext(ctx)
@@ -231,7 +234,9 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string, f RowFilter) ([]
 	rows, err := tx.Query(ctx, `
 		SELECT r.id::text, r.row_number, r.org_control_id, r.title, r.description, r.tested_under,
 		       COALESCE(r.implementation_type, ''), COALESCE(r.applicability, ''), r.status,
-		       r.no_candidate_reaches, r.llm_rerank, COALESCE(g.model_provider, '')
+		       r.no_candidate_reaches, r.llm_rerank, COALESCE(g.model_provider, ''),
+		       COALESCE(r.decided_by, ''), COALESCE(r.control_id::text, ''), COALESCE(r.scf_id, ''),
+		       COALESCE(r.rejection_reason, '')
 		FROM control_import_rows r
 		-- The provider of the row's latest rerank generation (#2079); only
 		-- an applied rerank names one.
@@ -256,7 +261,8 @@ func readStaged(ctx context.Context, tx pgx.Tx, batchID string, f RowFilter) ([]
 		var c BatchControl
 		var tested []byte
 		if err := rows.Scan(&c.ID, &c.RowNumber, &c.ExternalID, &c.Title, &c.Description, &tested,
-			&c.ImplementationType, &c.Applicability, &c.Status, &c.NoCandidateReaches, &c.LLMRerank, &c.LLMProvider); err != nil {
+			&c.ImplementationType, &c.Applicability, &c.Status, &c.NoCandidateReaches, &c.LLMRerank, &c.LLMProvider,
+			&c.DecidedBy, &c.ControlID, &c.ApprovedSCFID, &c.RejectionReason); err != nil {
 			return nil, fmt.Errorf("controlimport: scan staged row: %w", err)
 		}
 		if err := json.Unmarshal(tested, &c.TestedUnder); err != nil {
