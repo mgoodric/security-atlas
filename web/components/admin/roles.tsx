@@ -72,14 +72,16 @@ export const ROLE_DESCRIPTIONS: Record<
 };
 
 export function RoleBadge({ role }: { role: Role }) {
-  const variant: "default" | "secondary" | "outline" | "destructive" =
-    role === "admin"
-      ? "destructive"
-      : role === "viewer"
-        ? "outline"
-        : "secondary";
+  // #2090: admin is a category, not a hazard, so it takes the info tone
+  // rather than destructive (red is kept for irreversible actions).
+  const variant: "info" | "secondary" | "outline" =
+    role === "admin" ? "info" : role === "viewer" ? "outline" : "secondary";
   return (
-    <Badge variant={variant} className="font-mono text-[10px] uppercase">
+    <Badge
+      variant={variant}
+      className="font-mono text-[10px] uppercase"
+      data-testid={`role-badge-${role}`}
+    >
       {role}
     </Badge>
   );

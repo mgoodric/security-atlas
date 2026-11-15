@@ -549,7 +549,8 @@ test.describe("/settings user-facing page", () => {
     // successor in the chain (the first rotation extends the seed's
     // existing chain by one).
     const rotateTarget = rows.filter({ hasText: "rt02" }).first();
-    await rotateTarget.getByTestId("settings-token-rotate-button").click();
+    await rotateTarget.getByTestId("settings-token-actions").click();
+    await page.getByTestId("settings-token-rotate-button").click();
     await page.getByTestId("settings-token-rotate-modal").waitFor();
     await page.getByRole("button", { name: /Rotate now/ }).click();
 
@@ -588,7 +589,8 @@ test.describe("/settings user-facing page", () => {
     const successorLast4 = bearer1!.slice(-4);
 
     const rotateTarget2 = rows.filter({ hasText: successorLast4 }).first();
-    await rotateTarget2.getByTestId("settings-token-rotate-button").click();
+    await rotateTarget2.getByTestId("settings-token-actions").click();
+    await page.getByTestId("settings-token-rotate-button").click();
     await page.getByTestId("settings-token-rotate-modal").waitFor();
     await page.getByRole("button", { name: /Rotate now/ }).click();
 

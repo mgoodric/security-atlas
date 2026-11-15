@@ -44,7 +44,7 @@ export function PanelCard({
   testid,
   children,
 }: {
-  title: string;
+  title: ReactNode;
   description?: string;
   action?: ReactNode;
   state: PanelState;
