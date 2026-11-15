@@ -8,12 +8,14 @@
 // being silently dropped (slice anti-criterion: no fabricated mappings —
 // render exactly what the backend returns).
 
+import { enumLabel } from "@/lib/labels/enum-labels";
+
 export type StrmStyle = {
   // Tailwind classes for the small badge in the coverage table.
   badge: string;
   // SVG stroke color for the UCF mini-viz edge.
   stroke: string;
-  // Human label (the DB value is shown verbatim alongside, this is the gloss).
+  // Display label (#2083), from the shared label module.
   label: string;
 };
 
@@ -21,34 +23,34 @@ const KNOWN: Record<string, StrmStyle> = {
   equal: {
     badge: "bg-emerald-50 text-emerald-700",
     stroke: "rgb(16 185 129)",
-    label: "equal",
+    label: enumLabel("StrmRelationshipType", "equal"),
   },
   subset_of: {
     badge: "bg-sky-50 text-sky-700",
     stroke: "rgb(14 165 233)",
-    label: "subset of",
+    label: enumLabel("StrmRelationshipType", "subset_of"),
   },
   superset_of: {
     badge: "bg-violet-50 text-violet-700",
     stroke: "rgb(139 92 246)",
-    label: "superset of",
+    label: enumLabel("StrmRelationshipType", "superset_of"),
   },
   intersects_with: {
     badge: "bg-amber-50 text-amber-700",
     stroke: "rgb(245 158 11)",
-    label: "intersects with",
+    label: enumLabel("StrmRelationshipType", "intersects_with"),
   },
   no_relationship: {
     badge: "bg-slate-100 text-slate-500",
     stroke: "rgb(148 163 184)",
-    label: "no relationship",
+    label: enumLabel("StrmRelationshipType", "no_relationship"),
   },
 };
 
 const FALLBACK: StrmStyle = {
   badge: "bg-slate-100 text-slate-600",
   stroke: "rgb(100 116 139)",
-  label: "unknown",
+  label: "Unknown",
 };
 
 // strmStyle resolves a raw `relationship_type` string to its styling.

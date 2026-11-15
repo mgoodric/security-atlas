@@ -123,6 +123,7 @@ func TestContract_FrameworkPosture(t *testing.T) {
 		{
 			FrameworkID:           pgUUIDFromString(contractFrameworkA),
 			FrameworkVersion:      "2017",
+			FrameworkName:         "SOC 2",
 			FrameworkVersionID:    pgUUIDFromString(contractVersionA),
 			CoveragePct:           87.5,
 			CoveredByExceptionPct: 12.5,
@@ -135,6 +136,7 @@ func TestContract_FrameworkPosture(t *testing.T) {
 			// and null percentages, whatever the query computed.
 			FrameworkID:        pgUUIDFromString(contractFrameworkB),
 			FrameworkVersion:   "4.0",
+			FrameworkName:      "PCI DSS",
 			FrameworkVersionID: pgUUIDFromString(contractVersionB),
 			CoveragePct:        100,
 			FreshnessComposite: 100,

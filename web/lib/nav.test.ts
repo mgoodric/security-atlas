@@ -92,6 +92,7 @@ describe("buildNav — groups", () => {
           "Personnel security",
           "Questionnaires",
           "SCF catalog",
+          "Audited under",
         ],
       ],
       ["Settings & admin", ["Settings", "Admin"]],
@@ -188,6 +189,7 @@ describe("buildNav — gates", () => {
         "Personnel security",
         "Questionnaires",
         "SCF catalog",
+        "Audited under",
         "Settings",
       ]);
     });

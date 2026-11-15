@@ -85,8 +85,10 @@ WITH version_reqs AS (
         fv.id            AS framework_version_id,
         fv.framework_id  AS framework_id,
         fv.version       AS framework_version,
+        f.name           AS framework_name,
         fr.id            AS requirement_id
     FROM framework_versions fv
+    JOIN frameworks f ON f.id = fv.framework_id
     JOIN framework_requirements fr ON fr.framework_version_id = fv.id
     WHERE fv.status = 'current'
       AND NOT EXISTS (
@@ -220,6 +222,9 @@ SELECT
     vr.framework_id,
     vr.framework_version,
     vr.framework_version_id,
+    -- framework_name (#2083): callers label a version by name plus
+    -- version ("ISO/IEC 27001:2022"), never the version alone.
+    vr.framework_name,
     -- coverage_pct: covered requirements / total requirements, 0..100.
     CASE WHEN COUNT(DISTINCT vr.requirement_id) = 0 THEN 0.0
          ELSE ROUND(
@@ -263,7 +268,7 @@ LEFT JOIN covered_by_exception cbe ON cbe.framework_version_id = vr.framework_ve
 LEFT JOIN control_freshness cf ON cf.framework_version_id = vr.framework_version_id
 LEFT JOIN scoped_versions  sv ON sv.framework_version_id = vr.framework_version_id
 LEFT JOIN history_versions hv ON hv.framework_version_id = vr.framework_version_id
-GROUP BY vr.framework_id, vr.framework_version, vr.framework_version_id
+GROUP BY vr.framework_id, vr.framework_version, vr.framework_version_id, vr.framework_name
 ORDER BY vr.framework_id, vr.framework_version;
 
 -- name: ListEvidenceActivity :many

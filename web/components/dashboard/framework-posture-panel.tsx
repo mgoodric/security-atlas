@@ -24,6 +24,7 @@ import {
   deltaTone,
   deltaToneClass,
 } from "@/lib/charts/delta-tone";
+import { frameworkLabel } from "@/lib/labels/framework-label";
 import type {
   FrameworkPostureReport,
   FrameworkPostureRow,
@@ -53,7 +54,7 @@ function ScopeNotSetTile({ row }: { row: FrameworkPostureRow }) {
       className="rounded-xl bg-muted/40 p-4 ring-1 ring-foreground/5"
     >
       <div className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
-        {row.framework_version}
+        {frameworkLabel(row.framework_name, row.framework_version)}
       </div>
       <Link
         href={`/framework-scopes/${encodeURIComponent(
@@ -92,7 +93,7 @@ function PostureTile({ row }: { row: FrameworkPostureRow }) {
       className="rounded-xl bg-muted/40 p-4 ring-1 ring-foreground/5"
     >
       <div className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
-        {row.framework_version}
+        {frameworkLabel(row.framework_name, row.framework_version)}
       </div>
       <div className="mt-2 flex items-baseline gap-2">
         <span
