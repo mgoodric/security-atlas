@@ -5,7 +5,7 @@
 // this sibling server-component layout.
 //
 // #2092: the layout also gates the whole module (list + detail) on the
-// `board.reporting` flag, server-side, before the client page mounts.
+// Board reporting module, server-side, before the client page mounts.
 
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-titles";
@@ -22,7 +22,7 @@ export default function BoardPacksLayout({
   children: React.ReactNode;
 }) {
   return (
-    <FeatureGate flag="board.reporting" moduleName={pageTitle("/board-packs")}>
+    <FeatureGate page="/board-packs" moduleName={pageTitle("/board-packs")}>
       {children}
     </FeatureGate>
   );

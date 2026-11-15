@@ -129,14 +129,19 @@ func IsCategoryRefusal(err error) bool {
 // of the tenant's categories inside the caller's tenant-scoped transaction,
 // for writers outside Store such as the MCP create_risk applier (#1810). A
 // slug or id match wins; otherwise ref is matched against display names,
-// case-insensitively on the trimmed value (#1815), and more than one match
-// is an AmbiguousCategoryError. An unknown, ambiguous or archived category
-// is an error that IsCategoryRefusal recognises.
+// case-insensitively on the trimmed value (#1815). An unknown, ambiguous or
+// archived category is an error that IsCategoryRefusal recognises.
+//
+// Every caller assigns a risk to the result, so the matched rows are held
+// FOR SHARE until the caller's transaction ends (#2233): an ArchiveCategory
+// racing the write either waits for it to commit, or commits first and is
+// seen here as archived. Category admin takes only the category row lock
+// and never a risk row lock, so the share lock adds no deadlock cycle.
 func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (Category, error) {
 	if err := q.SeedRiskCategories(ctx, pgUUID(tenantID)); err != nil {
 		return Category{}, fmt.Errorf("seed risk categories: %w", err)
 	}
-	row, err := q.ResolveRiskCategory(ctx, dbx.ResolveRiskCategoryParams{
+	row, err := q.ShareLockRiskCategory(ctx, dbx.ShareLockRiskCategoryParams{
 		TenantID: pgUUID(tenantID),
 		Ref:      ref,
 	})
@@ -156,25 +161,32 @@ func ResolveCategoryTx(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, 
 	return categoryFromRow(row), nil
 }
 
-// resolveCategoryByName finds the one tenant category whose display name is
-// ref (#1815). No match is an UnknownCategoryError naming the valid slugs;
-// several are an AmbiguousCategoryError naming theirs.
+// resolveCategoryByName finds the tenant category whose display name is ref
+// (#1815). Active names are unique per tenant and archived categories take
+// no assignments, so a single active match wins over any archived ones
+// (#2233). No match is an UnknownCategoryError naming the valid slugs;
+// several active matches are an AmbiguousCategoryError naming theirs; only
+// archived matches return the first, which the caller refuses as archived.
 func resolveCategoryByName(ctx context.Context, q *dbx.Queries, tenantID uuid.UUID, ref string) (dbx.OrgRiskCategory, error) {
-	rows, err := q.ResolveRiskCategoriesByName(ctx, dbx.ResolveRiskCategoriesByNameParams{
+	rows, err := q.ShareLockRiskCategoriesByName(ctx, dbx.ShareLockRiskCategoriesByNameParams{
 		TenantID: pgUUID(tenantID),
 		Name:     ref,
 	})
 	if err != nil {
 		return dbx.OrgRiskCategory{}, fmt.Errorf("resolve risk category by name: %w", err)
 	}
-	switch len(rows) {
-	case 0:
+	if len(rows) == 0 {
 		return dbx.OrgRiskCategory{}, unknownCategory(ctx, q, tenantID, ref)
-	case 1:
-		return rows[0], nil
 	}
-	slugs := make([]string, len(rows))
-	for i, r := range rows {
+	active := slices.DeleteFunc(slices.Clone(rows), func(r dbx.OrgRiskCategory) bool { return r.Archived })
+	switch len(active) {
+	case 0:
+		return rows[0], nil
+	case 1:
+		return active[0], nil
+	}
+	slugs := make([]string, len(active))
+	for i, r := range active {
 		slugs[i] = r.Slug
 	}
 	return dbx.OrgRiskCategory{}, &AmbiguousCategoryError{Ref: ref, Slugs: slugs}

@@ -105,7 +105,7 @@ export default function BoardPacksPage() {
     generate.mutate(periodEnd);
   }
 
-  // The `board.reporting` flag is checked server-side by FeatureGate in
+  // The Board reporting module is checked server-side by FeatureGate in
   // ./layout.tsx (#2092); this page only mounts when the module is on.
   return (
     <PageShell

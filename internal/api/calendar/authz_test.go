@@ -42,15 +42,19 @@ func requestAs(t *testing.T, role authz.Role) func(string) (string, bool) {
 
 func TestReadableTypes_PerRole(t *testing.T) {
 	t.Parallel()
+	// #2232: vendor and exception follow the vendors and exceptions list
+	// endpoints' OPA reads: the viewer reads vendors, the auditor reads
+	// exceptions, the control owner reads neither.
 	cases := []struct {
 		role                      authz.Role
 		risk, action, offboarding bool
+		vendor, exception         bool
 	}{
-		{authz.RoleAdmin, true, true, true},
-		{authz.RoleGRCEngineer, true, true, true},
-		{authz.RoleViewer, true, false, false},
-		{authz.RoleAuditor, false, false, false},
-		{authz.RoleControlOwner, false, false, false},
+		{authz.RoleAdmin, true, true, true, true, true},
+		{authz.RoleGRCEngineer, true, true, true, true, true},
+		{authz.RoleViewer, true, false, false, true, false},
+		{authz.RoleAuditor, false, false, false, false, true},
+		{authz.RoleControlOwner, false, false, false, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.role), func(t *testing.T) {
@@ -75,7 +79,11 @@ func TestReadableTypes_PerRole(t *testing.T) {
 			if set["offboarding"] != tc.offboarding {
 				t.Errorf("%s: offboarding=%v, want %v (filter %q)", tc.role, set["offboarding"], tc.offboarding, got)
 			}
-			for _, always := range []string{"audit", "exception", "policy", "vendor", "control", "policy_ack"} {
+			if set["vendor"] != tc.vendor || set["exception"] != tc.exception {
+				t.Errorf("%s: vendor=%v exception=%v, want vendor=%v exception=%v (filter %q)",
+					tc.role, set["vendor"], set["exception"], tc.vendor, tc.exception, got)
+			}
+			for _, always := range []string{"audit", "policy", "control", "policy_ack"} {
 				if !set[always] {
 					t.Errorf("%s: %s dropped from %q", tc.role, always, got)
 				}
@@ -96,6 +104,13 @@ func TestReadableTypes_OnlyGatedRequestedAndDenied(t *testing.T) {
 	if got, ok := readable("offboarding"); ok || got != "" {
 		t.Errorf("auditor asking only for offboarding: got %q ok=%v, want nothing", got, ok)
 	}
+	if got, ok := readable("vendor"); ok || got != "" {
+		t.Errorf("auditor asking only for vendor: got %q ok=%v, want nothing", got, ok)
+	}
+	owner := requestAs(t, authz.RoleControlOwner)
+	if got, ok := owner("vendor,exception,control"); !ok || got != "control" {
+		t.Errorf("control owner asking for vendor,exception,control: got %q ok=%v, want control", got, ok)
+	}
 }
 
 func TestWithoutTypes(t *testing.T) {
@@ -103,7 +118,7 @@ func TestWithoutTypes(t *testing.T) {
 	if got, ok := withoutTypes("audit,risk", nil); !ok || got != "audit,risk" {
 		t.Errorf("no drop: %q %v", got, ok)
 	}
-	if got, ok := withoutTypes("", gatedEventTypes); !ok || got != "audit,exception,policy,vendor,control,policy_ack" {
+	if got, ok := withoutTypes("", gatedEventTypes); !ok || got != "audit,policy,control,policy_ack" {
 		t.Errorf("all minus gated: %q %v", got, ok)
 	}
 	if _, ok := withoutTypes("risk", gatedEventTypes); ok {

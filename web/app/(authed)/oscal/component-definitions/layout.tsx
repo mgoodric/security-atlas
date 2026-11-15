@@ -9,8 +9,8 @@
 // sibling server-component layout (the /settings pattern, slice 248).
 //
 // #2092: the layout also gates the whole module (list + per-import
-// claims) on the `oscal.export` flag, server-side, before the client page
-// mounts.
+// claims) on the Vendor claims module, server-side, before the client
+// page mounts.
 
 import type { Metadata } from "next";
 import { pageTitle } from "@/lib/page-titles";
@@ -28,7 +28,7 @@ export default function VendorClaimsLayout({
 }) {
   return (
     <FeatureGate
-      flag="oscal.export"
+      page="/oscal/component-definitions"
       moduleName={pageTitle("/oscal/component-definitions")}
     >
       {children}

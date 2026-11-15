@@ -446,7 +446,7 @@ type patchReq struct {
 	Level     *string         `json:"level"`
 	OrgUnitID json.RawMessage `json:"org_unit_id"`
 	// Category moves the risk onto another of the tenant's categories, by
-	// slug or id (#1812).
+	// slug, id or display name (#1812, #1815).
 	Category *string `json:"category"`
 }
 
@@ -521,7 +521,7 @@ func decodePatch(r *http.Request) (risk.PlacementInput, string) {
 	}
 	if req.Category != nil {
 		if *req.Category == "" {
-			return risk.PlacementInput{}, "category must be a category slug or id"
+			return risk.PlacementInput{}, "category must be a category slug, id or display name"
 		}
 		in.CategoryRef = *req.Category
 	}

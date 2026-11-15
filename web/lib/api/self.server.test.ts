@@ -32,10 +32,10 @@ import {
   emptyAdminMe,
   fetchAdminMe,
   fetchDemoSeedEnabled,
-  fetchEnabledModules,
+  fetchEffectiveModules,
   fetchSelfProfile,
   normalizeAdminMe,
-  normalizeEnabledModules,
+  normalizeEffectiveModules,
 } from "./self.server";
 
 // The internal service address the compose sets. Stable regardless of the
@@ -168,17 +168,26 @@ describe("OE-549: server-side probes under a containerized topology", () => {
     expectNoSelfFetch(urls);
   });
 
-  test("enabled-modules probe resolves the real flags in-container (not the fail-closed empty map)", async () => {
-    const { urls } = containerNetwork({
-      "/v1/features/enabled": {
-        body: { modules: { "oscal.export": true, "board.reporting": false } },
+  test("effective-modules probe resolves the real modules in-container (not the unknown null)", async () => {
+    const modules = [
+      {
+        key: "questionnaires",
+        name: "Questionnaires",
+        state: "switched_off",
+        pages: ["/questionnaires"],
       },
+      {
+        key: "board_reporting",
+        name: "Board reporting",
+        state: "on",
+        pages: ["/board-packs"],
+      },
+    ];
+    const { urls } = containerNetwork({
+      "/v1/me/modules": { body: { modules } },
     });
 
-    await expect(fetchEnabledModules("any-bearer")).resolves.toEqual({
-      "oscal.export": true,
-      "board.reporting": false,
-    });
+    await expect(fetchEffectiveModules("any-bearer")).resolves.toEqual(modules);
     expectNoSelfFetch(urls);
   });
 
@@ -197,13 +206,13 @@ describe("OE-549: server-side probes under a containerized topology", () => {
     const { urls } = containerNetwork({
       "/v1/me": { body: { is_admin: true, roles: ["admin"] } },
       "/v1/admin/demo/status": { body: { enabled: false } },
-      "/v1/features/enabled": { body: { modules: {} } },
+      "/v1/me/modules": { body: { modules: [] } },
     });
 
     await Promise.all([
       fetchAdminMe("b"),
       fetchSelfProfile("b"),
-      fetchEnabledModules("b"),
+      fetchEffectiveModules("b"),
       fetchDemoSeedEnabled("b"),
     ]);
 
@@ -245,7 +254,7 @@ describe("OE-549: fail-closed posture on every failure mode", () => {
     // component, which is what rendered "This page couldn't load".
     await expect(fetchAdminMe("b")).resolves.toEqual(emptyAdminMe());
     await expect(fetchSelfProfile("b")).resolves.toBeNull();
-    await expect(fetchEnabledModules("b")).resolves.toEqual({});
+    await expect(fetchEffectiveModules("b")).resolves.toBeNull();
     await expect(fetchDemoSeedEnabled("b")).resolves.toBe(false);
   });
 
@@ -295,14 +304,26 @@ describe("OE-549: fail-closed posture on every failure mode", () => {
     expect(normalizeAdminMe("nope")).toEqual(emptyAdminMe());
   });
 
-  test("normalizeEnabledModules collapses anything that is not a modules object", () => {
-    expect(normalizeEnabledModules(null)).toEqual({});
-    expect(normalizeEnabledModules({})).toEqual({});
-    expect(normalizeEnabledModules({ modules: null })).toEqual({});
-    expect(normalizeEnabledModules({ modules: "on" })).toEqual({});
-    expect(normalizeEnabledModules({ modules: { a: true } })).toEqual({
-      a: true,
-    });
+  test("normalizeEffectiveModules is null for anything that is not a modules list", () => {
+    expect(normalizeEffectiveModules(null)).toBeNull();
+    expect(normalizeEffectiveModules({})).toBeNull();
+    expect(normalizeEffectiveModules({ modules: null })).toBeNull();
+    expect(normalizeEffectiveModules({ modules: { a: true } })).toBeNull();
+  });
+
+  test("normalizeEffectiveModules drops malformed entries", () => {
+    const good = { key: "q", name: "Q", state: "on", pages: ["/q"] };
+    expect(
+      normalizeEffectiveModules({
+        modules: [
+          good,
+          { ...good, state: "maybe" },
+          { ...good, pages: [1] },
+          { key: "x" },
+          null,
+        ],
+      }),
+    ).toEqual([good]);
   });
 
   test("demo-seed probe admits only on a literal enabled:true", async () => {
