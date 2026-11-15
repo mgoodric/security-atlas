@@ -113,7 +113,9 @@ async function mockMe(page: Page, roles: string[], isAdmin: boolean) {
       tenant_role: roles[0] ?? "viewer",
       time_zone: null,
       is_admin: isAdmin,
-      owner_roles: [],
+      // The page reads owner_roles, the credential's roles, as the
+      // platform's taxonomy guard does.
+      owner_roles: roles,
       roles,
     }),
   );

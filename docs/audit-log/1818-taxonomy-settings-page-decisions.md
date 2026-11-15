@@ -27,8 +27,13 @@ so what the list shows and what a delete refuses can't disagree. Both
 fields are additive. No client reads the old shape strictly.
 
 **D3: Edit controls show for admin or grc_engineer, read from `/v1/me`.**
-`canManageTaxonomy` mirrors `hasTaxonomyAdmin`: `is_admin`, or a role of
-`admin` or `grc_engineer`. Every other caller gets the lists with no add
+`canManageTaxonomy` mirrors `hasTaxonomyAdmin`: `is_admin`, or `admin` or
+`grc_engineer` in `owner_roles`. Those are the credential's fields as
+`/v1/me` echoes them. For a browser JWT, `IsApprover` equals `IsAdmin`
+(both are super-admin), so the approver branch adds nothing. The page
+does not read `roles` (the `user_roles` rows), because the guard checks
+the JWT's roles. A role granted after the JWT was minted would show edit
+buttons that then 403. Every other caller gets the lists with no add
 form and no buttons. Hiding them is presentation only. The platform
 refuses each write from those callers with a 403
 (`category_admin_integration_test.go`, `theme_admin_integration_test.go`).

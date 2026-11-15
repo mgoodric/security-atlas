@@ -8,7 +8,7 @@
 // refusal.
 
 import { APIError } from "./base";
-import type { RiskCategory } from "./risks";
+import { fetchRiskCategories, type RiskCategory } from "./risks";
 
 export type { RiskCategory } from "./risks";
 
@@ -54,11 +54,8 @@ const categoryPath = (ref: string) =>
 const themePath = (ref: string) => `/api/themes/${encodeURIComponent(ref)}`;
 
 /** All the organisation's categories, archived ones included. */
-export async function listTaxonomyCategories(): Promise<RiskCategory[]> {
-  const body = await call<{ categories?: RiskCategory[] }>(
-    "/api/risks/categories?include_archived=true",
-  );
-  return body.categories ?? [];
+export function listTaxonomyCategories(): Promise<RiskCategory[]> {
+  return fetchRiskCategories(true);
 }
 
 export function createCategory(input: {
@@ -110,16 +107,21 @@ export function deleteTheme(name: string): Promise<unknown> {
 const TAXONOMY_ROLES = ["admin", "grc_engineer"];
 
 /**
- * canManageTaxonomy mirrors the platform's risk-taxonomy guard, so the
- * page shows edit controls only to a caller whose writes would succeed.
+ * canManageTaxonomy mirrors the platform's risk-taxonomy guard
+ * (`hasTaxonomyAdmin`), so the page shows edit controls only to a caller
+ * whose writes would succeed. The guard reads the credential, which
+ * `/v1/me` echoes as `is_admin` and `owner_roles`: for a browser session
+ * those are the JWT's super-admin flag (which also sets the approver bit)
+ * and its role list for the current tenant. It does not read `roles`, the
+ * `user_roles` rows, which can differ from a JWT minted earlier.
  * Anything unknown is view-only.
  */
 export function canManageTaxonomy(
-  me: { is_admin?: boolean; roles?: readonly string[] } | undefined,
+  me: { is_admin?: boolean; owner_roles?: readonly string[] } | undefined,
 ): boolean {
   if (!me) return false;
   if (me.is_admin === true) return true;
-  return (me.roles ?? []).some((r) => TAXONOMY_ROLES.includes(r));
+  return (me.owner_roles ?? []).some((r) => TAXONOMY_ROLES.includes(r));
 }
 
 /** usageLabel names a category's or theme's usage, e.g. "3 risks, 1 rule". */

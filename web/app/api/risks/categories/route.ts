@@ -11,7 +11,7 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 import { apiBaseURL } from "@/lib/api/base";
-import { forwardJSON } from "@/lib/api/bff";
+import { forwardJSON, noStore } from "@/lib/api/bff";
 import { ATLAS_JWT_COOKIE } from "@/lib/auth";
 
 // #1818 — POST adds a category (the Taxonomy settings page). The body is
@@ -24,10 +24,12 @@ export async function POST(req: Request): Promise<Response> {
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
-  return forwardJSON("/v1/risks/categories", {
-    method: "POST",
-    jsonBody: body,
-  });
+  return noStore(
+    await forwardJSON("/v1/risks/categories", {
+      method: "POST",
+      jsonBody: body,
+    }),
+  );
 }
 
 export async function GET(req: Request): Promise<Response> {

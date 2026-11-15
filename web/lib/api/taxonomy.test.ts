@@ -7,15 +7,22 @@ import { canManageTaxonomy, deleteBlockedReason, usageLabel } from "./taxonomy";
 
 describe("canManageTaxonomy", () => {
   test("admin and grc_engineer may manage; everyone else views", () => {
-    expect(canManageTaxonomy({ is_admin: true, roles: [] })).toBe(true);
-    expect(canManageTaxonomy({ is_admin: false, roles: ["admin"] })).toBe(true);
-    expect(canManageTaxonomy({ roles: ["viewer", "grc_engineer"] })).toBe(true);
-    expect(canManageTaxonomy({ is_admin: false, roles: ["viewer"] })).toBe(
-      false,
+    expect(canManageTaxonomy({ is_admin: true, owner_roles: [] })).toBe(true);
+    expect(canManageTaxonomy({ owner_roles: ["admin"] })).toBe(true);
+    expect(canManageTaxonomy({ owner_roles: ["viewer", "grc_engineer"] })).toBe(
+      true,
     );
-    expect(canManageTaxonomy({ roles: ["control_owner", "auditor"] })).toBe(
-      false,
-    );
+    expect(canManageTaxonomy({ owner_roles: ["viewer"] })).toBe(false);
+    expect(
+      canManageTaxonomy({ owner_roles: ["control_owner", "auditor"] }),
+    ).toBe(false);
+  });
+
+  test("reads the credential's owner_roles, not the user_roles list", () => {
+    // The platform guard checks the credential; a `roles` entry the JWT
+    // does not carry would only earn a 403.
+    const me = { is_admin: false, owner_roles: ["viewer"], roles: ["admin"] };
+    expect(canManageTaxonomy(me)).toBe(false);
   });
 
   test("an unknown caller is view-only", () => {
