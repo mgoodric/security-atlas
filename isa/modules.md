@@ -79,10 +79,11 @@ read exactly as they did before.
 - [ ] ISC-4: Evidence and control evaluation are unaffected by module switches
       and module access. Falsifier: an evidence record, or a control result,
       that differs between a tenant with an optional module switched on and the
-      same tenant with it switched off.
-- [ ] ISC-5: OSCAL output is unaffected by module switches. Falsifier: an OSCAL
-      SSP or POA&M export whose content differs between a module switched on
-      and switched off.
+      same tenant with it switched off, or between a member with access to all
+      modules and a member whose module access is narrowed.
+- [ ] ISC-5: Audit-binding output is unaffected by module switches. Falsifier:
+      an OSCAL SSP or POA&M export, or an audit-period evidence summary, whose
+      content differs between a module switched on and switched off.
 - [ ] ISC-6: A saved board pack never changes. Falsifier: a board pack
       generated before a module was switched off whose stored content or
       sections differ afterwards.
@@ -102,15 +103,15 @@ Every probe below is named before it is written. `isa/check-probes.sh`
 reports each as MISSING, which is not a pass: the claim stays open until its
 probe exists and has been observed failing and then passing.
 
-| isc   | tier    | type | check                                                                                | threshold | tool                                             |
-| ----- | ------- | ---- | ------------------------------------------------------------------------------------ | --------- | ------------------------------------------------ |
-| ISC-1 | service | bash | switching off each core module is refused and its routes never return the marker     | 0         | `bash isa/probes/modules-core-always-on.sh`      |
-| ISC-2 | pure    | bash | registered routes with zero or several registry modules                              | 0         | `bash isa/probes/modules-route-coverage.sh`      |
-| ISC-3 | service | sql  | module rows and feature switch values differ after an off-then-on cycle              | 0         | `bash isa/probes/modules-data-kept.sh`           |
-| ISC-4 | service | bash | evidence listings and control results differ with an optional module off             | 0         | `bash isa/probes/modules-evidence-unfiltered.sh` |
-| ISC-5 | service | bash | OSCAL SSP and POA&M exports differ with an optional module off                       | 0         | `bash isa/probes/modules-oscal-unfiltered.sh`    |
-| ISC-6 | service | sql  | stored board packs whose content changes after a module is switched off              | 0         | `bash isa/probes/modules-board-pack-frozen.sh`   |
-| ISC-7 | service | bash | switched-off routes not answering the 404 marker, no-access routes not answering 403 | 0         | `bash isa/probes/modules-status-codes.sh`        |
+| isc   | tier    | type | check                                                                                                          | threshold | tool                                                 |
+| ----- | ------- | ---- | -------------------------------------------------------------------------------------------------------------- | --------- | ---------------------------------------------------- |
+| ISC-1 | service | bash | switching off each core module is refused and its routes never return the marker                               | 0         | `bash isa/probes/modules-core-always-on.sh`          |
+| ISC-2 | pure    | bash | registered routes with zero or several registry modules                                                        | 0         | `bash isa/probes/modules-route-coverage.sh`          |
+| ISC-3 | service | sql  | module rows and feature switch values differ after an off-then-on cycle                                        | 0         | `bash isa/probes/modules-data-kept.sh`               |
+| ISC-4 | service | bash | evidence listings and control results differ with an optional module off, or for a member with narrowed access | 0         | `bash isa/probes/modules-evidence-unfiltered.sh`     |
+| ISC-5 | service | bash | OSCAL SSP and POA&M exports or audit-period evidence summaries differ with an optional module off              | 0         | `bash isa/probes/modules-audit-output-unfiltered.sh` |
+| ISC-6 | service | sql  | stored board packs whose content changes after a module is switched off                                        | 0         | `bash isa/probes/modules-board-pack-frozen.sh`       |
+| ISC-7 | service | bash | switched-off routes not answering the 404 marker, no-access routes not answering 403                           | 0         | `bash isa/probes/modules-status-codes.sh`            |
 
 ISC-4 and ISC-5 are the load-bearing pair: if a display switch moves the
 evidence or an audit-binding export, the initiative's ISC-3 (any past date is
