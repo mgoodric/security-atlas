@@ -73,9 +73,12 @@ export function EntityMultiSelect({
     onChange([...selectedIds, id]);
   };
 
+  // #2213 — `min-w-0`: a fieldset's minimum width is its content's by
+  // default, so one long control title widened it past a phone's column.
+  // With it the option labels truncate instead.
   return (
     <fieldset
-      className="rounded-md border p-3 space-y-2"
+      className="min-w-0 rounded-md border p-3 space-y-2"
       data-testid={`${testIdPrefix}-fieldset`}
     >
       <legend className="px-1 text-sm font-medium">
@@ -118,7 +121,7 @@ export function EntityMultiSelect({
               <li key={o.id}>
                 <label
                   className={
-                    "flex items-center gap-2 text-sm " +
+                    "flex min-w-0 items-center gap-2 text-sm " +
                     (disabled ? "opacity-50" : "cursor-pointer")
                   }
                 >
@@ -129,9 +132,9 @@ export function EntityMultiSelect({
                     onChange={() => toggle(o.id)}
                     data-testid={`${testIdPrefix}-option-${o.id}`}
                   />
-                  <span className="truncate">{o.label}</span>
+                  <span className="min-w-0 truncate">{o.label}</span>
                   {o.hint ? (
-                    <span className="text-xs text-muted-foreground">
+                    <span className="shrink-0 text-xs text-muted-foreground">
                       {o.hint}
                     </span>
                   ) : null}

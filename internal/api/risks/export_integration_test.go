@@ -214,6 +214,7 @@ func TestSlice136_RiskExportReturnsExpectedColumns(t *testing.T) {
 		"review_due_at", "accepted_until", "created_at", "updated_at",
 		"acceptance_status", // #1746, appended
 		"parent_risk_ids",   // #1748, appended
+		"category_name",     // #1814, appended
 	}
 	if len(header) != len(expectedCols) {
 		t.Errorf("header column count = %d; want %d; header=%v", len(header), len(expectedCols), header)
@@ -265,6 +266,7 @@ func TestSlice136_RiskExportColumnSetMatchesCanonical(t *testing.T) {
 		"review_due_at", "accepted_until", "created_at", "updated_at",
 		"acceptance_status", // #1746, appended
 		"parent_risk_ids",   // #1748, appended
+		"category_name",     // #1814, appended
 	}
 
 	t.Run("csv", func(t *testing.T) {

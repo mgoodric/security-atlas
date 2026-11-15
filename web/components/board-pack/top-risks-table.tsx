@@ -16,6 +16,9 @@ export type RiskAgingRow = {
   id: string;
   title: string;
   category: string;
+  // #1814: the organisation's name for the category; absent on packs
+  // stored before it was frozen in, which show the slug instead.
+  category_name?: string;
   treatment: string;
   residual_severity: number;
   age_days: number;
@@ -30,6 +33,10 @@ const treatmentTone: Record<string, string> = {
   transfer: TONE_CHIP.progress,
   avoid: TONE_CHIP.warning,
 };
+
+function categoryLabel(risk: RiskAgingRow): string {
+  return risk.category_name || risk.category;
+}
 
 export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
   if (!risks || risks.length === 0) {
@@ -59,7 +66,7 @@ export function TopRisksTable({ risks }: { risks: RiskAgingRow[] }) {
               <div className="font-medium text-foreground">{risk.title}</div>
               <div className="font-mono text-[11px] text-muted-foreground">
                 {risk.id}
-                {risk.category ? ` · ${risk.category}` : ""}
+                {categoryLabel(risk) ? ` · ${categoryLabel(risk)}` : ""}
               </div>
             </td>
             <td className="py-3 pr-3">

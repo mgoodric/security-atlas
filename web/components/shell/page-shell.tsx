@@ -79,8 +79,14 @@ export function PageShell({
             </div>
           ) : null}
         </div>
+        {/* #2213 — the actions wrap onto as many rows as they need and
+            never exceed the column, so every action stays reachable on
+            a 390px phone. A page that groups actions in its own flex
+            row must let that row wrap too (vendors' export buttons). */}
         {actions ? (
-          <div className="flex flex-wrap items-center gap-2">{actions}</div>
+          <div className="flex max-w-full min-w-0 flex-wrap items-center gap-2">
+            {actions}
+          </div>
         ) : null}
       </header>
       {tabs ? <div>{tabs}</div> : null}
