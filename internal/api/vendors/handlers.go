@@ -257,6 +257,24 @@ func (h *Handler) SpendRollup(w http.ResponseWriter, r *http.Request) {
 	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"rollup": out})
 }
 
+// GetInitialReviewWindow handles GET /v1/vendors/initial-review-window
+// (#2201): the organisation's vendor initial-review window in days, so the
+// Settings page can show the current value. Set via
+// PATCH /v1/tenants/{id} vendor_initial_review_days.
+func (h *Handler) GetInitialReviewWindow(w http.ResponseWriter, r *http.Request) {
+	ctx, ok := h.tenantContext(r)
+	if !ok {
+		httpresp.WriteError(w, http.StatusUnauthorized, "tenant context missing")
+		return
+	}
+	days, err := h.store.InitialReviewDays(ctx)
+	if err != nil {
+		h.writeStoreErr(w, r, "read vendor initial review window", err)
+		return
+	}
+	httpresp.WriteJSON(w, http.StatusOK, map[string]any{"vendor_initial_review_days": days})
+}
+
 // GetVendor handles GET /v1/vendors/{id}.
 func (h *Handler) GetVendor(w http.ResponseWriter, r *http.Request) {
 	ctx, ok := h.tenantContext(r)
