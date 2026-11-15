@@ -34,8 +34,12 @@ No path could change a risk's category before this ticket, and the ticket's
 "can be moved off it" needs one. `PATCH /v1/risks/{id}` already exists as the
 narrow, audited update for a risk's placement; it now also takes `category`
 (slug or id) in the same transaction, with the same lock order as the other
-risk writes (#1867 / #2204): resolve the category (vocabulary), then the
-aggregation rules' advisory locks, then the row. The aggregation hooks run
+risk writes (#1867 / #2204): resolve the category, then the aggregation
+rules' advisory locks, then the row. As shipped, resolving the category took
+no lock (an unlocked `SELECT`), so an archive committing between the resolve
+and the write could leave a risk on a just-archived category. #2233 made the
+resolve a `FOR SHARE` read of the category row, held to commit; see
+`docs/audit-log/2233-risk-category-share-lock-decisions.md`. The aggregation hooks run
 after the write, so a rule's meta-risk can follow a child's new category.
 
 Each change writes a `category_changed` row to `risk_audit_log`

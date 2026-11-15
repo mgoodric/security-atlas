@@ -5263,7 +5263,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     post:
-      summary: POST /v1/risks
+      summary: POST /v1/risks — create a risk; category is a slug, id or display name, refused when unknown, ambiguous or archived
       tags: [risks]
       operationId: post-v1-risks
       security:
@@ -5511,7 +5511,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Ack"
     patch:
-      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?, category?}; category is a slug or id, refused when unknown or archived
+      summary: PATCH /v1/risks/{id} — move a risk between hierarchy levels and org units; body {level?, org_unit_id?, category?}; category is a slug, id or display name, refused when unknown, ambiguous or archived
       tags: [risks]
       operationId: patch-v1-risks-id
       security:
