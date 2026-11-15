@@ -20,8 +20,8 @@
 // #2231). The page offers each action and shows the platform's refusal
 // as a toast; it never widens or narrows that decision itself.
 //
-// The scope is shown with the scope picker read-only. Justification text
-// is plain text.
+// The scope is shown with the scope picker read-only. The justification
+// renders through the shared Markdown component (#2094).
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -29,6 +29,7 @@ import { notFound, useRouter } from "next/navigation";
 import { use, useEffect, useState } from "react";
 
 import { DetailHeader } from "@/components/detail/detail-header";
+import { Markdown } from "@/components/markdown";
 import { ScopePicker } from "@/components/scope/scope-picker";
 import { SelfApprovedBadge } from "@/components/self-approved-badge";
 import { PageShell } from "@/components/shell/page-shell";
@@ -284,12 +285,10 @@ function DetailsCard({ ex }: { ex: Exception }) {
           <p className="text-xs font-medium text-muted-foreground">
             Justification
           </p>
-          <p
-            className="whitespace-pre-wrap"
+          <Markdown
+            source={ex.justification}
             data-testid="exception-justification"
-          >
-            {ex.justification}
-          </p>
+          />
         </div>
         <div>
           <p className="text-xs font-medium text-muted-foreground">

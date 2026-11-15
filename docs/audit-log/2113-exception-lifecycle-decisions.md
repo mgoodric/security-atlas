@@ -77,8 +77,9 @@ shared seed state for every other spec. The rule itself is covered against
 Postgres in `internal/exception` (`TestHTTP_ExceptionRevoke_*`,
 `TestHTTP_ExceptionApproval_FollowsSelfApprovalSetting`).
 
-### D7 — justification renders as plain text
+### D7 — justification renders through the Markdown component
 
-The Markdown component (#2313) is still in review. Justification renders as
-plain text with line breaks kept; switching it to the component is a
-one-line change once that lands.
+The justification is operator-authored long text, so it renders through the
+shared Markdown component (#2094, merged in #2313) like risk descriptions
+and policy bodies. Compensating controls stay a plain list: each is one
+line.
