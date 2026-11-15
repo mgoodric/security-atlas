@@ -247,7 +247,7 @@ func TestBoardStore_InsertGetList_RoundTrip(t *testing.T) {
 		t.Fatalf("Get: %v", err)
 	}
 	if fetched.Content.Frameworks[0].CoveragePct != 92 {
-		t.Errorf("Get.Content coverage = %d, want 92", fetched.Content.Frameworks[0].CoveragePct)
+		t.Errorf("Get.Content coverage = %v, want 92", fetched.Content.Frameworks[0].CoveragePct)
 	}
 	if fetched.NarrativeMd != narrative {
 		t.Errorf("Get narrative drift: got %q", fetched.NarrativeMd)
@@ -379,7 +379,7 @@ func TestGenerator_Generate_EndToEnd(t *testing.T) {
 	// Generator reads risks as-of it, so the risk must be seeded relative to it.
 	genClock := time.Date(2026, 4, 30, 12, 0, 0, 0, time.UTC)
 
-	seedFramework(t, admin, tenant, "test-soc2-gen", "SOC 2 (gen)")
+	seedPostureFramework(t, admin, tenant, postureFramework{name: "SOC 2 (gen)", reqs: 4, coveredNow: 3, activate: true})
 	seedRisk(t, admin, tenant, "Critical CVE backlog",
 		`{"score": 20}`, `{"likelihood": 5, "impact": 4}`, genClock, 60)
 
@@ -405,9 +405,13 @@ func TestGenerator_Generate_EndToEnd(t *testing.T) {
 	if len(stored.Content.Frameworks) == 0 {
 		t.Fatal("Generate produced zero framework posture rows")
 	}
-	// Trend arrow up — delta 2 is positive.
-	if stored.Content.Frameworks[0].TrendArrow != board.TrendUp {
-		t.Errorf("framework trend = %q, want %q", stored.Content.Frameworks[0].TrendArrow, board.TrendUp)
+	// Posture is the dashboard query's (#2210): 3 of 4 requirements covered.
+	if got := stored.Content.Frameworks[0]; got.Name != "SOC 2 (gen)" || got.CoveragePct != 75 {
+		t.Errorf("framework posture = %+v, want SOC 2 (gen) at 75%%", got)
+	}
+	// The evidence freshness rate is the freshness read model's: 2 of 3 fresh.
+	if c := stored.Content.Coverage; c == nil || c.CoveragePct != 75 || c.ScopedFrameworkCount != 1 || c.EvidenceFreshnessRatePct != 67 {
+		t.Errorf("coverage = %+v, want 75%% over 1 scoped framework, freshness rate 67%%", c)
 	}
 	// Top risk surfaces in the brief.
 	if len(stored.Content.TopRisks) == 0 || !strings.Contains(stored.Content.TopRisks[0].Title, "Critical CVE backlog") {
